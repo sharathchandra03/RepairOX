@@ -105,7 +105,7 @@ export default function ModulesPage() {
 
       {/* Header */}
       <header className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-6 sm:px-6">
-        <Logo size={36} />
+        <Logo className="h-9 w-9" />
         <Link
           href="/login"
           className="text-sm font-medium text-zinc-600 hover:text-zinc-900"
