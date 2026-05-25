@@ -79,12 +79,12 @@ export default function LeadManagementPreview() {
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <Logo size={32} />
+          <Logo className="h-8 w-8" />
           <span className="ml-2 hidden text-sm font-medium text-zinc-500 md:inline">/ Module 2</span>
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge tone="warn" dot>Preview</Badge>
+          <Badge tone="warning" dot>Preview</Badge>
           <Button size="sm" variant="outline" className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> New lead
           </Button>
