@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Logo } from "@/components/ui/logo";
+import { Novatrix } from "@/components/ui/novatrix-background";
 
 const FEATURES = [
   { icon: FileText, title: "Ticket Management", desc: "Track and manage every repair job easily" },
@@ -32,6 +33,16 @@ export default function LoginPage() {
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-rose-50/40 to-white">
+      {/* Novatrix animated background */}
+      <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
+        <Novatrix
+          color={[1, 0.91, 0.94]}
+          speed={0.28}
+          amplitude={0.06}
+          mouseReact={false}
+          className="h-full w-full"
+        />
+      </div>
       {/* Decorative background */}
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-40 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
       <div className="pointer-events-none absolute -left-24 -top-24 h-[420px] w-[420px] rounded-full bg-brand-200/30 blur-3xl" />
@@ -68,7 +79,7 @@ export default function LoginPage() {
               transition={{ delay: 0.3 }}
               className="mt-4 max-w-md text-[15px] text-muted-foreground"
             >
-              Run your tickets, inventory, billing and customers from one place — designed for serious repair shops in India and beyond.
+              Run your tickets, inventory, billing and customers from one place - designed for serious repair shops in India and beyond.
             </motion.p>
 
             {/* Pills */}
@@ -111,7 +122,6 @@ export default function LoginPage() {
                 <p className="text-sm font-semibold">Call us · +91 91089 55544</p>
               </div>
             </div>
-            <div className="hidden h-12 w-12 rounded-lg bg-foreground/90 sm:block bg-dot" />
           </div>
         </motion.section>
 
@@ -129,7 +139,7 @@ export default function LoginPage() {
 
             <h2 className="font-display text-4xl font-extrabold tracking-tight">Welcome Back</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Access your tickets, notes and projects anytime, anywhere — and keep everything flowing in one place.
+              Access your tickets, notes and projects anytime, anywhere - and keep everything flowing in one place.
             </p>
 
             <form onSubmit={onSubmit} className="mt-8 space-y-4">

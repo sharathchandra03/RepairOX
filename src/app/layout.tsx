@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "RepairOX — Repair Smarter, Grow Faster",
+  title: "RepairOX - Repair Smarter, Grow Faster",
   description:
-    "End-to-end CRM for mobile and electronics repair shops. Tickets, inventory, billing, customers, and analytics — beautifully designed.",
+    "End-to-end CRM for mobile and electronics repair shops. Tickets, inventory, billing, customers, and analytics - beautifully designed.",
   themeColor: "#E11D48",
 };
 

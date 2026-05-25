@@ -24,10 +24,10 @@ const KPIS = [
 
 const TECHS = [
   { name: "Anand Rao",   role: "L2 Mobile",   status: "On-route", eta: "12m",  jobs: 3, color: "bg-emerald-500", x: 35, y: 30 },
-  { name: "Pooja Iyer",  role: "Logic-board", status: "On-site",  eta: "—",    jobs: 2, color: "bg-sky-500",     x: 62, y: 48 },
-  { name: "Vikas Nair",  role: "Watch & iPad",status: "Idle",     eta: "—",    jobs: 0, color: "bg-zinc-400",    x: 48, y: 72 },
+  { name: "Pooja Iyer",  role: "Logic-board", status: "On-site",  eta: "-",    jobs: 2, color: "bg-sky-500",     x: 62, y: 48 },
+  { name: "Vikas Nair",  role: "Watch & iPad",status: "Idle",     eta: "-",    jobs: 0, color: "bg-zinc-400",    x: 48, y: 72 },
   { name: "Ritesh Kumar",role: "Pickup",      status: "On-route", eta: "8m",   jobs: 4, color: "bg-emerald-500", x: 78, y: 22 },
-  { name: "Manish Shah", role: "Senior Tech", status: "On-site",  eta: "—",    jobs: 1, color: "bg-sky-500",     x: 22, y: 58 },
+  { name: "Manish Shah", role: "Senior Tech", status: "On-site",  eta: "-",    jobs: 1, color: "bg-sky-500",     x: 22, y: 58 },
 ];
 
 const JOBS = [
@@ -194,7 +194,7 @@ export default function FieldManagementPreview() {
                   </div>
                   <div className="text-right">
                     <p className="text-[11px] font-semibold text-zinc-700">{t.status}</p>
-                    {t.eta !== "—" && (
+                    {t.eta !== "-" && (
                       <p className="text-[10px] text-zinc-500">ETA {t.eta}</p>
                     )}
                   </div>
@@ -411,7 +411,7 @@ export default function FieldManagementPreview() {
               <div>
                 <p className="text-sm font-semibold">This is a draft preview</p>
                 <p className="text-xs text-zinc-600">
-                  Field Management is currently a design preview — the underlying data is mocked.
+                  Field Management is currently a design preview - the underlying data is mocked.
                   We&apos;ll wire real GPS feeds, route optimisation, and proof-of-service capture in the next iteration.
                 </p>
               </div>
@@ -433,7 +433,7 @@ export default function FieldManagementPreview() {
 function CityMap() {
   return (
     <div className="relative h-[360px] overflow-hidden rounded-2xl border border-zinc-200 bg-gradient-to-br from-sky-50 via-white to-rose-50/40">
-      {/* Map base — subtle grid + roads */}
+      {/* Map base - subtle grid + roads */}
       <svg className="absolute inset-0 h-full w-full" viewBox="0 0 100 60" preserveAspectRatio="none">
         <defs>
           <pattern id="grid" width="6" height="6" patternUnits="userSpaceOnUse">

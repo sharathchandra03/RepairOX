@@ -101,7 +101,7 @@ export default function LeadManagementPreview() {
                 Lead <span className="brand-gradient-text">Management</span>
               </h1>
               <p className="mt-1.5 max-w-xl text-sm text-zinc-600">
-                Capture every enquiry from Google, Meta, YouTube, walk-ins and references — score, follow-up
+                Capture every enquiry from Google, Meta, YouTube, walk-ins and references - score, follow-up
                 and convert into Module 1 tickets without ever losing context.
               </p>
             </div>
@@ -325,7 +325,7 @@ export default function LeadManagementPreview() {
                 <div className="min-w-0">
                   <p className="text-sm font-semibold">Hand-off to Module 1</p>
                   <p className="mt-0.5 text-xs text-zinc-600">
-                    When a lead is won, convert it into a repair ticket in one click — customer details auto-fill.
+                    When a lead is won, convert it into a repair ticket in one click - customer details auto-fill.
                   </p>
                 </div>
               </div>
@@ -343,7 +343,7 @@ export default function LeadManagementPreview() {
               <div>
                 <p className="text-sm font-semibold">This is a draft preview</p>
                 <p className="text-xs text-zinc-600">
-                  Lead Management is currently a design preview — the underlying data is mocked.
+                  Lead Management is currently a design preview - the underlying data is mocked.
                   We&apos;ll wire real lead capture, scoring rules, and campaign analytics in the next iteration.
                 </p>
               </div>

@@ -194,7 +194,7 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Critical tasks — full width */}
+      {/* Critical tasks - full width */}
       <div className="rounded-2xl border border-border bg-card shadow-card">
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>

@@ -7,7 +7,7 @@ export default function Page() {
     <ModulePlaceholder
       eyebrow="Operations"
       title="Expenses"
-      subtitle="Rent, salaries, courier and operational costs — categorized and reportable."
+      subtitle="Rent, salaries, courier and operational costs - categorized and reportable."
       preview={[
         { label: "This month", value: formatINR(72_000) },
         { label: "Largest category", value: "Rent" },

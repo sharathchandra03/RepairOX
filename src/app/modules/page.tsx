@@ -33,7 +33,7 @@ const MODULES: ModuleDef[] = [
     title: "Shop Management",
     tagline: "Run your repair shop end-to-end",
     description:
-      "Tickets, inventory, invoicing, pricing, walk-ins and buy-back — all in one connected workspace.",
+      "Tickets, inventory, invoicing, pricing, walk-ins and buy-back - all in one connected workspace.",
     href: "/dashboard",
     status: "live",
     accent: "rose",
@@ -61,11 +61,11 @@ const MODULES: ModuleDef[] = [
     accent: "violet",
     iconStack: [{ Icon: Filter }, { Icon: MessageSquare }, { Icon: TrendingUp }, { Icon: Target }],
     features: [
-      { icon: Inbox, label: "Multi-channel Inbox", desc: "Calls, WhatsApp, web forms, Meta, Google — one queue." },
+      { icon: Inbox, label: "Multi-channel Inbox", desc: "Calls, WhatsApp, web forms, Meta, Google - one queue." },
       { icon: Filter, label: "Pipeline Kanban", desc: "Drag leads through New → Contacted → Quoted → Won." },
       { icon: Zap, label: "Auto Follow-ups", desc: "Trigger SMS / WhatsApp / email sequences on inactivity." },
       { icon: Target, label: "Lead Scoring", desc: "Score by source, intent signals, response time and budget." },
-      { icon: Megaphone, label: "Campaigns & ROI", desc: "Spend, leads, CAC and revenue per channel — Google, Meta, YouTube." },
+      { icon: Megaphone, label: "Campaigns & ROI", desc: "Spend, leads, CAC and revenue per channel - Google, Meta, YouTube." },
       { icon: Phone, label: "Click-to-Call", desc: "One-tap call from any lead card with call recording." },
       { icon: UserPlus, label: "Hand-off to Tickets", desc: "Convert a won lead into a Module 1 ticket in one click." },
       { icon: Mail, label: "Quote Templates", desc: "Pre-built quotation drafts for common repair jobs." },

@@ -266,7 +266,7 @@ function PartsAssignment({ data, setData, onNext }: any) {
         </AnimatePresence>
         {data.parts.length === 0 && (
           <li className="flex items-center justify-center px-4 py-8 text-sm text-muted-foreground">
-            <ListPlus className="mr-2 h-4 w-4" /> No parts added yet — you can skip this step.
+            <ListPlus className="mr-2 h-4 w-4" /> No parts added yet - you can skip this step.
           </li>
         )}
       </ul>
@@ -358,7 +358,7 @@ function QuoteSummary({ data, onNext }: any) {
             <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
           </div>
           {data.parts.length === 0 ? (
-            <div className="p-6 text-center text-sm text-muted-foreground">No parts added — quotation will reflect labour only.</div>
+            <div className="p-6 text-center text-sm text-muted-foreground">No parts added - quotation will reflect labour only.</div>
           ) : data.parts.map((p: any, i: number) => (
             <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30">
               <div>{p.name}</div>
@@ -370,7 +370,7 @@ function QuoteSummary({ data, onNext }: any) {
             <div>Labour & Diagnostics</div><div className="text-center">1</div><div className="text-right tnum">{formatINR(labour)}</div>
           </div>
           <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border">
-            <div>GST (18%)</div><div className="text-center">—</div><div className="text-right tnum">{formatINR(tax)}</div>
+            <div>GST (18%)</div><div className="text-center">-</div><div className="text-right tnum">{formatINR(tax)}</div>
           </div>
         </div>
 
@@ -495,7 +495,7 @@ function UploadStep({ data, setData, onNext }: any) {
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {data.files.length === 0 ? (
             <div className="col-span-full rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No files yet — add photos or documents above.
+              No files yet - add photos or documents above.
             </div>
           ) : data.files.map((f: string, i: number) => (
             <motion.div

@@ -62,7 +62,7 @@ export function CategoryWheel({
     const dist = i - active;
     const abs = Math.abs(dist);
     const sign = Math.sign(dist);
-    // x offsets per ring distance — tighter on mobile via CSS transforms below
+    // x offsets per ring distance - tighter on mobile via CSS transforms below
     const xs = [0, 150, 270, 370, 460];
     const ys = [0, 14, 28, 38, 46];
     const scales = [1.45, 0.95, 0.72, 0.56, 0.48];
@@ -123,7 +123,7 @@ export function CategoryWheel({
           ))}
         </div>
 
-        {/* Wheel viewport — items absolutely positioned, animated transforms */}
+        {/* Wheel viewport - items absolutely positioned, animated transforms */}
         <div className="absolute inset-0 grid place-items-center [perspective:1100px]">
           {/* Mobile-first: scale the whole wheel down on small screens */}
           <div className="relative h-full w-full origin-center scale-[0.7] sm:scale-90 lg:scale-100">

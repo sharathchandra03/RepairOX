@@ -7,7 +7,7 @@ export default function Page() {
     <ModulePlaceholder
       eyebrow="Billing"
       title="Invoice"
-      subtitle="Issue, edit and reconcile invoices in seconds — GST-ready."
+      subtitle="Issue, edit and reconcile invoices in seconds - GST-ready."
       preview={[
         { label: "This month", value: formatINR(1_85_000) },
         { label: "Outstanding", value: formatINR(42_500) },
