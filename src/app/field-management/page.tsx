@@ -74,7 +74,7 @@ export default function FieldManagementPreview() {
         </div>
 
         <div className="flex items-center gap-2">
-          <Badge tone="warn" dot>Preview</Badge>
+          <Badge tone="warning" dot>Preview</Badge>
           <Button size="sm" variant="outline" className="gap-1.5">
             <Plus className="h-3.5 w-3.5" /> Dispatch job
           </Button>
