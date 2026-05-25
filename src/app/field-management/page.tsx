@@ -69,7 +69,7 @@ export default function FieldManagementPreview() {
           >
             <ArrowLeft className="h-4 w-4" />
           </Link>
-          <Logo size={32} />
+          <Logo className="h-8 w-8" />
           <span className="ml-2 hidden text-sm font-medium text-zinc-500 md:inline">/ Module 3</span>
         </div>
 
