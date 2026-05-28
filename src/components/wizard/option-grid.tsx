@@ -43,18 +43,18 @@ export function OptionGrid({
             className={cn(
               "group relative flex flex-col items-center justify-center rounded-2xl border bg-card p-5 text-center shadow-card transition",
               active
-                ? "border-brand-300 ring-2 ring-brand-200/70"
-                : "border-border hover:-translate-y-0.5 hover:border-brand-200"
+                ? "border-indigo-300 ring-2 ring-indigo-200/70"
+                : "border-border hover:-translate-y-0.5 hover:border-indigo-200"
             )}
           >
             {/* glow */}
             <span
               className={cn(
                 "pointer-events-none absolute inset-0 rounded-2xl opacity-0 transition group-hover:opacity-100",
-                "bg-[radial-gradient(60%_60%_at_50%_0%,rgba(225,29,72,0.10),transparent_70%)]"
+                "bg-[radial-gradient(60%_60%_at_50%_0%,rgba(79,70,229,0.10),transparent_70%)]"
               )}
             />
-            <span className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-b from-rose-50 to-white text-3xl shadow-ring ring-1 ring-border">
+            <span className="grid h-16 w-16 place-items-center rounded-2xl bg-gradient-to-b from-indigo-50 to-white text-3xl shadow-ring ring-1 ring-border">
               {o.emoji || o.icon}
             </span>
             <p className="font-display mt-3 text-base font-bold tracking-tight">{o.label}</p>

@@ -18,14 +18,14 @@ type Cat = {
 };
 
 const CATS: Cat[] = [
-  { id: "macbook", label: "MacBook", icon: Laptop,            tint: "from-zinc-600 via-zinc-800 to-black",          glow: "rgba(244,63,94,0.45)" },
-  { id: "ipad",    label: "iPad",    icon: Tablet,            tint: "from-zinc-500 via-zinc-700 to-zinc-900",       glow: "rgba(244,63,94,0.45)" },
-  { id: "iwatch",  label: "iWatch",  icon: Watch,             tint: "from-zinc-600 via-zinc-800 to-zinc-900",       glow: "rgba(244,63,94,0.45)" },
-  { id: "iphone",  label: "iPhone",  icon: Smartphone,        tint: "from-zinc-700 via-zinc-900 to-black",          glow: "rgba(244,63,94,0.55)" },
-  { id: "imac",    label: "iMac",    icon: Monitor,           tint: "from-zinc-400 via-zinc-600 to-zinc-800",       glow: "rgba(244,63,94,0.45)" },
-  { id: "android", label: "Android", icon: MonitorSmartphone, tint: "from-emerald-700 via-zinc-800 to-black",        glow: "rgba(244,63,94,0.45)" },
-  { id: "windows", label: "Windows", icon: Laptop,            tint: "from-sky-700 via-zinc-800 to-black",            glow: "rgba(244,63,94,0.45)" },
-  { id: "others",  label: "Others",  icon: Boxes,             tint: "from-zinc-500 via-zinc-700 to-zinc-900",       glow: "rgba(244,63,94,0.45)" },
+  { id: "macbook", label: "MacBook", icon: Laptop,            tint: "from-zinc-600 via-zinc-800 to-black",          glow: "rgba(79,70,229,0.5)" },
+  { id: "ipad",    label: "iPad",    icon: Tablet,            tint: "from-zinc-500 via-zinc-700 to-zinc-900",       glow: "rgba(79,70,229,0.5)" },
+  { id: "iwatch",  label: "iWatch",  icon: Watch,             tint: "from-zinc-600 via-zinc-800 to-zinc-900",       glow: "rgba(79,70,229,0.5)" },
+  { id: "iphone",  label: "iPhone",  icon: Smartphone,        tint: "from-indigo-700 via-indigo-900 to-black",      glow: "rgba(79,70,229,0.6)" },
+  { id: "imac",    label: "iMac",    icon: Monitor,           tint: "from-zinc-400 via-zinc-600 to-zinc-800",       glow: "rgba(79,70,229,0.5)" },
+  { id: "android", label: "Android", icon: MonitorSmartphone, tint: "from-emerald-700 via-zinc-800 to-black",        glow: "rgba(79,70,229,0.5)" },
+  { id: "windows", label: "Windows", icon: Laptop,            tint: "from-sky-700 via-zinc-800 to-black",            glow: "rgba(79,70,229,0.5)" },
+  { id: "others",  label: "Others",  icon: Boxes,             tint: "from-violet-700 via-zinc-800 to-zinc-900",     glow: "rgba(79,70,229,0.5)" },
 ];
 
 export function CategoryWheel({
@@ -86,7 +86,7 @@ export function CategoryWheel({
       {/* ---------- Wheel stage ---------- */}
       <div className="relative h-[420px] overflow-hidden rounded-[28px] sm:h-[460px]">
         {/* Brand wash background */}
-        <div className="absolute inset-0 bg-gradient-to-br from-rose-200/60 via-rose-100/40 to-rose-200/50" />
+        <div className="absolute inset-0 bg-gradient-to-br from-indigo-200/50 via-indigo-100/30 to-violet-200/40" />
         {/* Wave grid */}
         <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-30 [mask-image:radial-gradient(ellipse_at_center,black_40%,transparent_75%)]" />
 
@@ -94,7 +94,7 @@ export function CategoryWheel({
         <div className="pointer-events-none absolute inset-0">
           <div
             className="absolute left-1/2 top-1/2 h-[440px] w-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
-            style={{ background: "radial-gradient(closest-side, rgba(244,63,94,0.55), rgba(244,63,94,0) 70%)" }}
+            style={{ background: "radial-gradient(closest-side, rgba(79,70,229,0.45), rgba(99,102,241,0) 70%)" }}
           />
         </div>
 
@@ -107,7 +107,7 @@ export function CategoryWheel({
               style={{
                 width: 200 + i * 70,
                 height: 200 + i * 70,
-                borderColor: "rgba(244,63,94,0.35)",
+                borderColor: "rgba(99,102,241,0.35)",
               }}
               animate={{
                 opacity: [0.55, 0.15, 0.55],
@@ -178,7 +178,7 @@ export function CategoryWheel({
                           <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            className="pointer-events-none absolute -inset-1 rounded-[30px] ring-2 ring-brand-400/70"
+                            className="pointer-events-none absolute -inset-1 rounded-[30px] ring-2 ring-indigo-400/70"
                           />
                         )}
                       </div>

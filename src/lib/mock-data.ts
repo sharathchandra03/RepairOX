@@ -18,7 +18,7 @@ export const STATUS_LABEL: Record<TicketStatus, string> = {
 export const STATUS_TONE: Record<TicketStatus, string> = {
   received: "bg-info/10 text-info ring-info/20",
   diagnosis: "bg-warning/10 text-amber-700 ring-warning/30",
-  repairing: "bg-brand-50 text-brand-700 ring-brand-200",
+  repairing: "bg-indigo-50 text-indigo-700 ring-indigo-200",
   qc: "bg-violet-50 text-violet-700 ring-violet-200",
   completed: "bg-success/10 text-emerald-700 ring-success/30",
   delivered: "bg-zinc-100 text-zinc-700 ring-zinc-200",
@@ -71,15 +71,41 @@ export const todos = [
 ];
 
 export const navItems = [
-  { href: "/dashboard", label: "Dashboard", icon: "Home" as const },
-  { href: "/tickets", label: "Tickets", icon: "Ticket" as const },
-  { href: "/invoice", label: "Invoice", icon: "FileText" as const },
-  { href: "/stock", label: "Stock", icon: "Boxes" as const },
-  { href: "/contacts", label: "Contacts", icon: "Users" as const },
-  { href: "/buy-back", label: "Buy-Back", icon: "Recycle" as const },
-  { href: "/price-list", label: "Price List", icon: "ClipboardList" as const },
-  { href: "/walk-in", label: "Walk-In", icon: "Store" as const },
-  { href: "/expenses", label: "Expenses", icon: "Wallet" as const },
-  { href: "/settings", label: "Settings", icon: "Settings" as const },
-  { href: "/reports", label: "Reports", icon: "BarChart3" as const },
+  { href: "/dashboard",        label: "Dashboard",    icon: "Home" },
+  { href: "/tickets",          label: "Tickets",      icon: "Ticket" },
+  { href: "/invoice",          label: "Invoice",      icon: "FileText" },
+  { href: "/stock",            label: "Stock",        icon: "Boxes" },
+  { href: "/contacts",         label: "Contacts",     icon: "Users" },
+  { href: "/buy-back",         label: "Buy-Back",     icon: "Recycle" },
+  { href: "/price-list",       label: "Price List",   icon: "ClipboardList" },
+  { href: "/walk-in",          label: "Walk-In",      icon: "Store" },
+  { href: "/expenses",         label: "Expenses",     icon: "Wallet" },
+  { href: "/settings",         label: "Settings",     icon: "Settings" },
+  { href: "/reports",          label: "Reports",      icon: "BarChart3" },
+  { href: "/field-management", label: "Field Ops",    icon: "Map" },
+  { href: "/lead-management",  label: "Leads",        icon: "BookUser" },
 ];
+
+export const modules = [
+  { id: "crm",   label: "CRM",     short: "CR" },
+  { id: "field", label: "Field",   short: "FD" },
+  { id: "leads", label: "Leads",   short: "LD" },
+] as const;
+
+export type ModuleId = typeof modules[number]["id"];
+
+export const navGroups: Record<ModuleId, { label: string; items: string[] }[]> = {
+  crm: [
+    { label: "WORKSPACE",  items: ["/dashboard", "/tickets", "/invoice", "/stock", "/contacts"] },
+    { label: "OPERATIONS", items: ["/buy-back", "/price-list", "/walk-in", "/expenses"] },
+    { label: "GENERAL",    items: ["/settings", "/reports"] },
+  ],
+  field: [
+    { label: "FIELD OPS",  items: ["/field-management"] },
+    { label: "GENERAL",    items: ["/settings", "/reports"] },
+  ],
+  leads: [
+    { label: "PIPELINE",   items: ["/lead-management"] },
+    { label: "GENERAL",    items: ["/settings", "/reports"] },
+  ],
+};

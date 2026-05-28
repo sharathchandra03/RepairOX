@@ -2,7 +2,8 @@
 
 import { motion } from "framer-motion";
 import {
-  Plus, Filter, Download, Wand2, ArrowRight, AlertCircle, AlertTriangle, CheckCircle2, ListChecks,
+  Plus, Filter, Download, Wand2, ArrowRight, AlertCircle, AlertTriangle,
+  CheckCircle2, ListChecks, MoreHorizontal, ArrowDownToLine,
 } from "lucide-react";
 import Link from "next/link";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -11,47 +12,79 @@ import { TicketsDonut } from "@/components/dashboard/donut";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
-import { SegmentedTabs } from "@/components/ui/tabs";
+import { PageHeader } from "@/components/layout/page-header";
 import { useState } from "react";
 import { ordersStatus, todos, tickets, STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { formatINR } from "@/lib/utils";
 
-const RANGES = [
-  { label: "Today", value: "today" },
-  { label: "Yesterday", value: "yesterday" },
-  { label: "This Month", value: "month" },
-  { label: "Last Month", value: "lastMonth" },
-  { label: "This Year", value: "year" },
+/* ── Device breakdown data (horizontal bar chart) ── */
+const DEVICE_DATA = [
+  { device: "iPhone",   count: 42, highlight: false },
+  { device: "Android",  count: 31, highlight: false },
+  { device: "MacBook",  count: 28, highlight: false },
+  { device: "iPad",     count: 38, highlight: true  },
+  { device: "Windows",  count: 19, highlight: false },
+  { device: "iWatch",   count: 12, highlight: false },
 ];
 
+/* ── Heatmap data (7 days × 8 slots) ── */
+const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const SLOTS = ["9am", "10am", "11am", "12pm", "1pm", "2pm", "4pm", "6pm"];
+const HEATMAP = DAYS.map((d) =>
+  SLOTS.map(() => Math.floor(Math.random() * 12))
+);
+
+function heatColor(v: number) {
+  if (v === 0) return "bg-slate-100";
+  if (v <= 3)  return "bg-[#C7D2FE]";
+  if (v <= 6)  return "bg-[#818CF8]";
+  if (v <= 9)  return "bg-[#4361EE]";
+  return "bg-[#3347D6]";
+}
+
+/* ── Transaction feed data ── */
+const TRANSACTIONS = [
+  { name: "Rahul Kapoor", location: "Mumbai", amount: 22500, time: "today", avatar: "RK" },
+  { name: "Manoj S.",     location: "Delhi",  amount: 18999, time: "today", avatar: "MS" },
+  { name: "Anjali R.",    location: "Pune",   amount: 8999,  time: "today", avatar: "AR" },
+  { name: "Ajay Verma",  location: "Noida",  amount: 12999, time: "yesterday", avatar: "AV" },
+  { name: "Radha Iyer",  location: "Chennai",amount: 6499,  time: "yesterday", avatar: "RI" },
+  { name: "Sneha P.",    location: "Hyderabad", amount: 3499, time: "yesterday", avatar: "SP" },
+];
+
+/* ── Card header with ... menu ── */
+function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }) {
+  return (
+    <div className="flex items-center justify-between mb-1">
+      <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
+      <div className="flex items-center gap-1.5">
+        {badge}
+        <button className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition">
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Dashboard() {
-  const [range, setRange] = useState("today");
+  const [_range, _setRange] = useState("today");
 
   return (
     <div className="space-y-6">
-      {/* Greeting */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-[12px] uppercase tracking-wider text-muted-foreground">Welcome back</p>
-          <motion.h1
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="font-display mt-1 text-3xl font-extrabold tracking-tight md:text-4xl"
-          >
-            Hello, <span className="brand-gradient-text">Shop Owner</span>
-          </motion.h1>
-          <p className="mt-1 text-sm text-muted-foreground">Here&apos;s what&apos;s happening across your shop today.</p>
-        </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <SegmentedTabs options={RANGES} value={range} onChange={setRange} size="sm" />
+      {/* Page header matching reference: large title + date + Sort/Filter pills + New Ticket */}
+      <PageHeader
+        title="Analytics Overview,"
+        showFilters
+        actions={
           <Link href="/tickets/new">
-            <Button size="md" className="rounded-full">
-              <Plus className="h-4 w-4" /> New Ticket
+            <Button size="sm" className="rounded-full gap-1.5">
+              <Plus className="h-3.5 w-3.5" /> New Ticket
             </Button>
           </Link>
-        </div>
-      </div>
+        }
+      />
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -61,10 +94,10 @@ export default function Dashboard() {
           format={formatINR}
           tone="emerald"
           delta={{ value: "+12.4%", up: true }}
-          hint="Avg/day ₹10,000 · Month prediction ₹3,00,000"
+          hint="Avg/day ₹10,000 · Month ₹3,00,000"
         />
         <KpiCard
-          title="Stock"
+          title="Stock Value"
           value={200000}
           format={formatINR}
           tone="amber"
@@ -72,7 +105,7 @@ export default function Dashboard() {
           hint="Spare parts: ₹1,50,000 · Accessories: ₹50,000"
         />
         <KpiCard
-          title="Due"
+          title="Dues Outstanding"
           value={10000}
           format={formatINR}
           tone="rose"
@@ -88,22 +121,136 @@ export default function Dashboard() {
         />
       </div>
 
-      {/* Charts row */}
+      {/* Row 2: Revenue chart (dark tooltip) + Donut */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <div className="lg:col-span-2">
-          <RevenueChart />
+          <RevenueChart darkTooltip />
+        </div>
+        <TicketsDonut />
+      </div>
+
+      {/* Row 3: Horizontal bar (device breakdown) + Heatmap + Transactions feed */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+
+        {/* Horizontal bar chart — device breakdown with anomaly highlight */}
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <CardHeader title="Tickets by Device" badge={
+            <span className="text-[11px] text-muted-foreground">Last 7 days</span>
+          } />
+          <p className="text-[11px] text-muted-foreground mb-4">{DEVICE_DATA.reduce((s,d)=>s+d.count,0)} total tickets</p>
+          <div className="space-y-2.5">
+            {DEVICE_DATA.map((d) => (
+              <div key={d.device} className="flex items-center gap-3">
+                <span className="w-[56px] shrink-0 text-[12px] text-muted-foreground text-right">{d.device}</span>
+                <div className="flex-1 h-6 rounded-full bg-slate-100 overflow-hidden">
+                  <motion.div
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(d.count / 45) * 100}%` }}
+                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
+                    className={`h-full rounded-full ${d.highlight ? "bg-orange-400" : "bg-[#4361EE]"}`}
+                  />
+                </div>
+                <span className="w-[24px] shrink-0 text-[12px] font-semibold tnum text-right">{d.count}</span>
+              </div>
+            ))}
+          </div>
+          <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1">
+            <span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> iPad flagged as highest volume spike
+          </p>
         </div>
 
-        {/* Orders status */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
-          <div className="flex items-center justify-between">
-            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Orders Status</p>
-            <Badge tone="info" dot>real-time</Badge>
+        {/* Heatmap — tickets by day × hour */}
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <CardHeader title="Tickets per slot" badge={
+            <span className="text-[11px] text-muted-foreground">Last 7 days</span>
+          } />
+          <div className="mt-3 overflow-x-auto">
+            <div className="min-w-[260px]">
+              {/* Day headers */}
+              <div className="grid mb-1" style={{ gridTemplateColumns: "32px repeat(7, 1fr)" }}>
+                <div />
+                {DAYS.map((d) => (
+                  <div key={d} className="text-center text-[10px] font-medium text-muted-foreground">{d}</div>
+                ))}
+              </div>
+              {/* Rows per slot */}
+              {SLOTS.map((slot, si) => (
+                <div key={slot} className="grid mb-1" style={{ gridTemplateColumns: "32px repeat(7, 1fr)" }}>
+                  <div className="text-[10px] text-muted-foreground flex items-center">{slot}</div>
+                  {DAYS.map((_, di) => (
+                    <div key={di} className="flex items-center justify-center p-0.5">
+                      <div
+                        className={`h-6 w-full rounded-md ${heatColor(HEATMAP[di][si])}`}
+                        title={`${HEATMAP[di][si]} tickets`}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
+              {/* Legend */}
+              <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+                <span>0</span>
+                {["bg-slate-100","bg-[#C7D2FE]","bg-[#818CF8]","bg-[#4361EE]","bg-[#3347D6]"].map((c,i)=>(
+                  <span key={i} className={`h-3 w-5 rounded ${c}`} />
+                ))}
+                <span>12+</span>
+              </div>
+            </div>
           </div>
+        </div>
 
-          <div className="mt-4 overflow-hidden rounded-xl border border-border">
+        {/* Transactions feed — avatar + name + location + amount, grouped by time */}
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-card flex flex-col">
+          <CardHeader title="Recent Transactions" />
+          <div className="flex-1 mt-2 space-y-0 overflow-hidden">
+            {(["today", "yesterday"] as const).map((group) => {
+              const rows = TRANSACTIONS.filter((t) => t.time === group);
+              return (
+                <div key={group} className="mb-3">
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">
+                    {group === "today" ? "Recent" : "Yesterday"}
+                  </p>
+                  <ul className="space-y-1">
+                    {rows.map((tx, i) => (
+                      <motion.li
+                        key={tx.name}
+                        initial={{ opacity: 0, x: 6 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        transition={{ delay: 0.04 * i }}
+                        className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/50 transition"
+                      >
+                        <Avatar name={tx.name} size={30} />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-semibold leading-tight">{tx.name}</p>
+                          <p className="text-[11px] text-muted-foreground">{tx.location}</p>
+                        </div>
+                        <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">
+                          {formatINR(tx.amount)}
+                        </span>
+                      </motion.li>
+                    ))}
+                  </ul>
+                </div>
+              );
+            })}
+          </div>
+          <div className="mt-2 border-t border-border pt-3">
+            <button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">
+              <ArrowDownToLine className="h-3.5 w-3.5" /> Download Report
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Row 4: Orders status + To-Do */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+
+        {/* Orders status */}
+        <div className="lg:col-span-2 rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+          <CardHeader title="Orders Status" badge={<Badge tone="info" dot>live</Badge>} />
+          <div className="mt-3 overflow-hidden rounded-xl border border-border">
             <div className="grid grid-cols-3 bg-muted px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <div>Order Detail</div>
+              <div>Type</div>
               <div className="text-center">Assigned</div>
               <div className="text-center">Received</div>
             </div>
@@ -111,7 +258,7 @@ export default function Dashboard() {
               {ordersStatus.map((row, i) => (
                 <motion.li
                   key={row.detail}
-                  initial={{ opacity: 0, y: 6 }}
+                  initial={{ opacity: 0, y: 4 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.05 * i }}
                   className="grid grid-cols-3 items-center px-3 py-2.5 text-sm odd:bg-background even:bg-muted/40"
@@ -121,20 +268,13 @@ export default function Dashboard() {
                   <div className="text-center tabular-nums">{row.received}</div>
                 </motion.li>
               ))}
-              <li className="grid grid-cols-3 items-center bg-brand-50/40 px-3 py-2.5 text-sm font-semibold">
+              <li className="grid grid-cols-3 items-center bg-[#EEF1FD] px-3 py-2.5 text-sm font-semibold">
                 <div>Total</div>
                 <div className="text-center tabular-nums">6</div>
                 <div className="text-center tabular-nums">6</div>
               </li>
             </ul>
           </div>
-        </div>
-      </div>
-
-      {/* Donut + To-Do (paired row) */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-        <div className="lg:col-span-2">
-          <TicketsDonut />
         </div>
 
         {/* To-Do list */}
@@ -143,15 +283,15 @@ export default function Dashboard() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Today&apos;s Focus</p>
-                <h3 className="font-display mt-0.5 text-lg font-bold flex items-center gap-2">
-                  <ListChecks className="h-4 w-4 text-brand-600" /> To-Do List
+                <h3 className="font-display mt-0.5 text-base font-bold flex items-center gap-2">
+                  <ListChecks className="h-4 w-4 text-[#4361EE]" /> To-Do List
                 </h3>
               </div>
               <button className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-            <ul className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+            <ul className="mt-4 grid grid-cols-1 gap-2.5 md:grid-cols-2">
               {todos.map((t, i) => (
                 <motion.li
                   key={t.id}
@@ -160,13 +300,13 @@ export default function Dashboard() {
                   transition={{ delay: 0.04 * i }}
                   className="group flex items-start gap-3 rounded-xl border border-border bg-background/60 p-3 transition hover:bg-muted/40"
                 >
-                  <span className={`mt-1 grid h-5 w-5 shrink-0 place-items-center rounded-full ring-1 ring-inset ${
+                  <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ring-1 ring-inset ${
                     t.flag === "danger" ? "bg-rose-100 text-rose-600 ring-rose-200" :
-                    t.flag === "warn" ? "bg-amber-100 text-amber-700 ring-amber-200" :
-                    "bg-sky-100 text-sky-700 ring-sky-200"
+                    t.flag === "warn"   ? "bg-amber-100 text-amber-700 ring-amber-200" :
+                    "bg-[#EEF1FD] text-[#4361EE] ring-[#B3BFF6]/60"
                   }`}>
                     {t.flag === "danger" ? <AlertCircle className="h-3 w-3" /> :
-                     t.flag === "warn" ? <AlertTriangle className="h-3 w-3" /> :
+                     t.flag === "warn"   ? <AlertTriangle className="h-3 w-3" /> :
                      <CheckCircle2 className="h-3 w-3" />}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -176,11 +316,9 @@ export default function Dashboard() {
                 </motion.li>
               ))}
             </ul>
-
-            {/* AI assistant CTA */}
-            <div className="mt-4 flex items-center justify-between rounded-xl border border-dashed border-brand-300 bg-brand-50/60 p-3">
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-3">
               <div className="flex items-center gap-2">
-                <span className="grid h-8 w-8 place-items-center rounded-lg brand-gradient text-white">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white">
                   <Wand2 className="h-4 w-4" />
                 </span>
                 <div>
@@ -194,16 +332,20 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Critical tasks - full width */}
+      {/* Row 5: Critical tasks table — full width */}
       <div className="rounded-2xl border border-border bg-card shadow-card">
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Critical Tasks</p>
-            <h3 className="font-display mt-0.5 text-lg font-bold">High-priority tickets to resolve today</h3>
+            <h3 className="font-display mt-0.5 text-base font-bold">High-priority tickets to resolve today</h3>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5"><Filter className="h-3.5 w-3.5" /> Filter</Button>
-            <Button variant="primary" size="sm" className="gap-1.5"><Download className="h-3.5 w-3.5" /> Export</Button>
+            <Button variant="outline" size="sm" className="gap-1.5 rounded-full">
+              <Filter className="h-3.5 w-3.5" /> Filter
+            </Button>
+            <Button variant="primary" size="sm" className="gap-1.5 rounded-full">
+              <Download className="h-3.5 w-3.5" /> Export
+            </Button>
           </div>
         </div>
 
@@ -252,7 +394,7 @@ export default function Dashboard() {
 
         <div className="flex items-center justify-between border-t border-border p-4">
           <p className="text-xs text-muted-foreground">Showing 5 of {tickets.length} active</p>
-          <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-brand-700 hover:underline">
+          <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">
             View all tickets <ArrowRight className="h-3.5 w-3.5" />
           </Link>
         </div>

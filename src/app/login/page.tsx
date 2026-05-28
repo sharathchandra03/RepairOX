@@ -32,11 +32,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-rose-50/40 to-white">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,30%,95%)] via-[hsl(228,30%,97%)] to-[hsl(228,30%,95%)]">
       {/* Novatrix animated background */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.18]">
         <Novatrix
-          color={[1, 0.91, 0.94]}
+          color={[0.76, 0.78, 0.98]}
           speed={0.28}
           amplitude={0.06}
           mouseReact={false}
@@ -45,8 +45,8 @@ export default function LoginPage() {
       </div>
       {/* Decorative background */}
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-40 [mask-image:radial-gradient(ellipse_at_center,black_30%,transparent_75%)]" />
-      <div className="pointer-events-none absolute -left-24 -top-24 h-[420px] w-[420px] rounded-full bg-brand-200/30 blur-3xl" />
-      <div className="pointer-events-none absolute -right-24 bottom-0 h-[480px] w-[480px] rounded-full bg-rose-300/20 blur-3xl" />
+      <div className="pointer-events-none absolute -left-24 -top-24 h-[420px] w-[420px] rounded-full bg-[#B3BFF6]/20 blur-3xl" />
+      <div className="pointer-events-none absolute -right-24 bottom-0 h-[480px] w-[480px] rounded-full bg-[#8DA0F2]/15 blur-3xl" />
 
       <div className="relative mx-auto grid min-h-screen max-w-7xl grid-cols-1 gap-10 px-4 py-8 lg:grid-cols-2 lg:px-10 lg:py-12">
         {/* Marketing panel */}
@@ -97,7 +97,7 @@ export default function LoginPage() {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.4 + i * 0.06 }}
-                  className="group flex items-start gap-3 rounded-2xl border border-border bg-gradient-to-b from-white to-rose-50/40 p-4 transition hover:-translate-y-0.5 hover:shadow-card"
+                  className="group flex items-start gap-3 rounded-2xl border border-border bg-white p-4 transition hover:-translate-y-0.5 hover:shadow-card hover:border-[#B3BFF6]/60"
                 >
                   <div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-brand-50 text-brand-700 ring-1 ring-brand-200">
                     <f.icon className="h-4 w-4" />
@@ -112,7 +112,7 @@ export default function LoginPage() {
           </div>
 
           {/* Footer */}
-          <div className="relative mt-8 flex items-center justify-between rounded-2xl border border-border bg-gradient-to-r from-rose-50 to-white p-4">
+          <div className="relative mt-8 flex items-center justify-between rounded-2xl border border-[#D9DFFA] bg-[#EEF1FD] p-4">
             <div className="flex items-center gap-3">
               <span className="grid h-9 w-9 place-items-center rounded-xl brand-gradient text-white">
                 <Phone className="h-4 w-4" />
@@ -173,7 +173,7 @@ export default function LoginPage() {
               </div>
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input id="remember" type="checkbox" className="h-3.5 w-3.5 rounded border-border text-brand-600 focus:ring-brand-300" />
+                <input id="remember" type="checkbox" className="h-3.5 w-3.5 rounded border-border text-brand-600 focus:ring-brand-400" />
                 <label htmlFor="remember">Remember me on this device</label>
               </div>
 

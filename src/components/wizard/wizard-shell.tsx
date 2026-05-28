@@ -36,10 +36,10 @@ export function WizardShell({
   const pct = Math.round(((step - 1) / TOTAL_STEPS) * 100);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-rose-50/30 to-white">
+    <div className="relative min-h-screen overflow-hidden bg-[hsl(228,30%,95%)]">
       {/* Decorative background */}
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-30 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_70%)]" />
-      <div className="pointer-events-none absolute -top-40 left-1/2 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-rose-200/30 blur-3xl" />
+      <div className="pointer-events-none absolute -top-40 left-1/2 h-[420px] w-[820px] -translate-x-1/2 rounded-full bg-[#B3BFF6]/20 blur-3xl" />
 
       {/* Top bar */}
       <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-5 sm:px-6">
@@ -65,7 +65,7 @@ export function WizardShell({
 
         <Link
           href="/dashboard"
-          className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-rose-600 shadow-card transition hover:bg-rose-50"
+          className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50"
           aria-label="Close"
         >
           <X className="h-4 w-4" />

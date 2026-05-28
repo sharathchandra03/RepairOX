@@ -10,7 +10,17 @@ import { revenueMonthly } from "@/lib/mock-data";
 import { formatINR } from "@/lib/utils";
 import { TrendingUp } from "lucide-react";
 
-export function RevenueChart() {
+function DarkTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="rounded-xl bg-zinc-900 px-3.5 py-2.5 text-white shadow-xl pointer-events-none">
+      <p className="text-[11px] text-zinc-400 mb-0.5">{label}</p>
+      <p className="text-sm font-bold">{formatINR(payload[0].value * 1000)}</p>
+    </div>
+  );
+}
+
+export function RevenueChart({ darkTooltip = false }: { darkTooltip?: boolean }) {
   const [view, setView] = useState<"monthly" | "yearly">("monthly");
   const data = revenueMonthly.map((d) => ({ ...d, v: view === "monthly" ? d.v : d.v * 12 }));
 
@@ -47,29 +57,31 @@ export function RevenueChart() {
         className="mt-4 h-[260px] w-full"
       >
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} barSize={18} margin={{ top: 10, right: 0, left: -16, bottom: 0 }}>
+          <BarChart data={data} barSize={20} barGap={6} margin={{ top: 10, right: 0, left: -16, bottom: 0 }}>
             <defs>
-              <linearGradient id="bar-rose" x1="0" x2="0" y1="0" y2="1">
-                <stop offset="0%" stopColor="#E11D48" />
-                <stop offset="100%" stopColor="#FDA4AF" />
+              <linearGradient id="bar-brand" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0%" stopColor="#4361EE" stopOpacity="1" />
+                <stop offset="100%" stopColor="#3B54E8" stopOpacity="0.88" />
               </linearGradient>
             </defs>
             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
             <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
             <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} width={42} />
             <Tooltip
-              cursor={{ fill: "hsl(var(--muted))" }}
-              contentStyle={{
-                background: "hsl(var(--popover))",
+              cursor={{ fill: "hsl(var(--muted)/0.4)", radius: 8 }}
+              content={darkTooltip ? <DarkTooltip /> : undefined}
+              contentStyle={darkTooltip ? undefined : {
+                background: "#fff",
                 border: "1px solid hsl(var(--border))",
-                borderRadius: 12,
+                borderRadius: 14,
                 fontSize: 12,
+                boxShadow: "0 8px 24px -8px rgba(20,30,80,0.14)",
               }}
-              formatter={(v: number) => [formatINR(v * 1000), "Revenue"]}
+              formatter={darkTooltip ? undefined : (v: number) => [formatINR(v * 1000), "Revenue"]}
             />
-            <Bar dataKey="v" radius={[8, 8, 4, 4]}>
+            <Bar dataKey="v" radius={[10, 10, 5, 5]}>
               {data.map((_, i) => (
-                <Cell key={i} fill="url(#bar-rose)" />
+                <Cell key={i} fill="url(#bar-brand)" />
               ))}
             </Bar>
           </BarChart>

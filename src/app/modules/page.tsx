@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  Wrench, Smartphone, Receipt, Package, Tags, ShoppingCart, Banknote, BarChart3, Users2, Settings,
+  Wrench, Receipt, Package, Tags, ShoppingCart, Banknote, BarChart3, Users2, Settings,
   Filter, MessageSquare, TrendingUp, Target, Inbox, Megaphone, Phone, Mail, UserPlus, Zap,
   MapPin, Truck, ClipboardList, Navigation, Clock, Camera, Route, Map, Briefcase,
   Info, ArrowRight,
@@ -23,7 +23,7 @@ interface ModuleDef {
   href: string;
   status: "live" | "preview";
   accent: ModuleAccent;
-  iconStack: { Icon: any }[];
+  image: string;
   features: ModuleFeature[];
 }
 
@@ -37,7 +37,7 @@ const MODULES: ModuleDef[] = [
     href: "/dashboard",
     status: "live",
     accent: "rose",
-    iconStack: [{ Icon: Wrench }, { Icon: Smartphone }, { Icon: Receipt }, { Icon: Package }],
+    image: "/module-shop.avif",
     features: [
       { icon: Wrench, label: "Ticket Management", desc: "Create, assign and track repair tickets through every stage." },
       { icon: Package, label: "Inventory Management", desc: "Live spare parts and accessory stock with low-stock alerts." },
@@ -59,7 +59,7 @@ const MODULES: ModuleDef[] = [
     href: "/lead-management",
     status: "preview",
     accent: "violet",
-    iconStack: [{ Icon: Filter }, { Icon: MessageSquare }, { Icon: TrendingUp }, { Icon: Target }],
+    image: "/module-leads.avif",
     features: [
       { icon: Inbox, label: "Multi-channel Inbox", desc: "Calls, WhatsApp, web forms, Meta, Google - one queue." },
       { icon: Filter, label: "Pipeline Kanban", desc: "Drag leads through New → Contacted → Quoted → Won." },
@@ -80,7 +80,7 @@ const MODULES: ModuleDef[] = [
     href: "/field-management",
     status: "preview",
     accent: "sky",
-    iconStack: [{ Icon: MapPin }, { Icon: Truck }, { Icon: ClipboardList }, { Icon: Camera }],
+    image: "/module-field.png",
     features: [
       { icon: ClipboardList, label: "Dispatch Board", desc: "Today's pickups and on-site jobs with technician assignment." },
       { icon: Navigation, label: "Live GPS Tracking", desc: "See where every technician is, in real-time, on the city map." },
@@ -98,10 +98,10 @@ export default function ModulesPage() {
   const [activeInfo, setActiveInfo] = useState<ModuleDef | null>(null);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-rose-50/30 to-white">
+    <div className="relative min-h-screen overflow-hidden bg-[hsl(228,30%,95%)]">    
       {/* Decorative bg */}
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-30 [mask-image:radial-gradient(ellipse_at_top,black_25%,transparent_75%)]" />
-      <div className="pointer-events-none absolute -top-40 left-1/2 h-[480px] w-[860px] -translate-x-1/2 rounded-full bg-rose-200/40 blur-3xl" />
+      <div className="pointer-events-none absolute -top-40 left-1/2 h-[480px] w-[860px] -translate-x-1/2 rounded-full bg-[#B3BFF6]/20 blur-3xl" />
 
       {/* Header */}
       <header className="relative mx-auto flex max-w-7xl items-center justify-between px-4 py-6 sm:px-6">
@@ -176,26 +176,6 @@ function ModuleCard({
   index: number;
   onInfo: () => void;
 }) {
-  const stage = {
-    rose: "from-rose-100/90 via-rose-50 to-white",
-    violet: "from-violet-100/90 via-rose-50/60 to-white",
-    sky: "from-sky-100/90 via-rose-50/50 to-white",
-  }[m.accent];
-
-  const ringTint = {
-    rose: "border-rose-300/40",
-    violet: "border-violet-300/40",
-    sky: "border-sky-300/40",
-  }[m.accent];
-
-  const accentChip = {
-    rose: "text-brand-700",
-    violet: "text-violet-700",
-    sky: "text-sky-700",
-  }[m.accent];
-
-  const [Center, TopRight, BottomLeft, BottomRight] = m.iconStack.map((s) => s.Icon);
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 18 }}
@@ -236,76 +216,16 @@ function ModuleCard({
         </button>
       </div>
 
-      {/* Hero illustration stage */}
-      <div className={cn("relative h-64 overflow-hidden bg-gradient-to-b", stage)}>
-        <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-25" />
-
-        {/* Concentric rings */}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          {[0, 1, 2].map((j) => (
-            <motion.span
-              key={j}
-              className={cn(
-                "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border",
-                ringTint
-              )}
-              style={{ width: 140 + j * 50, height: 140 + j * 50 }}
-              animate={{
-                scale: [1, 1.06, 1],
-                opacity: [0.55, 0.18, 0.55],
-              }}
-              transition={{
-                duration: 3.2 + j * 0.5,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: j * 0.3,
-              }}
-            />
-          ))}
-        </div>
-
-        {/* Floating icons */}
-        <div className="relative h-full">
-          <motion.div
-            animate={{ y: [0, -7, 0] }}
-            transition={{ duration: 3.6, repeat: Infinity, ease: "easeInOut" }}
-            className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2"
-          >
-            <span className="grid h-24 w-24 place-items-center rounded-3xl brand-gradient text-white shadow-glow ring-4 ring-white/40">
-              <Center className="h-10 w-10" strokeWidth={1.6} />
-            </span>
-          </motion.div>
-
-          <motion.div
-            animate={{ y: [0, -8, 0] }}
-            transition={{ duration: 4, repeat: Infinity, ease: "easeInOut", delay: 0.5 }}
-            className="absolute right-8 top-10"
-          >
-            <span className={cn("grid h-12 w-12 place-items-center rounded-2xl bg-white shadow-card ring-1 ring-zinc-200", accentChip)}>
-              <TopRight className="h-5 w-5" />
-            </span>
-          </motion.div>
-
-          <motion.div
-            animate={{ y: [0, -7, 0] }}
-            transition={{ duration: 4.4, repeat: Infinity, ease: "easeInOut", delay: 0.9 }}
-            className="absolute bottom-10 left-8"
-          >
-            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-zinc-700 shadow-card ring-1 ring-zinc-200">
-              <BottomLeft className="h-5 w-5" />
-            </span>
-          </motion.div>
-
-          <motion.div
-            animate={{ y: [0, -6, 0] }}
-            transition={{ duration: 3.8, repeat: Infinity, ease: "easeInOut", delay: 1.3 }}
-            className="absolute bottom-12 right-14"
-          >
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-white text-zinc-700 shadow-card ring-1 ring-zinc-200">
-              <BottomRight className="h-4 w-4" />
-            </span>
-          </motion.div>
-        </div>
+      {/* Hero image */}
+      <div className="relative h-64 overflow-hidden">
+        <img
+          src={m.image}
+          alt={m.title}
+          className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+          style={{ objectPosition: m.id === "field" ? "center top" : "center center" }}
+        />
+        {/* subtle bottom fade so body text blends cleanly */}
+        <div className="absolute inset-x-0 bottom-0 h-16 bg-gradient-to-t from-white/80 to-transparent" />
       </div>
 
       {/* Body */}

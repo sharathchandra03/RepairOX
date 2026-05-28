@@ -22,16 +22,16 @@ const config: Config = {
         warning: { DEFAULT: "hsl(var(--warning))", foreground: "hsl(var(--warning-foreground))" },
         info: { DEFAULT: "hsl(var(--info))", foreground: "hsl(var(--info-foreground))" },
         brand: {
-          50: "#FFF1F2",
-          100: "#FFE4E6",
-          200: "#FECDD3",
-          300: "#FDA4AF",
-          400: "#FB7185",
-          500: "#E11D48",
-          600: "#BE123C",
-          700: "#9F1239",
-          800: "#881337",
-          900: "#4C0519",
+          50: "#EEF1FD",
+          100: "#D9DFFA",
+          200: "#B3BFF6",
+          300: "#8DA0F2",
+          400: "#6780EE",
+          500: "#4361EE",
+          600: "#3B54E8",
+          700: "#3347D6",
+          800: "#2A3AB8",
+          900: "#1E2B8A",
         },
       },
       borderRadius: {
@@ -47,9 +47,10 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace"],
       },
       boxShadow: {
-        card: "0 1px 0 0 rgba(15,15,15,0.04), 0 1px 3px 0 rgba(15,15,15,0.06), 0 12px 28px -12px rgba(15,15,15,0.10)",
-        glow: "0 10px 40px -12px rgba(225,29,72,0.45)",
-        ring: "0 0 0 1px rgba(15,15,15,0.06)",
+        card: "0 2px 4px 0 rgba(20,30,80,0.04), 0 4px 12px 0 rgba(20,30,80,0.06), 0 16px 40px -16px rgba(20,30,80,0.10)",
+        glow: "0 10px 40px -12px rgba(67,97,238,0.50)",
+        ring: "0 0 0 1px rgba(20,30,80,0.06)",
+        "card-hover": "0 6px 20px 0 rgba(20,30,80,0.09), 0 20px 48px -16px rgba(20,30,80,0.14)",
       },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },
@@ -65,9 +66,11 @@ const config: Config = {
       },
       backgroundImage: {
         "grid-faint":
-          "linear-gradient(to right, rgba(15,15,15,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(15,15,15,0.04) 1px, transparent 1px)",
+          "linear-gradient(to right, rgba(20,30,80,0.04) 1px, transparent 1px), linear-gradient(to bottom, rgba(20,30,80,0.04) 1px, transparent 1px)",
         "radial-fade":
-          "radial-gradient(60% 60% at 50% 0%, rgba(225,29,72,0.10) 0%, rgba(225,29,72,0) 100%)",
+          "radial-gradient(60% 60% at 50% 0%, rgba(67,97,238,0.09) 0%, rgba(67,97,238,0) 100%)",
+        "gradient-subtle":
+          "linear-gradient(135deg, rgba(67,97,238,0.04) 0%, rgba(59,84,232,0.04) 100%)",
       },
     },
   },

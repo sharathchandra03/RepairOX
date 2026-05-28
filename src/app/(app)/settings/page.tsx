@@ -36,7 +36,7 @@ export default function Settings() {
               transition={{ delay: 0.04 * i }}
             >
               <button
-                className={`group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-muted ${i === 0 ? "ring-1 ring-brand-200" : ""}`}
+                className={`group flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-3 text-left transition hover:bg-muted ${i === 0 ? "ring-1 ring-indigo-200" : ""}`}
               >
                 <span className={`grid h-9 w-9 place-items-center rounded-lg ${i === 0 ? "brand-gradient text-white shadow-glow" : "bg-muted text-muted-foreground"}`}>
                   <s.icon className="h-4 w-4" />

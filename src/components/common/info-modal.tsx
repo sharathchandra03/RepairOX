@@ -71,9 +71,9 @@ export function InfoModal({
             </button>
 
             {/* header */}
-            <div className="relative overflow-hidden bg-gradient-to-br from-rose-50 via-rose-50/60 to-white px-7 pb-6 pt-7">
+            <div className="relative overflow-hidden bg-gradient-to-br from-indigo-50 via-indigo-50/60 to-white px-7 pb-6 pt-7">
               <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-25" />
-              <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-rose-200/40 blur-3xl" />
+              <div className="pointer-events-none absolute -right-20 -top-20 h-56 w-56 rounded-full bg-indigo-200/30 blur-3xl" />
               <div className="relative">
                 {eyebrow && (
                   <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-brand-700">
@@ -124,9 +124,9 @@ export function InfoModal({
                       initial={{ opacity: 0, y: 8 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: 0.04 * i }}
-                      className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 transition hover:border-rose-200 hover:bg-rose-50/30"
+                      className="flex items-start gap-3 rounded-xl border border-zinc-200 bg-white p-3.5 transition hover:border-indigo-200 hover:bg-indigo-50/30"
                     >
-                      <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-rose-50 text-brand-700 ring-1 ring-rose-100">
+                      <span className="mt-0.5 grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-indigo-50 text-brand-700 ring-1 ring-indigo-100">
                         <Icon className="h-4 w-4" />
                       </span>
                       <div className="min-w-0">

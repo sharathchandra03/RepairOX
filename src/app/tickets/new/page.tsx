@@ -375,7 +375,7 @@ function QuoteSummary({ data, onNext }: any) {
         </div>
 
         {/* Totals card */}
-        <div className="rounded-2xl border border-border bg-gradient-to-b from-rose-50/60 to-white p-5">
+        <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
@@ -475,7 +475,7 @@ function UploadStep({ data, setData, onNext }: any) {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.05 * i }}
             onClick={() => setData({ ...data, files: [...data.files, `${s.id}-${Date.now()}.jpg`] })}
-            className="group flex items-center gap-4 rounded-2xl border border-border bg-gradient-to-b from-rose-50/40 to-white p-5 text-left transition hover:-translate-y-0.5 hover:border-brand-200"
+            className="group flex items-center gap-4 rounded-2xl border border-border bg-gradient-to-b from-indigo-50/40 to-white p-5 text-left transition hover:-translate-y-0.5 hover:border-indigo-200"
           >
             <span className="grid h-14 w-14 place-items-center rounded-2xl border border-border bg-white text-brand-700 shadow-card">
               <s.icon className="h-6 w-6" />
@@ -502,7 +502,7 @@ function UploadStep({ data, setData, onNext }: any) {
               key={f + i}
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="aspect-[4/3] rounded-xl border border-border bg-gradient-to-br from-rose-100/60 to-white p-2 shadow-card"
+              className="aspect-[4/3] rounded-xl border border-border bg-gradient-to-br from-indigo-100/50 to-white p-2 shadow-card"
             >
               <div className="flex h-full items-end justify-between rounded-lg border border-border bg-white p-2">
                 <span className="truncate text-[10px] text-muted-foreground">{f}</span>
@@ -533,8 +533,8 @@ function SignatureStep({ onSubmit }: { onSubmit: () => void }) {
       <div
         onClick={() => setSigned(true)}
         className={cn(
-          "relative mt-5 grid h-[260px] cursor-crosshair place-items-center overflow-hidden rounded-2xl border-2 border-dashed bg-gradient-to-b from-rose-50/40 to-white transition",
-          signed ? "border-brand-300" : "border-border"
+          "relative mt-5 grid h-[260px] cursor-crosshair place-items-center overflow-hidden rounded-2xl border-2 border-dashed bg-gradient-to-b from-indigo-50/40 to-white transition",
+          signed ? "border-indigo-300" : "border-border"
         )}
       >
         {!signed ? (
@@ -582,7 +582,7 @@ function SignatureStep({ onSubmit }: { onSubmit: () => void }) {
 function ThankYou({ onPrint }: { onPrint: () => void }) {
   const [format, setFormat] = useState<"a4" | "thermal">("a4");
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-rose-50/30 to-white">
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-indigo-50/30 to-white">
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-25" />
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col items-center px-4 py-10 text-center sm:px-6">
         <motion.div
@@ -624,10 +624,10 @@ function ThankYou({ onPrint }: { onPrint: () => void }) {
                 onClick={() => setFormat(p.id as any)}
                 className={cn(
                   "rounded-2xl border bg-card p-5 text-left shadow-card transition",
-                  active ? "border-brand-300 ring-2 ring-brand-200/70" : "border-border"
+                  active ? "border-indigo-300 ring-2 ring-indigo-200/70" : "border-border"
                 )}
               >
-                <span className="grid h-12 w-12 place-items-center rounded-xl bg-rose-50 text-brand-700 ring-1 ring-brand-200">
+                <span className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-50 text-brand-700 ring-1 ring-brand-200">
                   <Printer className="h-5 w-5" />
                 </span>
                 <p className="font-display mt-3 text-lg font-bold">{p.label}</p>
@@ -642,7 +642,7 @@ function ThankYou({ onPrint }: { onPrint: () => void }) {
             <MessageCircle className="h-4 w-4 text-emerald-600" /> Share on WhatsApp
           </Button>
           <Button variant="outline" size="lg" className="flex-1">
-            <Mail className="h-4 w-4 text-rose-600" /> Share on Email
+            <Mail className="h-4 w-4 text-indigo-600" /> Share on Email
           </Button>
         </div>
         <Button size="xl" className="mt-3 w-full max-w-md" onClick={onPrint}>

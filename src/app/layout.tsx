@@ -5,7 +5,7 @@ export const metadata: Metadata = {
   title: "RepairOX - Repair Smarter, Grow Faster",
   description:
     "End-to-end CRM for mobile and electronics repair shops. Tickets, inventory, billing, customers, and analytics - beautifully designed.",
-  themeColor: "#E11D48",
+  themeColor: "#4361EE",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

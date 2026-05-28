@@ -6,9 +6,9 @@ import { AnimatedNumber } from "./kpi-card";
 
 export function TicketsDonut() {
   const data = [
-    { name: "In Progress", value: 200, color: "#FBBF24" },
+    { name: "In Progress", value: 200,  color: "#4361EE" },
     { name: "Repaired",    value: 1500, color: "#22C55E" },
-    { name: "Returned",    value: 300, color: "#F43F5E" },
+    { name: "Returned",    value: 300,  color: "#D1D9F8" },
   ];
   const total = data.reduce((s, d) => s + d.value, 0);
 
@@ -16,7 +16,7 @@ export function TicketsDonut() {
     <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
       <div className="flex items-center justify-between">
         <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Total Tickets</p>
-        <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+        <span className="rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE] ring-1 ring-[#B3BFF6]/60">
           live
         </span>
       </div>

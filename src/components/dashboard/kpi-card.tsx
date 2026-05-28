@@ -26,12 +26,12 @@ export function KpiCard({
   delta?: { value: string; up?: boolean };
   tone?: "rose" | "amber" | "emerald" | "sky" | "violet";
 }) {
-  const TONES: Record<string, { from: string; to: string; chip: string; ring: string }> = {
-    rose:    { from: "from-rose-100",    to: "to-rose-50/40",    chip: "text-rose-700 bg-rose-100/70 ring-rose-200",    ring: "ring-rose-200/70" },
-    amber:   { from: "from-amber-100",   to: "to-amber-50/40",   chip: "text-amber-800 bg-amber-100/70 ring-amber-200", ring: "ring-amber-200/70" },
-    emerald: { from: "from-emerald-100", to: "to-emerald-50/40", chip: "text-emerald-700 bg-emerald-100/70 ring-emerald-200", ring: "ring-emerald-200/70" },
-    sky:     { from: "from-sky-100",     to: "to-sky-50/40",     chip: "text-sky-700 bg-sky-100/70 ring-sky-200",       ring: "ring-sky-200/70" },
-    violet:  { from: "from-violet-100",  to: "to-violet-50/40",  chip: "text-violet-700 bg-violet-100/70 ring-violet-200", ring: "ring-violet-200/70" },
+  const TONES: Record<string, { from: string; to: string; chip: string; ring: string; line: string }> = {
+    rose:    { from: "from-white", to: "to-white", chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/60",   ring: "ring-[#B3BFF6]/50",   line: "text-[#4361EE]" },
+    amber:   { from: "from-white", to: "to-white", chip: "text-amber-700 bg-amber-50 ring-amber-200/60",     ring: "ring-amber-200/50",   line: "text-amber-500" },
+    emerald: { from: "from-white", to: "to-white", chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", ring: "ring-emerald-200/50", line: "text-emerald-500" },
+    sky:     { from: "from-white", to: "to-white", chip: "text-sky-700 bg-sky-50 ring-sky-200/60",            ring: "ring-sky-200/50",     line: "text-sky-500" },
+    violet:  { from: "from-white", to: "to-white", chip: "text-violet-700 bg-violet-50 ring-violet-200/60",  ring: "ring-violet-200/50",  line: "text-violet-500" },
   };
   const t = TONES[tone];
   return (
@@ -39,8 +39,7 @@ export function KpiCard({
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       className={cn(
-        "group relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br p-5 shadow-card transition will-change-transform hover:-translate-y-0.5",
-        t.from, t.to
+        "group relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-card transition will-change-transform hover:-translate-y-0.5 hover:shadow-card-hover"
       )}
     >
       <div className="flex items-center justify-between">
@@ -68,14 +67,14 @@ export function KpiCard({
         <path
           d="M0,28 C12,22 22,30 36,18 C52,6 64,24 80,16 C96,8 110,18 120,12 L120,36 L0,36 Z"
           fill={`url(#gr-${tone})`}
-          className="text-zinc-700"
+          className={t.line}
         />
         <path
           d="M0,28 C12,22 22,30 36,18 C52,6 64,24 80,16 C96,8 110,18 120,12"
           stroke="currentColor"
-          strokeWidth="1.5"
+          strokeWidth="1.8"
           fill="none"
-          className="text-zinc-700"
+          className={t.line}
         />
       </svg>
     </motion.div>

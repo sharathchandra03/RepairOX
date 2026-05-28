@@ -37,7 +37,7 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
             {active && (
               <motion.span
                 layoutId={`pill-${options.map((x) => x.value).join("-")}`}
-                className="absolute inset-0 rounded-full brand-gradient shadow-glow"
+                className="absolute inset-0 rounded-full bg-[#4361EE] shadow-[0_6px_20px_-8px_rgba(67,97,238,0.50)]"
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}
