@@ -6,7 +6,7 @@ import Link from "next/link";
 import {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, ChevronLeft, ChevronRight,
-  LogOut, CalendarDays, UserPlus, Map, BookUser,
+  LogOut, CalendarDays, UserPlus, Map, BookUser, Package,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
@@ -15,7 +15,7 @@ import { Avatar } from "@/components/ui/avatar";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
-  Store, Wallet, Settings, BarChart3, Map, BookUser,
+  Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */

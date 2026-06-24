@@ -75,6 +75,7 @@ export const navItems = [
   { href: "/tickets",          label: "Tickets",      icon: "Ticket" },
   { href: "/invoice",          label: "Invoice",      icon: "FileText" },
   { href: "/stock",            label: "Stock",        icon: "Boxes" },
+  { href: "/inventory",        label: "Inventory",    icon: "Package" },
   { href: "/contacts",         label: "Contacts",     icon: "Users" },
   { href: "/buy-back",         label: "Buy-Back",     icon: "Recycle" },
   { href: "/price-list",       label: "Price List",   icon: "ClipboardList" },
@@ -96,7 +97,7 @@ export type ModuleId = typeof modules[number]["id"];
 
 export const navGroups: Record<ModuleId, { label: string; items: string[] }[]> = {
   crm: [
-    { label: "WORKSPACE",  items: ["/dashboard", "/tickets", "/invoice", "/stock", "/contacts"] },
+    { label: "WORKSPACE",  items: ["/dashboard", "/tickets", "/invoice", "/stock", "/inventory", "/contacts"] },
     { label: "OPERATIONS", items: ["/buy-back", "/price-list", "/walk-in", "/expenses"] },
     { label: "GENERAL",    items: ["/settings", "/reports"] },
   ],

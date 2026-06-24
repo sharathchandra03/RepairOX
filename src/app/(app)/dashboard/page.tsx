@@ -9,6 +9,7 @@ import Link from "next/link";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
+import { InventoryOverview } from "@/components/dashboard/inventory-overview";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -241,6 +242,9 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Inventory Overview — bridges the CRM dashboard into Inventory Management */}
+      <InventoryOverview />
 
       {/* Row 4: Orders status + To-Do */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
