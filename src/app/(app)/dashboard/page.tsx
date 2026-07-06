@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
+import { Can } from "@/components/common/can";
 import { useState } from "react";
 import { ordersStatus, todos, tickets, STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { formatINR } from "@/lib/utils";
@@ -79,11 +80,13 @@ export default function Dashboard() {
         title="Analytics Overview,"
         showFilters
         actions={
-          <Link href="/tickets/new">
-            <Button size="sm" className="rounded-full gap-1.5">
-              <Plus className="h-3.5 w-3.5" /> New Ticket
-            </Button>
-          </Link>
+          <Can permission="manage_repair_jobs">
+            <Link href="/tickets/new">
+              <Button size="sm" className="rounded-full gap-1.5">
+                <Plus className="h-3.5 w-3.5" /> New Ticket
+              </Button>
+            </Link>
+          </Can>
         }
       />
 
@@ -235,16 +238,21 @@ export default function Dashboard() {
               );
             })}
           </div>
-          <div className="mt-2 border-t border-border pt-3">
-            <button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">
-              <ArrowDownToLine className="h-3.5 w-3.5" /> Download Report
-            </button>
-          </div>
+          <Can permission={["manage_reports", "export_reports"]}>
+            <div className="mt-2 border-t border-border pt-3">
+              <button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">
+                <ArrowDownToLine className="h-3.5 w-3.5" /> Download Report
+              </button>
+            </div>
+          </Can>
         </div>
       </div>
 
-      {/* Inventory Overview — bridges the CRM dashboard into Inventory Management */}
-      <InventoryOverview />
+      {/* Inventory Overview — bridges the CRM dashboard into Inventory Management.
+          Hidden entirely for roles without inventory access (e.g. Technician, Reception). */}
+      <Can permission="manage_inventory">
+        <InventoryOverview />
+      </Can>
 
       {/* Row 4: Orders status + To-Do */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
@@ -347,9 +355,11 @@ export default function Dashboard() {
             <Button variant="outline" size="sm" className="gap-1.5 rounded-full">
               <Filter className="h-3.5 w-3.5" /> Filter
             </Button>
-            <Button variant="primary" size="sm" className="gap-1.5 rounded-full">
-              <Download className="h-3.5 w-3.5" /> Export
-            </Button>
+            <Can permission="export_reports">
+              <Button variant="primary" size="sm" className="gap-1.5 rounded-full">
+                <Download className="h-3.5 w-3.5" /> Export
+              </Button>
+            </Can>
           </div>
         </div>
 

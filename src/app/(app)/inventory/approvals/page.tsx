@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { DataTable, type Column } from "@/components/inventory/data-table";
+import { Can } from "@/components/common/can";
+import { usePermissions } from "@/lib/permissions-context";
 import { cn, formatINR } from "@/lib/utils";
 import {
   approvals as seedApprovals, APPROVAL_STATUS_LABEL, APPROVAL_STATUS_TONE,
@@ -25,6 +27,7 @@ function StatusBadge({ status }: { status: ApprovalStatus }) {
 }
 
 export default function ApprovalsPage() {
+  const { can } = usePermissions();
   const [rows, setRows] = useState<Approval[]>(seedApprovals);
   const [status, setStatus] = useState<"all" | ApprovalStatus>("all");
   const [active, setActive] = useState<Approval | null>(null);
@@ -115,7 +118,7 @@ export default function ApprovalsPage() {
         minTableWidth={1000}
         rowActions={(r) => [
           { label: "View details", icon: Eye, onClick: () => setActive(r) },
-          ...(r.status === "pending"
+          ...(r.status === "pending" && can("approve")
             ? [
                 { label: "Approve", icon: Check, onClick: () => decide(r.id, "approved") },
                 { label: "Reject", icon: X, danger: true, onClick: () => decide(r.id, "rejected") },
@@ -134,7 +137,7 @@ export default function ApprovalsPage() {
         title={active?.id ?? ""}
         subtitle={active ? `${active.docType} · ${active.docNumber}` : ""}
         footer={
-          active?.status === "pending" ? (
+          active?.status === "pending" && can("approve") ? (
             <div className="flex gap-2">
               <Button variant="outline" className="flex-1 gap-1.5" onClick={() => active && decide(active.id, "rejected")}>
                 <X className="h-4 w-4 text-rose-500" /> Reject
@@ -145,7 +148,9 @@ export default function ApprovalsPage() {
             </div>
           ) : (
             <p className="text-center text-[12px] text-muted-foreground">
-              {active && `${APPROVAL_STATUS_LABEL[active.status]} by ${active.actionBy} · ${active.actionDate}`}
+              {active && active.status !== "pending"
+                ? `${APPROVAL_STATUS_LABEL[active.status]} by ${active.actionBy} · ${active.actionDate}`
+                : "You don't have permission to approve or reject documents."}
             </p>
           )
         }

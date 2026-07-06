@@ -1,3 +1,5 @@
+import type { PermissionKey, WorkspaceId } from "@/lib/permissions";
+
 export type TicketStatus =
   | "received"
   | "diagnosis"
@@ -70,43 +72,100 @@ export const todos = [
   { id: 6, title: "Accessories refilling", desc: "Tempered glass & latest mobile pouches to be ordered", flag: "warn" as const },
 ];
 
-export const navItems = [
-  { href: "/dashboard",        label: "Dashboard",    icon: "Home" },
-  { href: "/tickets",          label: "Tickets",      icon: "Ticket" },
-  { href: "/invoice",          label: "Invoice",      icon: "FileText" },
-  { href: "/stock",            label: "Stock",        icon: "Boxes" },
-  { href: "/inventory",        label: "Inventory",    icon: "Package" },
-  { href: "/contacts",         label: "Contacts",     icon: "Users" },
-  { href: "/buy-back",         label: "Buy-Back",     icon: "Recycle" },
-  { href: "/price-list",       label: "Price List",   icon: "ClipboardList" },
-  { href: "/walk-in",          label: "Walk-In",      icon: "Store" },
-  { href: "/expenses",         label: "Expenses",     icon: "Wallet" },
-  { href: "/settings",         label: "Settings",     icon: "Settings" },
-  { href: "/reports",          label: "Reports",      icon: "BarChart3" },
-  { href: "/field-management", label: "Field Ops",    icon: "Map" },
-  { href: "/lead-management",  label: "Leads",        icon: "BookUser" },
+/** Nav item shape. `permission` is optional — omit it for pages every role in
+ *  the item's workspace should see (general activity/browse views). When
+ *  present, the sidebar only renders the item if the active role is granted
+ *  at least one of the listed keys (see `Sidebar` / `usePermissions().can`). */
+export type NavItem = {
+  href: string;
+  label: string;
+  icon: string;
+  permission?: PermissionKey | PermissionKey[];
+};
+
+export const navItems: NavItem[] = [
+  // Shop Management
+  { href: "/dashboard",        label: "Dashboard",     icon: "Home", permission: "view_dashboard" },
+  { href: "/tickets",          label: "Tickets",       icon: "Ticket", permission: ["view_only", "manage_repair_jobs"] },
+  { href: "/shop/technicians", label: "Technicians",   icon: "Wrench", permission: ["assign_technicians", "manage_repair_jobs"] },
+  { href: "/shop/assignments", label: "Job Assignment", icon: "ClipboardCheck", permission: ["assign_technicians", "manage_repair_jobs"] },
+  { href: "/shop/status-updates", label: "Repair Status", icon: "ClipboardCheck", permission: ["update_repair_status", "manage_repair_jobs"] },
+  { href: "/shop/notes",       label: "Notes",         icon: "FileText", permission: ["upload_files", "manage_repair_jobs"] },
+  { href: "/contacts",         label: "Customers",     icon: "Users", permission: "manage_customers" },
+  { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
+  { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
+  { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
+  { href: "/buy-back",         label: "Buy-Back",      icon: "Recycle", permission: "manage_sales" },
+  { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
+  { href: "/expenses",         label: "Expenses",      icon: "Wallet", permission: "manage_payments" },
+
+  // Operations
+  { href: "/operations",             label: "Dashboard",       icon: "Home", permission: "view_dashboard" },
+  { href: "/stock",                  label: "Stock Levels",    icon: "Boxes", permission: "manage_inventory" },
+  { href: "/inventory",              label: "Inventory",       icon: "Package", permission: "manage_inventory" },
+  { href: "/operations/vendors",     label: "Vendors",         icon: "Truck", permission: "manage_vendors" },
+  { href: "/operations/purchase-orders", label: "Purchase Orders", icon: "ClipboardList", permission: "manage_purchases" },
+  { href: "/operations/transfers",   label: "Parts Transfers", icon: "Recycle", permission: "transfer_inventory" },
+  { href: "/operations/products",    label: "Product Items",   icon: "Package", permission: "manage_inventory" },
+
+  // Leads
+  { href: "/lead-management",  label: "Dashboard",    icon: "Home", permission: "view_dashboard" },
+  { href: "/leads/companies",  label: "Companies",    icon: "Store", permission: "manage_customers" },
+  { href: "/leads/deals",      label: "Deals",        icon: "ClipboardList", permission: "manage_sales" },
+  { href: "/leads/quotations", label: "Quotations",   icon: "FileText", permission: "manage_sales" },
+  { href: "/leads/tasks",      label: "Tasks",        icon: "Ticket" },
+  { href: "/leads/meetings",   label: "Meetings",     icon: "BookUser" },
+  { href: "/leads/activities", label: "Activities",   icon: "BarChart3" },
+  { href: "/leads/calls",      label: "Calls",        icon: "Boxes", permission: "send_communications" },
+  { href: "/leads/email",      label: "Email",        icon: "FileText", permission: "send_communications" },
+  { href: "/leads/whatsapp",   label: "WhatsApp",     icon: "BookUser", permission: "send_communications" },
+  { href: "/leads/smart-lists", label: "Smart Lists", icon: "ClipboardList" },
+  { href: "/leads/map-view",   label: "Map View",     icon: "Map" },
+  { href: "/field-management", label: "Field Ops",    icon: "Map", permission: ["assign_technicians", "manage_repair_jobs"] },
+
+  // Shared / general (present in every workspace)
+  { href: "/reports",          label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_financial_reports"] },
+  { href: "/settings",         label: "Settings",     icon: "Settings", permission: "manage_settings" },
 ];
 
-export const modules = [
-  { id: "crm",   label: "CRM",     short: "CR" },
-  { id: "field", label: "Field",   short: "FD" },
-  { id: "leads", label: "Leads",   short: "LD" },
-] as const;
+/** Team member — who has a RepairOX login, their assigned role, branch and
+ *  status. Lives here (not in a page) because role deletion/reassignment in
+ *  the Permissions context needs to know who's currently using a role. */
+export type TeamMember = {
+  name: string;
+  email: string;
+  roleId: string;
+  branch: string;
+  status: "active" | "invited" | "suspended";
+};
 
-export type ModuleId = typeof modules[number]["id"];
+export const TEAM_SEED: TeamMember[] = [
+  { name: "Kalai S.",      email: "abc@gmail.com",           roleId: "master_shop_owner",       branch: "BTM Layout (HQ)", status: "active" },
+  { name: "Ritesh Kumar",  email: "ritesh@repairox.in",       roleId: "shop_owner_branch_manager", branch: "Koramangala",     status: "active" },
+  { name: "Anjali R.",     email: "anjali@repairox.in",       roleId: "reception",               branch: "BTM Layout (HQ)", status: "active" },
+  { name: "Anand Rao",     email: "anand@repairox.in",        roleId: "senior_technician",       branch: "BTM Layout (HQ)", status: "active" },
+  { name: "Pooja Iyer",    email: "pooja@repairox.in",        roleId: "technician",              branch: "Koramangala",     status: "active" },
+  { name: "Vikas Nair",    email: "vikas@repairox.in",        roleId: "inventory_manager",       branch: "Warehouse A",     status: "active" },
+  { name: "Manoj S.",      email: "manoj@repairox.in",        roleId: "sales_executive",         branch: "HSR Layout",      status: "invited" },
+  { name: "Radha Iyer",    email: "radha@repairox.in",        roleId: "cashier_accounts",        branch: "BTM Layout (HQ)", status: "active" },
+  { name: "Imran Khan",    email: "imran@repairox.in",        roleId: "read_only_user",          branch: "HSR Layout",      status: "suspended" },
+];
 
-export const navGroups: Record<ModuleId, { label: string; items: string[] }[]> = {
-  crm: [
-    { label: "WORKSPACE",  items: ["/dashboard", "/tickets", "/invoice", "/stock", "/inventory", "/contacts"] },
-    { label: "OPERATIONS", items: ["/buy-back", "/price-list", "/walk-in", "/expenses"] },
-    { label: "GENERAL",    items: ["/settings", "/reports"] },
+export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
+  shop: [
+    { label: "WORKSPACE",  items: ["/dashboard", "/tickets", "/shop/technicians", "/shop/assignments", "/shop/status-updates", "/shop/notes", "/contacts"] },
+    { label: "BILLING",    items: ["/invoice", "/shop/payments", "/walk-in", "/buy-back", "/price-list", "/expenses"] },
+    { label: "GENERAL",    items: ["/reports", "/settings"] },
   ],
-  field: [
-    { label: "FIELD OPS",  items: ["/field-management"] },
-    { label: "GENERAL",    items: ["/settings", "/reports"] },
+  operations: [
+    { label: "WORKSPACE",  items: ["/operations", "/stock", "/inventory"] },
+    { label: "PURCHASING", items: ["/operations/vendors", "/operations/purchase-orders", "/operations/transfers", "/operations/products"] },
+    { label: "GENERAL",    items: ["/reports", "/settings"] },
   ],
   leads: [
-    { label: "PIPELINE",   items: ["/lead-management"] },
-    { label: "GENERAL",    items: ["/settings", "/reports"] },
+    { label: "PIPELINE",   items: ["/lead-management", "/leads/companies", "/leads/deals", "/leads/quotations"] },
+    { label: "ACTIVITY",   items: ["/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
+    { label: "VIEWS",      items: ["/leads/smart-lists", "/leads/map-view", "/field-management"] },
+    { label: "GENERAL",    items: ["/reports", "/settings"] },
   ],
 };

@@ -6,28 +6,39 @@ import Link from "next/link";
 import {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, ChevronLeft, ChevronRight,
-  LogOut, CalendarDays, UserPlus, Map, BookUser, Package,
+  LogOut, CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
+  ClipboardCheck, Truck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
-import { navItems, navGroups, modules, type ModuleId } from "@/lib/mock-data";
+import { navItems, navGroups, type NavItem as NavItemDef } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/avatar";
+import { CURRENT_USER, type WorkspaceId } from "@/lib/permissions";
+import { usePermissions } from "@/lib/permissions-context";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
+  Wrench, ClipboardCheck, Truck,
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
 function NavItem({ item, collapsed, pathname }: {
-  item: { href: string; label: string; icon: string };
+  item: NavItemDef;
   collapsed: boolean;
   pathname: string;
 }) {
   const Icon = ICONS[item.icon] ?? Home;
   const active = pathname === item.href || pathname.startsWith(item.href + "/");
   return (
-    <li>
+    <motion.li
+      layout
+      initial={{ opacity: 0, height: 0 }}
+      animate={{ opacity: 1, height: "auto" }}
+      exit={{ opacity: 0, height: 0 }}
+      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+      style={{ overflow: "hidden" }}
+    >
       <Link
         href={item.href}
         title={collapsed ? item.label : undefined}
@@ -51,32 +62,35 @@ function NavItem({ item, collapsed, pathname }: {
           <span className="relative whitespace-nowrap">{item.label}</span>
         )}
       </Link>
-    </li>
+    </motion.li>
   );
 }
 
-/* Module switcher pill row */
-function ModuleSwitcher({ active, collapsed, onChange }: {
-  active: ModuleId;
+/* Workspace switcher pill row — only shows workspaces the active role can access */
+function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
+  active: WorkspaceId;
   collapsed: boolean;
-  onChange: (id: ModuleId) => void;
+  onChange: (id: WorkspaceId) => void;
+  allowed: ReturnType<typeof usePermissions>["allowedWorkspaces"];
 }) {
+  if (allowed.length <= 1) return null; // single-workspace users never see a switcher
+
   if (collapsed) {
     return (
       <div className="mx-auto mb-3 flex flex-col items-center gap-1 px-1">
-        {modules.map((m) => (
+        {allowed.map((w) => (
           <button
-            key={m.id}
-            title={m.label}
-            onClick={() => onChange(m.id)}
+            key={w.id}
+            title={w.label}
+            onClick={() => onChange(w.id)}
             className={cn(
               "h-8 w-8 rounded-lg text-[10px] font-bold transition",
-              active === m.id
+              active === w.id
                 ? "bg-[#4361EE] text-white"
                 : "bg-muted text-zinc-500 hover:bg-slate-100"
             )}
           >
-            {m.short}
+            {w.short}
           </button>
         ))}
       </div>
@@ -84,39 +98,42 @@ function ModuleSwitcher({ active, collapsed, onChange }: {
   }
   return (
     <div className="mx-3 mb-4 flex items-center gap-1 rounded-xl bg-muted p-1">
-      {modules.map((m) => (
+      {allowed.map((w) => (
         <button
-          key={m.id}
-          onClick={() => onChange(m.id)}
+          key={w.id}
+          title={w.label}
+          onClick={() => onChange(w.id)}
           className={cn(
-            "flex-1 rounded-lg py-1.5 text-[12px] font-semibold transition",
-            active === m.id
+            "flex-1 truncate rounded-lg px-1.5 py-1.5 text-[11.5px] font-semibold leading-tight transition",
+            active === w.id
               ? "bg-[#4361EE] text-white shadow-sm"
               : "text-zinc-500 hover:text-zinc-800"
           )}
         >
-          {m.label}
+          {w.navLabel ?? w.label}
         </button>
       ))}
     </div>
   );
 }
 
-export function Sidebar({ collapsed, setCollapsed, activeModule, setActiveModule }: {
+export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWorkspace }: {
   collapsed: boolean;
   setCollapsed: (v: boolean) => void;
-  activeModule: ModuleId;
-  setActiveModule: (id: ModuleId) => void;
+  activeWorkspace: WorkspaceId;
+  setActiveWorkspace: (id: WorkspaceId) => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { can, allowedWorkspaces, role, isPreviewing } = usePermissions();
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
-  const groups = navGroups[activeModule];
+  const groups = navGroups[activeWorkspace];
+  const visibleItem = (item: NavItemDef | undefined): item is NavItemDef =>
+    !!item && (!item.permission || (Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission)));
 
-  function handleModuleChange(id: ModuleId) {
-    setActiveModule(id);
-    const dest = id === "crm" ? "/dashboard" : (navGroups[id][0]?.items[0] ?? "/dashboard");
-    router.push(dest);
+  function handleWorkspaceChange(id: WorkspaceId) {
+    setActiveWorkspace(id);
+    router.push(navGroups[id][0]?.items[0] ?? "/dashboard");
   }
 
   return (
@@ -154,28 +171,31 @@ export function Sidebar({ collapsed, setCollapsed, activeModule, setActiveModule
         </button>
       </div>
 
-      {/* Module switcher */}
-      <ModuleSwitcher active={activeModule} collapsed={collapsed} onChange={handleModuleChange} />
+      {/* Workspace switcher */}
+      <WorkspaceSwitcher active={activeWorkspace} collapsed={collapsed} onChange={handleWorkspaceChange} allowed={allowedWorkspaces} />
 
-      {/* Grouped nav — scrollable middle zone */}
+      {/* Grouped nav — scrollable middle zone, filtered live by the active role's permissions */}
       <nav className="flex-1 overflow-y-auto px-3 pb-2">
-        {groups.map((group) => (
-          <div key={group.label} className="mb-4">
-            {!collapsed && (
-              <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none">
-                {group.label}
-              </p>
-            )}
-            <ul className="space-y-0.5">
-              {group.items
-                .map((href) => itemMap[href])
-                .filter(Boolean)
-                .map((item) => (
-                  <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} />
-                ))}
-            </ul>
-          </div>
-        ))}
+        {groups.map((group) => {
+          const items = group.items.map((href) => itemMap[href]).filter(visibleItem);
+          if (items.length === 0) return null;
+          return (
+            <div key={group.label} className="mb-4">
+              {!collapsed && (
+                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none">
+                  {group.label}
+                </p>
+              )}
+              <ul className="space-y-0.5">
+                <AnimatePresence initial={false}>
+                  {items.map((item) => (
+                    <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} />
+                  ))}
+                </AnimatePresence>
+              </ul>
+            </div>
+          );
+        })}
       </nav>
 
       {/* CTA card — hidden when collapsed to prevent clipping */}
@@ -194,19 +214,26 @@ export function Sidebar({ collapsed, setCollapsed, activeModule, setActiveModule
         </div>
       )}
 
-      {/* Profile footer — centred avatar only when collapsed */}
+      {/* Profile footer — centred avatar only when collapsed. Role label reflects
+          whichever role is currently driving the UI (real admin, or the role
+          being previewed) so the sidebar never looks out of sync with itself. */}
       <div className={cn(
-        "mx-3 mb-3 shrink-0 rounded-2xl border border-border bg-card shadow-[0_1px_4px_0_rgba(20,30,80,0.06)]",
+        "mx-3 mb-3 shrink-0 rounded-2xl border shadow-[0_1px_4px_0_rgba(20,30,80,0.06)] transition-colors",
+        isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card",
         collapsed ? "flex justify-center p-2" : "p-3"
       )}>
         {collapsed ? (
-          <Avatar name="Shop Owner" size={36} />
+          <Avatar name={isPreviewing ? role.label : CURRENT_USER.name} size={36} />
         ) : (
           <div className="flex items-center gap-3">
-            <Avatar name="Shop Owner" />
+            <Avatar name={isPreviewing ? role.label : CURRENT_USER.name} />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold leading-tight">Shop Owner</p>
-              <p className="truncate text-[11px] text-muted-foreground">abc@gmail.com</p>
+              <p className="truncate text-sm font-semibold leading-tight">
+                {isPreviewing ? role.label : CURRENT_USER.name}
+              </p>
+              <p className="truncate text-[11px] text-muted-foreground">
+                {isPreviewing ? "Previewing this role" : CURRENT_USER.email}
+              </p>
             </div>
             <button className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition">
               <LogOut className="h-4 w-4" />
@@ -219,21 +246,23 @@ export function Sidebar({ collapsed, setCollapsed, activeModule, setActiveModule
 }
 
 /** Mobile drawer */
-export function MobileSidebar({ open, setOpen, activeModule, setActiveModule }: {
+export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspace }: {
   open: boolean;
   setOpen: (v: boolean) => void;
-  activeModule: ModuleId;
-  setActiveModule: (id: ModuleId) => void;
+  activeWorkspace: WorkspaceId;
+  setActiveWorkspace: (id: WorkspaceId) => void;
 }) {
   const pathname = usePathname();
   const router = useRouter();
+  const { can, allowedWorkspaces: allowed } = usePermissions();
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
-  const groups = navGroups[activeModule];
+  const groups = navGroups[activeWorkspace];
+  const visibleItem = (item: NavItemDef | undefined): item is NavItemDef =>
+    !!item && (!item.permission || (Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission)));
 
-  function handleModuleChange(id: ModuleId) {
-    setActiveModule(id);
-    const dest = id === "crm" ? "/dashboard" : (navGroups[id][0]?.items[0] ?? "/dashboard");
-    router.push(dest);
+  function handleWorkspaceChange(id: WorkspaceId) {
+    setActiveWorkspace(id);
+    router.push(navGroups[id][0]?.items[0] ?? "/dashboard");
     setOpen(false);
   }
 
@@ -265,35 +294,38 @@ export function MobileSidebar({ open, setOpen, activeModule, setActiveModule }: 
               </button>
             </div>
 
-            {/* Module switcher */}
-            <div className="mx-3 mb-4 flex items-center gap-1 rounded-xl bg-muted p-1 shrink-0">
-              {modules.map((m) => (
-                <button
-                  key={m.id}
-                  onClick={() => handleModuleChange(m.id)}
-                  className={cn(
-                    "flex-1 rounded-lg py-1.5 text-[12px] font-semibold transition",
-                    activeModule === m.id
-                      ? "bg-[#4361EE] text-white shadow-sm"
-                      : "text-zinc-500 hover:text-zinc-800"
-                  )}
-                >
-                  {m.label}
-                </button>
-              ))}
-            </div>
+            {/* Workspace switcher */}
+            {allowed.length > 1 && (
+              <div className="mx-3 mb-4 flex items-center gap-1 rounded-xl bg-muted p-1 shrink-0">
+                {allowed.map((w) => (
+                  <button
+                    key={w.id}
+                    title={w.label}
+                    onClick={() => handleWorkspaceChange(w.id)}
+                    className={cn(
+                      "flex-1 truncate rounded-lg px-1.5 py-1.5 text-[11.5px] font-semibold leading-tight transition",
+                      activeWorkspace === w.id
+                        ? "bg-[#4361EE] text-white shadow-sm"
+                        : "text-zinc-500 hover:text-zinc-800"
+                    )}
+                  >
+                    {w.navLabel ?? w.label}
+                  </button>
+                ))}
+              </div>
+            )}
 
             <nav className="flex-1 overflow-y-auto px-3 pb-2">
-              {groups.map((group) => (
-                <div key={group.label} className="mb-4">
-                  <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none">
-                    {group.label}
-                  </p>
-                  <ul className="space-y-0.5">
-                    {group.items
-                      .map((href) => itemMap[href])
-                      .filter(Boolean)
-                      .map((item) => {
+              {groups.map((group) => {
+                const items = group.items.map((href) => itemMap[href]).filter(visibleItem);
+                if (items.length === 0) return null;
+                return (
+                  <div key={group.label} className="mb-4">
+                    <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none">
+                      {group.label}
+                    </p>
+                    <ul className="space-y-0.5">
+                      {items.map((item) => {
                         const Icon = ICONS[item.icon] ?? Home;
                         const active = pathname === item.href;
                         return (
@@ -312,9 +344,10 @@ export function MobileSidebar({ open, setOpen, activeModule, setActiveModule }: 
                           </li>
                         );
                       })}
-                  </ul>
-                </div>
-              ))}
+                    </ul>
+                  </div>
+                );
+              })}
             </nav>
 
             <div className="mx-3 mb-3 shrink-0 rounded-2xl bg-[#4361EE] p-4 text-white">

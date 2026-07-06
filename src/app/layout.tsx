@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { PermissionsProvider } from "@/lib/permissions-context";
 
 export const metadata: Metadata = {
   title: "RepairOX - Repair Smarter, Grow Faster",
@@ -19,7 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           rel="stylesheet"
         />
       </head>
-      <body>{children}</body>
+      <body>
+        <PermissionsProvider>{children}</PermissionsProvider>
+      </body>
     </html>
   );
 }

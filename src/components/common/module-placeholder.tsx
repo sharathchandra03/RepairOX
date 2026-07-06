@@ -4,17 +4,23 @@ import { motion } from "framer-motion";
 import { Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/layout/page-header";
+import { Can } from "@/components/common/can";
+import type { PermissionKey } from "@/lib/permissions";
 
 export function ModulePlaceholder({
   title,
   subtitle,
   eyebrow,
   preview,
+  permission = "create",
 }: {
   title: string;
   subtitle: string;
   eyebrow: string;
   preview: { label: string; value: string }[];
+  /** Permission required to see "Set up module" — this is a configure/create
+   *  action, so it defaults to the generic `create` capability. */
+  permission?: PermissionKey;
 }) {
   return (
     <div className="space-y-6">
@@ -22,7 +28,11 @@ export function ModulePlaceholder({
         eyebrow={eyebrow}
         title={title}
         subtitle={subtitle}
-        actions={<Button variant="soft" size="md" className="rounded-full"><Sparkles className="h-4 w-4" /> Set up module</Button>}
+        actions={
+          <Can permission={permission}>
+            <Button variant="soft" size="md" className="rounded-full"><Sparkles className="h-4 w-4" /> Set up module</Button>
+          </Can>
+        }
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
+import { Can } from "@/components/common/can";
 import { tickets, STATUS_LABEL, STATUS_TONE, TicketStatus } from "@/lib/mock-data";
 import { formatINR, cn } from "@/lib/utils";
 
@@ -45,10 +46,14 @@ export default function TicketsPage() {
         actions={
           <>
             <Button variant="outline" size="md" className="rounded-full"><Filter className="h-4 w-4" /> Filter</Button>
-            <Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button>
-            <Link href="/tickets/new">
-              <Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> New Ticket</Button>
-            </Link>
+            <Can permission="export_reports">
+              <Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button>
+            </Can>
+            <Can permission="manage_repair_jobs">
+              <Link href="/tickets/new">
+                <Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> New Ticket</Button>
+              </Link>
+            </Can>
           </>
         }
       />

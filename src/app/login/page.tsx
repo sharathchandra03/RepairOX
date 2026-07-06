@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Logo } from "@/components/ui/logo";
 import { Novatrix } from "@/components/ui/novatrix-background";
+import { currentAllowedWorkspaces } from "@/lib/permissions";
 
 const FEATURES = [
   { icon: FileText, title: "Ticket Management", desc: "Track and manage every repair job easily" },
@@ -28,7 +29,11 @@ export default function LoginPage() {
   function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setLoading(true);
-    setTimeout(() => router.push("/modules"), 700);
+    // The backend returns the signed-in user's role and allowed workspaces.
+    // Users never choose their own role — we just route based on what they're permitted to see.
+    const allowed = currentAllowedWorkspaces();
+    const dest = allowed.length === 1 ? allowed[0].homeHref : "/workspaces";
+    setTimeout(() => router.push(dest), 700);
   }
 
   return (

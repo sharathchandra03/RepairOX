@@ -14,12 +14,15 @@ import { Input, Label, Select } from "@/components/ui/input";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { SectionCard, HealthBadge } from "@/components/inventory/widgets";
 import { InlineCombo } from "@/components/inventory/inline-combo";
+import { NoPermission } from "@/components/common/no-permission";
+import { usePermissions } from "@/lib/permissions-context";
 import { CATEGORIES, UOMS, classifyStock } from "@/lib/inventory-data";
 import { cn, formatINR } from "@/lib/utils";
 
 type CustomField = { id: number; label: string; value: string };
 
 export default function AddItemPage() {
+  const { can } = usePermissions();
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [type, setType] = useState("Product");
@@ -67,6 +70,15 @@ export default function AddItemPage() {
       setCurrentStock(""); setMinStock(""); setMaxStock(""); setCustomFields([]);
       if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     }
+  }
+
+  if (!can("create")) {
+    return (
+      <NoPermission
+        title="You don't have permission to create items"
+        subtitle="Ask an administrator to grant the “Create” permission to add new inventory items."
+      />
+    );
   }
 
   return (
@@ -229,12 +241,14 @@ export default function AddItemPage() {
                       value={f.value}
                       onChange={(e) => setCustomFields((arr) => arr.map((x) => (x.id === f.id ? { ...x, value: e.target.value } : x)))}
                     />
-                    <Button
-                      type="button" variant="outline" size="icon" className="shrink-0 rounded-xl"
-                      onClick={() => setCustomFields((arr) => arr.filter((x) => x.id !== f.id))}
-                    >
-                      <Trash2 className="h-4 w-4 text-rose-500" />
-                    </Button>
+                    {can("delete") && (
+                      <Button
+                        type="button" variant="outline" size="icon" className="shrink-0 rounded-xl"
+                        onClick={() => setCustomFields((arr) => arr.filter((x) => x.id !== f.id))}
+                      >
+                        <Trash2 className="h-4 w-4 text-rose-500" />
+                      </Button>
+                    )}
                   </motion.div>
                 ))
               )}

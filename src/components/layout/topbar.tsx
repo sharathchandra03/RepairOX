@@ -2,41 +2,43 @@
 
 import {
   Search, Bell, HelpCircle, MoreHorizontal, ChevronDown, Menu,
-  ShoppingBag, ChevronRight, ArrowLeft,
+  ShoppingBag, Check, LayoutGrid,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
-import { type ModuleId, navGroups } from "@/lib/mock-data";
-
-const MODULE_META: Record<ModuleId, { label: string; color: string; bg: string }> = {
-  crm:   { label: "CRM",         color: "text-[#4361EE]", bg: "bg-[#EEF1FD]" },
-  field: { label: "Field Ops",   color: "text-emerald-700", bg: "bg-emerald-50" },
-  leads: { label: "Lead Mgmt",   color: "text-violet-700",  bg: "bg-violet-50"  },
-};
+import { navGroups } from "@/lib/mock-data";
+import {
+  CURRENT_USER,
+  WORKSPACE_MAP, type WorkspaceId,
+} from "@/lib/permissions";
+import { usePermissions } from "@/lib/permissions-context";
+import { Can } from "@/components/common/can";
 
 export function Topbar({
   onMenu,
-  activeModule,
-  setActiveModule,
+  activeWorkspace,
+  setActiveWorkspace,
 }: {
   onMenu: () => void;
-  activeModule: ModuleId;
-  setActiveModule: (id: ModuleId) => void;
+  activeWorkspace: WorkspaceId;
+  setActiveWorkspace: (id: WorkspaceId) => void;
 }) {
   const [focused, setFocused] = useState(false);
   const router = useRouter();
-  const meta = MODULE_META[activeModule];
+  const meta = WORKSPACE_MAP[activeWorkspace];
+  const { allowedWorkspaces: allowed, role, isPreviewing } = usePermissions();
 
-  function backToCRM() {
-    setActiveModule("crm");
-    router.push("/dashboard");
+  function switchWorkspace(id: WorkspaceId) {
+    setActiveWorkspace(id);
+    router.push(navGroups[id][0]?.items[0] ?? "/dashboard");
   }
 
   return (
-    <header className="sticky top-0 z-20 border-b border-border bg-card">
+    <header className="border-b border-border bg-card">
       <div className="flex h-[60px] items-center gap-3 px-4 sm:px-6">
 
         {/* Mobile menu */}
@@ -48,25 +50,58 @@ export function Topbar({
           <Menu className="h-4 w-4" />
         </button>
 
-        {/* Module breadcrumb — only shown on non-CRM modules */}
-        {activeModule !== "crm" && (
-          <div className="hidden lg:flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={backToCRM}
-              className="flex items-center gap-1.5 rounded-full border border-[#E5E9F8] bg-[#F5F7FF] px-3 py-1.5 text-[12px] font-semibold text-[#4361EE] hover:bg-[#EEF1FD] active:scale-95 transition-all"
+        {/* Workspace switcher — dropdown when the role has access to more than one */}
+        <div className="hidden lg:flex items-center shrink-0">
+          {allowed.length > 1 ? (
+            <Dropdown
+              align="left"
+              width="w-64"
+              trigger={({ open, toggle }) => (
+                <button
+                  onClick={toggle}
+                  className={cn(
+                    "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
+                    meta.bg, meta.color,
+                    open ? "border-[#B3BFF6]" : "border-transparent hover:border-[#E5E9F8]"
+                  )}
+                >
+                  <LayoutGrid className="h-3.5 w-3.5" />
+                  {meta.label}
+                  <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
+                </button>
+              )}
             >
-              <ArrowLeft className="h-3 w-3" />
-              Back to CRM
-            </button>
-            <ChevronRight className="h-3 w-3 text-zinc-300" />
-            <span className={cn(
-              "rounded-full px-3 py-1.5 text-[12px] font-semibold",
-              meta.bg, meta.color
-            )}>
+              {(close) => (
+                <>
+                  <MenuLabel>Switch workspace</MenuLabel>
+                  {allowed.map((w) => (
+                    <MenuItem
+                      key={w.id}
+                      onClick={() => { switchWorkspace(w.id); close(); }}
+                      className={w.id === activeWorkspace ? "bg-muted" : ""}
+                    >
+                      <span className="flex flex-1 items-center justify-between">
+                        <span>
+                          <span className="block font-semibold">{w.label}</span>
+                          <span className="block text-[11px] font-normal text-muted-foreground">{w.tagline}</span>
+                        </span>
+                        {w.id === activeWorkspace && <Check className="h-3.5 w-3.5 text-[#4361EE]" />}
+                      </span>
+                    </MenuItem>
+                  ))}
+                  <div className="my-1 h-px bg-border" />
+                  <MenuItem icon={LayoutGrid} onClick={() => { router.push("/workspaces"); close(); }}>
+                    All workspaces
+                  </MenuItem>
+                </>
+              )}
+            </Dropdown>
+          ) : (
+            <span className={cn("rounded-full px-3 py-1.5 text-[12px] font-semibold", meta.bg, meta.color)}>
               {meta.label}
             </span>
-          </div>
-        )}
+          )}
+        </div>
 
         {/* Search pill */}
         <div
@@ -91,16 +126,18 @@ export function Topbar({
 
         <div className="flex-1" />
 
-        {/* POS shortcut */}
-        <Button
-          variant="secondary"
-          size="sm"
-          className="hidden md:inline-flex gap-1.5 rounded-full h-9 px-4"
-          onClick={() => router.push("/walk-in")}
-        >
-          <ShoppingBag className="h-3.5 w-3.5 text-brand-600" />
-          <span className="font-semibold text-[13px]">POS</span>
-        </Button>
+        {/* POS shortcut — only for roles allowed to transact at the counter */}
+        <Can permission="use_pos">
+          <Button
+            variant="secondary"
+            size="sm"
+            className="hidden md:inline-flex gap-1.5 rounded-full h-9 px-4"
+            onClick={() => router.push("/walk-in")}
+          >
+            <ShoppingBag className="h-3.5 w-3.5 text-brand-600" />
+            <span className="font-semibold text-[13px]">POS</span>
+          </Button>
+        </Can>
 
         {/* Icon actions */}
         <div className="flex items-center gap-0.5">
@@ -116,12 +153,17 @@ export function Topbar({
           </button>
         </div>
 
-        {/* Profile chip */}
-        <button className="hidden md:flex items-center gap-2.5 rounded-full border border-border bg-card pl-1 pr-3 py-1 hover:bg-muted transition">
-          <Avatar name="Shop Owner" size={30} />
+        {/* Profile chip — shows the previewed role's label while previewing, without touching the real admin identity */}
+        <button
+          className={cn(
+            "hidden md:flex items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
+            isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card hover:bg-muted"
+          )}
+        >
+          <Avatar name={CURRENT_USER.name} size={30} />
           <div className="text-left leading-tight">
-            <p className="text-[12px] font-semibold text-zinc-800">Kalai S.</p>
-            <p className="text-[10px] text-muted-foreground">Team Account</p>
+            <p className="text-[12px] font-semibold text-zinc-800">{CURRENT_USER.name}</p>
+            <p className="text-[10px] text-muted-foreground">{role.label}</p>
           </div>
           <ChevronDown className="h-3 w-3 text-muted-foreground" />
         </button>

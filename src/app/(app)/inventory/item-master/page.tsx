@@ -13,6 +13,8 @@ import { Badge } from "@/components/ui/badge";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { DataTable, type Column } from "@/components/inventory/data-table";
 import { ItemHealthBadge } from "@/components/inventory/widgets";
+import { Can } from "@/components/common/can";
+import { usePermissions } from "@/lib/permissions-context";
 import { cn, formatINR } from "@/lib/utils";
 import {
   inventoryItems, itemHealth, STORES, type InventoryItem,
@@ -42,6 +44,7 @@ const money = (n: number) => formatINR(n);
 function ItemMasterInner() {
   const router = useRouter();
   const params = useSearchParams();
+  const { can } = usePermissions();
   const [mode, setMode] = useState<"all" | "Product" | "Service">("all");
   const [store, setStore] = useState(STORES[0]);
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -124,17 +127,19 @@ function ItemMasterInner() {
     { key: "max", header: "Max Stock", accessor: (r) => r.maxStock, align: "right", defaultHidden: true, render: (r) => <span className="tnum text-muted-foreground">{r.maxStock}</span> },
   ];
 
+  // Row/bulk actions are plain data (consumed by DataTable's menu renderer, not JSX),
+  // so each entry is filtered out here based on the active role's permissions.
   const rowActions = (_r: InventoryItem) => [
     { label: "View details", icon: Eye, onClick: () => {} },
-    { label: "Edit item", icon: Pencil, onClick: () => router.push("/inventory/add-item") },
-    { label: "Duplicate", icon: Copy, onClick: () => {} },
-    { label: "Delete", icon: Trash2, danger: true, onClick: () => {} },
+    ...(can("edit") ? [{ label: "Edit item", icon: Pencil, onClick: () => router.push("/inventory/add-item") }] : []),
+    ...(can("create") ? [{ label: "Duplicate", icon: Copy, onClick: () => {} }] : []),
+    ...(can("delete") ? [{ label: "Delete", icon: Trash2, danger: true, onClick: () => {} }] : []),
   ];
 
   const bulkActions = [
-    { label: "Print labels", icon: Tags, onClick: () => {} },
-    { label: "Export", icon: Download, onClick: () => {} },
-    { label: "Delete", icon: Trash2, danger: true, onClick: () => {} },
+    ...(can("print_documents") ? [{ label: "Print labels", icon: Tags, onClick: () => {} }] : []),
+    ...(can("export_reports") ? [{ label: "Export", icon: Download, onClick: () => {} }] : []),
+    ...(can("delete") ? [{ label: "Delete", icon: Trash2, danger: true, onClick: () => {} }] : []),
   ];
 
   return (
@@ -153,29 +158,41 @@ function ItemMasterInner() {
                 <LayoutDashboard className="h-3.5 w-3.5" /> Dashboard
               </Button>
             </Link>
-            <Dropdown
-              width="w-52"
-              trigger={({ toggle, open }) => (
-                <Button variant="secondary" size="sm" className="gap-1.5 rounded-full" onClick={toggle}>
-                  <Settings2 className="h-3.5 w-3.5" /> Actions <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+            <Can permission={["import_data", "export_reports", "print_documents", "edit"]}>
+              <Dropdown
+                width="w-52"
+                trigger={({ toggle, open }) => (
+                  <Button variant="secondary" size="sm" className="gap-1.5 rounded-full" onClick={toggle}>
+                    <Settings2 className="h-3.5 w-3.5" /> Actions <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
+                  </Button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuLabel>Bulk operations</MenuLabel>
+                    <Can permission="import_data">
+                      <MenuItem icon={Upload} onClick={close}>Import items</MenuItem>
+                    </Can>
+                    <Can permission="export_reports">
+                      <MenuItem icon={Download} onClick={close}>Export catalogue</MenuItem>
+                    </Can>
+                    <Can permission="print_documents">
+                      <MenuItem icon={Printer} onClick={close}>Print barcodes</MenuItem>
+                    </Can>
+                    <Can permission="edit">
+                      <MenuItem icon={Tags} onClick={close}>Bulk price update</MenuItem>
+                    </Can>
+                  </>
+                )}
+              </Dropdown>
+            </Can>
+            <Can permission="create">
+              <Link href="/inventory/add-item">
+                <Button size="sm" className="gap-1.5 rounded-full">
+                  <Plus className="h-3.5 w-3.5" /> Add Single Item
                 </Button>
-              )}
-            >
-              {(close) => (
-                <>
-                  <MenuLabel>Bulk operations</MenuLabel>
-                  <MenuItem icon={Upload} onClick={close}>Import items</MenuItem>
-                  <MenuItem icon={Download} onClick={close}>Export catalogue</MenuItem>
-                  <MenuItem icon={Printer} onClick={close}>Print barcodes</MenuItem>
-                  <MenuItem icon={Tags} onClick={close}>Bulk price update</MenuItem>
-                </>
-              )}
-            </Dropdown>
-            <Link href="/inventory/add-item">
-              <Button size="sm" className="gap-1.5 rounded-full">
-                <Plus className="h-3.5 w-3.5" /> Add Single Item
-              </Button>
-            </Link>
+              </Link>
+            </Can>
           </>
         }
       />
