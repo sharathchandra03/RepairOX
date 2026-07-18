@@ -2,9 +2,11 @@
 
 import Link from "next/link";
 import { motion } from "framer-motion";
+import { useState } from "react";
 import {
   Sparkles, Filter, Inbox, Phone, Mail, MessageSquare, Target, TrendingUp,
   UserPlus, MoreHorizontal, Megaphone, Zap, Search, Plus, Calendar, ChevronRight, ArrowUpRight,
+  Users, Building2, FileText, ClipboardList, X,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -55,7 +57,7 @@ export default function LeadManagementPage() {
       <section className="rounded-3xl border border-zinc-200 bg-card p-6 shadow-card sm:p-8">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Lead Mgmt</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-violet-700">Sales</p>
             <h1 className="font-display mt-1 text-3xl font-extrabold tracking-tight md:text-4xl">
               Lead <span className="brand-gradient-text">Management</span>
             </h1>
@@ -67,6 +69,7 @@ export default function LeadManagementPage() {
           <div className="grid grid-cols-2 gap-2.5 sm:flex sm:gap-2">
             <Input iconLeft={<Search className="h-4 w-4" />} placeholder="Search leads..." className="h-10 rounded-xl border-zinc-200 bg-zinc-50 sm:w-72" />
             <Button className="gap-1.5"><Sparkles className="h-4 w-4" /> AI Triage</Button>
+            <QuickAddButton />
           </div>
         </div>
 
@@ -224,6 +227,57 @@ export default function LeadManagementPage() {
           </div>
         </aside>
       </section>
+    </div>
+  );
+}
+
+
+/* ── Quick Add button with dropdown ── */
+const QUICK_ADD_ITEMS = [
+  { label: "Lead",      icon: UserPlus,      href: "/leads/list",      color: "text-violet-600 bg-violet-50" },
+  { label: "Contact",   icon: Users,         href: "/leads/contacts",  color: "text-sky-600 bg-sky-50" },
+  { label: "Company",   icon: Building2,     href: "/leads/companies", color: "text-indigo-600 bg-indigo-50" },
+  { label: "Deal",      icon: Target,        href: "/leads/deals",     color: "text-emerald-600 bg-emerald-50" },
+  { label: "Quotation", icon: FileText,      href: "/leads/quotations",color: "text-amber-600 bg-amber-50" },
+  { label: "Task",      icon: ClipboardList, href: "/leads/tasks",     color: "text-rose-600 bg-rose-50" },
+  { label: "Meeting",   icon: Calendar,      href: "/leads/meetings",  color: "text-[#4361EE] bg-[#EEF1FD]" },
+];
+
+function QuickAddButton() {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative">
+      <Button onClick={() => setOpen(!open)} variant="outline" className="gap-1.5 border-zinc-200">
+        <Plus className="h-4 w-4" /> Quick Add
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <motion.div
+            initial={{ opacity: 0, y: 6, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            className="absolute right-0 top-full z-40 mt-2 w-56 rounded-2xl border border-border bg-card p-2 shadow-xl"
+          >
+            <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Create new</p>
+            {QUICK_ADD_ITEMS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 rounded-xl px-3 py-2 text-sm font-medium text-zinc-700 transition hover:bg-muted"
+                >
+                  <span className={cn("grid h-7 w-7 place-items-center rounded-lg", item.color)}>
+                    <Icon className="h-3.5 w-3.5" />
+                  </span>
+                  {item.label}
+                </Link>
+              );
+            })}
+          </motion.div>
+        </>
+      )}
     </div>
   );
 }

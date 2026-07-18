@@ -28,15 +28,6 @@ export interface WorkspaceDef {
 
 export const WORKSPACES: WorkspaceDef[] = [
   {
-    id: "leads",
-    label: "Leads",
-    tagline: "Capture, score and convert every enquiry",
-    short: "LD",
-    color: "text-violet-700",
-    bg: "bg-violet-50",
-    homeHref: "/lead-management",
-  },
-  {
     id: "shop",
     label: "Shop Management",
     navLabel: "Shop",
@@ -47,10 +38,21 @@ export const WORKSPACES: WorkspaceDef[] = [
     homeHref: "/dashboard",
   },
   {
+    id: "leads",
+    label: "Sales Management",
+    navLabel: "Leads",
+    tagline: "Capture, score and convert every enquiry",
+    short: "SA",
+    color: "text-violet-700",
+    bg: "bg-violet-50",
+    homeHref: "/lead-management",
+  },
+  {
     id: "operations",
-    label: "Operations",
-    tagline: "Inventory, vendors and purchasing",
-    short: "OP",
+    label: "Field Management",
+    navLabel: "Field",
+    tagline: "Technicians, field visits and route planning",
+    short: "FM",
     color: "text-emerald-700",
     bg: "bg-emerald-50",
     homeHref: "/operations",

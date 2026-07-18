@@ -5,7 +5,7 @@ import { formatINR } from "@/lib/utils";
 export default function Page() {
   return (
     <ModulePlaceholder
-      eyebrow="Operations"
+      eyebrow="Field"
       title="Purchase Orders"
       subtitle="Raise, track and receive purchase orders across every vendor."
       preview={[

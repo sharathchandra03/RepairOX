@@ -27,19 +27,21 @@ export function PageHeader({
   });
 
   return (
-    <div className={cn("flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between", className)}>
+    <div className={cn("flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between", className)}>
       <div>
-        {eyebrow && <p className="text-[11px] uppercase tracking-widest text-muted-foreground">{eyebrow}</p>}
+        {eyebrow && <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">{eyebrow}</p>}
         <motion.h1
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
-          className="font-display mt-0.5 text-3xl font-extrabold tracking-tight md:text-[2rem]"
+          className="font-display mt-0.5 text-2xl font-extrabold tracking-tight md:text-[1.75rem]"
         >
           {title}
         </motion.h1>
-        <p className="mt-0.5 text-[12px] text-muted-foreground uppercase tracking-wide">
-          {subtitle ?? formatted}
-        </p>
+        {subtitle && (
+          <p className="mt-0.5 text-[13px] text-muted-foreground">
+            {subtitle}
+          </p>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2 pt-1">

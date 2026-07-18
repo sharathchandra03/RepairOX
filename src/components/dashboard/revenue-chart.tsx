@@ -13,9 +13,9 @@ import { TrendingUp } from "lucide-react";
 function DarkTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
   return (
-    <div className="rounded-xl bg-zinc-900 px-3.5 py-2.5 text-white shadow-xl pointer-events-none">
-      <p className="text-[11px] text-zinc-400 mb-0.5">{label}</p>
-      <p className="text-sm font-bold">{formatINR(payload[0].value * 1000)}</p>
+    <div className="rounded-xl bg-zinc-900 px-4 py-3 text-white shadow-2xl pointer-events-none border border-zinc-700/50">
+      <p className="text-[10px] uppercase tracking-wider text-zinc-400 mb-1">{label}</p>
+      <p className="text-base font-bold tnum">{formatINR(payload[0].value * 1000)}</p>
     </div>
   );
 }
@@ -25,16 +25,16 @@ export function RevenueChart({ darkTooltip = false }: { darkTooltip?: boolean })
   const data = revenueMonthly.map((d) => ({ ...d, v: view === "monthly" ? d.v : d.v * 12 }));
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
-      <div className="flex items-start justify-between gap-3">
+    <div className="rounded-2xl bg-card p-5 sm:p-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             Total Revenue · {view === "monthly" ? "this month" : "this year"}
           </p>
-          <p className="font-display mt-2 text-3xl font-extrabold tracking-tight tnum">
+          <p className="font-display mt-1.5 text-2xl font-extrabold tracking-tight tnum">
             {formatINR(view === "monthly" ? 250000 : 250000 * 12)}
           </p>
-          <p className="mt-1 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+          <p className="mt-1 inline-flex items-center gap-1.5 text-[11px] font-medium text-emerald-600">
             <TrendingUp className="h-3.5 w-3.5" />
             <span>+2.25% vs last week</span>
           </p>
@@ -53,35 +53,47 @@ export function RevenueChart({ darkTooltip = false }: { darkTooltip?: boolean })
       <motion.div
         initial={{ opacity: 0 }}
         animate={{ opacity: 1 }}
-        transition={{ duration: 0.4 }}
-        className="mt-4 h-[260px] w-full"
+        transition={{ duration: 0.5 }}
+        className="mt-5 h-[200px] w-full"
       >
         <ResponsiveContainer width="100%" height="100%">
-          <BarChart data={data} barSize={20} barGap={6} margin={{ top: 10, right: 0, left: -16, bottom: 0 }}>
+          <BarChart data={data} barSize={18} barGap={8} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
             <defs>
-              <linearGradient id="bar-brand" x1="0" x2="0" y1="0" y2="1">
+              <linearGradient id="bar-brand-v2" x1="0" x2="0" y1="0" y2="1">
                 <stop offset="0%" stopColor="#4361EE" stopOpacity="1" />
-                <stop offset="100%" stopColor="#3B54E8" stopOpacity="0.88" />
+                <stop offset="100%" stopColor="#4361EE" stopOpacity="0.7" />
               </linearGradient>
             </defs>
-            <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="hsl(var(--border))" />
-            <XAxis dataKey="m" tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} />
-            <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} width={42} />
+            <CartesianGrid strokeDasharray="4 4" vertical={false} stroke="hsl(228 20% 92%)" strokeOpacity={0.8} />
+            <XAxis
+              dataKey="m"
+              tickLine={false}
+              axisLine={false}
+              tick={{ fontSize: 11, fill: "hsl(228 12% 55%)", fontWeight: 500 }}
+              dy={8}
+            />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              tick={{ fontSize: 10, fill: "hsl(228 12% 55%)" }}
+              width={36}
+            />
             <Tooltip
-              cursor={{ fill: "hsl(var(--muted)/0.4)", radius: 8 }}
+              cursor={{ fill: "hsl(228 30% 95% / 0.6)", radius: 8 }}
               content={darkTooltip ? <DarkTooltip /> : undefined}
               contentStyle={darkTooltip ? undefined : {
                 background: "#fff",
-                border: "1px solid hsl(var(--border))",
-                borderRadius: 14,
+                border: "1px solid hsl(228 20% 90%)",
+                borderRadius: 12,
                 fontSize: 12,
-                boxShadow: "0 8px 24px -8px rgba(20,30,80,0.14)",
+                boxShadow: "0 8px 24px -8px rgba(20,30,80,0.12)",
+                padding: "8px 12px",
               }}
               formatter={darkTooltip ? undefined : (v: number) => [formatINR(v * 1000), "Revenue"]}
             />
-            <Bar dataKey="v" radius={[10, 10, 5, 5]}>
+            <Bar dataKey="v" radius={[8, 8, 4, 4]}>
               {data.map((_, i) => (
-                <Cell key={i} fill="url(#bar-brand)" />
+                <Cell key={i} fill="url(#bar-brand-v2)" />
               ))}
             </Bar>
           </BarChart>

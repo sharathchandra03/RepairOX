@@ -40,7 +40,7 @@ export default function TicketsPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Operations"
+        eyebrow="Shop"
         title="Tickets"
         subtitle="Every repair job in one searchable, status-aware list."
         actions={
@@ -51,7 +51,7 @@ export default function TicketsPage() {
             </Can>
             <Can permission="manage_repair_jobs">
               <Link href="/tickets/new">
-                <Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> New Ticket</Button>
+                <Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Add New</Button>
               </Link>
             </Can>
           </>

@@ -12,23 +12,23 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
     return (
       <div className={cn("group relative flex items-center")}>
         {iconLeft && (
-          <span className="pointer-events-none absolute left-3 inline-flex h-5 w-5 items-center justify-center text-muted-foreground">
+          <span className="pointer-events-none absolute left-2.5 inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
             {iconLeft}
           </span>
         )}
         <input
           ref={ref}
           className={cn(
-            "flex h-11 w-full rounded-xl border border-border bg-card px-3.5 py-2 text-sm placeholder:text-muted-foreground transition shadow-[inset_0_1px_0_rgba(15,15,15,0.02)]",
-            "focus:border-brand-400 focus:ring-2 focus:ring-brand-200/50 focus:outline-none",
-            iconLeft && "pl-10",
-            iconRight && "pr-10",
+            "flex h-9 w-full rounded-xl border border-border bg-card px-3 py-2 text-sm placeholder:text-muted-foreground transition",
+            "focus:border-brand-400 focus:ring-2 focus:ring-brand-200/40 focus:outline-none",
+            iconLeft && "pl-9",
+            iconRight && "pr-9",
             className
           )}
           {...props}
         />
         {iconRight && (
-          <span className="absolute right-3 inline-flex h-5 w-5 items-center justify-center text-muted-foreground">
+          <span className="absolute right-2.5 inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
             {iconRight}
           </span>
         )}

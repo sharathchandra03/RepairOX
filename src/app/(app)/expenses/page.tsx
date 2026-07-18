@@ -5,7 +5,7 @@ import { formatINR } from "@/lib/utils";
 export default function Page() {
   return (
     <ModulePlaceholder
-      eyebrow="Operations"
+      eyebrow="Shop"
       title="Expenses"
       subtitle="Rent, salaries, courier and operational costs - categorized and reportable."
       preview={[

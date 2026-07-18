@@ -26,55 +26,54 @@ export function KpiCard({
   delta?: { value: string; up?: boolean };
   tone?: "rose" | "amber" | "emerald" | "sky" | "violet";
 }) {
-  const TONES: Record<string, { from: string; to: string; chip: string; ring: string; line: string }> = {
-    rose:    { from: "from-white", to: "to-white", chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/60",   ring: "ring-[#B3BFF6]/50",   line: "text-[#4361EE]" },
-    amber:   { from: "from-white", to: "to-white", chip: "text-amber-700 bg-amber-50 ring-amber-200/60",     ring: "ring-amber-200/50",   line: "text-amber-500" },
-    emerald: { from: "from-white", to: "to-white", chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", ring: "ring-emerald-200/50", line: "text-emerald-500" },
-    sky:     { from: "from-white", to: "to-white", chip: "text-sky-700 bg-sky-50 ring-sky-200/60",            ring: "ring-sky-200/50",     line: "text-sky-500" },
-    violet:  { from: "from-white", to: "to-white", chip: "text-violet-700 bg-violet-50 ring-violet-200/60",  ring: "ring-violet-200/50",  line: "text-violet-500" },
+  const TONES: Record<string, { chip: string; line: string; accent: string }> = {
+    rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", line: "text-[#4361EE]", accent: "#4361EE" },
+    amber:   { chip: "text-amber-700 bg-amber-50 ring-amber-200/40",   line: "text-amber-500", accent: "#F59E0B" },
+    emerald: { chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/40", line: "text-emerald-500", accent: "#10B981" },
+    sky:     { chip: "text-sky-700 bg-sky-50 ring-sky-200/40",         line: "text-sky-500", accent: "#0EA5E9" },
+    violet:  { chip: "text-violet-700 bg-violet-50 ring-violet-200/40", line: "text-violet-500", accent: "#8B5CF6" },
   };
   const t = TONES[tone];
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className={cn(
-        "group relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-card transition will-change-transform hover:-translate-y-0.5 hover:shadow-card-hover"
-      )}
+      className="group relative overflow-hidden rounded-2xl border border-border/80 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.1),0_8px_24px_-8px_rgba(0,0,0,0.08)]"
     >
       <div className="flex items-center justify-between">
-        <p className="text-[12px] font-semibold uppercase tracking-wider text-zinc-700">{title}</p>
+        <p className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
         {delta && (
-          <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", t.chip)}>
+          <span className={cn("inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset", t.chip)}>
             {delta.up ? <ArrowUpRight className="h-3 w-3" /> : <ArrowDownRight className="h-3 w-3" />}
             {delta.value}
           </span>
         )}
       </div>
-      <p className="font-display mt-3 text-3xl font-extrabold tracking-tight tnum">
+      <p className="font-display mt-3 text-[28px] font-extrabold leading-none tracking-tight tnum">
         <AnimatedNumber value={value} format={format} />
       </p>
-      {hint && <p className="mt-1.5 text-[12px] text-zinc-700/80">{hint}</p>}
+      {hint && <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">{hint}</p>}
 
-      {/* sparkline decoration */}
-      <svg viewBox="0 0 120 36" className="absolute inset-x-0 bottom-0 h-12 w-full opacity-50" preserveAspectRatio="none">
+      {/* Refined sparkline */}
+      <svg viewBox="0 0 120 32" className="absolute inset-x-0 bottom-0 h-10 w-full opacity-40" preserveAspectRatio="none">
         <defs>
-          <linearGradient id={`gr-${tone}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor="currentColor" stopOpacity="0.35" />
-            <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
+          <linearGradient id={`kpi-gr-${tone}`} x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%" stopColor={t.accent} stopOpacity="0.25" />
+            <stop offset="100%" stopColor={t.accent} stopOpacity="0" />
           </linearGradient>
         </defs>
         <path
-          d="M0,28 C12,22 22,30 36,18 C52,6 64,24 80,16 C96,8 110,18 120,12 L120,36 L0,36 Z"
-          fill={`url(#gr-${tone})`}
-          className={t.line}
+          d="M0,24 C10,20 20,26 34,16 C50,5 62,20 78,14 C94,7 108,16 120,10 L120,32 L0,32 Z"
+          fill={`url(#kpi-gr-${tone})`}
         />
         <path
-          d="M0,28 C12,22 22,30 36,18 C52,6 64,24 80,16 C96,8 110,18 120,12"
-          stroke="currentColor"
-          strokeWidth="1.8"
+          d="M0,24 C10,20 20,26 34,16 C50,5 62,20 78,14 C94,7 108,16 120,10"
+          stroke={t.accent}
+          strokeWidth="1.5"
+          strokeLinecap="round"
           fill="none"
-          className={t.line}
+          opacity="0.6"
         />
       </svg>
     </motion.div>

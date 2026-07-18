@@ -9,6 +9,7 @@ import { navGroups } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 import { PreviewBanner } from "@/components/common/preview-banner";
+import { InternalChat } from "@/components/common/internal-chat";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -45,7 +46,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [allowed, activeWorkspace]);
 
   return (
-    <div className="flex min-h-screen bg-[hsl(var(--background))]">
+    <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]">
       <Sidebar
         collapsed={collapsed}
         setCollapsed={setCollapsed}
@@ -58,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         activeWorkspace={activeWorkspace}
         setActiveWorkspace={setActiveWorkspace}
       />
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="sticky top-0 z-20">
           <PreviewBanner />
           <Topbar
@@ -77,6 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {children}
         </motion.main>
       </div>
+      <InternalChat />
     </div>
   );
 }

@@ -81,7 +81,7 @@ export default function RolesPage() {
                   <div className="min-w-0 flex-1">
                     <p className="truncate text-sm font-semibold leading-tight">{r.label}</p>
                     <p className="truncate text-[11px] text-muted-foreground">
-                      {r.workspaces.length === 3 ? "All workspaces" : r.workspaces.map((w) => WORKSPACE_MAP[w].label).join(" · ")}
+                      {r.workspaces.length === 3 ? "All modules" : r.workspaces.map((w) => WORKSPACE_MAP[w].label).join(" · ")}
                     </p>
                   </div>
                   <ChevronRight className={cn("h-4 w-4 shrink-0 transition-transform", isActive ? "text-[#4361EE] translate-x-0.5" : "text-zinc-300")} />
@@ -114,11 +114,11 @@ export default function RolesPage() {
             </Badge>
           </div>
 
-          {/* Workspace access */}
+          {/* Module access */}
           <div className="mt-6">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Workspace access</p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Module access</p>
             <div className="flex flex-wrap gap-2">
-              {(["leads", "shop", "operations"] as const).map((wid) => {
+              {(["shop", "leads", "operations"] as const).map((wid) => {
                 const w = WORKSPACE_MAP[wid];
                 const has = active.workspaces.includes(wid);
                 return (

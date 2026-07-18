@@ -43,8 +43,8 @@ export default function OperationsDashboard() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Operations"
-        title="Operations Overview"
+        eyebrow="Field"
+        title="Field Management Overview"
         subtitle="Stock health, purchasing and vendors — what needs your attention right now."
         actions={
           <Link href="/operations/purchase-orders">

@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
   Building2, User, Shield, CreditCard, Plug, Bell, Users, ShieldCheck,
-  MapPin, LayoutGrid, ChevronRight,
+  MapPin, LayoutGrid, ChevronRight, Sliders,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Avatar } from "@/components/ui/avatar";
@@ -16,11 +16,12 @@ import { usePermissions } from "@/lib/permissions-context";
 
 const SECTIONS = [
   { id: "shop",        icon: Building2,   label: "Shop",              desc: "Business identity, GSTIN, address", href: "/settings" },
+  { id: "dashboard",   icon: Sliders,     label: "Dashboard",         desc: "Card resize & layout preferences", href: "/settings/dashboard" },
   { id: "users",       icon: Users,       label: "Users",             desc: "Team members & their logins",       href: "/settings/users", permission: "manage_users" as PermissionKey },
   { id: "roles",       icon: Shield,      label: "Roles",             desc: "Responsibilities per role",         href: "/settings/roles", permission: "manage_roles" as PermissionKey },
   { id: "permissions", icon: ShieldCheck, label: "Roles & Permissions", desc: "Capability matrix per role",      href: "/settings/permissions", permission: "manage_roles" as PermissionKey },
   { id: "branches",    icon: MapPin,      label: "Branches",         desc: "Locations under this organisation",  href: "/settings/branches", permission: "manage_branches" as PermissionKey },
-  { id: "workspace",   icon: LayoutGrid,  label: "Workspace Access",  desc: "Enable Leads / Shop / Operations",  href: "/settings/module-access", permission: "manage_branches" as PermissionKey },
+  { id: "workspace",   icon: LayoutGrid,  label: "Module Access",     desc: "Enable Shop / Sales / Field",       href: "/settings/module-access", permission: "manage_branches" as PermissionKey },
   { id: "billing",     icon: CreditCard,  label: "Billing",           desc: "Plan, invoices, taxes",             href: "/settings", permission: "manage_subscription" as PermissionKey },
   { id: "integ",       icon: Plug,        label: "Integrations",      desc: "Razorpay, Tally, WhatsApp",         href: "/settings", permission: "access_api" as PermissionKey },
   { id: "notif",       icon: Bell,        label: "Notifications",     desc: "Email, SMS & push channels",        href: "/settings" },

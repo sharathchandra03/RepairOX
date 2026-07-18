@@ -88,8 +88,6 @@ export const navItems: NavItem[] = [
   { href: "/dashboard",        label: "Dashboard",     icon: "Home", permission: "view_dashboard" },
   { href: "/tickets",          label: "Tickets",       icon: "Ticket", permission: ["view_only", "manage_repair_jobs"] },
   { href: "/shop/technicians", label: "Technicians",   icon: "Wrench", permission: ["assign_technicians", "manage_repair_jobs"] },
-  { href: "/shop/assignments", label: "Job Assignment", icon: "ClipboardCheck", permission: ["assign_technicians", "manage_repair_jobs"] },
-  { href: "/shop/status-updates", label: "Repair Status", icon: "ClipboardCheck", permission: ["update_repair_status", "manage_repair_jobs"] },
   { href: "/shop/notes",       label: "Notes",         icon: "FileText", permission: ["upload_files", "manage_repair_jobs"] },
   { href: "/contacts",         label: "Customers",     icon: "Users", permission: "manage_customers" },
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
@@ -110,9 +108,13 @@ export const navItems: NavItem[] = [
 
   // Leads
   { href: "/lead-management",  label: "Dashboard",    icon: "Home", permission: "view_dashboard" },
+  { href: "/leads/list",       label: "Leads",        icon: "Users", permission: "manage_sales" },
+  { href: "/leads/kanban",     label: "Kanban",       icon: "ClipboardList", permission: "manage_sales" },
+  { href: "/leads/contacts",   label: "Contacts",     icon: "BookUser", permission: "manage_customers" },
   { href: "/leads/companies",  label: "Companies",    icon: "Store", permission: "manage_customers" },
   { href: "/leads/deals",      label: "Deals",        icon: "ClipboardList", permission: "manage_sales" },
   { href: "/leads/quotations", label: "Quotations",   icon: "FileText", permission: "manage_sales" },
+  { href: "/leads/inbox",      label: "Inbox",        icon: "Boxes", permission: "send_communications" },
   { href: "/leads/tasks",      label: "Tasks",        icon: "Ticket" },
   { href: "/leads/meetings",   label: "Meetings",     icon: "BookUser" },
   { href: "/leads/activities", label: "Activities",   icon: "BarChart3" },
@@ -121,7 +123,10 @@ export const navItems: NavItem[] = [
   { href: "/leads/whatsapp",   label: "WhatsApp",     icon: "BookUser", permission: "send_communications" },
   { href: "/leads/smart-lists", label: "Smart Lists", icon: "ClipboardList" },
   { href: "/leads/map-view",   label: "Map View",     icon: "Map" },
-  { href: "/field-management", label: "Field Ops",    icon: "Map", permission: ["assign_technicians", "manage_repair_jobs"] },
+  { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_financial_reports"] },
+  { href: "/leads/report-builder", label: "Report Builder", icon: "BarChart3", permission: "manage_reports" },
+  { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
+  { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
 
   // Shared / general (present in every workspace)
   { href: "/reports",          label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_financial_reports"] },
@@ -153,19 +158,22 @@ export const TEAM_SEED: TeamMember[] = [
 
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
-    { label: "WORKSPACE",  items: ["/dashboard", "/tickets", "/shop/technicians", "/shop/assignments", "/shop/status-updates", "/shop/notes", "/contacts"] },
-    { label: "BILLING",    items: ["/invoice", "/shop/payments", "/walk-in", "/buy-back", "/price-list", "/expenses"] },
+    { label: "MODULE",     items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/buy-back", "/price-list"] },
+    { label: "MANAGE",     items: ["/shop/technicians", "/shop/notes", "/contacts"] },
+    { label: "INVENTORY",  items: ["/inventory"] },
+    { label: "BILLING",    items: ["/shop/payments", "/expenses"] },
     { label: "GENERAL",    items: ["/reports", "/settings"] },
   ],
   operations: [
-    { label: "WORKSPACE",  items: ["/operations", "/stock", "/inventory"] },
+    { label: "MODULE",     items: ["/operations", "/stock"] },
     { label: "PURCHASING", items: ["/operations/vendors", "/operations/purchase-orders", "/operations/transfers", "/operations/products"] },
     { label: "GENERAL",    items: ["/reports", "/settings"] },
   ],
   leads: [
-    { label: "PIPELINE",   items: ["/lead-management", "/leads/companies", "/leads/deals", "/leads/quotations"] },
-    { label: "ACTIVITY",   items: ["/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
-    { label: "VIEWS",      items: ["/leads/smart-lists", "/leads/map-view", "/field-management"] },
-    { label: "GENERAL",    items: ["/reports", "/settings"] },
+    { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
+    { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
+    { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
+    { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/reports", "/leads/report-builder", "/leads/campaigns"] },
+    { label: "GENERAL",        items: ["/leads/settings"] },
   ],
 };

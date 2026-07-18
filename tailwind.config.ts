@@ -47,10 +47,10 @@ const config: Config = {
         mono: ["var(--font-mono)", "ui-monospace"],
       },
       boxShadow: {
-        card: "0 2px 4px 0 rgba(20,30,80,0.04), 0 4px 12px 0 rgba(20,30,80,0.06), 0 16px 40px -16px rgba(20,30,80,0.10)",
-        glow: "0 10px 40px -12px rgba(67,97,238,0.50)",
-        ring: "0 0 0 1px rgba(20,30,80,0.06)",
-        "card-hover": "0 6px 20px 0 rgba(20,30,80,0.09), 0 20px 48px -16px rgba(20,30,80,0.14)",
+        card: "0 1px 3px 0 rgba(20,30,80,0.03), 0 2px 8px -2px rgba(20,30,80,0.05), 0 8px 20px -8px rgba(20,30,80,0.06)",
+        glow: "0 8px 32px -8px rgba(67,97,238,0.45)",
+        ring: "0 0 0 1px rgba(20,30,80,0.05)",
+        "card-hover": "0 4px 12px 0 rgba(20,30,80,0.06), 0 12px 32px -8px rgba(20,30,80,0.1)",
       },
       keyframes: {
         "fade-in": { from: { opacity: "0" }, to: { opacity: "1" } },

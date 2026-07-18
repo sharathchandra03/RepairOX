@@ -10,6 +10,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
 import { InventoryOverview } from "@/components/dashboard/inventory-overview";
+import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -75,7 +76,6 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
 
-      {/* Page header matching reference: large title + date + Sort/Filter pills + New Ticket */}
       <PageHeader
         title="Analytics Overview,"
         showFilters
@@ -83,12 +83,19 @@ export default function Dashboard() {
           <Can permission="manage_repair_jobs">
             <Link href="/tickets/new">
               <Button size="sm" className="rounded-full gap-1.5">
-                <Plus className="h-3.5 w-3.5" /> New Ticket
+                <Plus className="h-3.5 w-3.5" /> Add New
               </Button>
             </Link>
           </Can>
         }
       />
+
+      {/* Monthly comparison indicator */}
+      <div className="flex items-center gap-2 -mt-3">
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200/60">
+          <ArrowRight className="h-3 w-3" /> +18.2% vs last month
+        </span>
+      </div>
 
       {/* KPI Row */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -120,24 +127,32 @@ export default function Dashboard() {
           title="Tickets Today"
           value={28}
           tone="violet"
-          delta={{ value: "+9", up: true }}
+          delta={{ value: "+9 vs yesterday", up: true }}
           hint="6 walk-in · 12 pickup · 10 on-site"
         />
       </div>
 
-      {/* Row 2: Revenue chart (dark tooltip) + Donut */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <div className="lg:col-span-2">
-          <RevenueChart darkTooltip />
+      {/* Resizable dashboard widgets — drag edges to resize, drag title to reorder */}
+      <DashboardGrid keys={["revenue", "donut", "devices", "heatmap", "transactions"]}>
+        {/* Revenue Chart */}
+        <div className="h-full rounded-2xl bg-card shadow-card overflow-hidden">
+          <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
+          <div className="px-1 pb-1 h-[calc(100%-16px)]">
+            <RevenueChart darkTooltip />
+          </div>
         </div>
-        <TicketsDonut />
-      </div>
 
-      {/* Row 3: Horizontal bar (device breakdown) + Heatmap + Transactions feed */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        {/* Tickets Donut */}
+        <div className="h-full rounded-2xl bg-card shadow-card overflow-hidden">
+          <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
+          <div className="px-1 pb-1 h-[calc(100%-16px)]">
+            <TicketsDonut />
+          </div>
+        </div>
 
-        {/* Horizontal bar chart — device breakdown with anomaly highlight */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+        {/* Tickets by Device */}
+        <div className="h-full rounded-2xl bg-card p-5 shadow-card overflow-auto">
+          <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Tickets by Device" badge={
             <span className="text-[11px] text-muted-foreground">Last 7 days</span>
           } />
@@ -163,21 +178,20 @@ export default function Dashboard() {
           </p>
         </div>
 
-        {/* Heatmap — tickets by day × hour */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+        {/* Heatmap */}
+        <div className="h-full rounded-2xl bg-card p-5 shadow-card overflow-auto">
+          <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Tickets per slot" badge={
             <span className="text-[11px] text-muted-foreground">Last 7 days</span>
           } />
           <div className="mt-3 overflow-x-auto">
             <div className="min-w-[260px]">
-              {/* Day headers */}
               <div className="grid mb-1" style={{ gridTemplateColumns: "32px repeat(7, 1fr)" }}>
                 <div />
                 {DAYS.map((d) => (
                   <div key={d} className="text-center text-[10px] font-medium text-muted-foreground">{d}</div>
                 ))}
               </div>
-              {/* Rows per slot */}
               {SLOTS.map((slot, si) => (
                 <div key={slot} className="grid mb-1" style={{ gridTemplateColumns: "32px repeat(7, 1fr)" }}>
                   <div className="text-[10px] text-muted-foreground flex items-center">{slot}</div>
@@ -191,7 +205,6 @@ export default function Dashboard() {
                   ))}
                 </div>
               ))}
-              {/* Legend */}
               <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
                 <span>0</span>
                 {["bg-slate-100","bg-[#C7D2FE]","bg-[#818CF8]","bg-[#4361EE]","bg-[#3347D6]"].map((c,i)=>(
@@ -203,8 +216,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Transactions feed — avatar + name + location + amount, grouped by time */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card flex flex-col">
+        {/* Transactions */}
+        <div className="h-full rounded-2xl bg-card p-5 shadow-card flex flex-col overflow-auto">
+          <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Recent Transactions" />
           <div className="flex-1 mt-2 space-y-0 overflow-hidden">
             {(["today", "yesterday"] as const).map((group) => {
@@ -238,15 +252,18 @@ export default function Dashboard() {
               );
             })}
           </div>
-          <Can permission={["manage_reports", "export_reports"]}>
-            <div className="mt-2 border-t border-border pt-3">
+          <div className="mt-2 border-t border-border pt-3 flex items-center justify-between">
+            <Can permission={["manage_reports", "export_reports"]}>
               <button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">
                 <ArrowDownToLine className="h-3.5 w-3.5" /> Download Report
               </button>
-            </div>
-          </Can>
+            </Can>
+            <Link href="/reports" className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">
+              View All <ArrowRight className="h-3 w-3" />
+            </Link>
+          </div>
         </div>
-      </div>
+      </DashboardGrid>
 
       {/* Inventory Overview — bridges the CRM dashboard into Inventory Management.
           Hidden entirely for roles without inventory access (e.g. Technician, Reception). */}
@@ -289,56 +306,61 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* To-Do list */}
+        {/* To-Do list — sticky pad design */}
         <div className="lg:col-span-3">
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
-            <div className="flex items-center justify-between">
+          <div className="relative rounded-2xl bg-[#FFF9C4] p-5 shadow-[0_4px_16px_-4px_rgba(200,180,0,0.15),0_8px_32px_-8px_rgba(200,180,0,0.1)] sm:p-6 border border-[#F0E68C]/60 overflow-hidden">
+            {/* Decorative tape */}
+            <div className="absolute -top-1 left-1/2 -translate-x-1/2 h-6 w-16 rounded-b-md bg-[#FFE082]/80 shadow-sm" />
+            {/* Subtle lined-paper effect */}
+            <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, #B8860B 27px, #B8860B 28px)", backgroundPosition: "0 48px" }} />
+
+            <div className="relative flex items-center justify-between">
               <div>
-                <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Today&apos;s Focus</p>
-                <h3 className="font-display mt-0.5 text-base font-bold flex items-center gap-2">
-                  <ListChecks className="h-4 w-4 text-[#4361EE]" /> To-Do List
+                <p className="text-[12px] font-semibold uppercase tracking-wider text-amber-800/70">Today&apos;s Focus</p>
+                <h3 className="font-display mt-0.5 text-base font-bold flex items-center gap-2 text-amber-900">
+                  <ListChecks className="h-4 w-4 text-amber-700" /> To-Do List
                 </h3>
               </div>
-              <button className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted">
+              <button className="grid h-8 w-8 place-items-center rounded-lg border border-amber-300/60 bg-[#FFF176]/50 text-amber-700 hover:text-amber-900 hover:bg-[#FFF176] transition">
                 <Plus className="h-4 w-4" />
               </button>
             </div>
-            <ul className="mt-4 grid grid-cols-1 gap-2.5 md:grid-cols-2">
+            <ul className="relative mt-4 grid grid-cols-1 gap-2.5 md:grid-cols-2">
               {todos.map((t, i) => (
                 <motion.li
                   key={t.id}
                   initial={{ opacity: 0, x: 4 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.04 * i }}
-                  className="group flex items-start gap-3 rounded-xl border border-border bg-background/60 p-3 transition hover:bg-muted/40"
+                  className="group flex items-start gap-3 rounded-xl border border-amber-200/60 bg-white/50 backdrop-blur-sm p-3 transition hover:bg-white/70"
                 >
                   <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ring-1 ring-inset ${
                     t.flag === "danger" ? "bg-rose-100 text-rose-600 ring-rose-200" :
                     t.flag === "warn"   ? "bg-amber-100 text-amber-700 ring-amber-200" :
-                    "bg-[#EEF1FD] text-[#4361EE] ring-[#B3BFF6]/60"
+                    "bg-amber-50 text-amber-700 ring-amber-300/60"
                   }`}>
                     {t.flag === "danger" ? <AlertCircle className="h-3 w-3" /> :
                      t.flag === "warn"   ? <AlertTriangle className="h-3 w-3" /> :
                      <CheckCircle2 className="h-3 w-3" />}
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold">{t.title}</p>
-                    <p className="line-clamp-2 text-xs text-muted-foreground">{t.desc}</p>
+                    <p className="truncate text-sm font-semibold text-amber-900">{t.title}</p>
+                    <p className="line-clamp-2 text-xs text-amber-800/70">{t.desc}</p>
                   </div>
                 </motion.li>
               ))}
             </ul>
-            <div className="mt-4 flex items-center justify-between rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-3">
+            <div className="relative mt-4 flex items-center justify-between rounded-xl border border-amber-300/50 bg-white/40 backdrop-blur-sm p-3">
               <div className="flex items-center gap-2">
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-amber-600 text-white shadow-sm">
                   <Wand2 className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">Auto-prioritise tasks</p>
-                  <p className="text-[11px] text-muted-foreground">Let RepairOX rank your day</p>
+                  <p className="text-sm font-semibold text-amber-900">Auto-prioritise tasks</p>
+                  <p className="text-[11px] text-amber-800/60">Let RepairOX rank your day</p>
                 </div>
               </div>
-              <Button size="sm" variant="soft">Run</Button>
+              <Button size="sm" variant="soft" className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-300">Run</Button>
             </div>
           </div>
         </div>

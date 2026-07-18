@@ -73,7 +73,7 @@ export function Topbar({
             >
               {(close) => (
                 <>
-                  <MenuLabel>Switch workspace</MenuLabel>
+                  <MenuLabel>Switch module</MenuLabel>
                   {allowed.map((w) => (
                     <MenuItem
                       key={w.id}
@@ -91,7 +91,7 @@ export function Topbar({
                   ))}
                   <div className="my-1 h-px bg-border" />
                   <MenuItem icon={LayoutGrid} onClick={() => { router.push("/workspaces"); close(); }}>
-                    All workspaces
+                    All modules
                   </MenuItem>
                 </>
               )}

@@ -30,32 +30,12 @@ interface WorkspaceCardDef {
 }
 
 const WORKSPACE_CARDS: Record<WorkspaceId, WorkspaceCardDef> = {
-  leads: {
-    id: "leads",
-    title: "Leads",
-    tagline: "Convert every enquiry into revenue",
-    description:
-      "Capture leads from every channel, score them, automate follow-ups and visualise the pipeline end-to-end.",
-    href: "/lead-management",
-    accent: "violet",
-    image: "/module-leads.avif",
-    features: [
-      { icon: Inbox, label: "Multi-channel Inbox", desc: "Calls, WhatsApp, web forms, Meta, Google - one queue." },
-      { icon: Filter, label: "Pipeline & Deals", desc: "Drag leads through New → Contacted → Quoted → Won." },
-      { icon: Zap, label: "Auto Follow-ups", desc: "Trigger SMS / WhatsApp / email sequences on inactivity." },
-      { icon: Target, label: "Lead Scoring", desc: "Score by source, intent signals, response time and budget." },
-      { icon: Megaphone, label: "Tasks & Meetings", desc: "Never miss a follow-up call or scheduled meeting." },
-      { icon: Phone, label: "Click-to-Call", desc: "One-tap call from any lead card with call recording." },
-      { icon: UserPlus, label: "Hand-off to Shop", desc: "Convert a won lead into a repair ticket in one click." },
-      { icon: Mail, label: "Quotations", desc: "Pre-built quotation drafts for common repair jobs." },
-    ],
-  },
   shop: {
     id: "shop",
     title: "Shop Management",
     tagline: "Run your repair shop end-to-end",
     description:
-      "Tickets, job assignment, invoicing, pricing, walk-ins and buy-back - all in one connected workspace.",
+      "End-to-end repair shop operations including tickets, customers, invoicing, repairs, pricing, walk-ins, buy-back, and day-to-day business management.",
     href: "/dashboard",
     accent: "rose",
     image: "/module-shop.avif",
@@ -70,12 +50,32 @@ const WORKSPACE_CARDS: Record<WorkspaceId, WorkspaceCardDef> = {
       { icon: BarChart3, label: "Reports", desc: "Technician productivity, P&L and tax summaries." },
     ],
   },
+  leads: {
+    id: "leads",
+    title: "Sales Management",
+    tagline: "Manage leads, contacts and conversions",
+    description:
+      "Manage leads, contacts, companies, deals, quotations, follow-ups, communication, pipeline management, and customer conversion.",
+    href: "/lead-management",
+    accent: "violet",
+    image: "/module-leads.avif",
+    features: [
+      { icon: Inbox, label: "Multi-channel Inbox", desc: "Calls, WhatsApp, web forms, Meta, Google - one queue." },
+      { icon: Filter, label: "Pipeline & Deals", desc: "Drag leads through New → Contacted → Quoted → Won." },
+      { icon: Zap, label: "Auto Follow-ups", desc: "Trigger SMS / WhatsApp / email sequences on inactivity." },
+      { icon: Target, label: "Lead Scoring", desc: "Score by source, intent signals, response time and budget." },
+      { icon: Megaphone, label: "Tasks & Meetings", desc: "Never miss a follow-up call or scheduled meeting." },
+      { icon: Phone, label: "Click-to-Call", desc: "One-tap call from any lead card with call recording." },
+      { icon: UserPlus, label: "Hand-off to Shop", desc: "Convert a won lead into a repair ticket in one click." },
+      { icon: Mail, label: "Quotations", desc: "Pre-built quotation drafts for common repair jobs." },
+    ],
+  },
   operations: {
     id: "operations",
-    title: "Operations",
-    tagline: "Back-office, inventory and purchasing",
+    title: "Field Management",
+    tagline: "Technicians, field visits and scheduling",
     description:
-      "Stock levels, vendors, purchase orders and parts transfers - the back-office engine behind every shop.",
+      "Manage technicians, field visits, scheduling, on-site services, route planning, and location-based operations.",
     href: "/operations",
     accent: "emerald",
     image: "/module-field.png",
@@ -132,10 +132,10 @@ export default function WorkspacesPage() {
           Welcome back, {CURRENT_USER.name.split(" ")[0]} · {role.label}
         </p>
         <h1 className="font-display mt-2 text-3xl font-extrabold tracking-tight md:text-4xl">
-          Choose a workspace to <span className="brand-gradient-text">get started</span>
+          Choose a module to <span className="brand-gradient-text">get started</span>
         </h1>
         <p className="mt-1.5 max-w-xl text-sm text-zinc-600">
-          Your role gives you access to {cards.length} workspaces. Tap{" "}
+          Your role gives you access to {cards.length} modules. Tap{" "}
           <span className="inline-flex h-4 w-4 items-center justify-center rounded-full bg-zinc-200 text-[9px] font-bold text-zinc-700">i</span>{" "}
           on any card to see exactly what&apos;s inside.
         </p>
@@ -158,7 +158,7 @@ export default function WorkspacesPage() {
         </div>
 
         <p className="mt-8 text-center text-xs text-zinc-500">
-          You can switch workspaces any time from the header inside the app.
+          You can switch modules any time from the header inside the app.
         </p>
       </main>
 
@@ -166,7 +166,7 @@ export default function WorkspacesPage() {
         <InfoModal
           open={!!activeInfo}
           onClose={() => setActiveInfo(null)}
-          eyebrow="Workspace"
+          eyebrow="Module"
           title={activeInfo.title}
           description={activeInfo.description}
           features={activeInfo.features}
@@ -209,7 +209,7 @@ function WorkspaceCard({
             e.stopPropagation();
             onInfo();
           }}
-          aria-label="Show what's inside this workspace"
+          aria-label="Show what's inside this module"
           className="grid h-8 w-8 place-items-center rounded-full bg-white/90 text-zinc-600 shadow-card ring-1 ring-zinc-200 backdrop-blur transition hover:bg-white hover:text-brand-700"
         >
           <Info className="h-4 w-4" />
@@ -230,7 +230,7 @@ function WorkspaceCard({
       {/* Body */}
       <div className="flex flex-1 flex-col p-6">
         <p className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
-          Workspace {index + 1}
+          Module {index + 1}
         </p>
         <h3 className="font-display mt-1 text-2xl font-extrabold tracking-tight">{m.title}</h3>
         <p className="mt-1 text-sm font-medium text-zinc-700">{m.tagline}</p>

@@ -8,9 +8,9 @@ import { Badge } from "@/components/ui/badge";
 import { WORKSPACES } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
 
-/** Org-level switch: which of the 3 workspaces this business has enabled at all.
+/** Org-level switch: which of the 3 modules this business has enabled at all.
  *  This is separate from per-role permissions (Settings → Permissions) — a
- *  workspace disabled here disappears for every role, regardless of what
+ *  module disabled here disappears for every role, regardless of what
  *  they're individually granted. Lets RepairOX be sold to a business that
  *  only runs, say, Shop Management, without any redesign. */
 export default function WorkspaceAccessPage() {
@@ -21,15 +21,15 @@ export default function WorkspaceAccessPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Settings / Workspace Access"
-        title="Workspace Access"
-        subtitle="Turn entire workspaces on or off for this business — independent of individual role permissions."
+        eyebrow="Settings / Module Access"
+        title="Module Access"
+        subtitle="Turn entire modules on or off for this business — independent of individual role permissions."
       />
 
       <div className="flex items-start gap-2.5 rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-[#4361EE]" />
         <p className="text-[12.5px] leading-relaxed text-[#3347D6]">
-          A business may run one, two, or all three workspaces. Disabling a workspace here hides it for
+          A business may run one, two, or all three modules. Disabling a module here hides it for
           every role — even Master Shop Owner — until it's switched back on.
         </p>
       </div>

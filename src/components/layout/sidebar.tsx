@@ -139,8 +139,8 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
   return (
     <aside
       className={cn(
-        "sticky top-0 z-30 hidden h-screen shrink-0 flex-col border-r border-border bg-card lg:flex",
-        "transition-[width] duration-300 ease-out overflow-hidden", /* overflow-hidden fixes clipping */
+        "z-30 hidden h-full shrink-0 flex-col border-r border-border bg-card lg:flex",
+        "transition-[width] duration-300 ease-out overflow-hidden",
         collapsed ? "w-[72px]" : "w-[256px]"
       )}
     >

@@ -5,7 +5,7 @@ import { formatINR } from "@/lib/utils";
 export default function Page() {
   return (
     <ModulePlaceholder
-      eyebrow="Operations"
+      eyebrow="Field"
       title="Vendors"
       subtitle="Every vendor and supplier, their order history and outstanding balances."
       preview={[

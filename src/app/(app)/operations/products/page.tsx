@@ -4,7 +4,7 @@ import { ModulePlaceholder } from "@/components/common/module-placeholder";
 export default function Page() {
   return (
     <ModulePlaceholder
-      eyebrow="Operations"
+      eyebrow="Field"
       title="Product Items"
       subtitle="Pricing and catalogue for every product and accessory sold across branches."
       preview={[
