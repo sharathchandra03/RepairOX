@@ -16,19 +16,12 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
-import { useState } from "react";
-import { ordersStatus, todos, tickets, STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
+import { useState, useMemo } from "react";
+import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
+import { useStore } from "@/lib/store";
 import { formatINR } from "@/lib/utils";
 
-/* ── Device breakdown data (horizontal bar chart) ── */
-const DEVICE_DATA = [
-  { device: "iPhone",   count: 42, highlight: false },
-  { device: "Android",  count: 31, highlight: false },
-  { device: "MacBook",  count: 28, highlight: false },
-  { device: "iPad",     count: 38, highlight: true  },
-  { device: "Windows",  count: 19, highlight: false },
-  { device: "iWatch",   count: 12, highlight: false },
-];
+/* ── Device breakdown — computed from store data in component ── */
 
 /* ── Heatmap data (7 days × 8 slots) ── */
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -45,15 +38,7 @@ function heatColor(v: number) {
   return "bg-[#3347D6]";
 }
 
-/* ── Transaction feed data ── */
-const TRANSACTIONS = [
-  { name: "Rahul Kapoor", location: "Mumbai", amount: 22500, time: "today", avatar: "RK" },
-  { name: "Manoj S.",     location: "Delhi",  amount: 18999, time: "today", avatar: "MS" },
-  { name: "Anjali R.",    location: "Pune",   amount: 8999,  time: "today", avatar: "AR" },
-  { name: "Ajay Verma",  location: "Noida",  amount: 12999, time: "yesterday", avatar: "AV" },
-  { name: "Radha Iyer",  location: "Chennai",amount: 6499,  time: "yesterday", avatar: "RI" },
-  { name: "Sneha P.",    location: "Hyderabad", amount: 3499, time: "yesterday", avatar: "SP" },
-];
+/* ── Transaction feed data — derived from store in component ── */
 
 /* ── Card header with ... menu ── */
 function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }) {
@@ -72,6 +57,26 @@ function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }
 
 export default function Dashboard() {
   const [_range, _setRange] = useState("today");
+  const { tickets, todos, orders: ordersStatus } = useStore();
+
+  // Compute live KPIs from store data
+  const totalRevenue = useMemo(() => tickets.reduce((s, t) => s + (t.amount || 0), 0), [tickets]);
+  const ticketsToday = useMemo(() => {
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    return tickets.filter((t) => new Date(t.createdAt).getTime() >= todayStart.getTime()).length;
+  }, [tickets]);
+  const duesOutstanding = useMemo(() => {
+    return tickets.filter((t) => t.status !== "delivered" && t.status !== "completed").reduce((s, t) => s + (t.amount || 0), 0);
+  }, [tickets]);
+
+  // Compute device breakdown from actual ticket data
+  const deviceData = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tickets.forEach((t) => { const d = t.device || "Others"; counts[d] = (counts[d] || 0) + 1; });
+    const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+    const maxCount = sorted[0]?.[1] || 1;
+    return sorted.slice(0, 6).map(([device, count]) => ({ device, count, highlight: count === maxCount }));
+  }, [tickets]);
 
   return (
     <div className="space-y-6">
@@ -101,11 +106,11 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <KpiCard
           title="Business Revenue"
-          value={15000}
+          value={totalRevenue}
           format={formatINR}
           tone="emerald"
           delta={{ value: "+12.4%", up: true }}
-          hint="Avg/day ₹10,000 · Month ₹3,00,000"
+          hint={`${tickets.length} total tickets`}
         />
         <KpiCard
           title="Stock Value"
@@ -117,15 +122,15 @@ export default function Dashboard() {
         />
         <KpiCard
           title="Dues Outstanding"
-          value={10000}
+          value={duesOutstanding}
           format={formatINR}
           tone="rose"
           delta={{ value: "−2.1%", up: false }}
-          hint="From 6 customers · 2 overdue"
+          hint={`From ${tickets.filter((t) => t.status !== "delivered" && t.status !== "completed").length} active tickets`}
         />
         <KpiCard
           title="Tickets Today"
-          value={28}
+          value={ticketsToday}
           tone="violet"
           delta={{ value: "+9 vs yesterday", up: true }}
           hint="6 walk-in · 12 pickup · 10 on-site"
@@ -156,15 +161,15 @@ export default function Dashboard() {
           <CardHeader title="Tickets by Device" badge={
             <span className="text-[11px] text-muted-foreground">Last 7 days</span>
           } />
-          <p className="text-[11px] text-muted-foreground mb-4">{DEVICE_DATA.reduce((s,d)=>s+d.count,0)} total tickets</p>
+          <p className="text-[11px] text-muted-foreground mb-4">{deviceData.reduce((s,d)=>s+d.count,0)} total tickets</p>
           <div className="space-y-2.5">
-            {DEVICE_DATA.map((d) => (
+            {deviceData.map((d) => (
               <div key={d.device} className="flex items-center gap-3">
                 <span className="w-[56px] shrink-0 text-[12px] text-muted-foreground text-right">{d.device}</span>
                 <div className="flex-1 h-6 rounded-full bg-slate-100 overflow-hidden">
                   <motion.div
                     initial={{ width: 0 }}
-                    animate={{ width: `${(d.count / 45) * 100}%` }}
+                    animate={{ width: `${(d.count / Math.max(...deviceData.map(x => x.count), 1)) * 100}%` }}
                     transition={{ type: "spring", stiffness: 80, damping: 20 }}
                     className={`h-full rounded-full ${d.highlight ? "bg-orange-400" : "bg-[#4361EE]"}`}
                   />
@@ -174,7 +179,7 @@ export default function Dashboard() {
             ))}
           </div>
           <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> iPad flagged as highest volume spike
+            <span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> {deviceData[0]?.device || "N/A"} flagged as highest volume
           </p>
         </div>
 
@@ -221,36 +226,27 @@ export default function Dashboard() {
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Recent Transactions" />
           <div className="flex-1 mt-2 space-y-0 overflow-hidden">
-            {(["today", "yesterday"] as const).map((group) => {
-              const rows = TRANSACTIONS.filter((t) => t.time === group);
-              return (
-                <div key={group} className="mb-3">
-                  <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">
-                    {group === "today" ? "Recent" : "Yesterday"}
-                  </p>
-                  <ul className="space-y-1">
-                    {rows.map((tx, i) => (
-                      <motion.li
-                        key={tx.name}
-                        initial={{ opacity: 0, x: 6 }}
-                        animate={{ opacity: 1, x: 0 }}
-                        transition={{ delay: 0.04 * i }}
-                        className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/50 transition"
-                      >
-                        <Avatar name={tx.name} size={30} />
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold leading-tight">{tx.name}</p>
-                          <p className="text-[11px] text-muted-foreground">{tx.location}</p>
-                        </div>
-                        <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">
-                          {formatINR(tx.amount)}
-                        </span>
-                      </motion.li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Recent</p>
+            <ul className="space-y-1">
+              {tickets.slice(0, 6).map((tx, i) => (
+                <motion.li
+                  key={tx.id}
+                  initial={{ opacity: 0, x: 6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.04 * i }}
+                  className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/50 transition"
+                >
+                  <Avatar name={tx.customer} size={30} />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[13px] font-semibold leading-tight">{tx.customer}</p>
+                    <p className="text-[11px] text-muted-foreground">{tx.model}</p>
+                  </div>
+                  <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">
+                    {formatINR(tx.amount)}
+                  </span>
+                </motion.li>
+              ))}
+            </ul>
           </div>
           <div className="mt-2 border-t border-border pt-3 flex items-center justify-between">
             <Can permission={["manage_reports", "export_reports"]}>
@@ -406,7 +402,7 @@ export default function Dashboard() {
                   transition={{ delay: 0.04 * i }}
                   className="group border-t border-border transition hover:bg-muted/40"
                 >
-                  <td className="px-5 py-3 whitespace-nowrap text-muted-foreground">{t.createdAt}</td>
+                  <td className="px-5 py-3 whitespace-nowrap text-muted-foreground">{new Date(t.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</td>
                   <td className="py-3 whitespace-nowrap font-medium">{t.id}</td>
                   <td className="py-3">
                     <div className="flex items-center gap-2">

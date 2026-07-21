@@ -1,8 +1,8 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, Camera, Image as ImageIcon, FileSignature, ShieldCheck,
   CheckCircle2, XCircle, MinusCircle, Mail, Phone, MessageCircle,
@@ -16,7 +16,18 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select } from "@/components/ui/input";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
+import type { Ticket, TicketStatus } from "@/lib/mock-data";
+
+/* Wrap the page in Suspense to support useSearchParams during static generation */
+export default function NewTicketPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen grid place-items-center"><div className="h-8 w-8 rounded-full border-2 border-[#4361EE] border-r-transparent animate-spin" /></div>}>
+      <NewTicketWizard />
+    </Suspense>
+  );
+}
 
 /* ---------------- Step content data ---------------- */
 
@@ -48,7 +59,7 @@ const QC_FIELDS = [
   "Network", "Vibration",
 ];
 
-/* ---------------- Component ---------------- */
+/* ---------------- Types ---------------- */
 
 type WizardData = {
   process?: string;
@@ -56,7 +67,7 @@ type WizardData = {
   device: { model: string; imei: string; password: string; issue: string; assignedBy: string; assignedTo: string; source: string; type: string; estimate: string; description: string; notes: string };
   parts: { name: string; price: number }[];
   contactType: "personal" | "business";
-  customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string };
+  customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
   qc: Record<string, "ok" | "no" | "na" | undefined>;
   files: string[];
   signatureCleared: boolean;
@@ -66,29 +77,111 @@ const DEFAULT: WizardData = {
   device: { model: "", imei: "", password: "", issue: "", assignedBy: "", assignedTo: "", source: "", type: "", estimate: "", description: "", notes: "" },
   parts: [],
   contactType: "personal",
-  customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "" },
+  customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
   qc: {},
   files: [],
   signatureCleared: false,
 };
 
-export default function NewTicketWizard() {
+/* ---------------- Helper: map existing ticket to wizard data ---------------- */
+
+function ticketToWizard(t: Ticket): WizardData {
+  const nameParts = t.customer.split(" ");
+  const first = nameParts[0] || "";
+  const last = nameParts.slice(1).join(" ");
+  const category = t.device?.toLowerCase() || "others";
+
+  return {
+    process: "ticket",
+    category,
+    device: {
+      model: t.model,
+      imei: "",
+      password: "",
+      issue: t.issue,
+      assignedBy: "",
+      assignedTo: t.technician?.toLowerCase() || "",
+      source: "",
+      type: "",
+      estimate: String(t.amount || 0),
+      description: t.issue,
+      notes: "",
+    },
+    parts: [],
+    contactType: "personal",
+    customer: { first, last, phone: t.phone || "", email: "", address: "", postal: "", city: "", company: t.company || "" },
+    qc: {},
+    files: [],
+    signatureCleared: false,
+  };
+}
+
+/* ---------------- Helper: generate ticket ID ---------------- */
+function genId(): string {
+  return `T-${Math.floor(1000 + Math.random() * 9000)}`;
+}
+
+/* ---------------- Main Component ---------------- */
+
+function NewTicketWizard() {
   const router = useRouter();
-  const [step, setStep] = useState(1);
+  const searchParams = useSearchParams();
+  const editId = searchParams.get("edit");
+  const { tickets, addTicket, updateTicket } = useStore();
+
+  const [step, setStep] = useState(editId ? 3 : 1);
   const [data, setData] = useState<WizardData>(DEFAULT);
   const [submitted, setSubmitted] = useState(false);
+  const isEdit = !!editId;
+
+  // Pre-fill data when editing
+  useEffect(() => {
+    if (editId) {
+      const existing = tickets.find((t) => t.id === editId);
+      if (existing) {
+        setData(ticketToWizard(existing));
+      }
+    }
+  }, [editId, tickets]);
 
   const next = () => setStep((s) => Math.min(s + 1, 10));
-  const back = () => (step === 1 ? router.push("/dashboard") : setStep((s) => Math.max(1, s - 1)));
+  const back = () => (step === 1 ? router.push("/tickets") : setStep((s) => Math.max(1, s - 1)));
 
-  if (submitted) return <ThankYou onPrint={() => router.push("/dashboard")} />;
+  const handleSubmit = () => {
+    const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
+    const ticketData: Ticket = {
+      id: editId || genId(),
+      customer: customerName,
+      phone: data.customer.phone || "+91 00000 00000",
+      company: data.customer.company || undefined,
+      device: data.category || "others",
+      model: data.device.model || "Unknown Device",
+      issue: data.device.issue || data.device.description || "General service",
+      status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "received") : "received") as TicketStatus,
+      priority: "med",
+      technician: data.device.assignedTo || "Unassigned",
+      createdAt: isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
+      dueDate: undefined,
+      amount: Number(data.device.estimate) || data.parts.reduce((s, p) => s + p.price, 0) || 0,
+      service: data.device.issue || "Repair",
+    };
+
+    if (isEdit) {
+      updateTicket(editId, ticketData);
+    } else {
+      addTicket(ticketData);
+    }
+    setSubmitted(true);
+  };
+
+  if (submitted) return <ThankYou isEdit={isEdit} onDone={() => router.push("/tickets")} />;
 
   return (
     <WizardShell
       step={step}
       onBack={back}
-      title={titleFor(step)}
-      subtitle={subtitleFor(step)}
+      title={isEdit ? `Edit Ticket ${editId}` : titleFor(step)}
+      subtitle={isEdit ? "Update ticket details below." : subtitleFor(step)}
     >
       <div className={cn("mx-auto", step === 2 ? "max-w-5xl" : "max-w-3xl")}>
         {step === 1 && (
@@ -99,7 +192,6 @@ export default function NewTicketWizard() {
             cols={3}
           />
         )}
-
         {step === 2 && (
           <CategoryWheel
             value={data.category}
@@ -107,22 +199,14 @@ export default function NewTicketWizard() {
             onNext={next}
           />
         )}
-
         {step === 3 && <DeviceForm data={data} setData={setData} onNext={next} />}
-
         {step === 4 && <PartsAssignment data={data} setData={setData} onNext={next} />}
-
         {step === 5 && <ContactSearch data={data} setData={setData} onNext={next} />}
-
         {step === 6 && <CustomerForm data={data} setData={setData} onNext={next} />}
-
         {step === 7 && <QuoteSummary data={data} onNext={next} />}
-
         {step === 8 && <QCForm data={data} setData={setData} onNext={next} />}
-
         {step === 9 && <UploadStep data={data} setData={setData} onNext={next} />}
-
-        {step === 10 && <SignatureStep onSubmit={() => setSubmitted(true)} />}
+        {step === 10 && <SignatureStep onSubmit={handleSubmit} isEdit={isEdit} />}
       </div>
     </WizardShell>
   );
@@ -145,7 +229,7 @@ function titleFor(step: number) {
 }
 function subtitleFor(step: number) {
   return [
-    "Pick what you’re creating today.",
+    "Pick what you're creating today.",
     "What kind of device is it?",
     "Capture identifiers, fault and assignments.",
     "Add spare parts and services consumed.",
@@ -171,42 +255,32 @@ function DeviceForm({ data, setData, onNext }: any) {
         <Field label="Issue"><Input value={d.issue} onChange={(e: any) => set("issue", e.target.value)} placeholder="Display not working" /></Field>
         <Field label="Assigned by"><Input value={d.assignedBy} onChange={(e: any) => set("assignedBy", e.target.value)} placeholder="Front desk" /></Field>
         <Field label="Assigned to">
-          <Select
-            value={d.assignedTo}
-            onChange={(e: any) => set("assignedTo", e.target.value)}
-            options={[
-              { label: "Select technician", value: "" },
-              { label: "Anand · L2 Mobile", value: "anand" },
-              { label: "Pooja · Logic-board", value: "pooja" },
-              { label: "Vikas · Watch & iPad", value: "vikas" },
-            ]}
-          />
+          <Select value={d.assignedTo} onChange={(e: any) => set("assignedTo", e.target.value)} options={[
+            { label: "Select technician", value: "" },
+            { label: "Anand · L2 Mobile", value: "anand" },
+            { label: "Pooja · Logic-board", value: "pooja" },
+            { label: "Vikas · Watch & iPad", value: "vikas" },
+            { label: "Shubham · Hardware", value: "shubham" },
+            { label: "Ravi · Android", value: "ravi" },
+          ]} />
         </Field>
         <Field label="Source">
-          <Select
-            value={d.source}
-            onChange={(e: any) => set("source", e.target.value)}
-            options={[
-              { label: "Select source", value: "" },
-              { label: "Google", value: "google" },
-              { label: "Meta", value: "meta" },
-              { label: "YouTube", value: "youtube" },
-              { label: "Walk-in", value: "walk-in" },
-              { label: "Reference", value: "ref" },
-            ]}
-          />
+          <Select value={d.source} onChange={(e: any) => set("source", e.target.value)} options={[
+            { label: "Select source", value: "" },
+            { label: "Google", value: "google" },
+            { label: "Meta", value: "meta" },
+            { label: "YouTube", value: "youtube" },
+            { label: "Walk-in", value: "walk-in" },
+            { label: "Reference", value: "ref" },
+          ]} />
         </Field>
         <Field label="Type">
-          <Select
-            value={d.type}
-            onChange={(e: any) => set("type", e.target.value)}
-            options={[
-              { label: "Select type", value: "" },
-              { label: "Walk-In", value: "walkin" },
-              { label: "Pick-Up", value: "pickup" },
-              { label: "On-Site", value: "onsite" },
-            ]}
-          />
+          <Select value={d.type} onChange={(e: any) => set("type", e.target.value)} options={[
+            { label: "Select type", value: "" },
+            { label: "Walk-In", value: "walkin" },
+            { label: "Pick-Up", value: "pickup" },
+            { label: "On-Site", value: "onsite" },
+          ]} />
         </Field>
         <Field label="Estimate (₹)"><Input type="number" value={d.estimate} onChange={(e: any) => set("estimate", e.target.value)} placeholder="0" /></Field>
         <div className="md:col-span-2"><Field label="Problem description"><Textarea value={d.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" /></Field></div>
@@ -240,25 +314,15 @@ function PartsAssignment({ data, setData, onNext }: any) {
         <Field label="Item / part"><Input value={item} onChange={(e: any) => setItem(e.target.value)} placeholder="OLED display assembly" /></Field>
         <Field label="Price"><Input type="number" value={price} onChange={(e: any) => setPrice(e.target.value)} placeholder="0" /></Field>
         <div className="flex items-end">
-          <Button
-            disabled={!item}
-            onClick={() => { setData({ ...data, parts: [...data.parts, { name: item, price: Number(price || 0) }] }); setItem(""); setPrice(""); }}
-          >
+          <Button disabled={!item} onClick={() => { setData({ ...data, parts: [...data.parts, { name: item, price: Number(price || 0) }] }); setItem(""); setPrice(""); }}>
             <Plus className="h-4 w-4" /> Add
           </Button>
         </div>
       </div>
-
       <ul className="mt-5 divide-y divide-border rounded-xl border border-border">
         <AnimatePresence initial={false}>
           {data.parts.map((p: any, i: number) => (
-            <motion.li
-              key={i}
-              initial={{ opacity: 0, height: 0 }}
-              animate={{ opacity: 1, height: "auto" }}
-              exit={{ opacity: 0, height: 0 }}
-              className="flex items-center justify-between px-4 py-3 text-sm"
-            >
+            <motion.li key={i} initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} exit={{ opacity: 0, height: 0 }} className="flex items-center justify-between px-4 py-3 text-sm">
               <span className="font-medium">{p.name}</span>
               <span className="tnum text-muted-foreground">{formatINR(Number(p.price))}</span>
             </motion.li>
@@ -270,12 +334,8 @@ function PartsAssignment({ data, setData, onNext }: any) {
           </li>
         )}
       </ul>
-
       <div className="mt-5 flex flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm">
-          <span className="text-muted-foreground">Estimated total: </span>
-          <span className="font-semibold tnum">{formatINR(total)}</span>
-        </div>
+        <div className="text-sm"><span className="text-muted-foreground">Estimated total: </span><span className="font-semibold tnum">{formatINR(total)}</span></div>
         <div className="flex gap-2">
           <Button variant="outline" size="lg" onClick={onNext}>Skip</Button>
           <Button size="lg" onClick={onNext}>Continue <ArrowRight className="h-4 w-4" /></Button>
@@ -291,27 +351,14 @@ function ContactSearch({ data, setData, onNext }: any) {
   return (
     <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
       <div className="flex flex-col items-center">
-        <SegmentedTabs
-          value={data.contactType}
-          onChange={(v) => setData({ ...data, contactType: v })}
-          options={[
-            { label: "Personal", value: "personal" },
-            { label: "Business", value: "business" },
-          ]}
-        />
+        <SegmentedTabs value={data.contactType} onChange={(v) => setData({ ...data, contactType: v })} options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]} />
         <div className="mt-6 w-full max-w-md">
-          <Input
-            value={q}
-            onChange={(e: any) => setQ(e.target.value)}
-            placeholder={data.contactType === "personal" ? "Search by name or phone…" : "Search by company name or GSTIN…"}
-            iconLeft={<Search className="h-4 w-4" />}
-          />
+          <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder={data.contactType === "personal" ? "Search by name or phone…" : "Search by company name or GSTIN…"} iconLeft={<Search className="h-4 w-4" />} />
           <p className="mt-2 text-center text-xs text-muted-foreground">
             {data.contactType === "personal" ? <User className="inline h-3 w-3 mr-1" /> : <Building2 className="inline h-3 w-3 mr-1" />}
             We&apos;ll auto-fill the next step if we find a match.
           </p>
         </div>
-
         <div className="mt-6 flex w-full max-w-md flex-col gap-2">
           <Button variant="outline" size="lg" onClick={onNext}>Add New</Button>
           <Button size="lg" onClick={onNext}>Use this contact <ArrowRight className="h-4 w-4" /></Button>
@@ -332,9 +379,10 @@ function CustomerForm({ data, setData, onNext }: any) {
         <Field label="Last name"><Input value={c.last} onChange={(e: any) => set("last", e.target.value)} placeholder="Kapoor" /></Field>
         <Field label="Contact number"><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" /></Field>
         <Field label="E-mail ID"><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} iconLeft={<Mail className="h-4 w-4" />} placeholder="rahul@email.com" /></Field>
+        <Field label="Company / Organization"><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></Field>
+        <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} /></Field>
         <div className="md:col-span-2"><Field label="Address"><Input value={c.address} onChange={(e: any) => set("address", e.target.value)} placeholder="House / Street / Locality" /></Field></div>
         <Field label="Postal code"><Input value={c.postal} onChange={(e: any) => set("postal", e.target.value)} /></Field>
-        <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} /></Field>
       </div>
       <div className="mt-6 flex justify-end">
         <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
@@ -352,7 +400,6 @@ function QuoteSummary({ data, onNext }: any) {
   return (
     <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
-        {/* Line items */}
         <div className="rounded-2xl border border-border">
           <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
@@ -361,9 +408,7 @@ function QuoteSummary({ data, onNext }: any) {
             <div className="p-6 text-center text-sm text-muted-foreground">No parts added - quotation will reflect labour only.</div>
           ) : data.parts.map((p: any, i: number) => (
             <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30">
-              <div>{p.name}</div>
-              <div className="text-center">1</div>
-              <div className="text-right tnum">{formatINR(Number(p.price))}</div>
+              <div>{p.name}</div><div className="text-center">1</div><div className="text-right tnum">{formatINR(Number(p.price))}</div>
             </div>
           ))}
           <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border">
@@ -373,29 +418,23 @@ function QuoteSummary({ data, onNext }: any) {
             <div>GST (18%)</div><div className="text-center">-</div><div className="text-right tnum">{formatINR(tax)}</div>
           </div>
         </div>
-
-        {/* Totals card */}
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
-            <Row k="Sub-total (parts)" v={formatINR(partsTotal)} />
-            <Row k="Labour" v={formatINR(labour)} />
-            <Row k="Tax" v={formatINR(tax)} />
-            <Row k="Total" v={formatINR(total)} bold />
+            <QRow k="Sub-total (parts)" v={formatINR(partsTotal)} />
+            <QRow k="Labour" v={formatINR(labour)} />
+            <QRow k="Tax" v={formatINR(tax)} />
+            <QRow k="Total" v={formatINR(total)} bold />
           </ul>
-          <Button size="lg" className="mt-4 w-full" onClick={onNext}>
-            Approve Quote <ArrowRight className="h-4 w-4" />
-          </Button>
-          <p className="mt-2 text-center text-[11px] text-muted-foreground">
-            Customer will be asked to sign at the end of this flow.
-          </p>
+          <Button size="lg" className="mt-4 w-full" onClick={onNext}>Approve Quote <ArrowRight className="h-4 w-4" /></Button>
+          <p className="mt-2 text-center text-[11px] text-muted-foreground">Customer will be asked to sign at the end of this flow.</p>
         </div>
       </div>
     </div>
   );
 }
-function Row({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
+function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
   return (
     <li className="flex items-center justify-between">
       <span className={cn("text-muted-foreground", bold && "text-foreground font-semibold")}>{k}</span>
@@ -425,21 +464,10 @@ function QCForm({ data, setData, onNext }: any) {
                 <div className="flex items-center gap-1">
                   {(["ok","no","na"] as const).map((v) => {
                     const active = data.qc[label] === v;
-                    const tone =
-                      v === "ok" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" :
-                      v === "no" ? "bg-rose-50 text-rose-700 ring-rose-200" :
-                                   "bg-zinc-50 text-zinc-700 ring-zinc-200";
+                    const tone = v === "ok" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : v === "no" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-zinc-50 text-zinc-700 ring-zinc-200";
                     const Icon = v === "ok" ? CheckCircle2 : v === "no" ? XCircle : MinusCircle;
                     return (
-                      <button
-                        key={v}
-                        onClick={() => set(label, v)}
-                        className={cn(
-                          "inline-flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition",
-                          active ? tone : "bg-card text-muted-foreground ring-border hover:bg-muted",
-                        )}
-                        aria-label={`${label}: ${v}`}
-                      >
+                      <button key={v} onClick={() => set(label, v)} className={cn("inline-flex h-7 w-7 items-center justify-center rounded-full ring-1 ring-inset transition", active ? tone : "bg-card text-muted-foreground ring-border hover:bg-muted")} aria-label={`${label}: ${v}`}>
                         <Icon className="h-4 w-4" />
                       </button>
                     );
@@ -451,9 +479,7 @@ function QCForm({ data, setData, onNext }: any) {
         ))}
       </div>
       <div className="mt-6 flex items-center justify-between">
-        <Button variant="outline" size="lg" onClick={() => setData({ ...data, qc: {} })}>
-          <RotateCcw className="h-4 w-4" /> Reset
-        </Button>
+        <Button variant="outline" size="lg" onClick={() => setData({ ...data, qc: {} })}><RotateCcw className="h-4 w-4" /> Reset</Button>
         <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
       </div>
     </div>
@@ -469,17 +495,11 @@ function UploadStep({ data, setData, onNext }: any) {
           { id: "camera", label: "Camera", icon: Camera, desc: "Open camera to capture device shots" },
           { id: "gallery", label: "Gallery", icon: ImageIcon, desc: "Pick existing photos from device" },
         ].map((s, i) => (
-          <motion.button
-            key={s.id}
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.05 * i }}
+          <motion.button key={s.id} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.05 * i }}
             onClick={() => setData({ ...data, files: [...data.files, `${s.id}-${Date.now()}.jpg`] })}
             className="group flex items-center gap-4 rounded-2xl border border-border bg-gradient-to-b from-indigo-50/40 to-white p-5 text-left transition hover:-translate-y-0.5 hover:border-indigo-200"
           >
-            <span className="grid h-14 w-14 place-items-center rounded-2xl border border-border bg-white text-brand-700 shadow-card">
-              <s.icon className="h-6 w-6" />
-            </span>
+            <span className="grid h-14 w-14 place-items-center rounded-2xl border border-border bg-white text-brand-700 shadow-card"><s.icon className="h-6 w-6" /></span>
             <div className="flex-1">
               <p className="font-display text-lg font-bold">{s.label}</p>
               <p className="text-sm text-muted-foreground">{s.desc}</p>
@@ -488,22 +508,13 @@ function UploadStep({ data, setData, onNext }: any) {
           </motion.button>
         ))}
       </div>
-
-      {/* Files */}
       <div className="mt-5">
         <p className="text-xs font-medium text-muted-foreground">Attached files</p>
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
           {data.files.length === 0 ? (
-            <div className="col-span-full rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
-              No files yet - add photos or documents above.
-            </div>
+            <div className="col-span-full rounded-xl border border-dashed border-border p-6 text-center text-sm text-muted-foreground">No files yet - add photos or documents above.</div>
           ) : data.files.map((f: string, i: number) => (
-            <motion.div
-              key={f + i}
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              className="aspect-[4/3] rounded-xl border border-border bg-gradient-to-br from-indigo-100/50 to-white p-2 shadow-card"
-            >
+            <motion.div key={f + i} initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="aspect-[4/3] rounded-xl border border-border bg-gradient-to-br from-indigo-100/50 to-white p-2 shadow-card">
               <div className="flex h-full items-end justify-between rounded-lg border border-border bg-white p-2">
                 <span className="truncate text-[10px] text-muted-foreground">{f}</span>
                 <FileText className="h-3.5 w-3.5 text-muted-foreground" />
@@ -512,7 +523,6 @@ function UploadStep({ data, setData, onNext }: any) {
           ))}
         </div>
       </div>
-
       <div className="mt-6 flex justify-end">
         <Button size="lg" onClick={onNext}>Upload & Continue <ArrowRight className="h-4 w-4" /></Button>
       </div>
@@ -521,57 +531,30 @@ function UploadStep({ data, setData, onNext }: any) {
 }
 
 /* ---------------- Step 10: Signature ---------------- */
-function SignatureStep({ onSubmit }: { onSubmit: () => void }) {
+function SignatureStep({ onSubmit, isEdit }: { onSubmit: () => void; isEdit: boolean }) {
   const [signed, setSigned] = useState(false);
   return (
     <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
       <p className="text-center text-sm text-muted-foreground">
-        By signing below the customer agrees to the diagnosis, estimate and our service terms.
+        {isEdit ? "Confirm your changes by signing below." : "By signing below the customer agrees to the diagnosis, estimate and our service terms."}
       </p>
-
-      {/* Pad */}
-      <div
-        onClick={() => setSigned(true)}
-        className={cn(
-          "relative mt-5 grid h-[260px] cursor-crosshair place-items-center overflow-hidden rounded-2xl border-2 border-dashed bg-gradient-to-b from-indigo-50/40 to-white transition",
-          signed ? "border-indigo-300" : "border-border"
-        )}
-      >
+      <div onClick={() => setSigned(true)} className={cn("relative mt-5 grid h-[260px] cursor-crosshair place-items-center overflow-hidden rounded-2xl border-2 border-dashed bg-gradient-to-b from-indigo-50/40 to-white transition", signed ? "border-indigo-300" : "border-border")}>
         {!signed ? (
           <div className="text-center text-muted-foreground">
             <FileSignature className="mx-auto h-10 w-10" />
             <p className="mt-2 text-sm">Tap & sign here</p>
           </div>
         ) : (
-          <motion.svg
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            viewBox="0 0 400 120"
-            className="h-32 w-[80%] text-brand-700"
-            fill="none"
-          >
-            <motion.path
-              initial={{ pathLength: 0 }}
-              animate={{ pathLength: 1 }}
-              transition={{ duration: 0.9 }}
-              d="M10 90 C 60 30, 90 110, 130 50 S 220 110, 260 60 S 340 100, 390 50"
-              stroke="currentColor"
-              strokeWidth="3"
-              strokeLinecap="round"
-            />
+          <motion.svg initial={{ opacity: 0 }} animate={{ opacity: 1 }} viewBox="0 0 400 120" className="h-32 w-[80%] text-brand-700" fill="none">
+            <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.9 }} d="M10 90 C 60 30, 90 110, 130 50 S 220 110, 260 60 S 340 100, 390 50" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
           </motion.svg>
         )}
-        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-wider text-muted-foreground">
-          x ─────────────── customer signature
-        </span>
+        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-wider text-muted-foreground">x ─────────────── customer signature</span>
       </div>
-
       <div className="mt-5 flex items-center justify-between">
-        <Button variant="outline" onClick={() => setSigned(false)}>
-          <RotateCcw className="h-4 w-4" /> Clear
-        </Button>
+        <Button variant="outline" onClick={() => setSigned(false)}><RotateCcw className="h-4 w-4" /> Clear</Button>
         <Button size="lg" onClick={onSubmit} disabled={!signed}>
-          <ShieldCheck className="h-4 w-4" /> Submit & finalise
+          <ShieldCheck className="h-4 w-4" /> {isEdit ? "Save Changes" : "Submit & finalise"}
         </Button>
       </div>
     </div>
@@ -579,78 +562,49 @@ function SignatureStep({ onSubmit }: { onSubmit: () => void }) {
 }
 
 /* ---------------- Thank you ---------------- */
-function ThankYou({ onPrint }: { onPrint: () => void }) {
+function ThankYou({ isEdit, onDone }: { isEdit: boolean; onDone: () => void }) {
   const [format, setFormat] = useState<"a4" | "thermal">("a4");
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-indigo-50/30 to-white">
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-25" />
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col items-center px-4 py-10 text-center sm:px-6">
-        <motion.div
-          initial={{ scale: 0.5, opacity: 0 }}
-          animate={{ scale: 1, opacity: 1 }}
-          transition={{ type: "spring", stiffness: 220, damping: 18 }}
-          className="grid h-20 w-20 place-items-center rounded-full brand-gradient text-white shadow-glow"
-        >
+        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 220, damping: 18 }} className="grid h-20 w-20 place-items-center rounded-full brand-gradient text-white shadow-glow">
           <CheckCircle2 className="h-10 w-10" />
         </motion.div>
-
-        <motion.h1
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ delay: 0.1 }}
-          className="font-display mt-6 text-4xl font-extrabold tracking-tight md:text-5xl"
-        >
-          Thank you! <span className="brand-gradient-text">Ticket created.</span>
+        <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="font-display mt-6 text-4xl font-extrabold tracking-tight md:text-5xl">
+          {isEdit ? <><span className="brand-gradient-text">Ticket updated!</span></> : <>Thank you! <span className="brand-gradient-text">Ticket created.</span></>}
         </motion.h1>
-        <motion.p
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.2 }}
-          className="mt-2 max-w-md text-sm text-muted-foreground"
-        >
-          A confirmation has been queued for SMS, WhatsApp and email. Choose how you&apos;d like to print or share the receipt.
+        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="mt-2 max-w-md text-sm text-muted-foreground">
+          {isEdit ? "Your changes have been saved. The ticket list will reflect the updates." : "A confirmation has been queued for SMS, WhatsApp and email. Choose how you'd like to print or share the receipt."}
         </motion.p>
 
-        <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
-          {[
-            { id: "a4", label: "A4 Receipt", desc: "Best for filing & email" },
-            { id: "thermal", label: "Thermal Receipt", desc: "Quick counter print" },
-          ].map((p) => {
-            const active = format === (p.id as any);
-            return (
-              <motion.button
-                key={p.id}
-                whileHover={{ y: -2 }}
-                onClick={() => setFormat(p.id as any)}
-                className={cn(
-                  "rounded-2xl border bg-card p-5 text-left shadow-card transition",
-                  active ? "border-indigo-300 ring-2 ring-indigo-200/70" : "border-border"
-                )}
-              >
-                <span className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-50 text-brand-700 ring-1 ring-brand-200">
-                  <Printer className="h-5 w-5" />
-                </span>
-                <p className="font-display mt-3 text-lg font-bold">{p.label}</p>
-                <p className="text-xs text-muted-foreground">{p.desc}</p>
-              </motion.button>
-            );
-          })}
-        </div>
+        {!isEdit && (
+          <>
+            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {[
+                { id: "a4", label: "A4 Receipt", desc: "Best for filing & email" },
+                { id: "thermal", label: "Thermal Receipt", desc: "Quick counter print" },
+              ].map((p) => {
+                const active = format === (p.id as any);
+                return (
+                  <motion.button key={p.id} whileHover={{ y: -2 }} onClick={() => setFormat(p.id as any)} className={cn("rounded-2xl border bg-card p-5 text-left shadow-card transition", active ? "border-indigo-300 ring-2 ring-indigo-200/70" : "border-border")}>
+                    <span className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-50 text-brand-700 ring-1 ring-brand-200"><Printer className="h-5 w-5" /></span>
+                    <p className="font-display mt-3 text-lg font-bold">{p.label}</p>
+                    <p className="text-xs text-muted-foreground">{p.desc}</p>
+                  </motion.button>
+                );
+              })}
+            </div>
+            <div className="mt-6 flex w-full max-w-md flex-col gap-2 sm:flex-row">
+              <Button variant="outline" size="lg" className="flex-1"><MessageCircle className="h-4 w-4 text-emerald-600" /> Share on WhatsApp</Button>
+              <Button variant="outline" size="lg" className="flex-1"><Mail className="h-4 w-4 text-indigo-600" /> Share on Email</Button>
+            </div>
+            <Button size="xl" className="mt-3 w-full max-w-md" onClick={onDone}><Printer className="h-4 w-4" /> Print Ticket</Button>
+          </>
+        )}
 
-        <div className="mt-6 flex w-full max-w-md flex-col gap-2 sm:flex-row">
-          <Button variant="outline" size="lg" className="flex-1">
-            <MessageCircle className="h-4 w-4 text-emerald-600" /> Share on WhatsApp
-          </Button>
-          <Button variant="outline" size="lg" className="flex-1">
-            <Mail className="h-4 w-4 text-indigo-600" /> Share on Email
-          </Button>
-        </div>
-        <Button size="xl" className="mt-3 w-full max-w-md" onClick={onPrint}>
-          <Printer className="h-4 w-4" /> Print Ticket
-        </Button>
-
-        <button onClick={onPrint} className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to dashboard
+        <button onClick={onDone} className="mt-6 inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to tickets
         </button>
       </div>
     </div>

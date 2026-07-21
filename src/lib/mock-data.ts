@@ -26,28 +26,63 @@ export const STATUS_TONE: Record<TicketStatus, string> = {
   delivered: "bg-zinc-100 text-zinc-700 ring-zinc-200",
 };
 
+export type TicketItem = {
+  device: string;
+  model: string;
+  serial?: string;
+  issue: string;
+  service?: string;
+};
+
 export type Ticket = {
   id: string;
   customer: string;
+  phone: string;
+  company?: string;
   device: string;
   model: string;
   issue: string;
+  items?: TicketItem[];
   status: TicketStatus;
   priority: "low" | "med" | "high" | "urgent";
   technician: string;
   createdAt: string;
+  dueDate?: string;
   amount: number;
+  service?: string;
 };
 
+/** Helper: generate a createdAt timestamp N minutes ago from now */
+function minsAgo(mins: number): string {
+  return new Date(Date.now() - mins * 60_000).toISOString();
+}
+
 export const tickets: Ticket[] = [
-  { id: "T-1837", customer: "Rahul Kapoor", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: "13/01/2026", amount: 22500 },
-  { id: "T-8624", customer: "Manoj S.", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "urgent", technician: "Vikas", createdAt: "11/01/2026", amount: 18999 },
-  { id: "T-456",  customer: "Ajay Verma", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "med", technician: "Pooja", createdAt: "13/01/2026", amount: 12999 },
-  { id: "T-156",  customer: "Radha Iyer", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "low", technician: "Shubham", createdAt: "12/01/2026", amount: 6499 },
-  { id: "T-911",  customer: "Vikas Nair", device: "iPad", model: "iPad Air 11”", issue: "Touch panel calibration", status: "received", priority: "med", technician: "Anand", createdAt: "14/01/2026", amount: 4999 },
-  { id: "T-204",  customer: "Sneha P.", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "low", technician: "Ravi", createdAt: "10/01/2026", amount: 3499 },
-  { id: "T-732",  customer: "Imran Khan", device: "iPhone", model: "iPhone 13", issue: "Speaker no audio", status: "repairing", priority: "high", technician: "Pooja", createdAt: "12/01/2026", amount: 2899 },
-  { id: "T-621",  customer: "Anjali R.", device: "Windows", model: "Lenovo Yoga 9i", issue: "Hinge replacement", status: "diagnosis", priority: "med", technician: "Shubham", createdAt: "13/01/2026", amount: 8999 },
+  { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", amount: 22500, service: "Screen Repair" },
+  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "urgent", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", amount: 18999, service: "Board Repair" },
+  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "med", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", amount: 12999, service: "Battery Replacement" },
+  { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "low", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair" },
+  {
+    id: "T-7335", customer: "Ravindu Toyota", phone: "+91 99000 56190", company: "iFix India - Koramangala", device: "iPad", model: "iPad Air 2", issue: "Battery bulged, display broken",
+    items: [
+      { device: "iPad", model: "iPad Air 2", serial: "DMPRT5EKG5VT", issue: "Battery bulged, display broken", service: "Battery + Screen" },
+      { device: "iPad", model: "iPad Air 2", serial: "DMPRT4UF05VT", issue: "Battery bulged", service: "Battery Replacement" },
+      { device: "iPad", model: "iPad Air 2", serial: "DMPRQ2AYG5VT", issue: "Battery bulged", service: "Battery Replacement" },
+      { device: "iPad", model: "iPad Air 2", serial: "DMPRT5K1G5VT", issue: "Battery bulged, display broken", service: "Battery + Screen" },
+    ],
+    status: "repairing", priority: "high", technician: "Anand", createdAt: minsAgo(90), dueDate: "2026-07-22T19:00:00", amount: 20000, service: "Bulk Repair"
+  },
+  { id: "T-911", customer: "Vikas Nair", phone: "+91 65432 10987", company: "NairTech Solutions", device: "iPad", model: "iPad Air 11\u2033", issue: "Touch panel calibration", status: "received", priority: "med", technician: "Anand", createdAt: minsAgo(45), dueDate: "2026-07-24T12:00:00", amount: 4999, service: "Calibration" },
+  { id: "T-204", customer: "Sneha P.", phone: "+91 54321 09876", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "low", technician: "Ravi", createdAt: minsAgo(5), amount: 3499, service: "Port Repair" },
+  { id: "T-732", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub", device: "iPhone", model: "iPhone 13", issue: "Speaker no audio", status: "repairing", priority: "high", technician: "Pooja", createdAt: minsAgo(90), dueDate: "2026-07-22T18:00:00", amount: 2899, service: "Speaker Repair" },
+  {
+    id: "T-621", customer: "Anjali R.", phone: "+91 32109 87654", device: "Windows", model: "Lenovo Yoga 9i", issue: "Hinge replacement",
+    items: [
+      { device: "Windows", model: "Lenovo Yoga 9i", serial: "PF4KXYZ1", issue: "Hinge replacement", service: "Hardware Repair" },
+      { device: "Windows", model: "Lenovo IdeaPad 5", serial: "PF4KABC2", issue: "Keyboard not working", service: "Keyboard Replacement" },
+    ],
+    status: "diagnosis", priority: "med", technician: "Shubham", createdAt: minsAgo(42), dueDate: "2026-07-25T11:00:00", amount: 14999, service: "Hardware Repair"
+  },
 ];
 
 export const revenueMonthly = [
@@ -66,7 +101,7 @@ export const ordersStatus = [
 export const todos = [
   { id: 1, title: "Update Anand (Inventory Team)", desc: "Order 16 Pro Max display for Ticket 1837", flag: "info" as const },
   { id: 2, title: "Send Quotation to Ticket 8624", desc: "Replace T2 IC due to liquid damage on the M3", flag: "info" as const },
-  { id: 3, title: "Manoj’s iPhone 14", desc: "Overdue since Dec 2025, update customer & attempt delivery", flag: "danger" as const },
+  { id: 3, title: "Manoj's iPhone 14", desc: "Overdue since Dec 2025, update customer & attempt delivery", flag: "danger" as const },
   { id: 4, title: "AC Service due", desc: "Take approval from owner & schedule", flag: "warn" as const },
   { id: 5, title: "Office stock audit", desc: "Check Mobile and Laptop stock in office", flag: "warn" as const },
   { id: 6, title: "Accessories refilling", desc: "Tempered glass & latest mobile pouches to be ordered", flag: "warn" as const },
