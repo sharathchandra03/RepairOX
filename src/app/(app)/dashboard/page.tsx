@@ -4,6 +4,7 @@ import { motion } from "framer-motion";
 import {
   Plus, Filter, Download, Wand2, ArrowRight, AlertCircle, AlertTriangle,
   CheckCircle2, ListChecks, MoreHorizontal, ArrowDownToLine,
+  ArrowUpDown, SlidersHorizontal, CalendarDays,
 } from "lucide-react";
 import Link from "next/link";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -16,10 +17,11 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { useState, useMemo } from "react";
 import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
-import { formatINR } from "@/lib/utils";
+import { formatINR, cn } from "@/lib/utils";
 
 /* ── Device breakdown — computed from store data in component ── */
 
@@ -56,34 +58,69 @@ function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }
 }
 
 export default function Dashboard() {
-  const [_range, _setRange] = useState("today");
+  const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_high" | "amount_low">("newest");
+  const [filterBy, setFilterBy] = useState<"all" | "received" | "repairing" | "completed" | "delivered">("all");
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "30days" | "all">("all");
   const { tickets, todos, orders: ordersStatus } = useStore();
 
-  // Compute live KPIs from store data
-  const totalRevenue = useMemo(() => tickets.reduce((s, t) => s + (t.amount || 0), 0), [tickets]);
+  // Apply filters to tickets
+  const filteredTickets = useMemo(() => {
+    let list = tickets;
+    // Filter by status
+    if (filterBy !== "all") list = list.filter((t) => t.status === filterBy);
+    // Filter by date
+    if (dateRange !== "all") {
+      const now = new Date();
+      const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+      const ts = todayStart.getTime();
+      list = list.filter((t) => {
+        const created = new Date(t.createdAt).getTime();
+        switch (dateRange) {
+          case "today": return created >= ts;
+          case "yesterday": return created >= ts - 86_400_000 && created < ts;
+          case "7days": return created >= ts - 7 * 86_400_000;
+          case "30days": return created >= ts - 30 * 86_400_000;
+          default: return true;
+        }
+      });
+    }
+    // Sort
+    list = [...list].sort((a, b) => {
+      switch (sortBy) {
+        case "newest": return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        case "oldest": return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+        case "amount_high": return b.amount - a.amount;
+        case "amount_low": return a.amount - b.amount;
+        default: return 0;
+      }
+    });
+    return list;
+  }, [tickets, filterBy, dateRange, sortBy]);
+
+  // Compute live KPIs from filtered data
+  const totalRevenue = useMemo(() => filteredTickets.reduce((s, t) => s + (t.amount || 0), 0), [filteredTickets]);
   const ticketsToday = useMemo(() => {
     const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    return tickets.filter((t) => new Date(t.createdAt).getTime() >= todayStart.getTime()).length;
-  }, [tickets]);
+    return filteredTickets.filter((t) => new Date(t.createdAt).getTime() >= todayStart.getTime()).length;
+  }, [filteredTickets]);
   const duesOutstanding = useMemo(() => {
-    return tickets.filter((t) => t.status !== "delivered" && t.status !== "completed").reduce((s, t) => s + (t.amount || 0), 0);
-  }, [tickets]);
+    return filteredTickets.filter((t) => t.status !== "delivered" && t.status !== "completed").reduce((s, t) => s + (t.amount || 0), 0);
+  }, [filteredTickets]);
 
   // Compute device breakdown from actual ticket data
   const deviceData = useMemo(() => {
     const counts: Record<string, number> = {};
-    tickets.forEach((t) => { const d = t.device || "Others"; counts[d] = (counts[d] || 0) + 1; });
+    filteredTickets.forEach((t) => { const d = t.device || "Others"; counts[d] = (counts[d] || 0) + 1; });
     const sorted = Object.entries(counts).sort((a, b) => b[1] - a[1]);
     const maxCount = sorted[0]?.[1] || 1;
     return sorted.slice(0, 6).map(([device, count]) => ({ device, count, highlight: count === maxCount }));
-  }, [tickets]);
+  }, [filteredTickets]);
 
   return (
     <div className="space-y-6">
 
       <PageHeader
-        title="Analytics Overview,"
-        showFilters
+        title="Analytics Overview"
         actions={
           <Can permission="manage_repair_jobs">
             <Link href="/tickets/new">
@@ -95,11 +132,53 @@ export default function Dashboard() {
         }
       />
 
-      {/* Monthly comparison indicator */}
-      <div className="flex items-center gap-2 -mt-3">
-        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200/60">
-          <ArrowRight className="h-3 w-3" /> +18.2% vs last month
-        </span>
+      {/* Functional filter bar */}
+      <div className="flex flex-wrap items-center gap-2 -mt-3">
+        {/* Sort By */}
+        <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
+          <button onClick={toggle} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] font-medium text-zinc-600 hover:bg-muted transition">
+            <ArrowUpDown className="h-3.5 w-3.5" /> Sort By
+          </button>
+        )}>
+          {(close) => (<>
+            <MenuItem onClick={() => { setSortBy("newest"); close(); }} className={cn(sortBy === "newest" && "bg-muted font-semibold")}>Newest First</MenuItem>
+            <MenuItem onClick={() => { setSortBy("oldest"); close(); }} className={cn(sortBy === "oldest" && "bg-muted font-semibold")}>Oldest First</MenuItem>
+            <MenuItem onClick={() => { setSortBy("amount_high"); close(); }} className={cn(sortBy === "amount_high" && "bg-muted font-semibold")}>Amount High → Low</MenuItem>
+            <MenuItem onClick={() => { setSortBy("amount_low"); close(); }} className={cn(sortBy === "amount_low" && "bg-muted font-semibold")}>Amount Low → High</MenuItem>
+          </>)}
+        </Dropdown>
+
+        {/* Filter By */}
+        <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
+          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", filterBy !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-muted")}>
+            <SlidersHorizontal className="h-3.5 w-3.5" /> Filter By {filterBy !== "all" && <span className="h-1.5 w-1.5 rounded-full bg-[#4361EE]" />}
+          </button>
+        )}>
+          {(close) => (<>
+            <MenuItem onClick={() => { setFilterBy("all"); close(); }} className={cn(filterBy === "all" && "bg-muted font-semibold")}>All Tickets</MenuItem>
+            <MenuItem onClick={() => { setFilterBy("received"); close(); }} className={cn(filterBy === "received" && "bg-muted font-semibold")}>Received</MenuItem>
+            <MenuItem onClick={() => { setFilterBy("repairing"); close(); }} className={cn(filterBy === "repairing" && "bg-muted font-semibold")}>Repairing</MenuItem>
+            <MenuItem onClick={() => { setFilterBy("completed"); close(); }} className={cn(filterBy === "completed" && "bg-muted font-semibold")}>Completed</MenuItem>
+            <MenuItem onClick={() => { setFilterBy("delivered"); close(); }} className={cn(filterBy === "delivered" && "bg-muted font-semibold")}>Delivered</MenuItem>
+          </>)}
+        </Dropdown>
+
+        {/* Date */}
+        <Dropdown align="left" width="w-40" trigger={({ toggle }) => (
+          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", dateRange !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-muted")}>
+            <CalendarDays className="h-3.5 w-3.5" /> {dateRange === "all" ? "All Time" : dateRange === "today" ? "Today" : dateRange === "yesterday" ? "Yesterday" : dateRange === "7days" ? "Last 7 Days" : "Last 30 Days"}
+          </button>
+        )}>
+          {(close) => (<>
+            <MenuItem onClick={() => { setDateRange("all"); close(); }} className={cn(dateRange === "all" && "bg-muted font-semibold")}>All Time</MenuItem>
+            <MenuItem onClick={() => { setDateRange("today"); close(); }} className={cn(dateRange === "today" && "bg-muted font-semibold")}>Today</MenuItem>
+            <MenuItem onClick={() => { setDateRange("yesterday"); close(); }} className={cn(dateRange === "yesterday" && "bg-muted font-semibold")}>Yesterday</MenuItem>
+            <MenuItem onClick={() => { setDateRange("7days"); close(); }} className={cn(dateRange === "7days" && "bg-muted font-semibold")}>Last 7 Days</MenuItem>
+            <MenuItem onClick={() => { setDateRange("30days"); close(); }} className={cn(dateRange === "30days" && "bg-muted font-semibold")}>Last 30 Days</MenuItem>
+          </>)}
+        </Dropdown>
+
+        <span className="ml-auto text-[11px] text-muted-foreground">{filteredTickets.length} ticket{filteredTickets.length !== 1 ? "s" : ""}</span>
       </div>
 
       {/* KPI Row */}
@@ -111,6 +190,7 @@ export default function Dashboard() {
           tone="emerald"
           delta={{ value: "+12.4%", up: true }}
           hint={`${tickets.length} total tickets`}
+          progress={{ value: Math.min(100, Math.round((totalRevenue / 300000) * 100)), label: "Monthly target" }}
         />
         <KpiCard
           title="Stock Value"
@@ -119,6 +199,7 @@ export default function Dashboard() {
           tone="amber"
           delta={{ value: "+1.8%", up: true }}
           hint="Spare parts: ₹1,50,000 · Accessories: ₹50,000"
+          progress={{ value: 75, label: "Inventory capacity" }}
         />
         <KpiCard
           title="Dues Outstanding"
@@ -127,6 +208,7 @@ export default function Dashboard() {
           tone="rose"
           delta={{ value: "−2.1%", up: false }}
           hint={`From ${tickets.filter((t) => t.status !== "delivered" && t.status !== "completed").length} active tickets`}
+          progress={{ value: totalRevenue > 0 ? Math.round(((totalRevenue - duesOutstanding) / totalRevenue) * 100) : 0, label: "Collection progress" }}
         />
         <KpiCard
           title="Tickets Today"
@@ -134,6 +216,7 @@ export default function Dashboard() {
           tone="violet"
           delta={{ value: "+9 vs yesterday", up: true }}
           hint="6 walk-in · 12 pickup · 10 on-site"
+          progress={{ value: ticketsToday > 0 ? Math.min(100, Math.round((ticketsToday / 30) * 100)) : 0, label: "Daily target" }}
         />
       </div>
 
@@ -228,7 +311,7 @@ export default function Dashboard() {
           <div className="flex-1 mt-2 space-y-0 overflow-hidden">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Recent</p>
             <ul className="space-y-1">
-              {tickets.slice(0, 6).map((tx, i) => (
+              {filteredTickets.slice(0, 6).map((tx, i) => (
                 <motion.li
                   key={tx.id}
                   initial={{ opacity: 0, x: 6 }}
@@ -394,7 +477,7 @@ export default function Dashboard() {
               </tr>
             </thead>
             <tbody>
-              {tickets.slice(0, 5).map((t, i) => (
+              {filteredTickets.slice(0, 5).map((t, i) => (
                 <motion.tr
                   key={t.id}
                   initial={{ opacity: 0, y: 6 }}
@@ -425,7 +508,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center justify-between border-t border-border p-4">
-          <p className="text-xs text-muted-foreground">Showing 5 of {tickets.length} active</p>
+          <p className="text-xs text-muted-foreground">Showing {Math.min(5, filteredTickets.length)} of {filteredTickets.length}</p>
           <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">
             View all tickets <ArrowRight className="h-3.5 w-3.5" />
           </Link>

@@ -180,6 +180,7 @@ function NewTicketWizard() {
     <WizardShell
       step={step}
       onBack={back}
+      closeHref="/tickets"
       title={isEdit ? `Edit Ticket ${editId}` : titleFor(step)}
       subtitle={isEdit ? "Update ticket details below." : subtitleFor(step)}
     >

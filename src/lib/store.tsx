@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
-import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, type Ticket, type TicketStatus, type TeamMember } from "@/lib/mock-data";
+import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, type Ticket, type TicketStatus, type TeamMember, type Invoice } from "@/lib/mock-data";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -11,6 +11,7 @@ export type RevenueMonth = { m: string; v: number };
 
 interface StoreState {
   tickets: Ticket[];
+  invoices: Invoice[];
   todos: Todo[];
   orders: OrderStatus[];
   revenue: RevenueMonth[];
@@ -22,6 +23,9 @@ interface StoreActions {
   updateTicket: (id: string, updates: Partial<Ticket>) => void;
   deleteTicket: (id: string) => void;
   bulkUpdateStatus: (ids: string[], status: TicketStatus) => void;
+  addInvoice: (invoice: Invoice) => void;
+  updateInvoice: (id: string, updates: Partial<Invoice>) => void;
+  deleteInvoice: (id: string) => void;
   addTodo: (todo: Todo) => void;
   removeTodo: (id: number) => void;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
@@ -60,9 +64,16 @@ function saveToStorage(state: StoreState) {
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoreState>(() => {
     const saved = loadFromStorage();
-    if (saved) return saved;
+    if (saved) {
+      // Ensure newer fields have defaults if missing from older localStorage data
+      return {
+        ...saved,
+        invoices: saved.invoices ?? SEED_INVOICES,
+      };
+    }
     return {
       tickets: SEED_TICKETS,
+      invoices: SEED_INVOICES,
       todos: SEED_TODOS,
       orders: SEED_ORDERS,
       revenue: SEED_REVENUE,
@@ -98,6 +109,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  /* ── Invoice actions ── */
+  const addInvoice = useCallback((invoice: Invoice) => {
+    setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
+  }, []);
+
+  const updateInvoice = useCallback((id: string, updates: Partial<Invoice>) => {
+    setState((s) => ({
+      ...s,
+      invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)),
+    }));
+  }, []);
+
+  const deleteInvoice = useCallback((id: string) => {
+    setState((s) => ({ ...s, invoices: s.invoices.filter((inv) => inv.id !== id) }));
+  }, []);
+
   /* ── Todo actions ── */
   const addTodo = useCallback((todo: Todo) => {
     setState((s) => ({ ...s, todos: [...s.todos, todo] }));
@@ -121,6 +148,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateTicket,
     deleteTicket,
     bulkUpdateStatus,
+    addInvoice,
+    updateInvoice,
+    deleteInvoice,
     addTodo,
     removeTodo,
     updateTeamMember,

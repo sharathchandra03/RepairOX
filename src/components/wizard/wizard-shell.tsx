@@ -26,12 +26,16 @@ export function WizardShell({
   subtitle,
   children,
   onBack,
+  onClose,
+  closeHref,
 }: {
   step: number; // 1-based
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   onBack?: () => void;
+  onClose?: () => void;
+  closeHref?: string;
 }) {
   const pct = Math.round(((step - 1) / TOTAL_STEPS) * 100);
 
@@ -71,13 +75,23 @@ export function WizardShell({
           </motion.div>
         </div>
 
-        <Link
-          href="/dashboard"
-          className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
-          aria-label="Close"
-        >
-          <X className="h-4 w-4" />
-        </Link>
+        {onClose ? (
+          <button
+            onClick={onClose}
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        ) : (
+          <Link
+            href={closeHref || "/tickets"}
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
+            aria-label="Close"
+          >
+            <X className="h-4 w-4" />
+          </Link>
+        )}
       </div>
 
       {/* Step indicator strip */}

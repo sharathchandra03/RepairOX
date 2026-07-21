@@ -83,3 +83,54 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
   )
 );
 Select.displayName = "Select";
+
+/** Numeric input that avoids leading-zero issues.
+ *  Shows empty while editing; commits number on blur. */
+export function NumericInput({
+  value,
+  onChange,
+  min,
+  className,
+  ...props
+}: Omit<React.InputHTMLAttributes<HTMLInputElement>, "value" | "onChange" | "type"> & {
+  value: number;
+  onChange: (n: number) => void;
+  min?: number;
+}) {
+  const [raw, setRaw] = React.useState<string>(value === 0 ? "" : String(value));
+  const [focused, setFocused] = React.useState(false);
+
+  // Sync external value changes when not focused
+  React.useEffect(() => {
+    if (!focused) setRaw(value === 0 ? "" : String(value));
+  }, [value, focused]);
+
+  return (
+    <input
+      {...props}
+      type="text"
+      inputMode="numeric"
+      value={focused ? raw : (value === 0 ? "0" : String(value))}
+      onFocus={(e) => {
+        setFocused(true);
+        setRaw(value === 0 ? "" : String(value));
+        e.target.select();
+      }}
+      onChange={(e) => {
+        const v = e.target.value.replace(/[^0-9.]/g, "");
+        setRaw(v);
+        const n = parseFloat(v);
+        onChange(isNaN(n) ? 0 : (min !== undefined ? Math.max(min, n) : n));
+      }}
+      onBlur={() => {
+        setFocused(false);
+        if (raw === "" || raw === ".") onChange(min ?? 0);
+      }}
+      className={cn(
+        "flex h-11 w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm placeholder:text-muted-foreground transition",
+        "focus:border-brand-400 focus:ring-2 focus:ring-brand-200/40 focus:outline-none",
+        className
+      )}
+    />
+  );
+}

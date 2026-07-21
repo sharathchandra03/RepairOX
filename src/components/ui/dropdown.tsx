@@ -4,7 +4,7 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
-/* Lightweight, dependency-free dropdown/menu.
+/* Smart dropdown that auto-positions upward if near the bottom of the viewport.
    Handles outside-click + Escape, animated panel, right/left alignment. */
 export function Dropdown({
   trigger,
@@ -22,7 +22,31 @@ export function Dropdown({
   panelClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
+  const [pos, setPos] = React.useState<{ top?: number; bottom?: number; left?: number; right?: number }>({});
   const ref = React.useRef<HTMLDivElement | null>(null);
+  const triggerRef = React.useRef<HTMLDivElement | null>(null);
+
+  // Calculate fixed positioning when opening
+  React.useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const spaceAbove = rect.top;
+    const openUp = spaceBelow < 260 && spaceAbove > spaceBelow;
+
+    const position: { top?: number; bottom?: number; left?: number; right?: number } = {};
+    if (openUp) {
+      position.bottom = window.innerHeight - rect.top + 4;
+    } else {
+      position.top = rect.bottom + 4;
+    }
+    if (align === "right") {
+      position.right = window.innerWidth - rect.right;
+    } else {
+      position.left = rect.left;
+    }
+    setPos(position);
+  }, [open, align]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -42,17 +66,19 @@ export function Dropdown({
 
   return (
     <div ref={ref} className={cn("relative inline-block", className)}>
-      {trigger({ open, toggle: () => setOpen((v) => !v) })}
+      <div ref={triggerRef}>
+        {trigger({ open, toggle: () => setOpen((v) => !v) })}
+      </div>
       <AnimatePresence>
         {open && (
           <motion.div
-            initial={{ opacity: 0, y: -6, scale: 0.97 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -6, scale: 0.97 }}
+            initial={{ opacity: 0, scale: 0.97 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.97 }}
             transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+            style={pos}
             className={cn(
-              "absolute z-50 mt-2 overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
-              align === "right" ? "right-0" : "left-0",
+              "fixed z-[100] overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
               width,
               panelClassName
             )}

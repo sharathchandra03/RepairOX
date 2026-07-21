@@ -17,7 +17,7 @@ export function AnimatedNumber({ value, format }: { value: number; format?: (n: 
 }
 
 export function KpiCard({
-  title, value, format, hint, delta, tone = "rose",
+  title, value, format, hint, delta, tone = "rose", progress,
 }: {
   title: string;
   value: number;
@@ -25,15 +25,18 @@ export function KpiCard({
   hint?: string;
   delta?: { value: string; up?: boolean };
   tone?: "rose" | "amber" | "emerald" | "sky" | "violet";
+  /** 0–100 progress value. Omit to hide the bar. */
+  progress?: { value: number; label?: string };
 }) {
-  const TONES: Record<string, { chip: string; line: string; accent: string }> = {
-    rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", line: "text-[#4361EE]", accent: "#4361EE" },
-    amber:   { chip: "text-amber-700 bg-amber-50 ring-amber-200/40",   line: "text-amber-500", accent: "#F59E0B" },
-    emerald: { chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/40", line: "text-emerald-500", accent: "#10B981" },
-    sky:     { chip: "text-sky-700 bg-sky-50 ring-sky-200/40",         line: "text-sky-500", accent: "#0EA5E9" },
-    violet:  { chip: "text-violet-700 bg-violet-50 ring-violet-200/40", line: "text-violet-500", accent: "#8B5CF6" },
+  const TONES: Record<string, { chip: string; bar: string }> = {
+    rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", bar: "bg-[#4361EE]" },
+    amber:   { chip: "text-amber-700 bg-amber-50 ring-amber-200/40", bar: "bg-amber-500" },
+    emerald: { chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/40", bar: "bg-emerald-500" },
+    sky:     { chip: "text-sky-700 bg-sky-50 ring-sky-200/40", bar: "bg-sky-500" },
+    violet:  { chip: "text-violet-700 bg-violet-50 ring-violet-200/40", bar: "bg-violet-500" },
   };
   const t = TONES[tone];
+  const pct = Math.max(0, Math.min(100, progress?.value ?? 0));
 
   return (
     <motion.div
@@ -55,27 +58,25 @@ export function KpiCard({
       </p>
       {hint && <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">{hint}</p>}
 
-      {/* Refined sparkline */}
-      <svg viewBox="0 0 120 32" className="absolute inset-x-0 bottom-0 h-10 w-full opacity-40" preserveAspectRatio="none">
-        <defs>
-          <linearGradient id={`kpi-gr-${tone}`} x1="0" x2="0" y1="0" y2="1">
-            <stop offset="0%" stopColor={t.accent} stopOpacity="0.25" />
-            <stop offset="100%" stopColor={t.accent} stopOpacity="0" />
-          </linearGradient>
-        </defs>
-        <path
-          d="M0,24 C10,20 20,26 34,16 C50,5 62,20 78,14 C94,7 108,16 120,10 L120,32 L0,32 Z"
-          fill={`url(#kpi-gr-${tone})`}
-        />
-        <path
-          d="M0,24 C10,20 20,26 34,16 C50,5 62,20 78,14 C94,7 108,16 120,10"
-          stroke={t.accent}
-          strokeWidth="1.5"
-          strokeLinecap="round"
-          fill="none"
-          opacity="0.6"
-        />
-      </svg>
+      {/* Progress indicator */}
+      {progress && (
+        <div className="mt-3">
+          {progress.label && (
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-[10px] text-muted-foreground">{progress.label}</span>
+              <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{pct}%</span>
+            </div>
+          )}
+          <div className="h-1.5 w-full rounded-full bg-muted/80 overflow-hidden">
+            <motion.div
+              initial={{ width: 0 }}
+              animate={{ width: `${pct}%` }}
+              transition={{ duration: 0.8, ease: "easeOut" }}
+              className={cn("h-full rounded-full transition-colors group-hover:brightness-110", t.bar)}
+            />
+          </div>
+        </div>
+      )}
     </motion.div>
   );
 }

@@ -191,6 +191,118 @@ export const TEAM_SEED: TeamMember[] = [
   { name: "Imran Khan",    email: "imran@repairox.in",        roleId: "read_only_user",          branch: "HSR Layout",      status: "suspended" },
 ];
 
+/* ─── Invoice Types & Seed Data ──────────────────────────────────────── */
+
+export type InvoiceStatus = "draft" | "sent" | "paid" | "partial" | "overdue" | "cancelled";
+
+export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
+  draft: "Draft",
+  sent: "Sent",
+  paid: "Paid",
+  partial: "Partial",
+  overdue: "Overdue",
+  cancelled: "Cancelled",
+};
+
+export const INVOICE_STATUS_TONE: Record<InvoiceStatus, string> = {
+  draft: "bg-zinc-100 text-zinc-700 ring-zinc-200",
+  sent: "bg-info/10 text-info ring-info/20",
+  paid: "bg-success/10 text-emerald-700 ring-success/30",
+  partial: "bg-warning/10 text-amber-700 ring-warning/30",
+  overdue: "bg-rose-50 text-rose-700 ring-rose-200",
+  cancelled: "bg-zinc-100 text-zinc-500 ring-zinc-200",
+};
+
+export type InvoiceLineItem = {
+  id: string;
+  sku?: string;
+  name: string;
+  description?: string;
+  qty: number;
+  price: number;
+  taxClass?: string;
+  discount: number;
+  total: number;
+};
+
+export type Invoice = {
+  id: string;
+  reference: string;
+  customer: string;
+  phone: string;
+  email?: string;
+  company?: string;
+  status: InvoiceStatus;
+  createdAt: string;
+  dueDate: string;
+  paidAmount: number;
+  items: InvoiceLineItem[];
+  subtotal: number;
+  discount: number;
+  tax: number;
+  total: number;
+  notes?: string;
+  terms?: string;
+  slogan?: string;
+  footer?: string;
+  employee?: string;
+  ticketId?: string;
+};
+
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 86_400_000).toISOString();
+}
+
+export const invoices: Invoice[] = [
+  {
+    id: "INV-1001", reference: "CORP-1753", customer: "Rahul Kapoor", phone: "+91 98456 12345", email: "rahul@kapoor.in", company: "Kapoor Electronics",
+    status: "paid", createdAt: daysAgo(5), dueDate: daysAgo(-2), paidAmount: 22500,
+    items: [
+      { id: "li-1", sku: "SCR-IPH16", name: "iPhone 16 Pro Max Display", description: "OLED original assembly", qty: 1, price: 18500, discount: 0, total: 18500 },
+      { id: "li-2", name: "Labour & Diagnostics", qty: 1, price: 2500, discount: 0, total: 2500 },
+      { id: "li-3", name: "Tempered Glass", qty: 1, price: 1500, discount: 0, total: 1500 },
+    ],
+    subtotal: 22500, discount: 0, tax: 0, total: 22500, notes: "Display replaced under warranty extension.", terms: "Limited Warranty\nWe stand behind our repair services.", footer: "THANK YOU FOR CHOOSING FIX IND", employee: "Anjali R.", ticketId: "T-1837"
+  },
+  {
+    id: "INV-1002", reference: "CORP-1754", customer: "Manoj S.", phone: "+91 90876 54321", email: "manoj@repairox.in",
+    status: "sent", createdAt: daysAgo(2), dueDate: daysAgo(-5), paidAmount: 0,
+    items: [
+      { id: "li-4", sku: "BRD-IPH14", name: "iPhone 14 Logic Board Repair", description: "Liquid damage micro-soldering", qty: 1, price: 15000, discount: 500, total: 14500 },
+      { id: "li-5", name: "Ultrasonic Cleaning", qty: 1, price: 2999, discount: 0, total: 2999 },
+      { id: "li-6", name: "Waterproof Sealing", qty: 1, price: 1500, discount: 0, total: 1500 },
+    ],
+    subtotal: 18999, discount: 500, tax: 3418, total: 21917, notes: "Board level repair completed.", terms: "Limited Warranty", footer: "THANK YOU FOR CHOOSING FIX IND", employee: "Vikas", ticketId: "T-8624"
+  },
+  {
+    id: "INV-1003", reference: "CORP-1755", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons",
+    status: "partial", createdAt: daysAgo(7), dueDate: daysAgo(-1), paidAmount: 7000,
+    items: [
+      { id: "li-7", sku: "BAT-MBA4", name: "MacBook Air M4 Battery", description: "Original Apple replacement cell", qty: 1, price: 9999, discount: 0, total: 9999 },
+      { id: "li-8", name: "Installation & Testing", qty: 1, price: 3000, discount: 0, total: 3000 },
+    ],
+    subtotal: 12999, discount: 0, tax: 2340, total: 15339, notes: "Customer paid advance. Balance on pickup.", employee: "Pooja", ticketId: "T-456"
+  },
+  {
+    id: "INV-1004", reference: "CORP-1756", customer: "Sneha P.", phone: "+91 54321 09876",
+    status: "draft", createdAt: daysAgo(0), dueDate: daysAgo(-7), paidAmount: 0,
+    items: [
+      { id: "li-9", name: "Charging Port Assembly", qty: 1, price: 2499, discount: 0, total: 2499 },
+      { id: "li-10", name: "Labour", qty: 1, price: 1000, discount: 0, total: 1000 },
+    ],
+    subtotal: 3499, discount: 0, tax: 630, total: 4129, employee: "Ravi", ticketId: "T-204"
+  },
+  {
+    id: "INV-1005", reference: "CORP-1757", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub",
+    status: "overdue", createdAt: daysAgo(14), dueDate: daysAgo(4), paidAmount: 0,
+    items: [
+      { id: "li-11", name: "Speaker Module (iPhone 13)", qty: 1, price: 1899, discount: 0, total: 1899 },
+      { id: "li-12", name: "Labour", qty: 1, price: 1000, discount: 0, total: 1000 },
+    ],
+    subtotal: 2899, discount: 0, tax: 522, total: 3421, notes: "Customer not reachable. Follow up required.", employee: "Pooja", ticketId: "T-732"
+  },
+];
+
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
     { label: "MODULE",     items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/buy-back", "/price-list"] },
