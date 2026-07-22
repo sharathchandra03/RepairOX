@@ -2,7 +2,45 @@
 
 ## July 21, 2026
 
-### Ticket Management — UI/UX Overhaul
+### Invoice Module — Major Upgrade
+
+- **Two Invoice Types** — Invoices are now categorized as Retail Invoice or Business Invoice. Each type has its own independent numbering sequence (INV001, INV002… and INVG001, INVG002…). Creating one type never affects the other's sequence.
+- **Invoice Type Required** — When creating a new invoice, selecting the invoice type (Retail or Business) is now mandatory in the Details step.
+- **Status-Colored Invoice IDs** — Invoice IDs in the list table now show a subtle color based on their status (green for paid, amber for pending, red for cancelled, etc.). Hover over any ID to see the full status.
+- **Draggable KPI Cards** — The metric cards at the top of the Invoice page can now be rearranged by dragging. Your preferred layout is saved and restored on next login.
+- **Invoice Type Filter** — A new "All Types / Retail / Business" filter is available in the filter bar to quickly show only one invoice category.
+- **Bulk Delete for Invoices and Tickets** — Select multiple invoices or tickets, then click "Delete" to remove them all at once. A confirmation popup appears before deletion.
+
+### POS — Separated from Walk-In
+
+- **POS is now independent** — The POS (Point of Sale) interface is no longer linked to Walk-In. It has its own route accessed via the highlighted POS button in the top navigation bar.
+- **Walk-In is now a separate module** — The Walk-In page is cleared and ready for a future separate implementation.
+- **POS Button Glow** — The POS button in the header now has a subtle continuous glowing border effect to draw attention.
+
+### Ticket & Invoice Shared Improvements
+
+- **Bulk Delete** — Both Tickets and Invoices now support selecting multiple items and deleting them in bulk with a confirmation popup.
+- **Dropdown Menu Fix** — Action menus (the three-dot menus) now use fixed positioning so they never get clipped by table containers, regardless of scroll position.
+- **Column Settings Redesign** — The column visibility panel for both Tickets and Invoices is now a clean two-section layout (Visible / Hidden) with checkboxes, drag handles for reordering, search, and Required badges for locked columns.
+- **Numeric Input Fix** — Price, Quantity, and Discount fields no longer produce leading zeros (like "066" or "07"). Fields clear on focus and allow natural typing.
+
+### Invoice Workflow
+
+- **Fixed Footer** — The Previous/Next navigation bar in Create Invoice is now properly fixed at the bottom without overlapping the sidebar.
+- **Spacious Layout** — The Create Invoice workflow has improved vertical spacing between breadcrumbs, stepper, and form cards for a more premium feel.
+- **Responsive Filters** — The invoice filter panel now wraps cleanly at all zoom levels and screen sizes. Date pickers never overflow the container.
+
+### Dashboard
+
+- **Sort / Filter / Date buttons now work** — The three filter buttons in the Analytics Dashboard are now functional dropdowns. Selecting a sort order, status filter, or date range immediately updates all KPIs, charts, and tables.
+- **KPI Cards Redesigned** — Removed decorative wave graphics. Replaced with thin progress bars showing meaningful metrics (Monthly Target, Inventory Capacity, Collection Progress, Daily Target).
+
+### Navigation
+
+- **Process Selection** — Clicking "New Invoice" in the ticket wizard now correctly opens the Invoice creation page. Clicking "Walk-In" opens the Walk-In module.
+- **Buy-Back Removed** — Removed from the Shop Management sidebar. Documented in use-later file for future re-addition.
+
+---
 
 - **Row Selection** — Every ticket row now has a checkbox. A "Select All" checkbox in the header supports indeterminate state. Selected count shown in the toolbar.
 - **Bulk Status Change** — Select one or more tickets, click "Change Status", and pick a new status from the inline pill row to update all at once.

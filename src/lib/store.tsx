@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
-import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, type Ticket, type TicketStatus, type TeamMember, type Invoice } from "@/lib/mock-data";
+import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS, type Ticket, type TicketStatus, type TeamMember, type Invoice, type WalkIn } from "@/lib/mock-data";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -12,6 +12,7 @@ export type RevenueMonth = { m: string; v: number };
 interface StoreState {
   tickets: Ticket[];
   invoices: Invoice[];
+  walkIns: WalkIn[];
   todos: Todo[];
   orders: OrderStatus[];
   revenue: RevenueMonth[];
@@ -26,6 +27,9 @@ interface StoreActions {
   addInvoice: (invoice: Invoice) => void;
   updateInvoice: (id: string, updates: Partial<Invoice>) => void;
   deleteInvoice: (id: string) => void;
+  addWalkIn: (walkIn: WalkIn) => void;
+  updateWalkIn: (id: string, updates: Partial<WalkIn>) => void;
+  deleteWalkIn: (id: string) => void;
   addTodo: (todo: Todo) => void;
   removeTodo: (id: number) => void;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
@@ -68,12 +72,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Ensure newer fields have defaults if missing from older localStorage data
       return {
         ...saved,
-        invoices: saved.invoices ?? SEED_INVOICES,
+        invoices: (saved.invoices ?? SEED_INVOICES).map((inv: any) => ({ ...inv, invoiceType: inv.invoiceType ?? "retail" })),
+        walkIns: saved.walkIns ?? SEED_WALKINS,
       };
     }
     return {
       tickets: SEED_TICKETS,
       invoices: SEED_INVOICES,
+      walkIns: SEED_WALKINS,
       todos: SEED_TODOS,
       orders: SEED_ORDERS,
       revenue: SEED_REVENUE,
@@ -125,6 +131,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, invoices: s.invoices.filter((inv) => inv.id !== id) }));
   }, []);
 
+  /* ── Walk-In actions ── */
+  const addWalkIn = useCallback((walkIn: WalkIn) => {
+    setState((s) => ({ ...s, walkIns: [walkIn, ...s.walkIns] }));
+  }, []);
+
+  const updateWalkIn = useCallback((id: string, updates: Partial<WalkIn>) => {
+    setState((s) => ({ ...s, walkIns: s.walkIns.map((w) => (w.id === id ? { ...w, ...updates } : w)) }));
+  }, []);
+
+  const deleteWalkIn = useCallback((id: string) => {
+    setState((s) => ({ ...s, walkIns: s.walkIns.filter((w) => w.id !== id) }));
+  }, []);
+
   /* ── Todo actions ── */
   const addTodo = useCallback((todo: Todo) => {
     setState((s) => ({ ...s, todos: [...s.todos, todo] }));
@@ -151,6 +170,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addInvoice,
     updateInvoice,
     deleteInvoice,
+    addWalkIn,
+    updateWalkIn,
+    deleteWalkIn,
     addTodo,
     removeTodo,
     updateTeamMember,

@@ -17,6 +17,7 @@ import { usePermissions } from "@/lib/permissions-context";
 const SECTIONS = [
   { id: "shop",        icon: Building2,   label: "Shop",              desc: "Business identity, GSTIN, address", href: "/settings" },
   { id: "dashboard",   icon: Sliders,     label: "Dashboard",         desc: "Card resize & layout preferences", href: "/settings/dashboard" },
+  { id: "categories",  icon: LayoutGrid,  label: "Device Categories", desc: "Manage repair device categories",  href: "/settings/categories" },
   { id: "users",       icon: Users,       label: "Users",             desc: "Team members & their logins",       href: "/settings/users", permission: "manage_users" as PermissionKey },
   { id: "roles",       icon: Shield,      label: "Roles",             desc: "Responsibilities per role",         href: "/settings/roles", permission: "manage_roles" as PermissionKey },
   { id: "permissions", icon: ShieldCheck, label: "Roles & Permissions", desc: "Capability matrix per role",      href: "/settings/permissions", permission: "manage_roles" as PermissionKey },

@@ -450,7 +450,7 @@ export default function Dashboard() {
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Critical Tasks</p>
-            <h3 className="font-display mt-0.5 text-base font-bold">High-priority tickets to resolve today</h3>
+            <h3 className="font-display mt-0.5 text-base font-bold">Critical & high-priority tickets to resolve</h3>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" className="gap-1.5 rounded-full">
@@ -468,16 +468,17 @@ export default function Dashboard() {
           <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-muted/60">
               <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <th className="w-[110px] px-5 py-2.5">Date</th>
-                <th className="w-[90px] py-2.5">Ticket</th>
+                <th className="w-[90px] px-5 py-2.5">Ticket</th>
                 <th className="py-2.5">Customer</th>
                 <th className="py-2.5">Device</th>
+                <th className="py-2.5 w-[80px]">Priority</th>
                 <th className="w-[140px] py-2.5">Status</th>
-                <th className="w-[120px] py-2.5 pr-5 text-right">Amount</th>
+                <th className="w-[100px] py-2.5">Waiting</th>
+                <th className="w-[100px] py-2.5 pr-5 text-right">Amount</th>
               </tr>
             </thead>
             <tbody>
-              {filteredTickets.slice(0, 5).map((t, i) => (
+              {filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "completed" && t.status !== "delivered").sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).slice(0, 5).map((t, i) => (
                 <motion.tr
                   key={t.id}
                   initial={{ opacity: 0, y: 6 }}
@@ -485,8 +486,7 @@ export default function Dashboard() {
                   transition={{ delay: 0.04 * i }}
                   className="group border-t border-border transition hover:bg-muted/40"
                 >
-                  <td className="px-5 py-3 whitespace-nowrap text-muted-foreground">{new Date(t.createdAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}</td>
-                  <td className="py-3 whitespace-nowrap font-medium">{t.id}</td>
+                  <td className="px-5 py-3 whitespace-nowrap font-medium">{t.id}</td>
                   <td className="py-3">
                     <div className="flex items-center gap-2">
                       <Avatar name={t.customer} size={28} />
@@ -495,11 +495,17 @@ export default function Dashboard() {
                   </td>
                   <td className="py-3 whitespace-nowrap text-muted-foreground">{t.model}</td>
                   <td className="py-3">
+                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>
+                      {t.priority === "critical" ? "Critical" : "High"}
+                    </span>
+                  </td>
+                  <td className="py-3">
                     <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}>
                       <span className="h-1.5 w-1.5 rounded-full bg-current" />
                       {STATUS_LABEL[t.status]}
                     </span>
                   </td>
+                  <td className="py-3 text-[12px] text-muted-foreground whitespace-nowrap">{(() => { const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000); if (mins < 60) return `${mins}m`; if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`; return `${Math.floor(mins/1440)}d`; })()}</td>
                   <td className="py-3 pr-5 text-right font-semibold tnum whitespace-nowrap">{formatINR(t.amount)}</td>
                 </motion.tr>
               ))}
@@ -508,7 +514,7 @@ export default function Dashboard() {
         </div>
 
         <div className="flex items-center justify-between border-t border-border p-4">
-          <p className="text-xs text-muted-foreground">Showing {Math.min(5, filteredTickets.length)} of {filteredTickets.length}</p>
+          <p className="text-xs text-muted-foreground">Showing {Math.min(5, filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "completed" && t.status !== "delivered").length)} critical/high priority</p>
           <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">
             View all tickets <ArrowRight className="h-3.5 w-3.5" />
           </Link>

@@ -128,15 +128,15 @@ export function Topbar({
 
         {/* POS shortcut — only for roles allowed to transact at the counter */}
         <Can permission="use_pos">
-          <Button
-            variant="secondary"
-            size="sm"
-            className="hidden md:inline-flex gap-1.5 rounded-full h-9 px-4"
-            onClick={() => router.push("/walk-in")}
+          <button
+            onClick={() => router.push("/pos")}
+            className="group relative hidden md:inline-flex items-center gap-1.5 rounded-full h-9 px-4 bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white font-semibold text-[13px] transition-all duration-300 hover:scale-[1.04] active:scale-[0.97]"
           >
-            <ShoppingBag className="h-3.5 w-3.5 text-brand-600" />
-            <span className="font-semibold text-[13px]">POS</span>
-          </Button>
+            {/* Thin glowing border light */}
+            <span className="absolute -inset-[1.5px] rounded-full bg-transparent ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
+            <ShoppingBag className="h-3.5 w-3.5 relative z-10" />
+            <span className="relative z-10">POS</span>
+          </button>
         </Can>
 
         {/* Icon actions */}

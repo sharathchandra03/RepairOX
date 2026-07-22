@@ -20,7 +20,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { useStore } from "@/lib/store";
 import { InvoiceFilters, type FilterState } from "@/components/filters/invoice-filters";
-import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, type Invoice, type InvoiceStatus } from "@/lib/mock-data";
+import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
 import { formatINR, cn } from "@/lib/utils";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
@@ -108,6 +108,7 @@ export default function InvoicePage() {
   const { invoices, deleteInvoice, addInvoice, updateInvoice } = useStore();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("all");
   const [q, setQ] = useState("");
   const [viewInvoice, setViewInvoice] = useState<Invoice | null>(null);
@@ -131,10 +132,11 @@ export default function InvoicePage() {
   const list = useMemo(() =>
     invoices.filter((inv) => {
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
+      const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange);
       const okQ = !q || `${inv.id} ${inv.reference} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
-      return okStatus && okDate && okQ;
-    }), [invoices, statusFilter, dateRange, q]);
+      return okStatus && okType && okDate && okQ;
+    }), [invoices, statusFilter, typeFilter, dateRange, q]);
 
   /* KPIs */
   const kpis = useMemo(() => {
@@ -166,23 +168,13 @@ export default function InvoicePage() {
       <PageHeader eyebrow="Billing" title="Invoices" subtitle="Issue, track and reconcile invoices — GST-ready."
         actions={<>
           <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button></Can>
+          <Can permission="manage_invoices"><Link href="/invoice/settings"><Button variant="outline" size="md" className="rounded-full"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
           <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
         </>}
       />
 
-      {/* KPI Cards — 2 rows of 4 */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard icon={DollarSign} label="Total Revenue" value={formatINR(kpis.totalRevenue)} tone="indigo" />
-        <KpiCard icon={Receipt} label="Total Invoices" value={String(kpis.totalInvoices)} tone="violet" />
-        <KpiCard icon={CreditCard} label="Paid Amount" value={formatINR(kpis.paidAmount)} tone="emerald" />
-        <KpiCard icon={Clock} label="Pending" value={formatINR(kpis.pending)} tone="amber" />
-      </div>
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KpiCard icon={AlertCircle} label="Overdue" value={formatINR(kpis.overdue)} subtext={`${kpis.overdueCount} invoice${kpis.overdueCount !== 1 ? "s" : ""}`} tone="rose" />
-        <KpiCard icon={FileText} label="Drafts" value={String(kpis.draftCount)} tone="zinc" />
-        <KpiCard icon={TrendingUp} label="Tax Collected" value={formatINR(kpis.taxCollected)} tone="teal" />
-        <KpiCard icon={BarChart3} label="Collection Rate" value={kpis.totalRevenue > 0 ? `${Math.round((kpis.paidAmount / kpis.totalRevenue) * 100)}%` : "0%"} tone="indigo" />
-      </div>
+      {/* KPI Cards — Draggable */}
+      <DraggableKpiGrid kpis={kpis} />
 
       {/* Analytics — Status Distribution + Payment Overview */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -247,12 +239,18 @@ export default function InvoicePage() {
           setStatusFilter(filterState.invoiceStatus);
           setQ(filterState.customerName || filterState.invoiceId || "");
         }}
-        onReset={() => { setStatusFilter("all"); setDateRange("all"); setQ(""); }}
-        extraActions={
+        onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setDateRange("all"); setQ(""); }}
+        extraActions={<>
           <Button variant="outline" size="sm" onClick={() => setShowColSettings(!showColSettings)}>
             <Settings2 className="h-3.5 w-3.5" /> Columns
           </Button>
-        }
+          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:border-[#4361EE] focus:ring-1 focus:ring-[#4361EE]/30 focus:outline-none">
+            <option value="all">All Types</option>
+            <option value="retail">Retail Invoice</option>
+            <option value="business">Business Invoice</option>
+          </select>
+        </>}
       />
 
       {/* Column Settings Panel */}
@@ -532,7 +530,11 @@ function renderInvCell(
   onDelete: () => void,
 ) {
   switch (colId) {
-    case "id": return <span className="font-semibold text-foreground whitespace-nowrap">{inv.id}</span>;
+    case "id": return (
+      <span className={cn("font-semibold whitespace-nowrap cursor-default", INVOICE_ID_COLOR[inv.status] || "text-foreground")} title={`Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}>
+        {inv.id}
+      </span>
+    );
     case "reference": return <span className="text-muted-foreground whitespace-nowrap text-[12px]">{inv.reference}</span>;
     case "customer": return (
       <div className="flex items-center gap-2.5">
@@ -662,5 +664,66 @@ function InvColumnSettingsPanel({
         </div>
       </div>
     </motion.div>
+  );
+}
+
+/* ─── Draggable KPI Grid ─────────────────────────────────────────────── */
+
+const KPI_STORAGE_KEY = "repairox-invoice-kpi-order";
+
+type KpiDef = { id: string; icon: any; label: string; value: string; subtext?: string; tone: string };
+
+function DraggableKpiGrid({ kpis }: { kpis: any }) {
+  const allCards: KpiDef[] = [
+    { id: "revenue", icon: DollarSign, label: "Total Revenue", value: formatINR(kpis.totalRevenue), tone: "indigo" },
+    { id: "invoices", icon: Receipt, label: "Total Invoices", value: String(kpis.totalInvoices), tone: "violet" },
+    { id: "paid", icon: CreditCard, label: "Paid Amount", value: formatINR(kpis.paidAmount), tone: "emerald" },
+    { id: "pending", icon: Clock, label: "Pending", value: formatINR(kpis.pending), tone: "amber" },
+    { id: "overdue", icon: AlertCircle, label: "Overdue", value: formatINR(kpis.overdue), subtext: `${kpis.overdueCount} invoice${kpis.overdueCount !== 1 ? "s" : ""}`, tone: "rose" },
+    { id: "drafts", icon: FileText, label: "Drafts", value: String(kpis.draftCount), tone: "zinc" },
+    { id: "tax", icon: TrendingUp, label: "Tax Collected", value: formatINR(kpis.taxCollected), tone: "teal" },
+    { id: "rate", icon: BarChart3, label: "Collection Rate", value: kpis.totalRevenue > 0 ? `${Math.round((kpis.paidAmount / kpis.totalRevenue) * 100)}%` : "0%", tone: "indigo" },
+  ];
+
+  const defaultOrder = allCards.map((c) => c.id);
+  const [order, setOrder] = useState<string[]>(() => {
+    if (typeof window === "undefined") return defaultOrder;
+    try { const s = localStorage.getItem(KPI_STORAGE_KEY); return s ? JSON.parse(s) : defaultOrder; } catch { return defaultOrder; }
+  });
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  const sorted = order.map((id) => allCards.find((c) => c.id === id)).filter(Boolean) as KpiDef[];
+
+  const handleDragOver = (e: React.DragEvent, targetId: string) => {
+    e.preventDefault();
+    if (!dragId || dragId === targetId) return;
+    setOrder((prev) => {
+      const from = prev.indexOf(dragId);
+      const to = prev.indexOf(targetId);
+      if (from < 0 || to < 0) return prev;
+      const n = [...prev]; n.splice(from, 1); n.splice(to, 0, dragId); return n;
+    });
+  };
+
+  const handleDragEnd = () => {
+    setDragId(null);
+    try { localStorage.setItem(KPI_STORAGE_KEY, JSON.stringify(order)); } catch {}
+  };
+
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      {sorted.map((card) => (
+        <div
+          key={card.id}
+          draggable
+          onDragStart={() => setDragId(card.id)}
+          onDragOver={(e) => handleDragOver(e, card.id)}
+          onDragEnd={handleDragEnd}
+          className={cn("transition-all", dragId === card.id && "opacity-50 scale-95")}
+        >
+          <KpiCard icon={card.icon} label={card.label} value={card.value} subtext={card.subtext} tone={card.tone} />
+        </div>
+      ))}
+    </div>
   );
 }

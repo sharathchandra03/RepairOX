@@ -20,7 +20,7 @@ import {
   CheckoutDrawer, EmailReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { STATUS_LABEL, STATUS_TONE, type TicketStatus, type Ticket } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 
@@ -85,10 +85,9 @@ const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
 
 const PRIORITY_OPTIONS = [
   { label: "All Priorities", value: "all" },
-  { label: "Low", value: "low" },
-  { label: "Medium", value: "med" },
-  { label: "High", value: "high" },
-  { label: "Urgent", value: "urgent" },
+  { label: "Normal", value: "normal" },
+  { label: "High Priority", value: "high" },
+  { label: "Critical", value: "critical" },
 ];
 
 const WAITING_THRESHOLD_MINS = 40;
@@ -133,7 +132,7 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
 
 export default function TicketsPage() {
   const router = useRouter();
-  const { tickets, bulkUpdateStatus, deleteTicket } = useStore();
+  const { tickets, bulkUpdateStatus, deleteTicket, updateTicket } = useStore();
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -159,6 +158,9 @@ export default function TicketsPage() {
 
   // Delete confirmation
   const [deleteTarget, setDeleteTarget] = useState<Ticket | null>(null);
+
+  // Priority change
+  const [priorityTarget, setPriorityTarget] = useState<Ticket | null>(null);
 
   // Tick for time-based highlights
   const [, setTick] = useState(0);
@@ -219,6 +221,10 @@ export default function TicketsPage() {
     if (action === "edit") { router.push(`/tickets/new?edit=${ticket.id}`); return; }
     if (action === "delete") {
       setDeleteTarget(ticket);
+      return;
+    }
+    if (action === "priority") {
+      setPriorityTarget(ticket);
       return;
     }
     setActiveTicket(ticket);
@@ -547,6 +553,27 @@ export default function TicketsPage() {
         confirmLabel={`Delete ${selected.size} Ticket${selected.size > 1 ? "s" : ""}`}
         danger
       />
+
+      {/* Priority Change Dialog */}
+      {priorityTarget && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setPriorityTarget(null)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <p className="text-sm font-bold mb-1">Change Priority</p>
+            <p className="text-[11px] text-muted-foreground mb-4">Ticket {priorityTarget.id}</p>
+            <div className="space-y-2">
+              {(["normal", "high", "critical"] as TicketPriority[]).map((p) => (
+                <button key={p} onClick={() => { updateTicket(priorityTarget.id, { priority: p }); setPriorityTarget(null); }}
+                  className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", priorityTarget.priority === p ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
+                  <span className={cn("h-2.5 w-2.5 rounded-full", p === "critical" ? "bg-rose-500" : p === "high" ? "bg-amber-500" : "bg-zinc-300")} />
+                  <span className="text-sm font-medium">{PRIORITY_LABEL[p]}</span>
+                  {priorityTarget.priority === p && <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span>}
+                </button>
+              ))}
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
@@ -571,7 +598,14 @@ function renderCell(
           aria-label={`Select ticket ${t.id}`} />
       );
     case "ticket":
-      return <span className="font-semibold text-foreground whitespace-nowrap">{t.id}</span>;
+      return (
+        <div className="flex items-center gap-1.5">
+          {t.priority !== "normal" && (
+            <span className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")} title={t.priority === "critical" ? "Critical" : "High Priority"} />
+          )}
+          <span className="font-semibold text-foreground whitespace-nowrap">{t.id}</span>
+        </div>
+      );
     case "customer":
       return (
         <div className="flex items-center gap-2.5">

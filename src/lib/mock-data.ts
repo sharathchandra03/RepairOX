@@ -26,6 +26,20 @@ export const STATUS_TONE: Record<TicketStatus, string> = {
   delivered: "bg-zinc-100 text-zinc-700 ring-zinc-200",
 };
 
+export type TicketPriority = "normal" | "high" | "critical";
+
+export const PRIORITY_LABEL: Record<TicketPriority, string> = {
+  normal: "Normal",
+  high: "High Priority",
+  critical: "Critical",
+};
+
+export const PRIORITY_TONE: Record<TicketPriority, string> = {
+  normal: "bg-zinc-100 text-zinc-600 ring-zinc-200",
+  high: "bg-amber-50 text-amber-700 ring-amber-200",
+  critical: "bg-rose-50 text-rose-700 ring-rose-200",
+};
+
 export type TicketItem = {
   device: string;
   model: string;
@@ -44,7 +58,7 @@ export type Ticket = {
   issue: string;
   items?: TicketItem[];
   status: TicketStatus;
-  priority: "low" | "med" | "high" | "urgent";
+  priority: TicketPriority;
   technician: string;
   createdAt: string;
   dueDate?: string;
@@ -59,9 +73,9 @@ function minsAgo(mins: number): string {
 
 export const tickets: Ticket[] = [
   { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", amount: 22500, service: "Screen Repair" },
-  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "urgent", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", amount: 18999, service: "Board Repair" },
-  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "med", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", amount: 12999, service: "Battery Replacement" },
-  { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "low", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair" },
+  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "critical", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", amount: 18999, service: "Board Repair" },
+  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "normal", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", amount: 12999, service: "Battery Replacement" },
+  { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "normal", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair" },
   {
     id: "T-7335", customer: "Ravindu Toyota", phone: "+91 99000 56190", company: "iFix India - Koramangala", device: "iPad", model: "iPad Air 2", issue: "Battery bulged, display broken",
     items: [
@@ -70,10 +84,10 @@ export const tickets: Ticket[] = [
       { device: "iPad", model: "iPad Air 2", serial: "DMPRQ2AYG5VT", issue: "Battery bulged", service: "Battery Replacement" },
       { device: "iPad", model: "iPad Air 2", serial: "DMPRT5K1G5VT", issue: "Battery bulged, display broken", service: "Battery + Screen" },
     ],
-    status: "repairing", priority: "high", technician: "Anand", createdAt: minsAgo(90), dueDate: "2026-07-22T19:00:00", amount: 20000, service: "Bulk Repair"
+    status: "repairing", priority: "critical", technician: "Anand", createdAt: minsAgo(90), dueDate: "2026-07-22T19:00:00", amount: 20000, service: "Bulk Repair"
   },
-  { id: "T-911", customer: "Vikas Nair", phone: "+91 65432 10987", company: "NairTech Solutions", device: "iPad", model: "iPad Air 11\u2033", issue: "Touch panel calibration", status: "received", priority: "med", technician: "Anand", createdAt: minsAgo(45), dueDate: "2026-07-24T12:00:00", amount: 4999, service: "Calibration" },
-  { id: "T-204", customer: "Sneha P.", phone: "+91 54321 09876", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "low", technician: "Ravi", createdAt: minsAgo(5), amount: 3499, service: "Port Repair" },
+  { id: "T-911", customer: "Vikas Nair", phone: "+91 65432 10987", company: "NairTech Solutions", device: "iPad", model: "iPad Air 11\u2033", issue: "Touch panel calibration", status: "received", priority: "normal", technician: "Anand", createdAt: minsAgo(45), dueDate: "2026-07-24T12:00:00", amount: 4999, service: "Calibration" },
+  { id: "T-204", customer: "Sneha P.", phone: "+91 54321 09876", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "normal", technician: "Ravi", createdAt: minsAgo(5), amount: 3499, service: "Port Repair" },
   { id: "T-732", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub", device: "iPhone", model: "iPhone 13", issue: "Speaker no audio", status: "repairing", priority: "high", technician: "Pooja", createdAt: minsAgo(90), dueDate: "2026-07-22T18:00:00", amount: 2899, service: "Speaker Repair" },
   {
     id: "T-621", customer: "Anjali R.", phone: "+91 32109 87654", device: "Windows", model: "Lenovo Yoga 9i", issue: "Hinge replacement",
@@ -81,7 +95,7 @@ export const tickets: Ticket[] = [
       { device: "Windows", model: "Lenovo Yoga 9i", serial: "PF4KXYZ1", issue: "Hinge replacement", service: "Hardware Repair" },
       { device: "Windows", model: "Lenovo IdeaPad 5", serial: "PF4KABC2", issue: "Keyboard not working", service: "Keyboard Replacement" },
     ],
-    status: "diagnosis", priority: "med", technician: "Shubham", createdAt: minsAgo(42), dueDate: "2026-07-25T11:00:00", amount: 14999, service: "Hardware Repair"
+    status: "diagnosis", priority: "normal", technician: "Shubham", createdAt: minsAgo(42), dueDate: "2026-07-25T11:00:00", amount: 14999, service: "Hardware Repair"
   },
 ];
 
@@ -128,7 +142,6 @@ export const navItems: NavItem[] = [
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
-  { href: "/buy-back",         label: "Buy-Back",      icon: "Recycle", permission: "manage_sales" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "Wallet", permission: "manage_payments" },
 
@@ -213,6 +226,16 @@ export const INVOICE_STATUS_TONE: Record<InvoiceStatus, string> = {
   cancelled: "bg-zinc-100 text-zinc-500 ring-zinc-200",
 };
 
+/** Muted text color for Invoice ID based on status */
+export const INVOICE_ID_COLOR: Record<InvoiceStatus, string> = {
+  draft: "text-zinc-500",
+  sent: "text-amber-600",
+  paid: "text-emerald-600",
+  partial: "text-blue-600",
+  overdue: "text-orange-600",
+  cancelled: "text-rose-500",
+};
+
 export type InvoiceLineItem = {
   id: string;
   sku?: string;
@@ -225,9 +248,17 @@ export type InvoiceLineItem = {
   total: number;
 };
 
+export type InvoiceType = "retail" | "business";
+
+export const INVOICE_TYPE_LABEL: Record<InvoiceType, string> = {
+  retail: "Retail Invoice",
+  business: "Business Invoice",
+};
+
 export type Invoice = {
   id: string;
   reference: string;
+  invoiceType: InvoiceType;
   customer: string;
   phone: string;
   email?: string;
@@ -255,7 +286,7 @@ function daysAgo(days: number): string {
 
 export const invoices: Invoice[] = [
   {
-    id: "INV-1001", reference: "CORP-1753", customer: "Rahul Kapoor", phone: "+91 98456 12345", email: "rahul@kapoor.in", company: "Kapoor Electronics",
+    id: "INV001", reference: "CORP-1753", invoiceType: "retail", customer: "Rahul Kapoor", phone: "+91 98456 12345", email: "rahul@kapoor.in", company: "Kapoor Electronics",
     status: "paid", createdAt: daysAgo(5), dueDate: daysAgo(-2), paidAmount: 22500,
     items: [
       { id: "li-1", sku: "SCR-IPH16", name: "iPhone 16 Pro Max Display", description: "OLED original assembly", qty: 1, price: 18500, discount: 0, total: 18500 },
@@ -265,7 +296,7 @@ export const invoices: Invoice[] = [
     subtotal: 22500, discount: 0, tax: 0, total: 22500, notes: "Display replaced under warranty extension.", terms: "Limited Warranty\nWe stand behind our repair services.", footer: "THANK YOU FOR CHOOSING FIX IND", employee: "Anjali R.", ticketId: "T-1837"
   },
   {
-    id: "INV-1002", reference: "CORP-1754", customer: "Manoj S.", phone: "+91 90876 54321", email: "manoj@repairox.in",
+    id: "INVG001", reference: "CORP-1754", invoiceType: "business", customer: "Manoj S.", phone: "+91 90876 54321", email: "manoj@repairox.in",
     status: "sent", createdAt: daysAgo(2), dueDate: daysAgo(-5), paidAmount: 0,
     items: [
       { id: "li-4", sku: "BRD-IPH14", name: "iPhone 14 Logic Board Repair", description: "Liquid damage micro-soldering", qty: 1, price: 15000, discount: 500, total: 14500 },
@@ -275,7 +306,7 @@ export const invoices: Invoice[] = [
     subtotal: 18999, discount: 500, tax: 3418, total: 21917, notes: "Board level repair completed.", terms: "Limited Warranty", footer: "THANK YOU FOR CHOOSING FIX IND", employee: "Vikas", ticketId: "T-8624"
   },
   {
-    id: "INV-1003", reference: "CORP-1755", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons",
+    id: "INV002", reference: "CORP-1755", invoiceType: "retail", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons",
     status: "partial", createdAt: daysAgo(7), dueDate: daysAgo(-1), paidAmount: 7000,
     items: [
       { id: "li-7", sku: "BAT-MBA4", name: "MacBook Air M4 Battery", description: "Original Apple replacement cell", qty: 1, price: 9999, discount: 0, total: 9999 },
@@ -284,7 +315,7 @@ export const invoices: Invoice[] = [
     subtotal: 12999, discount: 0, tax: 2340, total: 15339, notes: "Customer paid advance. Balance on pickup.", employee: "Pooja", ticketId: "T-456"
   },
   {
-    id: "INV-1004", reference: "CORP-1756", customer: "Sneha P.", phone: "+91 54321 09876",
+    id: "INV003", reference: "CORP-1756", invoiceType: "retail", customer: "Sneha P.", phone: "+91 54321 09876",
     status: "draft", createdAt: daysAgo(0), dueDate: daysAgo(-7), paidAmount: 0,
     items: [
       { id: "li-9", name: "Charging Port Assembly", qty: 1, price: 2499, discount: 0, total: 2499 },
@@ -293,7 +324,7 @@ export const invoices: Invoice[] = [
     subtotal: 3499, discount: 0, tax: 630, total: 4129, employee: "Ravi", ticketId: "T-204"
   },
   {
-    id: "INV-1005", reference: "CORP-1757", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub",
+    id: "INVG002", reference: "CORP-1757", invoiceType: "business", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub",
     status: "overdue", createdAt: daysAgo(14), dueDate: daysAgo(4), paidAmount: 0,
     items: [
       { id: "li-11", name: "Speaker Module (iPhone 13)", qty: 1, price: 1899, discount: 0, total: 1899 },
@@ -303,9 +334,58 @@ export const invoices: Invoice[] = [
   },
 ];
 
+/* ─── Walk-In Types & Seed Data ──────────────────────────────────────── */
+
+export type WalkInStatus = "waiting" | "inspection" | "quotation_given" | "converted_ticket" | "converted_invoice" | "closed" | "lost" | "follow_up";
+
+export const WALKIN_STATUS_LABEL: Record<WalkInStatus, string> = {
+  waiting: "Waiting", inspection: "Inspection", quotation_given: "Quotation Given",
+  converted_ticket: "Converted to Ticket", converted_invoice: "Converted to Invoice",
+  closed: "Closed", lost: "Lost Customer", follow_up: "Follow-Up Required",
+};
+
+export const WALKIN_STATUS_TONE: Record<WalkInStatus, string> = {
+  waiting: "bg-amber-50 text-amber-700 ring-amber-200",
+  inspection: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  quotation_given: "bg-violet-50 text-violet-700 ring-violet-200",
+  converted_ticket: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  converted_invoice: "bg-sky-50 text-sky-700 ring-sky-200",
+  closed: "bg-zinc-100 text-zinc-600 ring-zinc-200",
+  lost: "bg-rose-50 text-rose-600 ring-rose-200",
+  follow_up: "bg-orange-50 text-orange-700 ring-orange-200",
+};
+
+export type WalkIn = {
+  id: string;
+  date: string;
+  time: string;
+  customer: string;
+  phone: string;
+  source: string;
+  category: string;
+  model: string;
+  reasons: string[];
+  status: WalkInStatus;
+  ticketId?: string;
+  invoiceValue: number;
+  businessValue: number;
+  notes?: string;
+};
+
+export const walkIns: WalkIn[] = [
+  { id: "WI-001", date: "2026-07-21", time: "09:15", customer: "Rahul Kapoor", phone: "+91 98456 12345", source: "Walk-In", category: "Mobile", model: "iPhone 16 Pro Max", reasons: ["Repair", "Screen Damage"], status: "converted_ticket", ticketId: "T-1837", invoiceValue: 22500, businessValue: 22500 },
+  { id: "WI-002", date: "2026-07-21", time: "09:45", customer: "Priya Sharma", phone: "+91 87654 99887", source: "Google", category: "Laptop", model: "MacBook Air M4", reasons: ["Battery Issue"], status: "waiting", invoiceValue: 0, businessValue: 0 },
+  { id: "WI-003", date: "2026-07-21", time: "10:10", customer: "Manoj S.", phone: "+91 90876 54321", source: "Existing Customer", category: "Mobile", model: "iPhone 14", reasons: ["Water Damage", "Repair"], status: "inspection", invoiceValue: 0, businessValue: 0 },
+  { id: "WI-004", date: "2026-07-21", time: "10:30", customer: "Deepika R.", phone: "+91 77665 44332", source: "Instagram", category: "Mobile", model: "Samsung Galaxy S25", reasons: ["Quotation"], status: "quotation_given", invoiceValue: 0, businessValue: 0 },
+  { id: "WI-005", date: "2026-07-21", time: "11:00", customer: "Vikas Nair", phone: "+91 65432 10987", source: "Walk-In", category: "Smart Watch", model: "Apple Watch S9", reasons: ["Accessory Purchase"], status: "converted_invoice", invoiceValue: 1499, businessValue: 1499 },
+  { id: "WI-006", date: "2026-07-21", time: "11:20", customer: "Sneha P.", phone: "+91 54321 09876", source: "Reference", category: "Mobile", model: "Pixel 9", reasons: ["General Enquiry"], status: "closed", invoiceValue: 0, businessValue: 0 },
+  { id: "WI-007", date: "2026-07-21", time: "11:45", customer: "Amit Joshi", phone: "+91 99887 76655", source: "WhatsApp", category: "Tablet", model: "iPad Air 11", reasons: ["Data Recovery"], status: "follow_up", invoiceValue: 0, businessValue: 0 },
+  { id: "WI-008", date: "2026-07-21", time: "12:15", customer: "Unknown", phone: "+91 88776 65544", source: "Walk-In", category: "Mobile", model: "OnePlus 13", reasons: ["Screen Damage"], status: "lost", invoiceValue: 0, businessValue: 0 },
+];
+
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
-    { label: "MODULE",     items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/buy-back", "/price-list"] },
+    { label: "MODULE",     items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
     { label: "MANAGE",     items: ["/shop/technicians", "/shop/notes", "/contacts"] },
     { label: "INVENTORY",  items: ["/inventory"] },
     { label: "BILLING",    items: ["/shop/payments", "/expenses"] },

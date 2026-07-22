@@ -15,18 +15,56 @@ type Cat = {
   icon: typeof Smartphone;
   tint: string;
   glow: string;
+  image?: string;
 };
 
-const CATS: Cat[] = [
-  { id: "macbook", label: "MacBook", icon: Laptop,            tint: "from-zinc-600 via-zinc-800 to-black",          glow: "rgba(79,70,229,0.5)" },
-  { id: "ipad",    label: "iPad",    icon: Tablet,            tint: "from-zinc-500 via-zinc-700 to-zinc-900",       glow: "rgba(79,70,229,0.5)" },
-  { id: "iwatch",  label: "iWatch",  icon: Watch,             tint: "from-zinc-600 via-zinc-800 to-zinc-900",       glow: "rgba(79,70,229,0.5)" },
-  { id: "iphone",  label: "iPhone",  icon: Smartphone,        tint: "from-indigo-700 via-indigo-900 to-black",      glow: "rgba(79,70,229,0.6)" },
-  { id: "imac",    label: "iMac",    icon: Monitor,           tint: "from-zinc-400 via-zinc-600 to-zinc-800",       glow: "rgba(79,70,229,0.5)" },
-  { id: "android", label: "Android", icon: MonitorSmartphone, tint: "from-emerald-700 via-zinc-800 to-black",        glow: "rgba(79,70,229,0.5)" },
-  { id: "windows", label: "Windows", icon: Laptop,            tint: "from-sky-700 via-zinc-800 to-black",            glow: "rgba(79,70,229,0.5)" },
-  { id: "others",  label: "Others",  icon: Boxes,             tint: "from-violet-700 via-zinc-800 to-zinc-900",     glow: "rgba(79,70,229,0.5)" },
-];
+const ICON_MAP: Record<string, typeof Smartphone> = {
+  iphone: Smartphone, macbook: Laptop, ipad: Tablet, iwatch: Watch,
+  imac: Monitor, android: MonitorSmartphone, windows: Laptop, others: Boxes,
+};
+
+const TINT_MAP: Record<string, string> = {
+  iphone: "from-indigo-700 via-indigo-900 to-black",
+  macbook: "from-zinc-600 via-zinc-800 to-black",
+  ipad: "from-zinc-500 via-zinc-700 to-zinc-900",
+  iwatch: "from-zinc-600 via-zinc-800 to-zinc-900",
+  imac: "from-zinc-400 via-zinc-600 to-zinc-800",
+  android: "from-emerald-700 via-zinc-800 to-black",
+  windows: "from-sky-700 via-zinc-800 to-black",
+  others: "from-violet-700 via-zinc-800 to-zinc-900",
+};
+
+const CATS_STORAGE_KEY = "repairox-device-categories";
+
+function loadCats(): Cat[] {
+  if (typeof window === "undefined") return getDefaultCats();
+  try {
+    const raw = localStorage.getItem(CATS_STORAGE_KEY);
+    if (!raw) return getDefaultCats();
+    const saved: { id: string; label: string; image?: string }[] = JSON.parse(raw);
+    return saved.map((c) => ({
+      id: c.id,
+      label: c.label,
+      icon: ICON_MAP[c.id] || Boxes,
+      tint: TINT_MAP[c.id] || "from-zinc-600 via-zinc-800 to-black",
+      glow: "rgba(79,70,229,0.5)",
+      image: c.image,
+    }));
+  } catch { return getDefaultCats(); }
+}
+
+function getDefaultCats(): Cat[] {
+  return [
+    { id: "macbook", label: "MacBook", icon: Laptop, tint: "from-zinc-600 via-zinc-800 to-black", glow: "rgba(79,70,229,0.5)" },
+    { id: "ipad", label: "iPad", icon: Tablet, tint: "from-zinc-500 via-zinc-700 to-zinc-900", glow: "rgba(79,70,229,0.5)" },
+    { id: "iwatch", label: "iWatch", icon: Watch, tint: "from-zinc-600 via-zinc-800 to-zinc-900", glow: "rgba(79,70,229,0.5)" },
+    { id: "iphone", label: "iPhone", icon: Smartphone, tint: "from-indigo-700 via-indigo-900 to-black", glow: "rgba(79,70,229,0.6)" },
+    { id: "imac", label: "iMac", icon: Monitor, tint: "from-zinc-400 via-zinc-600 to-zinc-800", glow: "rgba(79,70,229,0.5)" },
+    { id: "android", label: "Android", icon: MonitorSmartphone, tint: "from-emerald-700 via-zinc-800 to-black", glow: "rgba(79,70,229,0.5)" },
+    { id: "windows", label: "Windows", icon: Laptop, tint: "from-sky-700 via-zinc-800 to-black", glow: "rgba(79,70,229,0.5)" },
+    { id: "others", label: "Others", icon: Boxes, tint: "from-violet-700 via-zinc-800 to-zinc-900", glow: "rgba(79,70,229,0.5)" },
+  ];
+}
 
 export function CategoryWheel({
   value,
@@ -37,9 +75,10 @@ export function CategoryWheel({
   onChange: (id: string) => void;
   onNext: () => void;
 }) {
-  const initial = value ? CATS.findIndex((c) => c.id === value) : 3;
-  const [active, setActive] = useState(initial >= 0 ? initial : 3);
-  const cur = CATS[active];
+  const [CATS] = useState<Cat[]>(() => loadCats());
+  const initial = value ? CATS.findIndex((c) => c.id === value) : Math.min(3, CATS.length - 1);
+  const [active, setActive] = useState(initial >= 0 ? initial : 0);
+  const cur = CATS[active] || CATS[0];
 
   // Sync external value if it changes (e.g. via dot navigation upstream)
   useEffect(() => {
@@ -84,7 +123,7 @@ export function CategoryWheel({
   return (
     <div className="relative">
       {/* ---------- Wheel stage ---------- */}
-      <div className="relative h-[420px] overflow-hidden rounded-[28px] sm:h-[460px]">
+      <div className="relative h-[280px] overflow-hidden rounded-[28px] sm:h-[320px]">
         {/* Brand wash background */}
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-200/50 via-indigo-100/30 to-violet-200/40" />
         {/* Wave grid */}
@@ -126,7 +165,7 @@ export function CategoryWheel({
         {/* Wheel viewport - items absolutely positioned, animated transforms */}
         <div className="absolute inset-0 grid place-items-center [perspective:1100px]">
           {/* Mobile-first: scale the whole wheel down on small screens */}
-          <div className="relative h-full w-full origin-center scale-[0.7] sm:scale-90 lg:scale-100">
+          <div className="relative h-full w-full origin-center scale-[0.65] sm:scale-[0.8] lg:scale-90">
             <div className="absolute inset-0 grid place-items-center">
               {CATS.map((c, i) => {
                 const p = pos(i);
@@ -161,7 +200,7 @@ export function CategoryWheel({
                     >
                       <div
                         className={cn(
-                          "relative grid h-36 w-32 place-items-center rounded-[26px] bg-gradient-to-b ring-1 ring-zinc-900/10 transition-shadow",
+                          "relative grid h-24 w-24 place-items-center rounded-[20px] bg-gradient-to-b ring-1 ring-zinc-900/10 transition-shadow",
                           c.tint
                         )}
                         style={{
@@ -170,7 +209,11 @@ export function CategoryWheel({
                             : "0 14px 30px -16px rgba(0,0,0,0.35)",
                         }}
                       >
-                        <Icon className="h-14 w-14 text-white/95" strokeWidth={1.4} />
+                        {c.image ? (
+                          <img src={c.image} alt={c.label} className="h-12 w-12 rounded-lg object-cover" />
+                        ) : (
+                          <Icon className="h-10 w-10 text-white/95" strokeWidth={1.4} />
+                        )}
                         {/* Specular highlight */}
                         <div className="pointer-events-none absolute inset-x-3 top-2 h-7 rounded-full bg-white/15 blur-md" />
                         {/* Active accent ring */}
@@ -218,7 +261,7 @@ export function CategoryWheel({
       </div>
 
       {/* ---------- Hero label ---------- */}
-      <div className="mt-3 text-center">
+      <div className="mt-2 text-center">
         <AnimatePresence mode="wait">
           <motion.p
             key={cur.id}
@@ -234,7 +277,7 @@ export function CategoryWheel({
       </div>
 
       {/* ---------- Dots ---------- */}
-      <div className="mt-3 flex items-center justify-center gap-1.5">
+      <div className="mt-2 flex items-center justify-center gap-1.5">
         {CATS.map((_, i) => (
           <button
             key={i}
@@ -249,7 +292,7 @@ export function CategoryWheel({
       </div>
 
       {/* ---------- Bottom CTAs ---------- */}
-      <div className="mt-6 flex items-center justify-center gap-3">
+      <div className="mt-4 flex items-center justify-center gap-3">
         <Button variant="outline" size="lg" onClick={goPrev} disabled={active === 0}>
           <ChevronLeft className="h-4 w-4" /> Previous
         </Button>

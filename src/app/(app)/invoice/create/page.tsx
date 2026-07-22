@@ -12,7 +12,7 @@ import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/in
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
-import type { Invoice, InvoiceLineItem, InvoiceStatus } from "@/lib/mock-data";
+import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType } from "@/lib/mock-data";
 
 /* ─── Step Definitions ───────────────────────────────────────────────── */
 
@@ -30,7 +30,7 @@ const STEPS = [
 
 type InvoiceFormData = {
   customer: { name: string; phone: string; email: string; company: string };
-  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus };
+  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; invoiceType: InvoiceType };
   items: InvoiceLineItem[];
   pricing: { discount: number; taxRate: number };
   notes: { notes: string; terms: string; slogan: string; footer: string };
@@ -38,14 +38,20 @@ type InvoiceFormData = {
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", email: "", company: "" },
-  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft" },
+  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", invoiceType: "retail" },
   items: [],
   pricing: { discount: 0, taxRate: 18 },
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
 
-function genInvoiceId(): string {
-  return `INV-${Math.floor(1000 + Math.random() * 9000)}`;
+function genInvoiceId(type: InvoiceType, existingInvoices: Invoice[]): string {
+  const prefix = type === "business" ? "INVG" : "INV";
+  const existing = existingInvoices.filter((i) => i.invoiceType === type);
+  const maxNum = existing.reduce((max, i) => {
+    const match = i.id.match(/\d+$/);
+    return match ? Math.max(max, parseInt(match[0], 10)) : max;
+  }, 0);
+  return `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
 }
 
 function genLineId(): string {
@@ -121,8 +127,9 @@ function InvoiceWizard() {
   // Submit
   const handleSubmit = useCallback(() => {
     const invoice: Invoice = {
-      id: editId || genInvoiceId(),
+      id: editId || genInvoiceId(form.details.invoiceType as InvoiceType, invoices),
       reference: form.details.reference || `CORP-${Math.floor(1000 + Math.random() * 9000)}`,
+      invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
       phone: form.customer.phone,
       email: form.customer.email || undefined,
@@ -171,7 +178,7 @@ function InvoiceWizard() {
       <div className="pointer-events-none absolute -top-40 left-1/2 h-[400px] w-[700px] -translate-x-1/2 rounded-full bg-gradient-to-br from-[#B3BFF6]/20 to-[#4361EE]/8 blur-3xl" />
 
       {/* Top bar */}
-      <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-5 sm:px-6 lg:px-8">
+      <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Back to invoices">
           <ArrowLeft className="h-4 w-4" />
         </button>
@@ -196,7 +203,7 @@ function InvoiceWizard() {
       </div>
 
       {/* Stepper */}
-      <div className="relative mx-auto max-w-6xl px-4 pt-4 pb-2 sm:px-6 lg:px-8">
+      <div className="relative mx-auto max-w-6xl px-4 pt-2 pb-2 sm:px-6 lg:px-8">
         <div className="hidden md:flex items-center justify-between">
           {STEPS.slice(0, 6).map((s, i) => {
             const done = step > s.id;
@@ -238,7 +245,7 @@ function InvoiceWizard() {
       </div>
 
       {/* Step Content */}
-      <div className="relative mx-auto max-w-6xl px-4 pt-8 pb-6 sm:px-6 lg:px-8 flex-1">
+      <div className="relative mx-auto max-w-6xl px-4 pt-4 pb-6 sm:px-6 lg:px-8 flex-1 min-h-0 overflow-y-auto">
         <AnimatePresence mode="wait">
           <motion.div key={step} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
             {step === 1 && <StepCustomer form={form} updateForm={updateForm} />}
@@ -291,7 +298,7 @@ function InvoiceWizard() {
 function invoiceToForm(inv: Invoice): InvoiceFormData {
   return {
     customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "" },
-    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status },
+    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, invoiceType: inv.invoiceType || "retail" },
     items: inv.items,
     pricing: { discount: inv.discount, taxRate: inv.tax > 0 && inv.subtotal > 0 ? Math.round((inv.tax / (inv.subtotal - inv.discount)) * 100) : 18 },
     notes: { notes: inv.notes || "", terms: inv.terms || "", slogan: inv.slogan || "", footer: inv.footer || "" },
@@ -302,16 +309,43 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
 
 function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
   const c = form.customer;
+  const d = form.details;
   const set = (k: keyof typeof c, v: string) => updateForm((f) => ({ ...f, customer: { ...f.customer, [k]: v } }));
+  const setType = (v: string) => updateForm((f) => ({ ...f, details: { ...f.details, invoiceType: v as any } }));
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
-      <h2 className="font-display text-lg font-bold mb-1">Customer Information</h2>
-      <p className="text-sm text-muted-foreground mb-6">Who is this invoice for?</p>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-        <div className="space-y-1.5"><Label>Customer Name *</Label><Input value={c.name} onChange={(e: any) => set("name", e.target.value)} placeholder="Rahul Kapoor" /></div>
-        <div className="space-y-1.5"><Label>Phone</Label><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" /></div>
-        <div className="space-y-1.5"><Label>Email</Label><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="customer@email.com" type="email" /></div>
-        <div className="space-y-1.5"><Label>Company / Organization</Label><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></div>
+    <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+      {/* Invoice Type — compact inline selector */}
+      <div className="border-b border-border px-6 py-4 sm:px-8">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Invoice Type</p>
+        <div className="flex gap-2">
+          <button type="button" onClick={() => setType("retail")}
+            className={cn("flex items-center gap-2.5 rounded-lg border px-4 py-2.5 transition-all text-left flex-1", d.invoiceType === "retail" ? "border-[#4361EE] bg-indigo-50/60 shadow-sm" : "border-border hover:border-zinc-300")}>
+            <span className={cn("grid h-8 w-8 place-items-center rounded-lg text-xs font-bold", d.invoiceType === "retail" ? "bg-[#4361EE] text-white" : "bg-indigo-100 text-[#4361EE]")}>R</span>
+            <div>
+              <p className="text-[13px] font-semibold leading-tight">Retail Invoice</p>
+              <p className="text-[10px] text-muted-foreground">Individual / walk-in</p>
+            </div>
+          </button>
+          <button type="button" onClick={() => setType("business")}
+            className={cn("flex items-center gap-2.5 rounded-lg border px-4 py-2.5 transition-all text-left flex-1", d.invoiceType === "business" ? "border-[#4361EE] bg-indigo-50/60 shadow-sm" : "border-border hover:border-zinc-300")}>
+            <span className={cn("grid h-8 w-8 place-items-center rounded-lg text-xs font-bold", d.invoiceType === "business" ? "bg-[#4361EE] text-white" : "bg-emerald-100 text-emerald-700")}>B</span>
+            <div>
+              <p className="text-[13px] font-semibold leading-tight">Business Invoice</p>
+              <p className="text-[10px] text-muted-foreground">GST / company billing</p>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      {/* Customer Info — same card, below the type */}
+      <div className="px-6 py-5 sm:px-8">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-4">Customer Information</p>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+          <div className="space-y-1"><Label>Customer Name *</Label><Input value={c.name} onChange={(e: any) => set("name", e.target.value)} placeholder="Rahul Kapoor" /></div>
+          <div className="space-y-1"><Label>Phone</Label><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" /></div>
+          <div className="space-y-1"><Label>Email</Label><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="customer@email.com" type="email" /></div>
+          <div className="space-y-1"><Label>Company / Organization</Label><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></div>
+        </div>
       </div>
     </div>
   );
@@ -327,6 +361,12 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
       <h2 className="font-display text-lg font-bold mb-1">Invoice Details</h2>
       <p className="text-sm text-muted-foreground mb-6">Reference, dates, and assignment.</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>Invoice Type *</Label>
+          <Select value={d.invoiceType} onChange={(e: any) => set("invoiceType", e.target.value)} options={[
+            { label: "Retail Invoice", value: "retail" }, { label: "Business Invoice", value: "business" },
+          ]} />
+        </div>
         <div className="space-y-1.5"><Label>Reference / PO Number</Label><Input value={d.reference} onChange={(e: any) => set("reference", e.target.value)} placeholder="CORP-1758" /></div>
         <div className="space-y-1.5"><Label>Due Date</Label><Input type="date" value={d.dueDate} onChange={(e: any) => set("dueDate", e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Employee</Label><Input value={d.employee} onChange={(e: any) => set("employee", e.target.value)} placeholder="Anjali R." /></div>

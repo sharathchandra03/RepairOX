@@ -64,7 +64,7 @@ const QC_FIELDS = [
 type WizardData = {
   process?: string;
   category?: string;
-  device: { model: string; imei: string; password: string; issue: string; assignedBy: string; assignedTo: string; source: string; type: string; estimate: string; description: string; notes: string };
+  device: { model: string; imei: string; password: string; issue: string; assignedBy: string; assignedTo: string; source: string; type: string; estimate: string; description: string; notes: string; priority: string };
   parts: { name: string; price: number }[];
   contactType: "personal" | "business";
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
@@ -74,7 +74,7 @@ type WizardData = {
 };
 
 const DEFAULT: WizardData = {
-  device: { model: "", imei: "", password: "", issue: "", assignedBy: "", assignedTo: "", source: "", type: "", estimate: "", description: "", notes: "" },
+  device: { model: "", imei: "", password: "", issue: "", assignedBy: "", assignedTo: "", source: "", type: "", estimate: "", description: "", notes: "", priority: "normal" },
   parts: [],
   contactType: "personal",
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
@@ -106,6 +106,7 @@ function ticketToWizard(t: Ticket): WizardData {
       estimate: String(t.amount || 0),
       description: t.issue,
       notes: "",
+      priority: t.priority || "normal",
     },
     parts: [],
     contactType: "personal",
@@ -158,7 +159,7 @@ function NewTicketWizard() {
       model: data.device.model || "Unknown Device",
       issue: data.device.issue || data.device.description || "General service",
       status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "received") : "received") as TicketStatus,
-      priority: "med",
+      priority: (data.device.priority as any) || "normal",
       technician: data.device.assignedTo || "Unassigned",
       createdAt: isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       dueDate: undefined,
@@ -186,11 +187,13 @@ function NewTicketWizard() {
     >
       <div className={cn("mx-auto", step === 2 ? "max-w-5xl" : "max-w-3xl")}>
         {step === 1 && (
-          <OptionGrid
-            options={PROCESSES}
+          <ProcessSelector
             value={data.process}
-            onChange={(id) => { setData({ ...data, process: id }); setTimeout(next, 180); }}
-            cols={3}
+            onChange={(id) => {
+              if (id === "invoice") { router.push("/invoice/create"); return; }
+              if (id === "walkin") { router.push("/walk-in"); return; }
+              setData({ ...data, process: id }); setTimeout(next, 180);
+            }}
           />
         )}
         {step === 2 && (
@@ -210,6 +213,59 @@ function NewTicketWizard() {
         {step === 10 && <SignatureStep onSubmit={handleSubmit} isEdit={isEdit} />}
       </div>
     </WizardShell>
+  );
+}
+
+/* ---------------- Process Selector (Premium) ---------------- */
+
+const PROCESS_CARDS = [
+  { id: "ticket", title: "New Ticket", desc: "Repair job intake and tracking", icon: "🧰", tone: "bg-rose-50 text-rose-500" },
+  { id: "invoice", title: "New Invoice", desc: "Create bill and manage payments", icon: "🧾", tone: "bg-violet-50 text-violet-500" },
+  { id: "stock", title: "Add Stock", desc: "Add new inventory to your store", icon: "📦", tone: "bg-amber-50 text-amber-500" },
+  { id: "walkin", title: "Walk-In", desc: "Counter customer billing", icon: "🏪", tone: "bg-sky-50 text-sky-500" },
+  { id: "estimate", title: "Estimate", desc: "Send quote to your customer", icon: "💵", tone: "bg-emerald-50 text-emerald-500" },
+  { id: "warranty", title: "Warranty", desc: "Claim or warranty check", icon: "🛡️", tone: "bg-cyan-50 text-cyan-500" },
+];
+
+function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: string) => void }) {
+  return (
+    <div className="max-w-3xl mx-auto">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {PROCESS_CARDS.map((card, i) => (
+          <motion.button
+            key={card.id}
+            type="button"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: 0.04 * i, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            onClick={() => onChange(card.id)}
+            className={cn(
+              "group relative flex flex-col items-center text-center rounded-xl border bg-white p-4 sm:p-5 transition-all duration-250 ease-out",
+              "hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(67,97,238,0.15)] hover:border-[#4361EE]/30",
+              "active:scale-[0.98]",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+              value === card.id ? "border-[#4361EE] shadow-[0_4px_16px_-6px_rgba(67,97,238,0.2)]" : "border-border/60 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
+            )}
+            aria-label={`Create ${card.title}`}
+          >
+            <span className={cn("grid h-10 w-10 place-items-center rounded-full text-lg transition-transform duration-250 group-hover:scale-110", card.tone)}>
+              {card.icon}
+            </span>
+            <h3 className="mt-3 text-[13px] font-bold text-zinc-800 tracking-tight">{card.title}</h3>
+            <p className="mt-1 text-[11px] text-zinc-500 leading-snug">{card.desc}</p>
+            <span className="mt-3 grid h-6 w-6 place-items-center rounded-full border border-border/80 text-zinc-400 transition-all duration-250 group-hover:border-[#4361EE] group-hover:bg-[#4361EE] group-hover:text-white">
+              <ArrowRight className="h-3 w-3 transition-transform duration-250 group-hover:translate-x-0.5" />
+            </span>
+          </motion.button>
+        ))}
+      </div>
+
+      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
+        className="mt-5 flex items-center justify-center gap-1.5 text-[10px] text-zinc-400">
+        <Sparkles className="h-3 w-3 text-[#4361EE]/50" />
+        Tip: You can access these options anytime from the main menu.
+      </motion.p>
+    </div>
   );
 }
 
@@ -284,6 +340,13 @@ function DeviceForm({ data, setData, onNext }: any) {
           ]} />
         </Field>
         <Field label="Estimate (₹)"><Input type="number" value={d.estimate} onChange={(e: any) => set("estimate", e.target.value)} placeholder="0" /></Field>
+        <Field label="Priority">
+          <Select value={d.priority} onChange={(e: any) => set("priority", e.target.value)} options={[
+            { label: "Normal", value: "normal" },
+            { label: "High Priority", value: "high" },
+            { label: "Critical", value: "critical" },
+          ]} />
+        </Field>
         <div className="md:col-span-2"><Field label="Problem description"><Textarea value={d.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" /></Field></div>
         <div className="md:col-span-2"><Field label="Internal notes"><Textarea value={d.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" /></Field></div>
       </div>

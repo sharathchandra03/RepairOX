@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Pencil, MoreHorizontal, Trash2 } from "lucide-react";
+import { Eye, ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import type { Ticket } from "@/lib/mock-data";
 
@@ -12,7 +12,8 @@ export type TicketAction =
   | "email-receipt"
   | "print"
   | "edit"
-  | "delete";
+  | "delete"
+  | "priority";
 
 interface TicketActionsMenuProps {
   ticket: Ticket;
@@ -64,6 +65,9 @@ export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) 
             </MenuItem>
             <MenuItem icon={Printer} onClick={() => { onAction("print", ticket); close(); }}>
               Print
+            </MenuItem>
+            <MenuItem icon={AlertTriangle} onClick={() => { onAction("priority", ticket); close(); }}>
+              Change Priority
             </MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onAction("delete", ticket); close(); }}>
