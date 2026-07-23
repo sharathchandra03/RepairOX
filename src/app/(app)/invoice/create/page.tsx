@@ -94,6 +94,58 @@ function InvoiceWizard() {
     }
   }, [editId, invoices]);
 
+  // Pre-fill from ticket (Push to Invoice)
+  useEffect(() => {
+    const fromTicket = searchParams.get("fromTicket");
+    if (fromTicket && !editId) {
+      const customer = searchParams.get("customer") || "";
+      const phone = searchParams.get("phone") || "";
+      const company = searchParams.get("company") || "";
+      const amount = parseFloat(searchParams.get("amount") || "0");
+      const service = searchParams.get("service") || "";
+      const device = searchParams.get("device") || "";
+      const partsRaw = searchParams.get("parts");
+
+      let items: any[] = [];
+
+      // If ticket has parts, use them as line items
+      if (partsRaw) {
+        try {
+          const parts = JSON.parse(partsRaw);
+          items = parts.map((p: any, i: number) => ({
+            id: `li-${Date.now()}-${i}`,
+            name: p.name,
+            description: "",
+            qty: p.qty || 1,
+            price: p.price || 0,
+            discount: 0,
+            total: p.total || (p.qty * p.price),
+          }));
+        } catch { /* ignore parse errors */ }
+      }
+
+      // If no parts but has amount, create a single service line item
+      if (items.length === 0 && amount > 0) {
+        items = [{
+          id: `li-${Date.now()}`,
+          name: service || "Repair Service",
+          description: device ? `Device: ${device}` : "",
+          qty: 1,
+          price: amount,
+          discount: 0,
+          total: amount,
+        }];
+      }
+
+      setForm((prev) => ({
+        ...prev,
+        customer: { name: customer, phone, email: "", company },
+        details: { ...prev.details, ticketId: fromTicket, status: "draft" },
+        items,
+      }));
+    }
+  }, [searchParams, editId]);
+
   // Track dirty state
   const updateForm = useCallback((updater: (prev: InvoiceFormData) => InvoiceFormData) => {
     setForm((prev) => { const next = updater(prev); setDirty(true); return next; });

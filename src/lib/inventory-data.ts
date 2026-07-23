@@ -71,6 +71,7 @@ export type InventoryItem = {
   tax: number;           // GST %
   minStock: number;
   maxStock: number;
+  reservedStock: number;  // reserved by tickets (not yet consumed)
   soldUnits: number;     // for top-selling
   purchasedUnits: number;// for top-purchased
 };
@@ -147,6 +148,7 @@ export const inventoryItems: InventoryItem[] = NAMES.map(([name, category, type,
     tax: isService ? 18 : [12, 18, 28][i % 3],
     minStock: min,
     maxStock: max,
+    reservedStock: 0,
     soldUnits: Math.round(r * 240),
     purchasedUnits: Math.round(r2 * 300),
   };

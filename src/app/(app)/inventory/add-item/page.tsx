@@ -17,12 +17,14 @@ import { InlineCombo } from "@/components/inventory/inline-combo";
 import { NoPermission } from "@/components/common/no-permission";
 import { usePermissions } from "@/lib/permissions-context";
 import { CATEGORIES, UOMS, classifyStock } from "@/lib/inventory-data";
+import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 
 type CustomField = { id: number; label: string; value: string };
 
 export default function AddItemPage() {
   const { can } = usePermissions();
+  const { addInventoryItem } = useStore();
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [type, setType] = useState("Product");
@@ -63,6 +65,46 @@ export default function AddItemPage() {
   }
 
   function save(addNew: boolean) {
+    if (!name.trim()) {
+      setToast("Item name is required");
+      setTimeout(() => setToast(null), 2600);
+      return;
+    }
+    if (!category) {
+      setToast("Please select a category");
+      setTimeout(() => setToast(null), 2600);
+      return;
+    }
+
+    const itemSku = sku || `SKU-${Date.now().toString().slice(-6)}`;
+    const newItem = {
+      id: itemSku,
+      name: name.trim(),
+      category,
+      type: type as "Product" | "Service",
+      mode: mode as "Buy" | "Sell" | "Both",
+      uom,
+      store: "Main Store",
+      active: true,
+      currentStock: Number(currentStock || 0),
+      defaultPrice: Number(defaultPrice || 0),
+      regularBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.7),
+      wholesaleBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.65),
+      regularSellingPrice: Number(defaultPrice || 0),
+      mrp: Math.round(Number(defaultPrice || 0) * 1.2),
+      dealerPrice: Math.round(Number(defaultPrice || 0) * 0.9),
+      distributorPrice: Math.round(Number(defaultPrice || 0) * 0.85),
+      hsnCode: hsn || "—",
+      tax: Number(tax || 18),
+      minStock: Number(minStock || 0),
+      maxStock: Number(maxStock || 0),
+      reservedStock: 0,
+      soldUnits: 0,
+      purchasedUnits: 0,
+    };
+
+    addInventoryItem(newItem);
+
     setToast(addNew ? "Item saved — ready for the next one" : "Item saved successfully");
     setTimeout(() => setToast(null), 2600);
     if (addNew) {

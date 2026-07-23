@@ -1,5 +1,61 @@
 # RepairOX — Changes Summary
 
+## July 23, 2026
+
+### Ticket Edit Mode — Fast Save
+
+- **Save Changes Button** — When editing a ticket, a persistent "Save Changes" button appears in the header area, within each form step, and in the fixed bottom navigation bar. Users can save immediately from any step.
+- **No Forced Step Traversal** — Users can edit Step 3 (Device) or Step 6 (Customer) and save without navigating through all remaining steps. The wizard still allows step navigation if needed.
+- **Unsaved Changes Guard** — If a user tries to navigate away or close the editor with unsaved changes, a confirmation dialog appears offering: Save Changes, Discard Changes, or Continue Editing.
+- **Success Toast** — After saving, a green toast appears ("Ticket updated successfully") and the user is automatically returned to the Ticket Detail page.
+- **Navigation Context Preserved** — Edit mode returns to the ticket detail page (not the wizard thank-you screen or dashboard).
+- **Fixed Bottom Bar** — In edit mode, the bottom navigation shows Previous, Next, and Save Changes — all visible without scrolling.
+
+### Ticket-Inventory Integration
+
+- **Inventory-Linked Parts** — The Parts step in ticket creation now searches real inventory items by name, SKU, or category. Free-text part entry is replaced with an autocomplete dropdown sourced from the Inventory module.
+- **Stock Validation** — Each inventory item shows its current stock level. Out-of-stock items cannot be added. Low-stock items show amber warnings. Quantity exceeding available stock triggers a visible alert.
+- **Quantity Controls** — Each part has +/- buttons for quantity adjustment. Line totals calculate automatically (qty × unit price).
+- **Planned vs Used** — Parts are initially saved as "Planned" on the ticket. They are NOT deducted from inventory until the ticket is marked as Completed.
+- **Automatic Deduction** — When a ticket status changes to Completed, all planned parts are deducted from inventory, marked as "Used", and stock movement records are created automatically.
+- **Stock Movement History** — Each deduction generates an Outward movement with ticket number, technician, and date for full traceability.
+- **Parts in Ticket Detail** — The ticket detail page shows a "Parts Used" table with item name, SKU, quantity, unit price, total, and status badge (Planned/Consumed).
+- **Push to Invoice with Parts** — When pushing a ticket to invoice, all parts are transferred as individual line items with correct quantities and prices. No re-entry needed.
+- **Reactive Inventory** — Inventory items are now in the global store (reactive, localStorage-persisted) alongside tickets and invoices.
+
+### Expected Resolution Time
+
+- **Resolution Time Field** — A new "Expected Resolution Time" dropdown is available in the ticket creation wizard (Device Details step). Options: 30 min, 45 min, 1 hour, 2 hours, 4 hours, 8 hours (End of Day). If left empty, defaults silently to 59 minutes.
+- **Automatic Due Time Calculation** — When a ticket is created or edited, the Due Time is automatically calculated as `Created Time + Resolution Minutes`. No manual due date entry required.
+- **Overdue Logic Updated** — The ticket list overdue highlighting (light blue row) now uses the calculated Due Time instead of a hardcoded 40-minute threshold. Tickets become overdue only when `Current Time > Due Time`.
+- **Detail Page Display** — The ticket detail page now shows "Expected Resolution" (e.g. "2h", "59 min") and "Due Time" in the Ticket Information section.
+- **Edit Support** — When editing a ticket, the resolution time can be changed and the due time recalculates automatically.
+- **Backward Compatible** — Existing tickets without `resolutionMinutes` fall back to the 59-minute default for overdue detection.
+
+### Ticket Detail Page — Full Implementation
+
+- **Full-Page Ticket Detail View** — Clicking "View" from the ticket actions menu or clicking a ticket row now opens a dedicated full-page detail screen at `/tickets/[id]` instead of the previous lightweight side drawer.
+- **Structured Layout** — The detail page is organized into: Header (ticket ID, status badge, priority, device, customer, elapsed time), Summary Cards (6-card grid showing customer, phone, device, technician, amount, created date), and full Detail Sections for Customer, Device, Ticket, and Billing information.
+- **Multi-Device Support** — If a ticket has multiple items, each device is shown in its own bordered card with serial/IMEI, issue, and service details.
+- **Activity Timeline** — A right-column timeline shows ticket lifecycle events: creation, technician assignment, status changes, priority updates, and due date setting.
+- **Quick Actions Panel** — Dedicated sidebar with one-click access to Push to Invoice, Edit Ticket, Change Status, and Print.
+- **Status & Priority Dialogs** — Inline modal dialogs for changing ticket status or priority directly from the detail page without navigating away.
+- **Back Navigation** — Prominent back arrow button returns to the ticket list instantly.
+
+### Push to Invoice Integration
+
+- **Push to Invoice Button** — Available in both the ticket detail page header and the ticket actions dropdown menu (new "Push to Invoice" menu item with Receipt icon).
+- **Prefilled Invoice Creation** — Clicking "Push to Invoice" navigates to the invoice creation wizard with customer name, phone, company, device, service/issue, amount, and linked ticket ID all prefilled automatically.
+- **Duplicate Prevention** — If an invoice is already linked to the ticket (via `ticketId`), the button is disabled and shows "Invoice Linked" with a link to the existing invoice.
+- **Seamless Handoff** — The invoice create page reads `fromTicket` query parameters and pre-populates the form including a line item for the repair service, so users never re-enter data.
+
+### Ticket List Improvements
+
+- **Row Click Navigation** — Clicking anywhere on a ticket row navigates to the full detail page. Checkbox and action button clicks are isolated and don't trigger navigation.
+- **Actions Menu Updated** — Added "Push to Invoice" option to the ticket row actions dropdown menu between "Email Receipt" and "Print".
+
+---
+
 ## July 21, 2026
 
 ### Invoice Module — Major Upgrade

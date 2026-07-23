@@ -16,7 +16,7 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
 import {
-  ViewTicketDrawer, TransferTicketDrawer, CommentDrawer,
+  TransferTicketDrawer, CommentDrawer,
   CheckoutDrawer, EmailReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -37,15 +37,15 @@ type ColumnDef = {
 };
 
 const ALL_COLUMNS: ColumnDef[] = [
-  { id: "checkbox", label: "", width: "w-11", locked: true },
-  { id: "ticket", label: "Ticket", width: "w-[80px]" },
-  { id: "customer", label: "Customer", width: "w-[180px]" },
-  { id: "device", label: "Device / Service", width: "min-w-[200px]" },
-  { id: "status", label: "Status", width: "w-[160px]" },
-  { id: "dueDate", label: "Due Date", width: "w-[150px]" },
-  { id: "created", label: "Created", width: "w-[150px]" },
-  { id: "amount", label: "Amount", width: "w-[100px]", align: "right" },
-  { id: "actions", label: "Actions", width: "w-[90px]", align: "right", locked: true },
+  { id: "checkbox", label: "", width: "w-10", locked: true },
+  { id: "ticket", label: "Ticket", width: "w-[72px]" },
+  { id: "customer", label: "Customer", width: "w-[22%]" },
+  { id: "device", label: "Device / Service", width: "w-[22%]" },
+  { id: "status", label: "Status", width: "w-[130px]" },
+  { id: "dueDate", label: "Due Date", width: "w-[110px]" },
+  { id: "created", label: "Created", width: "w-[135px]" },
+  { id: "amount", label: "Amount", width: "w-[90px]", align: "right" },
+  { id: "actions", label: "Actions", width: "w-[70px]", align: "right", locked: true },
 ];
 
 const DEFAULT_VISIBLE: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
@@ -100,6 +100,15 @@ function getElapsedMins(createdAt: string): number {
   return Math.floor((Date.now() - created) / 60_000);
 }
 
+function isOverdue(ticket: { dueDate?: string; createdAt: string; status: string }): boolean {
+  if (ticket.status === "completed" || ticket.status === "delivered") return false;
+  if (ticket.dueDate) {
+    return Date.now() > new Date(ticket.dueDate).getTime();
+  }
+  // Fallback: if no dueDate, use default 59 min from creation
+  return getElapsedMins(ticket.createdAt) >= 59;
+}
+
 function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
@@ -132,7 +141,7 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
 
 export default function TicketsPage() {
   const router = useRouter();
-  const { tickets, bulkUpdateStatus, deleteTicket, updateTicket } = useStore();
+  const { tickets, bulkUpdateStatus, deleteTicket, updateTicket, deductPartsForTicket } = useStore();
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -212,13 +221,24 @@ export default function TicketsPage() {
   /* Bulk status */
   const handleBulkStatusChange = useCallback((status: TicketStatus) => {
     bulkUpdateStatus(Array.from(selected), status);
+    // Deduct parts for tickets changing to completed
+    if (status === "completed") {
+      Array.from(selected).forEach((id) => {
+        const t = tickets.find((tk) => tk.id === id);
+        if (t?.parts?.some((p) => p.status === "planned")) {
+          deductPartsForTicket(id);
+        }
+      });
+    }
     setSelected(new Set());
     setShowBulkStatus(false);
-  }, [selected, bulkUpdateStatus]);
+  }, [selected, bulkUpdateStatus, tickets, deductPartsForTicket]);
 
   /* Action handler */
   const handleAction = useCallback((action: TicketAction, ticket: Ticket) => {
+    if (action === "view") { router.push(`/tickets/${ticket.id}`); return; }
     if (action === "edit") { router.push(`/tickets/new?edit=${ticket.id}`); return; }
+    if (action === "invoice") { router.push(`/invoice/create?fromTicket=${ticket.id}&customer=${encodeURIComponent(ticket.customer)}&phone=${encodeURIComponent(ticket.phone)}&amount=${ticket.amount}&service=${encodeURIComponent(ticket.service || ticket.issue)}&device=${encodeURIComponent(ticket.model)}${ticket.company ? `&company=${encodeURIComponent(ticket.company)}` : ""}`); return; }
     if (action === "delete") {
       setDeleteTarget(ticket);
       return;
@@ -428,7 +448,7 @@ export default function TicketsPage() {
             <tbody>
               {list.map((t, i) => {
                 const elapsed = getElapsedMins(t.createdAt);
-                const isWaiting = elapsed >= WAITING_THRESHOLD_MINS && t.status !== "completed" && t.status !== "delivered";
+                const isWaiting = isOverdue(t);
                 const isSelected = selected.has(t.id);
                 const hasMultiItems = t.items && t.items.length > 1;
 
@@ -438,15 +458,20 @@ export default function TicketsPage() {
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.015 * i }}
+                    onClick={() => router.push(`/tickets/${t.id}`)}
                     className={cn(
-                      "group border-t border-border transition-colors align-top",
+                      "group border-t border-border transition-colors align-top cursor-pointer",
                       isWaiting && "bg-sky-50/70",
                       isSelected && !isWaiting && "bg-indigo-50/40",
                       !isWaiting && !isSelected && "hover:bg-muted/40"
                     )}
                   >
                     {activeColumns.map((col) => (
-                      <td key={col.id} className={cn("px-3 py-3", col.align === "right" && "text-right")}>
+                      <td key={col.id} className={cn(
+                        "px-3 py-3",
+                        col.id !== "device" && "align-middle",
+                        col.align === "right" && "text-right"
+                      )}>
                         {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction)}
                       </td>
                     ))}
@@ -463,7 +488,7 @@ export default function TicketsPage() {
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {list.map((t, i) => {
           const elapsed = getElapsedMins(t.createdAt);
-          const isWaiting = elapsed >= WAITING_THRESHOLD_MINS && t.status !== "completed" && t.status !== "delivered";
+          const isWaiting = isOverdue(t);
           const isSelected = selected.has(t.id);
           return (
             <motion.div key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 * i }}
@@ -476,7 +501,7 @@ export default function TicketsPage() {
                     <Avatar name={t.customer} size={32} />
                     <div>
                       <p className="text-sm font-semibold">{t.customer}</p>
-                      <p className="text-[11px] text-muted-foreground">{t.id} · {t.phone}</p>
+                      <p className="text-[11px] text-muted-foreground">{t.id} · <span className="font-medium text-[#5B6FC0]">{t.phone}</span></p>
                     </div>
                   </div>
                 </div>
@@ -515,7 +540,6 @@ export default function TicketsPage() {
       </div>
 
       {/* Drawers */}
-      <ViewTicketDrawer open={activeDrawer === "view"} onClose={closeDrawer} ticket={activeTicket} />
       <TransferTicketDrawer open={activeDrawer === "transfer"} onClose={closeDrawer} ticket={activeTicket} />
       <CommentDrawer open={activeDrawer === "comment"} onClose={closeDrawer} ticket={activeTicket} />
       <CheckoutDrawer open={activeDrawer === "checkout"} onClose={closeDrawer} ticket={activeTicket} />
@@ -594,6 +618,7 @@ function renderCell(
     case "checkbox":
       return (
         <input type="checkbox" checked={isSelected} onChange={toggleOne}
+          onClick={(e) => e.stopPropagation()}
           className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
           aria-label={`Select ticket ${t.id}`} />
       );
@@ -608,11 +633,11 @@ function renderCell(
       );
     case "customer":
       return (
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-3">
           <Avatar name={t.customer} size={30} />
           <div className="min-w-0">
             <p className="text-sm font-medium leading-tight truncate">{t.customer}</p>
-            <p className="text-[11px] text-muted-foreground truncate">{t.phone}</p>
+            <p className="text-[11px] font-medium text-[#5B6FC0] truncate">{t.phone}</p>
             {t.company && <p className="text-[11px] text-muted-foreground truncate">{t.company}</p>}
           </div>
         </div>
@@ -662,13 +687,23 @@ function renderCell(
         </div>
       );
     case "dueDate":
-      return <span className="text-[12px] text-muted-foreground whitespace-nowrap">{t.dueDate ? fmtDate(t.dueDate) : "—"}</span>;
+      return t.dueDate ? (
+        <div className="text-[12px] text-muted-foreground">
+          <p>{new Date(t.dueDate).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
+          <p className="text-[11px]">{new Date(t.dueDate).toLocaleTimeString("en-IN", { timeStyle: "short" })}</p>
+        </div>
+      ) : <span className="text-[12px] text-muted-foreground">—</span>;
     case "created":
-      return <span className="text-[12px] text-muted-foreground whitespace-nowrap">{fmtDate(t.createdAt)}</span>;
+      return (
+        <div className="text-[12px] text-muted-foreground">
+          <p>{new Date(t.createdAt).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
+          <p className="text-[11px]">{new Date(t.createdAt).toLocaleTimeString("en-IN", { timeStyle: "short" })}</p>
+        </div>
+      );
     case "amount":
       return <span className="font-semibold tabular-nums whitespace-nowrap">{formatINR(t.amount)}</span>;
     case "actions":
-      return <TicketActionsMenu ticket={t} onAction={handleAction} />;
+      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} /></div>;
     default:
       return null;
   }

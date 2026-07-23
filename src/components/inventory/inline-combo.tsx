@@ -28,9 +28,9 @@ export function InlineCombo({
 
   return (
     <Dropdown
-      width="w-[var(--combo-w,100%)]"
+      width="w-64"
       className="block w-full"
-      panelClassName="w-full min-w-[14rem]"
+      align="left"
       trigger={({ toggle, open }) => (
         <button
           type="button"

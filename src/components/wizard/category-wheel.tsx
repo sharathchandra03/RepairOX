@@ -70,10 +70,12 @@ export function CategoryWheel({
   value,
   onChange,
   onNext,
+  isEdit,
 }: {
   value?: string;
   onChange: (id: string) => void;
   onNext: () => void;
+  isEdit?: boolean;
 }) {
   const [CATS] = useState<Cat[]>(() => loadCats());
   const initial = value ? CATS.findIndex((c) => c.id === value) : Math.min(3, CATS.length - 1);
@@ -292,14 +294,16 @@ export function CategoryWheel({
       </div>
 
       {/* ---------- Bottom CTAs ---------- */}
-      <div className="mt-4 flex items-center justify-center gap-3">
-        <Button variant="outline" size="lg" onClick={goPrev} disabled={active === 0}>
-          <ChevronLeft className="h-4 w-4" /> Previous
-        </Button>
-        <Button size="lg" onClick={onNext} className="min-w-[140px]">
-          Next <ArrowRight className="h-4 w-4" />
-        </Button>
-      </div>
+      {!isEdit && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <Button variant="outline" size="lg" onClick={goPrev} disabled={active === 0}>
+            <ChevronLeft className="h-4 w-4" /> Previous
+          </Button>
+          <Button size="lg" onClick={onNext} className="min-w-[140px]">
+            Next <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

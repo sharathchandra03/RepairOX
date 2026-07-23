@@ -48,6 +48,19 @@ export type TicketItem = {
   service?: string;
 };
 
+export type TicketPartStatus = "planned" | "used";
+
+export type TicketPart = {
+  inventoryId: string;
+  name: string;
+  sku: string;
+  qty: number;
+  unitPrice: number;
+  total: number;
+  uom: string;
+  status: TicketPartStatus;
+};
+
 export type Ticket = {
   id: string;
   customer: string;
@@ -57,11 +70,13 @@ export type Ticket = {
   model: string;
   issue: string;
   items?: TicketItem[];
+  parts?: TicketPart[];
   status: TicketStatus;
   priority: TicketPriority;
   technician: string;
   createdAt: string;
   dueDate?: string;
+  resolutionMinutes?: number;
   amount: number;
   service?: string;
 };
@@ -72,9 +87,9 @@ function minsAgo(mins: number): string {
 }
 
 export const tickets: Ticket[] = [
-  { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", amount: 22500, service: "Screen Repair" },
-  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "critical", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", amount: 18999, service: "Board Repair" },
-  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "normal", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", amount: 12999, service: "Battery Replacement" },
+  { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", resolutionMinutes: 120, amount: 22500, service: "Screen Repair" },
+  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "critical", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", resolutionMinutes: 240, amount: 18999, service: "Board Repair" },
+  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "normal", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", resolutionMinutes: 59, amount: 12999, service: "Battery Replacement" },
   { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "normal", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair" },
   {
     id: "T-7335", customer: "Ravindu Toyota", phone: "+91 99000 56190", company: "iFix India - Koramangala", device: "iPad", model: "iPad Air 2", issue: "Battery bulged, display broken",

@@ -28,6 +28,8 @@ export function WizardShell({
   onBack,
   onClose,
   closeHref,
+  isEdit,
+  footer,
 }: {
   step: number; // 1-based
   title: string;
@@ -36,6 +38,8 @@ export function WizardShell({
   onBack?: () => void;
   onClose?: () => void;
   closeHref?: string;
+  isEdit?: boolean;
+  footer?: React.ReactNode;
 }) {
   const pct = Math.round(((step - 1) / TOTAL_STEPS) * 100);
 
@@ -47,7 +51,7 @@ export function WizardShell({
       <div className="pointer-events-none absolute bottom-0 right-0 h-[300px] w-[400px] rounded-full bg-[#4361EE]/5 blur-3xl" />
 
       {/* Top bar */}
-      <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-5 sm:px-6">
+      <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-4 sm:px-6">
         <motion.button
           onClick={onBack}
           whileHover={{ scale: 1.05 }}
@@ -95,7 +99,7 @@ export function WizardShell({
       </div>
 
       {/* Step indicator strip */}
-      <div className="relative mx-auto mb-2 flex max-w-6xl items-center gap-2 px-4 sm:px-6">
+      <div className="relative mx-auto flex max-w-6xl items-center gap-2 px-4 sm:px-6 mb-2">
         <Progress value={pct} className="hidden sm:block" />
         {/* Mobile progress bar */}
         <div className="block w-full sm:hidden">
@@ -113,36 +117,36 @@ export function WizardShell({
       {/* Stepper labels (desktop) */}
       <div className="relative mx-auto hidden max-w-6xl px-6 md:block">
         <ol className="grid grid-cols-10 gap-1.5 text-[10px]">
-          {STEP_LABELS.map((label, i) => {
-            const idx = i + 1;
-            const done = idx < step;
-            const active = idx === step;
-            return (
-              <li key={label} className="flex flex-col items-center gap-1">
-                <motion.span
-                  initial={false}
-                  animate={active ? { scale: [1, 1.15, 1] } : {}}
-                  transition={{ duration: 0.3 }}
-                  className={cn(
-                    "grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold transition",
-                    done ? "bg-emerald-500 text-white"
-                      : active ? "brand-gradient text-white shadow-glow"
-                      : "bg-muted text-muted-foreground ring-1 ring-border"
-                  )}
-                >
-                  {done ? <Check className="h-3 w-3" /> : idx}
-                </motion.span>
-                <span className={cn("truncate text-center font-medium", active ? "text-foreground" : "text-muted-foreground")}>
-                  {label}
-                </span>
-              </li>
-            );
-          })}
-        </ol>
-      </div>
+            {STEP_LABELS.map((label, i) => {
+              const idx = i + 1;
+              const done = idx < step;
+              const active = idx === step;
+              return (
+                <li key={label} className="flex flex-col items-center gap-1">
+                  <motion.span
+                    initial={false}
+                    animate={active ? { scale: [1, 1.15, 1] } : {}}
+                    transition={{ duration: 0.3 }}
+                    className={cn(
+                      "grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold transition",
+                      done ? "bg-emerald-500 text-white"
+                        : active ? "brand-gradient text-white shadow-glow"
+                        : "bg-muted text-muted-foreground ring-1 ring-border"
+                    )}
+                  >
+                    {done ? <Check className="h-3 w-3" /> : idx}
+                  </motion.span>
+                  <span className={cn("truncate text-center font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+                    {label}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+        </div>
 
       {/* Title */}
-      <div className="relative mx-auto mt-6 max-w-6xl px-4 text-center sm:mt-8 sm:px-6">
+      <div className="relative mx-auto max-w-6xl px-4 text-center sm:px-6 mt-6 sm:mt-8">
         <motion.h1
           key={title}
           initial={{ opacity: 0, y: 8 }}
@@ -166,7 +170,10 @@ export function WizardShell({
       </div>
 
       {/* Step content */}
-      <div className="relative mx-auto mt-6 max-w-6xl px-4 pb-16 sm:px-6">
+      <div className={cn(
+        "relative mx-auto max-w-6xl px-4 sm:px-6 mt-6",
+        isEdit ? "pb-24" : "pb-16"
+      )}>
         <AnimatePresence mode="wait">
           <motion.div
             key={step}
@@ -179,6 +186,13 @@ export function WizardShell({
           </motion.div>
         </AnimatePresence>
       </div>
+
+      {/* Footer slot for edit mode */}
+      {isEdit && footer && (
+        <div className="fixed bottom-0 left-0 right-0 z-30 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-2px_8px_-2px_rgba(0,0,0,0.06)]">
+          {footer}
+        </div>
+      )}
     </div>
   );
 }

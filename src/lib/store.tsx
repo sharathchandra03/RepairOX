@@ -1,7 +1,8 @@
 "use client";
 
 import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
-import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS, type Ticket, type TicketStatus, type TeamMember, type Invoice, type WalkIn } from "@/lib/mock-data";
+import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS, type Ticket, type TicketStatus, type TicketPart, type TeamMember, type Invoice, type WalkIn } from "@/lib/mock-data";
+import { inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS, type InventoryItem, type StockMovement } from "@/lib/inventory-data";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -17,6 +18,8 @@ interface StoreState {
   orders: OrderStatus[];
   revenue: RevenueMonth[];
   team: TeamMember[];
+  inventory: InventoryItem[];
+  stockMovements: StockMovement[];
 }
 
 interface StoreActions {
@@ -33,6 +36,10 @@ interface StoreActions {
   addTodo: (todo: Todo) => void;
   removeTodo: (id: number) => void;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
+  deductPartsForTicket: (ticketId: string) => void;
+  addStockMovement: (movement: StockMovement) => void;
+  addInventoryItem: (item: InventoryItem) => void;
+  updateInventoryItem: (id: string, updates: Partial<InventoryItem>) => void;
 }
 
 type Store = StoreState & StoreActions;
@@ -74,6 +81,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...saved,
         invoices: (saved.invoices ?? SEED_INVOICES).map((inv: any) => ({ ...inv, invoiceType: inv.invoiceType ?? "retail" })),
         walkIns: saved.walkIns ?? SEED_WALKINS,
+        inventory: (saved.inventory ?? SEED_INVENTORY).map((i: any) => ({ ...i, reservedStock: i.reservedStock ?? 0 })),
+        stockMovements: saved.stockMovements ?? SEED_MOVEMENTS,
       };
     }
     return {
@@ -84,6 +93,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       orders: SEED_ORDERS,
       revenue: SEED_REVENUE,
       team: TEAM_SEED,
+      inventory: SEED_INVENTORY,
+      stockMovements: SEED_MOVEMENTS,
     };
   });
 
@@ -161,6 +172,66 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
+  /* ── Inventory actions ── */
+  const deductPartsForTicket = useCallback((ticketId: string) => {
+    setState((s) => {
+      const ticket = s.tickets.find((t) => t.id === ticketId);
+      if (!ticket || !ticket.parts || ticket.parts.length === 0) return s;
+
+      // Only deduct parts that are still "planned"
+      const partsToDeduct = ticket.parts.filter((p) => p.status === "planned");
+      if (partsToDeduct.length === 0) return s;
+
+      // Deduct from inventory
+      const updatedInventory = s.inventory.map((item) => {
+        const part = partsToDeduct.find((p) => p.inventoryId === item.id);
+        if (!part) return item;
+        return { ...item, currentStock: item.currentStock - part.qty };
+      });
+
+      // Mark parts as used
+      const updatedTickets = s.tickets.map((t) => {
+        if (t.id !== ticketId) return t;
+        return { ...t, parts: t.parts?.map((p) => ({ ...p, status: "used" as const })) };
+      });
+
+      // Create stock movements
+      const newMovements: StockMovement[] = partsToDeduct.map((part, i) => ({
+        docNumber: `MOV-TC-${Date.now()}-${i}`,
+        fromStore: "Main Store",
+        toStore: `Ticket ${ticketId}`,
+        items: part.qty,
+        date: new Date().toLocaleDateString("en-IN"),
+        user: ticket.technician,
+        type: "Outward" as const,
+        status: "completed" as const,
+      }));
+
+      return {
+        ...s,
+        tickets: updatedTickets,
+        inventory: updatedInventory,
+        stockMovements: [...newMovements, ...s.stockMovements],
+      };
+    });
+  }, []);
+
+  const addStockMovement = useCallback((movement: StockMovement) => {
+    setState((s) => ({ ...s, stockMovements: [movement, ...s.stockMovements] }));
+  }, []);
+
+  /* ── Inventory item actions ── */
+  const addInventoryItem = useCallback((item: InventoryItem) => {
+    setState((s) => ({ ...s, inventory: [item, ...s.inventory] }));
+  }, []);
+
+  const updateInventoryItem = useCallback((id: string, updates: Partial<InventoryItem>) => {
+    setState((s) => ({
+      ...s,
+      inventory: s.inventory.map((i) => (i.id === id ? { ...i, ...updates } : i)),
+    }));
+  }, []);
+
   const store: Store = {
     ...state,
     addTicket,
@@ -176,6 +247,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addTodo,
     removeTodo,
     updateTeamMember,
+    deductPartsForTicket,
+    addStockMovement,
+    addInventoryItem,
+    updateInventoryItem,
   };
 
   return <StoreContext.Provider value={store}>{children}</StoreContext.Provider>;
