@@ -22,6 +22,8 @@ import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
+import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
+import { searchBrands, searchModels, getModelsForBrand, createBrand, createDeviceModel, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
 export default function NewTicketPage() {
@@ -82,6 +84,7 @@ type WizardData = {
   parts: { inventoryId: string; name: string; sku: string; qty: number; unitPrice: number; total: number; uom: string }[];
   contactType: "personal" | "business";
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
+  customerId: string | null;
   qc: Record<string, "ok" | "no" | "na" | undefined>;
   files: string[];
   signatureCleared: boolean;
@@ -93,6 +96,7 @@ const DEFAULT: WizardData = {
   parts: [],
   contactType: "personal",
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
+  customerId: null,
   qc: {},
   files: [],
   signatureCleared: false,
@@ -139,6 +143,7 @@ function ticketToWizard(t: Ticket): WizardData {
     parts: t.parts ? t.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
     contactType: t.company ? "business" : "personal",
     customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
+    customerId: (t as any).customerId || null,
     qc: {},
     files: [],
     signatureCleared: false,
@@ -156,7 +161,7 @@ function NewTicketWizard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
-  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory } = useStore();
+  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer } = useStore();
 
   const [step, setStep] = useState(editId ? 3 : 1);
   const [data, setData] = useState<WizardData>(DEFAULT);
@@ -208,6 +213,24 @@ function NewTicketWizard() {
     const createdAt = isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString();
     const dueDate = new Date(new Date(createdAt).getTime() + resMinutes * 60_000).toISOString();
 
+    // If no existing customer was selected and we have customer details, save as new customer
+    let finalCustomerId = data.customerId;
+    if (!finalCustomerId && data.customer.first && data.customer.phone) {
+      const newCustomer = createCustomer({
+        type: data.contactType,
+        firstName: data.customer.first.trim(),
+        lastName: data.customer.last.trim(),
+        mobile: data.customer.phone.trim(),
+        email: data.customer.email.trim(),
+        company: data.customer.company.trim(),
+        address: data.customer.address.trim(),
+        city: data.customer.city.trim(),
+        postalCode: data.customer.postal.trim(),
+      });
+      addCustomer(newCustomer);
+      finalCustomerId = newCustomer.id;
+    }
+
     const ticketData: Ticket = {
       id: editId || genId(),
       customer: customerName,
@@ -231,6 +254,7 @@ function NewTicketWizard() {
       source: data.device.source || undefined,
       imeiType: data.device.imei ? (data.device.imeiType as "imei1" | "imei2" | "serial") || "imei1" : undefined,
       internalNotes: data.job.notes || undefined,
+      customerId: finalCustomerId || undefined,
     };
 
     if (isEdit) {
@@ -242,6 +266,18 @@ function NewTicketWizard() {
       }, 800);
     } else {
       addTicket(ticketData);
+      // Update customer stats (totalTickets, lastVisit)
+      if (finalCustomerId) {
+        const cust = customers.find((c) => c.id === finalCustomerId);
+        if (cust) {
+          updateCustomer(finalCustomerId, {
+            totalTickets: cust.totalTickets + 1,
+            totalRepairs: cust.totalRepairs + 1,
+            lastVisit: new Date().toISOString(),
+            lifetimeValue: cust.lifetimeValue + (Number(data.job.estimate) || data.parts.reduce((s, p) => s + p.total, 0) || 0),
+          });
+        }
+      }
       // Reserve stock for parts
       if (data.parts.length > 0) {
         data.parts.forEach((p: any) => {
@@ -440,8 +476,77 @@ function subtitleFor(step: number) {
 
 /* ---------------- Step 3: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
+  const { brands, deviceModels, addBrand, addDeviceModel } = useStore();
   const d = data.device;
   const set = (k: string, v: string) => setData({ ...data, device: { ...d, [k]: v } });
+
+  // Brand combobox state
+  const [brandQuery, setBrandQuery] = useState(d.brand || "");
+  const [brandOpen, setBrandOpen] = useState(false);
+  const [showNewBrand, setShowNewBrand] = useState(false);
+  const [newBrandName, setNewBrandName] = useState("");
+
+  // Model combobox state
+  const [modelQuery, setModelQuery] = useState(d.model || "");
+  const [modelOpen, setModelOpen] = useState(false);
+  const [showNewModel, setShowNewModel] = useState(false);
+  const [newModelName, setNewModelName] = useState("");
+
+  // Find selected brand id for filtering models
+  const selectedBrand = brands.find((b) => b.name.toLowerCase() === (d.brand || brandQuery).toLowerCase().trim());
+
+  // Search results
+  const brandResults = searchBrands(brands, brandQuery);
+  const modelResults = searchModels(deviceModels, selectedBrand?.id || null, modelQuery);
+
+  // Brand selection
+  const handleBrandSelect = (b: Brand) => {
+    set("brand", b.name);
+    setBrandQuery(b.name);
+    setBrandOpen(false);
+    // Clear model if brand changes
+    if (d.brand.toLowerCase() !== b.name.toLowerCase()) {
+      set("model", "");
+      setModelQuery("");
+    }
+  };
+
+  // Save new brand
+  const handleSaveNewBrand = () => {
+    if (!newBrandName.trim()) return;
+    const brand = createBrand(newBrandName.trim());
+    addBrand(brand);
+    set("brand", brand.name);
+    setBrandQuery(brand.name);
+    setShowNewBrand(false);
+    setNewBrandName("");
+    setBrandOpen(false);
+  };
+
+  // Model selection
+  const handleModelSelect = (m: DeviceModel) => {
+    set("model", m.name);
+    setModelQuery(m.name);
+    setModelOpen(false);
+    // Also set brand if not set
+    if (!d.brand) {
+      const b = brands.find((br) => br.id === m.brandId);
+      if (b) { set("brand", b.name); setBrandQuery(b.name); }
+    }
+  };
+
+  // Save new model
+  const handleSaveNewModel = () => {
+    if (!newModelName.trim() || !selectedBrand) return;
+    const model = createDeviceModel(selectedBrand.id, newModelName.trim());
+    addDeviceModel(model);
+    set("model", model.name);
+    setModelQuery(model.name);
+    setShowNewModel(false);
+    setNewModelName("");
+    setModelOpen(false);
+  };
+
   return (
     <div className={FORM_CARD}>
       <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
@@ -449,8 +554,90 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         <div className="space-y-4">
           <SectionLabel icon={Package}>Device Identity</SectionLabel>
           <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
-            <Field label="Brand Name"><Input value={d.brand} onChange={(e: any) => set("brand", e.target.value)} placeholder="e.g. Apple, Samsung" className="h-11" /></Field>
-            <Field label="Model"><Input value={d.model} onChange={(e: any) => set("model", e.target.value)} placeholder="e.g. iPhone 15 Pro Max" className="h-11" /></Field>
+            {/* Brand Combobox */}
+            <div className="relative">
+              <Field label="Brand Name">
+                <Input
+                  value={brandQuery}
+                  onChange={(e: any) => {
+                    setBrandQuery(e.target.value);
+                    set("brand", e.target.value);
+                    setBrandOpen(true);
+                  }}
+                  onFocus={() => setBrandOpen(true)}
+                  placeholder="Search brand…"
+                  className="h-11"
+                  iconLeft={<Search className="h-4 w-4" />}
+                />
+              </Field>
+              {brandOpen && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                  {brandResults.slice(0, 10).map((b) => (
+                    <button key={b.id} type="button" onClick={() => handleBrandSelect(b)}
+                      className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#EEF1FD]/60",
+                        d.brand.toLowerCase() === b.name.toLowerCase() && "bg-[#EEF1FD] font-medium text-[#4361EE]"
+                      )}>
+                      <Check className={cn("h-3.5 w-3.5 shrink-0", d.brand.toLowerCase() === b.name.toLowerCase() ? "text-[#4361EE]" : "opacity-0")} strokeWidth={3} />
+                      <span>{b.name}</span>
+                    </button>
+                  ))}
+                  {brandResults.length === 0 && brandQuery.trim() && (
+                    <p className="px-3 py-2 text-[12px] text-muted-foreground">No brands match &quot;{brandQuery}&quot;</p>
+                  )}
+                  <button type="button" onClick={() => { setNewBrandName(brandQuery); setShowNewBrand(true); setBrandOpen(false); }}
+                    className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors">
+                    <Plus className="h-3.5 w-3.5" /> Add New Brand
+                  </button>
+                </div>
+              )}
+              {/* Click outside to close */}
+              {brandOpen && <div className="fixed inset-0 z-20" onClick={() => setBrandOpen(false)} />}
+            </div>
+
+            {/* Model Combobox */}
+            <div className="relative">
+              <Field label="Model">
+                <Input
+                  value={modelQuery}
+                  onChange={(e: any) => {
+                    setModelQuery(e.target.value);
+                    set("model", e.target.value);
+                    setModelOpen(true);
+                  }}
+                  onFocus={() => setModelOpen(true)}
+                  placeholder={selectedBrand ? `Search ${selectedBrand.name} models…` : "Select brand first…"}
+                  className="h-11"
+                  iconLeft={<Search className="h-4 w-4" />}
+                />
+              </Field>
+              {modelOpen && (
+                <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                  {modelResults.slice(0, 12).map((m) => (
+                    <button key={m.id} type="button" onClick={() => handleModelSelect(m)}
+                      className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#EEF1FD]/60",
+                        d.model.toLowerCase() === m.name.toLowerCase() && "bg-[#EEF1FD] font-medium text-[#4361EE]"
+                      )}>
+                      <Check className={cn("h-3.5 w-3.5 shrink-0", d.model.toLowerCase() === m.name.toLowerCase() ? "text-[#4361EE]" : "opacity-0")} strokeWidth={3} />
+                      <span>{m.name}</span>
+                    </button>
+                  ))}
+                  {modelResults.length === 0 && modelQuery.trim() && (
+                    <p className="px-3 py-2 text-[12px] text-muted-foreground">No models match &quot;{modelQuery}&quot;</p>
+                  )}
+                  {selectedBrand && (
+                    <button type="button" onClick={() => { setNewModelName(modelQuery); setShowNewModel(true); setModelOpen(false); }}
+                      className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors">
+                      <Plus className="h-3.5 w-3.5" /> Add New Model
+                    </button>
+                  )}
+                  {!selectedBrand && (
+                    <p className="px-3 py-2 text-[11px] text-muted-foreground italic">Select a brand first to add a new model.</p>
+                  )}
+                </div>
+              )}
+              {modelOpen && <div className="fixed inset-0 z-20" onClick={() => setModelOpen(false)} />}
+            </div>
+
             <div className="col-span-1">
               <Field label="ID Type">
                 <RSelect value={d.imeiType} onChange={(v) => set("imeiType", v)} options={[
@@ -504,6 +691,50 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
           <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
         </div>
       )}
+
+      {/* Add New Brand Modal */}
+      {showNewBrand && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewBrand(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <h3 className="text-base font-bold">Add New Brand</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">This brand will be saved permanently to the Brand Master.</p>
+            <div className="mt-4 space-y-1">
+              <Label>Brand Name</Label>
+              <Input value={newBrandName} onChange={(e: any) => setNewBrandName(e.target.value)} placeholder="e.g. Nokia, Motorola" className="h-11" autoFocus />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowNewBrand(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleSaveNewBrand} disabled={!newBrandName.trim()}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Save Brand
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add New Model Modal */}
+      {showNewModel && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewModel(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <h3 className="text-base font-bold">Add New Model</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              This model will be linked to <span className="font-semibold text-[#4361EE]">{selectedBrand?.name}</span> in the Model Master.
+            </p>
+            <div className="mt-4 space-y-1">
+              <Label>Model Name</Label>
+              <Input value={newModelName} onChange={(e: any) => setNewModelName(e.target.value)} placeholder="e.g. iPhone 16 Pro Max" className="h-11" autoFocus />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowNewModel(false)}>Cancel</Button>
+              <Button size="sm" onClick={handleSaveNewModel} disabled={!newModelName.trim()}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Save Model
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }
@@ -522,10 +753,9 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
             <Field label="Job Type">
               <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
                 { label: "Service", value: "service" },
-                { label: "Repair", value: "repair" },
-                { label: "Diagnostics", value: "diagnostics" },
-                { label: "Warranty Claim", value: "warranty" },
-                { label: "Buy-Back", value: "buyback" },
+                { label: "Warranty", value: "warranty" },
+                { label: "Estimate", value: "estimate" },
+                { label: "Buyback", value: "buyback" },
               ]} />
             </Field>
             <Field label="Priority">
@@ -788,21 +1018,145 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
 
 /* ---------------- Step 6: Contact Search ---------------- */
 function ContactSearch({ data, setData, onNext, isEdit }: any) {
+  const { customers } = useStore();
   const [q, setQ] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(data.customerId || null);
+
+  // Live search results
+  const results = q.trim().length >= 2 ? searchCustomers(customers, q) : [];
+
+  // Select an existing customer and auto-populate step 7
+  const selectCustomer = (c: Customer) => {
+    setSelectedId(c.id);
+    setData({
+      ...data,
+      customerId: c.id,
+      contactType: c.type,
+      customer: {
+        first: c.firstName,
+        last: c.lastName,
+        phone: c.mobile,
+        email: c.email,
+        address: c.address,
+        postal: c.postalCode,
+        city: c.city,
+        company: c.company,
+      },
+    });
+  };
+
+  // Selected customer object (for display)
+  const selectedCustomer = selectedId ? customers.find((c) => c.id === selectedId) : null;
+
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="flex flex-col items-center">
         <SegmentedTabs value={data.contactType} onChange={(v) => setData({ ...data, contactType: v })} options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]} />
-        <div className="mt-6 w-full max-w-md">
-          <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder={data.contactType === "personal" ? "Search by name or phone…" : "Search by company name or GSTIN…"} iconLeft={<Search className="h-4 w-4" />} />
+
+        {/* Search Input */}
+        <div className="relative mt-6 w-full max-w-lg">
+          <Input
+            value={q}
+            onChange={(e: any) => { setQ(e.target.value); setSelectedId(null); }}
+            placeholder="Search by name, phone, email, company or ID…"
+            iconLeft={<Search className="h-4 w-4" />}
+            className="h-12"
+          />
           <p className="mt-2 text-center text-xs text-muted-foreground">
             {data.contactType === "personal" ? <User className="inline h-3 w-3 mr-1" /> : <Building2 className="inline h-3 w-3 mr-1" />}
-            We&apos;ll auto-fill the next step if we find a match.
+            Start typing to search existing customers.
           </p>
+
+          {/* Search Results Dropdown */}
+          {q.trim().length >= 2 && !selectedId && (
+            <div className="absolute left-0 right-0 top-[52px] z-30 mt-1 max-h-[340px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+              {results.length > 0 ? (
+                results.slice(0, 8).map((c) => (
+                  <button
+                    key={c.id}
+                    type="button"
+                    onClick={() => selectCustomer(c)}
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition border-b border-border last:border-0 hover:bg-indigo-50/50"
+                  >
+                    {/* Avatar */}
+                    <span className={cn(
+                      "grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-bold",
+                      c.type === "business" ? "bg-violet-100 text-violet-700" : "bg-[#EEF1FD] text-[#4361EE]"
+                    )}>
+                      {c.firstName[0]}{c.lastName[0] || ""}
+                    </span>
+                    {/* Info */}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="text-sm font-semibold truncate">{c.fullName}</p>
+                        {c.type === "business" && (
+                          <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-semibold text-violet-700 uppercase">Business</span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {c.mobile}
+                        {c.email && <> · {c.email}</>}
+                        {c.company && <> · {c.company}</>}
+                      </p>
+                    </div>
+                    {/* Stats */}
+                    <div className="text-right shrink-0 hidden sm:block">
+                      <p className="text-[10px] text-muted-foreground">{c.totalTickets} tickets · {formatINR(c.lifetimeValue)}</p>
+                      <p className="text-[10px] text-muted-foreground">{c.id}</p>
+                    </div>
+                  </button>
+                ))
+              ) : (
+                <div className="p-5 text-center">
+                  <p className="text-sm text-muted-foreground">No matching customers found</p>
+                  <p className="mt-1 text-[11px] text-muted-foreground">Click &quot;Add New&quot; to create a new customer in the next step.</p>
+                </div>
+              )}
+            </div>
+          )}
         </div>
-        <div className={cn("mt-6 flex w-full max-w-md flex-col gap-2", isEdit && "hidden")}>
-          <Button variant="outline" size="lg" onClick={onNext}>Add New</Button>
-          <Button size="lg" onClick={onNext}>Use this contact <ArrowRight className="h-4 w-4" /></Button>
+
+        {/* Selected Customer Card */}
+        {selectedCustomer && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="mt-5 w-full max-w-lg rounded-xl border border-emerald-200 bg-emerald-50/50 p-4"
+          >
+            <div className="flex items-center gap-3">
+              <span className="grid h-11 w-11 place-items-center rounded-full bg-emerald-100 text-emerald-700 font-bold text-sm">
+                <CheckCircle2 className="h-5 w-5" />
+              </span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-emerald-900">{selectedCustomer.fullName}</p>
+                <p className="text-[11px] text-emerald-700">
+                  {selectedCustomer.mobile}
+                  {selectedCustomer.company && <> · {selectedCustomer.company}</>}
+                  <> · {selectedCustomer.id}</>
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setSelectedId(null);
+                  setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" } });
+                }}
+                className="shrink-0 rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-100 transition"
+                aria-label="Clear selection"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Action Buttons */}
+        <div className={cn("mt-6 flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:justify-center", isEdit && "hidden")}>
+          <Button variant="outline" size="lg" onClick={() => { setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" } }); onNext(); }}>
+            <Plus className="h-4 w-4" /> Add New
+          </Button>
+          <Button size="lg" onClick={onNext} disabled={!selectedId}>
+            Continue <ArrowRight className="h-4 w-4" />
+          </Button>
         </div>
       </div>
     </div>
@@ -811,10 +1165,54 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
 
 /* ---------------- Step 7: Customer (Premium) ---------------- */
 function CustomerForm({ data, setData, onNext, isEdit }: any) {
+  const { customers, addCustomer } = useStore();
   const c = data.customer;
   const set = (k: string, v: string) => setData({ ...data, customer: { ...c, [k]: v } });
+  const hasLinkedCustomer = !!data.customerId;
+
+  // Save new customer to Customer Master when proceeding to next step
+  const handleNext = () => {
+    // Only create a new customer if no existing one is linked and we have at least a name
+    if (!data.customerId && c.first.trim()) {
+      // Check if this customer already exists (by phone or name match) to avoid re-saving on back/forth navigation
+      const existingByPhone = c.phone.trim()
+        ? customers.find((cust) => cust.mobile.replace(/[\s\-\(\)\+]/g, "") === c.phone.replace(/[\s\-\(\)\+]/g, "") && c.phone.replace(/[\s\-\(\)\+]/g, "").length >= 10)
+        : null;
+
+      if (existingByPhone) {
+        // Link to existing customer found by phone
+        setData({ ...data, customerId: existingByPhone.id });
+      } else {
+        // Create new customer and link
+        const newCustomer = createCustomer({
+          type: data.contactType,
+          firstName: c.first.trim(),
+          lastName: c.last.trim(),
+          mobile: c.phone.trim(),
+          email: c.email.trim(),
+          company: c.company.trim(),
+          address: c.address.trim(),
+          city: c.city.trim(),
+          postalCode: c.postal.trim(),
+        });
+        addCustomer(newCustomer);
+        setData({ ...data, customerId: newCustomer.id });
+      }
+    }
+    onNext();
+  };
+
   return (
     <div className={FORM_CARD}>
+      {/* Linked customer banner */}
+      {hasLinkedCustomer && (
+        <div className="mb-5 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5">
+          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
+          <p className="text-[12px] font-medium text-emerald-800">
+            Linked to Customer Master <span className="font-mono font-bold">{data.customerId}</span> — edits here update this ticket only.
+          </p>
+        </div>
+      )}
       <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
         {/* Left Column — Identity */}
         <div className="space-y-4">
@@ -840,7 +1238,7 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
       </div>
       {!isEdit && (
         <div className="mt-6 flex justify-end">
-          <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
+          <Button size="lg" onClick={handleNext}>Next <ArrowRight className="h-4 w-4" /></Button>
         </div>
       )}
     </div>

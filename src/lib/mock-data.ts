@@ -86,6 +86,7 @@ export type Ticket = {
   discount?: number;
   imeiType?: "imei1" | "imei2" | "serial";
   qcStatus?: "pending" | "pass" | "fail";
+  customerId?: string;
 };
 
 /** Helper: generate a createdAt timestamp N minutes ago from now */
@@ -94,10 +95,10 @@ function minsAgo(mins: number): string {
 }
 
 export const tickets: Ticket[] = [
-  { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", resolutionMinutes: 120, amount: 22500, service: "Screen Repair" },
-  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "critical", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", resolutionMinutes: 240, amount: 18999, service: "Board Repair" },
-  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "normal", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", resolutionMinutes: 59, amount: 12999, service: "Battery Replacement" },
-  { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "normal", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair" },
+  { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", resolutionMinutes: 120, amount: 22500, service: "Screen Repair", customerId: "CUS-A001" },
+  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "critical", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", resolutionMinutes: 240, amount: 18999, service: "Board Repair", customerId: "CUS-A002" },
+  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "normal", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", resolutionMinutes: 59, amount: 12999, service: "Battery Replacement", customerId: "CUS-A003" },
+  { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "normal", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair", customerId: "CUS-A004" },
   {
     id: "T-7335", customer: "Ravindu Toyota", phone: "+91 99000 56190", company: "iFix India - Koramangala", device: "iPad", model: "iPad Air 2", issue: "Battery bulged, display broken",
     items: [
@@ -106,18 +107,18 @@ export const tickets: Ticket[] = [
       { device: "iPad", model: "iPad Air 2", serial: "DMPRQ2AYG5VT", issue: "Battery bulged", service: "Battery Replacement" },
       { device: "iPad", model: "iPad Air 2", serial: "DMPRT5K1G5VT", issue: "Battery bulged, display broken", service: "Battery + Screen" },
     ],
-    status: "repairing", priority: "critical", technician: "Anand", createdAt: minsAgo(90), dueDate: "2026-07-22T19:00:00", amount: 20000, service: "Bulk Repair"
+    status: "repairing", priority: "critical", technician: "Anand", createdAt: minsAgo(90), dueDate: "2026-07-22T19:00:00", amount: 20000, service: "Bulk Repair", customerId: "CUS-A005"
   },
-  { id: "T-911", customer: "Vikas Nair", phone: "+91 65432 10987", company: "NairTech Solutions", device: "iPad", model: "iPad Air 11\u2033", issue: "Touch panel calibration", status: "received", priority: "normal", technician: "Anand", createdAt: minsAgo(45), dueDate: "2026-07-24T12:00:00", amount: 4999, service: "Calibration" },
-  { id: "T-204", customer: "Sneha P.", phone: "+91 54321 09876", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "normal", technician: "Ravi", createdAt: minsAgo(5), amount: 3499, service: "Port Repair" },
-  { id: "T-732", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub", device: "iPhone", model: "iPhone 13", issue: "Speaker no audio", status: "repairing", priority: "high", technician: "Pooja", createdAt: minsAgo(90), dueDate: "2026-07-22T18:00:00", amount: 2899, service: "Speaker Repair" },
+  { id: "T-911", customer: "Vikas Nair", phone: "+91 65432 10987", company: "NairTech Solutions", device: "iPad", model: "iPad Air 11\u2033", issue: "Touch panel calibration", status: "received", priority: "normal", technician: "Anand", createdAt: minsAgo(45), dueDate: "2026-07-24T12:00:00", amount: 4999, service: "Calibration", customerId: "CUS-A006" },
+  { id: "T-204", customer: "Sneha P.", phone: "+91 54321 09876", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "normal", technician: "Ravi", createdAt: minsAgo(5), amount: 3499, service: "Port Repair", customerId: "CUS-A007" },
+  { id: "T-732", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub", device: "iPhone", model: "iPhone 13", issue: "Speaker no audio", status: "repairing", priority: "high", technician: "Pooja", createdAt: minsAgo(90), dueDate: "2026-07-22T18:00:00", amount: 2899, service: "Speaker Repair", customerId: "CUS-A008" },
   {
     id: "T-621", customer: "Anjali R.", phone: "+91 32109 87654", device: "Windows", model: "Lenovo Yoga 9i", issue: "Hinge replacement",
     items: [
       { device: "Windows", model: "Lenovo Yoga 9i", serial: "PF4KXYZ1", issue: "Hinge replacement", service: "Hardware Repair" },
       { device: "Windows", model: "Lenovo IdeaPad 5", serial: "PF4KABC2", issue: "Keyboard not working", service: "Keyboard Replacement" },
     ],
-    status: "diagnosis", priority: "normal", technician: "Shubham", createdAt: minsAgo(42), dueDate: "2026-07-25T11:00:00", amount: 14999, service: "Hardware Repair"
+    status: "diagnosis", priority: "normal", technician: "Shubham", createdAt: minsAgo(42), dueDate: "2026-07-25T11:00:00", amount: 14999, service: "Hardware Repair", customerId: "CUS-A009"
   },
 ];
 
