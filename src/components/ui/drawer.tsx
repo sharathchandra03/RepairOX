@@ -1,12 +1,14 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* Right-side slide-over drawer for detail views. Locks scroll, closes on
-   backdrop click / Escape. Reused across Approvals, Stock Movement, Barcode. */
+   backdrop click / Escape. Renders via portal to escape stacking context
+   issues from parent containers with overflow/transform. */
 export function Drawer({
   open,
   onClose,
@@ -26,6 +28,12 @@ export function Drawer({
   footer?: React.ReactNode;
   width?: string;
 }) {
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -38,7 +46,7 @@ export function Drawer({
     };
   }, [open, onClose]);
 
-  return (
+  const content = (
     <AnimatePresence>
       {open && (
         <>
@@ -47,14 +55,14 @@ export function Drawer({
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={onClose}
-            className="fixed inset-0 z-50 bg-foreground/40 backdrop-blur-[2px]"
+            className="fixed inset-0 z-[9999] bg-foreground/40 backdrop-blur-[2px]"
           />
           <motion.aside
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "spring", stiffness: 320, damping: 34 }}
-            className={cn("fixed inset-y-0 right-0 z-50 flex w-full flex-col bg-card shadow-2xl", width)}
+            className={cn("fixed inset-y-0 right-0 z-[9999] flex w-full flex-col bg-card shadow-2xl", width)}
             role="dialog"
             aria-modal="true"
           >
@@ -87,6 +95,10 @@ export function Drawer({
       )}
     </AnimatePresence>
   );
+
+  // Portal to body to escape any stacking context / overflow constraints
+  if (!mounted) return null;
+  return createPortal(content, document.body);
 }
 
 /* Key/value detail row helper for drawer bodies */

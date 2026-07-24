@@ -19,8 +19,9 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={ref}
           className={cn(
-            "flex h-9 w-full rounded-xl border border-border bg-card px-3 py-2 text-sm placeholder:text-muted-foreground transition",
-            "focus:border-brand-400 focus:ring-2 focus:ring-brand-200/40 focus:outline-none",
+            "flex h-9 w-full rounded-xl border border-border bg-card px-3 py-2 text-sm placeholder:text-muted-foreground transition-all duration-150",
+            "hover:border-[#4361EE]/40",
+            "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none",
             iconLeft && "pl-9",
             iconRight && "pr-9",
             className
@@ -43,8 +44,9 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTML
     <textarea
       ref={ref}
       className={cn(
-        "min-h-[96px] w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm placeholder:text-muted-foreground transition",
-        "focus:border-brand-400 focus:ring-2 focus:ring-brand-200/50 focus:outline-none",
+        "min-h-[96px] w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm placeholder:text-muted-foreground transition-all duration-150 resize-none",
+        "hover:border-[#4361EE]/40",
+        "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none",
         className
       )}
       {...props}

@@ -8,13 +8,14 @@ import {
   CheckCircle2, Check, XCircle, MinusCircle, Mail, Phone, MessageCircle,
   Printer, FileText, Plus, Search, User, Building2, Sparkles, ListPlus,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
-  Shield, ChevronDown, ChevronUp, StickyNote, CircleDot,
+  Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList,
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
 import { CategoryWheel } from "@/components/wizard/category-wheel";
 import { Button } from "@/components/ui/button";
-import { Input, Label, Textarea, Select } from "@/components/ui/input";
+import { Input, Label, Textarea } from "@/components/ui/input";
+import { RSelect } from "@/components/ui/rselect";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useStore } from "@/lib/store";
@@ -76,7 +77,8 @@ const QC_GROUPS = [
 type WizardData = {
   process?: string;
   category?: string;
-  device: { model: string; imei: string; password: string; issue: string; assignedBy: string; assignedTo: string; source: string; type: string; estimate: string; description: string; notes: string; priority: string; resolutionMinutes: string };
+  device: { brand: string; model: string; imei: string; imeiType: string; assignedBy: string; assignedTo: string; source: string; type: string };
+  job: { jobType: string; estimate: string; warranty: string; issue: string; priority: string; resolutionMinutes: string; accessories: string; description: string; notes: string };
   parts: { inventoryId: string; name: string; sku: string; qty: number; unitPrice: number; total: number; uom: string }[];
   contactType: "personal" | "business";
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
@@ -86,7 +88,8 @@ type WizardData = {
 };
 
 const DEFAULT: WizardData = {
-  device: { model: "", imei: "", password: "", issue: "", assignedBy: "", assignedTo: "", source: "", type: "", estimate: "", description: "", notes: "", priority: "normal", resolutionMinutes: "" },
+  device: { brand: "", model: "", imei: "", imeiType: "imei1", assignedBy: "", assignedTo: "", source: "", type: "" },
+  job: { jobType: "service", estimate: "", warranty: "", issue: "", priority: "normal", resolutionMinutes: "", accessories: "", description: "", notes: "" },
   parts: [],
   contactType: "personal",
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
@@ -103,27 +106,39 @@ function ticketToWizard(t: Ticket): WizardData {
   const last = nameParts.slice(1).join(" ");
   const category = t.device?.toLowerCase() || "others";
 
+  // Parse address back into components (stored as "address, city, postal")
+  const addressParts = (t.address || "").split(", ");
+  const address = addressParts[0] || "";
+  const city = addressParts[1] || "";
+  const postal = addressParts[2] || "";
+
   return {
     process: "ticket",
     category,
     device: {
+      brand: t.device || "",
       model: t.model,
-      imei: "",
-      password: "",
-      issue: t.issue,
+      imei: t.items?.[0]?.serial || "",
+      imeiType: t.imeiType || "imei1",
       assignedBy: "",
       assignedTo: t.technician?.toLowerCase() || "",
-      source: "",
+      source: t.source || "",
       type: "",
+    },
+    job: {
+      jobType: "service",
       estimate: String(t.amount || 0),
-      description: t.issue,
-      notes: "",
+      warranty: "",
+      issue: t.issue,
       priority: t.priority || "normal",
       resolutionMinutes: t.resolutionMinutes ? String(t.resolutionMinutes) : "",
+      accessories: "",
+      description: t.issue,
+      notes: t.internalNotes || "",
     },
-    parts: [],
-    contactType: "personal",
-    customer: { first, last, phone: t.phone || "", email: "", address: "", postal: "", city: "", company: t.company || "" },
+    parts: t.parts ? t.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
+    contactType: t.company ? "business" : "personal",
+    customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     qc: {},
     files: [],
     signatureCleared: false,
@@ -169,7 +184,7 @@ function NewTicketWizard() {
     else setInitialLoaded(true);
   }, [data]);
 
-  const next = () => setStep((s) => Math.min(s + 1, 10));
+  const next = () => setStep((s) => Math.min(s + 1, 11));
   const back = () => {
     if (step === 1) {
       attemptNav("/tickets");
@@ -189,7 +204,7 @@ function NewTicketWizard() {
 
   const handleSave = () => {
     const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
-    const resMinutes = Number(data.device.resolutionMinutes) || 59;
+    const resMinutes = Number(data.job.resolutionMinutes) || 59;
     const createdAt = isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString();
     const dueDate = new Date(new Date(createdAt).getTime() + resMinutes * 60_000).toISOString();
 
@@ -197,19 +212,25 @@ function NewTicketWizard() {
       id: editId || genId(),
       customer: customerName,
       phone: data.customer.phone || "+91 00000 00000",
+      email: data.customer.email || undefined,
+      address: [data.customer.address, data.customer.city, data.customer.postal].filter(Boolean).join(", ") || undefined,
       company: data.customer.company || undefined,
-      device: data.category || "others",
+      device: data.device.brand || data.category || "others",
       model: data.device.model || "Unknown Device",
-      issue: data.device.issue || data.device.description || "General service",
+      issue: data.job.issue || data.job.description || "General service",
+      items: data.device.imei ? [{ device: data.device.brand || data.category || "others", model: data.device.model || "Unknown Device", serial: data.device.imei, issue: data.job.issue || "General service", service: data.job.issue || "Repair" }] : undefined,
       parts: data.parts.length > 0 ? data.parts.map((p) => ({ ...p, status: "planned" as const })) : undefined,
       status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "received") : "received") as TicketStatus,
-      priority: (data.device.priority as any) || "normal",
+      priority: (data.job.priority as any) || "normal",
       technician: data.device.assignedTo || "Unassigned",
       createdAt,
       dueDate,
       resolutionMinutes: resMinutes,
-      amount: Number(data.device.estimate) || data.parts.reduce((s, p) => s + p.total, 0) || 0,
-      service: data.device.issue || "Repair",
+      amount: Number(data.job.estimate) || data.parts.reduce((s, p) => s + p.total, 0) || 0,
+      service: data.job.issue || "Repair",
+      source: data.device.source || undefined,
+      imeiType: data.device.imei ? (data.device.imeiType as "imei1" | "imei2" | "serial") || "imei1" : undefined,
+      internalNotes: data.job.notes || undefined,
     };
 
     if (isEdit) {
@@ -254,15 +275,15 @@ function NewTicketWizard() {
               <ArrowLeft className="h-4 w-4" /> Previous
             </Button>
             <Button size="md" onClick={handleSave}>
-              <Check className="h-4 w-4" /> Save Changes
+              Save Changes
             </Button>
-            <Button variant="outline" size="md" onClick={next} disabled={step >= 10}>
+            <Button variant="outline" size="md" onClick={next} disabled={step >= 11}>
               Next <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
         ) : undefined}
       >
-        <div className={cn("mx-auto", step === 2 ? "max-w-5xl" : (step === 3 || step === 6 || step === 8) ? "max-w-5xl" : "max-w-3xl")}>
+        <div className={cn("mx-auto", step === 9 ? "max-w-6xl" : (step === 2 || step === 3 || step === 4 || step === 7) ? "max-w-5xl" : "max-w-3xl")}>
           {step === 1 && (
             <ProcessSelector
               value={data.process}
@@ -282,13 +303,14 @@ function NewTicketWizard() {
             />
           )}
           {step === 3 && <DeviceForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 4 && <PartsAssignment data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 5 && <ContactSearch data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 6 && <CustomerForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 7 && <QuoteSummary data={data} onNext={next} isEdit={isEdit} />}
-          {step === 8 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 9 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 10 && <SignatureStep onSubmit={handleSubmit} isEdit={isEdit} />}
+          {step === 4 && <JobDetailsForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 5 && <PartsAssignment data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 6 && <ContactSearch data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 7 && <CustomerForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 8 && <QuoteSummary data={data} onNext={next} isEdit={isEdit} />}
+          {step === 9 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 10 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 11 && <SignatureStep onSubmit={handleSubmit} isEdit={isEdit} />}
         </div>
       </WizardShell>
 
@@ -301,7 +323,7 @@ function NewTicketWizard() {
             <p className="mt-1.5 text-sm text-muted-foreground">You have unsaved changes to this ticket.</p>
             <div className="mt-5 flex flex-col gap-2">
               <Button size="md" onClick={() => { setShowLeaveDialog(false); handleSave(); }}>
-                <Check className="h-4 w-4" /> Save Changes
+                Save Changes
               </Button>
               <Button variant="outline" size="md" onClick={() => { setShowLeaveDialog(false); setDirty(false); if (pendingNav) router.push(pendingNav); }}>
                 Discard Changes
@@ -390,6 +412,7 @@ function titleFor(step: number) {
     "Select Your Process",
     "Select Your Category",
     "Device Details",
+    "Job Details",
     "Assign Items / Parts to Service",
     "Search Contact",
     "Customer Information",
@@ -403,7 +426,8 @@ function subtitleFor(step: number) {
   return [
     "Pick what you're creating today.",
     "What kind of device is it?",
-    "Capture identifiers, fault and assignments.",
+    "Capture brand, model and identifiers.",
+    "Capture job type, priority and repair notes.",
     "Add spare parts and services consumed.",
     "Find an existing contact, or add a new one.",
     "Make sure the customer details are correct.",
@@ -414,35 +438,47 @@ function subtitleFor(step: number) {
   ][step - 1];
 }
 
-/* ---------------- Step 3: Device ---------------- */
+/* ---------------- Step 3: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const d = data.device;
   const set = (k: string, v: string) => setData({ ...data, device: { ...d, [k]: v } });
   return (
-    <div className="rounded-[20px] border border-border/60 bg-white p-6 sm:p-7 shadow-[0_4px_24px_-6px_rgba(0,0,0,0.06),0_1px_3px_-1px_rgba(0,0,0,0.04)]">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Left Column — Device & Repair */}
-        <div className="space-y-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Device Information</p>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <Field label="Model"><Input value={d.model} onChange={(e: any) => set("model", e.target.value)} placeholder="e.g. iPhone 15 Pro Max" /></Field>
-            <Field label="IMEI / Serial"><Input value={d.imei} onChange={(e: any) => set("imei", e.target.value)} placeholder="356xxxxxxxxxx" /></Field>
-            <Field label="Password / Pattern"><Input value={d.password} onChange={(e: any) => set("password", e.target.value)} placeholder="If shared by customer" /></Field>
+    <div className={FORM_CARD}>
+      <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
+        {/* Left Column — Device Identity */}
+        <div className="space-y-4">
+          <SectionLabel icon={Package}>Device Identity</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+            <Field label="Brand Name"><Input value={d.brand} onChange={(e: any) => set("brand", e.target.value)} placeholder="e.g. Apple, Samsung" className="h-11" /></Field>
+            <Field label="Model"><Input value={d.model} onChange={(e: any) => set("model", e.target.value)} placeholder="e.g. iPhone 15 Pro Max" className="h-11" /></Field>
+            <div className="col-span-1">
+              <Field label="ID Type">
+                <RSelect value={d.imeiType} onChange={(v) => set("imeiType", v)} options={[
+                  { label: "IMEI 1", value: "imei1" },
+                  { label: "IMEI 2", value: "imei2" },
+                  { label: "Serial No.", value: "serial" },
+                ]} />
+              </Field>
+            </div>
+            <div className="col-span-1">
+              <Field label="IMEI / Serial Number"><Input value={d.imei} onChange={(e: any) => set("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="h-11 font-mono" /></Field>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Column — Intake */}
+        <div className="space-y-4">
+          <SectionLabel icon={ListPlus}>Intake Details</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
             <Field label="Type">
-              <Select value={d.type} onChange={(e: any) => set("type", e.target.value)} options={[
-                { label: "Select type", value: "" },
+              <RSelect value={d.type} onChange={(v) => set("type", v)} placeholder="Select type" options={[
                 { label: "Walk-In", value: "walkin" },
                 { label: "Pick-Up", value: "pickup" },
                 { label: "On-Site", value: "onsite" },
               ]} />
             </Field>
-          </div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Repair Information</p>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <Field label="Issue"><Input value={d.issue} onChange={(e: any) => set("issue", e.target.value)} placeholder="Display not working" /></Field>
             <Field label="Source">
-              <Select value={d.source} onChange={(e: any) => set("source", e.target.value)} options={[
-                { label: "Select source", value: "" },
+              <RSelect value={d.source} onChange={(v) => set("source", v)} placeholder="Select source" options={[
                 { label: "Google", value: "google" },
                 { label: "Meta", value: "meta" },
                 { label: "YouTube", value: "youtube" },
@@ -450,18 +486,9 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                 { label: "Reference", value: "ref" },
               ]} />
             </Field>
-            <Field label="Estimate (₹)"><Input type="number" value={d.estimate} onChange={(e: any) => set("estimate", e.target.value)} placeholder="0" /></Field>
-          </div>
-        </div>
-
-        {/* Right Column — Assignment */}
-        <div className="space-y-3">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Assignment</p>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <Field label="Assigned by"><Input value={d.assignedBy} onChange={(e: any) => set("assignedBy", e.target.value)} placeholder="Front desk" /></Field>
-            <Field label="Assigned to">
-              <Select value={d.assignedTo} onChange={(e: any) => set("assignedTo", e.target.value)} options={[
-                { label: "Select technician", value: "" },
+            <Field label="Assigned By"><Input value={d.assignedBy} onChange={(e: any) => set("assignedBy", e.target.value)} placeholder="Front desk" className="h-11" /></Field>
+            <Field label="Assigned To">
+              <RSelect value={d.assignedTo} onChange={(v) => set("assignedTo", v)} placeholder="Select technician" searchable options={[
                 { label: "Anand · L2 Mobile", value: "anand" },
                 { label: "Pooja · Logic-board", value: "pooja" },
                 { label: "Vikas · Watch & iPad", value: "vikas" },
@@ -469,16 +496,54 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                 { label: "Ravi · Android", value: "ravi" },
               ]} />
             </Field>
+          </div>
+        </div>
+      </div>
+      {!isEdit && (
+        <div className="mt-6 flex justify-end">
+          <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ---------------- Step 4: Job Details ---------------- */
+function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
+  const j = data.job;
+  const set = (k: string, v: string) => setData({ ...data, job: { ...j, [k]: v } });
+  return (
+    <div className={FORM_CARD}>
+      <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
+        {/* Left Column — Job Overview */}
+        <div className="space-y-4">
+          <SectionLabel icon={ClipboardList}>Job Overview</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+            <Field label="Job Type">
+              <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
+                { label: "Service", value: "service" },
+                { label: "Repair", value: "repair" },
+                { label: "Diagnostics", value: "diagnostics" },
+                { label: "Warranty Claim", value: "warranty" },
+                { label: "Buy-Back", value: "buyback" },
+              ]} />
+            </Field>
             <Field label="Priority">
-              <Select value={d.priority} onChange={(e: any) => set("priority", e.target.value)} options={[
+              <RSelect value={j.priority} onChange={(v) => set("priority", v)} options={[
                 { label: "Normal", value: "normal" },
                 { label: "High Priority", value: "high" },
                 { label: "Critical", value: "critical" },
               ]} />
             </Field>
-            <Field label="Resolution Time">
-              <Select value={d.resolutionMinutes} onChange={(e: any) => set("resolutionMinutes", e.target.value)} options={[
-                { label: "Default (59 min)", value: "" },
+            <Field label="Warranty">
+              <RSelect value={j.warranty} onChange={(v) => set("warranty", v)} placeholder="Select warranty" options={[
+                { label: "In Warranty", value: "in-warranty" },
+                { label: "Out of Warranty", value: "out-warranty" },
+                { label: "Extended Warranty", value: "extended" },
+              ]} />
+            </Field>
+            <Field label="Expected Resolution Time">
+              <RSelect value={j.resolutionMinutes} onChange={(v) => set("resolutionMinutes", v)} placeholder="Default (59 min)" options={[
                 { label: "30 Minutes", value: "30" },
                 { label: "45 Minutes", value: "45" },
                 { label: "1 Hour", value: "60" },
@@ -488,18 +553,35 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               ]} />
             </Field>
           </div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Notes</p>
-          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-            <Field label="Problem description"><Textarea value={d.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots…" rows={1} /></Field>
-            <Field label="Internal notes"><Textarea value={d.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" rows={1} /></Field>
-          </div>
+          <Field label="Issue"><Input value={j.issue} onChange={(e: any) => set("issue", e.target.value)} placeholder="Display not working" className="h-11" /></Field>
+          <Field label="User Accessories"><Textarea value={j.accessories} onChange={(e: any) => set("accessories", e.target.value)} placeholder="e.g. Charger, case, SIM tray received" rows={2} className="min-h-0" /></Field>
+        </div>
+
+        {/* Right Column — Notes */}
+        <div className="space-y-4">
+          <SectionLabel icon={StickyNote}>Notes</SectionLabel>
+          <Field label="Problem Description"><Textarea value={j.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" rows={5} className="min-h-0 h-[124px]" /></Field>
+          <Field label="Internal Notes"><Textarea value={j.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" rows={3} className="min-h-0 h-[76px]" /></Field>
         </div>
       </div>
       {!isEdit && (
-        <div className="mt-4 flex justify-end">
+        <div className="mt-6 flex justify-end">
           <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
         </div>
       )}
+    </div>
+  );
+}
+
+const FORM_CARD = "rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 sm:p-8 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
+
+function SectionLabel({ icon: Icon, children }: { icon: any; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="grid h-6 w-6 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+        <Icon className="h-3.5 w-3.5" />
+      </span>
+      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{children}</p>
     </div>
   );
 }
@@ -513,7 +595,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-/* ---------------- Step 4: Parts (Inventory Integrated) ---------------- */
+/* ---------------- Step 5: Parts (Inventory Integrated) ---------------- */
 function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   const { inventory } = useStore();
   const [query, setQuery] = useState("");
@@ -566,7 +648,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   };
 
   return (
-    <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       {/* Search */}
       <div className="relative">
         <Field label="Search Inventory">
@@ -704,11 +786,11 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 5: Contact Search ---------------- */
+/* ---------------- Step 6: Contact Search ---------------- */
 function ContactSearch({ data, setData, onNext, isEdit }: any) {
   const [q, setQ] = useState("");
   return (
-    <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="flex flex-col items-center">
         <SegmentedTabs value={data.contactType} onChange={(v) => setData({ ...data, contactType: v })} options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]} />
         <div className="mt-6 w-full max-w-md">
@@ -727,24 +809,37 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 6: Customer ---------------- */
+/* ---------------- Step 7: Customer (Premium) ---------------- */
 function CustomerForm({ data, setData, onNext, isEdit }: any) {
   const c = data.customer;
   const set = (k: string, v: string) => setData({ ...data, customer: { ...c, [k]: v } });
   return (
-    <div className="rounded-[20px] border border-border/60 bg-white p-6 sm:p-7 shadow-[0_4px_24px_-6px_rgba(0,0,0,0.06),0_1px_3px_-1px_rgba(0,0,0,0.04)]">
-      <div className="grid grid-cols-1 gap-x-5 gap-y-3 md:grid-cols-2">
-        <Field label="First name"><Input value={c.first} onChange={(e: any) => set("first", e.target.value)} placeholder="Rahul" /></Field>
-        <Field label="Last name"><Input value={c.last} onChange={(e: any) => set("last", e.target.value)} placeholder="Kapoor" /></Field>
-        <Field label="Contact number"><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" /></Field>
-        <Field label="E-mail ID"><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} iconLeft={<Mail className="h-4 w-4" />} placeholder="rahul@email.com" /></Field>
-        <Field label="Company / Organization"><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></Field>
-        <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} /></Field>
-        <div className="md:col-span-2"><Field label="Address"><Input value={c.address} onChange={(e: any) => set("address", e.target.value)} placeholder="House / Street / Locality" /></Field></div>
-        <Field label="Postal code"><Input value={c.postal} onChange={(e: any) => set("postal", e.target.value)} /></Field>
+    <div className={FORM_CARD}>
+      <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
+        {/* Left Column — Identity */}
+        <div className="space-y-4">
+          <SectionLabel icon={User}>Personal Details</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+            <Field label="First Name"><Input value={c.first} onChange={(e: any) => set("first", e.target.value)} placeholder="Rahul" className="h-11" /></Field>
+            <Field label="Last Name"><Input value={c.last} onChange={(e: any) => set("last", e.target.value)} placeholder="Kapoor" className="h-11" /></Field>
+            <div className="col-span-2"><Field label="Contact Number"><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" className="h-11" /></Field></div>
+            <Field label="E-mail ID"><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} iconLeft={<Mail className="h-4 w-4" />} placeholder="rahul@email.com" className="h-11" /></Field>
+            <Field label="Company / Organization"><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} iconLeft={<Building2 className="h-4 w-4" />} placeholder="Optional" className="h-11" /></Field>
+          </div>
+        </div>
+
+        {/* Right Column — Address */}
+        <div className="space-y-4">
+          <SectionLabel icon={Building2}>Address</SectionLabel>
+          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+            <div className="col-span-2"><Field label="Address"><Input value={c.address} onChange={(e: any) => set("address", e.target.value)} placeholder="House / Street / Locality" className="h-11" /></Field></div>
+            <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} placeholder="Bengaluru" className="h-11" /></Field>
+            <Field label="Postal Code"><Input value={c.postal} onChange={(e: any) => set("postal", e.target.value)} placeholder="560001" className="h-11" /></Field>
+          </div>
+        </div>
       </div>
       {!isEdit && (
-        <div className="mt-4 flex justify-end">
+        <div className="mt-6 flex justify-end">
           <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
         </div>
       )}
@@ -752,14 +847,14 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 7: Quote ---------------- */
+/* ---------------- Step 8: Quote ---------------- */
 function QuoteSummary({ data, onNext, isEdit }: any) {
   const partsTotal = data.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
   const labour = 499;
   const tax = Math.round(partsTotal * 0.18);
   const total = partsTotal + labour + tax;
   return (
-    <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
         <div className="rounded-2xl border border-border">
           <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -804,7 +899,7 @@ function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
   );
 }
 
-/* ---------------- Step 8: QC (Premium Inspection) ---------------- */
+/* ---------------- Step 9: QC (Premium Inspection) ---------------- */
 function QCForm({ data, setData, onNext, isEdit }: any) {
   const [filter, setFilter] = useState<"all" | "pass" | "fail" | "skip" | "pending">("all");
   const [search, setSearch] = useState("");
@@ -897,46 +992,50 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
           </div>
         </div>
 
-        {/* Groups */}
-        <div className="space-y-2.5">
-          {QC_GROUPS.map((group) => {
-            const visibleItems = group.items.filter((item) => matchesFilter(item) && matchesSearch(item));
-            if (visibleItems.length === 0) return null;
-            const groupDone = group.items.filter((i) => qc[i]).length;
-            const isCollapsed = collapsed.has(group.id);
-            return (
-              <div key={group.id} className="rounded-xl border border-border bg-card overflow-hidden">
-                <button onClick={() => toggleGroup(group.id)} className="flex w-full items-center justify-between px-4 py-2 bg-muted/40 hover:bg-muted/60 transition">
-                  <div className="flex items-center gap-2">
-                    {isCollapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />}
-                    <span className="text-[13px] font-semibold">{group.label}</span>
+        {/* Groups — two balanced columns */}
+        <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 lg:items-start">
+          {[QC_GROUPS.slice(0, 3), QC_GROUPS.slice(3)].map((column, colIdx) => (
+            <div key={colIdx} className="space-y-2.5">
+              {column.map((group) => {
+                const visibleItems = group.items.filter((item) => matchesFilter(item) && matchesSearch(item));
+                if (visibleItems.length === 0) return null;
+                const groupDone = group.items.filter((i) => qc[i]).length;
+                const isCollapsed = collapsed.has(group.id);
+                return (
+                  <div key={group.id} className="rounded-xl border border-border bg-card overflow-hidden">
+                    <button onClick={() => toggleGroup(group.id)} className="flex w-full items-center justify-between px-4 py-2 bg-muted/40 hover:bg-muted/60 transition">
+                      <div className="flex items-center gap-2">
+                        {isCollapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />}
+                        <span className="text-[13px] font-semibold">{group.label}</span>
+                      </div>
+                      <span className="text-[10px] text-muted-foreground font-medium">{groupDone}/{group.items.length}</span>
+                    </button>
+                    {!isCollapsed && (
+                      <div className="divide-y divide-border">
+                        {visibleItems.map((label) => {
+                          const status = qc[label];
+                          return (
+                            <div key={label} className="flex items-center gap-2.5 px-4 py-2">
+                              <span className={cn("h-2 w-2 rounded-full shrink-0", status === "ok" ? "bg-emerald-500" : status === "no" ? "bg-rose-500" : status === "na" ? "bg-[#4361EE]" : "bg-zinc-300")} />
+                              <span className="flex-1 text-[13px] font-medium truncate">{label}</span>
+                              <button onClick={() => { setNoteOpen(label); setNoteText(""); }} className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold text-[#4361EE] hover:bg-[#EEF1FD] transition">
+                                NOTE
+                              </button>
+                              <div className="flex items-center gap-1 shrink-0">
+                                <button onClick={() => set(label, "ok")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "ok" ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200" : "bg-muted text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700")}>Pass</button>
+                                <button onClick={() => set(label, "no")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "no" ? "bg-rose-100 text-rose-700 ring-1 ring-rose-200" : "bg-muted text-muted-foreground hover:bg-rose-50 hover:text-rose-700")}>Fail</button>
+                                <button onClick={() => set(label, "na")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "na" ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200" : "bg-muted text-muted-foreground hover:bg-indigo-50 hover:text-indigo-700")}>Skip</button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
-                  <span className="text-[10px] text-muted-foreground font-medium">{groupDone}/{group.items.length}</span>
-                </button>
-                {!isCollapsed && (
-                  <div className="divide-y divide-border">
-                    {visibleItems.map((label) => {
-                      const status = qc[label];
-                      return (
-                        <div key={label} className="flex items-center gap-3 px-4 py-2">
-                          <span className={cn("h-2 w-2 rounded-full shrink-0", status === "ok" ? "bg-emerald-500" : status === "no" ? "bg-rose-500" : status === "na" ? "bg-[#4361EE]" : "bg-zinc-300")} />
-                          <span className="flex-1 text-[13px] font-medium">{label}</span>
-                          <button onClick={() => { setNoteOpen(label); setNoteText(""); }} className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground hover:bg-muted transition" title="Note">
-                            <StickyNote className="h-3 w-3" />
-                          </button>
-                          <div className="flex items-center gap-1">
-                            <button onClick={() => set(label, "ok")} className={cn("rounded-md px-2.5 py-1 text-[10px] font-semibold transition-all", status === "ok" ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200" : "bg-muted text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700")}>Pass</button>
-                            <button onClick={() => set(label, "no")} className={cn("rounded-md px-2.5 py-1 text-[10px] font-semibold transition-all", status === "no" ? "bg-rose-100 text-rose-700 ring-1 ring-rose-200" : "bg-muted text-muted-foreground hover:bg-rose-50 hover:text-rose-700")}>Fail</button>
-                            <button onClick={() => set(label, "na")} className={cn("rounded-md px-2.5 py-1 text-[10px] font-semibold transition-all", status === "na" ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200" : "bg-muted text-muted-foreground hover:bg-indigo-50 hover:text-indigo-700")}>Skip</button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            );
-          })}
+                );
+              })}
+            </div>
+          ))}
         </div>
       </div>
 
@@ -990,10 +1089,10 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 9: Upload ---------------- */
+/* ---------------- Step 10: Upload ---------------- */
 function UploadStep({ data, setData, onNext, isEdit }: any) {
   return (
-    <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         {[
           { id: "camera", label: "Camera", icon: Camera, desc: "Open camera to capture device shots" },
@@ -1036,11 +1135,11 @@ function UploadStep({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 10: Signature ---------------- */
+/* ---------------- Step 11: Signature ---------------- */
 function SignatureStep({ onSubmit, isEdit }: { onSubmit: () => void; isEdit: boolean }) {
   const [signed, setSigned] = useState(false);
   return (
-    <div className="rounded-3xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <p className="text-center text-sm text-muted-foreground">
         {isEdit ? "Confirm your changes by signing below." : "By signing below the customer agrees to the diagnosis, estimate and our service terms."}
       </p>

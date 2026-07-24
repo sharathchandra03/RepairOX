@@ -28,12 +28,12 @@ export function KpiCard({
   /** 0–100 progress value. Omit to hide the bar. */
   progress?: { value: number; label?: string };
 }) {
-  const TONES: Record<string, { chip: string; bar: string }> = {
-    rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", bar: "bg-[#4361EE]" },
-    amber:   { chip: "text-amber-700 bg-amber-50 ring-amber-200/40", bar: "bg-amber-500" },
-    emerald: { chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/40", bar: "bg-emerald-500" },
-    sky:     { chip: "text-sky-700 bg-sky-50 ring-sky-200/40", bar: "bg-sky-500" },
-    violet:  { chip: "text-violet-700 bg-violet-50 ring-violet-200/40", bar: "bg-violet-500" },
+  const TONES: Record<string, { chip: string; bar: string; glow: string }> = {
+    rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", bar: "bg-[#4361EE]", glow: "rgba(67,97,238,0.16)" },
+    amber:   { chip: "text-amber-700 bg-amber-50 ring-amber-200/40", bar: "bg-amber-500", glow: "rgba(245,158,11,0.14)" },
+    emerald: { chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/40", bar: "bg-emerald-500", glow: "rgba(16,185,129,0.14)" },
+    sky:     { chip: "text-sky-700 bg-sky-50 ring-sky-200/40", bar: "bg-sky-500", glow: "rgba(14,165,233,0.14)" },
+    violet:  { chip: "text-violet-700 bg-violet-50 ring-violet-200/40", bar: "bg-violet-500", glow: "rgba(139,92,246,0.14)" },
   };
   const t = TONES[tone];
   const pct = Math.max(0, Math.min(100, progress?.value ?? 0));
@@ -44,7 +44,13 @@ export function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       className="group relative overflow-hidden rounded-2xl border border-border/80 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-200 will-change-transform hover:-translate-y-0.5 hover:shadow-[0_4px_16px_-4px_rgba(0,0,0,0.1),0_8px_24px_-8px_rgba(0,0,0,0.08)]"
     >
-      <div className="flex items-center justify-between">
+      {/* Ambient radial glow — subtle depth, not flashy */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute -top-10 -right-10 h-32 w-32 rounded-full opacity-70 blur-2xl transition-opacity duration-300 group-hover:opacity-100"
+        style={{ background: `radial-gradient(circle, ${t.glow}, transparent 70%)` }}
+      />
+      <div className="relative flex items-center justify-between">
         <p className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
         {delta && (
           <span className={cn("inline-flex items-center gap-0.5 rounded-full px-2 py-0.5 text-[10.5px] font-semibold ring-1 ring-inset", t.chip)}>
@@ -53,14 +59,14 @@ export function KpiCard({
           </span>
         )}
       </div>
-      <p className="font-display mt-3 text-[28px] font-extrabold leading-none tracking-tight tnum">
+      <p className="relative font-display mt-3 text-[28px] font-extrabold leading-none tracking-tight tnum">
         <AnimatedNumber value={value} format={format} />
       </p>
-      {hint && <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">{hint}</p>}
+      {hint && <p className="relative mt-2 text-[11.5px] leading-relaxed text-muted-foreground">{hint}</p>}
 
       {/* Progress indicator */}
       {progress && (
-        <div className="mt-3">
+        <div className="relative mt-3">
           {progress.label && (
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] text-muted-foreground">{progress.label}</span>

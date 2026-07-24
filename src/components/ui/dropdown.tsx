@@ -110,7 +110,7 @@ export function MenuItem({
       onClick={onClick}
       className={cn(
         "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors",
-        danger ? "text-rose-600 hover:bg-rose-50" : "text-foreground hover:bg-muted",
+        danger ? "text-rose-600 hover:bg-rose-50" : "text-foreground hover:bg-[#EEF1FD]",
         className
       )}
     >

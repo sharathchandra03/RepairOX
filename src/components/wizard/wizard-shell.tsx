@@ -6,11 +6,12 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 
-export const TOTAL_STEPS = 10;
+export const TOTAL_STEPS = 11;
 export const STEP_LABELS = [
   "Process",
   "Category",
   "Device",
+  "Job Details",
   "Parts",
   "Contact",
   "Customer",
@@ -74,7 +75,7 @@ export function WizardShell({
             <span className="font-display tnum text-base font-bold">
               {String(step).padStart(2, "0")}
               <span className="mx-1 text-muted-foreground">/</span>
-              <span className="brand-gradient-text">10</span>
+              <span className="brand-gradient-text">11</span>
             </span>
           </motion.div>
         </div>
@@ -116,7 +117,7 @@ export function WizardShell({
 
       {/* Stepper labels (desktop) */}
       <div className="relative mx-auto hidden max-w-6xl px-6 md:block">
-        <ol className="grid grid-cols-10 gap-1.5 text-[10px]">
+        <ol className="grid grid-cols-11 gap-1.5 text-[10px]">
             {STEP_LABELS.map((label, i) => {
               const idx = i + 1;
               const done = idx < step;

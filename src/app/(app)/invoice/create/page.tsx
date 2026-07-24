@@ -100,10 +100,15 @@ function InvoiceWizard() {
     if (fromTicket && !editId) {
       const customer = searchParams.get("customer") || "";
       const phone = searchParams.get("phone") || "";
+      const email = searchParams.get("email") || "";
+      const address = searchParams.get("address") || "";
       const company = searchParams.get("company") || "";
       const amount = parseFloat(searchParams.get("amount") || "0");
       const service = searchParams.get("service") || "";
       const device = searchParams.get("device") || "";
+      const brand = searchParams.get("brand") || "";
+      const serial = searchParams.get("serial") || "";
+      const employee = searchParams.get("employee") || "";
       const partsRaw = searchParams.get("parts");
 
       let items: any[] = [];
@@ -126,10 +131,11 @@ function InvoiceWizard() {
 
       // If no parts but has amount, create a single service line item
       if (items.length === 0 && amount > 0) {
+        const descParts = [brand, device, serial ? `SN: ${serial}` : ""].filter(Boolean);
         items = [{
           id: `li-${Date.now()}`,
           name: service || "Repair Service",
-          description: device ? `Device: ${device}` : "",
+          description: descParts.length > 0 ? descParts.join(" — ") : "",
           qty: 1,
           price: amount,
           discount: 0,
@@ -139,8 +145,8 @@ function InvoiceWizard() {
 
       setForm((prev) => ({
         ...prev,
-        customer: { name: customer, phone, email: "", company },
-        details: { ...prev.details, ticketId: fromTicket, status: "draft" },
+        customer: { name: customer, phone, email, company },
+        details: { ...prev.details, ticketId: fromTicket, employee, status: "draft" },
         items,
       }));
     }

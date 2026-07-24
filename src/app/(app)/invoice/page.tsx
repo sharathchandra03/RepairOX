@@ -17,7 +17,6 @@ import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { useStore } from "@/lib/store";
 import { InvoiceFilters, type FilterState } from "@/components/filters/invoice-filters";
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
@@ -111,7 +110,6 @@ export default function InvoicePage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("all");
   const [q, setQ] = useState("");
-  const [viewInvoice, setViewInvoice] = useState<Invoice | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
 
   // Column settings
@@ -312,17 +310,18 @@ export default function InvoicePage() {
             <tbody>
               {list.map((inv, i) => (
                 <motion.tr key={inv.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 * i }}
-                  className={cn("group border-t border-border transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-muted/40")}
+                  onClick={() => router.push(`/invoice/${inv.id}`)}
+                  className={cn("group cursor-pointer border-t border-border transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
                 >
-                  <td className="w-10 px-3 py-3.5">
+                  <td className="w-10 px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(inv.id)}
                       onChange={() => setSelected((prev) => { const n = new Set(prev); n.has(inv.id) ? n.delete(inv.id) : n.add(inv.id); return n; })}
                       className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-3.5 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")}>
-                      {renderInvCell(col.id, inv, () => setViewInvoice(inv), () => router.push(`/invoice/create?edit=${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv))}
+                    <td key={col.id} className={cn("py-3.5 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                      {renderInvCell(col.id, inv, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`))}
                     </td>
                   ))}
                 </motion.tr>
@@ -342,9 +341,6 @@ export default function InvoicePage() {
           <p className="text-xs text-muted-foreground">Showing {list.length} of {invoices.length}</p>
         </div>
       </div>
-
-      {/* View Drawer */}
-      <InvoiceViewDrawer invoice={viewInvoice} onClose={() => setViewInvoice(null)} />
 
       {/* Delete Confirm */}
       <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { if (deleteTarget) deleteInvoice(deleteTarget.id); }}
@@ -395,129 +391,6 @@ function KpiCard({ icon: Icon, label, value, subtext, tone }: { icon: any; label
 
 /* ─── Invoice View Drawer (Polished) ─────────────────────────────────── */
 
-function InvoiceViewDrawer({ invoice, onClose }: { invoice: Invoice | null; onClose: () => void }) {
-  if (!invoice) return null;
-  return (
-    <Drawer open={!!invoice} onClose={onClose} title={`Invoice ${invoice.id}`} subtitle={invoice.reference} icon={Receipt} width="max-w-lg">
-      <div className="space-y-6">
-        {/* Customer card */}
-        <div className="rounded-xl border border-border p-4">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Bill To</p>
-          <div className="flex items-center gap-3">
-            <Avatar name={invoice.customer} size={40} />
-            <div>
-              <p className="font-semibold text-[15px]">{invoice.customer}</p>
-              <p className="text-xs text-muted-foreground">{invoice.phone}</p>
-              {invoice.email && <p className="text-xs text-muted-foreground">{invoice.email}</p>}
-              {invoice.company && <p className="text-xs text-muted-foreground font-medium">{invoice.company}</p>}
-            </div>
-          </div>
-        </div>
-
-        {/* Metadata grid */}
-        <div className="grid grid-cols-2 gap-3">
-          <MetaCell label="Status">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`}>
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[invoice.status]}
-            </span>
-          </MetaCell>
-          <MetaCell label="Created"><span className="text-sm font-medium">{fmtDate(invoice.createdAt)}</span></MetaCell>
-          <MetaCell label="Due Date"><span className="text-sm font-medium">{fmtDate(invoice.dueDate)}</span></MetaCell>
-          {invoice.employee && <MetaCell label="Employee"><span className="text-sm font-medium">{invoice.employee}</span></MetaCell>}
-          {invoice.ticketId && <MetaCell label="Linked Ticket"><span className="text-sm font-medium text-[#4361EE]">{invoice.ticketId}</span></MetaCell>}
-        </div>
-
-        {/* Line Items */}
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Line Items</p>
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/50">
-                <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <th className="px-4 py-2.5 text-left">Item</th>
-                  <th className="py-2.5 text-center w-14">Qty</th>
-                  <th className="py-2.5 text-right w-24">Price</th>
-                  <th className="py-2.5 text-right w-24 pr-4">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {invoice.items.map((item) => (
-                  <tr key={item.id} className="border-t border-border">
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-[13px] leading-tight">{item.name}</p>
-                      {item.description && <p className="text-[11px] text-muted-foreground mt-0.5">{item.description}</p>}
-                      {item.sku && <p className="text-[10px] text-muted-foreground/70 font-mono mt-0.5">{item.sku}</p>}
-                    </td>
-                    <td className="py-3 text-center tabular-nums text-[13px]">{item.qty}</td>
-                    <td className="py-3 text-right tabular-nums text-[13px]">{formatINR(item.price)}</td>
-                    <td className="py-3 text-right tabular-nums text-[13px] pr-4 font-semibold">{formatINR(item.total)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        {/* Totals */}
-        <div className="rounded-xl border border-border bg-gradient-to-b from-slate-50/80 to-white p-5">
-          <div className="space-y-2 text-sm">
-            <TotalRow label="Subtotal" value={formatINR(invoice.subtotal)} />
-            {invoice.discount > 0 && <TotalRow label="Discount" value={`-${formatINR(invoice.discount)}`} className="text-emerald-600" />}
-            <TotalRow label="Tax (GST)" value={formatINR(invoice.tax)} />
-            <div className="border-t border-border pt-2 mt-2">
-              <TotalRow label="Total" value={formatINR(invoice.total)} bold />
-            </div>
-            <TotalRow label="Paid" value={formatINR(invoice.paidAmount)} className="text-emerald-600" />
-            {invoice.total - invoice.paidAmount > 0 && (
-              <TotalRow label="Balance Due" value={formatINR(invoice.total - invoice.paidAmount)} className="text-rose-600" bold />
-            )}
-          </div>
-        </div>
-
-        {/* Notes & Terms */}
-        {(invoice.notes || invoice.terms) && (
-          <div className="space-y-3">
-            {invoice.notes && (
-              <div className="rounded-xl border border-border p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Notes</p>
-                <p className="text-sm text-muted-foreground whitespace-pre-line">{invoice.notes}</p>
-              </div>
-            )}
-            {invoice.terms && (
-              <div className="rounded-xl border border-border p-4">
-                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Terms & Conditions</p>
-                <p className="text-sm text-muted-foreground whitespace-pre-line">{invoice.terms}</p>
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* Footer */}
-        {invoice.footer && (
-          <p className="text-center text-xs font-semibold text-muted-foreground tracking-wide">{invoice.footer}</p>
-        )}
-      </div>
-    </Drawer>
-  );
-}
-
-function MetaCell({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <div className="rounded-lg border border-border p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">{label}</p>
-      {children}
-    </div>
-  );
-}
-
-function TotalRow({ label, value, bold, className }: { label: string; value: string; bold?: boolean; className?: string }) {
-  return (
-    <div className={cn("flex items-center justify-between", bold && "font-bold", className)}>
-      <span className={cn(!bold && "text-muted-foreground")}>{label}</span>
-      <span className="tabular-nums">{value}</span>
-    </div>
-  );
-}
 
 /* ─── Invoice Cell Renderer ──────────────────────────────────────────── */
 
@@ -528,6 +401,7 @@ function renderInvCell(
   onEdit: () => void,
   onDuplicate: () => void,
   onDelete: () => void,
+  onPrint: () => void,
 ) {
   switch (colId) {
     case "id": return (
@@ -556,16 +430,16 @@ function renderInvCell(
     case "total": return <span className="font-semibold tabular-nums">{formatINR(inv.total)}</span>;
     case "actions": return (
       <div className="flex items-center justify-end gap-1">
-        <button onClick={onView} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground" title="View"><Eye className="h-3.5 w-3.5" /></button>
+        <button onClick={onView} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="View"><Eye className="h-3.5 w-3.5" /></button>
         <button onClick={onEdit} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
         <Dropdown align="right" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground" title="More"><MoreHorizontal className="h-4 w-4" /></button>
+          <button onClick={toggle} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="More"><MoreHorizontal className="h-4 w-4" /></button>
         )}>
           {(close) => (<>
             <MenuItem icon={Eye} onClick={() => { onView(); close(); }}>View</MenuItem>
             <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
             <MenuItem icon={Copy} onClick={() => { onDuplicate(); close(); }}>Duplicate</MenuItem>
-            <MenuItem icon={Printer} onClick={() => { window.print(); close(); }}>Print</MenuItem>
+            <MenuItem icon={Printer} onClick={() => { onPrint(); close(); }}>Print</MenuItem>
             <MenuItem icon={FileDown} onClick={close}>Download PDF</MenuItem>
             <MenuItem icon={Mail} onClick={close}>Email Invoice</MenuItem>
             <div className="my-1 border-t border-border" />
@@ -632,7 +506,7 @@ function InvColumnSettingsPanel({
               const req = INV_REQUIRED_IDS.has(id);
               return (
                 <div key={id} draggable={!req} onDragStart={() => handleDragStart(id)} onDragOver={(e) => handleDragOver(e, id)} onDragEnd={handleDragEnd}
-                  className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2 transition-all group", dragId === id ? "bg-indigo-50 ring-1 ring-indigo-200 shadow-sm scale-[1.02]" : "hover:bg-muted/60")}>
+                  className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2 transition-all group", dragId === id ? "bg-indigo-50 ring-1 ring-indigo-200 shadow-sm scale-[1.02]" : "hover:bg-[#EEF1FD]/60")}>
                   <input type="checkbox" checked disabled={req} onChange={() => toggleVis(id)} className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
                   <span className="flex-1 text-xs font-medium text-foreground">{col.label}</span>
                   {req && <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200">Required</span>}
@@ -647,7 +521,7 @@ function InvColumnSettingsPanel({
           <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">Hidden <span className="text-foreground ml-1">{filteredHidden.length}</span></p>
           <div className="space-y-1 max-h-[200px] overflow-y-auto">
             {filteredHidden.map((col) => (
-              <div key={col.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-muted/60 transition">
+              <div key={col.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-[#EEF1FD]/60 transition">
                 <input type="checkbox" checked={false} onChange={() => toggleVis(col.id)} className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
                 <span className="flex-1 text-xs font-medium text-muted-foreground">{col.label}</span>
               </div>

@@ -1,5 +1,70 @@
 # RepairOX — Changes Summary
 
+## July 25, 2026
+
+### Consistent RepairOX Blue Interaction System
+
+- **Global hover states** — replaced generic grey `hover:bg-muted` with subtle RepairOX blue (`hover:bg-[#EEF1FD]`) across the entire app. Every interactive element now feels native to the RepairOX theme.
+- **Shared MenuItem component** — the `MenuItem` in `dropdown.tsx` now uses blue hover, affecting all dropdown menus (ticket actions, invoice actions, dashboard filters, settings menus, etc.) automatically.
+- **Table row hovers** — ticket list and invoice list rows now show a soft blue tint on hover instead of neutral grey.
+- **Dashboard interactions** — Recent Transactions, Critical Tasks, filter bar buttons (Sort/Filter/Date), and card "more" icons all use blue hover with matching text color.
+- **Icon buttons** — "More" (⋯) and "View" (👁) action buttons across ticket/invoice lists and detail pages now hover to blue instead of grey.
+- **Quick action cards** — View Ticket and View Invoice sidebar action buttons use blue-tinted hover border and background.
+- **Selected states preserved** — all existing blue selected/active states (indigo-50 for selected rows, brand pill for active tabs) remain unchanged.
+
+### Form Surface Refinement
+
+- **Blue-tinted form containers** — the ticket creation wizard's form cards (Device Details, Job Details, Customer Information, Parts, Contact, Quote, Upload, Signature) now use `bg-[#F7FAFF]` instead of pure white, with a softer blue-tinted border (`border-[#E2E8F8]/80`). Input fields remain white for proper visual hierarchy.
+- **Customer form compacted** — Email and Company/Organization fields placed side-by-side (saving one row of vertical space).
+- **Save Changes buttons** — removed the tick (✓) icon for a cleaner look.
+
+### Pencil Icon → View Page
+
+- **Ticket list pencil** — clicking the pencil (edit) icon from the ticket list now opens the View Ticket page (with section-wise editing) instead of the full Edit Ticket wizard.
+- **Invoice list pencil** — same change applied to invoices: pencil opens View Invoice page, not the full edit flow.
+- Full Edit Ticket/Invoice flows remain available from the "Edit" button in each detail page header.
+
+### Complete Section-Wise Editing
+
+- **All visible fields now editable** — every section editor drawer now exposes ALL fields shown in that section (previously only a subset was editable).
+- **Two-column drawer layout** — drawers with 4+ fields automatically use a responsive two-column grid.
+- **Wider drawers** — sections with many fields use `max-w-md` for more breathing room.
+- **Ticket → Job Details** now editable: Issue, Service, Source, Amount, Priority, Status, Resolution Time (was: only Issue, Service, Source).
+- **Ticket → Device** now editable: Brand, Model, Issue, Service (was: only Brand, Model).
+- **Ticket → Assignment** now uses a proper technician dropdown (was: free text).
+- **Invoice → Billing Details** now editable: Reference, Invoice Type, Employee, Due Date, Status (was: only Reference, Employee, Due Date).
+- **Invoice → Tax & Discounts** now editable: Subtotal, Discount, Tax with auto-total recalculation (was: only Discount, Tax).
+
+## July 24, 2026
+
+### Section-Wise Editing on View Ticket & View Invoice
+
+- **Complete section-wise editing** — every Edit drawer now exposes ALL fields visible in that section (previously only a partial subset was editable):
+  - **Ticket → Device Information**: Brand/Category, Model, Issue, Service Type (was: only Brand, Model)
+  - **Ticket → Job Details**: Issue, Service, Source, Estimated Cost, Priority dropdown, Status dropdown, Expected Resolution (was: only Issue, Service, Source)
+  - **Ticket → Assignment**: Technician via a proper dropdown with all team members (was: free text)
+  - **Invoice → Billing Details**: Reference/PO, Invoice Type dropdown, Employee, Due Date, Status dropdown (was: only Reference, Employee, Due Date)
+  - **Invoice → Tax & Discounts**: Subtotal, Discount, Tax — with automatic total recalculation (was: only Discount, Tax)
+- **Two-column layout in drawers** — when a section has more than 3 fields, the `QuickEditDrawer` now renders in a responsive two-column grid (textarea fields span full width) for a cleaner, enterprise-grade feel.
+- **Wider drawers** where needed — Device, Customer, Job Details, and Billing drawers use `max-w-md` width instead of the narrow default, giving fields more breathing room.
+
+### Enterprise SaaS Polish — Ticket, Invoice & Dashboard
+
+- **View Ticket Refined** — Header is now the strongest visual area: wrapped in a soft gradient surface with the ticket ID, status, priority, and summary cards (Customer, Phone, Device, Technician, Amount, Created) all grouped together for immediate context. Section cards (`DetailSection`) now have a clear divider under each title and support an optional inline action for section-wise editing. Internal Notes can now be edited directly on the page (no need to open the full Edit Ticket wizard) — click "Add note" / "Edit" to open a lightweight textarea with Save/Cancel. Activity Timeline redesigned with tighter icon-to-text alignment, baseline-aligned timestamps, and improved readability.
+- **New View Invoice Page** — Added a dedicated `/invoice/[id]` page matching the same premium quality as View Ticket. Header shows Invoice Number, Type, Status, Customer, and key dates with Edit / Print / More quick actions. Organized into: Customer Information, Billing Details, Invoice Items, Tax & Discounts, Payment Information, Terms & Notes, Related Ticket (links back to the originating repair ticket), and Activity History. Payment Information and Terms & Notes both support section-wise editing via a lightweight drawer — no need to re-enter the full invoice creation flow for small updates.
+- **Invoice List Wired to New Page** — Clicking a row or the "View" action in the Invoices list now opens the full View Invoice page instead of the old summary drawer. The previous `InvoiceViewDrawer` implementation was retired in favor of the dedicated page.
+- **Dashboard Visual Elevation** — KPI cards now have a subtle radial ambient glow (color-matched per card tone) for gentle depth without looking flashy. Chart and analytics cards (Revenue, Tickets Donut, Tickets by Device, Heatmap, Recent Transactions, Orders Status, Critical Tasks) now share one consistent border/shadow treatment. Added a soft ambient background wash behind the page header for a more premium enterprise feel. Chart card headers got more breathing room (increased header-to-content spacing).
+
+All changes preserve the existing RepairOX blue theme, typography, spacing scale, and navigation — no new design language introduced.
+
+### Ticket Creation Wizard — 11-Step Restructure
+
+- **New "Job Details" Step (Step 4)** — Added a dedicated step between Device Details and Parts, capturing Job Type (dropdown, defaults to "Service"), Priority, Estimate, Warranty status, Issue, Expected Resolution Time, User Accessories notes, Problem Description, and Internal Notes.
+- **Device Details Simplified (Step 3)** — Reduced to two clean sections: "Device Identity" (Brand Name, Model, ID Type selector + IMEI/Serial Number) and "Intake Details" (Type, Source, Assigned By, Assigned To). Repair-specific fields moved to the new Job Details step.
+- **Customer Details Upgraded (Step 7)** — Reorganized into "Personal Details" and "Address" sections with icon-prefixed inputs (phone, email, company, address) and clearer two-column grouping on desktop.
+- **Wizard Renumbered to 11 Steps** — Process → Category → Device → Job Details → Parts → Contact → Customer → Quote → QC Form → Upload → Signature. Stepper, progress bar, step count ("X / 11"), and all navigation logic updated accordingly.
+- **Consistent Premium Styling** — Device, Job Details, and Customer steps now share the same elevated container style (soft border, layered shadow, rounded-[20px]) with section header icons for visual hierarchy, while preserving the existing RepairOX blue-centric theme.
+
 ## July 23, 2026
 
 ### Ticket Edit Mode — Fast Save

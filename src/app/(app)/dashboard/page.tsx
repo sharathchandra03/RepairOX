@@ -45,11 +45,11 @@ function heatColor(v: number) {
 /* ── Card header with ... menu ── */
 function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between mb-1">
+    <div className="flex items-center justify-between mb-3">
       <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
       <div className="flex items-center gap-1.5">
         {badge}
-        <button className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground transition">
+        <button className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE] transition">
           <MoreHorizontal className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -117,7 +117,9 @@ export default function Dashboard() {
   }, [filteredTickets]);
 
   return (
-    <div className="space-y-6">
+    <div className="relative space-y-6">
+      {/* Ambient background wash — subtle, matches RepairOX blue */}
+      <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[420px] bg-gradient-to-b from-[#EEF1FD]/60 via-[#EEF1FD]/15 to-transparent" />
 
       <PageHeader
         title="Analytics Overview"
@@ -136,7 +138,7 @@ export default function Dashboard() {
       <div className="flex flex-wrap items-center gap-2 -mt-3">
         {/* Sort By */}
         <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] font-medium text-zinc-600 hover:bg-muted transition">
+          <button onClick={toggle} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] font-medium text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50 transition">
             <ArrowUpDown className="h-3.5 w-3.5" /> Sort By
           </button>
         )}>
@@ -150,7 +152,7 @@ export default function Dashboard() {
 
         {/* Filter By */}
         <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", filterBy !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-muted")}>
+          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", filterBy !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50")}>
             <SlidersHorizontal className="h-3.5 w-3.5" /> Filter By {filterBy !== "all" && <span className="h-1.5 w-1.5 rounded-full bg-[#4361EE]" />}
           </button>
         )}>
@@ -165,7 +167,7 @@ export default function Dashboard() {
 
         {/* Date */}
         <Dropdown align="left" width="w-40" trigger={({ toggle }) => (
-          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", dateRange !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-muted")}>
+          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", dateRange !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50")}>
             <CalendarDays className="h-3.5 w-3.5" /> {dateRange === "all" ? "All Time" : dateRange === "today" ? "Today" : dateRange === "yesterday" ? "Yesterday" : dateRange === "7days" ? "Last 7 Days" : "Last 30 Days"}
           </button>
         )}>
@@ -223,7 +225,7 @@ export default function Dashboard() {
       {/* Resizable dashboard widgets — drag edges to resize, drag title to reorder */}
       <DashboardGrid keys={["revenue", "donut", "devices", "heatmap", "transactions"]}>
         {/* Revenue Chart */}
-        <div className="h-full rounded-2xl bg-card shadow-card overflow-hidden">
+        <div className="h-full rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
           <div className="px-1 pb-1 h-[calc(100%-16px)]">
             <RevenueChart darkTooltip />
@@ -231,7 +233,7 @@ export default function Dashboard() {
         </div>
 
         {/* Tickets Donut */}
-        <div className="h-full rounded-2xl bg-card shadow-card overflow-hidden">
+        <div className="h-full rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
           <div className="px-1 pb-1 h-[calc(100%-16px)]">
             <TicketsDonut />
@@ -239,7 +241,7 @@ export default function Dashboard() {
         </div>
 
         {/* Tickets by Device */}
-        <div className="h-full rounded-2xl bg-card p-5 shadow-card overflow-auto">
+        <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Tickets by Device" badge={
             <span className="text-[11px] text-muted-foreground">Last 7 days</span>
@@ -267,7 +269,7 @@ export default function Dashboard() {
         </div>
 
         {/* Heatmap */}
-        <div className="h-full rounded-2xl bg-card p-5 shadow-card overflow-auto">
+        <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Tickets per slot" badge={
             <span className="text-[11px] text-muted-foreground">Last 7 days</span>
@@ -305,7 +307,7 @@ export default function Dashboard() {
         </div>
 
         {/* Transactions */}
-        <div className="h-full rounded-2xl bg-card p-5 shadow-card flex flex-col overflow-auto">
+        <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] flex flex-col overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Recent Transactions" />
           <div className="flex-1 mt-2 space-y-0 overflow-hidden">
@@ -317,7 +319,7 @@ export default function Dashboard() {
                   initial={{ opacity: 0, x: 6 }}
                   animate={{ opacity: 1, x: 0 }}
                   transition={{ delay: 0.04 * i }}
-                  className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-muted/50 transition"
+                  className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-[#EEF1FD]/50 transition"
                 >
                   <Avatar name={tx.customer} size={30} />
                   <div className="min-w-0 flex-1">
@@ -354,7 +356,7 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
 
         {/* Orders status */}
-        <div className="lg:col-span-2 rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+        <div className="lg:col-span-2 rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6">
           <CardHeader title="Orders Status" badge={<Badge tone="info" dot>live</Badge>} />
           <div className="mt-3 overflow-hidden rounded-xl border border-border">
             <div className="grid grid-cols-3 bg-muted px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -446,7 +448,7 @@ export default function Dashboard() {
       </div>
 
       {/* Row 5: Critical tasks table — full width */}
-      <div className="rounded-2xl border border-border bg-card shadow-card">
+      <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div>
             <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Critical Tasks</p>
@@ -484,7 +486,7 @@ export default function Dashboard() {
                   initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: 0.04 * i }}
-                  className="group border-t border-border transition hover:bg-muted/40"
+                  className="group border-t border-border transition hover:bg-[#EEF1FD]/50"
                 >
                   <td className="px-5 py-3 whitespace-nowrap font-medium">{t.id}</td>
                   <td className="py-3">

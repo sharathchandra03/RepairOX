@@ -237,8 +237,27 @@ export default function TicketsPage() {
   /* Action handler */
   const handleAction = useCallback((action: TicketAction, ticket: Ticket) => {
     if (action === "view") { router.push(`/tickets/${ticket.id}`); return; }
-    if (action === "edit") { router.push(`/tickets/new?edit=${ticket.id}`); return; }
-    if (action === "invoice") { router.push(`/invoice/create?fromTicket=${ticket.id}&customer=${encodeURIComponent(ticket.customer)}&phone=${encodeURIComponent(ticket.phone)}&amount=${ticket.amount}&service=${encodeURIComponent(ticket.service || ticket.issue)}&device=${encodeURIComponent(ticket.model)}${ticket.company ? `&company=${encodeURIComponent(ticket.company)}` : ""}`); return; }
+    if (action === "edit") { router.push(`/tickets/${ticket.id}`); return; }
+    if (action === "invoice") {
+      const p = new URLSearchParams();
+      p.set("fromTicket", ticket.id);
+      p.set("customer", ticket.customer);
+      p.set("phone", ticket.phone);
+      if (ticket.email) p.set("email", ticket.email);
+      if (ticket.address) p.set("address", ticket.address);
+      if (ticket.company) p.set("company", ticket.company);
+      p.set("amount", String(ticket.amount));
+      p.set("service", ticket.service || ticket.issue);
+      p.set("device", ticket.model);
+      p.set("brand", ticket.device);
+      if (ticket.items?.[0]?.serial) p.set("serial", ticket.items[0].serial);
+      if (ticket.technician) p.set("employee", ticket.technician);
+      if (ticket.parts && ticket.parts.length > 0) {
+        p.set("parts", JSON.stringify(ticket.parts.map((pt) => ({ name: pt.name, qty: pt.qty, price: pt.unitPrice, total: pt.total }))));
+      }
+      router.push(`/invoice/create?${p.toString()}`);
+      return;
+    }
     if (action === "delete") {
       setDeleteTarget(ticket);
       return;
@@ -463,7 +482,7 @@ export default function TicketsPage() {
                       "group border-t border-border transition-colors align-top cursor-pointer",
                       isWaiting && "bg-sky-50/70",
                       isSelected && !isWaiting && "bg-indigo-50/40",
-                      !isWaiting && !isSelected && "hover:bg-muted/40"
+                      !isWaiting && !isSelected && "hover:bg-[#EEF1FD]/50"
                     )}
                   >
                     {activeColumns.map((col) => (

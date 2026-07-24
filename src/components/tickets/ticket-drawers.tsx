@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Send, Eye } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Send, Eye, FileText, Receipt, Tag } from "lucide-react";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, Select } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-data";
 import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { formatINR } from "@/lib/utils";
+import { getTicketPrintUrl, type PrintFormat } from "@/lib/print-utils";
 
 /* ─── View Ticket Drawer ─────────────────────────────────────────────── */
 
@@ -68,7 +70,7 @@ export function TransferTicketDrawer({ open, onClose, ticket }: { open: boolean;
       icon={ArrowRightLeft}
       width="max-w-md"
       footer={
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-start gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={onClose}>Transfer</Button>
         </div>
@@ -194,7 +196,7 @@ export function CheckoutDrawer({ open, onClose, ticket }: { open: boolean; onClo
       icon={CreditCard}
       width="max-w-md"
       footer={
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-start gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={onClose}>Process Payment</Button>
         </div>
@@ -253,7 +255,7 @@ export function EmailReceiptDrawer({ open, onClose, ticket }: { open: boolean; o
       icon={Mail}
       width="max-w-md"
       footer={
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-start gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
           <Button size="sm" onClick={onClose}>
             <Mail className="h-3.5 w-3.5" /> Send Receipt
@@ -295,7 +297,23 @@ export function EmailReceiptDrawer({ open, onClose, ticket }: { open: boolean; o
 /* ─── Print Drawer ───────────────────────────────────────────────────── */
 
 export function PrintDrawer({ open, onClose, ticket }: { open: boolean; onClose: () => void; ticket: Ticket | null }) {
+  const router = useRouter();
+  const [format, setFormat] = useState<PrintFormat>("a4");
+
   if (!ticket) return null;
+
+  const handlePrint = () => {
+    const url = getTicketPrintUrl(ticket.id, format);
+    router.push(url);
+    onClose();
+  };
+
+  const FORMAT_CHOICES: { id: PrintFormat; label: string; icon: any; desc: string }[] = [
+    { id: "a4", label: "A4 Print", icon: FileText, desc: "Full page professional document" },
+    { id: "thermal", label: "Thermal Print", icon: Receipt, desc: "Receipt printer format" },
+    { id: "label", label: "Label Print", icon: Tag, desc: "Compact tag for device" },
+  ];
+
   return (
     <Drawer
       open={open}
@@ -305,36 +323,49 @@ export function PrintDrawer({ open, onClose, ticket }: { open: boolean; onClose:
       icon={Printer}
       width="max-w-md"
       footer={
-        <div className="flex justify-end gap-2">
+        <div className="flex justify-start gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={() => { window.print(); onClose(); }}>
-            <Printer className="h-3.5 w-3.5" /> Print
+          <Button size="sm" onClick={handlePrint}>
+            <Printer className="h-3.5 w-3.5" /> Print Preview
           </Button>
         </div>
       }
     >
       <div className="space-y-5">
-        <div className="space-y-1.5">
+        {/* Format selection */}
+        <div className="space-y-2">
           <Label>Print Format</Label>
-          <Select
-            options={[
-              { label: "Service Receipt", value: "receipt" },
-              { label: "Job Card", value: "job-card" },
-              { label: "Invoice", value: "invoice" },
-              { label: "Delivery Note", value: "delivery" },
-            ]}
-          />
+          <div className="grid gap-2">
+            {FORMAT_CHOICES.map((opt) => {
+              const Icon = opt.icon;
+              const active = format === opt.id;
+              return (
+                <button
+                  key={opt.id}
+                  onClick={() => setFormat(opt.id)}
+                  className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
+                    active
+                      ? "border-[#4361EE] bg-[#4361EE]/5 ring-1 ring-[#4361EE]/20"
+                      : "border-border hover:bg-muted"
+                  }`}
+                >
+                  <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-lg ${active ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground"}`}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className={`text-sm font-semibold ${active ? "text-[#4361EE]" : ""}`}>{opt.label}</p>
+                    <p className="text-[11px] text-muted-foreground">{opt.desc}</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
 
-        {/* Print preview card */}
-        <div className="rounded-xl border border-border p-5 space-y-3">
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Preview</p>
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
-              {STATUS_LABEL[ticket.status]}
-            </span>
-          </div>
-          <div className="border-t border-border pt-3 space-y-2">
+        {/* Quick summary */}
+        <div className="rounded-xl border border-border p-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Document Summary</p>
+          <div className="space-y-1.5">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">Customer</span>
               <span className="font-medium">{ticket.customer}</span>
@@ -352,11 +383,6 @@ export function PrintDrawer({ open, onClose, ticket }: { open: boolean; onClose:
               <span className="font-bold">{formatINR(ticket.amount)}</span>
             </div>
           </div>
-        </div>
-
-        <div className="flex items-center gap-2">
-          <input type="checkbox" id="include-logo" defaultChecked className="rounded border-border" />
-          <label htmlFor="include-logo" className="text-sm text-muted-foreground">Include company logo</label>
         </div>
       </div>
     </Drawer>

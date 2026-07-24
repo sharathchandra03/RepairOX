@@ -334,3 +334,139 @@ html, body {
 .drag-handle:active {
   cursor: grabbing;
 }
+
+/* ─── Print Styles ────────────────────────────────────────────────────── */
+
+/* Screen styles for print preview page */
+.print-page-wrapper {
+  min-height: 100vh;
+  background: #f3f4f6;
+}
+
+@media screen {
+  .print-area {
+    display: flex;
+    justify-content: center;
+    padding: 32px 16px;
+  }
+}
+
+/* Print media styles */
+@media print {
+  /* Hide the control bar and any non-printable UI */
+  .print-hide {
+    display: none !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    visibility: hidden !important;
+  }
+
+  /* Reset html/body for print */
+  html,
+  body {
+    background: white !important;
+    color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Reset the page wrapper for print */
+  .print-page-wrapper {
+    background: white !important;
+    min-height: 0 !important;
+    height: auto !important;
+    padding: 0 !important;
+    margin: 0 !important;
+  }
+
+  /* Print area: simple visible block */
+  .print-area {
+    display: block !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+  }
+
+  /* Ensure all wrapper elements between body and print content are visible */
+  .print-page-wrapper,
+  .print-page-wrapper > *,
+  .print-area,
+  .print-area > * {
+    visibility: visible !important;
+    overflow: visible !important;
+    position: static !important;
+    float: none !important;
+    display: block !important;
+  }
+
+  /* But re-hide .print-hide even if above rule matched */
+  .print-hide,
+  .print-hide * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+
+  /* Remove shadow and fix print containers */
+  .a4-page,
+  .thermal-page,
+  .label-page {
+    box-shadow: none !important;
+    margin: 0 !important;
+    overflow: visible !important;
+    position: static !important;
+    background: white !important;
+  }
+
+  /* A4 page settings */
+  .a4-page {
+    width: 100% !important;
+    min-height: auto !important;
+    padding: 12mm !important;
+  }
+
+  /* Thermal page settings */
+  .thermal-page {
+    width: 80mm !important;
+    min-height: auto !important;
+    padding: 3mm !important;
+  }
+
+  /* Label page settings */
+  .label-page {
+    width: 62mm !important;
+    min-height: auto !important;
+    padding: 1.5mm !important;
+    border: none !important;
+  }
+
+  /* Prevent page breaks inside key sections */
+  .a4-page table,
+  .a4-page section,
+  .a4-page header {
+    page-break-inside: avoid;
+  }
+
+  /* Ensure borders print with visible color */
+  .a4-page *,
+  .thermal-page *,
+  .label-page * {
+    border-color: #d1d5db !important;
+  }
+
+  /* Ensure images (logos) are visible */
+  img {
+    max-width: 100% !important;
+    page-break-inside: avoid;
+  }
+}
+
+/* Page margin for print */
+@page {
+  margin: 0;
+}

@@ -79,6 +79,13 @@ export type Ticket = {
   resolutionMinutes?: number;
   amount: number;
   service?: string;
+  internalNotes?: string;
+  email?: string;
+  address?: string;
+  source?: string;
+  discount?: number;
+  imeiType?: "imei1" | "imei2" | "serial";
+  qcStatus?: "pending" | "pass" | "fail";
 };
 
 /** Helper: generate a createdAt timestamp N minutes ago from now */
