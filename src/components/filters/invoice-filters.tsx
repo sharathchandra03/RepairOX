@@ -197,7 +197,7 @@ export function InvoiceFilters({
   return (
     <div className="space-y-4">
       {/* Primary Filters Row */}
-      <div className="rounded-2xl border border-border bg-card p-4 shadow-card overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
           <FilterField label="Customer Name">
             <Input value={state.customerName} onChange={(e: any) => setField("customerName", e.target.value)} placeholder="Enter customer name" iconLeft={<User className="h-3.5 w-3.5" />} />

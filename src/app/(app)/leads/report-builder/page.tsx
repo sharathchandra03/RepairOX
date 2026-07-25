@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import { BarChart3, PieChart, LineChart, Save, Eye, Plus, Filter } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 const ENTITY_TYPES = ["Lead", "Contact", "Company", "Deal", "Call log", "Task"];
@@ -53,9 +53,7 @@ export default function ReportBuilderPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Report Type <span className="text-rose-500">*</span></Label>
-                  <select value={reportType} onChange={(e) => setReportType(e.target.value)} className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition">
-                    {REPORT_TYPES.map((t) => <option key={t}>{t}</option>)}
-                  </select>
+                  <Select value={reportType} onChange={(e: any) => setReportType(e.target.value)} options={REPORT_TYPES.map((t) => ({ label: t, value: t }))} />
                 </div>
               </div>
               <div className="space-y-1.5">
@@ -65,15 +63,11 @@ export default function ReportBuilderPage() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Entity Type</Label>
-                  <select value={entityType} onChange={(e) => setEntityType(e.target.value)} className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition">
-                    {ENTITY_TYPES.map((t) => <option key={t}>{t}</option>)}
-                  </select>
+                  <Select value={entityType} onChange={(e: any) => setEntityType(e.target.value)} options={ENTITY_TYPES.map((t) => ({ label: t, value: t }))} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Chart Type</Label>
-                  <select value={chartType} onChange={(e) => setChartType(e.target.value)} className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition">
-                    {CHART_TYPES.map((t) => <option key={t}>{t}</option>)}
-                  </select>
+                  <Select value={chartType} onChange={(e: any) => setChartType(e.target.value)} options={CHART_TYPES.map((t) => ({ label: t, value: t }))} />
                 </div>
               </div>
             </div>
@@ -86,15 +80,11 @@ export default function ReportBuilderPage() {
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Date Filter</Label>
-                  <select className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition">
-                    <option>Created At</option><option>Updated At</option><option>Close Date</option>
-                  </select>
+                  <Select defaultValue="Created At" options={[{ label: "Created At", value: "Created At" }, { label: "Updated At", value: "Updated At" }, { label: "Close Date", value: "Close Date" }]} />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Date Range</Label>
-                  <select value={dateRange} onChange={(e) => setDateRange(e.target.value)} className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition">
-                    {DATE_RANGES.map((d) => <option key={d}>{d}</option>)}
-                  </select>
+                  <Select value={dateRange} onChange={(e: any) => setDateRange(e.target.value)} options={DATE_RANGES.map((d) => ({ label: d, value: d }))} />
                 </div>
               </div>
               <div className="space-y-1.5">

@@ -50,35 +50,60 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
       </header>
 
       {/* ── Customer & Ticket/Invoice Meta ── */}
-      <section className="grid grid-cols-2 gap-6 mb-5">
-        {/* Customer */}
-        <div className="border border-gray-200 rounded-lg p-3">
-          <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Bill To / Customer</p>
-          <p className="font-semibold text-sm text-gray-900">{customer.name}</p>
-          {customer.company && <p className="text-[10px] text-gray-600">{customer.company}</p>}
-          <div className="mt-1 space-y-0.5 text-[10px] text-gray-600">
-            {customer.phone && <p>Phone: {customer.phone}</p>}
-            {customer.email && <p>Email: {customer.email}</p>}
-            {customer.address && <p>Address: {customer.address}</p>}
+      <section className="mb-5">
+        {/* Customer — compact horizontal strip */}
+        <div className="border border-gray-200 rounded-lg p-3 mb-3">
+          <div className="flex flex-wrap items-start gap-x-8 gap-y-1">
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-0.5">Customer</p>
+              <p className="font-semibold text-[11px] text-gray-900">{customer.name}</p>
+              {customer.company && <p className="text-[9px] text-gray-600">{customer.company}</p>}
+            </div>
+            {customer.phone && <div><p className="text-[9px] text-gray-400">Phone</p><p className="text-[10px] font-medium text-gray-800">{customer.phone}</p></div>}
+            {customer.email && <div><p className="text-[9px] text-gray-400">Email</p><p className="text-[10px] font-medium text-gray-800">{customer.email}</p></div>}
+            {customer.address && <div><p className="text-[9px] text-gray-400">Address</p><p className="text-[10px] font-medium text-gray-800 max-w-[200px]">{customer.address}</p></div>}
           </div>
         </div>
 
-        {/* Ticket/Device Info or Invoice Meta */}
+        {/* Ticket Devices — 2 column grid for multi, inline for single */}
         {isTicket && ticket && (
-          <div className="border border-gray-200 rounded-lg p-3">
-            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Device Information</p>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
-              <div><span className="text-gray-500">Device:</span> <span className="font-medium">{ticket.device}</span></div>
-              <div><span className="text-gray-500">Model:</span> <span className="font-medium">{ticket.model}</span></div>
-              {ticket.serial && <div><span className="text-gray-500">IMEI/Serial:</span> <span className="font-medium">{ticket.serial}</span></div>}
-              <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{ticket.issue}</span></div>
-              {ticket.service && <div><span className="text-gray-500">Service:</span> <span className="font-medium">{ticket.service}</span></div>}
-              <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{ticket.priority}</span></div>
-              <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{ticket.technician}</span></div>
-              <div><span className="text-gray-500">Source:</span> <span className="font-medium">{ticket.source}</span></div>
-              {ticket.dueDate && <div className="col-span-2"><span className="text-gray-500">Expected by:</span> <span className="font-medium">{formatPrintDateTime(ticket.dueDate)}</span></div>}
-            </div>
-          </div>
+          <>
+            {ticket.devices && ticket.devices.length > 1 ? (
+              <div className="border border-gray-200 rounded-lg p-3">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-2">Devices ({ticket.devices.length})</p>
+                <div className="grid grid-cols-2 gap-2">
+                  {ticket.devices.map((dev, idx) => (
+                    <div key={dev.id} className="rounded border border-gray-100 bg-gray-50/50 p-2">
+                      <p className="text-[10px] font-semibold text-gray-800 leading-tight">{idx + 1}. {dev.brand} {dev.model}</p>
+                      <div className="mt-1 space-y-0.5 text-[9px] text-gray-600">
+                        {dev.serial && <p>IMEI/SN: <span className="font-medium text-gray-700">{dev.serial}</span></p>}
+                        <p>Issue: <span className="font-medium text-gray-700">{dev.issue || "—"}</span></p>
+                        <div className="flex gap-3">
+                          <span>Tech: <span className="font-medium text-gray-700">{dev.technician || "—"}</span></span>
+                          <span>Est: <span className="font-medium text-gray-700">{formatPrintCurrency(dev.estimate)}</span></span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="border border-gray-200 rounded-lg p-3">
+                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Device Information</p>
+                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+                  <div><span className="text-gray-500">Device:</span> <span className="font-medium">{ticket.device}</span></div>
+                  <div><span className="text-gray-500">Model:</span> <span className="font-medium">{ticket.model}</span></div>
+                  {ticket.serial && <div><span className="text-gray-500">IMEI/Serial:</span> <span className="font-medium">{ticket.serial}</span></div>}
+                  <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{ticket.issue}</span></div>
+                  {ticket.service && <div><span className="text-gray-500">Service:</span> <span className="font-medium">{ticket.service}</span></div>}
+                  <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{ticket.priority}</span></div>
+                  <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{ticket.technician}</span></div>
+                  <div><span className="text-gray-500">Source:</span> <span className="font-medium">{ticket.source}</span></div>
+                  {ticket.dueDate && <div className="col-span-2"><span className="text-gray-500">Expected by:</span> <span className="font-medium">{formatPrintDateTime(ticket.dueDate)}</span></div>}
+                </div>
+              </div>
+            )}
+          </>
         )}
 
         {isInvoice && invoice && (
@@ -124,7 +149,44 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
               </tr>
             ))}
 
-            {isTicket && ticket?.parts && ticket.parts.length > 0 && ticket.parts.map((part, i) => (
+            {isTicket && ticket?.devices && ticket.devices.length > 1 && (() => {
+              let rowIdx = 0;
+              return ticket.devices.map((dev) => (
+                <>{dev.parts.length > 0 ? dev.parts.map((part) => {
+                  rowIdx++;
+                  return (
+                    <tr key={`${dev.id}-${part.name}-${rowIdx}`} className={rowIdx % 2 === 0 ? "bg-gray-50" : ""}>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{rowIdx}</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200">
+                        <span className="font-medium text-gray-800">{part.name}</span>
+                        <span className="block text-[9px] text-gray-500">{dev.brand} {dev.model}</span>
+                      </td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-center">{part.qty}</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(part.price)}</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">{part.discount > 0 ? formatPrintCurrency(part.discount) : "—"}</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(part.total)}</td>
+                    </tr>
+                  );
+                }) : (() => {
+                  rowIdx++;
+                  return (
+                    <tr key={dev.id} className={rowIdx % 2 === 0 ? "bg-gray-50" : ""}>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{rowIdx}</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200">
+                        <span className="font-medium text-gray-800">{dev.issue || "Repair Service"}</span>
+                        <span className="block text-[9px] text-gray-500">{dev.brand} {dev.model}</span>
+                      </td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-center">1</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(dev.estimate)}</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">—</td>
+                      <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(dev.estimate)}</td>
+                    </tr>
+                  );
+                })()}</>
+              ));
+            })()}
+
+            {isTicket && (!ticket?.devices || ticket.devices.length <= 1) && ticket?.parts && ticket.parts.length > 0 && ticket.parts.map((part, i) => (
               <tr key={i} className={i % 2 === 1 ? "bg-gray-50" : ""}>
                 <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{i + 1}</td>
                 <td className="py-1.5 px-2.5 border border-gray-200 font-medium text-gray-800">{part.name}</td>
@@ -135,7 +197,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
               </tr>
             ))}
 
-            {isTicket && (!ticket?.parts || ticket.parts.length === 0) && (
+            {isTicket && (!ticket?.devices || ticket.devices.length <= 1) && (!ticket?.parts || ticket.parts.length === 0) && (
               <tr>
                 <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">1</td>
                 <td className="py-1.5 px-2.5 border border-gray-200 font-medium text-gray-800">{ticket?.service || ticket?.issue || "Repair Service"}</td>

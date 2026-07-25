@@ -195,23 +195,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deductPartsForTicket = useCallback((ticketId: string) => {
     setState((s) => {
       const ticket = s.tickets.find((t) => t.id === ticketId);
-      if (!ticket || !ticket.parts || ticket.parts.length === 0) return s;
+      if (!ticket) return s;
 
-      // Only deduct parts that are still "planned"
-      const partsToDeduct = ticket.parts.filter((p) => p.status === "planned");
+      // Gather all planned parts — from devices[] if present, else from flat parts
+      let partsToDeduct: TicketPart[] = [];
+      if (ticket.devices && ticket.devices.length > 0) {
+        partsToDeduct = ticket.devices.flatMap((d) => d.parts.filter((p) => p.status === "planned"));
+      } else if (ticket.parts && ticket.parts.length > 0) {
+        partsToDeduct = ticket.parts.filter((p) => p.status === "planned");
+      }
       if (partsToDeduct.length === 0) return s;
 
       // Deduct from inventory
       const updatedInventory = s.inventory.map((item) => {
-        const part = partsToDeduct.find((p) => p.inventoryId === item.id);
-        if (!part) return item;
-        return { ...item, currentStock: item.currentStock - part.qty };
+        const matchingParts = partsToDeduct.filter((p) => p.inventoryId === item.id);
+        if (matchingParts.length === 0) return item;
+        const totalQty = matchingParts.reduce((sum, p) => sum + p.qty, 0);
+        return { ...item, currentStock: item.currentStock - totalQty };
       });
 
-      // Mark parts as used
+      // Mark parts as used — both in flat parts and in devices[]
       const updatedTickets = s.tickets.map((t) => {
         if (t.id !== ticketId) return t;
-        return { ...t, parts: t.parts?.map((p) => ({ ...p, status: "used" as const })) };
+        const updatedDevices = t.devices?.map((d) => ({
+          ...d,
+          parts: d.parts.map((p) => ({ ...p, status: "used" as const })),
+        }));
+        return {
+          ...t,
+          parts: t.parts?.map((p) => ({ ...p, status: "used" as const })),
+          devices: updatedDevices,
+        };
       });
 
       // Create stock movements

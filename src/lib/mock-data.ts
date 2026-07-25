@@ -61,6 +61,121 @@ export type TicketPart = {
   status: TicketPartStatus;
 };
 
+/* ─── Multi-Device Support ────────────────────────────────────────── */
+
+export type DeviceRecord = {
+  id: string;
+  /** Device identity */
+  brand: string;
+  model: string;
+  imei: string;
+  imeiType: "imei1" | "imei2" | "serial";
+  category: string;
+  type: string;
+  /** Intake / assignment */
+  source: string;
+  assignedBy: string;
+  assignedTo: string;
+  /** Job details */
+  issue: string;
+  description: string;
+  jobType: string;
+  priority: TicketPriority;
+  warranty: string;
+  resolutionMinutes: number;
+  accessories: string;
+  notes: string;
+  estimate: number;
+  /** Parts assigned to this device */
+  parts: TicketPart[];
+  /** QC results for this device */
+  qc: Record<string, "ok" | "no" | "na" | undefined>;
+  /** Status tracking per device */
+  status: TicketStatus;
+};
+
+/** Helper: create a blank DeviceRecord with defaults */
+export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRecord {
+  return {
+    id: `DEV-${Math.floor(1000 + Math.random() * 9000)}`,
+    brand: "",
+    model: "",
+    imei: "",
+    imeiType: "imei1",
+    category: "",
+    type: "",
+    source: "",
+    assignedBy: "",
+    assignedTo: "",
+    issue: "",
+    description: "",
+    jobType: "service",
+    priority: "normal",
+    warranty: "",
+    resolutionMinutes: 59,
+    accessories: "",
+    notes: "",
+    estimate: 0,
+    parts: [],
+    qc: {},
+    status: "received",
+    ...overrides,
+  };
+}
+
+/**
+ * Unified accessor: returns DeviceRecord[] for any ticket.
+ * If the ticket has devices[], returns those.
+ * Otherwise, synthesizes a single DeviceRecord from legacy flat fields.
+ */
+export function getTicketDevices(ticket: Ticket): DeviceRecord[] {
+  if (ticket.devices && ticket.devices.length > 0) {
+    return ticket.devices;
+  }
+  // Legacy single-device ticket — synthesize one DeviceRecord
+  return [
+    createDeviceRecord({
+      id: `DEV-legacy-${ticket.id}`,
+      brand: ticket.device || "",
+      model: ticket.model || "",
+      imei: ticket.items?.[0]?.serial || "",
+      imeiType: ticket.imeiType || "imei1",
+      category: ticket.device || "",
+      source: ticket.source || "",
+      assignedTo: ticket.technician || "",
+      issue: ticket.issue || "",
+      description: ticket.issue || "",
+      priority: ticket.priority || "normal",
+      resolutionMinutes: ticket.resolutionMinutes || 59,
+      notes: ticket.internalNotes || "",
+      estimate: ticket.amount || 0,
+      parts: ticket.parts || [],
+      status: ticket.status,
+    }),
+  ];
+}
+
+/**
+ * Derive overall ticket status from device statuses.
+ * Rules:
+ * - If all devices are "delivered" → delivered
+ * - If all devices are "completed" or "delivered" → completed
+ * - If any device is "repairing" → repairing
+ * - If any device is "qc" → qc
+ * - If any device is "diagnosis" → diagnosis
+ * - Otherwise → received
+ */
+export function deriveTicketStatus(devices: DeviceRecord[]): TicketStatus {
+  if (devices.length === 0) return "received";
+  const statuses = devices.map((d) => d.status);
+  if (statuses.every((s) => s === "delivered")) return "delivered";
+  if (statuses.every((s) => s === "completed" || s === "delivered")) return "completed";
+  if (statuses.some((s) => s === "qc")) return "qc";
+  if (statuses.some((s) => s === "repairing")) return "repairing";
+  if (statuses.some((s) => s === "diagnosis")) return "diagnosis";
+  return "received";
+}
+
 export type Ticket = {
   id: string;
   customer: string;
@@ -87,6 +202,8 @@ export type Ticket = {
   imeiType?: "imei1" | "imei2" | "serial";
   qcStatus?: "pending" | "pass" | "fail";
   customerId?: string;
+  /** Multi-device support — when present, each device has its own record */
+  devices?: DeviceRecord[];
 };
 
 /** Helper: generate a createdAt timestamp N minutes ago from now */

@@ -1,5 +1,6 @@
 import type { StoreSettings } from "@/lib/store-settings";
-import type { Ticket, Invoice, InvoiceLineItem } from "@/lib/mock-data";
+import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord } from "@/lib/mock-data";
+import { getTicketDevices } from "@/lib/mock-data";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
@@ -48,6 +49,22 @@ export type PrintTicketInfo = {
   dueDate: string;
   amount: number;
   parts: PrintLineItem[];
+  /** Multi-device: individual device sections for print */
+  devices?: PrintDeviceInfo[];
+};
+
+export type PrintDeviceInfo = {
+  id: string;
+  brand: string;
+  model: string;
+  serial: string;
+  issue: string;
+  service: string;
+  technician: string;
+  priority: string;
+  status: string;
+  parts: PrintLineItem[];
+  estimate: number;
 };
 
 export type PrintLineItem = {
@@ -136,12 +153,28 @@ export function buildCustomerFromInvoice(invoice: Invoice): PrintCustomerInfo {
 }
 
 export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
-  const parts: PrintLineItem[] = (ticket.parts || []).map((p) => ({
+  const allParts: PrintLineItem[] = (ticket.parts || []).map((p) => ({
     name: p.name,
     qty: p.qty,
     price: p.unitPrice,
     discount: 0,
     total: p.total,
+  }));
+
+  // Build per-device print info
+  const ticketDevices = getTicketDevices(ticket);
+  const printDevices: PrintDeviceInfo[] = ticketDevices.map((dr) => ({
+    id: dr.id,
+    brand: dr.brand,
+    model: dr.model,
+    serial: dr.imei,
+    issue: dr.issue || dr.description,
+    service: dr.issue,
+    technician: dr.assignedTo,
+    priority: dr.priority,
+    status: dr.status,
+    parts: dr.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.unitPrice, discount: 0, total: p.total })),
+    estimate: dr.estimate,
   }));
 
   return {
@@ -158,7 +191,8 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     createdAt: ticket.createdAt,
     dueDate: ticket.dueDate || "",
     amount: ticket.amount,
-    parts,
+    parts: allParts,
+    devices: printDevices.length > 0 ? printDevices : undefined,
   };
 }
 

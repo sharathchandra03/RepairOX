@@ -242,12 +242,13 @@ export default function InvoicePage() {
           <Button variant="outline" size="sm" onClick={() => setShowColSettings(!showColSettings)}>
             <Settings2 className="h-3.5 w-3.5" /> Columns
           </Button>
-          <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
-            className="h-8 rounded-lg border border-border bg-card px-2.5 text-xs font-medium text-foreground focus:border-[#4361EE] focus:ring-1 focus:ring-[#4361EE]/30 focus:outline-none">
-            <option value="all">All Types</option>
-            <option value="retail">Retail Invoice</option>
-            <option value="business">Business Invoice</option>
-          </select>
+          <Select value={typeFilter} onChange={(e: any) => setTypeFilter(e.target.value)}
+            className="h-8 !rounded-lg text-xs"
+            options={[
+              { label: "All Types", value: "all" },
+              { label: "Retail Invoice", value: "retail" },
+              { label: "Business Invoice", value: "business" },
+            ]} />
         </>}
       />
 
@@ -292,8 +293,8 @@ export default function InvoicePage() {
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
                 <th className="w-10 px-3 py-3">
                   <input type="checkbox"
                     checked={list.length > 0 && list.every((inv) => selected.has(inv.id))}

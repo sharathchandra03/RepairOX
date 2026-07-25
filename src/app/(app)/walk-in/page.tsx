@@ -179,8 +179,8 @@ export default function WalkInPage() {
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
                 <th className="w-10 px-3 py-3">
                   <input type="checkbox" checked={allSelected}
                     ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}

@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
@@ -174,8 +174,8 @@ export default function LeadsListPage() {
       {/* Desktop Table */}
       <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-card md:block">
         <table className="w-full text-sm">
-          <thead className="bg-muted/60">
-            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <thead className="bg-[#EEF1FD]">
+            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
               <th className="px-3 py-3 w-10">
                 <input type="checkbox" checked={selected.size === filtered.length && filtered.length > 0} onChange={toggleAll} className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]" />
               </th>
@@ -366,8 +366,8 @@ function AddLeadForm({ onClose }: { onClose: () => void }) {
             <div className="mt-3 space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Company</label><input className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/10 transition" placeholder="TechNova Pvt Ltd" /></div>
             <div className="mt-3 space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Owner <span className="text-rose-500">*</span></label><input className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/10 transition" defaultValue="Kalai S." /></div>
             <div className="mt-3 grid grid-cols-2 gap-3">
-              <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Source</label><select className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition"><option>Google Ads</option><option>Meta Ads</option><option>Walk-In</option><option>Reference</option><option>YouTube</option><option>Website</option></select></div>
-              <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Pipeline Stage</label><select className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition"><option>New</option><option>Contacted</option><option>Qualified</option><option>Proposal</option></select></div>
+              <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Source</label><Select defaultValue="Google Ads" options={[{ label: "Google Ads", value: "Google Ads" }, { label: "Meta Ads", value: "Meta Ads" }, { label: "Walk-In", value: "Walk-In" }, { label: "Reference", value: "Reference" }, { label: "YouTube", value: "YouTube" }, { label: "Website", value: "Website" }]} /></div>
+              <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Pipeline Stage</label><Select defaultValue="New" options={[{ label: "New", value: "New" }, { label: "Contacted", value: "Contacted" }, { label: "Qualified", value: "Qualified" }, { label: "Proposal", value: "Proposal" }]} /></div>
             </div>
           </section>
 
@@ -390,7 +390,7 @@ function AddLeadForm({ onClose }: { onClose: () => void }) {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Deal</p>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Estimated Value</label><div className="flex"><span className="flex h-9 items-center rounded-l-xl border border-r-0 border-border bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span><input type="number" className="h-9 w-full rounded-r-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition" placeholder="0" /></div></div>
-              <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Priority</label><select className="h-9 w-full rounded-xl border border-border bg-background px-3 text-sm outline-none focus:border-[#4361EE] transition"><option>Hot</option><option>Warm</option><option>Cold</option></select></div>
+              <div className="space-y-1.5"><label className="text-[12px] font-medium text-zinc-700">Priority</label><Select defaultValue="Hot" options={[{ label: "Hot", value: "Hot" }, { label: "Warm", value: "Warm" }, { label: "Cold", value: "Cold" }]} /></div>
             </div>
           </section>
         </div>

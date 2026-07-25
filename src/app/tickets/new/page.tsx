@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -76,28 +76,86 @@ const QC_GROUPS = [
 
 /* ---------------- Types ---------------- */
 
+type WizardDeviceData = {
+  brand: string;
+  model: string;
+  imei: string;
+  imeiType: string;
+  assignedBy: string;
+  assignedTo: string;
+  source: string;
+  type: string;
+};
+
+type WizardJobData = {
+  jobType: string;
+  estimate: string;
+  warranty: string;
+  issue: string;
+  priority: string;
+  resolutionMinutes: string;
+  accessories: string;
+  description: string;
+  notes: string;
+};
+
+type WizardPartData = {
+  inventoryId: string;
+  name: string;
+  sku: string;
+  qty: number;
+  unitPrice: number;
+  total: number;
+  uom: string;
+};
+
+/** A single device entry in the wizard — contains device info, job, parts, and QC */
+type WizardDevice = {
+  id: string;
+  device: WizardDeviceData;
+  job: WizardJobData;
+  parts: WizardPartData[];
+  qc: Record<string, "ok" | "no" | "na" | undefined>;
+  category?: string;
+};
+
+function createWizardDevice(category?: string): WizardDevice {
+  return {
+    id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    device: { brand: "", model: "", imei: "", imeiType: "imei1", assignedBy: "", assignedTo: "", source: "", type: "" },
+    job: { jobType: "service", estimate: "", warranty: "", issue: "", priority: "normal", resolutionMinutes: "", accessories: "", description: "", notes: "" },
+    parts: [],
+    qc: {},
+    category,
+  };
+}
+
 type WizardData = {
   process?: string;
   category?: string;
-  device: { brand: string; model: string; imei: string; imeiType: string; assignedBy: string; assignedTo: string; source: string; type: string };
-  job: { jobType: string; estimate: string; warranty: string; issue: string; priority: string; resolutionMinutes: string; accessories: string; description: string; notes: string };
-  parts: { inventoryId: string; name: string; sku: string; qty: number; unitPrice: number; total: number; uom: string }[];
+  /** Multi-device array — always has at least one entry */
+  devices: WizardDevice[];
+  /** Index of the currently active/expanded device */
+  activeDeviceIndex: number;
   contactType: "personal" | "business";
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
-  qc: Record<string, "ok" | "no" | "na" | undefined>;
   files: string[];
   signatureCleared: boolean;
+  /* Backward-compat computed accessors — these alias into devices[activeDeviceIndex] */
 };
 
+/** Convenience: get the active device from wizard data */
+function getActiveDevice(data: WizardData): WizardDevice {
+  return data.devices[data.activeDeviceIndex] || data.devices[0];
+}
+
 const DEFAULT: WizardData = {
-  device: { brand: "", model: "", imei: "", imeiType: "imei1", assignedBy: "", assignedTo: "", source: "", type: "" },
-  job: { jobType: "service", estimate: "", warranty: "", issue: "", priority: "normal", resolutionMinutes: "", accessories: "", description: "", notes: "" },
-  parts: [],
+  devices: [createWizardDevice()],
+  activeDeviceIndex: 0,
   contactType: "personal",
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
-  qc: {},
   files: [],
   signatureCleared: false,
 };
@@ -116,9 +174,52 @@ function ticketToWizard(t: Ticket): WizardData {
   const city = addressParts[1] || "";
   const postal = addressParts[2] || "";
 
-  return {
-    process: "ticket",
-    category,
+  // If the ticket has multi-device records, restore them
+  if (t.devices && t.devices.length > 0) {
+    const devices: WizardDevice[] = t.devices.map((dr) => ({
+      id: dr.id,
+      device: {
+        brand: dr.brand || "",
+        model: dr.model || "",
+        imei: dr.imei || "",
+        imeiType: dr.imeiType || "imei1",
+        assignedBy: dr.assignedBy || "",
+        assignedTo: dr.assignedTo || "",
+        source: dr.source || "",
+        type: dr.type || "",
+      },
+      job: {
+        jobType: dr.jobType || "service",
+        estimate: String(dr.estimate || 0),
+        warranty: dr.warranty || "",
+        issue: dr.issue || "",
+        priority: dr.priority || "normal",
+        resolutionMinutes: dr.resolutionMinutes ? String(dr.resolutionMinutes) : "",
+        accessories: dr.accessories || "",
+        description: dr.description || "",
+        notes: dr.notes || "",
+      },
+      parts: dr.parts ? dr.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
+      qc: dr.qc || {},
+      category: dr.category || category,
+    }));
+
+    return {
+      process: "ticket",
+      category,
+      devices,
+      activeDeviceIndex: 0,
+      contactType: t.company ? "business" : "personal",
+      customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
+      customerId: (t as any).customerId || null,
+      files: [],
+      signatureCleared: false,
+    };
+  }
+
+  // Legacy single-device ticket — wrap into devices array
+  const singleDevice: WizardDevice = {
+    id: `wd-legacy-${t.id}`,
     device: {
       brand: t.device || "",
       model: t.model,
@@ -141,10 +242,18 @@ function ticketToWizard(t: Ticket): WizardData {
       notes: t.internalNotes || "",
     },
     parts: t.parts ? t.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
+    qc: {},
+    category,
+  };
+
+  return {
+    process: "ticket",
+    category,
+    devices: [singleDevice],
+    activeDeviceIndex: 0,
     contactType: t.company ? "business" : "personal",
     customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     customerId: (t as any).customerId || null,
-    qc: {},
     files: [],
     signatureCleared: false,
   };
@@ -209,7 +318,9 @@ function NewTicketWizard() {
 
   const handleSave = () => {
     const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
-    const resMinutes = Number(data.job.resolutionMinutes) || 59;
+    const primaryDevice = data.devices[0];
+    const allParts = data.devices.flatMap((d) => d.parts);
+    const resMinutes = Number(primaryDevice.job.resolutionMinutes) || 59;
     const createdAt = isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString();
     const dueDate = new Date(new Date(createdAt).getTime() + resMinutes * 60_000).toISOString();
 
@@ -231,6 +342,35 @@ function NewTicketWizard() {
       finalCustomerId = newCustomer.id;
     }
 
+    // Build DeviceRecord[] for multi-device storage
+    const deviceRecords: import("@/lib/mock-data").DeviceRecord[] = data.devices.map((wd) => ({
+      id: wd.id,
+      brand: wd.device.brand,
+      model: wd.device.model,
+      imei: wd.device.imei,
+      imeiType: (wd.device.imeiType as "imei1" | "imei2" | "serial") || "imei1",
+      category: wd.category || data.category || "",
+      type: wd.device.type,
+      source: wd.device.source,
+      assignedBy: wd.device.assignedBy,
+      assignedTo: wd.device.assignedTo,
+      issue: wd.job.issue || wd.job.description || "General service",
+      description: wd.job.description,
+      jobType: wd.job.jobType,
+      priority: (wd.job.priority as any) || "normal",
+      warranty: wd.job.warranty,
+      resolutionMinutes: Number(wd.job.resolutionMinutes) || 59,
+      accessories: wd.job.accessories,
+      notes: wd.job.notes,
+      estimate: Number(wd.job.estimate) || wd.parts.reduce((s, p) => s + p.total, 0) || 0,
+      parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
+      qc: wd.qc,
+      status: "received" as const,
+    }));
+
+    // Total amount across all devices
+    const totalAmount = deviceRecords.reduce((s, dr) => s + dr.estimate, 0);
+
     const ticketData: Ticket = {
       id: editId || genId(),
       customer: customerName,
@@ -238,23 +378,38 @@ function NewTicketWizard() {
       email: data.customer.email || undefined,
       address: [data.customer.address, data.customer.city, data.customer.postal].filter(Boolean).join(", ") || undefined,
       company: data.customer.company || undefined,
-      device: data.device.brand || data.category || "others",
-      model: data.device.model || "Unknown Device",
-      issue: data.job.issue || data.job.description || "General service",
-      items: data.device.imei ? [{ device: data.device.brand || data.category || "others", model: data.device.model || "Unknown Device", serial: data.device.imei, issue: data.job.issue || "General service", service: data.job.issue || "Repair" }] : undefined,
-      parts: data.parts.length > 0 ? data.parts.map((p) => ({ ...p, status: "planned" as const })) : undefined,
+      // Primary device fields (backward compat — uses first device with data, or fallback)
+      device: primaryDevice.device.brand || data.category || "others",
+      model: deviceRecords.length > 1
+        ? `${primaryDevice.device.model || primaryDevice.device.brand || "Device"} + ${deviceRecords.length - 1} more`
+        : (primaryDevice.device.model || "Unknown Device"),
+      issue: deviceRecords.length > 1
+        ? `${deviceRecords.length} devices — ${primaryDevice.job.issue || "Repair"}`
+        : (primaryDevice.job.issue || primaryDevice.job.description || "General service"),
+      items: data.devices.filter((wd) => wd.device.imei).map((wd) => ({
+        device: wd.device.brand || data.category || "others",
+        model: wd.device.model || "Unknown Device",
+        serial: wd.device.imei,
+        issue: wd.job.issue || "General service",
+        service: wd.job.issue || "Repair",
+      })),
+      parts: allParts.length > 0 ? allParts.map((p) => ({ ...p, status: "planned" as const })) : undefined,
       status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "received") : "received") as TicketStatus,
-      priority: (data.job.priority as any) || "normal",
-      technician: data.device.assignedTo || "Unassigned",
+      priority: (primaryDevice.job.priority as any) || "normal",
+      technician: primaryDevice.device.assignedTo || "Unassigned",
       createdAt,
       dueDate,
       resolutionMinutes: resMinutes,
-      amount: Number(data.job.estimate) || data.parts.reduce((s, p) => s + p.total, 0) || 0,
-      service: data.job.issue || "Repair",
-      source: data.device.source || undefined,
-      imeiType: data.device.imei ? (data.device.imeiType as "imei1" | "imei2" | "serial") || "imei1" : undefined,
-      internalNotes: data.job.notes || undefined,
+      amount: totalAmount,
+      service: deviceRecords.length > 1
+        ? `${deviceRecords.length} device repair`
+        : (primaryDevice.job.issue || "Repair"),
+      source: primaryDevice.device.source || undefined,
+      imeiType: primaryDevice.device.imei ? (primaryDevice.device.imeiType as "imei1" | "imei2" | "serial") || "imei1" : undefined,
+      internalNotes: primaryDevice.job.notes || undefined,
       customerId: finalCustomerId || undefined,
+      // Multi-device data — always store for data consistency
+      devices: deviceRecords,
     };
 
     if (isEdit) {
@@ -274,13 +429,13 @@ function NewTicketWizard() {
             totalTickets: cust.totalTickets + 1,
             totalRepairs: cust.totalRepairs + 1,
             lastVisit: new Date().toISOString(),
-            lifetimeValue: cust.lifetimeValue + (Number(data.job.estimate) || data.parts.reduce((s, p) => s + p.total, 0) || 0),
+            lifetimeValue: cust.lifetimeValue + totalAmount,
           });
         }
       }
-      // Reserve stock for parts
-      if (data.parts.length > 0) {
-        data.parts.forEach((p: any) => {
+      // Reserve stock for parts (across all devices)
+      if (allParts.length > 0) {
+        allParts.forEach((p: any) => {
           const item = inventory.find((i: any) => i.id === p.inventoryId);
           if (item) {
             updateInventoryItem(p.inventoryId, { reservedStock: (item.reservedStock || 0) + p.qty });
@@ -333,7 +488,10 @@ function NewTicketWizard() {
           {step === 2 && (
             <CategoryWheel
               value={data.category}
-              onChange={(id) => setData({ ...data, category: id })}
+              onChange={(id) => {
+                const updatedDevices = data.devices.map((d, i) => i === data.activeDeviceIndex ? { ...d, category: id } : d);
+                setData({ ...data, category: id, devices: updatedDevices });
+              }}
               onNext={next}
               isEdit={isEdit}
             />
@@ -477,8 +635,52 @@ function subtitleFor(step: number) {
 /* ---------------- Step 3: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const { brands, deviceModels, addBrand, addDeviceModel } = useStore();
-  const d = data.device;
-  const set = (k: string, v: string) => setData({ ...data, device: { ...d, [k]: v } });
+  const activeIdx = data.activeDeviceIndex;
+  const activeDevice = data.devices[activeIdx];
+  const d = activeDevice.device;
+
+  // Ref for auto-scrolling to the active form
+  const formRef = useRef<HTMLDivElement>(null);
+
+  // Update a field on the active device
+  const set = (k: string, v: string) => {
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, device: { ...dev.device, [k]: v } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
+
+  // Add a new device
+  const addNewDevice = () => {
+    const newDevice = createWizardDevice(data.category);
+    setData({
+      ...data,
+      devices: [...data.devices, newDevice],
+      activeDeviceIndex: data.devices.length,
+    });
+    // Scroll to the form after React renders the new device
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
+
+  // Remove a device (prevent removing the last one)
+  const removeDevice = (idx: number) => {
+    if (data.devices.length <= 1) return;
+    const updatedDevices = data.devices.filter((_: any, i: number) => i !== idx);
+    const newActiveIdx = activeIdx >= updatedDevices.length
+      ? updatedDevices.length - 1
+      : activeIdx > idx ? activeIdx - 1 : activeIdx;
+    setData({ ...data, devices: updatedDevices, activeDeviceIndex: newActiveIdx });
+  };
+
+  // Switch active device
+  const switchDevice = (idx: number) => {
+    setData({ ...data, activeDeviceIndex: idx });
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 80);
+  };
 
   // Brand combobox state
   const [brandQuery, setBrandQuery] = useState(d.brand || "");
@@ -492,23 +694,31 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const [showNewModel, setShowNewModel] = useState(false);
   const [newModelName, setNewModelName] = useState("");
 
+  // Sync local queries when active device changes
+  useEffect(() => {
+    setBrandQuery(activeDevice.device.brand || "");
+    setModelQuery(activeDevice.device.model || "");
+  }, [activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Find selected brand id for filtering models
   const selectedBrand = brands.find((b) => b.name.toLowerCase() === (d.brand || brandQuery).toLowerCase().trim());
 
   // Search results
   const brandResults = searchBrands(brands, brandQuery);
-  const modelResults = searchModels(deviceModels, selectedBrand?.id || null, modelQuery);
+  const modelResults = selectedBrand
+    ? (modelQuery.trim() ? searchModels(deviceModels, selectedBrand.id, modelQuery) : getModelsForBrand(deviceModels, selectedBrand.id))
+    : [];
 
   // Brand selection
   const handleBrandSelect = (b: Brand) => {
-    set("brand", b.name);
+    const shouldClearModel = d.brand.toLowerCase() !== b.name.toLowerCase();
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, device: { ...dev.device, brand: b.name, ...(shouldClearModel ? { model: "" } : {}) } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
     setBrandQuery(b.name);
     setBrandOpen(false);
-    // Clear model if brand changes
-    if (d.brand.toLowerCase() !== b.name.toLowerCase()) {
-      set("model", "");
-      setModelQuery("");
-    }
+    if (shouldClearModel) setModelQuery("");
   };
 
   // Save new brand
@@ -516,8 +726,12 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
     if (!newBrandName.trim()) return;
     const brand = createBrand(newBrandName.trim());
     addBrand(brand);
-    set("brand", brand.name);
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, device: { ...dev.device, brand: brand.name, model: "" } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
     setBrandQuery(brand.name);
+    setModelQuery("");
     setShowNewBrand(false);
     setNewBrandName("");
     setBrandOpen(false);
@@ -525,14 +739,14 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
 
   // Model selection
   const handleModelSelect = (m: DeviceModel) => {
-    set("model", m.name);
+    const brandForModel = brands.find((br: Brand) => br.id === m.brandId);
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, device: { ...dev.device, model: m.name, ...(brandForModel && !d.brand ? { brand: brandForModel.name } : {}) } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
     setModelQuery(m.name);
     setModelOpen(false);
-    // Also set brand if not set
-    if (!d.brand) {
-      const b = brands.find((br) => br.id === m.brandId);
-      if (b) { set("brand", b.name); setBrandQuery(b.name); }
-    }
+    if (brandForModel && !d.brand) setBrandQuery(brandForModel.name);
   };
 
   // Save new model
@@ -540,7 +754,10 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
     if (!newModelName.trim() || !selectedBrand) return;
     const model = createDeviceModel(selectedBrand.id, newModelName.trim());
     addDeviceModel(model);
-    set("model", model.name);
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, device: { ...dev.device, model: model.name } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
     setModelQuery(model.name);
     setShowNewModel(false);
     setNewModelName("");
@@ -548,7 +765,81 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   };
 
   return (
-    <div className={FORM_CARD}>
+    <div className="space-y-3" role="region" aria-label="Device details">
+      {/* Collapsed Device Cards (for devices other than active) */}
+      {data.devices.length > 1 && (
+        <div className="space-y-2" role="list" aria-label="Added devices">
+          {data.devices.map((dev: WizardDevice, idx: number) => {
+            if (idx === activeIdx) return null;
+            const brandModel = [dev.device.brand, dev.device.model].filter(Boolean).join(" ");
+            const summary = brandModel || "Untitled Device";
+            const issue = dev.job.issue || dev.job.description || "";
+            const imeiSnippet = dev.device.imei ? `${dev.device.imeiType === "serial" ? "SN" : "IMEI"}: …${dev.device.imei.slice(-4)}` : "";
+            const hasMinInfo = !!(dev.device.brand && dev.device.model);
+            return (
+              <motion.div
+                key={dev.id}
+                role="listitem"
+                layout
+                initial={{ opacity: 0, y: -6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.2 }}
+                className="group flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 shadow-[0_1px_3px_rgba(0,0,0,0.03)] transition-all hover:border-[#B3BFF6] hover:shadow-card"
+              >
+                <span className={cn(
+                  "grid h-8 w-8 shrink-0 place-items-center rounded-xl text-[13px] font-bold transition-colors",
+                  hasMinInfo ? "bg-[#EEF1FD] text-[#4361EE]" : "bg-amber-50 text-amber-600"
+                )}>
+                  {idx + 1}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => switchDevice(idx)}
+                  className="flex-1 min-w-0 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40 rounded-lg px-1 -mx-1"
+                  aria-label={`Switch to device ${idx + 1}: ${summary}`}
+                >
+                  <p className="text-sm font-semibold truncate">{summary}</p>
+                  <p className="text-[11px] text-muted-foreground truncate">
+                    {[issue, imeiSnippet].filter(Boolean).join(" · ") || "Tap to edit"}
+                  </p>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => switchDevice(idx)}
+                  className="shrink-0 rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-[#4361EE] opacity-0 group-hover:opacity-100 hover:bg-[#EEF1FD] transition-all focus:opacity-100 focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                  aria-label={`Edit device ${idx + 1}`}
+                  tabIndex={-1}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  onClick={() => removeDevice(idx)}
+                  className="shrink-0 rounded-lg p-1.5 text-rose-400 opacity-0 group-hover:opacity-100 hover:text-rose-600 hover:bg-rose-50 transition-all focus:opacity-100 focus-visible:ring-2 focus-visible:ring-rose-300"
+                  aria-label={`Remove device ${idx + 1}: ${summary}`}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Active device label */}
+      {data.devices.length > 1 && (
+        <div className="flex items-center gap-2 pt-1">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#4361EE] text-[11px] font-bold text-white shadow-sm">
+            {activeIdx + 1}
+          </span>
+          <p className="text-[12px] font-semibold text-[#4361EE] tracking-tight">
+            Device {activeIdx + 1} of {data.devices.length}
+          </p>
+        </div>
+      )}
+
+    <div ref={formRef} className={FORM_CARD}>
       <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
         {/* Left Column — Device Identity */}
         <div className="space-y-4">
@@ -686,11 +977,29 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
           </div>
         </div>
       </div>
-      {!isEdit && (
-        <div className="mt-6 flex justify-end">
+
+      {/* + Add Device & Next */}
+      <div className="mt-6 flex items-center justify-between gap-3">
+        <motion.button
+          type="button"
+          onClick={addNewDevice}
+          whileHover={{ scale: 1.02 }}
+          whileTap={{ scale: 0.97 }}
+          className="inline-flex items-center gap-2 rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD]/30 px-4 py-2.5 text-[13px] font-semibold text-[#4361EE] transition-all hover:bg-[#EEF1FD] hover:border-[#4361EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+          aria-label={`Add another device to this ticket (currently ${data.devices.length} device${data.devices.length > 1 ? "s" : ""})`}
+        >
+          <Plus className="h-4 w-4" />
+          <span>Add Device</span>
+          {data.devices.length > 1 && (
+            <span className="ml-1 grid h-5 w-5 place-items-center rounded-full bg-[#4361EE]/10 text-[10px] font-bold text-[#4361EE]">
+              {data.devices.length}
+            </span>
+          )}
+        </motion.button>
+        {!isEdit && (
           <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
-        </div>
-      )}
+        )}
+      </div>
 
       {/* Add New Brand Modal */}
       {showNewBrand && (
@@ -736,15 +1045,24 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         </div>
       )}
     </div>
+    </div>
   );
 }
 
 /* ---------------- Step 4: Job Details ---------------- */
 function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
-  const j = data.job;
-  const set = (k: string, v: string) => setData({ ...data, job: { ...j, [k]: v } });
+  const activeIdx = data.activeDeviceIndex;
+  const activeDevice = data.devices[activeIdx];
+  const j = activeDevice.job;
+  const set = (k: string, v: string) => {
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, job: { ...dev.job, [k]: v } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
   return (
     <div className={FORM_CARD}>
+      <DeviceSwitcher data={data} setData={setData} />
       <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
         {/* Left Column — Job Overview */}
         <div className="space-y-4">
@@ -792,6 +1110,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
           <SectionLabel icon={StickyNote}>Notes</SectionLabel>
           <Field label="Problem Description"><Textarea value={j.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" rows={5} className="min-h-0 h-[124px]" /></Field>
           <Field label="Internal Notes"><Textarea value={j.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" rows={3} className="min-h-0 h-[76px]" /></Field>
+          <Field label="Estimate (₹)"><Input value={j.estimate} onChange={(e: any) => set("estimate", e.target.value)} placeholder="0" type="number" className="h-11 tabular-nums" /></Field>
         </div>
       </div>
       {!isEdit && (
@@ -804,6 +1123,43 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
 }
 
 const FORM_CARD = "rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 sm:p-8 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
+
+/** Inline device tab switcher — shown above Job Details & Parts steps when multiple devices exist */
+function DeviceSwitcher({ data, setData }: { data: any; setData: (d: any) => void }) {
+  if (data.devices.length <= 1) return null;
+  const activeIdx = data.activeDeviceIndex;
+  return (
+    <div className="mb-4 flex items-center gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Select device">
+      {data.devices.map((dev: WizardDevice, idx: number) => {
+        const label = [dev.device.brand, dev.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+        const isActive = idx === activeIdx;
+        return (
+          <button
+            key={dev.id}
+            type="button"
+            role="tab"
+            aria-selected={isActive}
+            onClick={() => setData({ ...data, activeDeviceIndex: idx })}
+            className={cn(
+              "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] font-medium transition-all",
+              isActive
+                ? "bg-[#4361EE] text-white shadow-sm"
+                : "bg-white border border-border text-muted-foreground hover:border-[#B3BFF6] hover:text-foreground"
+            )}
+          >
+            <span className={cn(
+              "grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold",
+              isActive ? "bg-white/20 text-white" : "bg-muted text-muted-foreground"
+            )}>
+              {idx + 1}
+            </span>
+            <span className="max-w-[120px] truncate">{label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 function SectionLabel({ icon: Icon, children }: { icon: any; children: React.ReactNode }) {
   return (
@@ -831,7 +1187,11 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   const [query, setQuery] = useState("");
   const [showResults, setShowResults] = useState(false);
 
-  const total = data.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+  const activeIdx = data.activeDeviceIndex;
+  const activeDevice = data.devices[activeIdx];
+  const parts = activeDevice.parts;
+
+  const total = parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
 
   // Search inventory items
   const results = query.trim().length >= 2
@@ -845,9 +1205,16 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
       }).slice(0, 8)
     : [];
 
+  const updateDeviceParts = (newParts: any[]) => {
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, parts: newParts } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
+
   const addPart = (item: InventoryItem) => {
     // Check if already added
-    if (data.parts.some((p: any) => p.inventoryId === item.id)) return;
+    if (parts.some((p: any) => p.inventoryId === item.id)) return;
     const newPart = {
       inventoryId: item.id,
       name: item.name,
@@ -857,28 +1224,28 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
       total: item.regularSellingPrice,
       uom: item.uom,
     };
-    setData({ ...data, parts: [...data.parts, newPart] });
+    updateDeviceParts([...parts, newPart]);
     setQuery("");
     setShowResults(false);
   };
 
   const removePart = (idx: number) => {
-    setData({ ...data, parts: data.parts.filter((_: any, i: number) => i !== idx) });
+    updateDeviceParts(parts.filter((_: any, i: number) => i !== idx));
   };
 
   const updateQty = (idx: number, delta: number) => {
-    setData({
-      ...data,
-      parts: data.parts.map((p: any, i: number) => {
+    updateDeviceParts(
+      parts.map((p: any, i: number) => {
         if (i !== idx) return p;
         const newQty = Math.max(1, p.qty + delta);
         return { ...p, qty: newQty, total: newQty * p.unitPrice };
-      }),
-    });
+      })
+    );
   };
 
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
+      <DeviceSwitcher data={data} setData={setData} />
       {/* Search */}
       <div className="relative">
         <Field label="Search Inventory">
@@ -895,7 +1262,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
         {showResults && results.length > 0 && (
           <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
             {results.map((item: InventoryItem) => {
-              const alreadyAdded = data.parts.some((p: any) => p.inventoryId === item.id);
+              const alreadyAdded = parts.some((p: any) => p.inventoryId === item.id);
               const available = item.currentStock - (item.reservedStock || 0);
               const outOfStock = available <= 0;
               const lowStock = available > 0 && available <= item.minStock;
@@ -944,7 +1311,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
 
       {/* Added Parts List */}
       <div className="mt-5 rounded-xl border border-border overflow-hidden">
-        {data.parts.length > 0 ? (
+        {parts.length > 0 ? (
           <table className="w-full text-sm">
             <thead className="bg-muted/60">
               <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -957,7 +1324,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
             </thead>
             <tbody>
               <AnimatePresence initial={false}>
-                {data.parts.map((p: any, i: number) => {
+                {parts.map((p: any, i: number) => {
                   const invItem = inventory.find((it: InventoryItem) => it.id === p.inventoryId);
                   const available = invItem ? invItem.currentStock - (invItem.reservedStock || 0) : 0;
                   const stockWarning = invItem && p.qty > available;
@@ -1247,10 +1614,13 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
 
 /* ---------------- Step 8: Quote ---------------- */
 function QuoteSummary({ data, onNext, isEdit }: any) {
-  const partsTotal = data.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
-  const labour = 499;
-  const tax = Math.round(partsTotal * 0.18);
-  const total = partsTotal + labour + tax;
+  const allParts = data.devices.flatMap((d: WizardDevice) => d.parts);
+  const partsTotal = allParts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+  const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
+  // Use device estimates if set, otherwise fall back to parts-based calculation
+  const subtotal = estimatesTotal > 0 ? estimatesTotal : partsTotal;
+  const tax = Math.round(subtotal * 0.18);
+  const total = subtotal + tax;
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
@@ -1258,27 +1628,41 @@ function QuoteSummary({ data, onNext, isEdit }: any) {
           <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
           </div>
-          {data.parts.length === 0 ? (
-            <div className="p-6 text-center text-sm text-muted-foreground">No parts added - quotation will reflect labour only.</div>
-          ) : data.parts.map((p: any, i: number) => (
-            <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30">
+          {/* Per-device estimates */}
+          {data.devices.length > 1 && data.devices.map((d: WizardDevice, idx: number) => {
+            const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+            const devEstimate = Number(d.job.estimate) || d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+            return (
+              <div key={d.id} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30 border-t border-border first:border-0">
+                <div>
+                  <span className="font-medium">{d.job.issue || "Repair"}</span>
+                  <span className="block text-[11px] text-muted-foreground">{devLabel}</span>
+                </div>
+                <div className="text-center">1</div>
+                <div className="text-right tnum">{formatINR(devEstimate)}</div>
+              </div>
+            );
+          })}
+          {/* Parts breakdown */}
+          {allParts.length > 0 && data.devices.length <= 1 && allParts.map((p: any, i: number) => (
+            <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30 border-t border-border first:border-0">
               <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
             </div>
           ))}
+          {allParts.length === 0 && data.devices.length <= 1 && (
+            <div className="p-6 text-center text-sm text-muted-foreground">No parts added - quotation will reflect estimate only.</div>
+          )}
           <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border">
-            <div>Labour & Diagnostics</div><div className="text-center">1</div><div className="text-right tnum">{formatINR(labour)}</div>
-          </div>
-          <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border">
-            <div>GST (18%)</div><div className="text-center">-</div><div className="text-right tnum">{formatINR(tax)}</div>
+            <div>GST (18%)</div><div className="text-center">—</div><div className="text-right tnum">{formatINR(tax)}</div>
           </div>
         </div>
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
-            <QRow k="Sub-total (parts)" v={formatINR(partsTotal)} />
-            <QRow k="Labour" v={formatINR(labour)} />
-            <QRow k="Tax" v={formatINR(tax)} />
+            {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(estimatesTotal || partsTotal)} />}
+            {data.devices.length <= 1 && <QRow k="Sub-total" v={formatINR(subtotal)} />}
+            <QRow k="Tax (18%)" v={formatINR(tax)} />
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
           {!isEdit && <Button size="lg" className="mt-4 w-full" onClick={onNext}>Approve Quote <ArrowRight className="h-4 w-4" /></Button>}
@@ -1305,8 +1689,15 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   const [noteOpen, setNoteOpen] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
 
-  const qc = data.qc || {};
-  const set = (k: string, v: "ok" | "no" | "na") => setData({ ...data, qc: { ...qc, [k]: v } });
+  const activeIdx = data.activeDeviceIndex;
+  const activeDevice = data.devices[activeIdx];
+  const qc = activeDevice.qc || {};
+  const set = (k: string, v: "ok" | "no" | "na") => {
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, qc: { ...dev.qc, [k]: v } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
 
   const total = QC_FIELDS.length;
   const passed = QC_FIELDS.filter((f) => qc[f] === "ok").length;
@@ -1332,7 +1723,10 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   const markAll = () => {
     const updated = { ...qc };
     QC_FIELDS.forEach((f) => { if (!updated[f]) updated[f] = "ok"; });
-    setData({ ...data, qc: updated });
+    const updatedDevicesMarkAll = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, qc: updated } : dev
+    );
+    setData({ ...data, devices: updatedDevicesMarkAll });
   };
 
   const filters = [
@@ -1347,6 +1741,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     <div className="flex flex-col lg:flex-row gap-4">
       {/* Main Inspection Area */}
       <div className="flex-1 min-w-0">
+        <DeviceSwitcher data={data} setData={setData} />
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
             <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
@@ -1354,11 +1749,11 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
             </span>
             <div>
               <h2 className="text-lg font-bold tracking-tight">Quality Control Inspection</h2>
-              <p className="text-[12px] text-muted-foreground">{data.device?.model || "Device"} • {data.device?.assignedTo || "Technician"}</p>
+              <p className="text-[12px] text-muted-foreground">{activeDevice.device?.model || "Device"} • {activeDevice.device?.assignedTo || "Technician"}</p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setData({ ...data, qc: {} })}><RotateCcw className="h-3.5 w-3.5" /> Reset</Button>
+            <Button variant="outline" size="sm" onClick={() => { const resetDevices = data.devices.map((dev: WizardDevice, i: number) => i === activeIdx ? { ...dev, qc: {} } : dev); setData({ ...data, devices: resetDevices }); }}><RotateCcw className="h-3.5 w-3.5" /> Reset</Button>
             <Button variant="outline" size="sm" onClick={markAll}><CheckCircle2 className="h-3.5 w-3.5" /> Mark All Pass</Button>
             {!isEdit && <Button size="sm" onClick={onNext}>Finish QC</Button>}
           </div>

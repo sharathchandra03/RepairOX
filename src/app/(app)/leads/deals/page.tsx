@@ -98,8 +98,8 @@ export default function DealsPage() {
       {/* Deals Table */}
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <table className="w-full text-sm">
-          <thead className="bg-muted/60">
-            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <thead className="bg-[#EEF1FD]">
+            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
               <th className="px-4 py-3">Deal</th>
               <th className="py-3">Contact</th>
               <th className="py-3">Stage</th>

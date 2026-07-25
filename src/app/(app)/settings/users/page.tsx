@@ -77,8 +77,8 @@ export default function UsersPage() {
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full min-w-[720px] text-sm">
-            <thead className="bg-muted/60">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <thead className="bg-[#EEF1FD]">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
                 <th className="px-5 py-3">Member</th>
                 <th className="py-3">Role</th>
                 <th className="py-3">Workspaces</th>

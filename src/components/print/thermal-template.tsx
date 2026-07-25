@@ -77,14 +77,27 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
         <>
           <div>
             <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">Device Details</p>
-            <div className="text-[9px] space-y-0.5">
-              <p>{ticket.device} - {ticket.model}</p>
-              {ticket.serial && <p>IMEI/SN: {ticket.serial}</p>}
-              <p>Issue: {ticket.issue}</p>
-              {ticket.service && <p>Service: {ticket.service}</p>}
-              <p>Tech: {ticket.technician} | Priority: {ticket.priority}</p>
-              {ticket.dueDate && <p>Due: {formatPrintDateTime(ticket.dueDate)}</p>}
-            </div>
+            {ticket.devices && ticket.devices.length > 1 ? (
+              <div className="text-[9px] space-y-1.5">
+                {ticket.devices.map((dev, idx) => (
+                  <div key={dev.id}>
+                    <p className="font-semibold">Device {idx + 1}: {dev.brand} {dev.model}</p>
+                    {dev.serial && <p>IMEI/SN: {dev.serial}</p>}
+                    <p>Issue: {dev.issue}</p>
+                    <p>Tech: {dev.technician} | Est: {formatPrintCurrency(dev.estimate)}</p>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[9px] space-y-0.5">
+                <p>{ticket.device} - {ticket.model}</p>
+                {ticket.serial && <p>IMEI/SN: {ticket.serial}</p>}
+                <p>Issue: {ticket.issue}</p>
+                {ticket.service && <p>Service: {ticket.service}</p>}
+                <p>Tech: {ticket.technician} | Priority: {ticket.priority}</p>
+                {ticket.dueDate && <p>Due: {formatPrintDateTime(ticket.dueDate)}</p>}
+              </div>
+            )}
           </div>
           <Divider />
         </>
@@ -111,7 +124,23 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
           ))}
 
           {/* Ticket parts */}
-          {isTicket && ticket?.parts && ticket.parts.length > 0 && ticket.parts.map((part, i) => (
+          {isTicket && ticket?.devices && ticket.devices.length > 1 && ticket.devices.map((dev) =>
+            dev.parts.length > 0 ? dev.parts.map((part, pi) => (
+              <div key={`${dev.id}-${pi}`} className="flex justify-between py-0.5">
+                <span className="flex-1 truncate pr-1">{part.name}</span>
+                <span className="w-[28px] text-center">{part.qty}</span>
+                <span className="w-[52px] text-right">{formatPrintCurrency(part.total)}</span>
+              </div>
+            )) : (
+              <div key={dev.id} className="flex justify-between py-0.5">
+                <span className="flex-1 truncate pr-1">{dev.issue || "Service"} ({dev.model})</span>
+                <span className="w-[28px] text-center">1</span>
+                <span className="w-[52px] text-right">{formatPrintCurrency(dev.estimate)}</span>
+              </div>
+            )
+          )}
+
+          {isTicket && (!ticket?.devices || ticket.devices.length <= 1) && ticket?.parts && ticket.parts.length > 0 && ticket.parts.map((part, i) => (
             <div key={i} className="flex justify-between py-0.5">
               <span className="flex-1 truncate pr-1">{part.name}</span>
               <span className="w-[28px] text-center">{part.qty}</span>

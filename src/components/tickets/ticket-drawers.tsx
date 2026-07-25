@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-data";
-import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, getTicketDevices } from "@/lib/mock-data";
 import { formatINR } from "@/lib/utils";
 import { getTicketPrintUrl, type PrintFormat } from "@/lib/print-utils";
 
@@ -16,8 +16,9 @@ import { getTicketPrintUrl, type PrintFormat } from "@/lib/print-utils";
 
 export function ViewTicketDrawer({ open, onClose, ticket }: { open: boolean; onClose: () => void; ticket: Ticket | null }) {
   if (!ticket) return null;
+  const devices = getTicketDevices(ticket);
   return (
-    <Drawer open={open} onClose={onClose} title={`Ticket ${ticket.id}`} subtitle={ticket.model} icon={Eye} width="max-w-md">
+    <Drawer open={open} onClose={onClose} title={`Ticket ${ticket.id}`} subtitle={devices.length > 1 ? `${devices.length} devices` : ticket.model} icon={Eye} width="max-w-md">
       <div className="divide-y divide-border">
         <div className="pb-4">
           <div className="flex items-center gap-3">
@@ -29,21 +30,31 @@ export function ViewTicketDrawer({ open, onClose, ticket }: { open: boolean; onC
             </div>
           </div>
         </div>
+        {devices.map((dev, idx) => (
+          <div key={dev.id} className="py-4 space-y-0">
+            {devices.length > 1 && (
+              <div className="flex items-center gap-2 mb-2">
+                <span className="grid h-5 w-5 place-items-center rounded bg-indigo-100 text-[9px] font-bold text-indigo-700">{idx + 1}</span>
+                <span className="text-[12px] font-semibold">{[dev.brand, dev.model].filter(Boolean).join(" ") || "Device"}</span>
+              </div>
+            )}
+            <DetailRow label="Device">{dev.model || ticket.model}</DetailRow>
+            <DetailRow label="Issue">{dev.issue || ticket.issue}</DetailRow>
+            <DetailRow label="Technician">{dev.assignedTo || ticket.technician}</DetailRow>
+            <DetailRow label="Priority">
+              <span className="capitalize">{dev.priority || ticket.priority}</span>
+            </DetailRow>
+            <DetailRow label="Status">
+              <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[dev.status || ticket.status]}`}>
+                <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                {STATUS_LABEL[dev.status || ticket.status]}
+              </span>
+            </DetailRow>
+            <DetailRow label="Estimate">{formatINR(dev.estimate)}</DetailRow>
+          </div>
+        ))}
         <div className="py-4 space-y-0">
-          <DetailRow label="Device">{ticket.model}</DetailRow>
-          <DetailRow label="Issue">{ticket.issue}</DetailRow>
-          <DetailRow label="Service">{ticket.service || "—"}</DetailRow>
-          <DetailRow label="Technician">{ticket.technician}</DetailRow>
-          <DetailRow label="Priority">
-            <span className="capitalize">{ticket.priority}</span>
-          </DetailRow>
-          <DetailRow label="Status">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />
-              {STATUS_LABEL[ticket.status]}
-            </span>
-          </DetailRow>
-          <DetailRow label="Amount">{formatINR(ticket.amount)}</DetailRow>
+          <DetailRow label="Total">{formatINR(ticket.amount)}</DetailRow>
           <DetailRow label="Created">{new Date(ticket.createdAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</DetailRow>
           {ticket.dueDate && (
             <DetailRow label="Due">{new Date(ticket.dueDate).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</DetailRow>

@@ -21,7 +21,8 @@ import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import {
   STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE,
-  type Ticket, type TicketStatus, type TicketPriority,
+  type Ticket, type TicketStatus, type TicketPriority, type DeviceRecord,
+  getTicketDevices,
 } from "@/lib/mock-data";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -141,10 +142,17 @@ export default function TicketDetailPage() {
 
   const handleStatusChange = useCallback((status: TicketStatus) => {
     if (ticket) {
-      updateTicket(ticket.id, { status });
+      // Update all device statuses along with the ticket status
+      const updatedDevices = ticket.devices?.map((d) => ({ ...d, status }));
+      updateTicket(ticket.id, { status, devices: updatedDevices });
       // Deduct inventory when ticket is completed
-      if (status === "completed" && ticket.parts && ticket.parts.some((p) => p.status === "planned")) {
-        deductPartsForTicket(ticket.id);
+      if (status === "completed") {
+        const hasPlannedParts = ticket.devices
+          ? ticket.devices.some((d) => d.parts.some((p) => p.status === "planned"))
+          : ticket.parts?.some((p) => p.status === "planned");
+        if (hasPlannedParts) {
+          deductPartsForTicket(ticket.id);
+        }
       }
       setShowStatusMenu(false);
     }
@@ -159,6 +167,7 @@ export default function TicketDetailPage() {
 
   const handlePushToInvoice = useCallback(() => {
     if (!ticket) return;
+    const devices = getTicketDevices(ticket);
     // Encode ticket data as query params for the invoice create page
     const params = new URLSearchParams();
     params.set("fromTicket", ticket.id);
@@ -168,14 +177,43 @@ export default function TicketDetailPage() {
     if (ticket.address) params.set("address", ticket.address);
     if (ticket.company) params.set("company", ticket.company);
     params.set("amount", String(ticket.amount));
-    params.set("service", ticket.service || ticket.issue);
-    params.set("device", ticket.model);
-    params.set("brand", ticket.device);
-    if (ticket.items?.[0]?.serial) params.set("serial", ticket.items[0].serial);
     if (ticket.technician) params.set("employee", ticket.technician);
-    if (ticket.parts && ticket.parts.length > 0) {
-      params.set("parts", JSON.stringify(ticket.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.unitPrice, total: p.total }))));
+
+    // Build line items from all devices
+    const lineItems: { name: string; qty: number; price: number; total: number; deviceLabel: string }[] = [];
+    devices.forEach((dev) => {
+      const deviceLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || "Device";
+      // Add parts as line items
+      if (dev.parts.length > 0) {
+        dev.parts.forEach((p) => {
+          lineItems.push({ name: p.name, qty: p.qty, price: p.unitPrice, total: p.total, deviceLabel });
+        });
+      }
+      // Add labour/service line item per device
+      if (dev.estimate > 0 || dev.parts.length === 0) {
+        const labourAmount = dev.estimate - dev.parts.reduce((s, p) => s + p.total, 0);
+        if (labourAmount > 0 || dev.parts.length === 0) {
+          lineItems.push({
+            name: `${dev.issue || "Repair Service"} — ${deviceLabel}`,
+            qty: 1,
+            price: Math.max(labourAmount, dev.estimate || 0),
+            total: Math.max(labourAmount, dev.estimate || 0),
+            deviceLabel,
+          });
+        }
+      }
+    });
+
+    if (lineItems.length > 0) {
+      params.set("parts", JSON.stringify(lineItems.map((li) => ({ name: li.name, qty: li.qty, price: li.price, total: li.total }))));
     }
+
+    // Pass first device info for backward compat
+    params.set("service", devices[0]?.issue || ticket.service || ticket.issue);
+    params.set("device", devices[0]?.model || ticket.model);
+    params.set("brand", devices[0]?.brand || ticket.device);
+    if (devices[0]?.imei) params.set("serial", devices[0].imei);
+
     router.push(`/invoice/create?${params.toString()}`);
   }, [ticket, router]);
 
@@ -263,7 +301,7 @@ export default function TicketDetailPage() {
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <SummaryCard label="Customer" value={ticket.customer} icon={User} />
           <SummaryCard label="Phone" value={ticket.phone} icon={Phone} />
-          <SummaryCard label="Device" value={ticket.model} icon={Smartphone} />
+          <SummaryCard label="Device" value={ticket.devices && ticket.devices.length > 1 ? `${ticket.devices.length} devices` : ticket.model} icon={Smartphone} />
           <SummaryCard label="Technician" value={ticket.technician} icon={Wrench} />
           <SummaryCard label="Amount" value={formatINR(ticket.amount)} icon={CreditCard} />
           <SummaryCard label="Created" value={fmtDateShort(ticket.createdAt)} icon={Calendar} />
@@ -294,36 +332,73 @@ export default function TicketDetailPage() {
           <DetailSection
             title="Device Information"
             icon={Smartphone}
-            action={<SectionEditButton onClick={() => setActiveEditor("device")} />}
+            action={
+              ticket.devices && ticket.devices.length > 1
+                ? <button onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline"><Pencil className="h-3 w-3" /> Edit All</button>
+                : <SectionEditButton onClick={() => setActiveEditor("device")} />
+            }
           >
-            {ticket.items && ticket.items.length > 0 ? (
-              <div className="space-y-4">
-                {ticket.items.map((item, idx) => (
-                  <div key={idx} className="rounded-xl border border-border p-4 bg-muted/20">
-                    <div className="flex items-center gap-2 mb-3">
-                      <span className="grid h-6 w-6 place-items-center rounded-md bg-indigo-100 text-[10px] font-bold text-indigo-700">{idx + 1}</span>
-                      <span className="text-sm font-semibold">{item.model}</span>
-                    </div>
-                    <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
-                      <DetailField label="Device" value={item.device} />
-                      <DetailField label="Model" value={item.model} />
-                      <DetailField label={ticket.imeiType === "serial" ? "Serial No." : ticket.imeiType === "imei2" ? "IMEI 2" : "IMEI 1"} value={item.serial || "—"} />
-                      <DetailField label="Issue" value={item.issue} />
-                      <DetailField label="Service" value={item.service || "—"} />
-                    </div>
+            {(() => {
+              const devices = getTicketDevices(ticket);
+              if (devices.length === 1) {
+                const dev = devices[0];
+                return (
+                  <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+                    <DetailField label="Brand" value={dev.brand || ticket.device} />
+                    <DetailField label="Model" value={dev.model || ticket.model} />
+                    <DetailField label="Category" value={dev.category || dev.brand || ticket.device} />
+                    <DetailField label={dev.imeiType === "serial" ? "Serial No." : dev.imeiType === "imei2" ? "IMEI 2" : "IMEI 1"} value={dev.imei || "—"} />
+                    <DetailField label="Source" value={dev.source || ticket.source || "—"} />
+                    <DetailField label="Issue" value={dev.issue || ticket.issue} />
+                    <DetailField label="Technician" value={dev.assignedTo || ticket.technician} />
+                    <DetailField label="Accessories" value={dev.accessories || "—"} />
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-                <DetailField label="Brand" value={ticket.device} />
-                <DetailField label="Model" value={ticket.model} />
-                <DetailField label="Category" value={ticket.device} />
-                <DetailField label={ticket.imeiType === "serial" ? "Serial No." : ticket.imeiType === "imei2" ? "IMEI 2" : "IMEI 1"} value={ticket.items?.[0]?.serial || "—"} />
-                <DetailField label="Source" value={ticket.source || "—"} />
-                <DetailField label="Service" value={ticket.service || "—"} />
-              </div>
-            )}
+                );
+              }
+              // Multi-device display
+              return (
+                <div className="space-y-3" role="list" aria-label="Devices in this ticket">
+                  {devices.map((dev, idx) => (
+                    <div key={dev.id} role="listitem" className="rounded-xl border border-border p-4 bg-muted/20 transition-colors hover:bg-muted/30">
+                      <div className="flex items-center gap-2 mb-3">
+                        <span className="grid h-6 w-6 place-items-center rounded-md bg-indigo-100 text-[10px] font-bold text-indigo-700">{idx + 1}</span>
+                        <span className="text-sm font-semibold">{[dev.brand, dev.model].filter(Boolean).join(" ") || "Untitled Device"}</span>
+                        <span className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[dev.status]}`}>
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                          {STATUS_LABEL[dev.status]}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+                        <DetailField label="Brand" value={dev.brand || "—"} />
+                        <DetailField label="Model" value={dev.model || "—"} />
+                        <DetailField label={dev.imeiType === "serial" ? "Serial No." : dev.imeiType === "imei2" ? "IMEI 2" : "IMEI 1"} value={dev.imei || "—"} />
+                        <DetailField label="Issue" value={dev.issue || "—"} />
+                        <DetailField label="Technician" value={dev.assignedTo || "—"} />
+                        <DetailField label="Estimate" value={formatINR(dev.estimate)} />
+                        {dev.accessories && <DetailField label="Accessories" value={dev.accessories} />}
+                      </div>
+                      {dev.parts.length > 0 && (
+                        <div className="mt-3 pt-3 border-t border-border">
+                          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Parts ({dev.parts.length})</p>
+                          <div className="space-y-1">
+                            {dev.parts.map((p, pi) => (
+                              <div key={pi} className="flex items-center justify-between text-[12px]">
+                                <span className="text-foreground">{p.name} × {p.qty}</span>
+                                <span className="font-medium tabular-nums">{formatINR(p.total)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-2.5 text-sm">
+                    <span className="text-muted-foreground">{devices.length} devices · Total Estimate</span>
+                    <span className="font-bold tabular-nums">{formatINR(devices.reduce((s, d) => s + d.estimate, 0))}</span>
+                  </div>
+                </div>
+              );
+            })()}
           </DetailSection>
 
           {/* Job Details */}
@@ -394,60 +469,139 @@ export default function TicketDetailPage() {
           </DetailSection>
 
           {/* Parts Used */}
-          {ticket.parts && ticket.parts.length > 0 && (
-            <DetailSection
-              title="Parts"
-              icon={Package}
-              action={
-                <button onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
-                  <Pencil className="h-3 w-3" /> Manage
-                </button>
-              }
-            >
-              <div className="rounded-xl border border-border overflow-hidden">
-                <table className="w-full text-sm">
-                  <thead className="bg-muted/60">
-                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <th className="px-4 py-2 text-left">Item</th>
-                      <th className="py-2 text-center w-16">Qty</th>
-                      <th className="py-2 text-right w-24">Price</th>
-                      <th className="py-2 text-right w-24">Total</th>
-                      <th className="py-2 text-right w-20 pr-4">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {ticket.parts.map((part, idx) => (
-                      <tr key={idx} className="border-t border-border">
-                        <td className="px-4 py-2.5">
-                          <p className="font-medium">{part.name}</p>
-                          <p className="text-[11px] text-muted-foreground">{part.sku} · {part.uom}</p>
-                        </td>
-                        <td className="py-2.5 text-center tabular-nums">{part.qty}</td>
-                        <td className="py-2.5 text-right tabular-nums">{formatINR(part.unitPrice)}</td>
-                        <td className="py-2.5 text-right tabular-nums font-medium">{formatINR(part.total)}</td>
-                        <td className="py-2.5 text-right pr-4">
-                          <span className={cn(
-                            "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
-                            part.status === "used"
-                              ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                              : "bg-amber-50 text-amber-700 ring-amber-200"
-                          )}>
-                            {part.status === "used" ? "Consumed" : "Planned"}
-                          </span>
-                        </td>
+          {(() => {
+            const devices = getTicketDevices(ticket);
+            const allParts = devices.flatMap((d) => d.parts);
+            const hasParts = allParts.length > 0 || (ticket.parts && ticket.parts.length > 0);
+            if (!hasParts) return null;
+
+            // Use device-level parts if available
+            if (devices.length > 1) {
+              return (
+                <DetailSection
+                  title="Parts"
+                  icon={Package}
+                  action={
+                    <button onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
+                      <Pencil className="h-3 w-3" /> Manage
+                    </button>
+                  }
+                >
+                  <div className="space-y-4">
+                    {devices.map((dev, idx) => {
+                      if (dev.parts.length === 0) return null;
+                      const devLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+                      return (
+                        <div key={dev.id}>
+                          <p className="text-[11px] font-semibold text-muted-foreground mb-2">
+                            <span className="inline-flex items-center gap-1.5">
+                              <span className="grid h-5 w-5 place-items-center rounded bg-indigo-100 text-[9px] font-bold text-indigo-700">{idx + 1}</span>
+                              {devLabel}
+                            </span>
+                          </p>
+                          <div className="rounded-xl border border-border overflow-hidden">
+                            <table className="w-full text-sm">
+                              <thead className="bg-muted/60">
+                                <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                                  <th className="px-4 py-2 text-left">Item</th>
+                                  <th className="py-2 text-center w-16">Qty</th>
+                                  <th className="py-2 text-right w-24">Price</th>
+                                  <th className="py-2 text-right w-24">Total</th>
+                                  <th className="py-2 text-right w-20 pr-4">Status</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {dev.parts.map((part, pi) => (
+                                  <tr key={pi} className="border-t border-border">
+                                    <td className="px-4 py-2.5">
+                                      <p className="font-medium">{part.name}</p>
+                                      <p className="text-[11px] text-muted-foreground">{part.sku} · {part.uom}</p>
+                                    </td>
+                                    <td className="py-2.5 text-center tabular-nums">{part.qty}</td>
+                                    <td className="py-2.5 text-right tabular-nums">{formatINR(part.unitPrice)}</td>
+                                    <td className="py-2.5 text-right tabular-nums font-medium">{formatINR(part.total)}</td>
+                                    <td className="py-2.5 text-right pr-4">
+                                      <span className={cn(
+                                        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                                        part.status === "used" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"
+                                      )}>
+                                        {part.status === "used" ? "Consumed" : "Planned"}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <div className="mt-3 flex justify-end">
+                    <div className="rounded-lg bg-muted/60 px-4 py-2 text-sm">
+                      <span className="text-muted-foreground">Parts Total: </span>
+                      <span className="font-semibold tabular-nums">{formatINR(allParts.reduce((s, p) => s + p.total, 0))}</span>
+                    </div>
+                  </div>
+                </DetailSection>
+              );
+            }
+
+            // Single-device fallback (original layout)
+            const parts = ticket.parts && ticket.parts.length > 0 ? ticket.parts : allParts;
+            return (
+              <DetailSection
+                title="Parts"
+                icon={Package}
+                action={
+                  <button onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
+                    <Pencil className="h-3 w-3" /> Manage
+                  </button>
+                }
+              >
+                <div className="rounded-xl border border-border overflow-hidden">
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/60">
+                      <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <th className="px-4 py-2 text-left">Item</th>
+                        <th className="py-2 text-center w-16">Qty</th>
+                        <th className="py-2 text-right w-24">Price</th>
+                        <th className="py-2 text-right w-24">Total</th>
+                        <th className="py-2 text-right w-20 pr-4">Status</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              <div className="mt-3 flex justify-end">
-                <div className="rounded-lg bg-muted/60 px-4 py-2 text-sm">
-                  <span className="text-muted-foreground">Parts Total: </span>
-                  <span className="font-semibold tabular-nums">{formatINR(ticket.parts.reduce((s, p) => s + p.total, 0))}</span>
+                    </thead>
+                    <tbody>
+                      {parts.map((part, idx) => (
+                        <tr key={idx} className="border-t border-border">
+                          <td className="px-4 py-2.5">
+                            <p className="font-medium">{part.name}</p>
+                            <p className="text-[11px] text-muted-foreground">{part.sku} · {part.uom}</p>
+                          </td>
+                          <td className="py-2.5 text-center tabular-nums">{part.qty}</td>
+                          <td className="py-2.5 text-right tabular-nums">{formatINR(part.unitPrice)}</td>
+                          <td className="py-2.5 text-right tabular-nums font-medium">{formatINR(part.total)}</td>
+                          <td className="py-2.5 text-right pr-4">
+                            <span className={cn(
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset",
+                              part.status === "used" ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-amber-50 text-amber-700 ring-amber-200"
+                            )}>
+                              {part.status === "used" ? "Consumed" : "Planned"}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-              </div>
-            </DetailSection>
-          )}
+                <div className="mt-3 flex justify-end">
+                  <div className="rounded-lg bg-muted/60 px-4 py-2 text-sm">
+                    <span className="text-muted-foreground">Parts Total: </span>
+                    <span className="font-semibold tabular-nums">{formatINR(parts.reduce((s, p) => s + p.total, 0))}</span>
+                  </div>
+                </div>
+              </DetailSection>
+            );
+          })()}
 
           {/* Billing Information */}
           <DetailSection
@@ -703,7 +857,17 @@ export default function TicketDetailPage() {
         ]}
         onSave={(v) => {
           const items = v.imei ? [{ device: v.device, model: v.model, serial: v.imei, issue: v.issue, service: v.service || undefined }] : undefined;
-          updateTicket(ticket.id, { device: v.device, model: v.model, issue: v.issue, service: v.service || undefined, imeiType: (v.imeiType as any) || undefined, items });
+          // Also update the devices[] array if it exists (single-device ticket)
+          const updatedDevices = ticket.devices?.map((d, i) =>
+            i === 0 ? { ...d, brand: v.device, model: v.model, imei: v.imei, imeiType: (v.imeiType as "imei1" | "imei2" | "serial") || "imei1", issue: v.issue } : d
+          );
+          updateTicket(ticket.id, {
+            device: v.device, model: v.model, issue: v.issue,
+            service: v.service || undefined,
+            imeiType: (v.imeiType as any) || undefined,
+            items,
+            devices: updatedDevices,
+          });
           setActiveEditor(null);
         }}
       />

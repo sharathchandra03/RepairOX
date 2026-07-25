@@ -62,29 +62,74 @@ export const Label = React.forwardRef<HTMLLabelElement, React.LabelHTMLAttribute
 );
 Label.displayName = "Label";
 
-interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+interface SelectProps {
+  value?: string;
+  defaultValue?: string;
+  onChange?: (e: { target: { value: string } }) => void;
   options: { label: string; value: string }[];
+  className?: string;
+  placeholder?: string;
+  id?: string;
 }
-export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, options, ...props }, ref) => (
-    <div className="relative">
-      <select
-        ref={ref}
+export function Select({ value, defaultValue, onChange, options, className, placeholder }: SelectProps) {
+  const [open, setOpen] = React.useState(false);
+  const [internalValue, setInternalValue] = React.useState(defaultValue || "");
+  const currentValue = value !== undefined ? value : internalValue;
+  const ref = React.useRef<HTMLDivElement>(null);
+  const selected = options.find((o) => o.value === currentValue);
+
+  // Close on click outside
+  React.useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
         className={cn(
-          "h-11 w-full appearance-none rounded-xl border border-border bg-card px-3.5 pr-9 text-sm transition focus:border-brand-400 focus:ring-2 focus:ring-brand-200/50 focus:outline-none",
+          "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
+          open
+            ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
+            : "border-border hover:border-[#4361EE]/40",
           className
         )}
-        {...props}
       >
-        {options.map((o) => (
-          <option key={o.value} value={o.value}>{o.label}</option>
-        ))}
-      </select>
-      <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground">▾</span>
+        <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
+          {selected ? selected.label : (placeholder || "Select…")}
+        </span>
+        <span className={cn("text-muted-foreground transition-transform duration-200", open && "rotate-180")}>▾</span>
+      </button>
+      {open && (
+        <div className="absolute left-0 min-w-[160px] top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
+          {options.map((o) => {
+            const isSelected = o.value === currentValue;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => { setInternalValue(o.value); onChange?.({ target: { value: o.value } }); setOpen(false); }}
+                className={cn(
+                  "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+                  isSelected ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : "hover:bg-[#EEF1FD]/60"
+                )}
+              >
+                <span className={cn("text-[#4361EE]", isSelected ? "opacity-100" : "opacity-0")}>✓</span>
+                <span className="truncate">{o.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
-  )
-);
-Select.displayName = "Select";
+  );
+}
 
 /** Numeric input that avoids leading-zero issues.
  *  Shows empty while editing; commits number on blur. */

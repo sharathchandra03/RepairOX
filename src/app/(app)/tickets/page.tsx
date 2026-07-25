@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings2,
   GripVertical, Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
+  Pin, PinOff,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -23,6 +24,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
+import { usePinnedFilters } from "@/hooks/use-pinned-filters";
+import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 
 /* ─── Column Definition ──────────────────────────────────────────────── */
 
@@ -183,6 +186,45 @@ export default function TicketsPage() {
     const set = new Set(tickets.map((t) => t.technician));
     return Array.from(set).sort();
   }, [tickets]);
+
+  // Pinned filters
+  const { pinnedIds, togglePin, unpin, isPinned } = usePinnedFilters();
+
+  // Define all pinnable advanced filters (same filters as the Advanced Filter panel)
+  const pinnableFilters: PinnableFilterDef[] = useMemo(() => [
+    {
+      id: "priority",
+      label: "Priority",
+      type: "select" as const,
+      value: priorityFilter,
+      options: PRIORITY_OPTIONS,
+      onChange: (v: string) => setPriorityFilter(v),
+    },
+    {
+      id: "technician",
+      label: "Technician",
+      type: "select" as const,
+      value: techFilter,
+      options: [{ label: "All Technicians", value: "all" }, ...technicians.map((t) => ({ label: t, value: t }))],
+      onChange: (v: string) => setTechFilter(v),
+    },
+    {
+      id: "status",
+      label: "Status",
+      type: "select" as const,
+      value: statusFilter,
+      options: [{ label: "All Statuses", value: "all" }, ...STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))],
+      onChange: (v: string) => setStatusFilter(v),
+    },
+    {
+      id: "dateRange",
+      label: "Date Range",
+      type: "select" as const,
+      value: dateRange,
+      options: DATE_RANGES.map((d) => ({ label: d.label, value: d.value })),
+      onChange: (v: string) => setDateRange(v as DateRange),
+    },
+  ], [priorityFilter, techFilter, statusFilter, dateRange, technicians]);
 
   // Filtered list
   const list = useMemo(
@@ -349,14 +391,23 @@ export default function TicketsPage() {
         ))}
       </div>
 
+      {/* Pinned Filters Bar */}
+      <PinnedFilterBar
+        filters={pinnableFilters}
+        pinnedIds={pinnedIds}
+        onUnpin={unpin}
+      />
+
       {/* Filter Panel */}
       <AnimatePresence>
         {showFilterPanel && (
           <motion.div
-            initial={{ opacity: 0, height: 0 }}
-            animate={{ opacity: 1, height: "auto" }}
-            exit={{ opacity: 0, height: 0 }}
-            className="overflow-hidden rounded-2xl border border-border bg-card p-4 shadow-card"
+            initial={{ opacity: 0, scaleY: 0.95 }}
+            animate={{ opacity: 1, scaleY: 1 }}
+            exit={{ opacity: 0, scaleY: 0.95 }}
+            style={{ transformOrigin: "top" }}
+            transition={{ duration: 0.15 }}
+            className="rounded-2xl border border-border bg-card p-4 shadow-card"
           >
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
@@ -366,19 +417,59 @@ export default function TicketsPage() {
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
+                  <button
+                    onClick={() => togglePin("priority")}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("priority") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                    title={isPinned("priority") ? "Unpin filter" : "Pin filter to header"}
+                  >
+                    {isPinned("priority") ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    {isPinned("priority") ? "Unpin" : "Pin"}
+                  </button>
+                </div>
                 <Select value={priorityFilter} onChange={(e: any) => setPriorityFilter(e.target.value)} options={PRIORITY_OPTIONS} />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Technician</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">Technician</label>
+                  <button
+                    onClick={() => togglePin("technician")}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("technician") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                    title={isPinned("technician") ? "Unpin filter" : "Pin filter to header"}
+                  >
+                    {isPinned("technician") ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    {isPinned("technician") ? "Unpin" : "Pin"}
+                  </button>
+                </div>
                 <Select value={techFilter} onChange={(e: any) => setTechFilter(e.target.value)} options={[{ label: "All Technicians", value: "all" }, ...technicians.map((t) => ({ label: t, value: t }))]} />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Status</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">Status</label>
+                  <button
+                    onClick={() => togglePin("status")}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("status") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                    title={isPinned("status") ? "Unpin filter" : "Pin filter to header"}
+                  >
+                    {isPinned("status") ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    {isPinned("status") ? "Unpin" : "Pin"}
+                  </button>
+                </div>
                 <Select value={statusFilter} onChange={(e: any) => setStatusFilter(e.target.value)} options={[{ label: "All Statuses", value: "all" }, ...STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))]} />
               </div>
               <div className="space-y-1">
-                <label className="text-[11px] font-medium text-muted-foreground">Date Range</label>
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">Date Range</label>
+                  <button
+                    onClick={() => togglePin("dateRange")}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("dateRange") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                    title={isPinned("dateRange") ? "Unpin filter" : "Pin filter to header"}
+                  >
+                    {isPinned("dateRange") ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    {isPinned("dateRange") ? "Unpin" : "Pin"}
+                  </button>
+                </div>
                 <Select value={dateRange} onChange={(e: any) => setDateRange(e.target.value)} options={DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))} />
               </div>
             </div>
@@ -446,8 +537,8 @@ export default function TicketsPage() {
       <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-card md:block">
         <div className="overflow-x-auto">
           <table className="w-full text-sm table-fixed">
-            <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur-sm">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
+              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
                 {activeColumns.map((col) => (
                   <th key={col.id} className={cn("px-3 py-3", col.width, col.align === "right" && "text-right")}>
                     {col.id === "checkbox" ? (
