@@ -49,9 +49,8 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
         </div>
       </header>
 
-      {/* ── Customer & Ticket/Invoice Meta ── */}
+      {/* ── Customer Info (shared, shown once) ── */}
       <section className="mb-5">
-        {/* Customer — compact horizontal strip */}
         <div className="border border-gray-200 rounded-lg p-3 mb-3">
           <div className="flex flex-wrap items-start gap-x-8 gap-y-1">
             <div>
@@ -65,51 +64,105 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
           </div>
         </div>
 
-        {/* Ticket Devices — 2 column grid for multi, inline for single */}
+        {/* ── TICKET: Unified Device Blocks ── */}
         {isTicket && ticket && (
           <>
             {ticket.devices && ticket.devices.length > 1 ? (
-              <div className="border border-gray-200 rounded-lg p-3">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-2">Devices ({ticket.devices.length})</p>
-                <div className="grid grid-cols-2 gap-2">
-                  {ticket.devices.map((dev, idx) => (
-                    <div key={dev.id} className="rounded border border-gray-100 bg-gray-50/50 p-2">
-                      <p className="text-[10px] font-semibold text-gray-800 leading-tight">{idx + 1}. {dev.brand} {dev.model}</p>
-                      <div className="mt-1 space-y-0.5 text-[9px] text-gray-600">
-                        {dev.serial && <p>IMEI/SN: <span className="font-medium text-gray-700">{dev.serial}</span></p>}
-                        <p>Issue: <span className="font-medium text-gray-700">{dev.issue || "—"}</span></p>
-                        <div className="flex gap-3">
-                          <span>Tech: <span className="font-medium text-gray-700">{dev.technician || "—"}</span></span>
-                          <span>Est: <span className="font-medium text-gray-700">{formatPrintCurrency(dev.estimate)}</span></span>
-                        </div>
-                      </div>
+              /* Multi-device: each device is a single unified block with all its info */
+              <div className="space-y-3">
+                {ticket.devices.map((dev, idx) => (
+                  <div key={dev.id} className="border border-gray-200 rounded-lg p-3">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="grid h-5 w-5 place-items-center rounded bg-gray-800 text-[9px] font-bold text-white">{idx + 1}</span>
+                      <p className="text-[10px] font-bold text-gray-900">{dev.brand} {dev.model}</p>
+                      {dev.serial && <span className="text-[9px] text-gray-500 ml-auto font-mono">{dev.serial}</span>}
                     </div>
-                  ))}
-                </div>
+                    {/* Device + Job details — grid layout */}
+                    <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[10px] mb-2">
+                      <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{dev.issue || "—"}</span></div>
+                      <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{dev.technician || "Unassigned"}</span></div>
+                      <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{dev.priority || "Normal"}</span></div>
+                      <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{dev.status || "Received"}</span></div>
+                      <div><span className="text-gray-500">Estimate:</span> <span className="font-bold">{formatPrintCurrency(dev.estimate)}</span></div>
+                    </div>
+                    {/* Parts for this device */}
+                    {dev.parts.length > 0 && (
+                      <div className="border-t border-gray-100 pt-1.5 mt-1.5">
+                        <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400 mb-1">Assigned Parts</p>
+                        <table className="w-full text-[9px]">
+                          <thead>
+                            <tr className="text-gray-500">
+                              <th className="text-left font-semibold pb-0.5">Part</th>
+                              <th className="text-center font-semibold pb-0.5 w-[40px]">Qty</th>
+                              <th className="text-right font-semibold pb-0.5 w-[70px]">Amount</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dev.parts.map((part, pi) => (
+                              <tr key={pi}>
+                                <td className="py-0.5 font-medium text-gray-800">{part.name}</td>
+                                <td className="py-0.5 text-center">{part.qty}</td>
+                                <td className="py-0.5 text-right font-medium">{formatPrintCurrency(part.total)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             ) : (
+              /* Single device: unified block with device + job + parts */
               <div className="border border-gray-200 rounded-lg p-3">
-                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Device Information</p>
-                <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
-                  <div><span className="text-gray-500">Device:</span> <span className="font-medium">{ticket.device}</span></div>
-                  <div><span className="text-gray-500">Model:</span> <span className="font-medium">{ticket.model}</span></div>
-                  {ticket.serial && <div><span className="text-gray-500">IMEI/Serial:</span> <span className="font-medium">{ticket.serial}</span></div>}
+                <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-2">Device & Service Details</p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-1.5 text-[10px]">
+                  <div><span className="text-gray-500">Device:</span> <span className="font-semibold">{ticket.device}</span></div>
+                  <div><span className="text-gray-500">Model:</span> <span className="font-semibold">{ticket.model}</span></div>
+                  {ticket.serial && <div><span className="text-gray-500">IMEI/Serial:</span> <span className="font-medium font-mono">{ticket.serial}</span></div>}
                   <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{ticket.issue}</span></div>
-                  {ticket.service && <div><span className="text-gray-500">Service:</span> <span className="font-medium">{ticket.service}</span></div>}
-                  <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{ticket.priority}</span></div>
+                  {ticket.service && ticket.service !== ticket.issue && <div><span className="text-gray-500">Service:</span> <span className="font-medium">{ticket.service}</span></div>}
                   <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{ticket.technician}</span></div>
+                  <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{ticket.priority}</span></div>
                   <div><span className="text-gray-500">Source:</span> <span className="font-medium">{ticket.source}</span></div>
                   {ticket.dueDate && <div className="col-span-2"><span className="text-gray-500">Expected by:</span> <span className="font-medium">{formatPrintDateTime(ticket.dueDate)}</span></div>}
                 </div>
+                {/* Parts */}
+                {ticket.parts && ticket.parts.length > 0 && (
+                  <div className="border-t border-gray-100 pt-2 mt-2">
+                    <p className="text-[8px] font-bold uppercase tracking-wider text-gray-400 mb-1">Assigned Parts</p>
+                    <table className="w-full text-[9px]">
+                      <thead>
+                        <tr className="text-gray-500 border-b border-gray-100">
+                          <th className="text-left font-semibold pb-1">Part</th>
+                          <th className="text-center font-semibold pb-1 w-[40px]">Qty</th>
+                          <th className="text-right font-semibold pb-1 w-[70px]">Price</th>
+                          <th className="text-right font-semibold pb-1 w-[70px]">Amount</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ticket.parts.map((part, i) => (
+                          <tr key={i}>
+                            <td className="py-0.5 font-medium text-gray-800">{part.name}</td>
+                            <td className="py-0.5 text-center">{part.qty}</td>
+                            <td className="py-0.5 text-right">{formatPrintCurrency(part.price)}</td>
+                            <td className="py-0.5 text-right font-medium">{formatPrintCurrency(part.total)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </>
         )}
 
+        {/* ── INVOICE: Details block ── */}
         {isInvoice && invoice && (
           <div className="border border-gray-200 rounded-lg p-3">
             <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Invoice Details</p>
-            <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-[10px]">
+            <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[10px]">
               <div><span className="text-gray-500">Reference:</span> <span className="font-medium">{invoice.reference}</span></div>
               <div><span className="text-gray-500">Type:</span> <span className="font-medium capitalize">{invoice.invoiceType}</span></div>
               <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{invoice.status}</span></div>
@@ -121,95 +174,90 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
         )}
       </section>
 
-      {/* ── Items Table ── */}
-      <section className="mb-5">
-        <table className="w-full text-[10px] border-collapse">
-          <thead>
-            <tr className="bg-gray-100">
-              <th className="text-left py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[5%]">#</th>
-              <th className="text-left py-2 px-2.5 font-semibold text-gray-700 border border-gray-200">Item / Service</th>
-              <th className="text-center py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[8%]">Qty</th>
-              <th className="text-right py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[14%]">Price</th>
-              <th className="text-right py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[12%]">Discount</th>
-              <th className="text-right py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[14%]">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isInvoice && invoice?.items.map((item, i) => (
-              <tr key={i} className={i % 2 === 1 ? "bg-gray-50" : ""}>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{i + 1}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200">
-                  <span className="font-medium text-gray-800">{item.name}</span>
-                  {item.description && <span className="block text-[9px] text-gray-500">{item.description}</span>}
-                </td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-center">{item.qty}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(item.price)}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right">{item.discount > 0 ? formatPrintCurrency(item.discount) : "—"}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(item.total)}</td>
-              </tr>
-            ))}
-
-            {isTicket && ticket?.devices && ticket.devices.length > 1 && (() => {
-              let rowIdx = 0;
-              return ticket.devices.map((dev) => (
-                <>{dev.parts.length > 0 ? dev.parts.map((part) => {
-                  rowIdx++;
-                  return (
-                    <tr key={`${dev.id}-${part.name}-${rowIdx}`} className={rowIdx % 2 === 0 ? "bg-gray-50" : ""}>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{rowIdx}</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200">
-                        <span className="font-medium text-gray-800">{part.name}</span>
-                        <span className="block text-[9px] text-gray-500">{dev.brand} {dev.model}</span>
-                      </td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-center">{part.qty}</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(part.price)}</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">{part.discount > 0 ? formatPrintCurrency(part.discount) : "—"}</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(part.total)}</td>
-                    </tr>
-                  );
-                }) : (() => {
-                  rowIdx++;
-                  return (
-                    <tr key={dev.id} className={rowIdx % 2 === 0 ? "bg-gray-50" : ""}>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{rowIdx}</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200">
-                        <span className="font-medium text-gray-800">{dev.issue || "Repair Service"}</span>
-                        <span className="block text-[9px] text-gray-500">{dev.brand} {dev.model}</span>
-                      </td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-center">1</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(dev.estimate)}</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-right">—</td>
-                      <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(dev.estimate)}</td>
-                    </tr>
-                  );
-                })()}</>
-              ));
-            })()}
-
-            {isTicket && (!ticket?.devices || ticket.devices.length <= 1) && ticket?.parts && ticket.parts.length > 0 && ticket.parts.map((part, i) => (
-              <tr key={i} className={i % 2 === 1 ? "bg-gray-50" : ""}>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{i + 1}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 font-medium text-gray-800">{part.name}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-center">{part.qty}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(part.price)}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right">{part.discount > 0 ? formatPrintCurrency(part.discount) : "—"}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(part.total)}</td>
-              </tr>
-            ))}
-
-            {isTicket && (!ticket?.devices || ticket.devices.length <= 1) && (!ticket?.parts || ticket.parts.length === 0) && (
-              <tr>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">1</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 font-medium text-gray-800">{ticket?.service || ticket?.issue || "Repair Service"}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-center">1</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(ticket?.amount || 0)}</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right">—</td>
-                <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(ticket?.amount || 0)}</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </section>
+      {/* ── Items Table (Invoice) / Summary Table (Ticket with multi-device) ── */}
+      {isInvoice && invoice && (
+        <section className="mb-5">
+          {/* Multi-device: per-device blocks with parts */}
+          {invoice.devices && invoice.devices.length > 0 ? (
+            <div className="space-y-3">
+              {invoice.devices.map((dev, idx) => (
+                <div key={dev.id} className="border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="flex items-center gap-2 bg-gray-50 px-3 py-2">
+                    <span className="grid h-5 w-5 place-items-center rounded bg-gray-800 text-[9px] font-bold text-white">{idx + 1}</span>
+                    <p className="text-[10px] font-bold text-gray-900">{dev.brand} {dev.model}</p>
+                    {dev.serial && <span className="text-[9px] text-gray-500 ml-auto font-mono">{dev.serial}</span>}
+                  </div>
+                  {/* Device job details */}
+                  <div className="px-3 py-1.5 border-b border-gray-100 grid grid-cols-3 gap-x-4 gap-y-0.5 text-[9px]">
+                    {dev.issue && <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{dev.issue}</span></div>}
+                    {dev.technician && <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{dev.technician}</span></div>}
+                    {dev.priority && dev.priority !== "normal" && <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{dev.priority}</span></div>}
+                    {dev.warranty && <div><span className="text-gray-500">Warranty:</span> <span className="font-medium">{dev.warranty}</span></div>}
+                  </div>
+                  {/* Parts table */}
+                  <table className="w-full text-[10px] border-collapse">
+                    <thead>
+                      <tr className="bg-gray-50/60">
+                        <th className="text-left py-1.5 px-2.5 font-semibold text-gray-600 w-[5%]">#</th>
+                        <th className="text-left py-1.5 px-2.5 font-semibold text-gray-600">Item / Part</th>
+                        <th className="text-center py-1.5 px-2.5 font-semibold text-gray-600 w-[8%]">Qty</th>
+                        <th className="text-right py-1.5 px-2.5 font-semibold text-gray-600 w-[14%]">Price</th>
+                        <th className="text-right py-1.5 px-2.5 font-semibold text-gray-600 w-[14%]">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dev.parts.map((part, pi) => (
+                        <tr key={pi} className={pi % 2 === 1 ? "bg-gray-50/40" : ""}>
+                          <td className="py-1 px-2.5 text-gray-500">{pi + 1}</td>
+                          <td className="py-1 px-2.5 font-medium text-gray-800">{part.name}</td>
+                          <td className="py-1 px-2.5 text-center">{part.qty}</td>
+                          <td className="py-1 px-2.5 text-right">{formatPrintCurrency(part.price)}</td>
+                          <td className="py-1 px-2.5 text-right font-medium">{formatPrintCurrency(part.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t border-gray-200">
+                        <td colSpan={4} className="py-1.5 px-2.5 text-right text-[9px] font-semibold text-gray-600">Device Subtotal</td>
+                        <td className="py-1.5 px-2.5 text-right font-bold">{formatPrintCurrency(dev.subtotal)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Legacy flat items table */
+            <table className="w-full text-[10px] border-collapse">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="text-left py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[5%]">#</th>
+                  <th className="text-left py-2 px-2.5 font-semibold text-gray-700 border border-gray-200">Item / Service</th>
+                  <th className="text-center py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[8%]">Qty</th>
+                  <th className="text-right py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[14%]">Price</th>
+                  <th className="text-right py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[12%]">Discount</th>
+                  <th className="text-right py-2 px-2.5 font-semibold text-gray-700 border border-gray-200 w-[14%]">Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {invoice.items.map((item, i) => (
+                  <tr key={i} className={i % 2 === 1 ? "bg-gray-50" : ""}>
+                    <td className="py-1.5 px-2.5 border border-gray-200 text-gray-600">{i + 1}</td>
+                    <td className="py-1.5 px-2.5 border border-gray-200">
+                      <span className="font-medium text-gray-800">{item.name}</span>
+                      {item.description && <span className="block text-[9px] text-gray-500">{item.description}</span>}
+                    </td>
+                    <td className="py-1.5 px-2.5 border border-gray-200 text-center">{item.qty}</td>
+                    <td className="py-1.5 px-2.5 border border-gray-200 text-right">{formatPrintCurrency(item.price)}</td>
+                    <td className="py-1.5 px-2.5 border border-gray-200 text-right">{item.discount > 0 ? formatPrintCurrency(item.discount) : "—"}</td>
+                    <td className="py-1.5 px-2.5 border border-gray-200 text-right font-medium">{formatPrintCurrency(item.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </section>
+      )}
 
       {/* ── Totals ── */}
       <section className="flex justify-end mb-6">
@@ -259,6 +307,16 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
           )}
         </div>
       </section>
+
+      {/* ── Notes (Invoice) ── */}
+      {isInvoice && invoice && invoice.notes && (
+        <section className="mb-4">
+          <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1">Notes</p>
+            <p className="text-[10px] text-gray-700 whitespace-pre-line">{invoice.notes}</p>
+          </div>
+        </section>
+      )}
 
       {/* ── Terms & Warranty ── */}
       <section className="border-t border-gray-200 pt-4 mb-5">

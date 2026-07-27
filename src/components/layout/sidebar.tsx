@@ -7,7 +7,7 @@ import {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, ChevronLeft, ChevronRight,
   LogOut, CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
-  ClipboardCheck, Truck,
+  ClipboardCheck, Truck, Receipt,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
@@ -19,7 +19,7 @@ import { usePermissions } from "@/lib/permissions-context";
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
-  Wrench, ClipboardCheck, Truck,
+  Wrench, ClipboardCheck, Truck, Receipt,
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
@@ -54,6 +54,10 @@ function NavItem({ item, collapsed, pathname }: {
             className="absolute inset-0 rounded-xl bg-[#4361EE] shadow-[0_8px_24px_-8px_rgba(67,97,238,0.45)]"
             transition={{ type: "spring", stiffness: 380, damping: 30 }}
           />
+        )}
+        {/* Hover underline — sweeps in from the left and stays while hovered */}
+        {!active && !collapsed && (
+          <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
         )}
         <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
           <Icon className={cn("h-[18px] w-[18px]", active ? "text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
@@ -162,13 +166,17 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
             )}
           </AnimatePresence>
         </Link>
-        <button
+        <motion.button
           onClick={() => setCollapsed(!collapsed)}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted hover:text-foreground transition"
+          animate={{ scale: [1, 1.12, 1] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          whileHover={{ scale: 1.15 }}
+          whileTap={{ scale: 0.95 }}
+          className="group grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-[#4361EE]/30 bg-card text-[#4361EE] transition-colors hover:border-[#4361EE]/60 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
           aria-label="Toggle sidebar"
         >
           {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-        </button>
+        </motion.button>
       </div>
 
       {/* Workspace switcher */}

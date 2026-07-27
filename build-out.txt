@@ -1,0 +1,36 @@
+﻿  Ôû▓ Next.js 14.2.5
+
+   Creating an optimized production build ...
+ Ô£ô Compiled successfully
+   Linting and checking validity of types ...
+   Collecting page data ...
+node.exe : unhandledRejection Error [PageNotFoundError]: 
+Cannot find module for page: /_document
+At line:1 char:1
++ & "C:\Program Files\nodejs/node.exe" "C:\Program 
+Files\nodejs/node_mo ...
++ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (unhandledRej 
+   ect...age: /_document:String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+    at getPagePath (C:\Users\LENOVO\Desktop\Reapirox 
+dummy2\app\node_modules\next\dist\server\require.js:94:15)
+    at requirePage (C:\Users\LENOVO\Desktop\Reapirox 
+dummy2\app\node_modules\next\dist\server\require.js:99:22)
+    at C:\Users\LENOVO\Desktop\Reapirox dummy2\app\node_mo
+dules\next\dist\server\load-components.js:72:65
+    at process.processTicksAndRejections 
+(node:internal/process/task_queues:105:5)
+    at async Promise.all (index 0)
+    at async loadComponentsImpl 
+(C:\Users\LENOVO\Desktop\Reapirox dummy2\app\node_modules\
+next\dist\server\load-components.js:71:33)
+    at async Object.hasCustomGetInitialProps 
+(C:\Users\LENOVO\Desktop\Reapirox 
+dummy2\app\node_modules\next\dist\build\utils.js:1273:24) 
+{
+  type: 'PageNotFoundError',
+  code: 'ENOENT'
+}

@@ -56,11 +56,19 @@ export function Dropdown({
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
     }
+    // Close on scroll (unless scrolling inside the menu itself) so the
+    // fixed-positioned panel never detaches from its trigger.
+    function onScroll(e: Event) {
+      if (ref.current && ref.current.contains(e.target as Node)) return;
+      setOpen(false);
+    }
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("keydown", onKey);
+    window.addEventListener("scroll", onScroll, true);
     return () => {
       document.removeEventListener("mousedown", onDoc);
       document.removeEventListener("keydown", onKey);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [open]);
 

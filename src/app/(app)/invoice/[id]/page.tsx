@@ -20,7 +20,7 @@ import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL,
-  type Invoice, type InvoiceStatus,
+  type Invoice, type InvoiceStatus, getInvoiceDevices,
 } from "@/lib/mock-data";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -322,9 +322,9 @@ export default function InvoiceDetailPage() {
             </div>
           </DetailSection>
 
-          {/* Invoice Items */}
+          {/* Invoice Items / Devices */}
           <DetailSection
-            title="Invoice Items"
+            title={invoice.devices && invoice.devices.length > 0 ? `Devices & Parts (${invoice.devices.length})` : "Invoice Items"}
             icon={Receipt}
             action={
               <button onClick={openItemsDrawer} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
@@ -332,40 +332,98 @@ export default function InvoiceDetailPage() {
               </button>
             }
           >
-            <div className="rounded-xl border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/60">
-                  <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    <th className="px-4 py-2 text-left">Item</th>
-                    <th className="py-2 text-center w-16">Qty</th>
-                    <th className="py-2 text-right w-24">Price</th>
-                    <th className="py-2 text-right w-24 pr-4">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {invoice.items.map((item) => (
-                    <tr key={item.id} className="border-t border-border">
-                      <td className="px-4 py-2.5">
-                        <p className="font-medium">{item.name}</p>
-                        {(item.description || item.sku) && (
-                          <p className="text-[11px] text-muted-foreground">
-                            {item.sku && <span className="font-mono">{item.sku}</span>}
-                            {item.sku && item.description && " · "}
-                            {item.description}
-                          </p>
-                        )}
-                      </td>
-                      <td className="py-2.5 text-center tabular-nums">{item.qty}</td>
-                      <td className="py-2.5 text-right tabular-nums">{formatINR(item.price)}</td>
-                      <td className="py-2.5 text-right tabular-nums font-medium pr-4">{formatINR(item.total)}</td>
+            {invoice.devices && invoice.devices.length > 0 ? (
+              /* Multi-device view — per-device blocks */
+              <div className="space-y-3">
+                {invoice.devices.map((dev, idx) => {
+                  const devLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+                  return (
+                    <div key={dev.id} className="rounded-xl border border-border overflow-hidden">
+                      <div className="flex items-center justify-between bg-muted/40 px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="grid h-6 w-6 place-items-center rounded-lg bg-[#4361EE] text-[10px] font-bold text-white">{idx + 1}</span>
+                          <div>
+                            <p className="text-sm font-semibold">{devLabel}</p>
+                            {dev.imei && <p className="text-[10px] text-muted-foreground font-mono">{dev.imei}</p>}
+                          </div>
+                        </div>
+                        <span className="text-sm font-bold tabular-nums">{formatINR(dev.subtotal)}</span>
+                      </div>
+                      {/* Job meta row */}
+                      <div className="px-4 py-2 border-b border-border bg-muted/20 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4 text-[11px]">
+                        {dev.issue && <div><span className="text-muted-foreground">Issue:</span> <span className="font-medium">{dev.issue}</span></div>}
+                        {dev.technician && <div><span className="text-muted-foreground">Tech:</span> <span className="font-medium">{dev.technician}</span></div>}
+                        {dev.jobType && <div><span className="text-muted-foreground">Type:</span> <span className="font-medium capitalize">{dev.jobType}</span></div>}
+                        {dev.priority && dev.priority !== "normal" && <div><span className="text-muted-foreground">Priority:</span> <span className="font-medium capitalize">{dev.priority}</span></div>}
+                      </div>
+                      {/* Parts table */}
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/30">
+                          <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            <th className="px-4 py-1.5 text-left">Part / Service</th>
+                            <th className="py-1.5 text-center w-14">Qty</th>
+                            <th className="py-1.5 text-right w-20">Price</th>
+                            <th className="py-1.5 text-right w-20 pr-4">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dev.parts.map((item) => (
+                            <tr key={item.id} className="border-t border-border">
+                              <td className="px-4 py-2">
+                                <p className="font-medium">{item.name}</p>
+                                {item.description && <p className="text-[10px] text-muted-foreground">{item.description}</p>}
+                              </td>
+                              <td className="py-2 text-center tabular-nums">{item.qty}</td>
+                              <td className="py-2 text-right tabular-nums">{formatINR(item.price)}</td>
+                              <td className="py-2 text-right tabular-nums font-medium pr-4">{formatINR(item.total)}</td>
+                            </tr>
+                          ))}
+                          {dev.parts.length === 0 && (
+                            <tr><td colSpan={4} className="px-4 py-4 text-center text-muted-foreground text-xs">No parts assigned</td></tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              /* Legacy flat items table */
+              <div className="rounded-xl border border-border overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/60">
+                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <th className="px-4 py-2 text-left">Item</th>
+                      <th className="py-2 text-center w-16">Qty</th>
+                      <th className="py-2 text-right w-24">Price</th>
+                      <th className="py-2 text-right w-24 pr-4">Total</th>
                     </tr>
-                  ))}
-                  {invoice.items.length === 0 && (
-                    <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">No line items</td></tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {invoice.items.map((item) => (
+                      <tr key={item.id} className="border-t border-border">
+                        <td className="px-4 py-2.5">
+                          <p className="font-medium">{item.name}</p>
+                          {(item.description || item.sku) && (
+                            <p className="text-[11px] text-muted-foreground">
+                              {item.sku && <span className="font-mono">{item.sku}</span>}
+                              {item.sku && item.description && " · "}
+                              {item.description}
+                            </p>
+                          )}
+                        </td>
+                        <td className="py-2.5 text-center tabular-nums">{item.qty}</td>
+                        <td className="py-2.5 text-right tabular-nums">{formatINR(item.price)}</td>
+                        <td className="py-2.5 text-right tabular-nums font-medium pr-4">{formatINR(item.total)}</td>
+                      </tr>
+                    ))}
+                    {invoice.items.length === 0 && (
+                      <tr><td colSpan={4} className="px-4 py-6 text-center text-muted-foreground">No line items</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </DetailSection>
 
           {/* Tax & Discounts */}

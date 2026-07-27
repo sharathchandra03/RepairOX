@@ -283,7 +283,7 @@ export const navItems: NavItem[] = [
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
-  { href: "/expenses",         label: "Expenses",      icon: "Wallet", permission: "manage_payments" },
+  { href: "/expenses",         label: "Expenses",      icon: "Receipt", permission: "manage_payments" },
 
   // Operations
   { href: "/operations",             label: "Dashboard",       icon: "Home", permission: "view_dashboard" },
@@ -395,6 +395,128 @@ export const INVOICE_TYPE_LABEL: Record<InvoiceType, string> = {
   business: "Business Invoice",
 };
 
+/* ─── Invoice Multi-Device Support ───────────────────────────────────── */
+
+/**
+ * An invoice device record — mirrors the Ticket DeviceRecord structure
+ * so that multi-device invoices preserve per-device details.
+ */
+export type InvoiceDeviceRecord = {
+  id: string;
+  /** Device identity */
+  brand: string;
+  model: string;
+  imei: string;
+  imeiType: "imei1" | "imei2" | "serial";
+  /** Job details */
+  issue: string;
+  description: string;
+  jobType: string;
+  priority: string;
+  warranty: string;
+  /** Assignment */
+  technician: string;
+  /** Parts assigned to this device */
+  parts: InvoiceLineItem[];
+  /** Notes specific to this device */
+  notes: string;
+  /** Device-level subtotal (sum of parts totals) */
+  subtotal: number;
+};
+
+/** Helper: create a blank InvoiceDeviceRecord */
+export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecord>): InvoiceDeviceRecord {
+  return {
+    id: `IDEV-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    brand: "",
+    model: "",
+    imei: "",
+    imeiType: "imei1",
+    issue: "",
+    description: "",
+    jobType: "service",
+    priority: "normal",
+    warranty: "",
+    technician: "",
+    parts: [],
+    notes: "",
+    subtotal: 0,
+    ...overrides,
+  };
+}
+
+/**
+ * Convert a Ticket DeviceRecord to an InvoiceDeviceRecord,
+ * mapping parts from TicketPart to InvoiceLineItem.
+ */
+export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRecord {
+  const parts: InvoiceLineItem[] = dev.parts.map((p, i) => ({
+    id: `li-${dev.id}-${i}`,
+    sku: p.sku,
+    name: p.name,
+    description: "",
+    qty: p.qty,
+    price: p.unitPrice,
+    discount: 0,
+    total: p.total,
+  }));
+
+  // If device has estimate exceeding parts total, add a service/labour line
+  const partsTotal = parts.reduce((s, p) => s + p.total, 0);
+  const labourAmount = dev.estimate - partsTotal;
+  if (labourAmount > 0 || parts.length === 0) {
+    parts.push({
+      id: `li-${dev.id}-labour`,
+      name: dev.issue || "Repair Service",
+      description: [dev.brand, dev.model].filter(Boolean).join(" "),
+      qty: 1,
+      price: Math.max(labourAmount, dev.estimate || 0),
+      discount: 0,
+      total: Math.max(labourAmount, dev.estimate || 0),
+    });
+  }
+
+  const subtotal = parts.reduce((s, p) => s + p.total, 0);
+
+  return {
+    id: `IDEV-${dev.id}`,
+    brand: dev.brand,
+    model: dev.model,
+    imei: dev.imei,
+    imeiType: dev.imeiType,
+    issue: dev.issue || dev.description,
+    description: dev.description,
+    jobType: dev.jobType,
+    priority: dev.priority,
+    warranty: dev.warranty,
+    technician: dev.assignedTo,
+    parts,
+    notes: dev.notes,
+    subtotal,
+  };
+}
+
+/**
+ * Unified accessor: returns InvoiceDeviceRecord[] for any invoice.
+ * If the invoice has devices[], returns those.
+ * Otherwise, synthesizes a single device from the flat items list.
+ */
+export function getInvoiceDevices(invoice: Invoice): InvoiceDeviceRecord[] {
+  if (invoice.devices && invoice.devices.length > 0) {
+    return invoice.devices;
+  }
+  // Legacy flat invoice — wrap items into a single device record
+  return [
+    createInvoiceDeviceRecord({
+      id: `IDEV-legacy-${invoice.id}`,
+      issue: "Service",
+      technician: invoice.employee || "",
+      parts: invoice.items,
+      subtotal: invoice.subtotal,
+    }),
+  ];
+}
+
 export type Invoice = {
   id: string;
   reference: string;
@@ -407,6 +529,7 @@ export type Invoice = {
   createdAt: string;
   dueDate: string;
   paidAmount: number;
+  /** Flat line items — kept for backward compatibility with legacy invoices */
   items: InvoiceLineItem[];
   subtotal: number;
   discount: number;
@@ -418,6 +541,8 @@ export type Invoice = {
   footer?: string;
   employee?: string;
   ticketId?: string;
+  /** Multi-device support — when present, each device has its own parts/job/technician */
+  devices?: InvoiceDeviceRecord[];
 };
 
 function daysAgo(days: number): string {

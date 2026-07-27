@@ -10,9 +10,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { CreationSuccess } from "@/components/ui/creation-success";
+import { CompletionScreen } from "@/components/completion/completion-screen";
 import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
-import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType } from "@/lib/mock-data";
+import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord } from "@/lib/mock-data";
+import { createInvoiceDeviceRecord } from "@/lib/mock-data";
 
 /* ─── Step Definitions ───────────────────────────────────────────────── */
 
@@ -28,18 +31,61 @@ const STEPS = [
 
 /* ─── Form Data Type ─────────────────────────────────────────────────── */
 
+/** A device entry within the invoice form */
+type InvoiceFormDevice = {
+  id: string;
+  brand: string;
+  model: string;
+  imei: string;
+  imeiType: string;
+  issue: string;
+  description: string;
+  jobType: string;
+  priority: string;
+  warranty: string;
+  technician: string;
+  notes: string;
+  parts: InvoiceLineItem[];
+};
+
 type InvoiceFormData = {
   customer: { name: string; phone: string; email: string; company: string };
   details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; invoiceType: InvoiceType };
+  /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
+  /** Multi-device entries */
+  devices: InvoiceFormDevice[];
+  /** Index of the active device being edited */
+  activeDeviceIndex: number;
   pricing: { discount: number; taxRate: number };
   notes: { notes: string; terms: string; slogan: string; footer: string };
 };
+
+function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDevice {
+  return {
+    id: `ifd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    brand: "",
+    model: "",
+    imei: "",
+    imeiType: "imei1",
+    issue: "",
+    description: "",
+    jobType: "service",
+    priority: "normal",
+    warranty: "",
+    technician: "",
+    notes: "",
+    parts: [],
+    ...overrides,
+  };
+}
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", email: "", company: "" },
   details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", invoiceType: "retail" },
   items: [],
+  devices: [createFormDevice()],
+  activeDeviceIndex: 0,
   pricing: { discount: 0, taxRate: 18 },
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
@@ -83,6 +129,9 @@ function InvoiceWizard() {
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
+  const [showCompletion, setShowCompletion] = useState(false);
+  const [createdInvoiceId, setCreatedInvoiceId] = useState("");
 
   // Pre-fill when editing
   useEffect(() => {
@@ -101,53 +150,95 @@ function InvoiceWizard() {
       const customer = searchParams.get("customer") || "";
       const phone = searchParams.get("phone") || "";
       const email = searchParams.get("email") || "";
-      const address = searchParams.get("address") || "";
       const company = searchParams.get("company") || "";
-      const amount = parseFloat(searchParams.get("amount") || "0");
-      const service = searchParams.get("service") || "";
-      const device = searchParams.get("device") || "";
-      const brand = searchParams.get("brand") || "";
-      const serial = searchParams.get("serial") || "";
       const employee = searchParams.get("employee") || "";
-      const partsRaw = searchParams.get("parts");
+      const devicesRaw = searchParams.get("devices");
 
-      let items: any[] = [];
+      let formDevices: InvoiceFormDevice[] = [];
+      let flatItems: InvoiceLineItem[] = [];
 
-      // If ticket has parts, use them as line items
-      if (partsRaw) {
+      // Parse multi-device data from ticket
+      if (devicesRaw) {
         try {
-          const parts = JSON.parse(partsRaw);
-          items = parts.map((p: any, i: number) => ({
-            id: `li-${Date.now()}-${i}`,
-            name: p.name,
-            description: "",
-            qty: p.qty || 1,
-            price: p.price || 0,
-            discount: 0,
-            total: p.total || (p.qty * p.price),
-          }));
+          const parsed = JSON.parse(devicesRaw);
+          formDevices = parsed.map((dev: any, idx: number) => {
+            const parts: InvoiceLineItem[] = (dev.parts || []).map((p: any, pi: number) => ({
+              id: `li-${Date.now()}-${idx}-${pi}`,
+              name: p.name,
+              sku: p.sku || "",
+              description: "",
+              qty: p.qty || 1,
+              price: p.unitPrice || p.price || 0,
+              discount: 0,
+              total: p.total || ((p.qty || 1) * (p.unitPrice || p.price || 0)),
+            }));
+
+            // Add service/labour line if estimate exceeds parts total
+            const partsTotal = parts.reduce((s, p2) => s + p2.total, 0);
+            const labourAmount = (dev.estimate || 0) - partsTotal;
+            if (labourAmount > 0 || parts.length === 0) {
+              parts.push({
+                id: `li-${Date.now()}-${idx}-labour`,
+                name: dev.issue || "Repair Service",
+                description: [dev.brand, dev.model].filter(Boolean).join(" "),
+                qty: 1,
+                price: Math.max(labourAmount, dev.estimate || 0),
+                discount: 0,
+                total: Math.max(labourAmount, dev.estimate || 0),
+              });
+            }
+
+            return createFormDevice({
+              brand: dev.brand || "",
+              model: dev.model || "",
+              imei: dev.imei || "",
+              imeiType: dev.imeiType || "imei1",
+              issue: dev.issue || "",
+              description: dev.description || "",
+              jobType: dev.jobType || "service",
+              priority: dev.priority || "normal",
+              warranty: dev.warranty || "",
+              technician: dev.technician || "",
+              notes: dev.notes || "",
+              parts,
+            });
+          });
+
+          // Build flat items from all devices for totals
+          flatItems = formDevices.flatMap((d) => d.parts);
         } catch { /* ignore parse errors */ }
       }
 
-      // If no parts but has amount, create a single service line item
-      if (items.length === 0 && amount > 0) {
-        const descParts = [brand, device, serial ? `SN: ${serial}` : ""].filter(Boolean);
-        items = [{
-          id: `li-${Date.now()}`,
-          name: service || "Repair Service",
-          description: descParts.length > 0 ? descParts.join(" — ") : "",
-          qty: 1,
-          price: amount,
-          discount: 0,
-          total: amount,
-        }];
+      // Fallback: if no devices data, use legacy amount/service params
+      if (formDevices.length === 0) {
+        const amount = parseFloat(searchParams.get("amount") || "0");
+        const service = searchParams.get("service") || "";
+        const device = searchParams.get("device") || "";
+        const brand = searchParams.get("brand") || "";
+        const serial = searchParams.get("serial") || "";
+
+        if (amount > 0) {
+          const parts: InvoiceLineItem[] = [{
+            id: `li-${Date.now()}`,
+            name: service || "Repair Service",
+            description: [brand, device, serial ? `SN: ${serial}` : ""].filter(Boolean).join(" — "),
+            qty: 1,
+            price: amount,
+            discount: 0,
+            total: amount,
+          }];
+          formDevices = [createFormDevice({ brand, model: device, imei: serial, issue: service, parts })];
+          flatItems = parts;
+        }
       }
 
       setForm((prev) => ({
         ...prev,
         customer: { name: customer, phone, email, company },
         details: { ...prev.details, ticketId: fromTicket, employee, status: "draft" },
-        items,
+        items: flatItems,
+        devices: formDevices.length > 0 ? formDevices : prev.devices,
+        activeDeviceIndex: 0,
       }));
     }
   }, [searchParams, editId]);
@@ -172,18 +263,43 @@ function InvoiceWizard() {
     if (pendingNav) router.push(pendingNav);
   }, [pendingNav, router]);
 
-  // Computed totals
+  // Computed totals — derive from devices or flat items
   const totals = useMemo(() => {
-    const subtotal = form.items.reduce((s, item) => s + item.total, 0);
+    const allItems = form.devices.length > 0
+      ? form.devices.flatMap((d) => d.parts)
+      : form.items;
+    const subtotal = allItems.reduce((s, item) => s + item.total, 0);
     const discount = form.pricing.discount;
     const taxable = subtotal - discount;
     const tax = Math.round(taxable * (form.pricing.taxRate / 100));
     const total = taxable + tax;
     return { subtotal, discount, tax, total };
-  }, [form.items, form.pricing]);
+  }, [form.devices, form.items, form.pricing]);
 
   // Submit
   const handleSubmit = useCallback(() => {
+    // Build invoice device records for storage
+    const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
+    const invoiceDevices: InvoiceDeviceRecord[] = hasDevices ? form.devices.map((d) => ({
+      id: d.id,
+      brand: d.brand,
+      model: d.model,
+      imei: d.imei,
+      imeiType: d.imeiType as "imei1" | "imei2" | "serial",
+      issue: d.issue,
+      description: d.description,
+      jobType: d.jobType,
+      priority: d.priority,
+      warranty: d.warranty,
+      technician: d.technician,
+      parts: d.parts,
+      notes: d.notes,
+      subtotal: d.parts.reduce((s, p) => s + p.total, 0),
+    })) : [];
+
+    // Flat items = all parts from all devices (for backward compat and totals)
+    const allItems = hasDevices ? form.devices.flatMap((d) => d.parts) : form.items;
+
     const invoice: Invoice = {
       id: editId || genInvoiceId(form.details.invoiceType as InvoiceType, invoices),
       reference: form.details.reference || `CORP-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -196,7 +312,7 @@ function InvoiceWizard() {
       createdAt: isEdit ? (invoices.find((i) => i.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       dueDate: form.details.dueDate || new Date(Date.now() + 7 * 86_400_000).toISOString(),
       paidAmount: isEdit ? (invoices.find((i) => i.id === editId)?.paidAmount || 0) : 0,
-      items: form.items,
+      items: allItems,
       subtotal: totals.subtotal,
       discount: totals.discount,
       tax: totals.tax,
@@ -207,6 +323,7 @@ function InvoiceWizard() {
       footer: form.notes.footer || undefined,
       employee: form.details.employee || undefined,
       ticketId: form.details.ticketId || undefined,
+      devices: invoiceDevices.length > 0 ? invoiceDevices : undefined,
     };
 
     if (isEdit) {
@@ -214,9 +331,13 @@ function InvoiceWizard() {
     } else {
       addInvoice(invoice);
     }
+    setCreatedInvoiceId(invoice.id);
     setDirty(false);
-    setSubmitted(true);
-    setStep(7);
+    if (isEdit) {
+      router.push("/invoice");
+    } else {
+      setShowSuccessAnimation(true);
+    }
   }, [form, totals, editId, isEdit, invoices, addInvoice, updateInvoice]);
 
   // Step navigation
@@ -225,8 +346,28 @@ function InvoiceWizard() {
   const goToStep = (s: number) => { if (s <= step || s <= maxReached) setStep(s); };
   const maxReached = step;
 
-  if (submitted && step === 7) {
-    return <CompletionScreen isEdit={isEdit} invoiceId={editId || form.details.reference} onDone={() => router.push("/invoice")} />;
+  if (showSuccessAnimation && !isEdit) {
+    return (
+      <CreationSuccess
+        type="invoice"
+        id={createdInvoiceId}
+        onComplete={() => {
+          setShowSuccessAnimation(false);
+          setShowCompletion(true);
+        }}
+      />
+    );
+  }
+
+  if (showCompletion && !isEdit) {
+    return (
+      <CompletionScreen
+        type="invoice"
+        id={createdInvoiceId}
+        onBack={() => router.push("/invoice")}
+        onView={() => router.push(`/invoice/${createdInvoiceId}`)}
+      />
+    );
   }
 
   return (
@@ -354,10 +495,31 @@ function InvoiceWizard() {
 /* ─── Helper: Invoice to Form ────────────────────────────────────────── */
 
 function invoiceToForm(inv: Invoice): InvoiceFormData {
+  // Restore devices if available, otherwise create a single device from flat items
+  const devices: InvoiceFormDevice[] = inv.devices && inv.devices.length > 0
+    ? inv.devices.map((d) => createFormDevice({
+        id: d.id,
+        brand: d.brand,
+        model: d.model,
+        imei: d.imei,
+        imeiType: d.imeiType,
+        issue: d.issue,
+        description: d.description,
+        jobType: d.jobType,
+        priority: d.priority,
+        warranty: d.warranty,
+        technician: d.technician,
+        notes: d.notes,
+        parts: d.parts,
+      }))
+    : [createFormDevice({ technician: inv.employee || "", parts: inv.items })];
+
   return {
     customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "" },
     details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, invoiceType: inv.invoiceType || "retail" },
     items: inv.items,
+    devices,
+    activeDeviceIndex: 0,
     pricing: { discount: inv.discount, taxRate: inv.tax > 0 && inv.subtotal > 0 ? Math.round((inv.tax / (inv.subtotal - inv.discount)) * 100) : 18 },
     notes: { notes: inv.notes || "", terms: inv.terms || "", slogan: inv.slogan || "", footer: inv.footer || "" },
   };
@@ -441,101 +603,197 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
   );
 }
 
-/* ─── Step 3: Products ───────────────────────────────────────────────── */
+/* ─── Step 3: Devices & Products (Multi-Device) ──────────────────────── */
 
 function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
-  const addItem = () => {
+  const activeIdx = form.activeDeviceIndex;
+  const activeDevice = form.devices[activeIdx] || form.devices[0];
+
+  const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
+
+  const addDevice = () => {
     updateForm((f) => ({
       ...f,
-      items: [...f.items, { id: genLineId(), name: "", qty: 1, price: 0, discount: 0, total: 0 }],
+      devices: [...f.devices, createFormDevice()],
+      activeDeviceIndex: f.devices.length,
     }));
   };
-  const removeItem = (id: string) => {
-    updateForm((f) => ({ ...f, items: f.items.filter((i) => i.id !== id) }));
-  };
-  const duplicateItem = (id: string) => {
+
+  const removeDevice = (idx: number) => {
+    if (form.devices.length <= 1) return;
     updateForm((f) => {
-      const source = f.items.find((i) => i.id === id);
-      if (!source) return f;
-      return { ...f, items: [...f.items, { ...source, id: genLineId() }] };
+      const updated = f.devices.filter((_, i) => i !== idx);
+      const newIdx = f.activeDeviceIndex >= updated.length ? updated.length - 1 : f.activeDeviceIndex > idx ? f.activeDeviceIndex - 1 : f.activeDeviceIndex;
+      return { ...f, devices: updated, activeDeviceIndex: newIdx };
     });
   };
-  const updateItem = (id: string, key: string, value: any) => {
+
+  const setDeviceField = (key: string, value: string) => {
     updateForm((f) => ({
       ...f,
-      items: f.items.map((i) => {
-        if (i.id !== id) return i;
-        const updated = { ...i, [key]: value };
-        updated.total = updated.qty * updated.price - updated.discount;
-        return updated;
+      devices: f.devices.map((d, i) => i === activeIdx ? { ...d, [key]: value } : d),
+    }));
+  };
+
+  const addPart = () => {
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => i === activeIdx
+        ? { ...d, parts: [...d.parts, { id: genLineId(), name: "", qty: 1, price: 0, discount: 0, total: 0 }] }
+        : d
+      ),
+    }));
+  };
+
+  const removePart = (partId: string) => {
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => i === activeIdx
+        ? { ...d, parts: d.parts.filter((p) => p.id !== partId) }
+        : d
+      ),
+    }));
+  };
+
+  const updatePart = (partId: string, key: string, value: any) => {
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => {
+        if (i !== activeIdx) return d;
+        return {
+          ...d,
+          parts: d.parts.map((p) => {
+            if (p.id !== partId) return p;
+            const updated = { ...p, [key]: value };
+            updated.total = updated.qty * updated.price - updated.discount;
+            return updated;
+          }),
+        };
       }),
     }));
   };
 
+  const deviceSubtotal = activeDevice.parts.reduce((s, p) => s + p.total, 0);
+
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <h2 className="font-display text-lg font-bold">Products & Services</h2>
-          <p className="text-sm text-muted-foreground">Add line items to this invoice.</p>
-        </div>
-        <Button size="sm" onClick={addItem}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
-      </div>
-
-      {form.items.length === 0 ? (
-        <div className="rounded-xl border-2 border-dashed border-border p-10 text-center">
-          <Package className="mx-auto h-8 w-8 text-muted-foreground/50" />
-          <p className="mt-2 text-sm text-muted-foreground">No items yet. Click "Add Item" to get started.</p>
-        </div>
-      ) : (
-        <div className="space-y-3">
-          {form.items.map((item, idx) => (
-            <motion.div key={item.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} className="rounded-xl border border-border p-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_80px_100px_80px_100px_auto]">
-                <div className="space-y-1">
-                  <Label>Item Name</Label>
-                  <Input value={item.name} onChange={(e: any) => updateItem(item.id, "name", e.target.value)} placeholder="Display assembly" />
+    <div className="space-y-4">
+      {/* Device Tabs */}
+      <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+        <div className="border-b border-border px-6 py-3 sm:px-8">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
+            <Button size="sm" onClick={addDevice}><Plus className="h-3.5 w-3.5" /> Add Device</Button>
+          </div>
+          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+            {form.devices.map((dev, idx) => {
+              const label = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+              const isActive = idx === activeIdx;
+              return (
+                <div key={dev.id} className="flex items-center gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => switchDevice(idx)}
+                    className={cn(
+                      "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] font-medium transition-all",
+                      isActive
+                        ? "bg-[#4361EE] text-white shadow-sm"
+                        : "bg-white border border-border text-muted-foreground hover:border-[#B3BFF6] hover:text-foreground"
+                    )}
+                  >
+                    <span className={cn("grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold", isActive ? "bg-white/20 text-white" : "bg-muted text-muted-foreground")}>{idx + 1}</span>
+                    <span className="max-w-[100px] truncate">{label}</span>
+                  </button>
+                  {form.devices.length > 1 && (
+                    <button type="button" onClick={() => removeDevice(idx)} className="grid h-5 w-5 place-items-center rounded-full text-rose-400 hover:text-rose-600 hover:bg-rose-50 transition">
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
                 </div>
-                <div className="space-y-1">
-                  <Label>Qty</Label>
-                  <NumericInput value={item.qty} onChange={(v) => updateItem(item.id, "qty", v)} min={1} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Price</Label>
-                  <NumericInput value={item.price} onChange={(v) => updateItem(item.id, "price", v)} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Disc.</Label>
-                  <NumericInput value={item.discount} onChange={(v) => updateItem(item.id, "discount", v)} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Total</Label>
-                  <div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums">{formatINR(item.total)}</div>
-                </div>
-                <div className="flex items-end gap-1">
-                  <button onClick={() => duplicateItem(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground hover:bg-muted transition" title="Duplicate"><Copy className="h-3.5 w-3.5" /></button>
-                  <button onClick={() => removeItem(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 hover:bg-rose-50 transition" title="Remove"><Trash2 className="h-3.5 w-3.5" /></button>
-                </div>
-              </div>
-              {/* Optional description */}
-              <div className="mt-2">
-                <Input value={item.description || ""} onChange={(e: any) => updateItem(item.id, "description", e.target.value)} placeholder="Description (optional)" className="text-xs" />
-              </div>
-            </motion.div>
-          ))}
-          <Button variant="outline" size="sm" onClick={addItem} className="w-full"><Plus className="h-3.5 w-3.5" /> Add Another Item</Button>
-        </div>
-      )}
-
-      {/* Running total */}
-      {form.items.length > 0 && (
-        <div className="mt-4 flex justify-end">
-          <div className="rounded-xl bg-muted/60 px-4 py-2 text-sm">
-            <span className="text-muted-foreground">Subtotal: </span>
-            <span className="font-semibold tabular-nums">{formatINR(form.items.reduce((s, i) => s + i.total, 0))}</span>
+              );
+            })}
           </div>
         </div>
-      )}
+
+        {/* Active Device Form */}
+        <div className="px-6 py-5 sm:px-8 space-y-5">
+          {/* Device Details */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Device Details</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="space-y-1"><Label>Brand</Label><Input value={activeDevice.brand} onChange={(e: any) => setDeviceField("brand", e.target.value)} placeholder="Apple" /></div>
+              <div className="space-y-1"><Label>Model</Label><Input value={activeDevice.model} onChange={(e: any) => setDeviceField("model", e.target.value)} placeholder="iPhone 16 Pro" /></div>
+              <div className="space-y-1"><Label>IMEI / Serial</Label><Input value={activeDevice.imei} onChange={(e: any) => setDeviceField("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="font-mono" /></div>
+            </div>
+          </div>
+
+          {/* Job Details */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Job Details</p>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" /></div>
+              <div className="space-y-1">
+                <Label>Job Type</Label>
+                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} options={[
+                  { label: "Service", value: "service" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" },
+                ]} />
+              </div>
+              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" /></div>
+              <div className="space-y-1">
+                <Label>Priority</Label>
+                <Select value={activeDevice.priority} onChange={(e: any) => setDeviceField("priority", e.target.value)} options={[
+                  { label: "Normal", value: "normal" }, { label: "High", value: "high" }, { label: "Critical", value: "critical" },
+                ]} />
+              </div>
+              <div className="space-y-1">
+                <Label>Warranty</Label>
+                <Select value={activeDevice.warranty} onChange={(e: any) => setDeviceField("warranty", e.target.value)} options={[
+                  { label: "None", value: "" }, { label: "In Warranty", value: "in-warranty" }, { label: "Out of Warranty", value: "out-warranty" },
+                ]} />
+              </div>
+              <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" /></div>
+            </div>
+          </div>
+
+          {/* Parts for this device */}
+          <div>
+            <div className="flex items-center justify-between mb-3">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Parts & Services</p>
+              <Button size="sm" onClick={addPart}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
+            </div>
+
+            {activeDevice.parts.length === 0 ? (
+              <div className="rounded-xl border-2 border-dashed border-border p-8 text-center">
+                <Package className="mx-auto h-7 w-7 text-muted-foreground/50" />
+                <p className="mt-2 text-sm text-muted-foreground">No parts yet. Click "Add Item" to add parts for this device.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {activeDevice.parts.map((item) => (
+                  <div key={item.id} className="rounded-xl border border-border p-3">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_70px_90px_auto]">
+                      <div className="space-y-1"><Label>Item</Label><Input value={item.name} onChange={(e: any) => updatePart(item.id, "name", e.target.value)} placeholder="Display assembly" /></div>
+                      <div className="space-y-1"><Label>Qty</Label><NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} /></div>
+                      <div className="space-y-1"><Label>Price</Label><NumericInput value={item.price} onChange={(v) => updatePart(item.id, "price", v)} /></div>
+                      <div className="space-y-1"><Label>Disc.</Label><NumericInput value={item.discount} onChange={(v) => updatePart(item.id, "discount", v)} /></div>
+                      <div className="space-y-1"><Label>Total</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums">{formatINR(item.total)}</div></div>
+                      <div className="flex items-end"><button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 hover:bg-rose-50 transition"><Trash2 className="h-3.5 w-3.5" /></button></div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {activeDevice.parts.length > 0 && (
+              <div className="mt-3 flex justify-end">
+                <div className="rounded-xl bg-muted/60 px-4 py-2 text-sm">
+                  <span className="text-muted-foreground">Device Subtotal: </span>
+                  <span className="font-semibold tabular-nums">{formatINR(deviceSubtotal)}</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -587,6 +845,7 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
 /* ─── Step 6: Review ─────────────────────────────────────────────────── */
 
 function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; tax: number; total: number }; onSubmit: () => void; isEdit: boolean }) {
+  const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
   return (
     <div className="space-y-4">
       <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
@@ -608,33 +867,84 @@ function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData;
           </div>
         </div>
 
-        {/* Items */}
-        <div className="mt-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Line Items ({form.items.length})</p>
-          <div className="rounded-xl border border-border overflow-hidden">
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60">
-                <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <th className="px-3 py-2 text-left">Item</th>
-                  <th className="py-2 text-center w-14">Qty</th>
-                  <th className="py-2 text-right w-20">Price</th>
-                  <th className="py-2 text-right w-20 pr-3">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {form.items.map((item) => (
-                  <tr key={item.id} className="border-t border-border">
-                    <td className="px-3 py-2 font-medium">{item.name || "Unnamed item"}</td>
-                    <td className="py-2 text-center tabular-nums">{item.qty}</td>
-                    <td className="py-2 text-right tabular-nums">{formatINR(item.price)}</td>
-                    <td className="py-2 text-right tabular-nums pr-3 font-medium">{formatINR(item.total)}</td>
-                  </tr>
-                ))}
-                {form.items.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No items</td></tr>}
-              </tbody>
-            </table>
+        {/* Devices Breakdown */}
+        {hasDevices && (
+          <div className="mt-4 space-y-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
+            {form.devices.map((dev, idx) => {
+              const devLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+              const devTotal = dev.parts.reduce((s, p) => s + p.total, 0);
+              return (
+                <div key={dev.id} className="rounded-xl border border-border overflow-hidden">
+                  <div className="flex items-center justify-between bg-muted/40 px-4 py-2">
+                    <div className="flex items-center gap-2">
+                      <span className="grid h-5 w-5 place-items-center rounded bg-[#4361EE] text-[9px] font-bold text-white">{idx + 1}</span>
+                      <span className="text-sm font-semibold">{devLabel}</span>
+                      {dev.imei && <span className="text-[10px] text-muted-foreground font-mono ml-2">{dev.imei}</span>}
+                    </div>
+                    <span className="text-sm font-bold tabular-nums">{formatINR(devTotal)}</span>
+                  </div>
+                  {dev.issue && (
+                    <div className="px-4 py-1.5 text-[11px] text-muted-foreground border-b border-border bg-muted/20">
+                      <span className="font-medium">Issue:</span> {dev.issue} {dev.technician && <> · <span className="font-medium">Tech:</span> {dev.technician}</>}
+                    </div>
+                  )}
+                  <table className="w-full text-sm">
+                    <thead className="bg-muted/30">
+                      <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <th className="px-3 py-1.5 text-left">Item</th>
+                        <th className="py-1.5 text-center w-14">Qty</th>
+                        <th className="py-1.5 text-right w-20">Price</th>
+                        <th className="py-1.5 text-right w-20 pr-3">Total</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {dev.parts.map((item) => (
+                        <tr key={item.id} className="border-t border-border">
+                          <td className="px-3 py-1.5 font-medium">{item.name || "Unnamed"}</td>
+                          <td className="py-1.5 text-center tabular-nums">{item.qty}</td>
+                          <td className="py-1.5 text-right tabular-nums">{formatINR(item.price)}</td>
+                          <td className="py-1.5 text-right tabular-nums font-medium pr-3">{formatINR(item.total)}</td>
+                        </tr>
+                      ))}
+                      {dev.parts.length === 0 && <tr><td colSpan={4} className="px-3 py-3 text-center text-muted-foreground text-xs">No parts</td></tr>}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })}
           </div>
-        </div>
+        )}
+
+        {/* Legacy flat items (no devices) */}
+        {!hasDevices && (
+          <div className="mt-4">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Line Items ({form.items.length})</p>
+            <div className="rounded-xl border border-border overflow-hidden">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/60">
+                  <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <th className="px-3 py-2 text-left">Item</th>
+                    <th className="py-2 text-center w-14">Qty</th>
+                    <th className="py-2 text-right w-20">Price</th>
+                    <th className="py-2 text-right w-20 pr-3">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {form.items.map((item) => (
+                    <tr key={item.id} className="border-t border-border">
+                      <td className="px-3 py-2 font-medium">{item.name || "Unnamed item"}</td>
+                      <td className="py-2 text-center tabular-nums">{item.qty}</td>
+                      <td className="py-2 text-right tabular-nums">{formatINR(item.price)}</td>
+                      <td className="py-2 text-right tabular-nums pr-3 font-medium">{formatINR(item.total)}</td>
+                    </tr>
+                  ))}
+                  {form.items.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No items</td></tr>}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         {/* Totals */}
         <div className="mt-4 flex justify-end">
@@ -656,27 +966,4 @@ function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData;
   );
 }
 
-/* ─── Step 7: Completion ─────────────────────────────────────────────── */
 
-function CompletionScreen({ isEdit, invoiceId, onDone }: { isEdit: boolean; invoiceId: string; onDone: () => void }) {
-  return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-indigo-50/30 to-white">
-      <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-20" />
-      <div className="relative mx-auto flex min-h-screen max-w-2xl flex-col items-center justify-center px-4 py-10 text-center">
-        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 220, damping: 18 }} className="grid h-20 w-20 place-items-center rounded-full bg-emerald-500 text-white shadow-[0_8px_24px_-8px_rgba(16,185,129,0.5)]">
-          <Check className="h-10 w-10" />
-        </motion.div>
-        <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }} className="font-display mt-6 text-3xl font-extrabold tracking-tight">
-          {isEdit ? "Invoice Updated" : "Invoice Created"}
-        </motion.h1>
-        <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.25 }} className="mt-2 text-sm text-muted-foreground">
-          {isEdit ? `Invoice ${invoiceId} has been updated successfully.` : "Your invoice has been created and is ready to send."}
-        </motion.p>
-        <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="mt-8 flex gap-3">
-          <Button variant="outline" size="lg" onClick={onDone}>Back to Invoices</Button>
-          <Button size="lg" onClick={onDone}><ArrowRight className="h-4 w-4" /> View Invoice</Button>
-        </motion.div>
-      </div>
-    </div>
-  );
-}

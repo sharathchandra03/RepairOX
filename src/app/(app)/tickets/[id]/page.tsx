@@ -179,34 +179,23 @@ export default function TicketDetailPage() {
     params.set("amount", String(ticket.amount));
     if (ticket.technician) params.set("employee", ticket.technician);
 
-    // Build line items from all devices
-    const lineItems: { name: string; qty: number; price: number; total: number; deviceLabel: string }[] = [];
-    devices.forEach((dev) => {
-      const deviceLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || "Device";
-      // Add parts as line items
-      if (dev.parts.length > 0) {
-        dev.parts.forEach((p) => {
-          lineItems.push({ name: p.name, qty: p.qty, price: p.unitPrice, total: p.total, deviceLabel });
-        });
-      }
-      // Add labour/service line item per device
-      if (dev.estimate > 0 || dev.parts.length === 0) {
-        const labourAmount = dev.estimate - dev.parts.reduce((s, p) => s + p.total, 0);
-        if (labourAmount > 0 || dev.parts.length === 0) {
-          lineItems.push({
-            name: `${dev.issue || "Repair Service"} — ${deviceLabel}`,
-            qty: 1,
-            price: Math.max(labourAmount, dev.estimate || 0),
-            total: Math.max(labourAmount, dev.estimate || 0),
-            deviceLabel,
-          });
-        }
-      }
-    });
-
-    if (lineItems.length > 0) {
-      params.set("parts", JSON.stringify(lineItems.map((li) => ({ name: li.name, qty: li.qty, price: li.price, total: li.total }))));
-    }
+    // Pass full device structure as JSON for multi-device invoice support
+    const invoiceDevices = devices.map((dev) => ({
+      brand: dev.brand,
+      model: dev.model,
+      imei: dev.imei,
+      imeiType: dev.imeiType,
+      issue: dev.issue || dev.description,
+      description: dev.description,
+      jobType: dev.jobType,
+      priority: dev.priority,
+      warranty: dev.warranty,
+      technician: dev.assignedTo,
+      notes: dev.notes,
+      estimate: dev.estimate,
+      parts: dev.parts.map((p) => ({ name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total })),
+    }));
+    params.set("devices", JSON.stringify(invoiceDevices));
 
     // Pass first device info for backward compat
     params.set("service", devices[0]?.issue || ticket.service || ticket.issue);

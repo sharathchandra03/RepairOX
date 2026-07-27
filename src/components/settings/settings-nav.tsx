@@ -53,7 +53,7 @@ const SETTINGS_NAV: NavSection[] = [
     id: "inventory", label: "Inventory", icon: Package,
     children: [
       { label: "Inventory Settings", href: "/settings/inventory/general" },
-      { label: "Price Lists", href: "/settings/inventory/price-lists" },
+      { label: "Price List", href: "/settings/inventory/price-lists" },
       { label: "Barcode", href: "/settings/inventory/barcode" },
     ],
   },

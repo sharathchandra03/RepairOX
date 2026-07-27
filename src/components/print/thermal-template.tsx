@@ -13,6 +13,16 @@ function DoubleDivider() {
   return <div className="border-t-2 border-gray-700 my-2" />;
 }
 
+/** Label/Value row — compact and aligned for thermal width */
+function Row({ label, value, bold }: { label: string; value: string; bold?: boolean }) {
+  return (
+    <div className="flex justify-between gap-1 text-[9px] leading-[1.4]">
+      <span className="text-gray-600 shrink-0">{label}:</span>
+      <span className={`text-right truncate ${bold ? "font-bold" : "font-medium"} text-gray-900`}>{value}</span>
+    </div>
+  );
+}
+
 export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
   const { store, customer, ticket, invoice } = data;
   const isInvoice = !!invoice;
@@ -72,99 +82,173 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
 
       <Divider />
 
-      {/* ── Device Info (Tickets) ── */}
+      {/* ── TICKET: Unified Device Blocks ── */}
       {isTicket && ticket && (
         <>
-          <div>
-            <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">Device Details</p>
-            {ticket.devices && ticket.devices.length > 1 ? (
-              <div className="text-[9px] space-y-1.5">
-                {ticket.devices.map((dev, idx) => (
-                  <div key={dev.id}>
-                    <p className="font-semibold">Device {idx + 1}: {dev.brand} {dev.model}</p>
-                    {dev.serial && <p>IMEI/SN: {dev.serial}</p>}
-                    <p>Issue: {dev.issue}</p>
-                    <p>Tech: {dev.technician} | Est: {formatPrintCurrency(dev.estimate)}</p>
+          {ticket.devices && ticket.devices.length > 1 ? (
+            /* Multi-device: each device gets one unified block */
+            <div className="space-y-2">
+              {ticket.devices.map((dev, idx) => (
+                <div key={dev.id}>
+                  {idx > 0 && <Divider />}
+                  <p className="text-[9px] font-bold uppercase tracking-wide mb-1">
+                    Device {idx + 1} of {ticket.devices!.length}
+                  </p>
+                  {/* Device identity */}
+                  <div className="space-y-0.5 mb-1">
+                    <Row label="Device" value={`${dev.brand} ${dev.model}`} bold />
+                    {dev.serial && <Row label="IMEI/SN" value={dev.serial} />}
                   </div>
-                ))}
+                  {/* Job details */}
+                  <div className="space-y-0.5 mb-1">
+                    <Row label="Issue" value={dev.issue || "General service"} />
+                    <Row label="Technician" value={dev.technician || "Unassigned"} />
+                    <Row label="Priority" value={dev.priority || "Normal"} />
+                    <Row label="Estimate" value={formatPrintCurrency(dev.estimate)} bold />
+                  </div>
+                  {/* Parts assigned to this device */}
+                  {dev.parts.length > 0 && (
+                    <div className="mt-1">
+                      <p className="text-[8px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">Parts</p>
+                      {dev.parts.map((part, pi) => (
+                        <div key={pi} className="flex justify-between text-[9px] py-0.5">
+                          <span className="flex-1 truncate pr-1">{part.name}</span>
+                          <span className="w-[24px] text-center">{part.qty}</span>
+                          <span className="w-[48px] text-right font-medium">{formatPrintCurrency(part.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Single device: one unified block */
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wide mb-1">Device & Service</p>
+              <div className="space-y-0.5 mb-1">
+                <Row label="Device" value={`${ticket.device} ${ticket.model}`} bold />
+                {ticket.serial && <Row label="IMEI/SN" value={ticket.serial} />}
               </div>
-            ) : (
-              <div className="text-[9px] space-y-0.5">
-                <p>{ticket.device} - {ticket.model}</p>
-                {ticket.serial && <p>IMEI/SN: {ticket.serial}</p>}
-                <p>Issue: {ticket.issue}</p>
-                {ticket.service && <p>Service: {ticket.service}</p>}
-                <p>Tech: {ticket.technician} | Priority: {ticket.priority}</p>
-                {ticket.dueDate && <p>Due: {formatPrintDateTime(ticket.dueDate)}</p>}
+              <div className="space-y-0.5 mb-1">
+                <Row label="Issue" value={ticket.issue} />
+                {ticket.service && ticket.service !== ticket.issue && <Row label="Service" value={ticket.service} />}
+                <Row label="Technician" value={ticket.technician || "Unassigned"} />
+                <Row label="Priority" value={ticket.priority} />
+                <Row label="Source" value={ticket.source || "Walk-In"} />
+                {ticket.dueDate && <Row label="Due" value={formatPrintDateTime(ticket.dueDate)} />}
               </div>
-            )}
+              {/* Parts */}
+              {ticket.parts && ticket.parts.length > 0 && (
+                <div className="mt-1">
+                  <p className="text-[8px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">Parts</p>
+                  <div className="flex justify-between font-bold text-[8px] border-b border-gray-300 pb-0.5 mb-0.5">
+                    <span className="flex-1">Item</span>
+                    <span className="w-[24px] text-center">Qty</span>
+                    <span className="w-[48px] text-right">Amt</span>
+                  </div>
+                  {ticket.parts.map((part, i) => (
+                    <div key={i} className="flex justify-between text-[9px] py-0.5">
+                      <span className="flex-1 truncate pr-1">{part.name}</span>
+                      <span className="w-[24px] text-center">{part.qty}</span>
+                      <span className="w-[48px] text-right font-medium">{formatPrintCurrency(part.total)}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          <DoubleDivider />
+
+          {/* Ticket total */}
+          <div className="flex justify-between font-bold text-[12px]">
+            <span>TOTAL</span>
+            <span>{formatPrintCurrency(ticket.amount)}</span>
           </div>
-          <Divider />
         </>
       )}
 
-      {/* ── Items / Services ── */}
-      <div>
-        <p className="text-[9px] font-bold uppercase tracking-wide mb-1">Items / Services</p>
-        <div className="text-[9px]">
-          {/* Column headers */}
-          <div className="flex justify-between font-bold border-b border-gray-300 pb-0.5 mb-1">
-            <span className="flex-1">Item</span>
-            <span className="w-[28px] text-center">Qty</span>
-            <span className="w-[52px] text-right">Amt</span>
+      {/* ── INVOICE: Unified structure ── */}
+      {isInvoice && invoice && (
+        <>
+          {/* Invoice meta */}
+          <div className="mb-1">
+            <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">Invoice Details</p>
+            <div className="space-y-0.5">
+              <Row label="Reference" value={invoice.reference} />
+              <Row label="Type" value={invoice.invoiceType === "business" ? "Business (GST)" : "Retail"} />
+              <Row label="Status" value={invoice.status} />
+              <Row label="Due" value={formatPrintDate(invoice.dueDate)} />
+              {invoice.employee && <Row label="Employee" value={invoice.employee} />}
+              {invoice.ticketId && <Row label="Ticket" value={invoice.ticketId} />}
+            </div>
           </div>
 
-          {/* Invoice items */}
-          {isInvoice && invoice?.items.map((item, i) => (
-            <div key={i} className="flex justify-between py-0.5">
-              <span className="flex-1 truncate pr-1">{item.name}</span>
-              <span className="w-[28px] text-center">{item.qty}</span>
-              <span className="w-[52px] text-right">{formatPrintCurrency(item.total)}</span>
-            </div>
-          ))}
+          <Divider />
 
-          {/* Ticket parts */}
-          {isTicket && ticket?.devices && ticket.devices.length > 1 && ticket.devices.map((dev) =>
-            dev.parts.length > 0 ? dev.parts.map((part, pi) => (
-              <div key={`${dev.id}-${pi}`} className="flex justify-between py-0.5">
-                <span className="flex-1 truncate pr-1">{part.name}</span>
-                <span className="w-[28px] text-center">{part.qty}</span>
-                <span className="w-[52px] text-right">{formatPrintCurrency(part.total)}</span>
+          {/* Multi-device invoice: per-device blocks */}
+          {invoice.devices && invoice.devices.length > 0 ? (
+            <div className="space-y-2">
+              {invoice.devices.map((dev, idx) => (
+                <div key={dev.id}>
+                  {idx > 0 && <Divider />}
+                  <p className="text-[9px] font-bold uppercase tracking-wide mb-1">
+                    Device {idx + 1} of {invoice.devices!.length}
+                  </p>
+                  <div className="space-y-0.5 mb-1">
+                    <Row label="Device" value={`${dev.brand} ${dev.model}`} bold />
+                    {dev.serial && <Row label="IMEI/SN" value={dev.serial} />}
+                  </div>
+                  <div className="space-y-0.5 mb-1">
+                    <Row label="Issue" value={dev.issue || "Service"} />
+                    <Row label="Technician" value={dev.technician || "—"} />
+                    {dev.priority && dev.priority !== "normal" && <Row label="Priority" value={dev.priority} />}
+                    <Row label="Subtotal" value={formatPrintCurrency(dev.subtotal)} bold />
+                  </div>
+                  {dev.parts.length > 0 && (
+                    <div className="mt-1">
+                      <p className="text-[8px] font-bold uppercase tracking-wide text-gray-500 mb-0.5">Parts</p>
+                      {dev.parts.map((part, pi) => (
+                        <div key={pi} className="flex justify-between text-[9px] py-0.5">
+                          <span className="flex-1 truncate pr-1">{part.name}</span>
+                          <span className="w-[24px] text-center">{part.qty}</span>
+                          <span className="w-[48px] text-right font-medium">{formatPrintCurrency(part.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            /* Legacy flat items */
+            <div>
+              <p className="text-[9px] font-bold uppercase tracking-wide mb-1">Items / Services</p>
+              <div className="flex justify-between font-bold text-[8px] border-b border-gray-300 pb-0.5 mb-0.5">
+                <span className="flex-1">Item</span>
+                <span className="w-[24px] text-center">Qty</span>
+                <span className="w-[48px] text-right">Amt</span>
               </div>
-            )) : (
-              <div key={dev.id} className="flex justify-between py-0.5">
-                <span className="flex-1 truncate pr-1">{dev.issue || "Service"} ({dev.model})</span>
-                <span className="w-[28px] text-center">1</span>
-                <span className="w-[52px] text-right">{formatPrintCurrency(dev.estimate)}</span>
-              </div>
-            )
+              {invoice.items.map((item, i) => (
+                <div key={i} className="py-0.5">
+                  <div className="flex justify-between text-[9px]">
+                    <span className="flex-1 truncate pr-1 font-medium">{item.name}</span>
+                    <span className="w-[24px] text-center">{item.qty}</span>
+                    <span className="w-[48px] text-right font-medium">{formatPrintCurrency(item.total)}</span>
+                  </div>
+                  {item.description && (
+                    <p className="text-[8px] text-gray-500 pl-1 truncate">{item.description}</p>
+                  )}
+                </div>
+              ))}
+            </div>
           )}
 
-          {isTicket && (!ticket?.devices || ticket.devices.length <= 1) && ticket?.parts && ticket.parts.length > 0 && ticket.parts.map((part, i) => (
-            <div key={i} className="flex justify-between py-0.5">
-              <span className="flex-1 truncate pr-1">{part.name}</span>
-              <span className="w-[28px] text-center">{part.qty}</span>
-              <span className="w-[52px] text-right">{formatPrintCurrency(part.total)}</span>
-            </div>
-          ))}
+          <DoubleDivider />
 
-          {/* Fallback for tickets without parts */}
-          {isTicket && (!ticket?.parts || ticket.parts.length === 0) && (
-            <div className="flex justify-between py-0.5">
-              <span className="flex-1 truncate pr-1">{ticket?.service || ticket?.issue || "Service"}</span>
-              <span className="w-[28px] text-center">1</span>
-              <span className="w-[52px] text-right">{formatPrintCurrency(ticket?.amount || 0)}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <DoubleDivider />
-
-      {/* ── Totals ── */}
-      <div className="text-[10px]">
-        {isInvoice && invoice && (
-          <div className="space-y-0.5">
+          {/* Invoice totals */}
+          <div className="text-[10px] space-y-0.5">
             <div className="flex justify-between">
               <span>Subtotal</span>
               <span>{formatPrintCurrency(invoice.subtotal)}</span>
@@ -195,22 +279,15 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                 <span>{formatPrintCurrency(invoice.balance)}</span>
               </div>
             )}
-            {invoice.paidAmount >= invoice.total && (
+            {invoice.paidAmount >= invoice.total && invoice.paidAmount > 0 && (
               <div className="flex justify-between">
                 <span>Change</span>
                 <span>{formatPrintCurrency(invoice.paidAmount - invoice.total)}</span>
               </div>
             )}
           </div>
-        )}
-
-        {isTicket && ticket && (
-          <div className="flex justify-between font-bold text-[12px]">
-            <span>TOTAL</span>
-            <span>{formatPrintCurrency(ticket.amount)}</span>
-          </div>
-        )}
-      </div>
+        </>
+      )}
 
       <Divider />
 

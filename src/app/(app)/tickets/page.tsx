@@ -21,7 +21,7 @@ import {
   CheckoutDrawer, EmailReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
@@ -289,14 +289,33 @@ export default function TicketsPage() {
       if (ticket.address) p.set("address", ticket.address);
       if (ticket.company) p.set("company", ticket.company);
       p.set("amount", String(ticket.amount));
-      p.set("service", ticket.service || ticket.issue);
-      p.set("device", ticket.model);
-      p.set("brand", ticket.device);
-      if (ticket.items?.[0]?.serial) p.set("serial", ticket.items[0].serial);
       if (ticket.technician) p.set("employee", ticket.technician);
-      if (ticket.parts && ticket.parts.length > 0) {
-        p.set("parts", JSON.stringify(ticket.parts.map((pt) => ({ name: pt.name, qty: pt.qty, price: pt.unitPrice, total: pt.total }))));
-      }
+
+      // Pass full device structure for multi-device invoice support
+      const devices = getTicketDevices(ticket);
+      const invoiceDevices = devices.map((dev) => ({
+        brand: dev.brand,
+        model: dev.model,
+        imei: dev.imei,
+        imeiType: dev.imeiType,
+        issue: dev.issue || dev.description,
+        description: dev.description,
+        jobType: dev.jobType,
+        priority: dev.priority,
+        warranty: dev.warranty,
+        technician: dev.assignedTo,
+        notes: dev.notes,
+        estimate: dev.estimate,
+        parts: (dev.parts || []).map((pt) => ({ name: pt.name, sku: pt.sku, qty: pt.qty, unitPrice: pt.unitPrice, total: pt.total })),
+      }));
+      p.set("devices", JSON.stringify(invoiceDevices));
+
+      // Pass first device info for backward compat
+      p.set("service", devices[0]?.issue || ticket.service || ticket.issue);
+      p.set("device", devices[0]?.model || ticket.model);
+      p.set("brand", devices[0]?.brand || ticket.device);
+      if (devices[0]?.imei) p.set("serial", devices[0].imei);
+
       router.push(`/invoice/create?${p.toString()}`);
       return;
     }

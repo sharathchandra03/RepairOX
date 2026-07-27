@@ -1,6 +1,6 @@
 import type { StoreSettings } from "@/lib/store-settings";
-import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord } from "@/lib/mock-data";
-import { getTicketDevices } from "@/lib/mock-data";
+import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
+import { getTicketDevices, getInvoiceDevices } from "@/lib/mock-data";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
@@ -95,6 +95,23 @@ export type PrintInvoiceInfo = {
   footer: string;
   employee: string;
   ticketId: string;
+  /** Multi-device: individual device sections for print */
+  devices?: PrintInvoiceDeviceInfo[];
+};
+
+export type PrintInvoiceDeviceInfo = {
+  id: string;
+  brand: string;
+  model: string;
+  serial: string;
+  issue: string;
+  jobType: string;
+  priority: string;
+  warranty: string;
+  technician: string;
+  notes: string;
+  parts: PrintLineItem[];
+  subtotal: number;
 };
 
 export type PrintDocumentData = {
@@ -206,6 +223,26 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     total: item.total,
   }));
 
+  // Build per-device print info
+  const invoiceDevices = getInvoiceDevices(invoice);
+  const hasMultiDevice = invoice.devices && invoice.devices.length > 0;
+  const printDevices: PrintInvoiceDeviceInfo[] | undefined = hasMultiDevice
+    ? invoiceDevices.map((d) => ({
+        id: d.id,
+        brand: d.brand,
+        model: d.model,
+        serial: d.imei,
+        issue: d.issue,
+        jobType: d.jobType,
+        priority: d.priority,
+        warranty: d.warranty,
+        technician: d.technician,
+        notes: d.notes,
+        parts: d.parts.map((p) => ({ name: p.name, description: p.description, qty: p.qty, price: p.price, discount: p.discount, total: p.total })),
+        subtotal: d.subtotal,
+      }))
+    : undefined;
+
   return {
     invoiceId: invoice.id,
     reference: invoice.reference,
@@ -225,6 +262,7 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     footer: invoice.footer || "",
     employee: invoice.employee || "",
     ticketId: invoice.ticketId || "",
+    devices: printDevices,
   };
 }
 

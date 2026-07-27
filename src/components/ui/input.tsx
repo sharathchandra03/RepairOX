@@ -70,8 +70,9 @@ interface SelectProps {
   className?: string;
   placeholder?: string;
   id?: string;
+  disabled?: boolean;
 }
-export function Select({ value, defaultValue, onChange, options, className, placeholder }: SelectProps) {
+export function Select({ value, defaultValue, onChange, options, className, placeholder, disabled }: SelectProps) {
   const [open, setOpen] = React.useState(false);
   const [internalValue, setInternalValue] = React.useState(defaultValue || "");
   const currentValue = value !== undefined ? value : internalValue;
@@ -92,12 +93,14 @@ export function Select({ value, defaultValue, onChange, options, className, plac
     <div ref={ref} className="relative">
       <button
         type="button"
-        onClick={() => setOpen(!open)}
+        disabled={disabled}
+        onClick={() => !disabled && setOpen(!open)}
         className={cn(
           "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
           open
             ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
             : "border-border hover:border-[#4361EE]/40",
+          disabled && "cursor-not-allowed opacity-50 hover:border-border",
           className
         )}
       >
