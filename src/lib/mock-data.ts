@@ -276,9 +276,9 @@ export const navItems: NavItem[] = [
   // Shop Management
   { href: "/dashboard",        label: "Dashboard",     icon: "Home", permission: "view_dashboard" },
   { href: "/tickets",          label: "Tickets",       icon: "Ticket", permission: ["view_only", "manage_repair_jobs"] },
-  { href: "/shop/technicians", label: "Technicians",   icon: "Wrench", permission: ["assign_technicians", "manage_repair_jobs"] },
+  { href: "/shop/technicians", label: "Employees",     icon: "Users", permission: ["assign_technicians", "manage_repair_jobs"] },
   { href: "/shop/notes",       label: "Notes",         icon: "FileText", permission: ["upload_files", "manage_repair_jobs"] },
-  { href: "/contacts",         label: "Customers",     icon: "Users", permission: "manage_customers" },
+  { href: "/contacts",         label: "Accounts",      icon: "BookUser", permission: "manage_customers" },
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
@@ -317,6 +317,7 @@ export const navItems: NavItem[] = [
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
 
   // Shared / general (present in every workspace)
+  { href: "/activity",         label: "Activity Log", icon: "Activity", permission: "view_audit_logs" },
   { href: "/reports",          label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_financial_reports"] },
   { href: "/settings",         label: "Settings",     icon: "Settings", permission: "manage_settings" },
 ];
@@ -650,11 +651,13 @@ export const walkIns: WalkIn[] = [
 
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
-    { label: "MODULE",     items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
-    { label: "MANAGE",     items: ["/shop/technicians", "/shop/notes", "/contacts"] },
-    { label: "INVENTORY",  items: ["/inventory"] },
-    { label: "BILLING",    items: ["/shop/payments", "/expenses"] },
-    { label: "GENERAL",    items: ["/reports", "/settings"] },
+    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
+    { label: "INVENTORY",      items: ["/inventory"] },
+    // Expenses is merged here (single operational-expenses module) — the old
+    // "Notes" item and the duplicate Billing → Expenses are intentionally dropped.
+    { label: "ADMINISTRATION", items: ["/shop/technicians", "/expenses", "/contacts"] },
+    { label: "BILLING",        items: ["/shop/payments"] },
+    { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],
   operations: [
     { label: "MODULE",     items: ["/operations", "/stock"] },

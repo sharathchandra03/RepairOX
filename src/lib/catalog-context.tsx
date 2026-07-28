@@ -30,6 +30,7 @@ import {
   type DevicePart,
 } from "./price-list-data";
 import type { SmartModel } from "./smart-import";
+import { logActivity, buildChanges } from "./activity-log";
 
 /* ─── State & Actions ────────────────────────────────────────────── */
 
@@ -190,19 +191,35 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       enabled: data.enabled ?? true,
     };
     setState((s) => ({ ...s, categories: [...s.categories, cat] }));
+    logActivity({
+      module: "Price List", action: "Category Created", severity: "success",
+      entity: "Category", reference: cat.name, description: `Created device category ${cat.name}.`,
+    });
     return cat;
   }, []);
 
   const updateCategory = useCallback((id: string, updates: Partial<DeviceCategory>) => {
+    const prev = stateRef.current.categories.find((c) => c.id === id);
     setState((s) => ({
       ...s,
       categories: s.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
     }));
+    const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
+      { key: "name", label: "Name" },
+      { key: "enabled", label: "Enabled" },
+    ]);
+    logActivity({
+      module: "Price List", action: "Category Updated", severity: "info",
+      entity: "Category", reference: prev?.name || id, description: `Updated category ${prev?.name || id}.`,
+      changes,
+    });
   }, []);
 
   const deleteCategory = useCallback((id: string) => {
+    const prev = stateRef.current.categories.find((c) => c.id === id);
+    const brandCount = stateRef.current.brands.filter((b) => b.categoryId === id).length;
+    const modelCount = stateRef.current.models.filter((m) => m.categoryId === id).length;
     setState((s) => {
-      const brandIds = s.brands.filter((b) => b.categoryId === id).map((b) => b.id);
       const modelIds = s.models.filter((m) => m.categoryId === id).map((m) => m.id);
       return {
         categories: s.categories.filter((c) => c.id !== id),
@@ -211,13 +228,26 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         parts: s.parts.filter((p) => !modelIds.includes(p.modelId)),
       };
     });
+    logActivity({
+      module: "Price List", action: "Category Deleted", severity: "critical",
+      entity: "Category", reference: prev?.name || id,
+      description: prev ? `Deleted category ${prev.name} (${brandCount} brand${brandCount !== 1 ? "s" : ""}, ${modelCount} model${modelCount !== 1 ? "s" : ""}).` : `Deleted category ${id}.`,
+    });
   }, []);
 
   const toggleCategory = useCallback((id: string) => {
+    const prev = stateRef.current.categories.find((c) => c.id === id);
+    const next = !(prev?.enabled ?? true);
     setState((s) => ({
       ...s,
       categories: s.categories.map((c) => (c.id === id ? { ...c, enabled: !(c.enabled ?? true) } : c)),
     }));
+    logActivity({
+      module: "Price List", action: "Category Updated", severity: "info",
+      entity: "Category", reference: prev?.name || id,
+      description: `${next ? "Enabled" : "Disabled"} category ${prev?.name || id}.`,
+      changes: [{ field: "Enabled", from: String(!next), to: String(next) }],
+    });
   }, []);
 
   /* ── Brands ── */
@@ -231,17 +261,33 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       enabled: data.enabled ?? true,
     };
     setState((s) => ({ ...s, brands: [...s.brands, brand] }));
+    logActivity({
+      module: "Price List", action: "Brand Added", severity: "success",
+      entity: "Brand", reference: brand.name, description: `Added brand ${brand.name}.`,
+    });
     return brand;
   }, []);
 
   const updateBrand = useCallback((id: string, updates: Partial<PriceListBrand>) => {
+    const prev = stateRef.current.brands.find((b) => b.id === id);
     setState((s) => ({
       ...s,
       brands: s.brands.map((b) => (b.id === id ? { ...b, ...updates } : b)),
     }));
+    const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
+      { key: "name", label: "Name" },
+      { key: "enabled", label: "Enabled" },
+    ]);
+    logActivity({
+      module: "Price List", action: "Brand Updated", severity: "info",
+      entity: "Brand", reference: prev?.name || id, description: `Updated brand ${prev?.name || id}.`,
+      changes,
+    });
   }, []);
 
   const deleteBrand = useCallback((id: string) => {
+    const prev = stateRef.current.brands.find((b) => b.id === id);
+    const modelCount = stateRef.current.models.filter((m) => m.brandId === id).length;
     setState((s) => {
       const modelIds = s.models.filter((m) => m.brandId === id).map((m) => m.id);
       return {
@@ -250,6 +296,11 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         models: s.models.filter((m) => m.brandId !== id),
         parts: s.parts.filter((p) => !modelIds.includes(p.modelId)),
       };
+    });
+    logActivity({
+      module: "Price List", action: "Brand Deleted", severity: "critical",
+      entity: "Brand", reference: prev?.name || id,
+      description: prev ? `Deleted brand ${prev.name} and ${modelCount} model${modelCount !== 1 ? "s" : ""}.` : `Deleted brand ${id}.`,
     });
   }, []);
 
@@ -273,22 +324,45 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       createdOn: data.createdOn ?? nowStamp(),
     };
     setState((s) => ({ ...s, models: [...s.models, model] }));
+    logActivity({
+      module: "Price List", action: "Model Added", severity: "success",
+      entity: "Device Model", reference: model.name, description: `Added model ${model.name}.`,
+    });
     return model;
   }, []);
 
   const updateModel = useCallback((id: string, updates: Partial<PriceListModel>) => {
+    const prev = stateRef.current.models.find((m) => m.id === id);
     setState((s) => ({
       ...s,
       models: s.models.map((m) => (m.id === id ? { ...m, ...updates, lastUpdated: nowStamp() } : m)),
     }));
+    const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
+      { key: "name", label: "Name" },
+      { key: "year", label: "Year" },
+      { key: "storage", label: "Storage" },
+      { key: "variant", label: "Variant" },
+      { key: "status", label: "Status" },
+    ]);
+    logActivity({
+      module: "Price List", action: "Model Updated", severity: "info",
+      entity: "Device Model", reference: prev?.name || id, description: `Updated model ${prev?.name || id}.`,
+      changes,
+    });
   }, []);
 
   const deleteModel = useCallback((id: string) => {
+    const prev = stateRef.current.models.find((m) => m.id === id);
     setState((s) => ({
       ...s,
       models: s.models.filter((m) => m.id !== id),
       parts: s.parts.filter((p) => p.modelId !== id),
     }));
+    logActivity({
+      module: "Price List", action: "Model Deleted", severity: "critical",
+      entity: "Device Model", reference: prev?.name || id,
+      description: prev ? `Deleted device model ${prev.name}.` : `Deleted model ${id}.`,
+    });
   }, []);
 
   const bulkDeleteModels = useCallback((ids: string[]) => {
@@ -298,6 +372,11 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       models: s.models.filter((m) => !idSet.has(m.id)),
       parts: s.parts.filter((p) => !idSet.has(p.modelId)),
     }));
+    logActivity({
+      module: "Price List", action: "Model Deleted", severity: "critical",
+      entity: "Device Model", reference: `${ids.length} models`,
+      description: `Deleted ${ids.length} device model${ids.length !== 1 ? "s" : ""}.`,
+    });
   }, []);
 
   const setModelImage = useCallback((id: string, imageUrl: string) => {
@@ -320,23 +399,56 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       modelId: data.modelId,
     };
     setState((s) => ({ ...s, parts: [...s.parts, part] }));
+    logActivity({
+      module: "Price List", action: "Part Added", severity: "success",
+      entity: "Part", reference: part.partName,
+      description: `Added part ${part.partName} (₹${Number(part.price ?? 0).toLocaleString("en-IN")}).`,
+    });
     return part;
   }, []);
 
   const updatePart = useCallback((id: number, updates: Partial<DevicePart>) => {
+    const prev = stateRef.current.parts.find((p) => p.id === id);
     setState((s) => ({
       ...s,
       parts: s.parts.map((p) => (p.id === id ? { ...p, ...updates, lastUpdated: nowStamp() } : p)),
     }));
+    const inr = (v: unknown) => `₹${Number(v ?? 0).toLocaleString("en-IN")}`;
+    const priceChanged = "price" in updates && prev && updates.price !== prev.price;
+    const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
+      { key: "partName", label: "Part Name" },
+      { key: "price", label: "Price", format: inr },
+      { key: "warranty", label: "Warranty" },
+      { key: "availability", label: "Availability" },
+    ]);
+    logActivity({
+      module: "Price List", action: priceChanged ? "Price Updated" : "Part Updated", severity: "info",
+      entity: "Part", reference: prev?.partName || String(id),
+      description: priceChanged
+        ? `Updated price for ${prev?.partName || "part"}.`
+        : `Updated part ${prev?.partName || id}.`,
+      changes,
+    });
   }, []);
 
   const deletePart = useCallback((id: number) => {
+    const prev = stateRef.current.parts.find((p) => p.id === id);
     setState((s) => ({ ...s, parts: s.parts.filter((p) => p.id !== id) }));
+    logActivity({
+      module: "Price List", action: "Part Deleted", severity: "critical",
+      entity: "Part", reference: prev?.partName || String(id),
+      description: prev ? `Deleted part ${prev.partName}.` : `Deleted part ${id}.`,
+    });
   }, []);
 
   const bulkDeleteParts = useCallback((ids: number[]) => {
     const idSet = new Set(ids);
     setState((s) => ({ ...s, parts: s.parts.filter((p) => !idSet.has(p.id)) }));
+    logActivity({
+      module: "Price List", action: "Part Deleted", severity: "critical",
+      entity: "Part", reference: `${ids.length} parts`,
+      description: `Deleted ${ids.length} part${ids.length !== 1 ? "s" : ""}.`,
+    });
   }, []);
 
   const clearSeedData = useCallback(() => {
@@ -458,6 +570,18 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     })(stateRef.current);
 
     setState(nextState);
+    logActivity({
+      module: "Price List", action: "Data Imported", severity: "info", entity: "Catalog",
+      description: `Imported catalog data — ${result.modelsAdded} model(s) added, ${result.partsAdded} part(s) added, ${result.partsUpdated} updated.`,
+      meta: {
+        "Categories added": String(result.categoriesAdded),
+        "Brands added": String(result.brandsAdded),
+        "Models added": String(result.modelsAdded),
+        "Models updated": String(result.modelsUpdated),
+        "Parts added": String(result.partsAdded),
+        "Parts updated": String(result.partsUpdated),
+      },
+    });
     return result;
   }, []);
 
@@ -584,6 +708,18 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     })(stateRef.current);
 
     setState(nextState);
+    logActivity({
+      module: "Price List", action: "Data Imported", severity: "info", entity: "Catalog",
+      description: `Imported catalog data — ${result.modelsAdded} model(s) added, ${result.partsAdded} part(s) added, ${result.partsUpdated} updated.`,
+      meta: {
+        "Categories added": String(result.categoriesAdded),
+        "Brands added": String(result.brandsAdded),
+        "Models added": String(result.modelsAdded),
+        "Models updated": String(result.modelsUpdated),
+        "Parts added": String(result.partsAdded),
+        "Parts updated": String(result.partsUpdated),
+      },
+    });
     return result;
   }, []);
 

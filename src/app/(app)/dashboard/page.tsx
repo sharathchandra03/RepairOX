@@ -10,7 +10,6 @@ import Link from "next/link";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
-import { InventoryOverview } from "@/components/dashboard/inventory-overview";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -22,23 +21,10 @@ import { useState, useMemo } from "react";
 import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
+import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
+import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
 
 /* ── Device breakdown — computed from store data in component ── */
-
-/* ── Heatmap data (7 days × 8 slots) ── */
-const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const SLOTS = ["9am", "10am", "11am", "12pm", "1pm", "2pm", "4pm", "6pm"];
-const HEATMAP = DAYS.map((d) =>
-  SLOTS.map(() => Math.floor(Math.random() * 12))
-);
-
-function heatColor(v: number) {
-  if (v === 0) return "bg-slate-100";
-  if (v <= 3)  return "bg-[#C7D2FE]";
-  if (v <= 6)  return "bg-[#818CF8]";
-  if (v <= 9)  return "bg-[#4361EE]";
-  return "bg-[#3347D6]";
-}
 
 /* ── Transaction feed data — derived from store in component ── */
 
@@ -62,6 +48,8 @@ export default function Dashboard() {
   const [filterBy, setFilterBy] = useState<"all" | "received" | "repairing" | "completed" | "delivered">("all");
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "30days" | "all">("all");
   const { tickets, todos, orders: ordersStatus } = useStore();
+  const activities = useActivityLog();
+  const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
 
   // Apply filters to tickets
   const filteredTickets = useMemo(() => {
@@ -223,7 +211,7 @@ export default function Dashboard() {
       </div>
 
       {/* Resizable dashboard widgets — drag edges to resize, drag title to reorder */}
-      <DashboardGrid keys={["revenue", "donut", "devices", "heatmap", "transactions"]}>
+      <DashboardGrid keys={["revenue", "donut", "devices", "transactions"]}>
         {/* Revenue Chart */}
         <div className="h-full rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
@@ -266,44 +254,6 @@ export default function Dashboard() {
           <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1">
             <span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> {deviceData[0]?.device || "N/A"} flagged as highest volume
           </p>
-        </div>
-
-        {/* Heatmap */}
-        <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
-          <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
-          <CardHeader title="Tickets per slot" badge={
-            <span className="text-[11px] text-muted-foreground">Last 7 days</span>
-          } />
-          <div className="mt-3 overflow-x-auto">
-            <div className="min-w-[260px]">
-              <div className="grid mb-1" style={{ gridTemplateColumns: "32px repeat(7, 1fr)" }}>
-                <div />
-                {DAYS.map((d) => (
-                  <div key={d} className="text-center text-[10px] font-medium text-muted-foreground">{d}</div>
-                ))}
-              </div>
-              {SLOTS.map((slot, si) => (
-                <div key={slot} className="grid mb-1" style={{ gridTemplateColumns: "32px repeat(7, 1fr)" }}>
-                  <div className="text-[10px] text-muted-foreground flex items-center">{slot}</div>
-                  {DAYS.map((_, di) => (
-                    <div key={di} className="flex items-center justify-center p-0.5">
-                      <div
-                        className={`h-6 w-full rounded-md ${heatColor(HEATMAP[di][si])}`}
-                        title={`${HEATMAP[di][si]} tickets`}
-                      />
-                    </div>
-                  ))}
-                </div>
-              ))}
-              <div className="mt-2 flex items-center gap-1.5 text-[10px] text-muted-foreground">
-                <span>0</span>
-                {["bg-slate-100","bg-[#C7D2FE]","bg-[#818CF8]","bg-[#4361EE]","bg-[#3347D6]"].map((c,i)=>(
-                  <span key={i} className={`h-3 w-5 rounded ${c}`} />
-                ))}
-                <span>12+</span>
-              </div>
-            </div>
-          </div>
         </div>
 
         {/* Transactions */}
@@ -422,11 +372,22 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Inventory Overview — bridges the CRM dashboard into Inventory Management.
-          Hidden entirely for roles without inventory access (e.g. Technician, Reception). */}
-      <Can permission="manage_inventory">
-        <InventoryOverview />
-      </Can>
+      {/* Recent Activity — centralized audit trail (latest entries only) */}
+      <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
+        <div className="flex items-center justify-between gap-3 p-5 sm:px-6">
+          <div>
+            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Activity</p>
+            <h3 className="font-display mt-0.5 text-base font-bold">Audit trail across every module</h3>
+          </div>
+          <Link href="/activity" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">
+            View all activities <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        </div>
+        <div className="max-h-[420px] overflow-auto px-3 pb-3 sm:px-4">
+          <ActivityTimeline entries={activities.slice(0, 15)} onSelect={setSelectedActivity} />
+        </div>
+      </div>
+      <ActivityDetailDrawer entry={selectedActivity} onClose={() => setSelectedActivity(null)} />
 
       {/* Row 4: Orders status + To-Do */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
