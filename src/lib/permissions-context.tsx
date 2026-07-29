@@ -501,8 +501,17 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   }, [apiFetch, refreshTeamFromDb]);
 
   /* Self-service profile update — works for every signed-in user (not just
-     admins). Applies an optimistic local change, then persists via the
-     non-privileged /api/profile route in Supabase mode. */
+     admins). Applies an optimistic local change, then persists.
+
+     Persistence strategy (Supabase mode):
+       1) Write the user's OWN staff row straight from the browser under RLS.
+          This needs no server-only service-role key, so profile saving works
+          even if that key isn't configured on the deployment. (Admins are
+          allowed by the staff_write policy; other staff by staff_self_update.)
+       2) If that direct write is blocked (policy not applied yet), fall back to
+          the privileged /api/profile route (service-role key).
+     Either way the DB is the source of truth, so the change survives refresh
+     and logout/login. */
   const updateProfile = useCallback(async (
     updates: { name?: string; phone?: string; avatarUrl?: string | null }
   ): Promise<{ ok: boolean; reason?: string }> => {
@@ -517,16 +526,29 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       if (updates.avatarUrl !== undefined) next.avatarUrl = updates.avatarUrl ?? undefined;
       return next;
     }));
-    if (isSupabaseConfigured) {
+
+    if (isSupabaseConfigured && supabase) {
+      // 1) Direct, RLS-protected write of the caller's own row.
+      const payload: Record<string, unknown> = {};
+      if (updates.name !== undefined) payload.name = updates.name;
+      if (updates.phone !== undefined) payload.phone = updates.phone || null;
+      if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl ?? null;
+
+      const direct = await supabase.from("staff").update(payload).eq("id", id).select("*").maybeSingle();
+      if (!direct.error && direct.data) {
+        const saved = rowToStaff(direct.data as StaffRow);
+        setTeam((prev) => prev.map((m) => (m.id === id ? saved : m)));
+        return { ok: true };
+      }
+
+      // 2) Fall back to the privileged server route.
       const res = await apiFetch("/api/profile", { method: "PATCH", body: JSON.stringify(updates) });
       if (!res.ok || !res.json?.ok) {
-        // Write didn't land — discard the optimistic change so the form reflects
+        // Nothing persisted — discard the optimistic change so the form shows
         // the real DB state instead of falsely appearing saved until a refresh.
         await refreshTeamFromDb();
         return { ok: false, reason: res.json?.reason ?? (res.status === 401 ? "unauthorized" : "server_error") };
       }
-      // Trust the row the server returned (authoritative), then reconcile the
-      // rest of the team in the background.
       const saved = res.json.member as TeamMember | undefined;
       if (saved) setTeam((prev) => prev.map((m) => (m.id === saved.id ? saved : m)));
       await refreshTeamFromDb();

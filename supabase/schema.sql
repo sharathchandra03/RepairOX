@@ -894,6 +894,49 @@ create policy staff_write on public.staff
   using (public.is_admin() and (organization_id = public.auth_org_id() or organization_id is null))
   with check (public.is_admin());
 
+-- ── Self-service: a signed-in user may update THEIR OWN staff row ────────────
+--   Lets every user save their own profile (name / phone / avatar) directly
+--   from the browser under RLS — no privileged server route or service-role
+--   key required. A guard trigger blocks non-admins from changing any
+--   sensitive column (role, salary, status, org/branch, login, email), so this
+--   can never be used to self-escalate. Combined with staff_write (OR-ed by
+--   Postgres), admins keep full management access.
+create or replace function public.staff_guard_self_update()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  -- Trusted contexts bypass the column guard: admins managing staff, and the
+  -- service-role key (no auth.uid(); used by the admin API routes + seed).
+  if public.is_admin() or auth.uid() is null then
+    return NEW;
+  end if;
+  if NEW.role_id         is distinct from OLD.role_id
+  or NEW.salary_type     is distinct from OLD.salary_type
+  or NEW.salary_amount   is distinct from OLD.salary_amount
+  or NEW.status          is distinct from OLD.status
+  or NEW.login_enabled   is distinct from OLD.login_enabled
+  or NEW.organization_id is distinct from OLD.organization_id
+  or NEW.branch_id       is distinct from OLD.branch_id
+  or NEW.branch          is distinct from OLD.branch
+  or NEW.department      is distinct from OLD.department
+  or NEW.designation     is distinct from OLD.designation
+  or NEW.auth_user_id    is distinct from OLD.auth_user_id
+  or NEW.email           is distinct from OLD.email then
+    raise exception 'Only name, phone and avatar may be changed by the account holder.';
+  end if;
+  return NEW;
+end;
+$$;
+
+drop trigger if exists staff_guard_self on public.staff;
+create trigger staff_guard_self before update on public.staff
+  for each row execute function public.staff_guard_self_update();
+
+drop policy if exists staff_self_update on public.staff;
+create policy staff_self_update on public.staff
+  for update to authenticated
+  using (auth_user_id = auth.uid())
+  with check (auth_user_id = auth.uid());
+
 -- ── Audit log: read requires view_audit_logs; org members may append ─────────
 drop policy if exists audit_read on public.audit_log;
 create policy audit_read on public.audit_log
