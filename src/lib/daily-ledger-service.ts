@@ -659,6 +659,45 @@ export function getTransactionById(id: string): LedgerTransaction | undefined {
   return transactions.find((t) => t.id === id);
 }
 
+/** Find the transaction linked to a given expense (by the expense's internal id). */
+export function getTransactionByExpenseId(expenseId: string): LedgerTransaction | undefined {
+  ensureHydrated();
+  return transactions.find((t) => t.linkedExpenseId === expenseId);
+}
+
+/** Update an existing transaction — used when its source record (e.g. an
+ *  expense) is edited. Recomputes the colour code and appends an audit entry. */
+export function updateTransaction(
+  id: string,
+  patch: Partial<Omit<LedgerTransaction, "id" | "auditHistory">>,
+  by = "System"
+): LedgerTransaction | null {
+  ensureHydrated();
+  if (!transactions.some((t) => t.id === id)) return null;
+  transactions = transactions.map((t) => {
+    if (t.id !== id) return t;
+    const merged: LedgerTransaction = { ...t, ...patch };
+    merged.colorCode = deriveColorCode(merged.module, merged.direction);
+    merged.auditHistory = [...t.auditHistory, { action: "Updated", by, at: new Date().toISOString() }];
+    return merged;
+  });
+  persist();
+  emit();
+  return transactions.find((t) => t.id === id) ?? null;
+}
+
+/** Remove a transaction — used when its source record (e.g. an expense) is
+ *  cancelled, so the day's cash/bank position stays correct. */
+export function removeTransaction(id: string): boolean {
+  ensureHydrated();
+  const before = transactions.length;
+  transactions = transactions.filter((t) => t.id !== id);
+  if (transactions.length === before) return false;
+  persist();
+  emit();
+  return true;
+}
+
 /* ─── React Hook (useSyncExternalStore) ──────────────────────────── */
 
 /** Stable snapshot reference — only replaced when data changes (via emit) */
@@ -696,8 +735,11 @@ export function useDailyLedger() {
     getDailySummary,
     getTransactionsForDate,
     getTransactionById,
+    getTransactionByExpenseId,
     getSession,
     recordTransaction,
+    updateTransaction,
+    removeTransaction,
     closeDay,
     reopenDay,
   };

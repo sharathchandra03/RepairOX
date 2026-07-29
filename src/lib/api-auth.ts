@@ -24,7 +24,15 @@ export async function requireAdmin(req: Request): Promise<AdminGuard> {
   const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7) : "";
   if (!token) return { ok: false, status: 401, error: "Not signed in." };
 
-  const admin = createAdminClient();
+  let admin: SupabaseClient;
+  try {
+    admin = createAdminClient();
+  } catch (e: any) {
+    // Almost always a missing/invalid SUPABASE_SERVICE_ROLE_KEY on the server
+    // (e.g. env var not set in the deployment). Surface it clearly so writes
+    // don't fail silently.
+    return { ok: false, status: 500, error: e?.message ?? "Server not configured: missing service-role key." };
+  }
   const { data, error } = await admin.auth.getUser(token);
   if (error || !data.user) return { ok: false, status: 401, error: "Invalid session." };
 

@@ -519,7 +519,16 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }));
     if (isSupabaseConfigured) {
       const res = await apiFetch("/api/profile", { method: "PATCH", body: JSON.stringify(updates) });
-      if (!res.ok || !res.json?.ok) return { ok: false, reason: res.json?.reason ?? "server_error" };
+      if (!res.ok || !res.json?.ok) {
+        // Write didn't land — discard the optimistic change so the form reflects
+        // the real DB state instead of falsely appearing saved until a refresh.
+        await refreshTeamFromDb();
+        return { ok: false, reason: res.json?.reason ?? (res.status === 401 ? "unauthorized" : "server_error") };
+      }
+      // Trust the row the server returned (authoritative), then reconcile the
+      // rest of the team in the background.
+      const saved = res.json.member as TeamMember | undefined;
+      if (saved) setTeam((prev) => prev.map((m) => (m.id === saved.id ? saved : m)));
       await refreshTeamFromDb();
     }
     return { ok: true };

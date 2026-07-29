@@ -21,6 +21,14 @@ import type { Expense, PaymentMode } from "./expense-store";
 import { linkLedgerEntry } from "./expense-store";
 import { logActivity } from "./activity-log";
 import type { NewLedgerEntry } from "./accounting-service";
+import {
+  recordTransaction,
+  updateTransaction,
+  removeTransaction,
+  getTransactionByExpenseId,
+  type TransactionCategory,
+  type PaymentMode as LedgerPaymentMode,
+} from "./daily-ledger-service";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -77,6 +85,9 @@ export function emitExpenseCreated(
 
   // 2. Link the ledger entry back to the expense record
   linkLedgerEntry(expense.id, ledgerEntry.id);
+
+  // 2b. Mirror the expense into the Daily Ledger as an outflow.
+  recordExpenseInDailyLedger(expense, actor);
 
   // 3. Log to Activity Trail
   logActivity({
@@ -137,6 +148,29 @@ export function emitExpenseUpdated(
     linkLedgerEntry(updatedExpense.id, newLedgerEntry.id);
   }
 
+  // Keep the Daily Ledger row in sync with the edited expense. If none exists
+  // yet (expense created before this bridge), create it now.
+  const existingTx = getTransactionByExpenseId(updatedExpense.id);
+  if (existingTx) {
+    const { paymentMode, cashOrBank } = toLedgerPayment(updatedExpense.paymentMode);
+    updateTransaction(
+      existingTx.id,
+      {
+        date: updatedExpense.date,
+        referenceId: updatedExpense.expenseId,
+        description: updatedExpense.description,
+        category: toLedgerCategory(updatedExpense.category),
+        paymentMode,
+        cashOrBank,
+        amount: updatedExpense.amount,
+        employee: updatedExpense.employee || actor,
+      },
+      actor
+    );
+  } else {
+    recordExpenseInDailyLedger(updatedExpense, actor);
+  }
+
   // Build field-level change diffs
   const changes: { field: string; from?: string; to?: string }[] = [];
   if (amountChanged) changes.push({ field: "Amount", from: formatAmount(previousExpense.amount), to: formatAmount(updatedExpense.amount) });
@@ -178,6 +212,10 @@ export function emitExpenseCancelled(
     accounting.reverseEntry(expense.ledgerEntryId);
   }
 
+  // 1b. Remove the mirrored Daily Ledger outflow so the day balance is correct.
+  const ledgerTx = getTransactionByExpenseId(expense.id);
+  if (ledgerTx) removeTransaction(ledgerTx.id);
+
   // 2. Log to Activity Trail with reason
   logActivity({
     module: "Expense",
@@ -194,6 +232,57 @@ export function emitExpenseCancelled(
       "Reason": reason,
       "Ledger Entry Reversed": expense.ledgerEntryId || "N/A",
     },
+  });
+}
+
+/* ─── Daily Ledger bridge ────────────────────────────────────────────
+   Expenses must also show up in the Daily Ledger (the per-day cash/bank
+   book at /accounts/ledger). The Daily Ledger is a separate store from the
+   accounting ledger above, so we mirror every expense into it here — this is
+   the single coordination point, so the UI never has to know about either. */
+
+/** Expense payment mode → Daily Ledger payment mode + which balance it hits. */
+function toLedgerPayment(mode: PaymentMode): { paymentMode: LedgerPaymentMode; cashOrBank: "Cash" | "Bank" } {
+  switch (mode) {
+    case "cash": return { paymentMode: "Cash", cashOrBank: "Cash" };
+    case "upi": return { paymentMode: "UPI", cashOrBank: "Bank" };
+    case "bank_transfer": return { paymentMode: "Bank", cashOrBank: "Bank" };
+    case "card": return { paymentMode: "Card", cashOrBank: "Bank" };
+    case "cheque": return { paymentMode: "Cheque", cashOrBank: "Bank" };
+    case "wallet": return { paymentMode: "UPI", cashOrBank: "Bank" };
+    default: return { paymentMode: "Cash", cashOrBank: "Cash" };
+  }
+}
+
+/** Free-form expense category → the Daily Ledger's fixed category set. */
+function toLedgerCategory(category: string): TransactionCategory {
+  const c = category.toLowerCase();
+  if (c.includes("rent")) return "Rent Expense";
+  if (c.includes("salary") || c.includes("wage")) return "Salary Expense";
+  if (c.includes("utilit")) return "Utilities";
+  if (c.includes("office") || c.includes("supplies") || c.includes("stationery")) return "Office Supplies";
+  if (c.includes("market")) return "Marketing";
+  if (c.includes("fuel") || c.includes("travel")) return "Fuel & Travel";
+  if (c.includes("courier") || c.includes("ship")) return "Courier & Shipping";
+  return "Miscellaneous";
+}
+
+/** Record an expense as an outflow in the Daily Ledger. */
+function recordExpenseInDailyLedger(expense: Expense, actor: string): void {
+  const { paymentMode, cashOrBank } = toLedgerPayment(expense.paymentMode);
+  recordTransaction({
+    date: expense.date,
+    module: "Expense",
+    referenceId: expense.expenseId,
+    description: expense.description,
+    category: toLedgerCategory(expense.category),
+    paymentMode,
+    cashOrBank,
+    direction: "outflow",
+    amount: expense.amount,
+    employee: expense.employee || actor,
+    createdBy: actor,
+    linkedExpenseId: expense.id,
   });
 }
 

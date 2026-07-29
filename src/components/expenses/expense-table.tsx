@@ -280,7 +280,7 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
       {/* Table */}
       <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
         {/* Header */}
-        <div className="hidden sm:grid sm:grid-cols-[100px_1fr_120px_100px_100px_80px] gap-2 px-5 py-2.5 border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="hidden sm:grid sm:grid-cols-[130px_minmax(190px,1.4fr)_minmax(150px,1fr)_120px_120px_100px] gap-3 px-5 py-2.5 border-b border-border bg-muted/40 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
           <div>ID</div>
           <div>Description</div>
           <div>Category</div>
@@ -296,11 +296,11 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
               key={expense.id}
               type="button"
               onClick={() => onRowClick(expense)}
-              className="w-full text-left sm:grid sm:grid-cols-[100px_1fr_120px_100px_100px_80px] gap-2 px-5 py-3.5 hover:bg-muted/30 transition items-center"
+              className="w-full text-left sm:grid sm:grid-cols-[130px_minmax(190px,1.4fr)_minmax(150px,1fr)_120px_120px_100px] gap-3 px-5 py-3.5 hover:bg-muted/30 transition items-center"
             >
               {/* ID + Date */}
-              <div>
-                <p className="text-[11px] font-semibold text-[#4361EE] tabular-nums">{expense.expenseId}</p>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold text-[#4361EE] tabular-nums whitespace-nowrap">{expense.expenseId}</p>
                 <p className="text-[10px] text-muted-foreground">
                   {new Date(expense.date).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}
                 </p>
@@ -316,28 +316,28 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
               </div>
 
               {/* Category */}
-              <div className="hidden sm:block">
-                <span className="inline-flex items-center gap-1 text-[11px] font-medium text-zinc-600">
-                  <Tag className="h-3 w-3 text-zinc-400" />
+              <div className="hidden sm:block min-w-0">
+                <span className="inline-flex max-w-full items-center gap-1 text-[11px] font-medium text-zinc-600">
+                  <Tag className="h-3 w-3 shrink-0 text-zinc-400" />
                   <span className="truncate">{expense.category}</span>
                 </span>
               </div>
 
               {/* Amount */}
               <div className="hidden sm:block text-right">
-                <span className="text-sm font-bold tabular-nums">{formatINR(expense.amount)}</span>
+                <span className="text-sm font-bold tabular-nums whitespace-nowrap">{formatINR(expense.amount)}</span>
               </div>
 
               {/* Payment Mode */}
               <div className="hidden sm:flex sm:justify-center">
-                <Badge className={cn("text-[9px] px-1.5", PAYMENT_TONE[expense.paymentMode])}>
+                <Badge className={cn("text-[9px] px-1.5 whitespace-nowrap", PAYMENT_TONE[expense.paymentMode])}>
                   {PAYMENT_MODE_LABELS[expense.paymentMode]}
                 </Badge>
               </div>
 
               {/* Status */}
               <div className="hidden sm:flex sm:justify-center">
-                <Badge className={cn("text-[9px] px-1.5", STATUS_TONE[expense.status])}>
+                <Badge className={cn("text-[9px] px-1.5 whitespace-nowrap", STATUS_TONE[expense.status])}>
                   {expense.status === "active" ? "Active" : "Cancelled"}
                 </Badge>
               </div>
