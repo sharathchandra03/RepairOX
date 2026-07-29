@@ -13,7 +13,7 @@ import {
 import { Logo } from "@/components/ui/logo";
 import { InfoModal, type ModuleFeature } from "@/components/common/info-modal";
 import { cn } from "@/lib/utils";
-import { CURRENT_USER, type WorkspaceId } from "@/lib/permissions";
+import { WORKSPACES, type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 
 type Accent = "violet" | "rose" | "emerald";
@@ -93,19 +93,28 @@ const WORKSPACE_CARDS: Record<WorkspaceId, WorkspaceCardDef> = {
 export default function WorkspacesPage() {
   const router = useRouter();
   const [activeInfo, setActiveInfo] = useState<WorkspaceCardDef | null>(null);
-  const { allowedWorkspaces: allowed, role } = usePermissions();
+  const { allowedWorkspaces: allowed, role, currentUser, authReady } = usePermissions();
 
-  // Users with access to a single workspace never see this screen — send them straight in.
+  // Permission-driven landing:
+  //   • not signed in           → back to login
+  //   • access to all modules    → stay here (show the module chooser)
+  //   • access to some / one      → skip this screen, straight to their module
   useEffect(() => {
-    if (allowed.length === 1) {
+    if (!authReady) return;
+    if (!currentUser) {
+      router.replace("/login");
+      return;
+    }
+    if (allowed.length > 0 && allowed.length < WORKSPACES.length) {
       router.replace(allowed[0].homeHref ?? "/dashboard");
     }
-  }, [allowed, router]);
+  }, [authReady, currentUser, allowed, router]);
 
   const cards = allowed.map((w) => WORKSPACE_CARDS[w.id]);
 
-  if (allowed.length <= 1) {
-    // brief blank frame while the redirect above kicks in
+  // Only render the chooser once we know the user is signed in AND can reach
+  // every module; otherwise show a brief blank frame while redirecting.
+  if (!authReady || !currentUser || allowed.length < WORKSPACES.length) {
     return <div className="min-h-screen bg-[hsl(228,30%,95%)]" />;
   }
 
@@ -129,7 +138,7 @@ export default function WorkspacesPage() {
       {/* Title */}
       <section className="relative mx-auto max-w-7xl px-4 sm:px-6">
         <p className="text-[12px] font-semibold uppercase tracking-wider text-brand-700">
-          Welcome back, {CURRENT_USER.name.split(" ")[0]} · {role.label}
+          Welcome back, {currentUser.name.split(" ")[0]} · {role.label}
         </p>
         <h1 className="font-display mt-2 text-3xl font-extrabold tracking-tight md:text-4xl">
           Choose a module to <span className="brand-gradient-text">get started</span>

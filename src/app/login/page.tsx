@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Logo } from "@/components/ui/logo";
 import { Novatrix } from "@/components/ui/novatrix-background";
-import { currentAllowedWorkspaces } from "@/lib/permissions";
+import { usePermissions } from "@/lib/permissions-context";
 
 const FEATURES = [
   { icon: FileText, title: "Ticket Management", desc: "Track and manage every repair job easily" },
@@ -21,19 +21,37 @@ const FEATURES = [
   { icon: Users, title: "Lead Management", desc: "Capture leads, follow-ups & conversion" },
 ];
 
+const LOGIN_ERRORS: Record<string, string> = {
+  not_found: "No account found with that email.",
+  bad_password: "Incorrect password. Please try again.",
+  login_disabled: "This account doesn't have login access. Contact your administrator.",
+  suspended: "This account is suspended. Contact your administrator.",
+  invited: "This account isn't active yet. Contact your administrator.",
+};
+
 export default function LoginPage() {
   const router = useRouter();
+  const { login } = usePermissions();
   const [show, setShow] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     setLoading(true);
-    // The backend returns the signed-in user's role and allowed workspaces.
-    // Users never choose their own role — we just route based on what they're permitted to see.
-    const allowed = currentAllowedWorkspaces();
-    const dest = allowed.length === 1 ? allowed[0].homeHref : "/workspaces";
-    setTimeout(() => router.push(dest), 700);
+    // Authenticate against the central staff directory. The signed-in user's
+    // role decides where they land — users never choose their own role, and
+    // the routing is fully permission-driven (module selection vs. dashboard).
+    const result = await login(email, password);
+    if (!result.ok) {
+      setLoading(false);
+      setError(LOGIN_ERRORS[result.reason] ?? "Unable to sign in.");
+      return;
+    }
+    router.push(result.landingHref);
   }
 
   return (
@@ -154,6 +172,8 @@ export default function LoginPage() {
                   id="email"
                   type="email"
                   required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
                   placeholder="you@company.com"
                   iconLeft={<Mail className="h-4 w-4" />}
                 />
@@ -167,6 +187,8 @@ export default function LoginPage() {
                   id="password"
                   type={show ? "text" : "password"}
                   required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••"
                   iconLeft={<Lock className="h-4 w-4" />}
                   iconRight={
@@ -176,6 +198,13 @@ export default function LoginPage() {
                   }
                 />
               </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-[12.5px] font-medium text-rose-700">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                  {error}
+                </div>
+              )}
 
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
                 <input id="remember" type="checkbox" className="h-3.5 w-3.5 rounded border-border text-brand-600 focus:ring-brand-400" />
@@ -204,6 +233,10 @@ export default function LoginPage() {
               <p className="pt-2 text-center text-sm text-muted-foreground">
                 Don&apos;t have an account?{" "}
                 <Link href="#" className="font-semibold text-brand-700 hover:underline">Sign Up</Link>
+              </p>
+
+              <p className="text-center text-[11px] text-muted-foreground/80">
+                Demo owner login · <span className="font-medium text-zinc-600">abc@gmail.com</span> / <span className="font-medium text-zinc-600">repairox123</span>
               </p>
             </form>
           </div>

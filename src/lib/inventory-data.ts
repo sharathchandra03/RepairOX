@@ -116,43 +116,8 @@ function seeded(i: number) {
   return x - Math.floor(x);
 }
 
-export const inventoryItems: InventoryItem[] = NAMES.map(([name, category, type, mode], i) => {
-  const r = seeded(i + 1);
-  const r2 = seeded(i + 50);
-  const isService = type === "Service";
-  const base = 400 + Math.round(r * 18000);
-  const min = isService ? 0 : 5 + Math.round(r2 * 10);
-  const max = isService ? 0 : min + 40 + Math.round(r * 80);
-  // engineer a spread of stock states for realistic dashboards
-  const buckets = [-3, 0, Math.round(min * 0.6), Math.round(min * 1.2), Math.round((min + max) / 2), Math.round(max * 0.95), Math.round(max * 1.3)];
-  const currentStock = isService ? 0 : buckets[i % buckets.length];
-  const regBuy = Math.round(base * 0.62);
-  return {
-    id: `SKU-${(1024 + i * 7).toString().padStart(4, "0")}`,
-    name,
-    category,
-    type,
-    mode,
-    uom: isService ? "Hour" : UOMS[i % 5],
-    store: STORES[1 + (i % (STORES.length - 1))],
-    active: i % 11 !== 0,
-    currentStock,
-    defaultPrice: base,
-    regularBuyingPrice: regBuy,
-    wholesaleBuyingPrice: Math.round(regBuy * 0.92),
-    regularSellingPrice: Math.round(base * 1.08),
-    mrp: Math.round(base * 1.25),
-    dealerPrice: Math.round(base * 0.97),
-    distributorPrice: Math.round(base * 0.9),
-    hsnCode: isService ? "998713" : `8517${(70 + (i % 9))}`,
-    tax: isService ? 18 : [12, 18, 28][i % 3],
-    minStock: min,
-    maxStock: max,
-    reservedStock: 0,
-    soldUnits: Math.round(r * 240),
-    purchasedUnits: Math.round(r2 * 300),
-  };
-});
+// Real data lives in Supabase (store `inventory` collection). No seed items.
+export const inventoryItems: InventoryItem[] = [];
 
 export function itemHealth(it: InventoryItem): StockHealth {
   return classifyStock(it.currentStock, it.minStock, it.maxStock);
@@ -215,24 +180,7 @@ export type Approval = {
   amount: number;
 };
 
-const APPR_USERS = ["Anand", "Vikas", "Pooja", "Shubham", "Ravi", "Shop Owner"];
-export const approvals: Approval[] = Array.from({ length: 14 }).map((_, i) => {
-  const r = seeded(i + 7);
-  const status: ApprovalStatus = i % 3 === 0 ? "pending" : i % 3 === 1 ? "approved" : "rejected";
-  return {
-    id: `APR-${(401 + i).toString()}`,
-    docType: (["Purchase", "Stock Transfer", "Adjustment", "Write-off", "Return"] as const)[i % 5],
-    docNumber: `DOC-${(2200 + i * 3).toString()}`,
-    action: (["Create", "Update", "Delete"] as const)[i % 3],
-    status,
-    createdBy: APPR_USERS[i % APPR_USERS.length],
-    actionBy: status === "pending" ? "—" : APPR_USERS[(i + 2) % APPR_USERS.length],
-    actionDate: status === "pending" ? "—" : `${10 + (i % 18)}/01/2026`,
-    barcodeAdded: i % 2 === 0,
-    items: 1 + Math.round(r * 12),
-    amount: 2000 + Math.round(r * 60000),
-  };
-});
+export const approvals: Approval[] = [];
 
 /* ── Stock Movement ───────────────────────────────────────────────────── */
 export type MovementType = "Transfer" | "Inward" | "Outward" | "Adjustment" | "Return";
@@ -261,23 +209,7 @@ export type StockMovement = {
   status: MovementStatus;
 };
 
-export const stockMovements: StockMovement[] = Array.from({ length: 16 }).map((_, i) => {
-  const r = seeded(i + 19);
-  const type = (["Transfer", "Inward", "Outward", "Adjustment", "Return"] as const)[i % 5];
-  const status = (["completed", "in-transit", "draft", "cancelled"] as const)[i % 4];
-  const from = type === "Inward" ? "Supplier" : STORES[1 + (i % (STORES.length - 1))];
-  const to = type === "Outward" ? "Customer" : STORES[1 + ((i + 2) % (STORES.length - 1))];
-  return {
-    docNumber: `MOV-${(7100 + i * 4).toString()}`,
-    fromStore: from,
-    toStore: to,
-    items: 1 + Math.round(r * 22),
-    date: `${5 + (i % 22)}/01/2026`,
-    user: APPR_USERS[i % APPR_USERS.length],
-    type,
-    status,
-  };
-});
+export const stockMovements: StockMovement[] = [];
 
 /* ── Barcode register ─────────────────────────────────────────────────── */
 export type BarcodeStatus = "active" | "consumed" | "expired" | "returned";
@@ -313,46 +245,13 @@ export type BarcodeRow = {
   status: BarcodeStatus;
 };
 
-export const barcodes: BarcodeRow[] = inventoryItems.slice(0, 12).map((it, i) => {
-  const r = seeded(i + 31);
-  const qtyOut = 2 + Math.round(r * 14);
-  const ret = i % 4 === 0 ? Math.round(r * 3) : 0;
-  return {
-    itemId: it.id,
-    itemName: it.name,
-    qtyOut,
-    balanceQty: Math.max(it.currentStock - qtyOut, 0),
-    returnQty: ret,
-    createdBy: APPR_USERS[i % APPR_USERS.length],
-    creationDate: `${4 + (i % 20)}/01/2026`,
-    mfgDate: `${1 + (i % 12)}/2025`,
-    expiryDate: `${1 + (i % 12)}/2027`,
-    info1: it.category,
-    info2: it.uom,
-    fromStore: STORES[1 + (i % (STORES.length - 1))],
-    toStore: STORES[1 + ((i + 1) % (STORES.length - 1))],
-    lastModifiedBy: APPR_USERS[(i + 1) % APPR_USERS.length],
-    lastModifiedDate: `${6 + (i % 18)}/01/2026`,
-    status: (["active", "consumed", "expired", "returned"] as const)[i % 4],
-  };
-});
+export const barcodes: BarcodeRow[] = [];
 
 /* ── Recent inventory activity (dashboard feed) ───────────────────────── */
 export type ActivityKind = "inward" | "outward" | "adjust" | "approval" | "alert";
-export const recentActivity: { id: number; kind: ActivityKind; title: string; meta: string; time: string }[] = [
-  { id: 1, kind: "inward", title: "32 units received", meta: "iPhone 15 Pro OLED · Main Store", time: "12m ago" },
-  { id: 2, kind: "alert", title: "Low stock alert", meta: "Pixel 9 Type-C Flex hit reorder level", time: "48m ago" },
-  { id: 3, kind: "outward", title: "8 units issued", meta: "Service Counter · Ticket T-1837", time: "1h ago" },
-  { id: 4, kind: "approval", title: "Purchase approved", meta: "DOC-2206 by Shop Owner", time: "2h ago" },
-  { id: 5, kind: "adjust", title: "Stock adjusted", meta: "−3 Galaxy A55 Charging Port", time: "3h ago" },
-  { id: 6, kind: "inward", title: "Transfer completed", meta: "Warehouse A → Branch Andheri", time: "5h ago" },
-];
+export const recentActivity: { id: number; kind: ActivityKind; title: string; meta: string; time: string }[] = [];
 
 /* ── Smart recommendations (dashboard) ────────────────────────────────── */
-export const recommendations: { id: number; tone: "danger" | "warning" | "info"; title: string; detail: string }[] = [
-  { id: 1, tone: "danger", title: "Reorder 5 critical SKUs", detail: "Below minimum level — est. ₹84,000 purchase order." },
-  { id: 2, tone: "warning", title: "Rebalance excess stock", detail: "3 SKUs overstocked at Warehouse A vs demand at Service Counter." },
-  { id: 3, tone: "info", title: "Review 4 pending approvals", detail: "2 purchases waiting since yesterday." },
-];
+export const recommendations: { id: number; tone: "danger" | "warning" | "info"; title: string; detail: string }[] = [];
 
 export const LAST_UPDATED = "Today, 09:42 AM";

@@ -1,3 +1,21 @@
 "use client";
-import { SettingsPlaceholder } from "@/components/settings/settings-placeholder";
-export default function Page() { return <SettingsPlaceholder breadcrumbs={[{ label: "Employees", href: "/settings/users" }, { label: "Security" }]} title="Security" description="Password policies, 2FA and access control settings." />; }
+
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+
+/** Employee access & security controls moved out of Settings into the
+ *  dedicated Administration > Roles & Permissions workspace. This legacy
+ *  route just forwards there. */
+export default function EmployeeSecurityRedirectPage() {
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace("/roles-permissions");
+  }, [router]);
+
+  return (
+    <div className="flex items-center justify-center min-h-[40vh]">
+      <div className="h-6 w-6 rounded-full border-2 border-[#4361EE] border-r-transparent animate-spin" />
+    </div>
+  );
+}

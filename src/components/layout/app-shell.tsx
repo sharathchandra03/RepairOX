@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { Sidebar, MobileSidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { motion } from "framer-motion";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { navGroups } from "@/lib/mock-data";
+import { expandableNavGroups } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 import { PreviewBanner } from "@/components/common/preview-banner";
@@ -21,15 +22,31 @@ function workspaceForPath(pathname: string): WorkspaceId | null {
       }
     }
   }
+  // Also check expandable nav groups (Employees, Accounts sub-pages)
+  const expandEntries = Object.entries(expandableNavGroups) as [WorkspaceId, { children: { href: string }[] }[]][];
+  for (const [id, groups] of expandEntries) {
+    for (const g of groups) {
+      if (g.children.some((child) => pathname === child.href || pathname.startsWith(child.href + "/"))) {
+        return id;
+      }
+    }
+  }
   return null;
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState(false);
-  const { allowedWorkspaces: allowed } = usePermissions();
+  const { allowedWorkspaces: allowed, currentUser, authReady } = usePermissions();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(allowed[0]?.id ?? "shop");
   const pathname = usePathname();
+  const router = useRouter();
+
+  // Route guard — once the session is restored, bounce anyone who isn't
+  // signed in back to the login screen. Access is centrally controlled.
+  useEffect(() => {
+    if (authReady && !currentUser) router.replace("/login");
+  }, [authReady, currentUser, router]);
 
   // Keep the active workspace in sync with the current route (e.g. deep links, back/forward nav)
   useEffect(() => {
@@ -44,6 +61,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setActiveWorkspace(allowed[0].id);
     }
   }, [allowed, activeWorkspace]);
+
+  // Hold rendering until we know who (if anyone) is signed in — avoids a flash
+  // of app content before the guard above redirects an unauthenticated user.
+  if (!authReady || !currentUser) {
+    return <div className="h-screen bg-[hsl(var(--background))]" />;
+  }
 
   return (
     <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]">

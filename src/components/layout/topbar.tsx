@@ -2,7 +2,7 @@
 
 import {
   Search, Bell, HelpCircle, MoreHorizontal, ChevronDown, Menu,
-  ShoppingBag, Check, LayoutGrid,
+  ShoppingBag, Check, LayoutGrid, LogOut,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,14 @@ export function Topbar({
   const [focused, setFocused] = useState(false);
   const router = useRouter();
   const meta = WORKSPACE_MAP[activeWorkspace];
-  const { allowedWorkspaces: allowed, role, isPreviewing } = usePermissions();
+  const { allowedWorkspaces: allowed, role, isPreviewing, currentUser, logout } = usePermissions();
+  const displayName = currentUser?.name ?? CURRENT_USER.name;
+  const displayEmail = currentUser?.email ?? CURRENT_USER.email;
+
+  function handleLogout() {
+    logout();
+    router.push("/login");
+  }
 
   function switchWorkspace(id: WorkspaceId) {
     setActiveWorkspace(id);
@@ -153,20 +160,46 @@ export function Topbar({
           </button>
         </div>
 
-        {/* Profile chip — shows the previewed role's label while previewing, without touching the real admin identity */}
-        <button
-          className={cn(
-            "hidden md:flex items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
-            isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card hover:bg-muted"
+        {/* Profile menu — shows the previewed role's label while previewing,
+            without touching the real admin identity. Opens account actions. */}
+        <Dropdown
+          align="right"
+          width="w-60"
+          trigger={({ open, toggle }) => (
+            <button
+              onClick={toggle}
+              className={cn(
+                "hidden md:flex items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
+                isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card hover:bg-muted"
+              )}
+            >
+              <Avatar name={displayName} src={currentUser?.avatarUrl} size={30} />
+              <div className="text-left leading-tight">
+                <p className="text-[12px] font-semibold text-zinc-800">{displayName}</p>
+                <p className="text-[10px] text-muted-foreground">{role.label}</p>
+              </div>
+              <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", open && "rotate-180")} />
+            </button>
           )}
         >
-          <Avatar name={CURRENT_USER.name} size={30} />
-          <div className="text-left leading-tight">
-            <p className="text-[12px] font-semibold text-zinc-800">{CURRENT_USER.name}</p>
-            <p className="text-[10px] text-muted-foreground">{role.label}</p>
-          </div>
-          <ChevronDown className="h-3 w-3 text-muted-foreground" />
-        </button>
+          {(close) => (
+            <>
+              <div className="px-2.5 py-2">
+                <p className="truncate text-[13px] font-semibold text-zinc-800">{displayName}</p>
+                <p className="truncate text-[11px] text-muted-foreground">{displayEmail}</p>
+              </div>
+              <div className="my-1 h-px bg-border" />
+              {allowed.length > 1 && (
+                <MenuItem icon={LayoutGrid} onClick={() => { router.push("/workspaces"); close(); }}>
+                  All modules
+                </MenuItem>
+              )}
+              <MenuItem icon={LogOut} danger onClick={() => { handleLogout(); close(); }}>
+                Log out
+              </MenuItem>
+            </>
+          )}
+        </Dropdown>
       </div>
     </header>
   );

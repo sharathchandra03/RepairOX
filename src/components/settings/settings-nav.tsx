@@ -34,14 +34,6 @@ const SETTINGS_NAV: NavSection[] = [
     ],
   },
   {
-    id: "employees", label: "Employees", icon: Users,
-    children: [
-      { label: "Manage Employees", href: "/settings/users" },
-      { label: "Roles & Permissions", href: "/settings/permissions" },
-      { label: "Security", href: "/settings/employees/security" },
-    ],
-  },
-  {
     id: "financial", label: "Financial", icon: CreditCard,
     children: [
       { label: "Currency", href: "/settings/financial/currency" },

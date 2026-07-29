@@ -1,26 +1,29 @@
 "use client";
 
 /* ──────────────────────────────────────────────────────────────────────────
-   RepairOX — Permission-driven rendering context.
+   RepairOX — Permission-driven rendering + staff/auth context.
 
-   This is the reactive layer on top of `lib/permissions.ts`. The plain
-   exports over there (`ROLES`, `hasPermission`, `currentRole`, etc.) stay
-   untouched and remain the backend-ready source of truth for the *shape* of
-   role/permission data. This file adds the piece a static module can't give
-   us: state that changes at runtime (admin edits + saves a role's grants,
-   then clicks "Preview Current Role") and something every component can
-   subscribe to so the whole tree re-renders instantly — no reload, no
-   second login.
+   Single integration point for the whole access system. It transparently
+   runs in one of two modes:
 
-   Consumers should use `usePermissions()` instead of calling
-   `currentRole()` / `currentAllowedWorkspaces()` directly, so the UI reacts
-   to preview mode and saved permission edits.
+     • Supabase mode  (when NEXT_PUBLIC_SUPABASE_* env vars are present):
+         - real authentication via Supabase Auth
+         - roles / permission grants read from Postgres
+         - staff directory read from Postgres (RLS enforced)
+         - all privileged writes go through server API routes (/api/*)
+
+     • Local mode  (no env vars): the original localStorage prototype, so the
+         app keeps working with zero configuration.
+
+   Every consuming component uses `usePermissions()` and never needs to know
+   which mode is active.
    ────────────────────────────────────────────────────────────────────────── */
 
 import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
@@ -36,8 +39,16 @@ import {
   type WorkspaceId,
 } from "@/lib/permissions";
 import { TEAM_SEED, type TeamMember } from "@/lib/mock-data";
+import {
+  hashPassword,
+  verifyPassword,
+  normalizeEmail,
+  computeLandingHref,
+  type SalaryType,
+} from "@/lib/auth";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { rowToStaff, type StaffRow } from "@/lib/staff-map";
 
-/** Same shape as `RoleDef["permissions"]` — either the full catalogue or an explicit list. */
 export type GrantMap = Record<string, PermissionKey[] | "all">;
 
 function initialGrants(): GrantMap {
@@ -46,22 +57,67 @@ function initialGrants(): GrantMap {
   return map;
 }
 
-/** Turn a free-typed role name into a stable id, e.g. "Store Auditor" -> "store_auditor". */
 function slugify(label: string): string {
   return (
-    label
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, "_")
-      .replace(/^_+|_+$/g, "") || "role"
+    label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "") || "role"
   );
 }
 
-/** Input for creating a brand-new role — an administrator-defined collection
- *  of workspaces + starting permissions. New roles slot in next to the
- *  built-in catalogue everywhere the app reads roles from (permission
- *  matrix, role browser, user invite/edit pickers) with zero extra wiring,
- *  since everything already reads through `usePermissions()`. */
+function nextEmployeeId(team: TeamMember[]): string {
+  let max = 0;
+  for (const m of team) {
+    const match = /^EMP-(\d+)$/.exec(m.id ?? "");
+    if (match) max = Math.max(max, parseInt(match[1], 10));
+  }
+  return `EMP-${String(max + 1).padStart(3, "0")}`;
+}
+
+/* ── Local-mode persistence (only used when Supabase is NOT configured) ───── */
+const ACCESS_KEY = "repairox-access";
+const SESSION_KEY = "repairox-session";
+
+interface PersistedAccess {
+  grants: GrantMap;
+  customRoles: RoleDef[];
+  removedBuiltInRoles: string[];
+  team: TeamMember[];
+}
+
+function migrateTeam(team: TeamMember[]): TeamMember[] {
+  return team.map((m, i) => ({
+    ...m,
+    id: m.id ?? `EMP-${String(i + 1).padStart(3, "0")}`,
+    loginEnabled: m.loginEnabled ?? m.status === "active",
+    status: m.status ?? "active",
+  }));
+}
+
+function loadAccess(): PersistedAccess | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ACCESS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<PersistedAccess>;
+    return {
+      grants: { ...initialGrants(), ...(parsed.grants ?? {}) },
+      customRoles: parsed.customRoles ?? [],
+      removedBuiltInRoles: parsed.removedBuiltInRoles ?? [],
+      team: migrateTeam(parsed.team ?? TEAM_SEED),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function loadSessionEmail(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
 export interface AddRoleInput {
   label: string;
   summary?: string;
@@ -69,88 +125,92 @@ export interface AddRoleInput {
   permissions?: PermissionKey[];
 }
 
-/** Expand a role's grant entry into a concrete Set for fast lookups. */
+export interface AddStaffInput {
+  name: string;
+  phone?: string;
+  email: string;
+  hasLogin: boolean;
+  password?: string;
+  roleId: string;
+  branch: string;
+  salaryType?: SalaryType;
+  salaryAmount?: number;
+  department?: string;
+  designation?: string;
+}
+
+export interface AddStaffResult {
+  ok: boolean;
+  reason?: "duplicate_email" | "missing_password" | "missing_email" | "server_error";
+  member?: TeamMember;
+}
+
+export type LoginResult =
+  | { ok: true; account: TeamMember; landingHref: string }
+  | { ok: false; reason: "not_found" | "bad_password" | "login_disabled" | "suspended" | "invited" };
+
 export function resolveGrantedKeys(grants: GrantMap, roleId: string): Set<PermissionKey> {
   const g = grants[roleId];
   if (!g || g === "all") return new Set(ALL_PERMISSIONS.map((p) => p.key));
   return new Set(g);
 }
 
-/** Same semantics as `hasPermission()` in lib/permissions.ts, but reads the live grant map. */
 export function checkGrantedPermission(grants: GrantMap, roleId: string, key: PermissionKey): boolean {
   const set = resolveGrantedKeys(grants, roleId);
   return set.has(key) || set.has("full_access");
 }
 
-/** Result of attempting to delete a role — lets the UI branch between "just
- *  gone", "N people need to be reassigned first", or a protected role that
- *  can't be removed at all, without throwing. */
 export interface DeleteRoleResult {
   ok: boolean;
   reason?: "platform_owner" | "own_role" | "in_use";
   affectedMembers?: TeamMember[];
 }
 
-/** Result of attempting to delete a team member. */
 export interface DeleteMemberResult {
   ok: boolean;
   reason?: "self";
 }
 
 interface PermissionsContextValue {
-  /** Every role's saved capability grants — what "Save changes" writes to. */
   grants: GrantMap;
-  /** Persist a role's edited permission list (called by the Permissions matrix page). */
   saveGrants: (roleId: string, keys: PermissionKey[]) => void;
 
-  /** Built-in catalogue plus any administrator-created roles — the single
-   *  list every role picker/tab strip/browser should render from. */
   allRoles: RoleDef[];
-  /** Look up any role (built-in or custom) by id. */
   getRoleById: (roleId: string) => RoleDef | undefined;
-  /** True for roles created via "Add Role" (kept for UI that only wants to
-   *  label roles as custom — deletion itself is no longer restricted to
-   *  these; see `deleteRole`). */
   isCustomRole: (roleId: string) => boolean;
-  /** Whether a role can be deleted at all: everything except Platform Owner
-   *  (the one role the spec says always has full access, non-negotiable)
-   *  and whichever role the signed-in administrator is currently using. */
   canDeleteRole: (roleId: string) => boolean;
-  /** Create a new role from the "Add Role" form and return its generated id. */
   addRole: (input: AddRoleInput) => string;
-  /** Remove any role — built-in or custom — except Platform Owner and the
-   *  administrator's own role. Fails with `reason: "in_use"` (and the list
-   *  of who's affected) unless `reassignTo` is given, in which case affected
-   *  members are moved to that role first, then this one is deleted. */
   deleteRole: (roleId: string, reassignTo?: string) => DeleteRoleResult;
 
-  /** Team directory — who has a login, their role, branch and status. */
   team: TeamMember[];
-  /** People currently assigned to a given role (built-in or custom). */
   membersInRole: (roleId: string) => TeamMember[];
-  /** Reassign a single team member to a different role (Users page). */
+  getStaffById: (id: string) => TeamMember | undefined;
   setMemberRole: (email: string, roleId: string) => void;
-  /** Remove a team member entirely. Fails with `reason: "self"` for the
-   *  signed-in administrator's own account — you can't delete yourself. */
   deleteMember: (email: string) => DeleteMemberResult;
 
-  /** The real signed-in administrator's role — never changes while previewing. */
+  addStaff: (input: AddStaffInput) => Promise<AddStaffResult>;
+  updateStaff: (id: string, updates: Partial<TeamMember>) => void;
+  /** Self-service: the signed-in user edits their own name / phone / photo. */
+  updateProfile: (updates: { name?: string; phone?: string; avatarUrl?: string | null }) => Promise<{ ok: boolean; reason?: string }>;
+  resetPassword: (id: string, newPassword: string) => void;
+  setStaffStatus: (id: string, status: TeamMember["status"]) => void;
+  toggleLogin: (id: string, enabled: boolean, password?: string) => void;
+
+  authReady: boolean;
+  currentUser: TeamMember | null;
+  login: (email: string, password: string) => Promise<LoginResult>;
+  logout: () => void;
+  landingForRole: (roleId: string) => string;
+
   adminRoleId: string;
-  /** The role currently driving the rendered UI (adminRoleId, unless a preview is active). */
   activeRoleId: string;
-  /** Resolved role record for `activeRoleId`. */
   role: RoleDef;
-  /** The single check every screen should use: `can("manage_inventory")`, `can("delete")`, etc. */
   can: (key: PermissionKey) => boolean;
-  /** Workspaces the active role may access — drives the sidebar/topbar switcher and `/workspaces`. */
   allowedWorkspaces: WorkspaceDef[];
 
-  /** True while an administrator is previewing a role other than their own. */
   isPreviewing: boolean;
   previewRoleId: string | null;
-  /** Rebuild the entire CRM as the given role would see it, instantly. */
   enterPreview: (roleId: string) => void;
-  /** Restore the administrator's own view. */
   exitPreview: () => void;
 }
 
@@ -159,15 +219,124 @@ const PermissionsContext = createContext<PermissionsContextValue | null>(null);
 export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [grants, setGrants] = useState<GrantMap>(initialGrants);
   const [customRoles, setCustomRoles] = useState<RoleDef[]>([]);
-  // Built-in roles (from lib/permissions.ts) that an administrator deleted.
-  // The static catalogue itself is never mutated — we just filter these ids
-  // out of every list the app renders from `allRoles`.
   const [removedBuiltInRoles, setRemovedBuiltInRoles] = useState<string[]>([]);
   const [team, setTeam] = useState<TeamMember[]>(TEAM_SEED);
   const [previewRoleId, setPreviewRoleId] = useState<string | null>(null);
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
 
-  const adminRoleId = CURRENT_USER.roleId;
-  const activeRoleId = previewRoleId ?? adminRoleId;
+  /* ── Supabase read helpers ── */
+  const refreshTeamFromDb = useCallback(async () => {
+    if (!supabase) return;
+    const { data, error } = await supabase.from("staff").select("*").order("created_at", { ascending: true });
+    if (error || !data) return;
+    setTeam(data.map((r) => rowToStaff(r as StaffRow)));
+  }, []);
+
+  const loadAccessFromDb = useCallback(async () => {
+    if (!supabase) return;
+    const [{ data: dbRoles }, { data: dbGrants }] = await Promise.all([
+      supabase.from("roles").select("*"),
+      supabase.from("role_permissions").select("*"),
+    ]);
+    if (!dbRoles || dbRoles.length === 0) return; // not seeded yet — keep static defaults
+
+    // Grants map from role_permissions ('*' means all).
+    const gmap: GrantMap = {};
+    for (const r of dbRoles) gmap[r.id] = [];
+    for (const g of (dbGrants ?? [])) {
+      if (g.permission_key === "*") gmap[g.role_id] = "all";
+      else if (gmap[g.role_id] !== "all") (gmap[g.role_id] as PermissionKey[]).push(g.permission_key);
+    }
+
+    const builtinIds = new Set(ROLES.map((r) => r.id));
+    const presentIds = new Set(dbRoles.map((r) => r.id));
+    const custom: RoleDef[] = dbRoles
+      .filter((r) => r.is_custom || !builtinIds.has(r.id))
+      .map((r) => ({
+        id: r.id,
+        label: r.label,
+        summary: r.summary ?? "",
+        workspaces: (r.workspaces ?? []) as WorkspaceId[],
+        permissions: gmap[r.id] === "all" ? "all" : ((gmap[r.id] as PermissionKey[]) ?? []),
+      }));
+    const removed = ROLES.filter((r) => !presentIds.has(r.id)).map((r) => r.id);
+
+    setGrants({ ...initialGrants(), ...gmap });
+    setCustomRoles(custom);
+    setRemovedBuiltInRoles(removed);
+  }, []);
+
+  /* ── Authed API helper (browser → server routes) ── */
+  const apiFetch = useCallback(async (path: string, init: RequestInit = {}) => {
+    let token: string | undefined;
+    if (supabase) token = (await supabase.auth.getSession()).data.session?.access_token;
+    const res = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+    let json: any = null;
+    try { json = await res.json(); } catch { /* no body */ }
+    return { ok: res.ok, status: res.status, json };
+  }, []);
+
+  /* ── Hydration ── */
+  useEffect(() => {
+    if (!isSupabaseConfigured || !supabase) {
+      // Local prototype mode.
+      const access = loadAccess();
+      if (access) {
+        setGrants(access.grants);
+        setCustomRoles(access.customRoles);
+        setRemovedBuiltInRoles(access.removedBuiltInRoles);
+        setTeam(access.team);
+      }
+      setCurrentUserEmail(loadSessionEmail());
+      setHydrated(true);
+      return;
+    }
+
+    // Supabase mode.
+    let active = true;
+    (async () => {
+      await loadAccessFromDb();
+      const { data } = await supabase.auth.getSession();
+      const email = data.session?.user?.email ?? null;
+      if (email) {
+        await refreshTeamFromDb();
+        if (active) setCurrentUserEmail(email);
+      }
+      if (active) setHydrated(true);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      const email = session?.user?.email ?? null;
+      setCurrentUserEmail(email);
+      if (email) await refreshTeamFromDb();
+    });
+    return () => { active = false; sub.subscription.unsubscribe(); };
+  }, [loadAccessFromDb, refreshTeamFromDb]);
+
+  // Persist local-mode state only (Supabase mode is authoritative in the DB).
+  useEffect(() => {
+    if (isSupabaseConfigured || !hydrated || typeof window === "undefined") return;
+    try {
+      const payload: PersistedAccess = { grants, customRoles, removedBuiltInRoles, team };
+      localStorage.setItem(ACCESS_KEY, JSON.stringify(payload));
+    } catch { /* ignore */ }
+  }, [grants, customRoles, removedBuiltInRoles, team, hydrated]);
+
+  useEffect(() => {
+    if (isSupabaseConfigured || !hydrated || typeof window === "undefined") return;
+    try {
+      if (currentUserEmail) localStorage.setItem(SESSION_KEY, currentUserEmail);
+      else localStorage.removeItem(SESSION_KEY);
+    } catch { /* ignore */ }
+  }, [currentUserEmail, hydrated]);
 
   const allRoles = useMemo(
     () => [...ROLES, ...customRoles].filter((r) => !removedBuiltInRoles.includes(r.id)),
@@ -175,27 +344,48 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   );
   const roleMap = useMemo(() => Object.fromEntries(allRoles.map((r) => [r.id, r])), [allRoles]);
   const getRoleById = useCallback((roleId: string) => roleMap[roleId], [roleMap]);
+
+  const allowedWorkspacesForRole = useCallback(
+    (roleId: string): WorkspaceDef[] => {
+      const r = roleMap[roleId];
+      if (!r) return [];
+      return WORKSPACES.filter((w) => r.workspaces.includes(w.id));
+    },
+    [roleMap]
+  );
+
   const isCustomRole = useCallback(
     (roleId: string) => customRoles.some((r) => r.id === roleId),
     [customRoles]
   );
+
+  const currentUser = useMemo<TeamMember | null>(() => {
+    if (!currentUserEmail) return null;
+    const norm = normalizeEmail(currentUserEmail);
+    return team.find((m) => normalizeEmail(m.email) === norm) ?? null;
+  }, [currentUserEmail, team]);
+
+  const adminRoleId = currentUser?.roleId ?? CURRENT_USER.roleId;
+  const activeRoleId = previewRoleId ?? adminRoleId;
+
   const canDeleteRole = useCallback(
     (roleId: string) => roleId !== "platform_owner" && roleId !== adminRoleId,
     [adminRoleId]
   );
 
+  /* ── Grant edits ── */
   const saveGrants = useCallback((roleId: string, keys: PermissionKey[]) => {
     setGrants((prev) => ({ ...prev, [roleId]: keys }));
-  }, []);
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify({ permissions: keys }) });
+    }
+  }, [apiFetch]);
 
   const addRole = useCallback(({ label, summary, workspaces, permissions = [] }: AddRoleInput) => {
     const base = slugify(label);
     let id = base;
     let n = 2;
-    // Guard against name collisions with built-ins or previously created roles.
-    while (ROLES.some((r) => r.id === id) || customRoles.some((r) => r.id === id)) {
-      id = `${base}_${n++}`;
-    }
+    while (ROLES.some((r) => r.id === id) || customRoles.some((r) => r.id === id)) id = `${base}_${n++}`;
     const newRole: RoleDef = {
       id,
       label: label.trim(),
@@ -205,60 +395,219 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     };
     setCustomRoles((prev) => [...prev, newRole]);
     setGrants((prev) => ({ ...prev, [id]: permissions }));
+    if (isSupabaseConfigured) {
+      apiFetch("/api/roles", {
+        method: "POST",
+        body: JSON.stringify({ id, label: newRole.label, summary: newRole.summary, workspaces: newRole.workspaces, permissions }),
+      });
+    }
     return id;
-  }, [customRoles]);
+  }, [customRoles, apiFetch]);
 
-  const membersInRole = useCallback(
-    (roleId: string) => team.filter((m) => m.roleId === roleId),
-    [team]
-  );
+  const membersInRole = useCallback((roleId: string) => team.filter((m) => m.roleId === roleId), [team]);
+  const getStaffById = useCallback((id: string) => team.find((m) => m.id === id), [team]);
 
   const setMemberRole = useCallback((email: string, roleId: string) => {
-    setTeam((prev) => prev.map((m) => (m.email === email ? { ...m, roleId } : m)));
-  }, []);
+    const now = new Date().toISOString();
+    const member = team.find((m) => m.email === email);
+    setTeam((prev) => prev.map((m) => (m.email === email ? { ...m, roleId, updatedAt: now } : m)));
+    if (isSupabaseConfigured && member) {
+      apiFetch(`/api/staff/${member.id}`, { method: "PATCH", body: JSON.stringify({ roleId }) })
+        .then(() => refreshTeamFromDb());
+    }
+  }, [team, apiFetch, refreshTeamFromDb]);
 
   const deleteRole = useCallback((roleId: string, reassignTo?: string): DeleteRoleResult => {
-    // Platform Owner always has full access by design (matches the spec) —
-    // it's the one role that can never be removed.
-    if (roleId === "platform_owner") {
-      return { ok: false, reason: "platform_owner" };
-    }
-    // An administrator can't delete the role they themselves are signed in
-    // as — that would leave nobody able to administer the account.
-    if (roleId === adminRoleId) {
-      return { ok: false, reason: "own_role" };
-    }
+    if (roleId === "platform_owner") return { ok: false, reason: "platform_owner" };
+    if (roleId === adminRoleId) return { ok: false, reason: "own_role" };
     const affected = team.filter((m) => m.roleId === roleId);
-    if (affected.length > 0 && !reassignTo) {
-      return { ok: false, reason: "in_use", affectedMembers: affected };
-    }
+    if (affected.length > 0 && !reassignTo) return { ok: false, reason: "in_use", affectedMembers: affected };
     if (affected.length > 0 && reassignTo) {
       setTeam((prev) => prev.map((m) => (m.roleId === roleId ? { ...m, roleId: reassignTo } : m)));
     }
-    // Built-in roles simply stop being offered anywhere (hidden), since the
-    // static catalogue in lib/permissions.ts is read-only; custom roles are
-    // fully removed from state. Either way `allRoles` no longer includes it.
     setCustomRoles((prev) => prev.filter((r) => r.id !== roleId));
     setRemovedBuiltInRoles((prev) => (prev.includes(roleId) ? prev : [...prev, roleId]));
-    setGrants((prev) => {
-      const next = { ...prev };
-      delete next[roleId];
-      return next;
-    });
-    // If the role being deleted is currently being previewed, drop back to
-    // the administrator's own view rather than previewing a role that no
-    // longer exists.
+    setGrants((prev) => { const next = { ...prev }; delete next[roleId]; return next; });
     setPreviewRoleId((prev) => (prev === roleId ? null : prev));
+    if (isSupabaseConfigured) {
+      const q = reassignTo ? `?reassignTo=${encodeURIComponent(reassignTo)}` : "";
+      apiFetch(`/api/roles/${roleId}${q}`, { method: "DELETE" }).then(() => refreshTeamFromDb());
+    }
     return { ok: true };
-  }, [adminRoleId, team]);
+  }, [adminRoleId, team, apiFetch, refreshTeamFromDb]);
 
   const deleteMember = useCallback((email: string): DeleteMemberResult => {
-    if (email === CURRENT_USER.email) {
-      return { ok: false, reason: "self" };
-    }
+    const selfEmail = currentUser?.email ?? CURRENT_USER.email;
+    if (normalizeEmail(email) === normalizeEmail(selfEmail)) return { ok: false, reason: "self" };
+    const member = team.find((m) => m.email === email);
     setTeam((prev) => prev.filter((m) => m.email !== email));
+    if (isSupabaseConfigured && member) {
+      apiFetch(`/api/staff/${member.id}`, { method: "DELETE" }).then(() => refreshTeamFromDb());
+    }
     return { ok: true };
+  }, [currentUser, team, apiFetch, refreshTeamFromDb]);
+
+  /* ── Staff creation ── */
+  const addStaff = useCallback(async (input: AddStaffInput): Promise<AddStaffResult> => {
+    const email = normalizeEmail(input.email);
+    if (input.hasLogin && !email) return { ok: false, reason: "missing_email" };
+    if (input.hasLogin && !input.password) return { ok: false, reason: "missing_password" };
+
+    if (isSupabaseConfigured) {
+      const res = await apiFetch("/api/staff", {
+        method: "POST",
+        body: JSON.stringify({ ...input, email: input.email, createdBy: currentUser?.name }),
+      });
+      if (!res.ok || !res.json?.ok) {
+        return { ok: false, reason: res.json?.reason ?? "server_error" };
+      }
+      await refreshTeamFromDb();
+      return { ok: true, member: res.json.member };
+    }
+
+    // Local mode
+    if (email && team.some((m) => normalizeEmail(m.email) === email)) return { ok: false, reason: "duplicate_email" };
+    const id = nextEmployeeId(team);
+    const now = new Date().toISOString();
+    const member: TeamMember = {
+      id,
+      name: input.name.trim(),
+      email: input.email.trim(),
+      phone: input.phone?.trim() || undefined,
+      roleId: input.roleId,
+      branch: input.branch,
+      status: "active",
+      loginEnabled: input.hasLogin,
+      passwordHash: input.hasLogin && input.password ? hashPassword(input.password, id) : undefined,
+      department: input.department,
+      designation: input.designation ?? roleMap[input.roleId]?.label,
+      joiningDate: now.slice(0, 10),
+      salaryType: input.salaryType,
+      salaryAmount: input.salaryAmount,
+      createdBy: currentUser?.name ?? CURRENT_USER.name,
+      createdAt: now,
+      updatedAt: now,
+    };
+    setTeam((prev) => [member, ...prev]);
+    return { ok: true, member };
+  }, [team, currentUser, roleMap, apiFetch, refreshTeamFromDb]);
+
+  const updateStaff = useCallback((id: string, updates: Partial<TeamMember>) => {
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => (m.id === id ? { ...m, ...updates, updatedAt: now } : m)));
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/staff/${id}`, { method: "PATCH", body: JSON.stringify(updates) }).then(() => refreshTeamFromDb());
+    }
+  }, [apiFetch, refreshTeamFromDb]);
+
+  /* Self-service profile update — works for every signed-in user (not just
+     admins). Applies an optimistic local change, then persists via the
+     non-privileged /api/profile route in Supabase mode. */
+  const updateProfile = useCallback(async (
+    updates: { name?: string; phone?: string; avatarUrl?: string | null }
+  ): Promise<{ ok: boolean; reason?: string }> => {
+    const id = currentUser?.id;
+    if (!id) return { ok: false, reason: "no_user" };
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => {
+      if (m.id !== id) return m;
+      const next: TeamMember = { ...m, updatedAt: now };
+      if (updates.name !== undefined) next.name = updates.name;
+      if (updates.phone !== undefined) next.phone = updates.phone;
+      if (updates.avatarUrl !== undefined) next.avatarUrl = updates.avatarUrl ?? undefined;
+      return next;
+    }));
+    if (isSupabaseConfigured) {
+      const res = await apiFetch("/api/profile", { method: "PATCH", body: JSON.stringify(updates) });
+      if (!res.ok || !res.json?.ok) return { ok: false, reason: res.json?.reason ?? "server_error" };
+      await refreshTeamFromDb();
+    }
+    return { ok: true };
+  }, [currentUser, apiFetch, refreshTeamFromDb]);
+
+  const resetPassword = useCallback((id: string, newPassword: string) => {
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => (m.id === id
+      ? { ...m, passwordHash: hashPassword(newPassword, id), loginEnabled: true, updatedAt: now }
+      : m)));
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/staff/${id}`, { method: "PATCH", body: JSON.stringify({ password: newPassword, loginEnabled: true }) })
+        .then(() => refreshTeamFromDb());
+    }
+  }, [apiFetch, refreshTeamFromDb]);
+
+  const setStaffStatus = useCallback((id: string, status: TeamMember["status"]) => {
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => (m.id === id ? { ...m, status, updatedAt: now } : m)));
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/staff/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }).then(() => refreshTeamFromDb());
+    }
+  }, [apiFetch, refreshTeamFromDb]);
+
+  const toggleLogin = useCallback((id: string, enabled: boolean, password?: string) => {
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => {
+      if (m.id !== id) return m;
+      return {
+        ...m,
+        loginEnabled: enabled,
+        passwordHash: enabled && password ? hashPassword(password, id) : m.passwordHash,
+        updatedAt: now,
+      };
+    }));
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/staff/${id}`, { method: "PATCH", body: JSON.stringify({ loginEnabled: enabled, ...(password ? { password } : {}) }) })
+        .then(() => refreshTeamFromDb());
+    }
+  }, [apiFetch, refreshTeamFromDb]);
+
+  /* ── Session ── */
+  const login = useCallback(async (email: string, password: string): Promise<LoginResult> => {
+    const norm = normalizeEmail(email);
+
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.auth.signInWithPassword({ email: norm, password });
+      if (error || !data.user) {
+        const msg = error?.message?.toLowerCase() ?? "";
+        if (msg.includes("ban")) return { ok: false, reason: "suspended" };
+        return { ok: false, reason: "bad_password" };
+      }
+      // Load the linked profile to drive permissions + landing.
+      const { data: rows } = await supabase.from("staff").select("*").ilike("email", norm).limit(1);
+      const account = rows && rows[0] ? rowToStaff(rows[0] as StaffRow) : null;
+      if (!account) { await supabase.auth.signOut(); return { ok: false, reason: "not_found" }; }
+      if (!account.loginEnabled) { await supabase.auth.signOut(); return { ok: false, reason: "login_disabled" }; }
+      if (account.status === "suspended") { await supabase.auth.signOut(); return { ok: false, reason: "suspended" }; }
+      await refreshTeamFromDb();
+      setCurrentUserEmail(account.email);
+      setPreviewRoleId(null);
+      return { ok: true, account, landingHref: computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
+    }
+
+    // Local mode
+    const acc = team.find((m) => normalizeEmail(m.email) === norm);
+    if (!acc) return { ok: false, reason: "not_found" };
+    if (!acc.loginEnabled || !acc.passwordHash) return { ok: false, reason: "login_disabled" };
+    if (acc.status === "suspended") return { ok: false, reason: "suspended" };
+    if (acc.status === "invited") return { ok: false, reason: "invited" };
+    if (!verifyPassword(password, acc.id, acc.passwordHash)) return { ok: false, reason: "bad_password" };
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => (m.id === acc.id ? { ...m, lastLogin: now } : m)));
+    setCurrentUserEmail(acc.email);
+    setPreviewRoleId(null);
+    return { ok: true, account: { ...acc, lastLogin: now }, landingHref: computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
+  }, [team, allowedWorkspacesForRole, refreshTeamFromDb]);
+
+  const logout = useCallback(() => {
+    if (isSupabaseConfigured && supabase) supabase.auth.signOut();
+    setCurrentUserEmail(null);
+    setPreviewRoleId(null);
   }, []);
+
+  const landingForRole = useCallback(
+    (roleId: string) => computeLandingHref(allowedWorkspacesForRole(roleId)),
+    [allowedWorkspacesForRole]
+  );
 
   const enterPreview = useCallback((roleId: string) => setPreviewRoleId(roleId), []);
   const exitPreview = useCallback(() => setPreviewRoleId(null), []);
@@ -273,40 +622,26 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     [grants, activeRoleId]
   );
 
-  const allowedWorkspaces = useMemo(() => {
-    const r = getRoleById(activeRoleId);
-    if (!r) return [];
-    return WORKSPACES.filter((w) => r.workspaces.includes(w.id));
-  }, [getRoleById, activeRoleId]);
+  const allowedWorkspaces = useMemo(
+    () => allowedWorkspacesForRole(activeRoleId),
+    [allowedWorkspacesForRole, activeRoleId]
+  );
 
   const value = useMemo<PermissionsContextValue>(
     () => ({
-      grants,
-      saveGrants,
-      allRoles,
-      getRoleById,
-      isCustomRole,
-      canDeleteRole,
-      addRole,
-      deleteRole,
-      team,
-      membersInRole,
-      setMemberRole,
-      deleteMember,
-      adminRoleId,
-      activeRoleId,
-      role,
-      can,
-      allowedWorkspaces,
-      isPreviewing: previewRoleId !== null,
-      previewRoleId,
-      enterPreview,
-      exitPreview,
+      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole,
+      team, membersInRole, getStaffById, setMemberRole, deleteMember,
+      addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
+      authReady: hydrated, currentUser, login, logout, landingForRole,
+      adminRoleId, activeRoleId, role, can, allowedWorkspaces,
+      isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
     }),
     [
       grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole,
-      team, membersInRole, setMemberRole, deleteMember, adminRoleId, activeRoleId,
-      role, can, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
+      team, membersInRole, getStaffById, setMemberRole, deleteMember,
+      addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
+      hydrated, currentUser, login, logout, landingForRole,
+      adminRoleId, activeRoleId, role, can, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
     ]
   );
 
@@ -315,8 +650,6 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
 export function usePermissions(): PermissionsContextValue {
   const ctx = useContext(PermissionsContext);
-  if (!ctx) {
-    throw new Error("usePermissions() must be used within a <PermissionsProvider>");
-  }
+  if (!ctx) throw new Error("usePermissions() must be used within a <PermissionsProvider>");
   return ctx;
 }

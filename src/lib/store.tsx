@@ -2,14 +2,13 @@
 
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { logActivity, buildChanges, type ActivitySeverity } from "./activity-log";
-import { tickets as SEED_TICKETS, todos as SEED_TODOS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS, STATUS_LABEL, type Ticket, type TicketStatus, type TicketPart, type TeamMember, type Invoice, type WalkIn } from "@/lib/mock-data";
+import { tickets as SEED_TICKETS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE, TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS, STATUS_LABEL, type Ticket, type TicketStatus, type TicketPart, type TeamMember, type Invoice, type WalkIn } from "@/lib/mock-data";
 import { inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS, type InventoryItem, type StockMovement } from "@/lib/inventory-data";
 import { seedCustomers as SEED_CUSTOMERS, type Customer } from "@/lib/customer-data";
 import { seedBrands as SEED_BRANDS, seedModels as SEED_MODELS, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
-export type Todo = { id: number; title: string; desc: string; flag: "info" | "danger" | "warn" };
 export type OrderStatus = { detail: string; assigned: number; received: number };
 export type RevenueMonth = { m: string; v: number };
 
@@ -17,7 +16,6 @@ interface StoreState {
   tickets: Ticket[];
   invoices: Invoice[];
   walkIns: WalkIn[];
-  todos: Todo[];
   orders: OrderStatus[];
   revenue: RevenueMonth[];
   team: TeamMember[];
@@ -39,8 +37,6 @@ interface StoreActions {
   addWalkIn: (walkIn: WalkIn) => void;
   updateWalkIn: (id: string, updates: Partial<WalkIn>) => void;
   deleteWalkIn: (id: string) => void;
-  addTodo: (todo: Todo) => void;
-  removeTodo: (id: number) => void;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
   deductPartsForTicket: (ticketId: string) => void;
   addStockMovement: (movement: StockMovement) => void;
@@ -62,7 +58,8 @@ type Store = StoreState & StoreActions;
 
 const StoreContext = createContext<Store | null>(null);
 
-const STORAGE_KEY = "repairox-store";
+// Bumped to v2 to drop any cached demo/dummy data from earlier builds.
+const STORAGE_KEY = "repairox-store-v2";
 
 function loadFromStorage(): StoreState | null {
   if (typeof window === "undefined") return null;
@@ -106,7 +103,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       tickets: SEED_TICKETS,
       invoices: SEED_INVOICES,
       walkIns: SEED_WALKINS,
-      todos: SEED_TODOS,
       orders: SEED_ORDERS,
       revenue: SEED_REVENUE,
       team: TEAM_SEED,
@@ -281,15 +277,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       entity: "Walk-In", reference: id,
       description: prev ? `Deleted walk-in for ${prev.customer} (${prev.model}).` : `Deleted walk-in ${id}.`,
     });
-  }, []);
-
-  /* ── Todo actions ── */
-  const addTodo = useCallback((todo: Todo) => {
-    setState((s) => ({ ...s, todos: [...s.todos, todo] }));
-  }, []);
-
-  const removeTodo = useCallback((id: number) => {
-    setState((s) => ({ ...s, todos: s.todos.filter((t) => t.id !== id) }));
   }, []);
 
   /* ── Team actions ── */
@@ -528,8 +515,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addWalkIn,
     updateWalkIn,
     deleteWalkIn,
-    addTodo,
-    removeTodo,
     updateTeamMember,
     deductPartsForTicket,
     addStockMovement,

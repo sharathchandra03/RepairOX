@@ -20,7 +20,8 @@ export type ActivitySeverity = "success" | "info" | "warning" | "critical" | "ne
 
 export type ActivityModule =
   | "Ticket" | "Invoice" | "Inventory" | "Customer" | "Walk-In"
-  | "Price List" | "Employee" | "Settings" | "Auth" | "System";
+  | "Price List" | "Employee" | "Settings" | "Auth" | "System"
+  | "Expense" | "Task";
 
 export interface ActivityChange {
   field: string;
@@ -159,7 +160,7 @@ export const SEVERITY_STYLE: Record<ActivitySeverity, { icon: string; badge: str
 };
 
 export const ALL_MODULES: ActivityModule[] = [
-  "Ticket", "Invoice", "Inventory", "Customer", "Walk-In", "Price List", "Employee", "Settings", "Auth", "System",
+  "Ticket", "Invoice", "Inventory", "Customer", "Walk-In", "Price List", "Employee", "Expense", "Task", "Settings", "Auth", "System",
 ];
 
 /* ─── Time formatting ────────────────────────────────────────────── */

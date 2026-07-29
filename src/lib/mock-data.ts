@@ -1,4 +1,5 @@
 import type { PermissionKey, WorkspaceId } from "@/lib/permissions";
+import { hashPassword, DEFAULT_SEED_PASSWORD, type SalaryType } from "@/lib/auth";
 
 export type TicketStatus =
   | "received"
@@ -211,55 +212,11 @@ function minsAgo(mins: number): string {
   return new Date(Date.now() - mins * 60_000).toISOString();
 }
 
-export const tickets: Ticket[] = [
-  { id: "T-1837", customer: "Rahul Kapoor", phone: "+91 98456 12345", company: "Kapoor Electronics", device: "iPhone", model: "iPhone 16 Pro Max", issue: "Display replacement", status: "diagnosis", priority: "high", technician: "Anand", createdAt: minsAgo(120), dueDate: "2026-07-22T14:00:00", resolutionMinutes: 120, amount: 22500, service: "Screen Repair", customerId: "CUS-A001" },
-  { id: "T-8624", customer: "Manoj S.", phone: "+91 90876 54321", device: "iPhone", model: "iPhone 14", issue: "Liquid damage logic board", status: "repairing", priority: "critical", technician: "Vikas", createdAt: minsAgo(55), dueDate: "2026-07-23T10:00:00", resolutionMinutes: 240, amount: 18999, service: "Board Repair", customerId: "CUS-A002" },
-  { id: "T-456", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons", device: "MacBook", model: "MacBook Air M4", issue: "Battery service", status: "qc", priority: "normal", technician: "Pooja", createdAt: minsAgo(30), dueDate: "2026-07-22T17:00:00", resolutionMinutes: 59, amount: 12999, service: "Battery Replacement", customerId: "CUS-A003" },
-  { id: "T-156", customer: "Radha Iyer", phone: "+91 76543 21098", device: "iWatch", model: "Watch S8 45mm", issue: "Glass replacement", status: "completed", priority: "normal", technician: "Shubham", createdAt: minsAgo(10), amount: 6499, service: "Glass Repair", customerId: "CUS-A004" },
-  {
-    id: "T-7335", customer: "Ravindu Toyota", phone: "+91 99000 56190", company: "iFix India - Koramangala", device: "iPad", model: "iPad Air 2", issue: "Battery bulged, display broken",
-    items: [
-      { device: "iPad", model: "iPad Air 2", serial: "DMPRT5EKG5VT", issue: "Battery bulged, display broken", service: "Battery + Screen" },
-      { device: "iPad", model: "iPad Air 2", serial: "DMPRT4UF05VT", issue: "Battery bulged", service: "Battery Replacement" },
-      { device: "iPad", model: "iPad Air 2", serial: "DMPRQ2AYG5VT", issue: "Battery bulged", service: "Battery Replacement" },
-      { device: "iPad", model: "iPad Air 2", serial: "DMPRT5K1G5VT", issue: "Battery bulged, display broken", service: "Battery + Screen" },
-    ],
-    status: "repairing", priority: "critical", technician: "Anand", createdAt: minsAgo(90), dueDate: "2026-07-22T19:00:00", amount: 20000, service: "Bulk Repair", customerId: "CUS-A005"
-  },
-  { id: "T-911", customer: "Vikas Nair", phone: "+91 65432 10987", company: "NairTech Solutions", device: "iPad", model: "iPad Air 11\u2033", issue: "Touch panel calibration", status: "received", priority: "normal", technician: "Anand", createdAt: minsAgo(45), dueDate: "2026-07-24T12:00:00", amount: 4999, service: "Calibration", customerId: "CUS-A006" },
-  { id: "T-204", customer: "Sneha P.", phone: "+91 54321 09876", device: "Android", model: "Pixel 9", issue: "Charging port repair", status: "delivered", priority: "normal", technician: "Ravi", createdAt: minsAgo(5), amount: 3499, service: "Port Repair", customerId: "CUS-A007" },
-  { id: "T-732", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub", device: "iPhone", model: "iPhone 13", issue: "Speaker no audio", status: "repairing", priority: "high", technician: "Pooja", createdAt: minsAgo(90), dueDate: "2026-07-22T18:00:00", amount: 2899, service: "Speaker Repair", customerId: "CUS-A008" },
-  {
-    id: "T-621", customer: "Anjali R.", phone: "+91 32109 87654", device: "Windows", model: "Lenovo Yoga 9i", issue: "Hinge replacement",
-    items: [
-      { device: "Windows", model: "Lenovo Yoga 9i", serial: "PF4KXYZ1", issue: "Hinge replacement", service: "Hardware Repair" },
-      { device: "Windows", model: "Lenovo IdeaPad 5", serial: "PF4KABC2", issue: "Keyboard not working", service: "Keyboard Replacement" },
-    ],
-    status: "diagnosis", priority: "normal", technician: "Shubham", createdAt: minsAgo(42), dueDate: "2026-07-25T11:00:00", amount: 14999, service: "Hardware Repair", customerId: "CUS-A009"
-  },
-];
-
-export const revenueMonthly = [
-  { m: "Jan", v: 162 }, { m: "Feb", v: 198 }, { m: "Mar", v: 255 },
-  { m: "Apr", v: 220 }, { m: "May", v: 245 }, { m: "Jun", v: 240 },
-  { m: "Jul", v: 250 }, { m: "Aug", v: 305 }, { m: "Sep", v: 268 },
-  { m: "Oct", v: 285 }, { m: "Nov", v: 232 }, { m: "Dec", v: 290 },
-];
-
-export const ordersStatus = [
-  { detail: "On Site", assigned: 2, received: 2 },
-  { detail: "Pick Up", assigned: 2, received: 2 },
-  { detail: "Walk-in", assigned: 2, received: 2 },
-];
-
-export const todos = [
-  { id: 1, title: "Update Anand (Inventory Team)", desc: "Order 16 Pro Max display for Ticket 1837", flag: "info" as const },
-  { id: 2, title: "Send Quotation to Ticket 8624", desc: "Replace T2 IC due to liquid damage on the M3", flag: "info" as const },
-  { id: 3, title: "Manoj's iPhone 14", desc: "Overdue since Dec 2025, update customer & attempt delivery", flag: "danger" as const },
-  { id: 4, title: "AC Service due", desc: "Take approval from owner & schedule", flag: "warn" as const },
-  { id: 5, title: "Office stock audit", desc: "Check Mobile and Laptop stock in office", flag: "warn" as const },
-  { id: 6, title: "Accessories refilling", desc: "Tempered glass & latest mobile pouches to be ordered", flag: "warn" as const },
-];
+// Real data lives in Supabase — see store.tsx cloud sync. No demo seeds.
+export const tickets: Ticket[] = [];
+export const revenueMonthly: { m: string; v: number }[] = [];
+export const ordersStatus: { detail: string; assigned: number; received: number }[] = [];
+export const todos: { id: number; title: string; desc: string; flag: "info" | "danger" | "warn" }[] = [];
 
 /** Nav item shape. `permission` is optional — omit it for pages every role in
  *  the item's workspace should see (general activity/browse views). When
@@ -270,6 +227,16 @@ export type NavItem = {
   label: string;
   icon: string;
   permission?: PermissionKey | PermissionKey[];
+};
+
+/** Expandable nav group — a parent item that collapses/expands to reveal children.
+ *  Used for Administration sections like Employees and Accounts. */
+export type ExpandableNavGroup = {
+  id: string;
+  label: string;
+  icon: string;
+  permission?: PermissionKey | PermissionKey[];
+  children: NavItem[];
 };
 
 export const navItems: NavItem[] = [
@@ -284,6 +251,19 @@ export const navItems: NavItem[] = [
   { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "Receipt", permission: "manage_payments" },
+
+  // Employee sub-pages
+  { href: "/employees/directory",      label: "Employee Directory", icon: "Users", permission: ["manage_users", "assign_technicians"] },
+  { href: "/employees/payroll",        label: "Payroll & Salary",   icon: "Banknote", permission: "manage_payments" },
+  { href: "/employees/salary-advances", label: "Salary Advances",  icon: "WalletCards", permission: "manage_payments" },
+
+  // Administration — single entry point for all employee access / role management
+  { href: "/roles-permissions",        label: "Roles & Permissions", icon: "ShieldCheck", permission: ["manage_roles", "manage_users"] },
+
+  // Accounts sub-pages
+  { href: "/accounts/ledger",          label: "Daily Ledger",        icon: "BookOpen", permission: "view_financial_reports" },
+  { href: "/accounts/banking",         label: "Banking & Transfers", icon: "Landmark", permission: "manage_payments" },
+  { href: "/accounts/management",      label: "Account Management",  icon: "FolderTree", permission: "manage_payments" },
 
   // Operations
   { href: "/operations",             label: "Dashboard",       icon: "Home", permission: "view_dashboard" },
@@ -322,28 +302,100 @@ export const navItems: NavItem[] = [
   { href: "/settings",         label: "Settings",     icon: "Settings", permission: "manage_settings" },
 ];
 
-/** Team member — who has a RepairOX login, their assigned role, branch and
- *  status. Lives here (not in a page) because role deletion/reassignment in
- *  the Permissions context needs to know who's currently using a role. */
-export type TeamMember = {
-  name: string;
-  email: string;
-  roleId: string;
-  branch: string;
-  status: "active" | "invited" | "suspended";
+/** Expandable navigation groups for the Administration section */
+export const expandableNavGroups: Record<WorkspaceId, ExpandableNavGroup[]> = {
+  shop: [
+    {
+      id: "employees",
+      label: "Employees",
+      icon: "UsersRound",
+      permission: ["manage_users", "assign_technicians", "manage_roles"],
+      children: [
+        { href: "/employees/directory",      label: "Employee Directory", icon: "Users", permission: ["manage_users", "assign_technicians"] },
+        { href: "/employees/payroll",        label: "Payroll & Salary",   icon: "Banknote", permission: "manage_payments" },
+        { href: "/employees/salary-advances", label: "Salary Advances",  icon: "WalletCards", permission: "manage_payments" },
+      ],
+    },
+    {
+      id: "accounts",
+      label: "Accounts",
+      icon: "BookOpen",
+      permission: ["manage_payments", "view_financial_reports"],
+      children: [
+        { href: "/accounts/ledger",          label: "Daily Ledger",        icon: "BookOpen", permission: "view_financial_reports" },
+        { href: "/accounts/banking",         label: "Banking & Transfers", icon: "Landmark", permission: "manage_payments" },
+        { href: "/accounts/management",      label: "Account Management",  icon: "FolderTree", permission: "manage_payments" },
+      ],
+    },
+  ],
+  operations: [],
+  leads: [],
 };
 
-export const TEAM_SEED: TeamMember[] = [
-  { name: "Kalai S.",      email: "abc@gmail.com",           roleId: "master_shop_owner",       branch: "BTM Layout (HQ)", status: "active" },
-  { name: "Ritesh Kumar",  email: "ritesh@repairox.in",       roleId: "shop_owner_branch_manager", branch: "Koramangala",     status: "active" },
-  { name: "Anjali R.",     email: "anjali@repairox.in",       roleId: "reception",               branch: "BTM Layout (HQ)", status: "active" },
-  { name: "Anand Rao",     email: "anand@repairox.in",        roleId: "senior_technician",       branch: "BTM Layout (HQ)", status: "active" },
-  { name: "Pooja Iyer",    email: "pooja@repairox.in",        roleId: "technician",              branch: "Koramangala",     status: "active" },
-  { name: "Vikas Nair",    email: "vikas@repairox.in",        roleId: "inventory_manager",       branch: "Warehouse A",     status: "active" },
-  { name: "Manoj S.",      email: "manoj@repairox.in",        roleId: "sales_executive",         branch: "HSR Layout",      status: "invited" },
-  { name: "Radha Iyer",    email: "radha@repairox.in",        roleId: "cashier_accounts",        branch: "BTM Layout (HQ)", status: "active" },
-  { name: "Imran Khan",    email: "imran@repairox.in",        roleId: "read_only_user",          branch: "HSR Layout",      status: "suspended" },
-];
+export type StaffStatus = "active" | "invited" | "suspended";
+
+/** Staff member — the unified record that links an employee's HR profile,
+ *  their RepairOX login (auth account) and their compensation. A single
+ *  source of truth consumed by:
+ *    • Roles & Permissions → Users tab (who can log in, their role/branch)
+ *    • Employee Directory (HR profile, salary)
+ *    • Payroll (base salary per person)
+ *    • The permission context (who's using a role — for reassignment/deletes)
+ *    • Login (email + passwordHash + loginEnabled + status)
+ *
+ *  Kept here (not in a page) because the permission context owns the live,
+ *  persisted list. `TeamMember` is retained as the type name for backward
+ *  compatibility with existing consumers. */
+export type TeamMember = {
+  /** Stable employee id (also used as the password salt). */
+  id: string;
+  name: string;
+  email: string;
+  phone?: string;
+  /** Profile picture — a data URL (self-uploaded) or a storage URL. */
+  avatarUrl?: string;
+  roleId: string;
+  branch: string;
+  status: StaffStatus;
+
+  /* ── Auth account ── */
+  /** Whether this staff member has login credentials at all. */
+  loginEnabled: boolean;
+  /** Salted hash of the password (see lib/auth.ts). Absent when no login. */
+  passwordHash?: string;
+
+  /* ── HR profile ── */
+  department?: string;
+  designation?: string;
+  joiningDate?: string;
+
+  /* ── Compensation ── */
+  salaryType?: SalaryType;
+  salaryAmount?: number;
+
+  /* ── Audit ── */
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  lastLogin?: string;
+};
+
+/** Build a seeded staff account with a known default password so the demo is
+ *  immediately usable. Real accounts are created through the Add Staff form. */
+function seedStaff(m: Omit<TeamMember, "loginEnabled" | "passwordHash" | "createdAt"> & { loginEnabled?: boolean }): TeamMember {
+  const loginEnabled = m.loginEnabled ?? m.status === "active";
+  return {
+    ...m,
+    loginEnabled,
+    passwordHash: loginEnabled ? hashPassword(DEFAULT_SEED_PASSWORD, m.id) : undefined,
+    createdAt: m.joiningDate ? new Date(m.joiningDate).toISOString() : new Date().toISOString(),
+    createdBy: "System",
+  };
+}
+
+// Staff/logins live in Supabase (`staff` table + Supabase Auth). No demo staff.
+// The owner is created by the seed endpoint (see /api/setup/seed).
+export const TEAM_SEED: TeamMember[] = [];
 
 /* ─── Invoice Types & Seed Data ──────────────────────────────────────── */
 
@@ -550,55 +602,7 @@ function daysAgo(days: number): string {
   return new Date(Date.now() - days * 86_400_000).toISOString();
 }
 
-export const invoices: Invoice[] = [
-  {
-    id: "INV001", reference: "CORP-1753", invoiceType: "retail", customer: "Rahul Kapoor", phone: "+91 98456 12345", email: "rahul@kapoor.in", company: "Kapoor Electronics",
-    status: "paid", createdAt: daysAgo(5), dueDate: daysAgo(-2), paidAmount: 22500,
-    items: [
-      { id: "li-1", sku: "SCR-IPH16", name: "iPhone 16 Pro Max Display", description: "OLED original assembly", qty: 1, price: 18500, discount: 0, total: 18500 },
-      { id: "li-2", name: "Labour & Diagnostics", qty: 1, price: 2500, discount: 0, total: 2500 },
-      { id: "li-3", name: "Tempered Glass", qty: 1, price: 1500, discount: 0, total: 1500 },
-    ],
-    subtotal: 22500, discount: 0, tax: 0, total: 22500, notes: "Display replaced under warranty extension.", terms: "Limited Warranty\nWe stand behind our repair services.", footer: "THANK YOU FOR CHOOSING FIX IND", employee: "Anjali R.", ticketId: "T-1837"
-  },
-  {
-    id: "INVG001", reference: "CORP-1754", invoiceType: "business", customer: "Manoj S.", phone: "+91 90876 54321", email: "manoj@repairox.in",
-    status: "sent", createdAt: daysAgo(2), dueDate: daysAgo(-5), paidAmount: 0,
-    items: [
-      { id: "li-4", sku: "BRD-IPH14", name: "iPhone 14 Logic Board Repair", description: "Liquid damage micro-soldering", qty: 1, price: 15000, discount: 500, total: 14500 },
-      { id: "li-5", name: "Ultrasonic Cleaning", qty: 1, price: 2999, discount: 0, total: 2999 },
-      { id: "li-6", name: "Waterproof Sealing", qty: 1, price: 1500, discount: 0, total: 1500 },
-    ],
-    subtotal: 18999, discount: 500, tax: 3418, total: 21917, notes: "Board level repair completed.", terms: "Limited Warranty", footer: "THANK YOU FOR CHOOSING FIX IND", employee: "Vikas", ticketId: "T-8624"
-  },
-  {
-    id: "INV002", reference: "CORP-1755", invoiceType: "retail", customer: "Ajay Verma", phone: "+91 87654 32100", company: "Verma & Sons",
-    status: "partial", createdAt: daysAgo(7), dueDate: daysAgo(-1), paidAmount: 7000,
-    items: [
-      { id: "li-7", sku: "BAT-MBA4", name: "MacBook Air M4 Battery", description: "Original Apple replacement cell", qty: 1, price: 9999, discount: 0, total: 9999 },
-      { id: "li-8", name: "Installation & Testing", qty: 1, price: 3000, discount: 0, total: 3000 },
-    ],
-    subtotal: 12999, discount: 0, tax: 2340, total: 15339, notes: "Customer paid advance. Balance on pickup.", employee: "Pooja", ticketId: "T-456"
-  },
-  {
-    id: "INV003", reference: "CORP-1756", invoiceType: "retail", customer: "Sneha P.", phone: "+91 54321 09876",
-    status: "draft", createdAt: daysAgo(0), dueDate: daysAgo(-7), paidAmount: 0,
-    items: [
-      { id: "li-9", name: "Charging Port Assembly", qty: 1, price: 2499, discount: 0, total: 2499 },
-      { id: "li-10", name: "Labour", qty: 1, price: 1000, discount: 0, total: 1000 },
-    ],
-    subtotal: 3499, discount: 0, tax: 630, total: 4129, employee: "Ravi", ticketId: "T-204"
-  },
-  {
-    id: "INVG002", reference: "CORP-1757", invoiceType: "business", customer: "Imran Khan", phone: "+91 43210 98765", company: "Khan Mobile Hub",
-    status: "overdue", createdAt: daysAgo(14), dueDate: daysAgo(4), paidAmount: 0,
-    items: [
-      { id: "li-11", name: "Speaker Module (iPhone 13)", qty: 1, price: 1899, discount: 0, total: 1899 },
-      { id: "li-12", name: "Labour", qty: 1, price: 1000, discount: 0, total: 1000 },
-    ],
-    subtotal: 2899, discount: 0, tax: 522, total: 3421, notes: "Customer not reachable. Follow up required.", employee: "Pooja", ticketId: "T-732"
-  },
-];
+export const invoices: Invoice[] = [];
 
 /* ─── Walk-In Types & Seed Data ──────────────────────────────────────── */
 
@@ -638,24 +642,16 @@ export type WalkIn = {
   notes?: string;
 };
 
-export const walkIns: WalkIn[] = [
-  { id: "WI-001", date: "2026-07-21", time: "09:15", customer: "Rahul Kapoor", phone: "+91 98456 12345", source: "Walk-In", category: "Mobile", model: "iPhone 16 Pro Max", reasons: ["Repair", "Screen Damage"], status: "converted_ticket", ticketId: "T-1837", invoiceValue: 22500, businessValue: 22500 },
-  { id: "WI-002", date: "2026-07-21", time: "09:45", customer: "Priya Sharma", phone: "+91 87654 99887", source: "Google", category: "Laptop", model: "MacBook Air M4", reasons: ["Battery Issue"], status: "waiting", invoiceValue: 0, businessValue: 0 },
-  { id: "WI-003", date: "2026-07-21", time: "10:10", customer: "Manoj S.", phone: "+91 90876 54321", source: "Existing Customer", category: "Mobile", model: "iPhone 14", reasons: ["Water Damage", "Repair"], status: "inspection", invoiceValue: 0, businessValue: 0 },
-  { id: "WI-004", date: "2026-07-21", time: "10:30", customer: "Deepika R.", phone: "+91 77665 44332", source: "Instagram", category: "Mobile", model: "Samsung Galaxy S25", reasons: ["Quotation"], status: "quotation_given", invoiceValue: 0, businessValue: 0 },
-  { id: "WI-005", date: "2026-07-21", time: "11:00", customer: "Vikas Nair", phone: "+91 65432 10987", source: "Walk-In", category: "Smart Watch", model: "Apple Watch S9", reasons: ["Accessory Purchase"], status: "converted_invoice", invoiceValue: 1499, businessValue: 1499 },
-  { id: "WI-006", date: "2026-07-21", time: "11:20", customer: "Sneha P.", phone: "+91 54321 09876", source: "Reference", category: "Mobile", model: "Pixel 9", reasons: ["General Enquiry"], status: "closed", invoiceValue: 0, businessValue: 0 },
-  { id: "WI-007", date: "2026-07-21", time: "11:45", customer: "Amit Joshi", phone: "+91 99887 76655", source: "WhatsApp", category: "Tablet", model: "iPad Air 11", reasons: ["Data Recovery"], status: "follow_up", invoiceValue: 0, businessValue: 0 },
-  { id: "WI-008", date: "2026-07-21", time: "12:15", customer: "Unknown", phone: "+91 88776 65544", source: "Walk-In", category: "Mobile", model: "OnePlus 13", reasons: ["Screen Damage"], status: "lost", invoiceValue: 0, businessValue: 0 },
-];
+export const walkIns: WalkIn[] = [];
 
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
     { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
     { label: "INVENTORY",      items: ["/inventory"] },
-    // Expenses is merged here (single operational-expenses module) — the old
-    // "Notes" item and the duplicate Billing → Expenses are intentionally dropped.
-    { label: "ADMINISTRATION", items: ["/shop/technicians", "/expenses", "/contacts"] },
+    // Expenses remains standalone for daily operational quick-access.
+    // Employees and Accounts are now expandable groups rendered separately.
+    // Roles & Permissions is the single, dedicated access-control workspace.
+    { label: "ADMINISTRATION", items: ["/expenses", "/roles-permissions"] },
     { label: "BILLING",        items: ["/shop/payments"] },
     { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],

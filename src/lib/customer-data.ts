@@ -143,7 +143,9 @@ export function searchCustomers(customers: Customer[], query: string): Customer[
 
 /* ─── Seed Data ──────────────────────────────────────────────────── */
 
-export const seedCustomers: Customer[] = [
+// Real customers live in Supabase (store `customers` collection). No seeds.
+export const seedCustomers: Customer[] = [];
+const _legacySeedCustomers: Customer[] = [
   {
     id: "CUS-A001",
     type: "business",

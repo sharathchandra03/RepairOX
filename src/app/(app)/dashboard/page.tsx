@@ -2,8 +2,7 @@
 
 import { motion } from "framer-motion";
 import {
-  Plus, Filter, Download, Wand2, ArrowRight, AlertCircle, AlertTriangle,
-  CheckCircle2, ListChecks, MoreHorizontal, ArrowDownToLine,
+  Plus, Filter, Download, ArrowRight, MoreHorizontal, ArrowDownToLine,
   ArrowUpDown, SlidersHorizontal, CalendarDays,
 } from "lucide-react";
 import Link from "next/link";
@@ -11,6 +10,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
+import { TodoWidget } from "@/components/dashboard/todo-widget";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -47,7 +47,7 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_high" | "amount_low">("newest");
   const [filterBy, setFilterBy] = useState<"all" | "received" | "repairing" | "completed" | "delivered">("all");
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "30days" | "all">("all");
-  const { tickets, todos, orders: ordersStatus } = useStore();
+  const { tickets, orders: ordersStatus } = useStore();
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
 
@@ -426,61 +426,7 @@ export default function Dashboard() {
 
         {/* To-Do list — sticky pad design */}
         <div className="lg:col-span-3">
-          <div className="relative rounded-2xl bg-[#FFF9C4] p-5 shadow-[0_4px_16px_-4px_rgba(200,180,0,0.15),0_8px_32px_-8px_rgba(200,180,0,0.1)] sm:p-6 border border-[#F0E68C]/60 overflow-hidden">
-            {/* Decorative tape */}
-            <div className="absolute -top-1 left-1/2 -translate-x-1/2 h-6 w-16 rounded-b-md bg-[#FFE082]/80 shadow-sm" />
-            {/* Subtle lined-paper effect */}
-            <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, #B8860B 27px, #B8860B 28px)", backgroundPosition: "0 48px" }} />
-
-            <div className="relative flex items-center justify-between">
-              <div>
-                <p className="text-[12px] font-semibold uppercase tracking-wider text-amber-800/70">Today&apos;s Focus</p>
-                <h3 className="font-display mt-0.5 text-base font-bold flex items-center gap-2 text-amber-900">
-                  <ListChecks className="h-4 w-4 text-amber-700" /> To-Do List
-                </h3>
-              </div>
-              <button className="grid h-8 w-8 place-items-center rounded-lg border border-amber-300/60 bg-[#FFF176]/50 text-amber-700 hover:text-amber-900 hover:bg-[#FFF176] transition">
-                <Plus className="h-4 w-4" />
-              </button>
-            </div>
-            <ul className="relative mt-4 grid grid-cols-1 gap-2.5 md:grid-cols-2">
-              {todos.map((t, i) => (
-                <motion.li
-                  key={t.id}
-                  initial={{ opacity: 0, x: 4 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.04 * i }}
-                  className="group flex items-start gap-3 rounded-xl border border-amber-200/60 bg-white/50 backdrop-blur-sm p-3 transition hover:bg-white/70"
-                >
-                  <span className={`mt-0.5 grid h-5 w-5 shrink-0 place-items-center rounded-full ring-1 ring-inset ${
-                    t.flag === "danger" ? "bg-rose-100 text-rose-600 ring-rose-200" :
-                    t.flag === "warn"   ? "bg-amber-100 text-amber-700 ring-amber-200" :
-                    "bg-amber-50 text-amber-700 ring-amber-300/60"
-                  }`}>
-                    {t.flag === "danger" ? <AlertCircle className="h-3 w-3" /> :
-                     t.flag === "warn"   ? <AlertTriangle className="h-3 w-3" /> :
-                     <CheckCircle2 className="h-3 w-3" />}
-                  </span>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-semibold text-amber-900">{t.title}</p>
-                    <p className="line-clamp-2 text-xs text-amber-800/70">{t.desc}</p>
-                  </div>
-                </motion.li>
-              ))}
-            </ul>
-            <div className="relative mt-4 flex items-center justify-between rounded-xl border border-amber-300/50 bg-white/40 backdrop-blur-sm p-3">
-              <div className="flex items-center gap-2">
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-amber-600 text-white shadow-sm">
-                  <Wand2 className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold text-amber-900">Auto-prioritise tasks</p>
-                  <p className="text-[11px] text-amber-800/60">Let RepairOX rank your day</p>
-                </div>
-              </div>
-              <Button size="sm" variant="soft" className="bg-amber-100 text-amber-800 hover:bg-amber-200 border-amber-300">Run</Button>
-            </div>
-          </div>
+          <TodoWidget />
         </div>
       </div>
     </div>

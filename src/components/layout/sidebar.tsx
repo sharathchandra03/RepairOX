@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -7,11 +8,12 @@ import {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, ChevronLeft, ChevronRight,
   LogOut, CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
-  ClipboardCheck, Truck, Receipt, Activity,
+  ClipboardCheck, Truck, Receipt, Activity, ChevronDown,
+  UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
-import { navItems, navGroups, type NavItem as NavItemDef } from "@/lib/mock-data";
+import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/avatar";
 import { CURRENT_USER, type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
@@ -20,6 +22,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
   Wrench, ClipboardCheck, Truck, Receipt, Activity,
+  UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
@@ -67,6 +70,125 @@ function NavItem({ item, collapsed, pathname }: {
         )}
       </Link>
     </motion.li>
+  );
+}
+
+/* Expandable nav group — collapsible section with children */
+function ExpandableNavSection({ group, collapsed, pathname }: {
+  group: ExpandableNavGroup;
+  collapsed: boolean;
+  pathname: string;
+}) {
+  const Icon = ICONS[group.icon] ?? Home;
+  // Auto-expand if any child is active
+  const childActive = group.children.some(
+    (child) => pathname === child.href || pathname.startsWith(child.href + "/")
+  );
+  const [expanded, setExpanded] = useState(childActive);
+
+  // Keep expanded in sync when navigating
+  if (childActive && !expanded) {
+    setExpanded(true);
+  }
+
+  if (collapsed) {
+    // In collapsed mode, show just the parent icon with a tooltip
+    return (
+      <li>
+        <button
+          title={group.label}
+          onClick={() => setExpanded(!expanded)}
+          className={cn(
+            "group relative flex w-full items-center justify-center rounded-xl py-2.5 mx-1 text-sm font-medium transition-colors",
+            childActive ? "text-[#4361EE]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          )}
+        >
+          <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
+            <Icon className={cn("h-[18px] w-[18px]", childActive ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-700")} />
+          </span>
+        </button>
+      </li>
+    );
+  }
+
+  return (
+    <li>
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className={cn(
+          "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
+          childActive ? "text-[#4361EE]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+        )}
+      >
+        {/* Hover underline — sweeps in from the left */}
+        {!childActive && (
+          <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
+        )}
+        <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
+          <Icon className={cn("h-[18px] w-[18px]", childActive ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-700")} />
+        </span>
+        <span className="flex-1 whitespace-nowrap text-left">{group.label}</span>
+        <motion.span
+          animate={{ rotate: expanded ? 180 : 0 }}
+          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
+        >
+          <ChevronDown className={cn("h-3.5 w-3.5", childActive ? "text-[#4361EE]" : "text-zinc-400")} />
+        </motion.span>
+      </button>
+
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.ul
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden pl-4 space-y-0.5"
+          >
+            {group.children.map((child) => {
+              const ChildIcon = ICONS[child.icon] ?? Home;
+              const active = pathname === child.href || pathname.startsWith(child.href + "/");
+              return (
+                <motion.li
+                  key={child.href}
+                  initial={{ opacity: 0, x: -8 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: -8 }}
+                  transition={{ duration: 0.15 }}
+                >
+                  <Link
+                    href={child.href}
+                    className={cn(
+                      "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors",
+                      active
+                        ? "bg-[#EEF1FD] text-[#4361EE]"
+                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                    )}
+                  >
+                    {/* Hover underline — sweeps in from the left */}
+                    {!active && (
+                      <span className="pointer-events-none absolute bottom-0.5 left-2.5 right-2.5 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
+                    )}
+                    <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
+                      <ChildIcon className={cn("h-[15px] w-[15px]", active ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-600")} />
+                    </span>
+                    <span className="whitespace-nowrap">{child.label}</span>
+                    {active && (
+                      <motion.span
+                        layoutId="sidebar-child-active"
+                        className="absolute left-0 top-1/2 -translate-y-1/2 h-4 w-0.5 rounded-full bg-[#4361EE]"
+                        transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                  </Link>
+                </motion.li>
+              );
+            })}
+          </motion.ul>
+        )}
+      </AnimatePresence>
+    </li>
   );
 }
 
@@ -129,11 +251,16 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { can, allowedWorkspaces, role, isPreviewing } = usePermissions();
+  const { can, allowedWorkspaces, role, isPreviewing, currentUser, logout } = usePermissions();
+  const displayName = currentUser?.name ?? CURRENT_USER.name;
+  const displayEmail = currentUser?.email ?? CURRENT_USER.email;
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
   const groups = navGroups[activeWorkspace];
+  const expandableGroups = expandableNavGroups[activeWorkspace] ?? [];
   const visibleItem = (item: NavItemDef | undefined): item is NavItemDef =>
     !!item && (!item.permission || (Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission)));
+  const visibleExpandableGroup = (group: ExpandableNavGroup): boolean =>
+    !group.permission || (Array.isArray(group.permission) ? group.permission.some(can) : can(group.permission));
 
   function handleWorkspaceChange(id: WorkspaceId) {
     setActiveWorkspace(id);
@@ -186,7 +313,13 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
       <nav className="flex-1 overflow-y-auto px-3 pb-2">
         {groups.map((group) => {
           const items = group.items.map((href) => itemMap[href]).filter(visibleItem);
-          if (items.length === 0) return null;
+          // For ADMINISTRATION group, also render expandable groups
+          const isAdminGroup = group.label === "ADMINISTRATION";
+          const visibleExpandables = isAdminGroup
+            ? expandableGroups.filter(visibleExpandableGroup)
+            : [];
+
+          if (items.length === 0 && visibleExpandables.length === 0) return null;
           return (
             <div key={group.label} className="mb-4">
               {!collapsed && (
@@ -195,6 +328,19 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
                 </p>
               )}
               <ul className="space-y-0.5">
+                {/* Expandable groups (Employees, Accounts) come first in Administration */}
+                {visibleExpandables.map((eg) => (
+                  <ExpandableNavSection
+                    key={eg.id}
+                    group={{
+                      ...eg,
+                      children: eg.children.filter(visibleItem),
+                    }}
+                    collapsed={collapsed}
+                    pathname={pathname}
+                  />
+                ))}
+                {/* Regular flat nav items */}
                 <AnimatePresence initial={false}>
                   {items.map((item) => (
                     <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} />
@@ -215,19 +361,24 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
         collapsed ? "flex justify-center p-2" : "p-3"
       )}>
         {collapsed ? (
-          <Avatar name={isPreviewing ? role.label : CURRENT_USER.name} size={36} />
+          <Avatar name={isPreviewing ? role.label : displayName} src={isPreviewing ? undefined : currentUser?.avatarUrl} size={36} />
         ) : (
           <div className="flex items-center gap-3">
-            <Avatar name={isPreviewing ? role.label : CURRENT_USER.name} />
+            <Avatar name={isPreviewing ? role.label : displayName} src={isPreviewing ? undefined : currentUser?.avatarUrl} />
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-semibold leading-tight">
-                {isPreviewing ? role.label : CURRENT_USER.name}
+                {isPreviewing ? role.label : displayName}
               </p>
               <p className="truncate text-[11px] text-muted-foreground">
-                {isPreviewing ? "Previewing this role" : CURRENT_USER.email}
+                {isPreviewing ? "Previewing this role" : displayEmail}
               </p>
             </div>
-            <button className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition">
+            <button
+              onClick={() => { logout(); router.push("/login"); }}
+              title="Log out"
+              aria-label="Log out"
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition"
+            >
               <LogOut className="h-4 w-4" />
             </button>
           </div>
@@ -249,8 +400,11 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
   const { can, allowedWorkspaces: allowed } = usePermissions();
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
   const groups = navGroups[activeWorkspace];
+  const expandableGroups = expandableNavGroups[activeWorkspace] ?? [];
   const visibleItem = (item: NavItemDef | undefined): item is NavItemDef =>
     !!item && (!item.permission || (Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission)));
+  const visibleExpandableGroup = (group: ExpandableNavGroup): boolean =>
+    !group.permission || (Array.isArray(group.permission) ? group.permission.some(can) : can(group.permission));
 
   function handleWorkspaceChange(id: WorkspaceId) {
     setActiveWorkspace(id);
@@ -266,76 +420,61 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-40 bg-foreground/40 lg:hidden"
             onClick={() => setOpen(false)}
+            className="fixed inset-0 z-40 bg-foreground/40 backdrop-blur-[2px] lg:hidden"
           />
           <motion.aside
-            initial={{ x: -300 }}
+            initial={{ x: -280 }}
             animate={{ x: 0 }}
-            exit={{ x: -300 }}
-            transition={{ type: "spring", stiffness: 280, damping: 32 }}
-            className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col border-r border-border bg-card lg:hidden overflow-hidden"
+            exit={{ x: -280 }}
+            transition={{ type: "spring", stiffness: 380, damping: 34 }}
+            className="fixed inset-y-0 left-0 z-50 flex w-[280px] flex-col border-r border-border bg-card lg:hidden"
           >
-            <div className="flex items-center justify-between px-4 pt-5 pb-4 shrink-0">
-              <Logo />
-              <button
-                onClick={() => setOpen(false)}
-                className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted"
-              >
-                <ChevronLeft className="h-4 w-4" />
+            {/* Logo */}
+            <div className="flex items-center justify-between px-4 pt-6 pb-4">
+              <Link href="/dashboard" onClick={() => setOpen(false)}>
+                <Logo />
+              </Link>
+              <button onClick={() => setOpen(false)} className="grid h-7 w-7 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted transition">
+                <ChevronLeft className="h-3.5 w-3.5" />
               </button>
             </div>
 
             {/* Workspace switcher */}
-            {allowed.length > 1 && (
-              <div className="mx-3 mb-4 flex items-center gap-1 rounded-xl bg-muted p-1 shrink-0">
-                {allowed.map((w) => (
-                  <button
-                    key={w.id}
-                    title={w.label}
-                    onClick={() => handleWorkspaceChange(w.id)}
-                    className={cn(
-                      "flex-1 truncate rounded-lg px-1.5 py-1.5 text-[11.5px] font-semibold leading-tight transition",
-                      activeWorkspace === w.id
-                        ? "bg-[#4361EE] text-white shadow-sm"
-                        : "text-zinc-500 hover:text-zinc-800"
-                    )}
-                  >
-                    {w.navLabel ?? w.label}
-                  </button>
-                ))}
-              </div>
-            )}
+            <WorkspaceSwitcher active={activeWorkspace} collapsed={false} onChange={handleWorkspaceChange} allowed={allowed} />
 
-            <nav className="flex-1 overflow-y-auto px-3 pb-2">
+            {/* Nav */}
+            <nav className="flex-1 overflow-y-auto px-3 pb-4">
               {groups.map((group) => {
                 const items = group.items.map((href) => itemMap[href]).filter(visibleItem);
-                if (items.length === 0) return null;
+                const isAdminGroup = group.label === "ADMINISTRATION";
+                const visibleExpandables = isAdminGroup
+                  ? expandableGroups.filter(visibleExpandableGroup)
+                  : [];
+
+                if (items.length === 0 && visibleExpandables.length === 0) return null;
                 return (
                   <div key={group.label} className="mb-4">
                     <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none">
                       {group.label}
                     </p>
                     <ul className="space-y-0.5">
-                      {items.map((item) => {
-                        const Icon = ICONS[item.icon] ?? Home;
-                        const active = pathname === item.href;
-                        return (
-                          <li key={item.href}>
-                            <Link
-                              href={item.href}
-                              onClick={() => setOpen(false)}
-                              className={cn(
-                                "flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium",
-                                active ? "bg-[#4361EE] text-white" : "text-zinc-600 hover:bg-muted"
-                              )}
-                            >
-                              <Icon className="h-[18px] w-[18px] shrink-0" />
-                              {item.label}
-                            </Link>
-                          </li>
-                        );
-                      })}
+                      {visibleExpandables.map((eg) => (
+                        <ExpandableNavSection
+                          key={eg.id}
+                          group={{
+                            ...eg,
+                            children: eg.children.filter(visibleItem),
+                          }}
+                          collapsed={false}
+                          pathname={pathname}
+                        />
+                      ))}
+                      <AnimatePresence initial={false}>
+                        {items.map((item) => (
+                          <NavItem key={item.href} item={item} collapsed={false} pathname={pathname} />
+                        ))}
+                      </AnimatePresence>
                     </ul>
                   </div>
                 );
