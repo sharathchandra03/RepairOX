@@ -24,7 +24,7 @@ import { ChangeRoleDrawer } from "@/components/settings/change-role-drawer";
 import { DeleteMemberDialog } from "@/components/settings/delete-member-dialog";
 import { ResetPasswordDrawer } from "@/components/settings/reset-password-drawer";
 import {
-  PERMISSION_GROUPS, ALL_PERMISSIONS, WORKSPACE_MAP,
+  PERMISSION_GROUPS, ALL_PERMISSIONS, WORKSPACE_MAP, WORKSPACES,
   type PermissionKey, type RoleDef, type WorkspaceId,
 } from "@/lib/permissions";
 import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
@@ -76,7 +76,7 @@ export default function RolesPermissionsPage() {
     grants: savedGrants, saveGrants, enterPreview, allRoles, addRole,
     isCustomRole, canDeleteRole, deleteRole, membersInRole,
     getRoleById, team, setMemberRole, deleteMember,
-    resetPassword, setStaffStatus, toggleLogin,
+    resetPassword, setStaffStatus, toggleLogin, updateRoleWorkspaces,
   } = usePermissions();
 
   const [tab, setTab] = useState<TabId>("roles");
@@ -170,6 +170,11 @@ export default function RolesPermissionsPage() {
               membersInRole={membersInRole}
               onEditPermissions={() => setTab("matrix")}
               onAddRole={addRole}
+              setMemberRole={setMemberRole}
+              deleteMember={deleteMember}
+              resetPassword={resetPassword}
+              setStaffStatus={setStaffStatus}
+              toggleLogin={toggleLogin}
             />
           )}
           {tab === "matrix" && (
@@ -185,6 +190,7 @@ export default function RolesPermissionsPage() {
               membersInRole={membersInRole}
               activeRoleId={activeRoleId}
               setActiveRoleId={setActiveRoleId}
+              updateRoleWorkspaces={updateRoleWorkspaces}
             />
           )}
           {tab === "users" && (
@@ -227,6 +233,7 @@ export default function RolesPermissionsPage() {
    ───────────────────────────────────────────────────────────────────────── */
 function RolesTab({
   allRoles, activeRoleId, setActiveRoleId, membersInRole, onEditPermissions, onAddRole,
+  setMemberRole, deleteMember, resetPassword, setStaffStatus, toggleLogin,
 }: {
   allRoles: RoleDef[];
   activeRoleId: string;
@@ -234,9 +241,20 @@ function RolesTab({
   membersInRole: (roleId: string) => TeamMember[];
   onEditPermissions: () => void;
   onAddRole: ReturnType<typeof usePermissions>["addRole"];
+  setMemberRole: ReturnType<typeof usePermissions>["setMemberRole"];
+  deleteMember: ReturnType<typeof usePermissions>["deleteMember"];
+  resetPassword: ReturnType<typeof usePermissions>["resetPassword"];
+  setStaffStatus: ReturnType<typeof usePermissions>["setStaffStatus"];
+  toggleLogin: ReturnType<typeof usePermissions>["toggleLogin"];
 }) {
-  const { grants } = usePermissions();
+  const { grants, currentUser } = usePermissions();
+  const selfEmail = currentUser?.email ?? "";
   const [addOpen, setAddOpen] = useState(false);
+  const [detailView, setDetailView] = useState<"members" | "permissions">("members");
+  const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
+  const [removingMember, setRemovingMember] = useState<TeamMember | null>(null);
+  const [resettingMember, setResettingMember] = useState<TeamMember | null>(null);
+  const [suspendingMember, setSuspendingMember] = useState<TeamMember | null>(null);
   const active = allRoles.find((r) => r.id === activeRoleId) ?? allRoles[0];
   const totalPermissions = ALL_PERMISSIONS.length;
   const granted = resolveGrantedKeys(grants, active.id);
@@ -250,6 +268,17 @@ function RolesTab({
     const id = onAddRole({ label: input.label, summary: input.summary, workspaces: input.workspaces, permissions: [] });
     setActiveRoleId(id);
     setAddOpen(false);
+  }
+
+  function handleChangeRole(email: string, roleId: string) {
+    setMemberRole(email, roleId);
+    setEditingMember(null);
+  }
+
+  function handleRemoveMember() {
+    if (!removingMember) return;
+    deleteMember(removingMember.email);
+    setRemovingMember(null);
   }
 
   const totalMembers = allRoles.reduce((sum, r) => sum + membersInRole(r.id).length, 0);
@@ -342,91 +371,113 @@ function RolesTab({
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.25 }}
-        className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-7"
+        className="space-y-6"
       >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-3.5">
-            <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl brand-gradient text-white shadow-glow">
-              {(() => { const Icon = ROLE_ICON[active.id] ?? Users; return <Icon className="h-5 w-5" />; })()}
-            </span>
-            <div>
-              <h2 className="font-display text-xl font-extrabold tracking-tight">{active.label}</h2>
-              <p className="mt-1 max-w-lg text-sm text-zinc-600">{active.summary}</p>
+        {/* Role header card */}
+        <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-7">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3.5">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl brand-gradient text-white shadow-glow">
+                {(() => { const Icon = ROLE_ICON[active.id] ?? Users; return <Icon className="h-5 w-5" />; })()}
+              </span>
+              <div>
+                <h2 className="font-display text-xl font-extrabold tracking-tight">{active.label}</h2>
+                <p className="mt-1 max-w-lg text-sm text-zinc-600">{active.summary}</p>
+              </div>
+            </div>
+            <Can permission="manage_roles">
+              <Button size="md" className="shrink-0 gap-1.5 rounded-full" onClick={onEditPermissions}>
+                <SlidersHorizontal className="h-4 w-4" /> Edit permissions
+              </Button>
+            </Can>
+          </div>
+
+          {/* Access + scope summary cards */}
+          <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <ScopeCard icon={KeyRound} label="Access level" value={isFullAccess ? "Full access" : "Limited access"} hint={`${granted.size} / ${totalPermissions} capabilities`} />
+            <ScopeCard icon={LayoutGrid} label="Module scope" value={active.workspaces.length === 3 ? "All modules" : `${active.workspaces.length} module${active.workspaces.length === 1 ? "" : "s"}`} hint={active.workspaces.map((w) => WORKSPACE_MAP[w].label).join(" · ")} />
+            <ScopeCard icon={MapPin} label="Branch scope" value={branches.length === 0 ? "Unassigned" : branches.length === 1 ? "1 branch" : `${branches.length} branches`} hint={branches.length === 0 ? "No members assigned yet" : branches.join(" · ")} />
+          </div>
+
+          {/* Module access chips */}
+          <div className="mt-6">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Module access</p>
+            <div className="flex flex-wrap gap-2">
+              {(["shop", "leads", "operations"] as const).map((wid) => {
+                const w = WORKSPACE_MAP[wid];
+                const has = active.workspaces.includes(wid);
+                return (
+                  <span key={wid} className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold ring-1 ring-inset", has ? cn(w.bg, w.color, "ring-current/20") : "bg-zinc-50 text-zinc-400 ring-zinc-200")}>
+                    <span className={cn("h-1.5 w-1.5 rounded-full", has ? "bg-current" : "bg-zinc-300")} />
+                    {w.label}
+                  </span>
+                );
+              })}
             </div>
           </div>
-          <Can permission="manage_roles">
-            <Button size="md" className="shrink-0 gap-1.5 rounded-full" onClick={onEditPermissions}>
-              <SlidersHorizontal className="h-4 w-4" /> Edit permissions
-            </Button>
-          </Can>
         </div>
 
-        {/* Access + scope summary cards */}
-        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <ScopeCard
-            icon={KeyRound}
-            label="Access level"
-            value={isFullAccess ? "Full access" : "Limited access"}
-            hint={`${granted.size} / ${totalPermissions} capabilities`}
-          />
-          <ScopeCard
-            icon={LayoutGrid}
-            label="Module scope"
-            value={active.workspaces.length === 3 ? "All modules" : `${active.workspaces.length} module${active.workspaces.length === 1 ? "" : "s"}`}
-            hint={active.workspaces.map((w) => WORKSPACE_MAP[w].label).join(" · ")}
-          />
-          <ScopeCard
-            icon={MapPin}
-            label="Branch scope"
-            value={branches.length === 0 ? "Unassigned" : branches.length === 1 ? "1 branch" : `${branches.length} branches`}
-            hint={branches.length === 0 ? "No members assigned yet" : branches.join(" · ")}
-          />
+        {/* Detail sub-tabs: Members / Permissions */}
+        <div className="inline-flex items-center gap-1 rounded-full border border-border bg-muted p-1">
+          <button onClick={() => setDetailView("members")} className={cn("inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors", detailView === "members" ? "bg-[#4361EE] text-white shadow-[0_6px_20px_-8px_rgba(67,97,238,0.5)]" : "text-zinc-500 hover:text-zinc-800")}>
+            <Users className="h-4 w-4" /> Members ({members.length})
+          </button>
+          <button onClick={() => setDetailView("permissions")} className={cn("inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-[13px] font-semibold transition-colors", detailView === "permissions" ? "bg-[#4361EE] text-white shadow-[0_6px_20px_-8px_rgba(67,97,238,0.5)]" : "text-zinc-500 hover:text-zinc-800")}>
+            <ShieldCheck className="h-4 w-4" /> Permissions ({granted.size})
+          </button>
         </div>
 
-        {/* Module access chips */}
-        <div className="mt-6">
-          <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Module access</p>
-          <div className="flex flex-wrap gap-2">
-            {(["shop", "leads", "operations"] as const).map((wid) => {
-              const w = WORKSPACE_MAP[wid];
-              const has = active.workspaces.includes(wid);
+        {/* Members panel */}
+        {detailView === "members" && (
+          <RoleMembersPanel
+            members={members}
+            active={active}
+            selfEmail={selfEmail}
+            toggleLogin={toggleLogin}
+            setStaffStatus={setStaffStatus}
+            setEditingMember={setEditingMember}
+            setRemovingMember={setRemovingMember}
+            setResettingMember={setResettingMember}
+            setSuspendingMember={setSuspendingMember}
+          />
+        )}
+
+        {/* Permissions summary panel */}
+        {detailView === "permissions" && (
+          <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }} className="space-y-4">
+            {PERMISSION_GROUPS.map((g) => {
+              const inGroup = g.permissions.filter((p) => granted.has(p.key));
+              if (inGroup.length === 0) return null;
               return (
-                <span
-                  key={wid}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[12px] font-semibold ring-1 ring-inset",
-                    has ? cn(w.bg, w.color, "ring-current/20") : "bg-zinc-50 text-zinc-400 ring-zinc-200"
-                  )}
-                >
-                  <span className={cn("h-1.5 w-1.5 rounded-full", has ? "bg-current" : "bg-zinc-300")} />
-                  {w.label}
-                </span>
+                <div key={g.id} className="rounded-xl border border-border bg-card p-4 shadow-card">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[12.5px] font-semibold">{g.label}</p>
+                    <Badge tone="brand">{inGroup.length}/{g.permissions.length}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{g.description}</p>
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {inGroup.map((p) => (<Badge key={p.key} tone="success">{p.label}</Badge>))}
+                  </div>
+                </div>
               );
             })}
-          </div>
-        </div>
-
-        {/* Granted capabilities grouped */}
-        <div className="mt-6 space-y-4">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">What they can do</p>
-          {PERMISSION_GROUPS.map((g) => {
-            const inGroup = g.permissions.filter((p) => granted.has(p.key));
-            if (inGroup.length === 0) return null;
-            return (
-              <div key={g.id} className="rounded-xl border border-border bg-background/60 p-4">
-                <p className="text-[12px] font-semibold">{g.label}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5">
-                  {inGroup.map((p) => (
-                    <Badge key={p.key} tone="success">{p.label}</Badge>
-                  ))}
-                </div>
+            {PERMISSION_GROUPS.every((g) => g.permissions.filter((p) => granted.has(p.key)).length === 0) && (
+              <div className="flex flex-col items-center justify-center px-6 py-12 text-center rounded-2xl border border-border bg-card">
+                <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]"><ShieldCheck className="h-6 w-6" /></span>
+                <p className="mt-4 text-sm font-semibold text-zinc-700">No permissions granted</p>
+                <p className="mt-1 max-w-xs text-[12.5px] text-muted-foreground">This role has no capabilities yet. Use the Permission Matrix tab to configure access.</p>
               </div>
-            );
-          })}
-        </div>
+            )}
+          </motion.div>
+        )}
       </motion.div>
 
+      {/* Drawers and dialogs */}
       <AddRoleDrawer open={addOpen} onClose={() => setAddOpen(false)} onCreate={handleCreate} />
+      <ChangeRoleDrawer open={!!editingMember} onClose={() => setEditingMember(null)} memberName={editingMember?.name ?? ""} currentRoleId={editingMember?.roleId ?? allRoles[0].id} roles={allRoles} onConfirm={(roleId) => editingMember && handleChangeRole(editingMember.email, roleId)} />
+      <ResetPasswordDrawer open={!!resettingMember} onClose={() => setResettingMember(null)} memberName={resettingMember?.name ?? ""} onConfirm={(password) => { if (resettingMember) resetPassword(resettingMember.id, password); setResettingMember(null); }} />
+      <ConfirmDialog open={!!suspendingMember} onClose={() => setSuspendingMember(null)} title="Suspend this staff member?" description={`${suspendingMember?.name ?? "They"} will lose access immediately and won't be able to log in until reactivated.`} confirmLabel="Suspend" onConfirm={() => { if (suspendingMember) setStaffStatus(suspendingMember.id, "suspended"); setSuspendingMember(null); }} />
+      <DeleteMemberDialog open={!!removingMember} onClose={() => setRemovingMember(null)} member={removingMember} onConfirm={handleRemoveMember} />
     </div>
   );
 }
@@ -449,6 +500,156 @@ function ScopeCard({ icon: Icon, label, value, hint }: {
   );
 }
 
+/* ─── Role Members Panel — the member list shown inside the Roles tab ─── */
+function RoleMembersPanel({
+  members, active, selfEmail, toggleLogin, setStaffStatus,
+  setEditingMember, setRemovingMember, setResettingMember, setSuspendingMember,
+}: {
+  members: TeamMember[];
+  active: RoleDef;
+  selfEmail: string;
+  toggleLogin: ReturnType<typeof usePermissions>["toggleLogin"];
+  setStaffStatus: ReturnType<typeof usePermissions>["setStaffStatus"];
+  setEditingMember: (m: TeamMember | null) => void;
+  setRemovingMember: (m: TeamMember | null) => void;
+  setResettingMember: (m: TeamMember | null) => void;
+  setSuspendingMember: (m: TeamMember | null) => void;
+}) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 6 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.2 }}
+      className="rounded-2xl border border-border bg-card shadow-card"
+    >
+      <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+        <div>
+          <p className="text-[13.5px] font-semibold">Role Members</p>
+          <p className="mt-0.5 text-[12px] text-muted-foreground">
+            {members.length} {members.length === 1 ? "person" : "people"} assigned to {active.label}
+          </p>
+        </div>
+        <Can permission="manage_users">
+          <Link href="/roles-permissions/add-user">
+            <button className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-[12px] font-semibold text-[#3347D6] ring-1 ring-inset ring-[#B3BFF6]/60 transition hover:bg-[#E2E8FB]">
+              <Plus className="h-3.5 w-3.5" /> Add member
+            </button>
+          </Link>
+        </Can>
+      </div>
+
+      {members.length === 0 ? (
+        <div className="flex flex-col items-center justify-center px-6 py-12 text-center">
+          <span className="grid h-14 w-14 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]">
+            <Users className="h-6 w-6" />
+          </span>
+          <p className="mt-4 text-sm font-semibold text-zinc-700">No members yet</p>
+          <p className="mt-1 max-w-xs text-[12.5px] text-muted-foreground">
+            No one is assigned to the {active.label} role. Add a staff member or move someone from another role.
+          </p>
+          <Can permission="manage_users">
+            <Link href="/roles-permissions/add-user">
+              <Button size="md" className="mt-4 gap-1.5 rounded-full">
+                <Plus className="h-4 w-4" /> Add staff member
+              </Button>
+            </Link>
+          </Can>
+        </div>
+      ) : (
+        <div className="divide-y divide-border">
+          {members.map((m, i) => {
+            const isSelf = m.email === selfEmail;
+            return (
+              <motion.div
+                key={m.email}
+                initial={{ opacity: 0, y: 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.025 * i }}
+                className="flex items-center gap-3.5 px-5 py-3.5 transition hover:bg-muted/40"
+              >
+                <Avatar name={m.name} size={38} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13.5px] font-semibold leading-tight">
+                    {m.name}
+                    {isSelf && <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">(you)</span>}
+                  </p>
+                  <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Mail className="h-3 w-3" /> {m.email}
+                    </span>
+                    {m.phone && (
+                      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <Phone className="h-3 w-3" /> {m.phone}
+                      </span>
+                    )}
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <Building2 className="h-3 w-3" /> {m.branch}
+                    </span>
+                  </div>
+                </div>
+                <Badge tone={STATUS_TONE[m.status]} dot={m.status === "active"}>{STATUS_LABEL[m.status]}</Badge>
+                <Can permission="manage_users">
+                  <Dropdown
+                    align="right"
+                    width="w-52"
+                    trigger={({ toggle }) => (
+                      <button
+                        onClick={toggle}
+                        aria-label="Member actions"
+                        className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                      >
+                        <MoreHorizontal className="h-4 w-4" />
+                      </button>
+                    )}
+                  >
+                    {(close) => (
+                      <>
+                        <MenuLabel>Member actions</MenuLabel>
+                        <MenuItem icon={UserCog} onClick={() => { setEditingMember(m); close(); }}>
+                          Change role
+                        </MenuItem>
+                        <MenuItem icon={KeyRound} onClick={() => { setResettingMember(m); close(); }}>
+                          Reset password
+                        </MenuItem>
+                        {m.loginEnabled ? (
+                          <MenuItem icon={Power} onClick={() => { toggleLogin(m.id, false); close(); }}>
+                            Disable login
+                          </MenuItem>
+                        ) : (
+                          <MenuItem icon={Power} onClick={() => { setResettingMember(m); close(); }}>
+                            Enable login…
+                          </MenuItem>
+                        )}
+                        {m.status === "suspended" ? (
+                          <MenuItem icon={CheckCircle2} onClick={() => { setStaffStatus(m.id, "active"); close(); }}>
+                            Activate access
+                          </MenuItem>
+                        ) : (
+                          <MenuItem icon={Ban} onClick={() => { setSuspendingMember(m); close(); }}>
+                            Suspend access
+                          </MenuItem>
+                        )}
+                        {!isSelf && (
+                          <>
+                            <div className="my-1 h-px bg-border" />
+                            <MenuItem icon={Trash2} danger onClick={() => { setRemovingMember(m); close(); }}>
+                              Remove from role
+                            </MenuItem>
+                          </>
+                        )}
+                      </>
+                    )}
+                  </Dropdown>
+                </Can>
+              </motion.div>
+            );
+          })}
+        </div>
+      )}
+    </motion.div>
+  );
+}
+
 /* ─────────────────────────────────────────────────────────────────────────
    TAB 2 — Permission Matrix
    The editable grid where an administrator grants exactly what each role can
@@ -457,6 +658,7 @@ function ScopeCard({ icon: Icon, label, value, hint }: {
 function MatrixTab({
   savedGrants, saveGrants, enterPreview, allRoles, addRole,
   isCustomRole, canDeleteRole, deleteRole, membersInRole, activeRoleId, setActiveRoleId,
+  updateRoleWorkspaces,
 }: {
   savedGrants: ReturnType<typeof usePermissions>["grants"];
   saveGrants: ReturnType<typeof usePermissions>["saveGrants"];
@@ -469,6 +671,7 @@ function MatrixTab({
   membersInRole: ReturnType<typeof usePermissions>["membersInRole"];
   activeRoleId: string;
   setActiveRoleId: (id: string) => void;
+  updateRoleWorkspaces: ReturnType<typeof usePermissions>["updateRoleWorkspaces"];
 }) {
   const [grants, setGrants] = useState<Record<string, Set<PermissionKey>>>(() => draftFromContext(savedGrants, allRoles));
   const [query, setQuery] = useState("");
@@ -709,7 +912,7 @@ function MatrixTab({
         </div>
 
         {/* Summary sidebar */}
-        <div className="space-y-4">
+        <div className="space-y-4 lg:sticky lg:top-[72px] lg:self-start">
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <div className="flex items-center gap-2.5">
               <span className="grid h-9 w-9 place-items-center rounded-lg brand-gradient text-white shadow-glow">
@@ -750,7 +953,43 @@ function MatrixTab({
             </div>
           </div>
 
-          <div className="rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
+          <div className="mt-6 rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
+            <p className="text-[13px] font-semibold text-[#3347D6]">Workspace access</p>
+            <p className="mt-0.5 text-[11px] leading-relaxed text-[#3347D6]/70">
+              Which modules this role can reach. Changes save immediately.
+            </p>
+            <div className="mt-3 space-y-1.5">
+              {WORKSPACES.map((w) => {
+                const checked = activeRole.workspaces.includes(w.id);
+                return (
+                  <label
+                    key={w.id}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition",
+                      checked ? "border-[#B3BFF6] bg-white" : "border-border hover:bg-white/60",
+                      isPlatformOwner && "cursor-not-allowed opacity-60"
+                    )}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      onChange={() => {
+                        if (isPlatformOwner) return;
+                        const next = checked
+                          ? activeRole.workspaces.filter((id) => id !== w.id)
+                          : [...activeRole.workspaces, w.id];
+                        if (next.length === 0) return;
+                        updateRoleWorkspaces(activeRoleId, next);
+                      }}
+                      aria-label={w.label}
+                    />
+                    <span className={cn("font-medium", checked ? "text-zinc-900" : "text-zinc-500")}>{w.label}</span>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="mt-2 rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
             <p className="text-[13px] font-semibold text-[#3347D6]">Access levels</p>
             <p className="mt-0.5 text-[11px] leading-relaxed text-[#3347D6]/70">
               View, Create, Edit, Delete, Assign, Approve and Export sit under the

@@ -105,7 +105,7 @@ export async function POST(req: Request) {
       branch_id: branchIdFor(ownerBranch),
       name: "Owner",
       email: ownerEmail,
-      role_id: "master_shop_owner",
+      role_id: "platform_owner",
       branch: ownerBranch,
       status: "active",
       login_enabled: true,

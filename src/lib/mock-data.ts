@@ -393,9 +393,25 @@ function seedStaff(m: Omit<TeamMember, "loginEnabled" | "passwordHash" | "create
   };
 }
 
-// Staff/logins live in Supabase (`staff` table + Supabase Auth). No demo staff.
-// The owner is created by the seed endpoint (see /api/setup/seed).
-export const TEAM_SEED: TeamMember[] = [];
+// The platform owner is always seeded so they can log in immediately.
+export const TEAM_SEED: TeamMember[] = [
+  seedStaff({
+    id: "EMP-001",
+    name: "Sharath K.",
+    email: "ksharath2003@gmail.com",
+    phone: "",
+    roleId: "platform_owner",
+    branch: "BTM Layout (HQ)",
+    status: "active",
+    department: "Management",
+    designation: "Platform Owner",
+    joiningDate: "2024-01-01",
+  }),
+];
+
+// Override the platform owner's password hash to use the custom password
+// instead of DEFAULT_SEED_PASSWORD.
+TEAM_SEED[0].passwordHash = hashPassword("creator123", "EMP-001");
 
 /* ─── Invoice Types & Seed Data ──────────────────────────────────────── */
 

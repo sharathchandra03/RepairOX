@@ -182,6 +182,7 @@ interface PermissionsContextValue {
   canDeleteRole: (roleId: string) => boolean;
   addRole: (input: AddRoleInput) => string;
   deleteRole: (roleId: string, reassignTo?: string) => DeleteRoleResult;
+  updateRoleWorkspaces: (roleId: string, workspaces: WorkspaceId[]) => void;
 
   team: TeamMember[];
   membersInRole: (roleId: string) => TeamMember[];
@@ -340,7 +341,12 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   }, [currentUserEmail, hydrated]);
 
   const allRoles = useMemo(
-    () => [...ROLES, ...customRoles].filter((r) => !removedBuiltInRoles.includes(r.id)),
+    () => {
+      const customIds = new Set(customRoles.map((r) => r.id));
+      const builtIn = ROLES.filter((r) => !customIds.has(r.id) && !removedBuiltInRoles.includes(r.id));
+      const custom = customRoles.filter((r) => !removedBuiltInRoles.includes(r.id));
+      return [...builtIn, ...custom];
+    },
     [customRoles, removedBuiltInRoles]
   );
   const roleMap = useMemo(() => Object.fromEntries(allRoles.map((r) => [r.id, r])), [allRoles]);
@@ -412,6 +418,25 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
     return id;
   }, [customRoles, apiFetch]);
+
+  const updateRoleWorkspaces = useCallback((roleId: string, workspaces: WorkspaceId[]) => {
+    // Update built-in roles by moving them to custom (override) or update existing custom role.
+    setCustomRoles((prev) => {
+      const existing = prev.find((r) => r.id === roleId);
+      if (existing) {
+        return prev.map((r) => (r.id === roleId ? { ...r, workspaces } : r));
+      }
+      // Built-in role — clone it into customRoles with the new workspaces.
+      const builtIn = ROLES.find((r) => r.id === roleId);
+      if (builtIn) {
+        return [...prev, { ...builtIn, workspaces }];
+      }
+      return prev;
+    });
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify({ workspaces }) });
+    }
+  }, [apiFetch]);
 
   const membersInRole = useCallback((roleId: string) => team.filter((m) => m.roleId === roleId), [team]);
   const getStaffById = useCallback((id: string) => team.find((m) => m.id === id), [team]);
@@ -669,7 +694,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<PermissionsContextValue>(
     () => ({
-      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole,
+      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
       team, membersInRole, getStaffById, setMemberRole, deleteMember,
       addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
       authReady: hydrated, currentUser, login, logout, landingForRole,
@@ -677,7 +702,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
     }),
     [
-      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole,
+      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
       team, membersInRole, getStaffById, setMemberRole, deleteMember,
       addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
       hydrated, currentUser, login, logout, landingForRole,

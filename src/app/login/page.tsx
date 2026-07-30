@@ -235,9 +235,6 @@ export default function LoginPage() {
                 <Link href="#" className="font-semibold text-brand-700 hover:underline">Sign Up</Link>
               </p>
 
-              <p className="text-center text-[11px] text-muted-foreground/80">
-                Demo owner login · <span className="font-medium text-zinc-600">abc@gmail.com</span> / <span className="font-medium text-zinc-600">repairox123</span>
-              </p>
             </form>
           </div>
         </motion.section>
