@@ -97,6 +97,7 @@ function TaskRow({
           <Dropdown
             align="right"
             width="w-40"
+            panelClassName="border-amber-200 bg-[#FFFDE7] shadow-[0_12px_40px_-12px_rgba(180,150,0,0.2)]"
             trigger={({ toggle }) => (
               <button
                 onClick={toggle}
@@ -112,11 +113,12 @@ function TaskRow({
                 <MenuItem
                   icon={task.completed ? RotateCcw : CheckCircle2}
                   onClick={() => { onToggle(!task.completed); close(); }}
+                  className="text-amber-900 hover:bg-amber-100/70"
                 >
                   {task.completed ? "Reopen" : "Complete"}
                 </MenuItem>
-                <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
-                <MenuItem icon={Pin} onClick={() => { onPin(); close(); }}>
+                <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }} className="text-amber-900 hover:bg-amber-100/70">Edit</MenuItem>
+                <MenuItem icon={Pin} onClick={() => { onPin(); close(); }} className="text-amber-900 hover:bg-amber-100/70">
                   {task.pinned ? "Unpin" : "Pin to top"}
                 </MenuItem>
                 <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
@@ -228,7 +230,7 @@ export function TodoWidget() {
   const isEmpty = !loading && tasks.length === 0;
 
   return (
-    <div className="relative overflow-hidden rounded-2xl border border-[#F0E68C]/60 bg-[#FFF9C4] p-5 shadow-[0_4px_16px_-4px_rgba(200,180,0,0.15),0_8px_32px_-8px_rgba(200,180,0,0.1)] sm:p-6">
+    <div className="relative rounded-2xl border border-[#F0E68C]/60 bg-[#FFF9C4] p-5 shadow-[0_4px_16px_-4px_rgba(200,180,0,0.15),0_8px_32px_-8px_rgba(200,180,0,0.1)] sm:p-6">
       {/* Decorative tape */}
       <div className="absolute -top-1 left-1/2 h-6 w-16 -translate-x-1/2 rounded-b-md bg-[#FFE082]/80 shadow-sm" />
       {/* Subtle lined-paper effect */}

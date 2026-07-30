@@ -1,10 +1,12 @@
 "use client";
 
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 /* Smart dropdown that auto-positions upward if near the bottom of the viewport.
+   Renders the panel via a Portal so it always floats above everything.
    Handles outside-click + Escape, animated panel, right/left alignment. */
 export function Dropdown({
   trigger,
@@ -25,6 +27,10 @@ export function Dropdown({
   const [pos, setPos] = React.useState<{ top?: number; bottom?: number; left?: number; right?: number }>({});
   const ref = React.useRef<HTMLDivElement | null>(null);
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
+  const panelRef = React.useRef<HTMLDivElement | null>(null);
+  const [mounted, setMounted] = React.useState(false);
+
+  React.useEffect(() => { setMounted(true); }, []);
 
   // Calculate fixed positioning when opening
   React.useEffect(() => {
@@ -51,7 +57,14 @@ export function Dropdown({
   React.useEffect(() => {
     if (!open) return;
     function onDoc(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const target = e.target as Node;
+      // Close if click is outside both trigger wrapper and portal panel
+      if (
+        ref.current && !ref.current.contains(target) &&
+        panelRef.current && !panelRef.current.contains(target)
+      ) {
+        setOpen(false);
+      }
     }
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") setOpen(false);
@@ -59,7 +72,8 @@ export function Dropdown({
     // Close on scroll (unless scrolling inside the menu itself) so the
     // fixed-positioned panel never detaches from its trigger.
     function onScroll(e: Event) {
-      if (ref.current && ref.current.contains(e.target as Node)) return;
+      const target = e.target as Node;
+      if (panelRef.current && panelRef.current.contains(target)) return;
       setOpen(false);
     }
     document.addEventListener("mousedown", onDoc);
@@ -72,29 +86,34 @@ export function Dropdown({
     };
   }, [open]);
 
+  const panel = (
+    <AnimatePresence>
+      {open && (
+        <motion.div
+          ref={panelRef}
+          initial={{ opacity: 0, scale: 0.97 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0, scale: 0.97 }}
+          transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
+          style={pos}
+          className={cn(
+            "fixed z-[9999] overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
+            width,
+            panelClassName
+          )}
+        >
+          {children(() => setOpen(false))}
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
   return (
     <div ref={ref} className={cn("relative inline-block", className)}>
       <div ref={triggerRef}>
         {trigger({ open, toggle: () => setOpen((v) => !v) })}
       </div>
-      <AnimatePresence>
-        {open && (
-          <motion.div
-            initial={{ opacity: 0, scale: 0.97 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.97 }}
-            transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
-            style={pos}
-            className={cn(
-              "fixed z-[100] overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
-              width,
-              panelClassName
-            )}
-          >
-            {children(() => setOpen(false))}
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {mounted ? createPortal(panel, document.body) : null}
     </div>
   );
 }
