@@ -293,9 +293,15 @@ export function buildInvoicePrintData(
   invoice: Invoice,
 ): PrintDocumentData {
   const now = new Date();
-  let title = invoice.invoiceType === "business" ? "Tax Invoice" : "Invoice";
-  // Accessories invoices get a distinct title
-  if (invoice.serviceCategory === "accessories") title = "Accessories Invoice";
+  // Determine print title based on invoice type + service category
+  let title: string;
+  if (invoice.invoiceType === "business") {
+    title = "Tax Invoice";
+  } else if (invoice.serviceCategory === "accessories") {
+    title = "Accessories Invoice";
+  } else {
+    title = "Retail Invoice";
+  }
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromInvoice(invoice),

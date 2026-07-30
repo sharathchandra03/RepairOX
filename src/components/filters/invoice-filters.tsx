@@ -40,6 +40,7 @@ const CRITERIA_GROUPS: { group: string; items: CriteriaOption[] }[] = [
     group: "Invoice",
     items: [
       { id: "invoice_type", label: "Invoice Type", group: "Invoice", type: "select", icon: FileText, options: [{ label: "All", value: "" }, { label: "Service", value: "service" }, { label: "Product", value: "product" }, { label: "Mixed", value: "mixed" }] },
+      { id: "service_category", label: "Service Category", group: "Invoice", type: "select", icon: Tag, options: [{ label: "All", value: "" }, { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }] },
       { id: "payment_status", label: "Payment Status", group: "Invoice", type: "select", icon: CreditCard, options: [{ label: "All", value: "" }, { label: "Paid", value: "paid" }, { label: "Unpaid", value: "unpaid" }, { label: "Partial", value: "partial" }] },
       { id: "due_status", label: "Due Status", group: "Invoice", type: "select", icon: FileText, options: [{ label: "All", value: "" }, { label: "Not Due", value: "not_due" }, { label: "Due Today", value: "due_today" }, { label: "Overdue", value: "overdue" }] },
       { id: "tax_type", label: "Tax Type", group: "Invoice", type: "select", icon: Tag, options: [{ label: "All", value: "" }, { label: "GST", value: "gst" }, { label: "No Tax", value: "none" }] },

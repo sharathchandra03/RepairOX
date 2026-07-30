@@ -226,7 +226,16 @@ export default function InvoiceDetailPage() {
                   {INVOICE_STATUS_LABEL[invoice.status]}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
-                  {INVOICE_TYPE_LABEL[invoice.invoiceType]}
+                  {invoice.serviceCategory === "accessories"
+                    ? "Accessories Invoice"
+                    : INVOICE_TYPE_LABEL[invoice.invoiceType]}
+                </span>
+                <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${
+                  (invoice.serviceCategory || "service") === "accessories"
+                    ? "bg-violet-50 text-violet-700 ring-violet-200"
+                    : "bg-sky-50 text-sky-700 ring-sky-200"
+                }`}>
+                  {(invoice.serviceCategory || "service") === "accessories" ? "Accessories" : "Service"}
                 </span>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">

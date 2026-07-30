@@ -108,6 +108,7 @@ export default function InvoicePage() {
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("all");
   const [q, setQ] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
@@ -131,10 +132,11 @@ export default function InvoicePage() {
     invoices.filter((inv) => {
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
+      const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange);
       const okQ = !q || `${inv.id} ${inv.reference} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
-      return okStatus && okType && okDate && okQ;
-    }), [invoices, statusFilter, typeFilter, dateRange, q]);
+      return okStatus && okType && okCategory && okDate && okQ;
+    }), [invoices, statusFilter, typeFilter, categoryFilter, dateRange, q]);
 
   /* KPIs */
   const kpis = useMemo(() => {
@@ -237,7 +239,7 @@ export default function InvoicePage() {
           setStatusFilter(filterState.invoiceStatus);
           setQ(filterState.customerName || filterState.invoiceId || "");
         }}
-        onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setDateRange("all"); setQ(""); }}
+        onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setCategoryFilter("all"); setDateRange("all"); setQ(""); }}
         extraActions={<>
           <Button variant="outline" size="sm" onClick={() => setShowColSettings(!showColSettings)}>
             <Settings2 className="h-3.5 w-3.5" /> Columns
@@ -248,6 +250,13 @@ export default function InvoicePage() {
               { label: "All Types", value: "all" },
               { label: "Retail Invoice", value: "retail" },
               { label: "Business Invoice", value: "business" },
+            ]} />
+          <Select value={categoryFilter} onChange={(e: any) => setCategoryFilter(e.target.value)}
+            className="h-8 !rounded-lg text-xs"
+            options={[
+              { label: "All Categories", value: "all" },
+              { label: "Service", value: "service" },
+              { label: "Accessories", value: "accessories" },
             ]} />
         </>}
       />
@@ -422,9 +431,18 @@ function renderInvCell(
     );
     case "date": return <span className="text-[12px] text-muted-foreground whitespace-nowrap">{fmtDate(inv.createdAt)}</span>;
     case "status": return (
-      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
-        <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
-      </span>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
+        </span>
+        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset whitespace-nowrap ${
+          (inv.serviceCategory || "service") === "accessories"
+            ? "bg-violet-50 text-violet-700 ring-violet-200"
+            : "bg-sky-50 text-sky-700 ring-sky-200"
+        }`}>
+          {(inv.serviceCategory || "service") === "accessories" ? "Accessories" : "Service"}
+        </span>
+      </div>
     );
     case "paid": return <span className="tabular-nums text-[12px] font-medium">{formatINR(inv.paidAmount)}</span>;
     case "tax": return <span className="tabular-nums text-[12px] text-muted-foreground">{formatINR(inv.tax)}</span>;
