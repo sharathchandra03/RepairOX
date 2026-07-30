@@ -16,7 +16,7 @@ import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
-import { searchBrands, getModelsForBrand } from "@/lib/brand-model-data";
+import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
 
 /* ─── Step Definitions ───────────────────────────────────────────────── */
@@ -606,64 +606,6 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
   );
 }
 
-/* ─── Shared Brand/Model Selector (reuses ticket device catalog) ─────── */
-
-function BrandModelSelector({ brand, model, onBrandChange, onModelChange }: { brand: string; model: string; onBrandChange: (v: string) => void; onModelChange: (v: string) => void }) {
-  const { brands, deviceModels } = useStore();
-  const [brandQ, setBrandQ] = useState("");
-  const [modelQ, setModelQ] = useState("");
-  const [showBrandList, setShowBrandList] = useState(false);
-  const [showModelList, setShowModelList] = useState(false);
-
-  const filteredBrands = brandQ.trim() ? searchBrands(brands, brandQ) : brands;
-  const selectedBrand = brands.find((b) => b.name === brand);
-  const availableModels = selectedBrand ? getModelsForBrand(deviceModels, selectedBrand.id) : [];
-  const filteredModels = modelQ.trim() ? availableModels.filter((m) => m.name.toLowerCase().includes(modelQ.toLowerCase())) : availableModels;
-
-  return (
-    <>
-      <div className="space-y-1 relative">
-        <Label>Brand</Label>
-        <Input
-          value={brand || brandQ}
-          onChange={(e: any) => { setBrandQ(e.target.value); onBrandChange(e.target.value); setShowBrandList(true); }}
-          onFocus={() => setShowBrandList(true)}
-          placeholder="Apple"
-        />
-        {showBrandList && filteredBrands.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[200px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-            {filteredBrands.slice(0, 10).map((b) => (
-              <button key={b.id} type="button" onClick={() => { onBrandChange(b.name); onModelChange(""); setBrandQ(""); setShowBrandList(false); }}
-                className={cn("flex w-full items-center px-3 py-2 text-sm text-left hover:bg-[#EEF1FD] transition", b.name === brand && "bg-[#EEF1FD] font-medium text-[#4361EE]")}>
-                {b.name}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="space-y-1 relative">
-        <Label>Model</Label>
-        <Input
-          value={model || modelQ}
-          onChange={(e: any) => { setModelQ(e.target.value); onModelChange(e.target.value); setShowModelList(true); }}
-          onFocus={() => setShowModelList(true)}
-          placeholder={selectedBrand ? "Select model…" : "Select brand first"}
-        />
-        {showModelList && filteredModels.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[200px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-            {filteredModels.slice(0, 10).map((m) => (
-              <button key={m.id} type="button" onClick={() => { onModelChange(m.name); setModelQ(""); setShowModelList(false); }}
-                className={cn("flex w-full items-center px-3 py-2 text-sm text-left hover:bg-[#EEF1FD] transition", m.name === model && "bg-[#EEF1FD] font-medium text-[#4361EE]")}>
-                {m.name}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </>
-  );
-}
-
 /* ─── Inventory Search Box (reuses ticket inventory search pattern) ──── */
 
 function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryItem) => void; onClose: () => void }) {
@@ -830,7 +772,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Device Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <BrandModelSelector
+              <DeviceBrandModelSelector
                 brand={activeDevice.brand}
                 model={activeDevice.model}
                 onBrandChange={(v) => setDeviceField("brand", v)}
