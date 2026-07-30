@@ -15,7 +15,7 @@ import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
 import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
 import { Avatar } from "@/components/ui/avatar";
-import { CURRENT_USER, type WorkspaceId } from "@/lib/permissions";
+import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -252,8 +252,8 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
   const pathname = usePathname();
   const router = useRouter();
   const { can, allowedWorkspaces, role, isPreviewing, currentUser, logout } = usePermissions();
-  const displayName = currentUser?.name ?? CURRENT_USER.name;
-  const displayEmail = currentUser?.email ?? CURRENT_USER.email;
+  const displayName = currentUser?.name ?? "User";
+  const displayEmail = currentUser?.email ?? "";
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
   const groups = navGroups[activeWorkspace];
   const expandableGroups = expandableNavGroups[activeWorkspace] ?? [];

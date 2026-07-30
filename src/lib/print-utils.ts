@@ -95,6 +95,7 @@ export type PrintInvoiceInfo = {
   footer: string;
   employee: string;
   ticketId: string;
+  paymentMode?: string;
   /** Multi-device: individual device sections for print */
   devices?: PrintInvoiceDeviceInfo[];
 };
@@ -262,6 +263,7 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     footer: invoice.footer || "",
     employee: invoice.employee || "",
     ticketId: invoice.ticketId || "",
+    paymentMode: invoice.paymentMode || undefined,
     devices: printDevices,
   };
 }
@@ -291,7 +293,9 @@ export function buildInvoicePrintData(
   invoice: Invoice,
 ): PrintDocumentData {
   const now = new Date();
-  const title = invoice.invoiceType === "business" ? "Tax Invoice" : "Invoice";
+  let title = invoice.invoiceType === "business" ? "Tax Invoice" : "Invoice";
+  // Accessories invoices get a distinct title
+  if (invoice.serviceCategory === "accessories") title = "Accessories Invoice";
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromInvoice(invoice),

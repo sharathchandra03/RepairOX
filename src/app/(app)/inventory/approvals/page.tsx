@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { RefreshCw, BadgeCheck, Check, X, Eye, ScanLine, FileText } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -9,9 +9,10 @@ import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { DataTable, type Column } from "@/components/inventory/data-table";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
+import { logActivity } from "@/lib/activity-log";
 import { cn, formatINR } from "@/lib/utils";
 import {
-  approvals as seedApprovals, APPROVAL_STATUS_LABEL, APPROVAL_STATUS_TONE,
+  APPROVAL_STATUS_LABEL, APPROVAL_STATUS_TONE,
   type Approval, type ApprovalStatus,
 } from "@/lib/inventory-data";
 
@@ -26,12 +27,30 @@ function StatusBadge({ status }: { status: ApprovalStatus }) {
   return <Badge tone={APPROVAL_STATUS_TONE[status]} dot={status === "pending"}>{APPROVAL_STATUS_LABEL[status]}</Badge>;
 }
 
+const APPROVALS_STORAGE_KEY = "repairox-inventory-approvals";
+
+function loadApprovals(): Approval[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(APPROVALS_STORAGE_KEY);
+    if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) return parsed; }
+  } catch { /* ignore */ }
+  return [];
+}
+
 export default function ApprovalsPage() {
   const { can } = usePermissions();
-  const [rows, setRows] = useState<Approval[]>(seedApprovals);
+  const [rows, setRows] = useState<Approval[]>(loadApprovals);
   const [status, setStatus] = useState<"all" | ApprovalStatus>("all");
   const [active, setActive] = useState<Approval | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+
+  // Persist approvals to localStorage on change
+  useEffect(() => {
+    if (rows.length > 0) {
+      localStorage.setItem(APPROVALS_STORAGE_KEY, JSON.stringify(rows));
+    }
+  }, [rows]);
 
   const counts = useMemo(() => ({
     pending: rows.filter((r) => r.status === "pending").length,
@@ -45,8 +64,17 @@ export default function ApprovalsPage() {
   );
 
   function decide(id: string, next: ApprovalStatus) {
-    setRows((arr) => arr.map((r) => (r.id === id ? { ...r, status: next, actionBy: "Shop Owner", actionDate: "Today" } : r)));
-    setActive((a) => (a && a.id === id ? { ...a, status: next, actionBy: "Shop Owner", actionDate: "Today" } : a));
+    const row = rows.find((r) => r.id === id);
+    setRows((arr) => arr.map((r) => (r.id === id ? { ...r, status: next, actionBy: "Shop Owner", actionDate: new Date().toLocaleDateString("en-IN") } : r)));
+    setActive((a) => (a && a.id === id ? { ...a, status: next, actionBy: "Shop Owner", actionDate: new Date().toLocaleDateString("en-IN") } : a));
+    logActivity({
+      module: "Inventory",
+      action: next === "approved" ? "Approval Granted" : "Approval Rejected",
+      severity: next === "approved" ? "success" : "warning",
+      entity: "Approval",
+      reference: id,
+      description: `${next === "approved" ? "Approved" : "Rejected"} ${row?.docType || "document"} ${row?.docNumber || id}.`,
+    });
   }
 
   function refresh() {

@@ -10,6 +10,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
+import { DraggableKpiRow, type KpiCardItem } from "@/components/dashboard/draggable-kpi-row";
 import { TodoWidget } from "@/components/dashboard/todo-widget";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -18,11 +19,12 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { useState, useMemo } from "react";
-import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, type TicketStatus } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
 import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
+import { useDashboardOrder } from "@/lib/use-dashboard-order";
 
 /* ── Device breakdown — computed from store data in component ── */
 
@@ -47,9 +49,22 @@ export default function Dashboard() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_high" | "amount_low">("newest");
   const [filterBy, setFilterBy] = useState<"all" | "received" | "repairing" | "completed" | "delivered">("all");
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "30days" | "all">("all");
-  const { tickets, orders: ordersStatus } = useStore();
+  const { tickets, invoices, inventory } = useStore();
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
+  const { cardOrder, reorder: reorderKpi } = useDashboardOrder();
+
+  // Compute live Orders Status from real ticket data
+  const ordersStatus = useMemo(() => {
+    const statusList: TicketStatus[] = ["received", "diagnosis", "repairing", "qc", "completed", "delivered"];
+    return statusList
+      .map((status) => {
+        const inStatus = tickets.filter((t) => t.status === status);
+        const assigned = inStatus.filter((t) => t.technician && t.technician.trim() !== "").length;
+        return { detail: STATUS_LABEL[status], assigned, received: inStatus.length };
+      })
+      .filter((row) => row.received > 0); // Only show statuses that have tickets
+  }, [tickets]);
 
   // Apply filters to tickets
   const filteredTickets = useMemo(() => {
@@ -85,15 +100,117 @@ export default function Dashboard() {
     return list;
   }, [tickets, filterBy, dateRange, sortBy]);
 
-  // Compute live KPIs from filtered data
-  const totalRevenue = useMemo(() => filteredTickets.reduce((s, t) => s + (t.amount || 0), 0), [filteredTickets]);
-  const ticketsToday = useMemo(() => {
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    return filteredTickets.filter((t) => new Date(t.createdAt).getTime() >= todayStart.getTime()).length;
-  }, [filteredTickets]);
-  const duesOutstanding = useMemo(() => {
-    return filteredTickets.filter((t) => t.status !== "delivered" && t.status !== "completed").reduce((s, t) => s + (t.amount || 0), 0);
-  }, [filteredTickets]);
+  // Compute live KPIs from real data
+  const now = useMemo(() => new Date(), []);
+  const todayStart = useMemo(() => { const d = new Date(now); d.setHours(0,0,0,0); return d; }, [now]);
+  const monthStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
+  const daysInMonth = useMemo(() => new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), [now]);
+  const daysElapsed = useMemo(() => Math.max(1, now.getDate()), [now]);
+
+  // Revenue from invoices (not tickets) — this month
+  const revenueMetrics = useMemo(() => {
+    const monthInvoices = invoices.filter((i) => new Date(i.createdAt).getTime() >= monthStart.getTime());
+    const totalRevenue = monthInvoices.reduce((s, i) => s + i.total, 0);
+    const avgRevenue = Math.round(totalRevenue / daysElapsed);
+    const projection = avgRevenue * daysInMonth;
+    return { totalRevenue, avgRevenue, projection };
+  }, [invoices, monthStart, daysElapsed, daysInMonth]);
+
+  // Stock value from inventory (cost basis — buying price)
+  const stockValue = useMemo(() => {
+    if (inventory.length === 0) return 0;
+    return inventory.reduce((s, item) => s + (item.currentStock * (item.regularBuyingPrice || item.defaultPrice || 0)), 0);
+  }, [inventory]);
+
+  // Dues outstanding from invoices (overdue + unpaid balances)
+  const duesMetrics = useMemo(() => {
+    const outstanding = invoices.filter((i) => {
+      if (i.status === "paid" || i.status === "cancelled") return false;
+      return i.total - i.paidAmount > 0;
+    });
+    const totalDues = outstanding.reduce((s, i) => s + (i.total - i.paidAmount), 0);
+    const overdueInvoices = invoices.filter((i) => {
+      if (i.status === "paid" || i.status === "cancelled") return false;
+      if (i.total - i.paidAmount <= 0) return false;
+      return i.dueDate && Date.now() > new Date(i.dueDate).getTime();
+    });
+    const overdueAmount = overdueInvoices.reduce((s, i) => s + (i.total - i.paidAmount), 0);
+    return { totalDues, overdueCount: overdueInvoices.length, overdueAmount, outstandingCount: outstanding.length };
+  }, [invoices]);
+
+  // Tickets today with average and projection
+  const ticketMetrics = useMemo(() => {
+    const todayTickets = tickets.filter((t) => new Date(t.createdAt).getTime() >= todayStart.getTime()).length;
+    const monthTickets = tickets.filter((t) => new Date(t.createdAt).getTime() >= monthStart.getTime()).length;
+    const avgPerDay = Math.round((monthTickets / daysElapsed) * 10) / 10;
+    const projection = Math.round(avgPerDay * daysInMonth);
+    return { todayTickets, avgPerDay, projection };
+  }, [tickets, todayStart, monthStart, daysElapsed, daysInMonth]);
+
+  // KPI cards map — each card definition keyed by its stable ID
+  const kpiCardsMap = useMemo<Record<string, KpiCardItem>>(() => ({
+    total_revenue: {
+      id: "total_revenue",
+      node: (
+        <KpiCard
+          title="Total Revenue"
+          value={revenueMetrics.totalRevenue}
+          format={formatINR}
+          tone="emerald"
+          delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
+          hint={`Projection: ${formatINR(revenueMetrics.projection)} this month`}
+          progress={{ value: Math.min(100, Math.round((revenueMetrics.totalRevenue / Math.max(revenueMetrics.projection, 1)) * 100)), label: "Monthly progress" }}
+        />
+      ),
+    },
+    stock_value: {
+      id: "stock_value",
+      node: (
+        <KpiCard
+          title="Stock Value"
+          value={stockValue}
+          format={formatINR}
+          tone="amber"
+          delta={{ value: inventory.length > 0 ? `${inventory.length} item${inventory.length !== 1 ? "s" : ""}` : "No items", up: inventory.length > 0 }}
+          hint={inventory.length > 0 ? `${inventory.filter((i) => i.currentStock <= i.minStock && i.active).length} low stock items` : "Add inventory items to track stock value"}
+          progress={{ value: inventory.length > 0 ? Math.min(100, Math.round((inventory.filter((i) => i.currentStock > i.minStock).length / inventory.length) * 100)) : 0, label: "Healthy stock" }}
+        />
+      ),
+    },
+    dues_outstanding: {
+      id: "dues_outstanding",
+      node: (
+        <KpiCard
+          title="Dues Outstanding"
+          value={duesMetrics.totalDues}
+          format={formatINR}
+          tone="rose"
+          delta={{ value: `${duesMetrics.overdueCount} overdue`, up: false }}
+          hint={`${duesMetrics.outstandingCount} unpaid invoice${duesMetrics.outstandingCount !== 1 ? "s" : ""} · Overdue: ${formatINR(duesMetrics.overdueAmount)}`}
+          progress={{ value: invoices.length > 0 ? Math.round(((invoices.reduce((s, i) => s + i.paidAmount, 0)) / Math.max(invoices.reduce((s, i) => s + i.total, 0), 1)) * 100) : 0, label: "Collection progress" }}
+        />
+      ),
+    },
+    tickets_today: {
+      id: "tickets_today",
+      node: (
+        <KpiCard
+          title="Tickets Today"
+          value={ticketMetrics.todayTickets}
+          tone="violet"
+          delta={{ value: `Avg ${ticketMetrics.avgPerDay}/day`, up: true }}
+          hint={`Projection: ${ticketMetrics.projection} tickets this month`}
+          progress={{ value: ticketMetrics.todayTickets > 0 ? Math.min(100, Math.round((ticketMetrics.todayTickets / Math.max(ticketMetrics.avgPerDay, 1)) * 100)) : 0, label: "vs daily avg" }}
+        />
+      ),
+    },
+  }), [revenueMetrics, stockValue, inventory, duesMetrics, invoices, ticketMetrics]);
+
+  // Ordered cards array based on saved user preference
+  const orderedKpiCards = useMemo<KpiCardItem[]>(
+    () => cardOrder.map((id) => kpiCardsMap[id]).filter(Boolean),
+    [cardOrder, kpiCardsMap]
+  );
 
   // Compute device breakdown from actual ticket data
   const deviceData = useMemo(() => {
@@ -171,44 +288,8 @@ export default function Dashboard() {
         <span className="ml-auto text-[11px] text-muted-foreground">{filteredTickets.length} ticket{filteredTickets.length !== 1 ? "s" : ""}</span>
       </div>
 
-      {/* KPI Row */}
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard
-          title="Business Revenue"
-          value={totalRevenue}
-          format={formatINR}
-          tone="emerald"
-          delta={{ value: "+12.4%", up: true }}
-          hint={`${tickets.length} total tickets`}
-          progress={{ value: Math.min(100, Math.round((totalRevenue / 300000) * 100)), label: "Monthly target" }}
-        />
-        <KpiCard
-          title="Stock Value"
-          value={200000}
-          format={formatINR}
-          tone="amber"
-          delta={{ value: "+1.8%", up: true }}
-          hint="Spare parts: ₹1,50,000 · Accessories: ₹50,000"
-          progress={{ value: 75, label: "Inventory capacity" }}
-        />
-        <KpiCard
-          title="Dues Outstanding"
-          value={duesOutstanding}
-          format={formatINR}
-          tone="rose"
-          delta={{ value: "−2.1%", up: false }}
-          hint={`From ${tickets.filter((t) => t.status !== "delivered" && t.status !== "completed").length} active tickets`}
-          progress={{ value: totalRevenue > 0 ? Math.round(((totalRevenue - duesOutstanding) / totalRevenue) * 100) : 0, label: "Collection progress" }}
-        />
-        <KpiCard
-          title="Tickets Today"
-          value={ticketsToday}
-          tone="violet"
-          delta={{ value: "+9 vs yesterday", up: true }}
-          hint="6 walk-in · 12 pickup · 10 on-site"
-          progress={{ value: ticketsToday > 0 ? Math.min(100, Math.round((ticketsToday / 30) * 100)) : 0, label: "Daily target" }}
-        />
-      </div>
+      {/* KPI Row — Draggable */}
+      <DraggableKpiRow cards={orderedKpiCards} onReorder={reorderKpi} />
 
       {/* Resizable dashboard widgets — drag edges to resize, drag title to reorder */}
       <DashboardGrid keys={["revenue", "donut", "devices", "transactions"]}>
@@ -234,6 +315,13 @@ export default function Dashboard() {
           <CardHeader title="Tickets by Device" badge={
             <span className="text-[11px] text-muted-foreground">Last 7 days</span>
           } />
+          {deviceData.length === 0 ? (
+            <div className="flex h-32 flex-col items-center justify-center gap-1 text-muted-foreground">
+              <p className="text-[13px] font-medium">No data available</p>
+              <p className="text-[11px]">No tickets found for this period</p>
+            </div>
+          ) : (
+          <>
           <p className="text-[11px] text-muted-foreground mb-4">{deviceData.reduce((s,d)=>s+d.count,0)} total tickets</p>
           <div className="space-y-2.5">
             {deviceData.map((d) => (
@@ -254,12 +342,20 @@ export default function Dashboard() {
           <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1">
             <span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> {deviceData[0]?.device || "N/A"} flagged as highest volume
           </p>
+          </>
+          )}
         </div>
 
         {/* Transactions */}
         <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] flex flex-col overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Recent Transactions" />
+          {filteredTickets.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-1 text-muted-foreground">
+              <p className="text-[13px] font-medium">No data available</p>
+              <p className="text-[11px]">No transactions found</p>
+            </div>
+          ) : (
           <div className="flex-1 mt-2 space-y-0 overflow-hidden">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Recent</p>
             <ul className="space-y-1">
@@ -283,6 +379,7 @@ export default function Dashboard() {
               ))}
             </ul>
           </div>
+          )}
           <div className="mt-2 border-t border-border pt-3 flex items-center justify-between">
             <Can permission={["manage_reports", "export_reports"]}>
               <button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">
@@ -397,29 +494,35 @@ export default function Dashboard() {
           <CardHeader title="Orders Status" badge={<Badge tone="info" dot>live</Badge>} />
           <div className="mt-3 overflow-hidden rounded-xl border border-border">
             <div className="grid grid-cols-3 bg-muted px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <div>Type</div>
+              <div>Status</div>
               <div className="text-center">Assigned</div>
-              <div className="text-center">Received</div>
+              <div className="text-center">Total</div>
             </div>
             <ul>
-              {ordersStatus.map((row, i) => (
-                <motion.li
-                  key={row.detail}
-                  initial={{ opacity: 0, y: 4 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.05 * i }}
-                  className="grid grid-cols-3 items-center px-3 py-2.5 text-sm odd:bg-background even:bg-muted/40"
-                >
-                  <div className="font-medium">{row.detail}</div>
-                  <div className="text-center tabular-nums">{row.assigned}</div>
-                  <div className="text-center tabular-nums">{row.received}</div>
-                </motion.li>
-              ))}
-              <li className="grid grid-cols-3 items-center bg-[#EEF1FD] px-3 py-2.5 text-sm font-semibold">
-                <div>Total</div>
-                <div className="text-center tabular-nums">6</div>
-                <div className="text-center tabular-nums">6</div>
-              </li>
+              {ordersStatus.length === 0 ? (
+                <li className="px-3 py-6 text-center text-sm text-muted-foreground">No active orders yet.</li>
+              ) : (
+                <>
+                  {ordersStatus.map((row, i) => (
+                    <motion.li
+                      key={row.detail}
+                      initial={{ opacity: 0, y: 4 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: 0.05 * i }}
+                      className="grid grid-cols-3 items-center px-3 py-2.5 text-sm odd:bg-background even:bg-muted/40"
+                    >
+                      <div className="font-medium">{row.detail}</div>
+                      <div className="text-center tabular-nums">{row.assigned}</div>
+                      <div className="text-center tabular-nums">{row.received}</div>
+                    </motion.li>
+                  ))}
+                  <li className="grid grid-cols-3 items-center bg-[#EEF1FD] px-3 py-2.5 text-sm font-semibold">
+                    <div>Total</div>
+                    <div className="text-center tabular-nums">{ordersStatus.reduce((s, r) => s + r.assigned, 0)}</div>
+                    <div className="text-center tabular-nums">{ordersStatus.reduce((s, r) => s + r.received, 0)}</div>
+                  </li>
+                </>
+              )}
             </ul>
           </div>
         </div>

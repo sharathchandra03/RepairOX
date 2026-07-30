@@ -1,12 +1,36 @@
 "use client";
 
-import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from "react";
+/* ──────────────────────────────────────────────────────────────────────────
+   RepairOX — Organization Store Settings (Supabase-first).
+
+   When Supabase is configured, settings are loaded from the
+   `organization_settings` table on mount and kept in sync via Supabase
+   Realtime. Every employee in the same org sees the same values. Only admins
+   may write changes.
+
+   When Supabase is NOT configured (no env vars), falls back to localStorage
+   so the app still runs as a demo/prototype.
+
+   The public API (useStoreSettings) remains identical — consuming components
+   don't need to know which mode is active.
+   ────────────────────────────────────────────────────────────────────────── */
+
+import {
+  createContext,
+  useContext,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+  type ReactNode,
+} from "react";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
 export type StoreSettings = {
   /* Basic Information */
-  logo: string; // base64 data URL or empty
+  logo: string;
   storeName: string;
   alternateName: string;
 
@@ -25,7 +49,7 @@ export type StoreSettings = {
   country: string;
 
   /* Store Details */
-  registrationNumber: string; // GSTIN / UIN
+  registrationNumber: string;
   language: string;
   timeZone: string;
   timeFormat: "12h" | "24h";
@@ -45,7 +69,7 @@ export type StoreSettings = {
   depositEnabled: boolean;
   depositPercentage: number;
   refundPolicy: string;
-  screenTimeout: number; // minutes
+  screenTimeout: number;
 
   /* Print Settings */
   termsAndConditions: string;
@@ -115,6 +139,94 @@ WARRANTY IS VOID IF:
   printSlogan: "Your device, our expertise.",
 };
 
+/* ─── DB ↔ Client field mapping ──────────────────────────────────────── */
+
+// Maps DB snake_case columns → client camelCase fields.
+function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
+  return {
+    logo: (row.logo as string) ?? DEFAULT_STORE_SETTINGS.logo,
+    storeName: (row.store_name as string) ?? DEFAULT_STORE_SETTINGS.storeName,
+    alternateName: (row.alternate_name as string) ?? DEFAULT_STORE_SETTINGS.alternateName,
+    phone: (row.phone as string) ?? DEFAULT_STORE_SETTINGS.phone,
+    mobile: (row.mobile as string) ?? DEFAULT_STORE_SETTINGS.mobile,
+    fax: (row.fax as string) ?? DEFAULT_STORE_SETTINGS.fax,
+    email: (row.email as string) ?? DEFAULT_STORE_SETTINGS.email,
+    website: (row.website as string) ?? DEFAULT_STORE_SETTINGS.website,
+    address: (row.address as string) ?? DEFAULT_STORE_SETTINGS.address,
+    city: (row.city as string) ?? DEFAULT_STORE_SETTINGS.city,
+    state: (row.state as string) ?? DEFAULT_STORE_SETTINGS.state,
+    postCode: (row.postal_code as string) ?? DEFAULT_STORE_SETTINGS.postCode,
+    country: (row.country as string) ?? DEFAULT_STORE_SETTINGS.country,
+    registrationNumber: (row.registration_number as string) ?? DEFAULT_STORE_SETTINGS.registrationNumber,
+    language: (row.language as string) ?? DEFAULT_STORE_SETTINGS.language,
+    timeZone: (row.timezone as string) ?? DEFAULT_STORE_SETTINGS.timeZone,
+    timeFormat: (row.time_format as "12h" | "24h") ?? DEFAULT_STORE_SETTINGS.timeFormat,
+    startTime: (row.start_time as string) ?? DEFAULT_STORE_SETTINGS.startTime,
+    endTime: (row.end_time as string) ?? DEFAULT_STORE_SETTINGS.endTime,
+    companyEmail: (row.company_email as string) ?? DEFAULT_STORE_SETTINGS.companyEmail,
+    apiKey: (row.api_key as string) ?? DEFAULT_STORE_SETTINGS.apiKey,
+    receiveAllEmails: (row.receive_all_emails as boolean) ?? DEFAULT_STORE_SETTINGS.receiveAllEmails,
+    accountingMethod: (row.accounting_method as "accrual" | "cash") ?? DEFAULT_STORE_SETTINGS.accountingMethod,
+    defaultCurrency: (row.default_currency as string) ?? DEFAULT_STORE_SETTINGS.defaultCurrency,
+    priceFormat: (row.price_format as string) ?? DEFAULT_STORE_SETTINGS.priceFormat,
+    decimalFormat: (row.decimal_format as "2" | "3" | "0") ?? DEFAULT_STORE_SETTINGS.decimalFormat,
+    depositEnabled: (row.deposit_enabled as boolean) ?? DEFAULT_STORE_SETTINGS.depositEnabled,
+    depositPercentage: Number(row.deposit_percentage ?? DEFAULT_STORE_SETTINGS.depositPercentage),
+    refundPolicy: (row.refund_policy as string) ?? DEFAULT_STORE_SETTINGS.refundPolicy,
+    screenTimeout: Number(row.screen_timeout ?? DEFAULT_STORE_SETTINGS.screenTimeout),
+    termsAndConditions: (row.terms_and_conditions as string) ?? DEFAULT_STORE_SETTINGS.termsAndConditions,
+    warrantyText: (row.warranty_text as string) ?? DEFAULT_STORE_SETTINGS.warrantyText,
+    printFooter: (row.print_footer as string) ?? DEFAULT_STORE_SETTINGS.printFooter,
+    printSlogan: (row.print_slogan as string) ?? DEFAULT_STORE_SETTINGS.printSlogan,
+  };
+}
+
+// Maps client camelCase partial → DB snake_case columns for upsert.
+function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, unknown> {
+  const map: Record<string, string> = {
+    logo: "logo",
+    storeName: "store_name",
+    alternateName: "alternate_name",
+    phone: "phone",
+    mobile: "mobile",
+    fax: "fax",
+    email: "email",
+    website: "website",
+    address: "address",
+    city: "city",
+    state: "state",
+    postCode: "postal_code",
+    country: "country",
+    registrationNumber: "registration_number",
+    language: "language",
+    timeZone: "timezone",
+    timeFormat: "time_format",
+    startTime: "start_time",
+    endTime: "end_time",
+    companyEmail: "company_email",
+    apiKey: "api_key",
+    receiveAllEmails: "receive_all_emails",
+    accountingMethod: "accounting_method",
+    defaultCurrency: "default_currency",
+    priceFormat: "price_format",
+    decimalFormat: "decimal_format",
+    depositEnabled: "deposit_enabled",
+    depositPercentage: "deposit_percentage",
+    refundPolicy: "refund_policy",
+    screenTimeout: "screen_timeout",
+    termsAndConditions: "terms_and_conditions",
+    warrantyText: "warranty_text",
+    printFooter: "print_footer",
+    printSlogan: "print_slogan",
+  };
+  const payload: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    const col = map[key];
+    if (col) payload[col] = value;
+  }
+  return payload;
+}
+
 /* ─── Context ────────────────────────────────────────────────────────── */
 
 interface StoreSettingsContextType {
@@ -128,7 +240,9 @@ const StoreSettingsContext = createContext<StoreSettingsContextType | null>(null
 
 const STORAGE_KEY = "repairox-store-settings";
 
-function loadSettings(): StoreSettings | null {
+/* ─── localStorage fallback helpers (used only when Supabase is off) ── */
+
+function loadSettingsLocal(): StoreSettings | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
@@ -139,13 +253,11 @@ function loadSettings(): StoreSettings | null {
   }
 }
 
-function saveSettings(settings: StoreSettings) {
+function saveSettingsLocal(settings: StoreSettings) {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
-  } catch {
-    // storage full or unavailable
-  }
+  } catch { /* storage full or unavailable */ }
 }
 
 /* ─── Provider ───────────────────────────────────────────────────────── */
@@ -153,29 +265,159 @@ function saveSettings(settings: StoreSettings) {
 export function StoreSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
+  const orgIdRef = useRef<string | null>(null);
 
-  // Load from localStorage after mount (avoids hydration mismatch)
+  // ── Supabase mode: load from DB + subscribe to realtime ──
   useEffect(() => {
-    const saved = loadSettings();
-    if (saved) {
-      setSettings(saved);
+    if (!isSupabaseConfigured || !supabase) {
+      // Local fallback
+      const saved = loadSettingsLocal();
+      if (saved) setSettings(saved);
+      setHydrated(true);
+      return;
     }
-    setHydrated(true);
+
+    let active = true;
+
+    (async () => {
+      // Get current user's organization id via their staff record
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (!sessionData.session?.user) {
+        // Not signed in yet — use defaults until auth fires
+        if (active) setHydrated(true);
+        return;
+      }
+
+      const { data: staffRow } = await supabase
+        .from("staff")
+        .select("organization_id")
+        .eq("auth_user_id", sessionData.session.user.id)
+        .maybeSingle();
+
+      const orgId = staffRow?.organization_id as string | null;
+      orgIdRef.current = orgId;
+
+      if (!orgId) {
+        if (active) setHydrated(true);
+        return;
+      }
+
+      // Load the settings row for this org
+      const { data: row } = await supabase
+        .from("organization_settings")
+        .select("*")
+        .eq("organization_id", orgId)
+        .maybeSingle();
+
+      if (row && active) {
+        setSettings(dbRowToSettings(row));
+      }
+      if (active) setHydrated(true);
+    })();
+
+    // Listen to auth state changes (login/logout)
+    const { data: authSub } = supabase.auth.onAuthStateChange(async (_event, session) => {
+      if (!session?.user) {
+        setSettings(DEFAULT_STORE_SETTINGS);
+        orgIdRef.current = null;
+        return;
+      }
+      const { data: staffRow } = await supabase!
+        .from("staff")
+        .select("organization_id")
+        .eq("auth_user_id", session.user.id)
+        .maybeSingle();
+
+      const orgId = staffRow?.organization_id as string | null;
+      orgIdRef.current = orgId;
+      if (!orgId) return;
+
+      const { data: row } = await supabase!
+        .from("organization_settings")
+        .select("*")
+        .eq("organization_id", orgId)
+        .maybeSingle();
+
+      if (row) setSettings(dbRowToSettings(row));
+    });
+
+    return () => {
+      active = false;
+      authSub.subscription.unsubscribe();
+    };
   }, []);
 
-  // Persist on every change (but only after hydration)
+  // ── Supabase Realtime subscription for organization_settings ──
   useEffect(() => {
-    if (hydrated) {
-      saveSettings(settings);
-    }
+    if (!isSupabaseConfigured || !supabase) return;
+
+    const channel = supabase
+      .channel("org-settings-changes")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "organization_settings" },
+        (payload) => {
+          const row = payload.new as Record<string, unknown> | undefined;
+          if (!row) return;
+          // Only apply if it's our org
+          if (orgIdRef.current && row.organization_id === orgIdRef.current) {
+            setSettings(dbRowToSettings(row));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase!.removeChannel(channel);
+    };
+  }, []);
+
+  // ── localStorage persistence (only when Supabase is NOT configured) ──
+  useEffect(() => {
+    if (isSupabaseConfigured || !hydrated) return;
+    saveSettingsLocal(settings);
   }, [settings, hydrated]);
 
+  // ── Update handler ──
   const updateSettings = useCallback((updates: Partial<StoreSettings>) => {
-    setSettings((prev) => ({ ...prev, ...updates }));
+    setSettings((prev) => {
+      const next = { ...prev, ...updates };
+
+      if (isSupabaseConfigured && supabase && orgIdRef.current) {
+        // Write to DB. Uses the authenticated user's session (RLS-enforced:
+        // only admins can write to organization_settings).
+        const dbPayload = settingsToDbPayload(updates);
+        supabase
+          .from("organization_settings")
+          .upsert(
+            { organization_id: orgIdRef.current, ...dbPayload },
+            { onConflict: "organization_id" }
+          )
+          .then(({ error }) => {
+            if (error) {
+              console.error("[StoreSettings] DB write failed:", error.message);
+            }
+          });
+      }
+
+      return next;
+    });
   }, []);
 
   const resetSettings = useCallback(() => {
     setSettings(DEFAULT_STORE_SETTINGS);
+    if (isSupabaseConfigured && supabase && orgIdRef.current) {
+      const dbPayload = settingsToDbPayload(DEFAULT_STORE_SETTINGS);
+      supabase
+        .from("organization_settings")
+        .upsert(
+          { organization_id: orgIdRef.current, ...dbPayload },
+          { onConflict: "organization_id" }
+        )
+        .then(({ error }) => {
+          if (error) console.error("[StoreSettings] DB reset failed:", error.message);
+        });
+    }
   }, []);
 
   return (

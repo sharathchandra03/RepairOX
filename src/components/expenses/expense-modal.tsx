@@ -137,7 +137,7 @@ export function ExpenseModal({ open, onClose, editExpense, onSuccess }: ExpenseM
 
   const canSubmit = category && amount > 0 && description.trim() && date && time;
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!canSubmit) return;
 
     const actor = CURRENT_USER.name;
@@ -146,7 +146,7 @@ export function ExpenseModal({ open, onClose, editExpense, onSuccess }: ExpenseM
       // Save previous state for diff
       const previous = { ...editExpense };
 
-      const updated = updateExpense(editExpense.id, {
+      const updated = await updateExpense(editExpense.id, {
         category,
         amount,
         paymentMode: paymentMode as PaymentMode,
@@ -181,7 +181,7 @@ export function ExpenseModal({ open, onClose, editExpense, onSuccess }: ExpenseM
         createdBy: actor,
       };
 
-      const created = addExpense(newExp);
+      const created = await addExpense(newExp);
 
       // Emit accounting event (handles ledger posting + activity log)
       emitExpenseCreated(created, accounting, actor);

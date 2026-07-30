@@ -31,6 +31,7 @@ import {
 } from "./price-list-data";
 import type { SmartModel } from "./smart-import";
 import { logActivity, buildChanges } from "./activity-log";
+import { supabase, isSupabaseConfigured } from "./supabase";
 
 /* ─── State & Actions ────────────────────────────────────────────── */
 
@@ -164,11 +165,57 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CatalogState>(seedState);
   const [hydrated, setHydrated] = useState(false);
 
-  // Hydrate from localStorage after mount (avoids SSR/client mismatch)
+  // Hydrate from DB (Supabase) or localStorage after mount.
   useEffect(() => {
-    const saved = loadFromStorage();
-    if (saved) setState(saved);
-    setHydrated(true);
+    if (isSupabaseConfigured && supabase) {
+      // Load catalog from Supabase.
+      (async () => {
+        const [{ data: cats }, { data: brds }, { data: mods }, { data: prts }] = await Promise.all([
+          supabase.from("price_list_categories").select("*").order("created_at", { ascending: true }),
+          supabase.from("price_list_brands").select("*").order("created_at", { ascending: true }),
+          supabase.from("price_list_models").select("*").order("created_at", { ascending: true }),
+          supabase.from("price_list_parts").select("*").order("created_at", { ascending: true }),
+        ]);
+        const dbState: CatalogState = {
+          categories: (cats ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, enabled: r.enabled ?? true })),
+          brands: (brds ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })),
+          models: (mods ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })),
+          parts: (prts ?? []).map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })),
+        };
+        // Only use DB data if there's actual content; otherwise fall through to seed.
+        if (dbState.categories.length > 0 || dbState.brands.length > 0) setState(dbState);
+        setHydrated(true);
+      })();
+
+      // Realtime subscription for catalog tables.
+      const channel = supabase.channel("catalog-realtime")
+        .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_categories" }, () => {
+          supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+            if (data) setState((s) => ({ ...s, categories: data.map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, enabled: r.enabled ?? true })) }));
+          });
+        })
+        .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_brands" }, () => {
+          supabase!.from("price_list_brands").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+            if (data) setState((s) => ({ ...s, brands: data.map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })) }));
+          });
+        })
+        .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_models" }, () => {
+          supabase!.from("price_list_models").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+            if (data) setState((s) => ({ ...s, models: data.map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })) }));
+          });
+        })
+        .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_parts" }, () => {
+          supabase!.from("price_list_parts").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+            if (data) setState((s) => ({ ...s, parts: data.map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })) }));
+          });
+        })
+        .subscribe();
+      return () => { supabase!.removeChannel(channel); };
+    } else {
+      const saved = loadFromStorage();
+      if (saved) setState(saved);
+      setHydrated(true);
+    }
   }, []);
 
   // Mirror latest state in a ref so imperative actions (import) can read the
@@ -177,8 +224,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   useEffect(() => { stateRef.current = state; }, [state]);
 
   // Persist on every change (only after hydration so we don't clobber saved data)
+  // Only persist to localStorage in local mode; in DB mode, writes go to Supabase.
   useEffect(() => {
-    if (hydrated) saveToStorage(state);
+    if (hydrated && !isSupabaseConfigured) saveToStorage(state);
   }, [state, hydrated]);
 
   /* ── Categories ── */
@@ -191,6 +239,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       enabled: data.enabled ?? true,
     };
     setState((s) => ({ ...s, categories: [...s.categories, cat] }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_categories").insert({ id: cat.id, name: cat.name, icon: cat.icon, item_count: 0, enabled: cat.enabled }).then();
+    }
     logActivity({
       module: "Price List", action: "Category Created", severity: "success",
       entity: "Category", reference: cat.name, description: `Created device category ${cat.name}.`,
@@ -204,6 +255,13 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       ...s,
       categories: s.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      const row: Record<string, unknown> = {};
+      if ("name" in updates) row.name = updates.name;
+      if ("icon" in updates) row.icon = updates.icon;
+      if ("enabled" in updates) row.enabled = updates.enabled;
+      supabase.from("price_list_categories").update(row).eq("id", id).then();
+    }
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "name", label: "Name" },
       { key: "enabled", label: "Enabled" },
@@ -228,6 +286,10 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         parts: s.parts.filter((p) => !modelIds.includes(p.modelId)),
       };
     });
+    if (isSupabaseConfigured && supabase) {
+      // Cascade handled by DB foreign keys, but explicitly delete to trigger audit.
+      supabase.from("price_list_categories").delete().eq("id", id).then();
+    }
     logActivity({
       module: "Price List", action: "Category Deleted", severity: "critical",
       entity: "Category", reference: prev?.name || id,
@@ -242,6 +304,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       ...s,
       categories: s.categories.map((c) => (c.id === id ? { ...c, enabled: !(c.enabled ?? true) } : c)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_categories").update({ enabled: next }).eq("id", id).then();
+    }
     logActivity({
       module: "Price List", action: "Category Updated", severity: "info",
       entity: "Category", reference: prev?.name || id,
@@ -261,6 +326,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       enabled: data.enabled ?? true,
     };
     setState((s) => ({ ...s, brands: [...s.brands, brand] }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_brands").insert({ id: brand.id, name: brand.name, category_id: brand.categoryId, item_count: 0, logo_url: brand.logoUrl ?? null, enabled: brand.enabled }).then();
+    }
     logActivity({
       module: "Price List", action: "Brand Added", severity: "success",
       entity: "Brand", reference: brand.name, description: `Added brand ${brand.name}.`,
@@ -274,6 +342,13 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       ...s,
       brands: s.brands.map((b) => (b.id === id ? { ...b, ...updates } : b)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      const row: Record<string, unknown> = {};
+      if ("name" in updates) row.name = updates.name;
+      if ("enabled" in updates) row.enabled = updates.enabled;
+      if ("logoUrl" in updates) row.logo_url = updates.logoUrl ?? null;
+      supabase.from("price_list_brands").update(row).eq("id", id).then();
+    }
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "name", label: "Name" },
       { key: "enabled", label: "Enabled" },
@@ -297,6 +372,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         parts: s.parts.filter((p) => !modelIds.includes(p.modelId)),
       };
     });
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_brands").delete().eq("id", id).then();
+    }
     logActivity({
       module: "Price List", action: "Brand Deleted", severity: "critical",
       entity: "Brand", reference: prev?.name || id,
@@ -324,6 +402,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       createdOn: data.createdOn ?? nowStamp(),
     };
     setState((s) => ({ ...s, models: [...s.models, model] }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_models").insert({ id: model.id, brand_id: model.brandId, category_id: model.categoryId, name: model.name, model_year: model.year, chip: model.chip ?? null, storage: model.storage ?? null, display_size: model.displaySize ?? null, variant: model.variant ?? null, image_url: model.imageUrl ?? null, status: model.status ?? "active" }).then();
+    }
     logActivity({
       module: "Price List", action: "Model Added", severity: "success",
       entity: "Device Model", reference: model.name, description: `Added model ${model.name}.`,
@@ -337,17 +418,25 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       ...s,
       models: s.models.map((m) => (m.id === id ? { ...m, ...updates, lastUpdated: nowStamp() } : m)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      const row: Record<string, unknown> = {};
+      if ("name" in updates) row.name = updates.name;
+      if ("year" in updates) row.model_year = updates.year;
+      if ("chip" in updates) row.chip = updates.chip ?? null;
+      if ("storage" in updates) row.storage = updates.storage ?? null;
+      if ("displaySize" in updates) row.display_size = updates.displaySize ?? null;
+      if ("variant" in updates) row.variant = updates.variant ?? null;
+      if ("imageUrl" in updates) row.image_url = updates.imageUrl ?? null;
+      if ("status" in updates) row.status = updates.status;
+      supabase.from("price_list_models").update(row).eq("id", id).then();
+    }
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
-      { key: "name", label: "Name" },
-      { key: "year", label: "Year" },
-      { key: "storage", label: "Storage" },
-      { key: "variant", label: "Variant" },
-      { key: "status", label: "Status" },
+      { key: "name", label: "Name" }, { key: "year", label: "Year" },
+      { key: "storage", label: "Storage" }, { key: "variant", label: "Variant" }, { key: "status", label: "Status" },
     ]);
     logActivity({
       module: "Price List", action: "Model Updated", severity: "info",
-      entity: "Device Model", reference: prev?.name || id, description: `Updated model ${prev?.name || id}.`,
-      changes,
+      entity: "Device Model", reference: prev?.name || id, description: `Updated model ${prev?.name || id}.`, changes,
     });
   }, []);
 
@@ -358,6 +447,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       models: s.models.filter((m) => m.id !== id),
       parts: s.parts.filter((p) => p.modelId !== id),
     }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_models").delete().eq("id", id).then();
+    }
     logActivity({
       module: "Price List", action: "Model Deleted", severity: "critical",
       entity: "Device Model", reference: prev?.name || id,
@@ -372,6 +464,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       models: s.models.filter((m) => !idSet.has(m.id)),
       parts: s.parts.filter((p) => !idSet.has(p.modelId)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_models").delete().in("id", ids).then();
+    }
     logActivity({
       module: "Price List", action: "Model Deleted", severity: "critical",
       entity: "Device Model", reference: `${ids.length} models`,
@@ -384,6 +479,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       ...s,
       models: s.models.map((m) => (m.id === id ? { ...m, imageUrl, lastUpdated: nowStamp() } : m)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_models").update({ image_url: imageUrl }).eq("id", id).then();
+    }
   }, []);
 
   /* ── Parts ── */
@@ -399,6 +497,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       modelId: data.modelId,
     };
     setState((s) => ({ ...s, parts: [...s.parts, part] }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_parts").insert({ id: String(part.id), model_id: part.modelId, part_name: part.partName, part_number: part.partNumber ?? null, price: part.price, warranty: part.warranty ?? null, availability: part.availability ?? "In Stock" }).then();
+    }
     logActivity({
       module: "Price List", action: "Part Added", severity: "success",
       entity: "Part", reference: part.partName,
@@ -413,27 +514,34 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       ...s,
       parts: s.parts.map((p) => (p.id === id ? { ...p, ...updates, lastUpdated: nowStamp() } : p)),
     }));
+    if (isSupabaseConfigured && supabase) {
+      const row: Record<string, unknown> = {};
+      if ("partName" in updates) row.part_name = updates.partName;
+      if ("partNumber" in updates) row.part_number = updates.partNumber ?? null;
+      if ("price" in updates) row.price = updates.price;
+      if ("warranty" in updates) row.warranty = updates.warranty ?? null;
+      if ("availability" in updates) row.availability = updates.availability ?? null;
+      supabase.from("price_list_parts").update(row).eq("id", String(id)).then();
+    }
     const inr = (v: unknown) => `₹${Number(v ?? 0).toLocaleString("en-IN")}`;
     const priceChanged = "price" in updates && prev && updates.price !== prev.price;
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
-      { key: "partName", label: "Part Name" },
-      { key: "price", label: "Price", format: inr },
-      { key: "warranty", label: "Warranty" },
-      { key: "availability", label: "Availability" },
+      { key: "partName", label: "Part Name" }, { key: "price", label: "Price", format: inr },
+      { key: "warranty", label: "Warranty" }, { key: "availability", label: "Availability" },
     ]);
     logActivity({
       module: "Price List", action: priceChanged ? "Price Updated" : "Part Updated", severity: "info",
       entity: "Part", reference: prev?.partName || String(id),
-      description: priceChanged
-        ? `Updated price for ${prev?.partName || "part"}.`
-        : `Updated part ${prev?.partName || id}.`,
-      changes,
+      description: priceChanged ? `Updated price for ${prev?.partName || "part"}.` : `Updated part ${prev?.partName || id}.`, changes,
     });
   }, []);
 
   const deletePart = useCallback((id: number) => {
     const prev = stateRef.current.parts.find((p) => p.id === id);
     setState((s) => ({ ...s, parts: s.parts.filter((p) => p.id !== id) }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_parts").delete().eq("id", String(id)).then();
+    }
     logActivity({
       module: "Price List", action: "Part Deleted", severity: "critical",
       entity: "Part", reference: prev?.partName || String(id),
@@ -444,6 +552,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   const bulkDeleteParts = useCallback((ids: number[]) => {
     const idSet = new Set(ids);
     setState((s) => ({ ...s, parts: s.parts.filter((p) => !idSet.has(p.id)) }));
+    if (isSupabaseConfigured && supabase) {
+      supabase.from("price_list_parts").delete().in("id", ids.map(String)).then();
+    }
     logActivity({
       module: "Price List", action: "Part Deleted", severity: "critical",
       entity: "Part", reference: `${ids.length} parts`,

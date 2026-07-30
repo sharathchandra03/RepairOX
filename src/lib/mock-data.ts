@@ -594,6 +594,10 @@ export type Invoice = {
   footer?: string;
   employee?: string;
   ticketId?: string;
+  /** Mode of payment (cash, upi, card, etc.) */
+  paymentMode?: string;
+  /** Service category — "service" or "accessories" */
+  serviceCategory?: "service" | "accessories";
   /** Multi-device support — when present, each device has its own parts/job/technician */
   devices?: InvoiceDeviceRecord[];
 };

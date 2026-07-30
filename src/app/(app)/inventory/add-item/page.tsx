@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowLeft, Save, Plus, Wand2, Package, Trash2, Info, Tag, IndianRupee,
@@ -24,7 +25,12 @@ type CustomField = { id: number; label: string; value: string };
 
 export default function AddItemPage() {
   const { can } = usePermissions();
-  const { addInventoryItem } = useStore();
+  const { addInventoryItem, updateInventoryItem, inventory } = useStore();
+  const params = useSearchParams();
+  const editId = params.get("edit");
+  const editItem = editId ? inventory.find((i) => i.id === editId) : null;
+  const isEdit = !!editItem;
+
   const [name, setName] = useState("");
   const [sku, setSku] = useState("");
   const [type, setType] = useState("Product");
@@ -42,6 +48,26 @@ export default function AddItemPage() {
   const [customFields, setCustomFields] = useState<CustomField[]>([]);
   const [fieldSeq, setFieldSeq] = useState(1);
   const [toast, setToast] = useState<string | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  // Populate form fields when editing an existing item
+  useEffect(() => {
+    if (editItem && !hydrated) {
+      setName(editItem.name);
+      setSku(editItem.id);
+      setType(editItem.type);
+      setMode(editItem.mode);
+      setCategory(editItem.category);
+      setUom(editItem.uom || "Piece");
+      setDefaultPrice(String(editItem.defaultPrice || ""));
+      setHsn(editItem.hsnCode === "—" ? "" : editItem.hsnCode);
+      setTax(String(editItem.tax || "18"));
+      setCurrentStock(String(editItem.currentStock || ""));
+      setMinStock(String(editItem.minStock || ""));
+      setMaxStock(String(editItem.maxStock || ""));
+      setHydrated(true);
+    }
+  }, [editItem, hydrated]);
 
   const isService = type === "Service";
 
@@ -77,6 +103,34 @@ export default function AddItemPage() {
     }
 
     const itemSku = sku || `SKU-${Date.now().toString().slice(-6)}`;
+
+    if (isEdit && editId) {
+      // Update existing item
+      updateInventoryItem(editId, {
+        name: name.trim(),
+        category,
+        type: type as "Product" | "Service",
+        mode: mode as "Buy" | "Sell" | "Both",
+        uom,
+        active: true,
+        currentStock: Number(currentStock || 0),
+        defaultPrice: Number(defaultPrice || 0),
+        regularBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.7),
+        wholesaleBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.65),
+        regularSellingPrice: Number(defaultPrice || 0),
+        mrp: Math.round(Number(defaultPrice || 0) * 1.2),
+        dealerPrice: Math.round(Number(defaultPrice || 0) * 0.9),
+        distributorPrice: Math.round(Number(defaultPrice || 0) * 0.85),
+        hsnCode: hsn || "—",
+        tax: Number(tax || 18),
+        minStock: Number(minStock || 0),
+        maxStock: Number(maxStock || 0),
+      });
+      setToast("Item updated successfully");
+      setTimeout(() => setToast(null), 2600);
+      return;
+    }
+
     const newItem = {
       id: itemSku,
       name: name.trim(),
@@ -114,7 +168,7 @@ export default function AddItemPage() {
     }
   }
 
-  if (!can("create")) {
+  if (!can("create") && !isEdit) {
     return (
       <NoPermission
         title="You don't have permission to create items"
@@ -127,8 +181,8 @@ export default function AddItemPage() {
     <div className="space-y-5">
       <PageHeader
         eyebrow="Inventory Management"
-        title="Add Item"
-        subtitle="Create a new product or service with full pricing and stock controls."
+        title={isEdit ? "Edit Item" : "Add Item"}
+        subtitle={isEdit ? `Editing ${editItem?.name || editId}` : "Create a new product or service with full pricing and stock controls."}
         actions={
           <>
             <Link href="/inventory/item-master">

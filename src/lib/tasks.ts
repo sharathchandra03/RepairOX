@@ -433,6 +433,9 @@ export function useTasks(opts: UseTasksOptions = {}): UseTasksResult {
   const deleteTask = useCallback(async (id: string) => {
     const prev = tasksRef.current.find((t) => t.id === id);
 
+    // Optimistically remove from UI immediately
+    removeLocalState(id);
+
     if (modeRef.current === "db" && supabase) {
       const { error } = await supabase
         .from("tasks")
@@ -444,10 +447,11 @@ export function useTasks(opts: UseTasksOptions = {}): UseTasksResult {
 
       if (error) {
         console.warn("[tasks] delete failed:", error.message);
+        // Rollback: re-add the task if the DB delete failed
+        if (prev) upsert(prev);
         return;
       }
     }
-    removeLocalState(id);
 
     logActivity({
       module: "Task", action: "Task Deleted", severity: "critical",
@@ -455,7 +459,7 @@ export function useTasks(opts: UseTasksOptions = {}): UseTasksResult {
       description: `Deleted to-do "${prev?.title ?? id}".`,
       meta: prev ? { Priority: PRIORITY_LABEL[prev.priority], Status: prev.completed ? "Completed" : "Open" } : undefined,
     });
-  }, [removeLocalState, currentStaffId]);
+  }, [removeLocalState, upsert, currentStaffId]);
 
   return { tasks, loading, mode, addTask, updateTask, setCompleted, deleteTask };
 }

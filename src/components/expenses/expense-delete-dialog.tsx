@@ -33,13 +33,13 @@ export function ExpenseDeleteDialog({ expense, open, onClose, onSuccess }: Expen
 
   const canConfirm = reason.trim().length >= 3;
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     if (!expense || !canConfirm) return;
 
     const actor = CURRENT_USER.name;
 
     // 1. Soft-delete (mark as cancelled in the store)
-    cancelExpense(expense.id, reason.trim(), actor);
+    await cancelExpense(expense.id, reason.trim(), actor);
 
     // 2. Emit accounting event (reverses ledger entry + logs activity)
     emitExpenseCancelled(expense, reason.trim(), accounting, actor);

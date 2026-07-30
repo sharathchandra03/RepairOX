@@ -24,7 +24,7 @@ import { ChangeRoleDrawer } from "@/components/settings/change-role-drawer";
 import { DeleteMemberDialog } from "@/components/settings/delete-member-dialog";
 import { ResetPasswordDrawer } from "@/components/settings/reset-password-drawer";
 import {
-  PERMISSION_GROUPS, ALL_PERMISSIONS, WORKSPACE_MAP, CURRENT_USER,
+  PERMISSION_GROUPS, ALL_PERMISSIONS, WORKSPACE_MAP,
   type PermissionKey, type RoleDef, type WorkspaceId,
 } from "@/lib/permissions";
 import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
@@ -809,7 +809,7 @@ function UsersTab({
   toggleLogin: ReturnType<typeof usePermissions>["toggleLogin"];
 }) {
   const { currentUser } = usePermissions();
-  const selfEmail = currentUser?.email ?? CURRENT_USER.email;
+  const selfEmail = currentUser?.email ?? "";
 
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<TeamMember | null>(null);

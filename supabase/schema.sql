@@ -18,6 +18,9 @@
 --     session (lists, dashboards, counters, detail views) with no refresh.
 --   • Audit trail: a single trigger records who did what, when, with the full
 --     previous/new value — even for hard deletes, so nothing is silently lost.
+--   • Organization settings, user preferences, numbering sequences, file
+--     uploads, and vendors are all stored in the database (never localStorage)
+--     ensuring persistence across devices, sessions, and employees.
 -- ============================================================================
 
 
@@ -51,6 +54,207 @@ create index if not exists branches_org_idx on public.branches(organization_id);
 
 
 -- ############################################################################
+-- SECTION 1B — ORGANIZATION SETTINGS (persistent, shared across all employees)
+--   One row per organization. Replaces localStorage-based store settings.
+--   All employees in the org read the same values; only admins may write.
+--   Published on realtime so changes stream instantly to every active session.
+-- ############################################################################
+
+create table if not exists public.organization_settings (
+  organization_id     uuid primary key references public.organizations(id) on delete cascade,
+
+  -- Basic Information
+  logo                text default '',
+  store_name          text not null default 'RepairOX Service Center',
+  alternate_name      text default '',
+
+  -- Contact Information
+  phone               text default '',
+  mobile              text default '',
+  fax                 text default '',
+  email               text default '',
+  website             text default '',
+
+  -- Store Location
+  address             text default '',
+  city                text default '',
+  state               text default '',
+  postal_code         text default '',
+  country             text default 'India',
+
+  -- Store Details
+  registration_number text default '',
+  language            text default 'English',
+  timezone            text default 'Asia/Kolkata',
+  time_format         text default '12h',
+  start_time          text default '09:00',
+  end_time            text default '20:00',
+
+  -- Email and Access
+  company_email       text default '',
+  api_key             text default '',
+  receive_all_emails  boolean not null default true,
+
+  -- Configuration
+  accounting_method   text not null default 'accrual',
+  default_currency    text not null default 'INR',
+  price_format        text not null default 'symbol_before',
+  decimal_format      text not null default '2',
+  deposit_enabled     boolean not null default false,
+  deposit_percentage  numeric not null default 30,
+  refund_policy       text default 'Refunds are processed within 7 business days of approval.',
+  screen_timeout      integer not null default 15,
+
+  -- Print Settings
+  terms_and_conditions text default '',
+  warranty_text        text default '',
+  print_footer         text default 'Thank you for choosing RepairOX!',
+  print_slogan         text default 'Your device, our expertise.',
+
+  -- Invoice & Ticket Display
+  invoice_show_logo    boolean not null default true,
+  invoice_show_gst     boolean not null default true,
+  invoice_show_terms   boolean not null default true,
+  ticket_show_logo     boolean not null default true,
+  ticket_show_warranty boolean not null default true,
+
+  -- Audit
+  updated_by          uuid references public.staff(id) on delete set null,
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+
+-- ############################################################################
+-- SECTION 1C — USER PREFERENCES (per-staff, personal, device-portable)
+--   Settings that belong to a single user (not shared with the org).
+--   Follows the user across devices. Other employees never see these.
+-- ############################################################################
+
+create table if not exists public.user_preferences (
+  staff_id            uuid primary key references public.staff(id) on delete cascade,
+  organization_id     uuid not null references public.organizations(id) on delete cascade,
+
+  -- Dashboard & UI
+  dashboard_layout    jsonb not null default '[]'::jsonb,
+  sidebar_collapsed   boolean not null default false,
+  default_page_size   integer not null default 20,
+  preferred_filters   jsonb not null default '{}'::jsonb,
+  theme               text not null default 'light',
+  compact_mode        boolean not null default false,
+
+  -- Default views
+  default_workspace   text default 'shop',
+  default_landing     text default '/dashboard',
+
+  -- Notification preferences
+  email_notifications boolean not null default true,
+  push_notifications  boolean not null default true,
+  sound_enabled       boolean not null default true,
+
+  -- Timestamps
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+create index if not exists user_prefs_org_idx on public.user_preferences(organization_id);
+
+
+-- ############################################################################
+-- SECTION 1D — NUMBERING SEQUENCES (configurable prefixes + auto-increment)
+--   Controls how tickets, invoices, expenses etc. are numbered.
+--   Org-wide by default; branch_id can override per branch if needed.
+--   Admins configure; all employees read (to generate the next number).
+-- ############################################################################
+
+create table if not exists public.numbering_sequences (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  branch_id       uuid references public.branches(id) on delete set null,
+  entity_type     text not null,           -- 'ticket' | 'invoice' | 'expense' | 'stock_movement' | 'payroll'
+  prefix          text not null default '',
+  suffix          text not null default '',
+  next_number     integer not null default 1,
+  padding         integer not null default 4,
+  separator       text not null default '-',
+  include_date    boolean not null default false,
+  date_format     text default 'YYYYMMDD',
+  reset_period    text not null default 'never',  -- 'daily' | 'monthly' | 'yearly' | 'never'
+  last_reset_at   date,
+  updated_by      uuid references public.staff(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  unique (organization_id, branch_id, entity_type)
+);
+
+create index if not exists numbering_org_idx on public.numbering_sequences(organization_id);
+
+
+-- ############################################################################
+-- SECTION 1E — FILE UPLOADS (track all uploaded files with entity linking)
+--   Every file uploaded through the app is registered here for traceability.
+--   The actual binary lives in Supabase Storage; this table stores metadata
+--   and the relationship to the owning entity.
+-- ############################################################################
+
+create table if not exists public.file_uploads (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
+  branch_id       uuid default public.auth_branch_id() references public.branches(id) on delete set null,
+  storage_path    text not null,
+  file_name       text not null,
+  mime_type       text,
+  file_size       bigint default 0,
+  entity_type     text,                   -- 'ticket' | 'expense' | 'staff' | 'invoice' | 'customer' | 'organization'
+  entity_id       text,
+  description     text,
+  uploaded_by     uuid default public.auth_staff_id() references public.staff(id) on delete set null,
+  created_at      timestamptz not null default now()
+);
+
+create index if not exists file_uploads_org_idx    on public.file_uploads(organization_id);
+create index if not exists file_uploads_entity_idx on public.file_uploads(entity_type, entity_id);
+
+
+-- ############################################################################
+-- SECTION 1F — VENDORS (normalized supplier/vendor management)
+--   Replaces free-text vendor fields in expenses. Enables vendor analytics,
+--   purchase tracking, and contact management for suppliers.
+-- ############################################################################
+
+create table if not exists public.vendors (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
+  branch_id       uuid references public.branches(id) on delete set null,
+  name            text not null,
+  contact_person  text,
+  phone           text,
+  email           text,
+  gst_number      text,
+  address         text,
+  city            text,
+  state           text,
+  postal_code     text,
+  category        text,
+  payment_terms   text,
+  notes           text,
+  is_active       boolean not null default true,
+  total_purchases numeric not null default 0,
+  total_paid      numeric not null default 0,
+  balance_due     numeric not null default 0,
+  created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
+  updated_by      uuid references public.staff(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now()
+);
+
+create index if not exists vendors_org_idx on public.vendors(organization_id);
+
+-- Add vendor_id FK to expenses (nullable, preserves existing free-text vendor column)
+alter table public.expenses add column if not exists vendor_id uuid references public.vendors(id) on delete set null;
+
+
+-- ############################################################################
 -- SECTION 2 — ROLES / PERMISSIONS / STAFF
 --   Roles are a shared platform catalogue (mirrors src/lib/permissions.ts).
 --   Staff belong to an organization + branch.
@@ -77,10 +281,10 @@ create table if not exists public.staff (
   name          text not null,
   phone         text,
   email         text unique,
-  avatar_url    text,                              -- profile picture (data URL or storage URL)
+  avatar_url    text,
   role_id       text references public.roles(id),
-  branch        text,                              -- legacy free-text branch label
-  status        text not null default 'active',    -- active | invited | suspended
+  branch        text,
+  status        text not null default 'active',
   login_enabled boolean not null default false,
   salary_type   text default 'monthly',
   salary_amount numeric not null default 0,
@@ -93,8 +297,7 @@ create table if not exists public.staff (
   last_login    timestamptz
 );
 
--- Multi-tenant scoping for staff (added via ALTER so existing installs upgrade
--- cleanly without dropping data).
+-- Multi-tenant scoping for staff
 alter table public.staff add column if not exists organization_id uuid references public.organizations(id) on delete cascade;
 alter table public.staff add column if not exists branch_id       uuid references public.branches(id)      on delete set null;
 alter table public.staff add column if not exists avatar_url      text;
@@ -127,8 +330,6 @@ create trigger branches_touch before update on public.branches
   for each row execute function public.touch_updated_at();
 
 -- ── Session helpers (SECURITY DEFINER avoids RLS recursion on staff) ────────
--- These resolve the CURRENT signed-in user's tenancy + permissions and are the
--- single source of truth every RLS policy is built on.
 
 create or replace function public.is_admin()
 returns boolean language sql stable security definer set search_path = public as $$
@@ -162,8 +363,7 @@ returns text language sql stable security definer set search_path = public as $$
   select role_id from public.staff where auth_user_id = auth.uid() limit 1;
 $$;
 
--- True if the current user's role has ANY of the given permission keys, or a
--- blanket grant ('*' / 'full_access'), or is an admin role.
+-- True if the current user's role has ANY of the given permission keys
 create or replace function public.auth_has_any(keys text[])
 returns boolean language sql stable security definer set search_path = public as $$
   select public.is_admin() or exists (
@@ -177,8 +377,6 @@ returns boolean language sql stable security definer set search_path = public as
   );
 $$;
 
--- Owners / managers / admins may see across all branches in their org; everyone
--- else is limited to their own branch.
 create or replace function public.auth_can_cross_branch()
 returns boolean language sql stable security definer set search_path = public as $$
   select public.auth_has_any(array['manage_branches']);
@@ -195,32 +393,96 @@ returns boolean language sql stable security definer set search_path = public as
 $$;
 
 
+-- ── Numbering helper: atomically get-and-increment the next number ───────────
+-- Returns the formatted document number (e.g. "INV-20260730-0042") and bumps
+-- the sequence. Handles daily/monthly/yearly resets automatically.
+create or replace function public.next_doc_number(
+  p_org_id      uuid,
+  p_entity_type text,
+  p_branch_id   uuid default null
+)
+returns text
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_row   public.numbering_sequences%rowtype;
+  v_num   integer;
+  v_today date := current_date;
+  v_reset boolean := false;
+  v_date  text := '';
+  v_result text;
+begin
+  select * into v_row
+  from public.numbering_sequences
+  where organization_id = p_org_id
+    and entity_type = p_entity_type
+    and (branch_id = p_branch_id or (branch_id is null and p_branch_id is null))
+  for update;
+
+  if not found then
+    -- No sequence configured; return a simple fallback
+    return upper(p_entity_type) || '-' || to_char(v_today, 'YYYYMMDD') || '-' || lpad('1', 4, '0');
+  end if;
+
+  -- Check if reset is needed
+  if v_row.reset_period = 'daily' and v_row.last_reset_at is distinct from v_today then
+    v_reset := true;
+  elsif v_row.reset_period = 'monthly' and (v_row.last_reset_at is null or date_trunc('month', v_row.last_reset_at) < date_trunc('month', v_today)) then
+    v_reset := true;
+  elsif v_row.reset_period = 'yearly' and (v_row.last_reset_at is null or date_trunc('year', v_row.last_reset_at) < date_trunc('year', v_today)) then
+    v_reset := true;
+  end if;
+
+  if v_reset then
+    v_num := 1;
+  else
+    v_num := v_row.next_number;
+  end if;
+
+  -- Build the date segment
+  if v_row.include_date then
+    v_date := to_char(v_today, v_row.date_format) || v_row.separator;
+  end if;
+
+  -- Assemble result
+  v_result := v_row.prefix || v_row.separator || v_date || lpad(v_num::text, v_row.padding, '0') || v_row.suffix;
+
+  -- Bump the counter
+  update public.numbering_sequences
+  set next_number = v_num + 1,
+      last_reset_at = v_today,
+      updated_at = now()
+  where id = v_row.id;
+
+  return v_result;
+end;
+$$;
+
+
 -- ############################################################################
 -- SECTION 4 — AUDIT TRAIL
---   One immutable table + one generic trigger. Records every create / update /
---   delete on every business table, capturing the full before & after value,
---   the actor, their role, and the org/branch scope. Used by the dashboard
---   Activity Log. Hard deletes are captured too, so nothing is ever lost.
 -- ############################################################################
 
 create table if not exists public.audit_log (
   id              uuid primary key default gen_random_uuid(),
   organization_id uuid,
   branch_id       uuid,
-  module          text,                 -- Ticket | Invoice | Inventory | ...
-  entity_type     text,                 -- source table name
-  record_id       text,                 -- business id / reference of the row
-  action_type     text,                 -- INSERT | UPDATE | DELETE
-  action          text,                 -- human label
-  severity        text default 'info',  -- success | info | warning | critical
+  module          text,
+  entity_type     text,
+  record_id       text,
+  action_type     text,
+  action          text,
+  severity        text default 'info',
   description     text,
   previous_value  jsonb,
   new_value       jsonb,
-  changes         jsonb,                -- optional [{field,from,to}] (app-supplied)
+  changes         jsonb,
   meta            jsonb,
   reason          text,
-  performed_by    uuid,                 -- auth.users id of the actor
-  actor           text,                 -- actor display name (snapshot)
+  performed_by    uuid,
+  actor           text,
   role            text,
   branch          text,
   created_at      timestamptz not null default now()
@@ -231,10 +493,7 @@ create index if not exists audit_created_idx  on public.audit_log(created_at des
 create index if not exists audit_module_idx   on public.audit_log(module);
 create index if not exists audit_record_idx   on public.audit_log(entity_type, record_id);
 
--- Generic audit trigger. Attach with the module label as the first argument,
--- e.g.  execute function public.fn_audit('Ticket').
--- SECURITY DEFINER so it can always write to audit_log regardless of the
--- writer's own RLS grants (the audit trail must never be blocked).
+-- Generic audit trigger function
 create or replace function public.fn_audit()
 returns trigger
 language plpgsql
@@ -293,13 +552,6 @@ $$;
 
 -- ############################################################################
 -- SECTION 5 — BUSINESS TABLES
---   Standard scope/ownership columns on every table:
---     organization_id  (auto-filled from the signed-in user)
---     branch_id        (auto-filled from the signed-in user)
---     created_by / updated_by / deleted_by  (staff ids)
---     created_at / updated_at / deleted_at
---   Nested structures the app already uses (devices, parts, line items) are
---   stored as jsonb so writes stay atomic and match the existing shapes.
 -- ############################################################################
 
 -- ── Customers ───────────────────────────────────────────────────────────────
@@ -336,7 +588,7 @@ create table if not exists public.customers (
   deleted_at      timestamptz
 );
 
--- ── Tickets (devices / parts / items as jsonb) ───────────────────────────────
+-- ── Tickets ──────────────────────────────────────────────────────────────────
 create table if not exists public.tickets (
   id                 text primary key,
   organization_id    uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
@@ -375,7 +627,7 @@ create table if not exists public.tickets (
   deleted_at         timestamptz
 );
 
--- ── Invoices (line items / devices as jsonb) ─────────────────────────────────
+-- ── Invoices ─────────────────────────────────────────────────────────────────
 create table if not exists public.invoices (
   id              text primary key,
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
@@ -440,13 +692,13 @@ create table if not exists public.walk_ins (
 
 -- ── Inventory items ──────────────────────────────────────────────────────────
 create table if not exists public.inventory_items (
-  id                     text primary key,          -- SKU
+  id                     text primary key,
   organization_id        uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id              uuid default public.auth_branch_id() references public.branches(id) on delete set null,
   name                   text not null,
   category               text,
-  item_type              text default 'Product',    -- Product | Service
-  mode                   text default 'Both',        -- Buy | Sell | Both
+  item_type              text default 'Product',
+  mode                   text default 'Both',
   uom                    text,
   store                  text,
   active                 boolean not null default true,
@@ -483,16 +735,14 @@ create table if not exists public.stock_movements (
   items           integer not null default 0,
   movement_date   text,
   movement_user   text,
-  movement_type   text,                 -- Transfer | Inward | Outward | Adjustment | Return
+  movement_type   text,
   status          text not null default 'completed',
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now()
 );
 
--- ── Brands & device models (ticket/price-list catalogue) ─────────────────────
--- Catalogue/reference tables carry a nullable branch_id: NULL means "org-wide"
--- (visible to every branch), so shared catalogues aren't hidden per branch.
+-- ── Brands & device models ───────────────────────────────────────────────────
 create table if not exists public.brands (
   id              text primary key,
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
@@ -512,7 +762,7 @@ create table if not exists public.device_models (
   created_at      timestamptz not null default now()
 );
 
--- ── Price list (category → brand → model → part) ─────────────────────────────
+-- ── Price list ───────────────────────────────────────────────────────────────
 create table if not exists public.price_list_categories (
   id              text primary key,
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
@@ -594,18 +844,19 @@ create table if not exists public.expenses (
   id                  text primary key,
   organization_id     uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id           uuid default public.auth_branch_id() references public.branches(id) on delete set null,
-  expense_id          text,                       -- EXP-YYYYMMDD-001 (per-day sequence)
+  expense_id          text,
   category            text,
   amount              numeric not null default 0,
   payment_mode        text,
   description         text,
   vendor              text,
+  vendor_id           uuid references public.vendors(id) on delete set null,
   employee            text,
   attachment          text,
   expense_date        date,
   time_label          text,
   internal_notes      text,
-  status              text not null default 'active',   -- active | cancelled
+  status              text not null default 'active',
   cancellation_reason text,
   cancelled_at        timestamptz,
   cancelled_by        text,
@@ -619,13 +870,13 @@ create table if not exists public.expenses (
   deleted_at          timestamptz
 );
 
--- ── Daily ledger: sessions (per branch per day) + transactions ───────────────
+-- ── Daily ledger ─────────────────────────────────────────────────────────────
 create table if not exists public.daily_sessions (
   id                  uuid primary key default gen_random_uuid(),
   organization_id     uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id           uuid default public.auth_branch_id() references public.branches(id) on delete set null,
   session_date        date not null,
-  status              text not null default 'open',   -- open | closed
+  status              text not null default 'open',
   opening_cash        numeric not null default 0,
   opening_bank        numeric not null default 0,
   actual_closing_cash numeric,
@@ -650,8 +901,8 @@ create table if not exists public.ledger_transactions (
   description       text,
   category          text,
   payment_mode      text,
-  cash_or_bank      text,                 -- Cash | Bank
-  direction         text,                 -- inflow | outflow
+  cash_or_bank      text,
+  direction         text,
   amount            numeric not null default 0,
   employee          text,
   color_code        text,
@@ -666,13 +917,13 @@ create table if not exists public.ledger_transactions (
 
 create index if not exists ledger_tx_date_idx on public.ledger_transactions(organization_id, txn_date);
 
--- ── Accounting ledger entries (double-entry style feed) ──────────────────────
+-- ── Accounting ledger entries ────────────────────────────────────────────────
 create table if not exists public.ledger_entries (
   id              text primary key,
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id       uuid default public.auth_branch_id() references public.branches(id) on delete set null,
   entry_date      date not null,
-  entry_type      text,                   -- expense | salary | ticket_payment | ...
+  entry_type      text,
   account         text,
   description     text,
   debit           numeric not null default 0,
@@ -690,11 +941,11 @@ create table if not exists public.payroll_runs (
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id       uuid default public.auth_branch_id() references public.branches(id) on delete set null,
   staff_id        uuid references public.staff(id) on delete set null,
-  period          text,                   -- e.g. 2026-07
+  period          text,
   base_salary     numeric not null default 0,
   deductions      numeric not null default 0,
   net_pay         numeric not null default 0,
-  status          text not null default 'pending',  -- pending | paid
+  status          text not null default 'pending',
   reference       text,
   paid_at         timestamptz,
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
@@ -710,7 +961,7 @@ create table if not exists public.salary_advances (
   employee        text,
   amount          numeric not null default 0,
   reason          text,
-  status          text not null default 'pending',  -- pending | disbursed | recovered
+  status          text not null default 'pending',
   reference       text,
   disbursed_at    timestamptz,
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
@@ -718,27 +969,22 @@ create table if not exists public.salary_advances (
   updated_at      timestamptz not null default now()
 );
 
--- ── Tasks (dashboard To-Do — personal + shared productivity items) ───────────
---   Powers the dashboard "Today's Focus → To-Do List" widget. Private tasks are
---   visible only to their creator; shared tasks are visible to permitted org
---   members (see the custom RLS in Section 7). `remind_at` / `reminder_sent`
---   are reserved so due-date reminders can be layered on later without a
---   migration.
+-- ── Tasks ────────────────────────────────────────────────────────────────────
 create table if not exists public.tasks (
   id              uuid primary key default gen_random_uuid(),
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id       uuid default public.auth_branch_id() references public.branches(id) on delete set null,
   title           text not null,
   description     text,
-  priority        text not null default 'medium',   -- low | medium | high | critical
-  status          text not null default 'open',     -- open | completed
+  priority        text not null default 'medium',
+  status          text not null default 'open',
   completed       boolean not null default false,
   due_date        date,
-  due_time        text,                             -- HH:MM (local wall-clock)
+  due_time        text,
   assigned_to     uuid references public.staff(id) on delete set null,
   is_private      boolean not null default false,
-  remind_at       timestamptz,                      -- reserved: future reminders
-  reminder_sent   boolean not null default false,   -- reserved: future reminders
+  remind_at       timestamptz,
+  reminder_sent   boolean not null default false,
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
   updated_by      uuid references public.staff(id) on delete set null,
   deleted_by      uuid references public.staff(id) on delete set null,
@@ -753,7 +999,7 @@ create index if not exists tasks_assignee_idx on public.tasks(assigned_to);
 create index if not exists tasks_open_idx     on public.tasks(organization_id, completed) where deleted_at is null;
 
 
--- ── updated_at triggers for business tables ──────────────────────────────────
+-- ── updated_at triggers for ALL tables with updated_at ───────────────────────
 do $$
 declare t text;
 begin
@@ -761,7 +1007,8 @@ begin
     'customers','tickets','invoices','walk_ins','inventory_items','stock_movements',
     'price_list_categories','price_list_brands','price_list_models','price_list_parts',
     'expenses','daily_sessions','ledger_transactions','ledger_entries',
-    'payroll_runs','salary_advances','tasks'
+    'payroll_runs','salary_advances','tasks',
+    'organization_settings','user_preferences','numbering_sequences','vendors'
   ] loop
     execute format('drop trigger if exists %I on public.%I;', t || '_touch', t);
     execute format(
@@ -781,28 +1028,32 @@ declare
 begin
   for r in
     select * from (values
-      ('customers',        'Customer'),
-      ('tickets',          'Ticket'),
-      ('invoices',         'Invoice'),
-      ('walk_ins',         'Walk-In'),
-      ('inventory_items',  'Inventory'),
-      ('stock_movements',  'Inventory'),
-      ('brands',           'Price List'),
-      ('device_models',    'Price List'),
-      ('price_list_categories', 'Price List'),
-      ('price_list_brands',     'Price List'),
-      ('price_list_models',     'Price List'),
-      ('price_list_parts',      'Price List'),
-      ('expenses',         'Expense'),
-      ('expense_categories','Expense'),
-      ('daily_sessions',   'Daily Ledger'),
-      ('ledger_transactions','Daily Ledger'),
-      ('ledger_entries',   'Accounting'),
-      ('payroll_runs',     'Payroll'),
-      ('salary_advances',  'Payroll'),
-      ('tasks',            'Task'),
-      ('staff',            'Employee'),
-      ('branches',         'System')
+      ('customers',              'Customer'),
+      ('tickets',                'Ticket'),
+      ('invoices',               'Invoice'),
+      ('walk_ins',               'Walk-In'),
+      ('inventory_items',        'Inventory'),
+      ('stock_movements',        'Inventory'),
+      ('brands',                 'Price List'),
+      ('device_models',          'Price List'),
+      ('price_list_categories',  'Price List'),
+      ('price_list_brands',      'Price List'),
+      ('price_list_models',      'Price List'),
+      ('price_list_parts',       'Price List'),
+      ('expenses',               'Expense'),
+      ('expense_categories',     'Expense'),
+      ('daily_sessions',         'Daily Ledger'),
+      ('ledger_transactions',    'Daily Ledger'),
+      ('ledger_entries',         'Accounting'),
+      ('payroll_runs',           'Payroll'),
+      ('salary_advances',        'Payroll'),
+      ('tasks',                  'Task'),
+      ('staff',                  'Employee'),
+      ('branches',               'System'),
+      ('organization_settings',  'Settings'),
+      ('numbering_sequences',    'Settings'),
+      ('vendors',                'Vendor'),
+      ('file_uploads',           'File')
     ) as x(tbl, label)
   loop
     execute format('drop trigger if exists %I on public.%I;', 'audit_' || r.tbl, r.tbl);
@@ -815,39 +1066,41 @@ end $$;
 
 -- ############################################################################
 -- SECTION 7 — ROW LEVEL SECURITY
---   Reads/writes happen from the browser with the anon/authenticated key, so
---   every rule is enforced here in Postgres. Privileged admin actions (creating
---   logins, seeding) use the service-role key which bypasses RLS by design.
 -- ############################################################################
 
-alter table public.organizations      enable row level security;
-alter table public.branches           enable row level security;
-alter table public.roles              enable row level security;
-alter table public.role_permissions   enable row level security;
-alter table public.staff              enable row level security;
-alter table public.audit_log          enable row level security;
-alter table public.customers          enable row level security;
-alter table public.tickets            enable row level security;
-alter table public.invoices           enable row level security;
-alter table public.walk_ins           enable row level security;
-alter table public.inventory_items    enable row level security;
-alter table public.stock_movements    enable row level security;
-alter table public.brands             enable row level security;
-alter table public.device_models      enable row level security;
-alter table public.price_list_categories enable row level security;
-alter table public.price_list_brands  enable row level security;
-alter table public.price_list_models  enable row level security;
-alter table public.price_list_parts   enable row level security;
-alter table public.expenses           enable row level security;
-alter table public.expense_categories enable row level security;
-alter table public.daily_sessions     enable row level security;
-alter table public.ledger_transactions enable row level security;
-alter table public.ledger_entries     enable row level security;
-alter table public.payroll_runs       enable row level security;
-alter table public.salary_advances    enable row level security;
-alter table public.tasks              enable row level security;
+alter table public.organizations          enable row level security;
+alter table public.branches               enable row level security;
+alter table public.roles                  enable row level security;
+alter table public.role_permissions       enable row level security;
+alter table public.staff                  enable row level security;
+alter table public.audit_log              enable row level security;
+alter table public.customers              enable row level security;
+alter table public.tickets                enable row level security;
+alter table public.invoices               enable row level security;
+alter table public.walk_ins               enable row level security;
+alter table public.inventory_items        enable row level security;
+alter table public.stock_movements        enable row level security;
+alter table public.brands                 enable row level security;
+alter table public.device_models          enable row level security;
+alter table public.price_list_categories  enable row level security;
+alter table public.price_list_brands      enable row level security;
+alter table public.price_list_models      enable row level security;
+alter table public.price_list_parts       enable row level security;
+alter table public.expenses               enable row level security;
+alter table public.expense_categories     enable row level security;
+alter table public.daily_sessions         enable row level security;
+alter table public.ledger_transactions    enable row level security;
+alter table public.ledger_entries         enable row level security;
+alter table public.payroll_runs           enable row level security;
+alter table public.salary_advances        enable row level security;
+alter table public.tasks                  enable row level security;
+alter table public.organization_settings  enable row level security;
+alter table public.user_preferences       enable row level security;
+alter table public.numbering_sequences    enable row level security;
+alter table public.file_uploads           enable row level security;
+alter table public.vendors                enable row level security;
 
--- ── Role catalogue: readable by everyone (drives the permission UI) ──────────
+-- ── Role catalogue: readable by everyone ─────────────────────────────────────
 drop policy if exists roles_read on public.roles;
 create policy roles_read on public.roles for select using (true);
 
@@ -894,18 +1147,10 @@ create policy staff_write on public.staff
   using (public.is_admin() and (organization_id = public.auth_org_id() or organization_id is null))
   with check (public.is_admin());
 
--- ── Self-service: a signed-in user may update THEIR OWN staff row ────────────
---   Lets every user save their own profile (name / phone / avatar) directly
---   from the browser under RLS — no privileged server route or service-role
---   key required. A guard trigger blocks non-admins from changing any
---   sensitive column (role, salary, status, org/branch, login, email), so this
---   can never be used to self-escalate. Combined with staff_write (OR-ed by
---   Postgres), admins keep full management access.
+-- ── Self-service: user may update their own staff row (guarded) ──────────────
 create or replace function public.staff_guard_self_update()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  -- Trusted contexts bypass the column guard: admins managing staff, and the
-  -- service-role key (no auth.uid(); used by the admin API routes + seed).
   if public.is_admin() or auth.uid() is null then
     return NEW;
   end if;
@@ -937,6 +1182,101 @@ create policy staff_self_update on public.staff
   using (auth_user_id = auth.uid())
   with check (auth_user_id = auth.uid());
 
+-- ── Organization Settings: all org members read; admins write ────────────────
+drop policy if exists org_settings_read on public.organization_settings;
+create policy org_settings_read on public.organization_settings
+  for select to authenticated
+  using (organization_id = public.auth_org_id());
+
+drop policy if exists org_settings_write on public.organization_settings;
+create policy org_settings_write on public.organization_settings
+  for all to authenticated
+  using (organization_id = public.auth_org_id() and public.is_admin())
+  with check (organization_id = public.auth_org_id() and public.is_admin());
+
+-- ── User Preferences: only the owner staff_id can read/write their own row ──
+drop policy if exists user_prefs_read on public.user_preferences;
+create policy user_prefs_read on public.user_preferences
+  for select to authenticated
+  using (staff_id = public.auth_staff_id());
+
+drop policy if exists user_prefs_write on public.user_preferences;
+create policy user_prefs_write on public.user_preferences
+  for all to authenticated
+  using (staff_id = public.auth_staff_id())
+  with check (staff_id = public.auth_staff_id());
+
+-- ── Numbering Sequences: org members read; admins write ─────────────────────
+drop policy if exists numbering_read on public.numbering_sequences;
+create policy numbering_read on public.numbering_sequences
+  for select to authenticated
+  using (organization_id = public.auth_org_id());
+
+drop policy if exists numbering_write on public.numbering_sequences;
+create policy numbering_write on public.numbering_sequences
+  for all to authenticated
+  using (organization_id = public.auth_org_id() and public.is_admin())
+  with check (organization_id = public.auth_org_id() and public.is_admin());
+
+-- ── File Uploads: org members with upload_files can read/write ───────────────
+drop policy if exists file_uploads_read on public.file_uploads;
+create policy file_uploads_read on public.file_uploads
+  for select to authenticated
+  using (
+    public.auth_member_of_org(organization_id)
+    and public.auth_branch_visible(branch_id)
+  );
+
+drop policy if exists file_uploads_write on public.file_uploads;
+create policy file_uploads_write on public.file_uploads
+  for all to authenticated
+  using (
+    public.auth_member_of_org(organization_id)
+    and public.auth_has_any(array['upload_files'])
+  )
+  with check (
+    organization_id = public.auth_org_id()
+    and public.auth_has_any(array['upload_files'])
+  );
+
+-- ── Vendors: org members with manage_vendors or manage_purchases can access ──
+drop policy if exists vendors_sel on public.vendors;
+create policy vendors_sel on public.vendors
+  for select to authenticated
+  using (
+    public.auth_member_of_org(organization_id)
+    and public.auth_branch_visible(branch_id)
+    and public.auth_has_any(array['manage_vendors','manage_purchases','manage_payments','manage_inventory'])
+  );
+
+drop policy if exists vendors_ins on public.vendors;
+create policy vendors_ins on public.vendors
+  for insert to authenticated
+  with check (
+    organization_id = public.auth_org_id()
+    and public.auth_has_any(array['manage_vendors','manage_purchases'])
+  );
+
+drop policy if exists vendors_upd on public.vendors;
+create policy vendors_upd on public.vendors
+  for update to authenticated
+  using (
+    public.auth_member_of_org(organization_id)
+    and public.auth_has_any(array['manage_vendors','manage_purchases'])
+  )
+  with check (
+    organization_id = public.auth_org_id()
+    and public.auth_has_any(array['manage_vendors','manage_purchases'])
+  );
+
+drop policy if exists vendors_del on public.vendors;
+create policy vendors_del on public.vendors
+  for delete to authenticated
+  using (
+    public.auth_member_of_org(organization_id)
+    and public.auth_has_any(array['manage_vendors','manage_purchases'])
+  );
+
 -- ── Audit log: read requires view_audit_logs; org members may append ─────────
 drop policy if exists audit_read on public.audit_log;
 create policy audit_read on public.audit_log
@@ -949,15 +1289,12 @@ create policy audit_insert on public.audit_log
   with check (organization_id = public.auth_org_id());
 
 -- ── Generic per-module policy generator ──────────────────────────────────────
--- Builds SELECT / INSERT / UPDATE / DELETE policies for a business table using
--- org isolation + branch scope + per-module permission keys.
 do $$
 declare
   r record;
 begin
   for r in
     select * from (values
-      -- table,                read keys,                                                              write keys
       ('customers',        array['manage_customers','manage_repair_jobs','manage_sales','manage_invoices','view_financial_reports'], array['manage_customers']),
       ('tickets',          array['manage_repair_jobs','update_repair_status','view_only','assign_technicians'],                       array['manage_repair_jobs','update_repair_status','create','edit']),
       ('invoices',         array['manage_invoices','manage_payments','view_financial_reports','manage_sales'],                        array['manage_invoices','manage_payments']),
@@ -979,7 +1316,6 @@ begin
       ('salary_advances',  array['manage_payments','manage_users'],                                                                   array['manage_payments'])
     ) as x(tbl, read_keys, write_keys)
   loop
-    -- SELECT
     execute format('drop policy if exists %I on public.%I;', r.tbl || '_sel', r.tbl);
     execute format($f$
       create policy %I on public.%I for select to authenticated
@@ -989,7 +1325,6 @@ begin
         and public.auth_has_any(%L::text[])
       );$f$, r.tbl || '_sel', r.tbl, r.read_keys);
 
-    -- INSERT
     execute format('drop policy if exists %I on public.%I;', r.tbl || '_ins', r.tbl);
     execute format($f$
       create policy %I on public.%I for insert to authenticated
@@ -999,7 +1334,6 @@ begin
         and public.auth_has_any(%L::text[])
       );$f$, r.tbl || '_ins', r.tbl, r.write_keys);
 
-    -- UPDATE
     execute format('drop policy if exists %I on public.%I;', r.tbl || '_upd', r.tbl);
     execute format($f$
       create policy %I on public.%I for update to authenticated
@@ -1014,7 +1348,6 @@ begin
         and public.auth_has_any(%L::text[])
       );$f$, r.tbl || '_upd', r.tbl, r.write_keys, r.write_keys);
 
-    -- DELETE
     execute format('drop policy if exists %I on public.%I;', r.tbl || '_del', r.tbl);
     execute format($f$
       create policy %I on public.%I for delete to authenticated
@@ -1027,11 +1360,6 @@ begin
 end $$;
 
 -- ── Tasks: custom visibility (private / shared / admin) ──────────────────────
---   Private tasks are visible only to their creator. Shared tasks are visible
---   to org members who can view the dashboard (branch-scoped). Assignees always
---   see tasks assigned to them. Admins/owners see everything in their org.
---   Only the creator (or an admin) may delete a task; anyone who can see a
---   shared task may complete / edit it (that is the point of a shared to-do).
 drop policy if exists tasks_sel on public.tasks;
 create policy tasks_sel on public.tasks for select to authenticated
 using (
@@ -1082,10 +1410,6 @@ using (
 
 -- ############################################################################
 -- SECTION 8 — REAL-TIME
---   Publish every business table (+ audit_log) so changes stream live to all
---   permitted sessions. REPLICA IDENTITY FULL makes update/delete payloads
---   carry the full old row (needed for client-side reconciliation + filtering).
---   Realtime still respects RLS, so users only receive changes they may see.
 -- ############################################################################
 
 do $$
@@ -1097,17 +1421,16 @@ declare
     'brands','device_models',
     'price_list_categories','price_list_brands','price_list_models','price_list_parts',
     'expenses','expense_categories','daily_sessions','ledger_transactions','ledger_entries',
-    'payroll_runs','salary_advances','tasks'
+    'payroll_runs','salary_advances','tasks',
+    'organization_settings','user_preferences','numbering_sequences','file_uploads','vendors'
   ];
 begin
-  -- Ensure the Supabase realtime publication exists (it does on Supabase).
   if not exists (select 1 from pg_publication where pubname = 'supabase_realtime') then
     create publication supabase_realtime;
   end if;
 
   foreach t in array tables loop
     execute format('alter table public.%I replica identity full;', t);
-    -- Add to the publication only if not already a member (re-run safe).
     if not exists (
       select 1 from pg_publication_tables
       where pubname = 'supabase_realtime' and schemaname = 'public' and tablename = t
@@ -1120,8 +1443,6 @@ end $$;
 
 -- ############################################################################
 -- SECTION 9 — GRANTS
---   RLS still governs row visibility; these grants just expose the tables to
---   the API roles. All write attempts are checked against the policies above.
 -- ############################################################################
 
 grant usage on schema public to anon, authenticated;
@@ -1129,7 +1450,6 @@ grant usage on schema public to anon, authenticated;
 grant select on public.roles            to anon, authenticated;
 grant select on public.role_permissions to anon, authenticated;
 
--- Helper functions used by policies / the app.
 grant execute on function public.is_admin()                       to anon, authenticated;
 grant execute on function public.auth_staff_id()                  to authenticated;
 grant execute on function public.auth_org_id()                    to authenticated;
@@ -1139,9 +1459,8 @@ grant execute on function public.auth_has_any(text[])             to authenticat
 grant execute on function public.auth_can_cross_branch()          to authenticated;
 grant execute on function public.auth_member_of_org(uuid)         to authenticated;
 grant execute on function public.auth_branch_visible(uuid)        to authenticated;
+grant execute on function public.next_doc_number(uuid, text, uuid) to authenticated;
 
--- Business tables: authenticated CRUD (RLS-restricted). Reads for staff/org/
--- branch happen from the browser; writes are permission-checked in the policies.
 do $$
 declare
   t text;
@@ -1151,7 +1470,8 @@ declare
     'brands','device_models',
     'price_list_categories','price_list_brands','price_list_models','price_list_parts',
     'expenses','expense_categories','daily_sessions','ledger_transactions','ledger_entries',
-    'payroll_runs','salary_advances','tasks'
+    'payroll_runs','salary_advances','tasks',
+    'organization_settings','user_preferences','numbering_sequences','file_uploads','vendors'
   ];
 begin
   foreach t in array tables loop

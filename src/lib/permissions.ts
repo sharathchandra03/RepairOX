@@ -364,9 +364,16 @@ export function getAllowedWorkspaces(roleId: string): WorkspaceDef[] {
   return WORKSPACES.filter((w) => role.workspaces.includes(w.id));
 }
 
-/* ── Current session (mock) ──────────────────────────────────────────────
-   Replace with the backend session payload. Everything above renders
-   dynamically off `roleId`, so swapping this is the entire integration. */
+/* ── Session defaults (local-mode fallback) ──────────────────────────────
+   When Supabase is NOT configured (local/demo mode), these defaults are used
+   as the "signed-in user". In production (Supabase mode), the real session is
+   loaded from `auth.users` → `staff` by `permissions-context.tsx` and the
+   `CURRENT_USER` constant below is only used as a last-resort fallback when
+   the session is still loading or unavailable.
+
+   Consuming components should use `usePermissions().currentUser` instead of
+   importing CURRENT_USER directly. The context provides the real DB-backed
+   session in production and falls back to this constant in local mode. */
 export const CURRENT_USER = {
   name: "Kalai S.",
   email: "abc@gmail.com",
@@ -375,10 +382,12 @@ export const CURRENT_USER = {
   roleId: "master_shop_owner",
 };
 
+/** @deprecated Use `usePermissions().role` instead for context-aware role. */
 export function currentRole(): RoleDef {
   return getRole(CURRENT_USER.roleId) ?? ROLES[ROLES.length - 1];
 }
 
+/** @deprecated Use `usePermissions().allowedWorkspaces` instead. */
 export function currentAllowedWorkspaces(): WorkspaceDef[] {
   return getAllowedWorkspaces(CURRENT_USER.roleId);
 }

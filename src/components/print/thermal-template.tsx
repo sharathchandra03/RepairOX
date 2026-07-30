@@ -180,6 +180,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
               <Row label="Type" value={invoice.invoiceType === "business" ? "Business (GST)" : "Retail"} />
               <Row label="Status" value={invoice.status} />
               <Row label="Due" value={formatPrintDate(invoice.dueDate)} />
+              {invoice.paymentMode && <Row label="Payment" value={invoice.paymentMode.replace("_", " ")} />}
               {invoice.employee && <Row label="Employee" value={invoice.employee} />}
               {invoice.ticketId && <Row label="Ticket" value={invoice.ticketId} />}
             </div>

@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
-  User, FileText, Package, DollarSign, StickyNote, ClipboardCheck, Sparkles, X,
+  User, FileText, Package, DollarSign, StickyNote, ClipboardCheck, Sparkles, X, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
@@ -16,6 +16,8 @@ import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
+import { searchBrands, getModelsForBrand } from "@/lib/brand-model-data";
+import type { InventoryItem } from "@/lib/inventory-data";
 
 /* ─── Step Definitions ───────────────────────────────────────────────── */
 
@@ -50,14 +52,14 @@ type InvoiceFormDevice = {
 
 type InvoiceFormData = {
   customer: { name: string; phone: string; email: string; company: string };
-  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; invoiceType: InvoiceType };
+  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
   /** Multi-device entries */
   devices: InvoiceFormDevice[];
   /** Index of the active device being edited */
   activeDeviceIndex: number;
-  pricing: { discount: number; taxRate: number };
+  pricing: { discount: number; taxRate: number; paymentMode: string };
   notes: { notes: string; terms: string; slogan: string; footer: string };
 };
 
@@ -82,11 +84,11 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", email: "", company: "" },
-  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", invoiceType: "retail" },
+  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", invoiceType: "retail", serviceCategory: "service" },
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
-  pricing: { discount: 0, taxRate: 18 },
+  pricing: { discount: 0, taxRate: 18, paymentMode: "" },
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
 
@@ -323,6 +325,8 @@ function InvoiceWizard() {
       footer: form.notes.footer || undefined,
       employee: form.details.employee || undefined,
       ticketId: form.details.ticketId || undefined,
+      paymentMode: form.pricing.paymentMode || undefined,
+      serviceCategory: form.details.serviceCategory || "service",
       devices: invoiceDevices.length > 0 ? invoiceDevices : undefined,
     };
 
@@ -516,11 +520,11 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
 
   return {
     customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "" },
-    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, invoiceType: inv.invoiceType || "retail" },
+    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
-    pricing: { discount: inv.discount, taxRate: inv.tax > 0 && inv.subtotal > 0 ? Math.round((inv.tax / (inv.subtotal - inv.discount)) * 100) : 18 },
+    pricing: { discount: inv.discount, taxRate: inv.tax > 0 && inv.subtotal > 0 ? Math.round((inv.tax / (inv.subtotal - inv.discount)) * 100) : 18, paymentMode: inv.paymentMode || "" },
     notes: { notes: inv.notes || "", terms: inv.terms || "", slogan: inv.slogan || "", footer: inv.footer || "" },
   };
 }
@@ -587,18 +591,123 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
             { label: "Retail Invoice", value: "retail" }, { label: "Business Invoice", value: "business" },
           ]} />
         </div>
-        <div className="space-y-1.5"><Label>Reference / PO Number</Label><Input value={d.reference} onChange={(e: any) => set("reference", e.target.value)} placeholder="CORP-1758" /></div>
+        <div className="space-y-1.5">
+          <Label>Service / Accessories</Label>
+          <Select value={d.serviceCategory} onChange={(e: any) => set("serviceCategory", e.target.value)} options={[
+            { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" },
+          ]} />
+        </div>
+        <div className="space-y-1.5"><Label>Reference/Invoice Number</Label><Input value={d.reference} onChange={(e: any) => set("reference", e.target.value)} placeholder="CORP-1758" /></div>
         <div className="space-y-1.5"><Label>Due Date</Label><Input type="date" value={d.dueDate} onChange={(e: any) => set("dueDate", e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Employee</Label><Input value={d.employee} onChange={(e: any) => set("employee", e.target.value)} placeholder="Anjali R." /></div>
         <div className="space-y-1.5"><Label>Linked Ticket</Label><Input value={d.ticketId} onChange={(e: any) => set("ticketId", e.target.value)} placeholder="T-1837 (optional)" /></div>
-        <div className="space-y-1.5">
-          <Label>Status</Label>
-          <Select value={d.status} onChange={(e: any) => set("status", e.target.value)} options={[
-            { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" }, { label: "Paid", value: "paid" },
-            { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
-          ]} />
-        </div>
       </div>
+    </div>
+  );
+}
+
+/* ─── Shared Brand/Model Selector (reuses ticket device catalog) ─────── */
+
+function BrandModelSelector({ brand, model, onBrandChange, onModelChange }: { brand: string; model: string; onBrandChange: (v: string) => void; onModelChange: (v: string) => void }) {
+  const { brands, deviceModels } = useStore();
+  const [brandQ, setBrandQ] = useState("");
+  const [modelQ, setModelQ] = useState("");
+  const [showBrandList, setShowBrandList] = useState(false);
+  const [showModelList, setShowModelList] = useState(false);
+
+  const filteredBrands = brandQ.trim() ? searchBrands(brands, brandQ) : brands;
+  const selectedBrand = brands.find((b) => b.name === brand);
+  const availableModels = selectedBrand ? getModelsForBrand(deviceModels, selectedBrand.id) : [];
+  const filteredModels = modelQ.trim() ? availableModels.filter((m) => m.name.toLowerCase().includes(modelQ.toLowerCase())) : availableModels;
+
+  return (
+    <>
+      <div className="space-y-1 relative">
+        <Label>Brand</Label>
+        <Input
+          value={brand || brandQ}
+          onChange={(e: any) => { setBrandQ(e.target.value); onBrandChange(e.target.value); setShowBrandList(true); }}
+          onFocus={() => setShowBrandList(true)}
+          placeholder="Apple"
+        />
+        {showBrandList && filteredBrands.length > 0 && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[200px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+            {filteredBrands.slice(0, 10).map((b) => (
+              <button key={b.id} type="button" onClick={() => { onBrandChange(b.name); onModelChange(""); setBrandQ(""); setShowBrandList(false); }}
+                className={cn("flex w-full items-center px-3 py-2 text-sm text-left hover:bg-[#EEF1FD] transition", b.name === brand && "bg-[#EEF1FD] font-medium text-[#4361EE]")}>
+                {b.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="space-y-1 relative">
+        <Label>Model</Label>
+        <Input
+          value={model || modelQ}
+          onChange={(e: any) => { setModelQ(e.target.value); onModelChange(e.target.value); setShowModelList(true); }}
+          onFocus={() => setShowModelList(true)}
+          placeholder={selectedBrand ? "Select model…" : "Select brand first"}
+        />
+        {showModelList && filteredModels.length > 0 && (
+          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[200px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+            {filteredModels.slice(0, 10).map((m) => (
+              <button key={m.id} type="button" onClick={() => { onModelChange(m.name); setModelQ(""); setShowModelList(false); }}
+                className={cn("flex w-full items-center px-3 py-2 text-sm text-left hover:bg-[#EEF1FD] transition", m.name === model && "bg-[#EEF1FD] font-medium text-[#4361EE]")}>
+                {m.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+/* ─── Inventory Search Box (reuses ticket inventory search pattern) ──── */
+
+function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryItem) => void; onClose: () => void }) {
+  const { inventory } = useStore();
+  const [q, setQ] = useState("");
+
+  const results = q.trim().length >= 2
+    ? inventory.filter((item) => {
+        const query = q.toLowerCase();
+        return item.active && (item.name.toLowerCase().includes(query) || item.id.toLowerCase().includes(query) || item.category.toLowerCase().includes(query));
+      }).slice(0, 8)
+    : [];
+
+  return (
+    <div className="rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD]/30 p-3">
+      <div className="flex items-center gap-2 mb-2">
+        <Search className="h-4 w-4 text-[#4361EE]" />
+        <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search inventory by name, SKU, or category…" autoFocus className="flex-1" />
+        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted transition"><X className="h-4 w-4" /></button>
+      </div>
+      {results.length > 0 && (
+        <div className="max-h-[220px] overflow-y-auto rounded-lg border border-border bg-card">
+          {results.map((item) => {
+            const available = item.currentStock - (item.reservedStock || 0);
+            return (
+              <button key={item.id} type="button" onClick={() => onSelect(item)}
+                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition border-b border-border last:border-0 hover:bg-indigo-50/50">
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Package className="h-3.5 w-3.5" /></span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium truncate">{item.name}</p>
+                  <p className="text-[10px] text-muted-foreground">{item.id} · {item.category}</p>
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
+                  <span className="text-[10px] text-muted-foreground">Stock: {available}</span>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      )}
+      {q.trim().length >= 2 && results.length === 0 && (
+        <p className="text-center text-sm text-muted-foreground py-3">No inventory items match "{q}"</p>
+      )}
     </div>
   );
 }
@@ -608,6 +717,7 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
 function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
+  const [showInventorySearch, setShowInventorySearch] = useState(false);
 
   const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
 
@@ -720,8 +830,12 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Device Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="space-y-1"><Label>Brand</Label><Input value={activeDevice.brand} onChange={(e: any) => setDeviceField("brand", e.target.value)} placeholder="Apple" /></div>
-              <div className="space-y-1"><Label>Model</Label><Input value={activeDevice.model} onChange={(e: any) => setDeviceField("model", e.target.value)} placeholder="iPhone 16 Pro" /></div>
+              <BrandModelSelector
+                brand={activeDevice.brand}
+                model={activeDevice.model}
+                onBrandChange={(v) => setDeviceField("brand", v)}
+                onModelChange={(v) => setDeviceField("model", v)}
+              />
               <div className="space-y-1"><Label>IMEI / Serial</Label><Input value={activeDevice.imei} onChange={(e: any) => setDeviceField("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="font-mono" /></div>
             </div>
           </div>
@@ -758,15 +872,46 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div>
             <div className="flex items-center justify-between mb-3">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Parts & Services</p>
-              <Button size="sm" onClick={addPart}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
+              <div className="flex gap-1.5">
+                <Button size="sm" variant="outline" onClick={() => setShowInventorySearch(true)}><Search className="h-3.5 w-3.5" /> Search Item</Button>
+                <Button size="sm" onClick={addPart}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
+              </div>
             </div>
 
-            {activeDevice.parts.length === 0 ? (
-              <div className="rounded-xl border-2 border-dashed border-border p-8 text-center">
-                <Package className="mx-auto h-7 w-7 text-muted-foreground/50" />
-                <p className="mt-2 text-sm text-muted-foreground">No parts yet. Click "Add Item" to add parts for this device.</p>
+            {/* Inventory Search Dropdown */}
+            {showInventorySearch && (
+              <div className="mb-3">
+                <InventorySearchBox
+                  onSelect={(item) => {
+                    updateForm((f) => ({
+                      ...f,
+                      devices: f.devices.map((d, i) => i === activeIdx
+                        ? { ...d, parts: [...d.parts, { id: genLineId(), name: item.name, sku: item.id, qty: 1, price: item.regularSellingPrice, discount: 0, total: item.regularSellingPrice, description: item.category }] }
+                        : d
+                      ),
+                    }));
+                    setShowInventorySearch(false);
+                  }}
+                  onClose={() => setShowInventorySearch(false)}
+                />
               </div>
-            ) : (
+            )}
+
+            {/* Always-visible item entry row */}
+            {activeDevice.parts.length === 0 && !showInventorySearch && (
+              <div className="rounded-xl border border-border p-3 mb-2">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_70px_90px_auto]">
+                  <div className="space-y-1"><Label>Item</Label><Input value="" onChange={() => addPart()} onFocus={() => addPart()} placeholder="Click to add an item…" /></div>
+                  <div className="space-y-1"><Label>Qty</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">1</div></div>
+                  <div className="space-y-1"><Label>Price</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
+                  <div className="space-y-1"><Label>Disc.</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
+                  <div className="space-y-1"><Label>Total</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
+                  <div className="flex items-end"><div className="h-9 w-9" /></div>
+                </div>
+              </div>
+            )}
+
+            {activeDevice.parts.length > 0 && (
               <div className="space-y-2">
                 {activeDevice.parts.map((item) => (
                   <div key={item.id} className="rounded-xl border border-border p-3">
@@ -802,11 +947,32 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
 function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; tax: number; total: number } }) {
   const p = form.pricing;
+  const d = form.details;
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
-      <h2 className="font-display text-lg font-bold mb-1">Pricing & Tax</h2>
-      <p className="text-sm text-muted-foreground mb-6">Adjust discount and tax settings.</p>
+      <h2 className="font-display text-lg font-bold mb-1">Pricing & Payment</h2>
+      <p className="text-sm text-muted-foreground mb-6">Discount, tax, payment mode, and status.</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>Mode of Payment</Label>
+          <Select value={p.paymentMode} onChange={(e: any) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, paymentMode: e.target.value } }))} options={[
+            { label: "Select payment mode…", value: "" },
+            { label: "Cash", value: "cash" },
+            { label: "UPI", value: "upi" },
+            { label: "Bank Transfer", value: "bank_transfer" },
+            { label: "Card", value: "card" },
+            { label: "Cheque", value: "cheque" },
+            { label: "Wallet", value: "wallet" },
+            { label: "Other", value: "other" },
+          ]} />
+        </div>
+        <div className="space-y-1.5">
+          <Label>Status</Label>
+          <Select value={d.status} onChange={(e: any) => updateForm((f) => ({ ...f, details: { ...f.details, status: e.target.value } }))} options={[
+            { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" }, { label: "Paid", value: "paid" },
+            { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
+          ]} />
+        </div>
         <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} /></div>
         <div className="space-y-1.5"><Label>Tax Rate (%)</Label><NumericInput value={p.taxRate} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, taxRate: v } }))} /></div>
       </div>

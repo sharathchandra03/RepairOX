@@ -13,9 +13,10 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { DataTable, type Column } from "@/components/inventory/data-table";
 import { FilterSelect } from "@/components/inventory/widgets";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
-  stockMovements, MOVEMENT_STATUS_LABEL, MOVEMENT_STATUS_TONE,
+  MOVEMENT_STATUS_LABEL, MOVEMENT_STATUS_TONE,
   type StockMovement, type MovementType, type MovementStatus,
 } from "@/lib/inventory-data";
 
@@ -35,6 +36,7 @@ function StatusBadge({ status }: { status: MovementStatus }) {
 }
 
 export default function StockMovementPage() {
+  const { stockMovements } = useStore();
   const [view, setView] = useState("table");
   const [type, setType] = useState("all");
   const [status, setStatus] = useState("all");

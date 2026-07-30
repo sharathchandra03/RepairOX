@@ -113,6 +113,8 @@ export default function InvoiceDetailPage() {
   const [showItemsDrawer, setShowItemsDrawer] = useState(false);
   const [statusDraft, setStatusDraft] = useState<InvoiceStatus>("draft");
   const [paidDraft, setPaidDraft] = useState("");
+  const [paymentModeDraft, setPaymentModeDraft] = useState("");
+  const [paymentNoteDraft, setPaymentNoteDraft] = useState("");
   const [notesDraft, setNotesDraft] = useState("");
   const [termsDraft, setTermsDraft] = useState("");
   const [activeEditor, setActiveEditor] = useState<"customer" | "billing" | "tax" | null>(null);
@@ -129,14 +131,27 @@ export default function InvoiceDetailPage() {
     if (!invoice) return;
     setStatusDraft(invoice.status);
     setPaidDraft(String(invoice.paidAmount));
+    setPaymentModeDraft(invoice.paymentMode || "");
+    setPaymentNoteDraft("");
     setShowStatusDrawer(true);
   }, [invoice]);
 
   const saveStatus = useCallback(() => {
     if (!invoice) return;
-    updateInvoice(invoice.id, { status: statusDraft, paidAmount: Number(paidDraft) || 0 });
+    const paid = Number(paidDraft) || 0;
+    // Auto-determine status based on payment
+    let finalStatus = statusDraft;
+    if (paid >= invoice.total) finalStatus = "paid";
+    else if (paid > 0 && paid < invoice.total) finalStatus = "partial";
+    else if (invoice.dueDate && Date.now() > new Date(invoice.dueDate).getTime() && paid < invoice.total) finalStatus = "overdue";
+
+    const updates: Partial<typeof invoice> = { status: finalStatus, paidAmount: paid, paymentMode: paymentModeDraft || undefined };
+    if (paymentNoteDraft.trim()) {
+      updates.notes = [invoice.notes, `Payment Note: ${paymentNoteDraft.trim()}`].filter(Boolean).join("\n");
+    }
+    updateInvoice(invoice.id, updates);
     setShowStatusDrawer(false);
-  }, [invoice, statusDraft, paidDraft, updateInvoice]);
+  }, [invoice, statusDraft, paidDraft, paymentModeDraft, paymentNoteDraft, updateInvoice]);
 
   const [footerDraft, setFooterDraft] = useState("");
 
@@ -615,11 +630,43 @@ export default function InvoiceDetailPage() {
         footer={
           <div className="flex justify-start gap-2">
             <Button variant="outline" size="sm" onClick={() => setShowStatusDrawer(false)}>Cancel</Button>
-            <Button size="sm" onClick={saveStatus}><Check className="h-3.5 w-3.5" /> Save</Button>
+            <Button size="sm" onClick={saveStatus}><Check className="h-3.5 w-3.5" /> Save Payment</Button>
           </div>
         }
       >
         <div className="space-y-4">
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Paid Amount (₹)</label>
+            <input
+              type="number"
+              value={paidDraft}
+              onChange={(e) => setPaidDraft(e.target.value)}
+              className="flex h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm transition-all duration-150 hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none"
+            />
+            {/* Quick amount buttons */}
+            <div className="flex gap-1.5 mt-1.5">
+              <button type="button" onClick={() => setPaidDraft(String(invoice.total))} className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-[#EEF1FD] hover:text-[#4361EE] transition">Full ({formatINR(invoice.total)})</button>
+              <button type="button" onClick={() => setPaidDraft(String(Math.round(invoice.total / 2)))} className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-[#EEF1FD] hover:text-[#4361EE] transition">50%</button>
+              <button type="button" onClick={() => setPaidDraft(String(invoice.paidAmount))} className="rounded-lg border border-border px-2.5 py-1 text-[11px] font-medium hover:bg-[#EEF1FD] hover:text-[#4361EE] transition">Keep Current</button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <label className="text-xs font-medium text-muted-foreground">Payment Mode</label>
+            <Select
+              value={paymentModeDraft}
+              onChange={(e: any) => setPaymentModeDraft(e.target.value)}
+              options={[
+                { label: "Select mode…", value: "" },
+                { label: "Cash", value: "cash" },
+                { label: "UPI", value: "upi" },
+                { label: "Bank Transfer", value: "bank_transfer" },
+                { label: "Card", value: "card" },
+                { label: "Cheque", value: "cheque" },
+                { label: "Wallet", value: "wallet" },
+                { label: "Other", value: "other" },
+              ]}
+            />
+          </div>
           <div className="space-y-1.5">
             <label className="text-xs font-medium text-muted-foreground">Status</label>
             <Select
@@ -630,19 +677,22 @@ export default function InvoiceDetailPage() {
                 { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
               ]}
             />
+            <p className="text-[10px] text-muted-foreground">Status auto-adjusts based on payment amount.</p>
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs font-medium text-muted-foreground">Paid Amount (₹)</label>
+            <label className="text-xs font-medium text-muted-foreground">Internal Note (optional)</label>
             <input
-              type="number"
-              value={paidDraft}
-              onChange={(e) => setPaidDraft(e.target.value)}
+              type="text"
+              value={paymentNoteDraft}
+              onChange={(e) => setPaymentNoteDraft(e.target.value)}
+              placeholder="e.g. UPI ref #12345"
               className="flex h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm transition-all duration-150 hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none"
             />
           </div>
           <div className="rounded-xl border border-border bg-muted/30 p-3 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">Invoice Total</span><span className="font-medium tabular-nums">{formatINR(invoice.total)}</span></div>
-            <div className="flex justify-between mt-1"><span className="text-muted-foreground">Balance After</span><span className="font-medium tabular-nums">{formatINR(Math.max(invoice.total - (Number(paidDraft) || 0), 0))}</span></div>
+            <div className="flex justify-between mt-1"><span className="text-muted-foreground">Previously Paid</span><span className="font-medium tabular-nums">{formatINR(invoice.paidAmount)}</span></div>
+            <div className="flex justify-between mt-1 border-t border-border pt-1"><span className="text-muted-foreground font-medium">Balance After</span><span className="font-bold tabular-nums">{formatINR(Math.max(invoice.total - (Number(paidDraft) || 0), 0))}</span></div>
           </div>
         </div>
       </Drawer>
@@ -713,7 +763,7 @@ export default function InvoiceDetailPage() {
           status: invoice.status,
         }}
         fields={[
-          { key: "reference", label: "Reference / PO Number", type: "text" },
+          { key: "reference", label: "Reference/Invoice Number", type: "text" },
           { key: "invoiceType", label: "Invoice Type", type: "select", options: [
             { label: "Retail Invoice", value: "retail" }, { label: "Business Invoice", value: "business" },
           ]},

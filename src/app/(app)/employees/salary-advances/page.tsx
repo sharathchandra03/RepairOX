@@ -34,18 +34,12 @@ const STATUS_TONE: Record<SalaryAdvance["status"], string> = {
 
 /* ─── Seed ───────────────────────────────────────────────────────────── */
 
-const SEED_ADVANCES: SalaryAdvance[] = [
-  { id: "ADV-001", employeeId: "EMP-004", employeeName: "Anand Rao", branch: "BTM Layout (HQ)", requestDate: "2026-07-05", amount: 15000, reason: "Medical emergency", status: "approved", approvedDate: "2026-07-06", recoverySchedule: "3 months", recoveredAmount: 5000 },
-  { id: "ADV-002", employeeId: "EMP-005", employeeName: "Pooja Iyer", branch: "Koramangala", requestDate: "2026-07-10", amount: 10000, reason: "House rent deposit", status: "approved", approvedDate: "2026-07-11", recoverySchedule: "2 months", recoveredAmount: 0 },
-  { id: "ADV-003", employeeId: "EMP-007", employeeName: "Manoj S.", branch: "HSR Layout", requestDate: "2026-07-18", amount: 8000, reason: "Personal requirement", status: "pending", recoveredAmount: 0 },
-  { id: "ADV-004", employeeId: "EMP-009", employeeName: "Imran Khan", branch: "HSR Layout", requestDate: "2026-06-20", amount: 12000, reason: "Education fees", status: "recovered", approvedDate: "2026-06-21", recoverySchedule: "2 months", recoveredAmount: 12000 },
-  { id: "ADV-005", employeeId: "EMP-003", employeeName: "Anjali R.", branch: "BTM Layout (HQ)", requestDate: "2026-07-22", amount: 5000, reason: "Travel expense", status: "rejected", recoveredAmount: 0 },
-];
+// No seed data — advances are managed by users via "New Request"
 
 /* ─── Page ────────────────────────────────────────────────────────────── */
 
 export default function SalaryAdvancesPage() {
-  const [advances, setAdvances] = useState<SalaryAdvance[]>(SEED_ADVANCES);
+  const [advances, setAdvances] = useState<SalaryAdvance[]>([]);
   const { addEntry } = useLedger();
 
   const totalOutstanding = advances
@@ -107,39 +101,47 @@ export default function SalaryAdvancesPage() {
         </div>
 
         <div className="divide-y divide-border">
-          {advances.map((adv) => (
-            <div key={adv.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/30 transition">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#EEF1FD] text-xs font-bold text-[#4361EE]">
-                {adv.employeeName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
-              </span>
-              <div className="flex-1 min-w-0 sm:grid sm:grid-cols-[1fr_120px_100px_120px_100px_90px] sm:gap-2 sm:items-center">
-                <div>
-                  <p className="text-sm font-medium truncate">{adv.employeeName}</p>
-                  <p className="text-[10px] text-muted-foreground">{adv.id} · {adv.reason}</p>
-                </div>
-                <div className="hidden sm:block text-[12px]">{new Date(adv.requestDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div>
-                <div className="hidden sm:block text-right text-[12px] font-semibold tabular-nums">{formatINR(adv.amount)}</div>
-                <div className="hidden sm:block text-[12px] text-muted-foreground">{adv.recoverySchedule ?? "—"}</div>
-                <div className="hidden sm:block text-right text-[12px] tabular-nums">
-                  {adv.status === "approved" ? formatINR(adv.amount - adv.recoveredAmount) : "—"}
-                </div>
-                <div className="hidden sm:flex sm:justify-center">
-                  {adv.status === "pending" ? (
-                    <button
-                      onClick={() => approveAdvance(adv.id)}
-                      className="rounded-full bg-[#4361EE] px-3 py-1 text-[10px] font-semibold text-white hover:bg-[#3651DE] transition"
-                    >
-                      Approve
-                    </button>
-                  ) : (
-                    <Badge className={cn("text-[10px]", STATUS_TONE[adv.status])}>
-                      {adv.status.charAt(0).toUpperCase() + adv.status.slice(1)}
-                    </Badge>
-                  )}
+          {advances.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-12 text-center">
+              <Wallet className="h-10 w-10 text-muted-foreground/40" />
+              <p className="mt-3 text-sm font-medium text-muted-foreground">No salary advance requests yet.</p>
+              <p className="mt-1 text-xs text-muted-foreground/70">Click &quot;New Request&quot; to create one.</p>
+            </div>
+          ) : (
+            advances.map((adv) => (
+              <div key={adv.id} className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/30 transition">
+                <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[#EEF1FD] text-xs font-bold text-[#4361EE]">
+                  {adv.employeeName.split(" ").map((n) => n[0]).join("").slice(0, 2)}
+                </span>
+                <div className="flex-1 min-w-0 sm:grid sm:grid-cols-[1fr_120px_100px_120px_100px_90px] sm:gap-2 sm:items-center">
+                  <div>
+                    <p className="text-sm font-medium truncate">{adv.employeeName}</p>
+                    <p className="text-[10px] text-muted-foreground">{adv.id} · {adv.reason}</p>
+                  </div>
+                  <div className="hidden sm:block text-[12px]">{new Date(adv.requestDate).toLocaleDateString("en-IN", { day: "numeric", month: "short" })}</div>
+                  <div className="hidden sm:block text-right text-[12px] font-semibold tabular-nums">{formatINR(adv.amount)}</div>
+                  <div className="hidden sm:block text-[12px] text-muted-foreground">{adv.recoverySchedule ?? "—"}</div>
+                  <div className="hidden sm:block text-right text-[12px] tabular-nums">
+                    {adv.status === "approved" ? formatINR(adv.amount - adv.recoveredAmount) : "—"}
+                  </div>
+                  <div className="hidden sm:flex sm:justify-center">
+                    {adv.status === "pending" ? (
+                      <button
+                        onClick={() => approveAdvance(adv.id)}
+                        className="rounded-full bg-[#4361EE] px-3 py-1 text-[10px] font-semibold text-white hover:bg-[#3651DE] transition"
+                      >
+                        Approve
+                      </button>
+                    ) : (
+                      <Badge className={cn("text-[10px]", STATUS_TONE[adv.status])}>
+                        {adv.status.charAt(0).toUpperCase() + adv.status.slice(1)}
+                      </Badge>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            ))
+          )}
         </div>
       </div>
     </div>

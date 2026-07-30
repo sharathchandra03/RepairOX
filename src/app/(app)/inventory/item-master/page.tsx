@@ -15,9 +15,10 @@ import { DataTable, type Column } from "@/components/inventory/data-table";
 import { ItemHealthBadge } from "@/components/inventory/widgets";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import {
-  inventoryItems, itemHealth, STORES, type InventoryItem,
+  itemHealth, STORES, type InventoryItem,
 } from "@/lib/inventory-data";
 
 type StatusFilter = "all" | "low" | "excess" | "negative" | "inactive";
@@ -45,6 +46,7 @@ function ItemMasterInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { can } = usePermissions();
+  const { inventory: inventoryItems, deleteInventoryItem } = useStore();
   const [mode, setMode] = useState<"all" | "Product" | "Service">("all");
   const [store, setStore] = useState(STORES[0]);
   const [status, setStatus] = useState<StatusFilter>("all");
@@ -129,11 +131,11 @@ function ItemMasterInner() {
 
   // Row/bulk actions are plain data (consumed by DataTable's menu renderer, not JSX),
   // so each entry is filtered out here based on the active role's permissions.
-  const rowActions = (_r: InventoryItem) => [
+  const rowActions = (r: InventoryItem) => [
     { label: "View details", icon: Eye, onClick: () => {} },
-    ...(can("edit") ? [{ label: "Edit item", icon: Pencil, onClick: () => router.push("/inventory/add-item") }] : []),
+    ...(can("edit") ? [{ label: "Edit item", icon: Pencil, onClick: () => router.push(`/inventory/add-item?edit=${r.id}`) }] : []),
     ...(can("create") ? [{ label: "Duplicate", icon: Copy, onClick: () => {} }] : []),
-    ...(can("delete") ? [{ label: "Delete", icon: Trash2, danger: true, onClick: () => {} }] : []),
+    ...(can("delete") ? [{ label: "Delete", icon: Trash2, danger: true, onClick: () => deleteInventoryItem(r.id) }] : []),
   ];
 
   const bulkActions = [

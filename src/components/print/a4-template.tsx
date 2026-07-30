@@ -168,6 +168,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
               <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{invoice.status}</span></div>
               <div><span className="text-gray-500">Due Date:</span> <span className="font-medium">{formatPrintDate(invoice.dueDate)}</span></div>
               {invoice.employee && <div><span className="text-gray-500">Salesperson:</span> <span className="font-medium">{invoice.employee}</span></div>}
+              {invoice.paymentMode && <div><span className="text-gray-500">Payment:</span> <span className="font-medium capitalize">{invoice.paymentMode.replace("_", " ")}</span></div>}
               {invoice.ticketId && <div><span className="text-gray-500">Ticket:</span> <span className="font-medium">{invoice.ticketId}</span></div>}
             </div>
           </div>
@@ -318,6 +319,16 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
         </section>
       )}
 
+      {/* ── Invoice Terms (from invoice form) ── */}
+      {isInvoice && invoice && invoice.terms && (
+        <section className="mb-4">
+          <div className="border border-gray-100 rounded-lg p-3 bg-gray-50/50">
+            <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1">Terms & Warranty</p>
+            <p className="text-[10px] text-gray-700 whitespace-pre-line">{invoice.terms}</p>
+          </div>
+        </section>
+      )}
+
       {/* ── Terms & Warranty ── */}
       <section className="border-t border-gray-200 pt-4 mb-5">
         <div className="grid grid-cols-1 gap-4">
@@ -353,9 +364,9 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
       </section>
 
       {/* ── Footer ── */}
-      {data.printFooter && (
+      {(data.printFooter || (isInvoice && invoice?.footer)) && (
         <footer className="mt-6 pt-3 border-t border-gray-200 text-center">
-          <p className="text-[10px] font-medium text-gray-600">{data.printFooter}</p>
+          <p className="text-[10px] font-medium text-gray-600">{data.printFooter || invoice?.footer}</p>
         </footer>
       )}
     </div>

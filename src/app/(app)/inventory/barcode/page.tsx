@@ -9,9 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { DataTable, type Column } from "@/components/inventory/data-table";
+import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
-  barcodes, BARCODE_STATUS_LABEL, BARCODE_STATUS_TONE,
+  BARCODE_STATUS_LABEL, BARCODE_STATUS_TONE,
   type BarcodeRow, type BarcodeStatus,
 } from "@/lib/inventory-data";
 
@@ -43,13 +44,36 @@ function BarcodeGlyph({ value }: { value: string }) {
 }
 
 export default function BarcodePage() {
+  const { inventory } = useStore();
   const [status, setStatus] = useState<"all" | BarcodeStatus>("all");
   const [active, setActive] = useState<BarcodeRow | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
+  // Derive barcode rows from live inventory items
+  const barcodes: BarcodeRow[] = useMemo(() => {
+    return inventory.filter((item) => item.active && item.type === "Product").map((item) => ({
+      itemId: item.id,
+      itemName: item.name,
+      qtyOut: item.soldUnits,
+      balanceQty: item.currentStock,
+      returnQty: 0,
+      createdBy: "System",
+      creationDate: new Date().toLocaleDateString("en-IN"),
+      mfgDate: "—",
+      expiryDate: "—",
+      info1: item.category,
+      info2: item.hsnCode,
+      fromStore: item.store || "Main Store",
+      toStore: "—",
+      lastModifiedBy: "System",
+      lastModifiedDate: new Date().toLocaleDateString("en-IN"),
+      status: item.currentStock <= 0 ? "consumed" as BarcodeStatus : "active" as BarcodeStatus,
+    }));
+  }, [inventory]);
+
   const filtered = useMemo(
     () => (status === "all" ? barcodes : barcodes.filter((b) => b.status === status)),
-    [status]
+    [status, barcodes]
   );
 
   function refresh() {

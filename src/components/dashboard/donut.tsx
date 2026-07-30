@@ -1,18 +1,66 @@
 "use client";
 
+import { useMemo } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { motion } from "framer-motion";
+import { PieChart as PieChartIcon } from "lucide-react";
+import { useStore } from "@/lib/store";
 import { AnimatedNumber } from "./kpi-card";
 
+const STATUS_COLORS: Record<string, string> = {
+  received: "#4361EE",
+  repairing: "#F59E0B",
+  completed: "#22C55E",
+  delivered: "#B3BFF6",
+  "quality-check": "#8B5CF6",
+  "waiting-parts": "#EF4444",
+  cancelled: "#94A3B8",
+};
+
+const STATUS_DISPLAY: Record<string, string> = {
+  received: "Received",
+  repairing: "In Progress",
+  completed: "Completed",
+  delivered: "Delivered",
+  "quality-check": "Quality Check",
+  "waiting-parts": "Waiting for Parts",
+  cancelled: "Cancelled",
+};
+
 export function TicketsDonut() {
-  const data = [
-    { name: "In Progress",          value: 200,  color: "#4361EE" },
-    { name: "Repaired",             value: 1500, color: "#22C55E" },
-    { name: "Returned",             value: 300,  color: "#B3BFF6" },
-    { name: "Waiting for Approval", value: 85,   color: "#F59E0B" },
-    { name: "Waiting for Parts",    value: 120,  color: "#EF4444" },
-  ];
+  const { tickets } = useStore();
+
+  const data = useMemo(() => {
+    const counts: Record<string, number> = {};
+    tickets.forEach((t) => {
+      counts[t.status] = (counts[t.status] || 0) + 1;
+    });
+    return Object.entries(counts)
+      .filter(([, v]) => v > 0)
+      .sort((a, b) => b[1] - a[1])
+      .map(([status, value]) => ({
+        name: STATUS_DISPLAY[status] || status,
+        value,
+        color: STATUS_COLORS[status] || "#94A3B8",
+      }));
+  }, [tickets]);
+
   const total = data.reduce((s, d) => s + d.value, 0);
+
+  if (total === 0) {
+    return (
+      <div className="rounded-2xl bg-card p-5 sm:p-6">
+        <div className="flex items-center justify-between">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Total Tickets</p>
+        </div>
+        <div className="mt-8 flex flex-col items-center justify-center gap-2 text-muted-foreground">
+          <PieChartIcon className="h-8 w-8 opacity-40" />
+          <p className="text-[13px] font-medium">No data available</p>
+          <p className="text-[11px]">No tickets found</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="rounded-2xl bg-card p-5 sm:p-6">

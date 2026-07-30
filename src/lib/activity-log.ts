@@ -1,17 +1,18 @@
 "use client";
 
 /**
- * Centralized Activity Log / Audit Trail.
+ * Centralized Activity Log / Audit Trail (Supabase-first).
  *
- * A single module-level store (not tied to React render) so ANY module —
- * store.tsx, catalog-context.tsx, UI actions — can record an activity by
- * simply importing `logActivity(...)`. Components subscribe via
- * `useActivityLog()` (React 18 useSyncExternalStore). Entries persist to
- * localStorage so the audit trail survives reloads and outlives the records
- * they describe (critical for delete auditing).
+ * When Supabase is configured, reads from the `audit_log` table in the DB
+ * and subscribes to realtime changes. Client-side logActivity() also writes
+ * to the audit_log table. When Supabase is not configured, falls back to
+ * localStorage (same behavior as before).
+ *
+ * Components subscribe via `useActivityLog()` (React 18 useSyncExternalStore).
  */
 
 import { useSyncExternalStore } from "react";
+import { supabase, isSupabaseConfigured } from "./supabase";
 import { CURRENT_USER, currentRole } from "./permissions";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
@@ -31,30 +32,21 @@ export interface ActivityChange {
 
 export interface ActivityEntry {
   id: string;
-  /** epoch ms */
   ts: number;
   module: ActivityModule;
-  /** Human action label, e.g. "Ticket Created", "Invoice Deleted". */
   action: string;
   severity: ActivitySeverity;
-  /** Entity type, e.g. "Ticket", "Invoice", "Part". */
   entity?: string;
-  /** Reference / record id, e.g. "TK-1025", "INV-230". */
   reference?: string;
-  /** One-line human description. */
   description: string;
   actor: string;
   role?: string;
   branch?: string;
-  /** Field-level before/after diffs (for updates). */
   changes?: ActivityChange[];
-  /** Reason captured on deletes / cancellations. */
   reason?: string;
-  /** Extra key/value context shown in the detail view. */
   meta?: Record<string, string>;
 }
 
-/** Everything except the auto-filled fields; actor/role/branch/ts optional. */
 export type ActivityInput =
   Omit<ActivityEntry, "id" | "ts" | "actor" | "role" | "branch"> &
   Partial<Pick<ActivityEntry, "actor" | "role" | "branch" | "ts">>;
@@ -66,6 +58,7 @@ const MAX_ENTRIES = 600;
 
 let entries: ActivityEntry[] = [];
 let hydrated = false;
+let mode: "db" | "local" = isSupabaseConfigured ? "db" : "local";
 const listeners = new Set<() => void>();
 let _counter = 0;
 
@@ -75,30 +68,75 @@ function genId(): string {
 }
 
 function persist() {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_ENTRIES)));
-  } catch { /* storage full/unavailable */ }
+  if (typeof window === "undefined" || mode === "db") return;
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(entries.slice(0, MAX_ENTRIES))); } catch { /* noop */ }
 }
 
-function emit() {
-  for (const l of listeners) l();
+function emit() { for (const l of listeners) l(); }
+
+/** Convert an audit_log DB row to an ActivityEntry. */
+function rowToActivity(r: any): ActivityEntry {
+  return {
+    id: r.id,
+    ts: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
+    module: r.module ?? "System",
+    action: r.action ?? r.action_type ?? "Unknown",
+    severity: r.severity ?? "info",
+    entity: r.entity_type ?? undefined,
+    reference: r.record_id ?? undefined,
+    description: r.description ?? "",
+    actor: r.actor ?? "System",
+    role: r.role ?? undefined,
+    branch: r.branch ?? undefined,
+    changes: r.changes ?? undefined,
+    reason: r.reason ?? undefined,
+    meta: r.meta ?? undefined,
+  };
 }
 
-/** Load persisted entries (or seed) once on the client. */
+/** Load from DB or localStorage. */
+async function hydrateFromDb() {
+  if (!supabase) return;
+  const { data } = await supabase
+    .from("audit_log")
+    .select("*")
+    .order("created_at", { ascending: false })
+    .limit(MAX_ENTRIES);
+  if (data && data.length > 0) {
+    entries = data.map(rowToActivity);
+    emit();
+  }
+}
+
 function ensureHydrated() {
   if (hydrated || typeof window === "undefined") return;
   hydrated = true;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) { entries = parsed; return; }
-    }
-  } catch { /* ignore */ }
-  // First run — seed a realistic recent trail so the widget isn't empty.
-  entries = seedActivities();
-  persist();
+
+  if (isSupabaseConfigured && supabase) {
+    mode = "db";
+    hydrateFromDb();
+    // Realtime subscription for new audit entries.
+    const channel = supabase.channel("audit-log-realtime")
+      .on("postgres_changes" as any, { event: "INSERT", schema: "public", table: "audit_log" }, (payload: any) => {
+        if (!payload.new) return;
+        const entry = rowToActivity(payload.new);
+        // Avoid duplicates (from our own writes).
+        if (!entries.some((e) => e.id === entry.id)) {
+          entries = [entry, ...entries].slice(0, MAX_ENTRIES);
+          emit();
+        }
+      })
+      .subscribe();
+    (globalThis as any).__auditChannel = channel;
+  } else {
+    mode = "local";
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (raw) { const parsed = JSON.parse(raw); if (Array.isArray(parsed)) { entries = parsed; return; } }
+    } catch { /* ignore */ }
+    entries = seedActivities();
+    persist();
+  }
 }
 
 export function logActivity(input: ActivityInput): ActivityEntry {
@@ -120,6 +158,31 @@ export function logActivity(input: ActivityInput): ActivityEntry {
     reason: input.reason,
     meta: input.meta,
   };
+
+  // In DB mode, write to audit_log table (the DB trigger already captures
+  // most CRUD operations automatically, but explicit client-side activity
+  // entries — like "Ticket Status Changed" with field-level diffs — add
+  // richer context). We insert and let realtime bring it back.
+  if (mode === "db" && supabase) {
+    supabase.from("audit_log").insert({
+      module: entry.module,
+      entity_type: entry.entity ?? null,
+      record_id: entry.reference ?? null,
+      action_type: "CLIENT",
+      action: entry.action,
+      severity: entry.severity,
+      description: entry.description,
+      changes: entry.changes ?? null,
+      meta: entry.meta ?? null,
+      reason: entry.reason ?? null,
+      actor: entry.actor,
+      role: entry.role ?? null,
+      branch: entry.branch ?? null,
+    }).then(({ error }) => {
+      if (error) console.warn("[activity-log] insert failed:", error.message);
+    });
+  }
+
   entries = [entry, ...entries].slice(0, MAX_ENTRIES);
   persist();
   emit();
@@ -149,7 +212,6 @@ export function useActivityLog(): ActivityEntry[] {
 }
 
 /* ─── Severity visual tokens ─────────────────────────────────────── */
-// Subtle colored icon/badge — rows stay clean (RepairOX premium look).
 
 export const SEVERITY_STYLE: Record<ActivitySeverity, { icon: string; badge: string; dot: string; label: string }> = {
   success:  { icon: "bg-emerald-50 text-emerald-600 ring-emerald-200/60", badge: "bg-emerald-50 text-emerald-700 ring-emerald-200", dot: "bg-emerald-500", label: "Success" },
@@ -169,13 +231,11 @@ function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 }
 
-/** "Just now" / "5 min ago" / "2 h ago" / "Today • 10:42 AM" / "28 Jul 2026 • 11:42 AM". */
 export function formatWhen(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
   const diffMs = now.getTime() - ts;
   const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
-
   if (diffMs < 60_000) return "Just now";
   if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} min ago`;
   if (isSameDay(d, now)) return `Today • ${time}`;
@@ -184,7 +244,6 @@ export function formatWhen(ts: number): string {
   return `${d.toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric" })} • ${time}`;
 }
 
-/** Chronological bucket label for grouped timelines. */
 export function timeGroup(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
@@ -198,14 +257,11 @@ export function timeGroup(ts: number): string {
 }
 
 export function fullTimestamp(ts: number): string {
-  return new Date(ts).toLocaleString("en-GB", {
-    day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit",
-  });
+  return new Date(ts).toLocaleString("en-GB", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 /* ─── Diff helper ────────────────────────────────────────────────── */
 
-/** Build a change list from an updates object vs the previous record. */
 export function buildChanges(
   prev: Record<string, unknown> | undefined,
   updates: Record<string, unknown>,
@@ -223,22 +279,14 @@ export function buildChanges(
   return changes;
 }
 
-/* ─── Seed trail ─────────────────────────────────────────────────── */
-// A realistic recent audit trail so the dashboard widget is populated on first
-// load. Real activities logged by store/catalog actions stack on top.
+/* ─── Seed trail (local mode only) ───────────────────────────────── */
 
 function seedActivities(): ActivityEntry[] {
   const now = Date.now();
   const min = 60_000, hr = 3_600_000, day = 86_400_000;
   const mk = (
-    ago: number,
-    module: ActivityModule,
-    action: string,
-    severity: ActivitySeverity,
-    reference: string | undefined,
-    description: string,
-    actor: string,
-    role: string,
+    ago: number, module: ActivityModule, action: string, severity: ActivitySeverity,
+    reference: string | undefined, description: string, actor: string, role: string,
     extra: Partial<ActivityEntry> = {},
   ): ActivityEntry => ({
     id: genId(), ts: now - ago, module, action, severity, reference, description,
@@ -257,9 +305,7 @@ function seedActivities(): ActivityEntry[] {
     mk(1 * day + 2 * hr, "Walk-In", "Walk-In Converted", "info", "WI-88", "Converted walk-in to repair ticket TK-1035.", "Anjali R.", "Reception", { meta: { "New Ticket": "TK-1035" } }),
     mk(1 * day + 5 * hr, "Inventory", "Item Added", "success", "INV-SPKR-09", "Added new inventory item: OnePlus 12 loudspeaker.", "Vikas Nair", "Inventory Manager"),
     mk(2 * day, "Invoice", "Invoice Deleted", "critical", "INV-230", "Deleted duplicate invoice.", "Kalai S.", "Master Shop Owner", { reason: "Duplicate invoice" }),
-    mk(2 * day + 4 * hr, "Settings", "Configuration Changed", "info", undefined, "Updated store printing preferences.", "Kalai S.", "Master Shop Owner"),
     mk(3 * day, "Auth", "Login", "neutral", undefined, "Signed in to RepairOX.", "Ritesh Kumar", "Branch Manager"),
     mk(4 * day, "Price List", "Model Added", "success", "Galaxy S25 Ultra", "Added Galaxy S25 Ultra under Samsung.", "Kalai S.", "Master Shop Owner"),
-    mk(6 * day, "Employee", "Employee Created", "success", undefined, "Invited Manoj S. as Sales Executive.", "Kalai S.", "Master Shop Owner"),
   ];
 }

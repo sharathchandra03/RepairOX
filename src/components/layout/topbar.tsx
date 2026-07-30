@@ -12,7 +12,6 @@ import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import { navGroups } from "@/lib/mock-data";
 import {
-  CURRENT_USER,
   WORKSPACE_MAP, type WorkspaceId,
 } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
@@ -31,8 +30,8 @@ export function Topbar({
   const router = useRouter();
   const meta = WORKSPACE_MAP[activeWorkspace];
   const { allowedWorkspaces: allowed, role, isPreviewing, currentUser, logout } = usePermissions();
-  const displayName = currentUser?.name ?? CURRENT_USER.name;
-  const displayEmail = currentUser?.email ?? CURRENT_USER.email;
+  const displayName = currentUser?.name ?? "User";
+  const displayEmail = currentUser?.email ?? "";
 
   function handleLogout() {
     logout();

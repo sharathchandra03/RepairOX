@@ -332,7 +332,13 @@ export function TodoWidget() {
       <ConfirmDialog
         open={Boolean(deleteTarget)}
         onClose={() => setDeleteTarget(null)}
-        onConfirm={() => { if (deleteTarget) deleteTask(deleteTarget.id); }}
+        onConfirm={() => {
+          if (deleteTarget) {
+            const id = deleteTarget.id;
+            setDeleteTarget(null);
+            deleteTask(id);
+          }
+        }}
         title="Delete task?"
         description={deleteTarget ? `"${deleteTarget.title}" will be removed from your to-do list.` : undefined}
         confirmLabel="Delete task"

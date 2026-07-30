@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { MessageCircle, X, Send, Paperclip } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
-import { CURRENT_USER } from "@/lib/permissions";
+import { usePermissions } from "@/lib/permissions-context";
 
 interface ChatMessage {
   id: string;
@@ -17,9 +17,9 @@ interface ChatMessage {
 
 const SEED_MESSAGES: ChatMessage[] = [
   { id: "1", sender: "Anand Rao", text: "iPhone 16 Pro Max display is ready for collection.", time: "10:32 AM", isOwn: false },
-  { id: "2", sender: CURRENT_USER.name, text: "Great, I'll call the customer now.", time: "10:34 AM", isOwn: true },
+  { id: "2", sender: "You", text: "Great, I'll call the customer now.", time: "10:34 AM", isOwn: true },
   { id: "3", sender: "Pooja Iyer", text: "Need approval for the logic board repair on T-8624. Estimate is 18,999.", time: "10:45 AM", isOwn: false },
-  { id: "4", sender: CURRENT_USER.name, text: "Approved. Please proceed with the repair.", time: "10:47 AM", isOwn: true },
+  { id: "4", sender: "You", text: "Approved. Please proceed with the repair.", time: "10:47 AM", isOwn: true },
   { id: "5", sender: "Vikas Nair", text: "Stock for iPad Air screens is running low. Should I raise a PO?", time: "11:02 AM", isOwn: false },
 ];
 
@@ -28,6 +28,8 @@ export function InternalChat() {
   const [messages, setMessages] = useState<ChatMessage[]>(SEED_MESSAGES);
   const [input, setInput] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
+  const { currentUser } = usePermissions();
+  const userName = currentUser?.name ?? "You";
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -39,7 +41,7 @@ export function InternalChat() {
     if (!input.trim()) return;
     const msg: ChatMessage = {
       id: Date.now().toString(),
-      sender: CURRENT_USER.name,
+      sender: userName,
       text: input.trim(),
       time: new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
       isOwn: true,

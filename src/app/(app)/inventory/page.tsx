@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -14,10 +14,11 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { StatTile, SectionCard } from "@/components/inventory/widgets";
+import { useStore } from "@/lib/store";
 import { formatINR, formatNumber, cn } from "@/lib/utils";
 import {
-  inventoryStats, topSelling, topPurchased, recentActivity, recommendations,
-  STOCK_HEALTH_LABEL, STOCK_HEALTH_TONE, LAST_UPDATED, type StockHealth,
+  itemHealth,
+  STOCK_HEALTH_LABEL, STOCK_HEALTH_TONE, type StockHealth,
 } from "@/lib/inventory-data";
 
 const HEALTH_COLORS: Record<StockHealth, string> = {
@@ -46,9 +47,69 @@ const REC_TONE = {
 
 export default function InventoryDashboard() {
   const router = useRouter();
+  const { inventory, stockMovements } = useStore();
   const [refreshing, setRefreshing] = useState(false);
-  const [updated, setUpdated] = useState(LAST_UPDATED);
-  const s = inventoryStats();
+  const [updated, setUpdated] = useState("Just now");
+
+  // Compute live stats from store inventory
+  const s = useMemo(() => {
+    if (inventory.length === 0) {
+      return { value: 0, count: 0, totalUnits: 0, low: 0, excess: 0, negative: 0, reorder: 0, optimum: 0, high: 0, pendingApprovals: 0 };
+    }
+    const products = inventory.filter((i) => i.type === "Product");
+    const value = inventory.reduce((sum, i) => sum + i.currentStock * (i.regularBuyingPrice || i.defaultPrice || 0), 0);
+    const count = inventory.length;
+    const by = (h: StockHealth) => products.filter((i) => itemHealth(i) === h).length;
+    return {
+      value,
+      count,
+      totalUnits: products.reduce((sum, i) => sum + Math.max(i.currentStock, 0), 0),
+      low: by("low"),
+      excess: by("excess"),
+      negative: by("negative"),
+      reorder: by("reorder"),
+      optimum: by("optimum"),
+      high: by("high"),
+      pendingApprovals: 0,
+    };
+  }, [inventory]);
+
+  const topSelling = useMemo(() =>
+    [...inventory].filter((i) => i.type === "Product").sort((a, b) => b.soldUnits - a.soldUnits).slice(0, 5),
+    [inventory]
+  );
+
+  const topPurchased = useMemo(() =>
+    [...inventory].filter((i) => i.type === "Product").sort((a, b) => b.purchasedUnits - a.purchasedUnits).slice(0, 5),
+    [inventory]
+  );
+
+  // Derive recent activity from stock movements
+  const recentActivity = useMemo(() => {
+    return stockMovements.slice(0, 5).map((m, i) => {
+      const kind = m.type === "Inward" ? "inward" as const
+        : m.type === "Outward" ? "outward" as const
+        : m.type === "Adjustment" ? "adjust" as const
+        : "inward" as const;
+      return {
+        id: i,
+        kind,
+        title: `${m.type}: ${m.docNumber}`,
+        meta: `${m.fromStore} → ${m.toStore} · ${m.items} items`,
+        time: m.date,
+      };
+    });
+  }, [stockMovements]);
+
+  // Smart recommendations derived from live data
+  const recommendations = useMemo(() => {
+    const recs: { id: number; tone: "danger" | "warning" | "info"; title: string; detail: string }[] = [];
+    if (s.negative > 0) recs.push({ id: 1, tone: "danger", title: `${s.negative} items have negative stock`, detail: "Review and correct stock levels immediately." });
+    if (s.low > 0) recs.push({ id: 2, tone: "warning", title: `${s.low} items below reorder level`, detail: "Consider placing purchase orders soon." });
+    if (s.excess > 0) recs.push({ id: 3, tone: "info", title: `${s.excess} items above maximum level`, detail: "Review excess stock for redistribution opportunities." });
+    if (recs.length === 0) recs.push({ id: 4, tone: "info", title: "Inventory levels are healthy", detail: "All items are within optimal stock ranges." });
+    return recs;
+  }, [s]);
 
   const health = (
     [
@@ -98,10 +159,10 @@ export default function InventoryDashboard() {
 
       {/* Primary KPI row */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <KpiCard title="Inventory Value" value={s.value} format={formatINR} tone="emerald" delta={{ value: "+4.2%", up: true }} hint={`${formatNumber(s.totalUnits)} units in stock`} />
-        <KpiCard title="Total Items" value={s.count} tone="sky" delta={{ value: "+6", up: true }} hint="Across all stores & categories" />
-        <KpiCard title="Low Stock" value={s.low} tone="amber" delta={{ value: "needs action", up: false }} hint="Below minimum level" />
-        <KpiCard title="Excess Stock" value={s.excess} tone="violet" delta={{ value: "review", up: true }} hint="Above maximum level" />
+        <KpiCard title="Inventory Value" value={s.value} format={formatINR} tone="emerald" delta={{ value: s.count > 0 ? `${formatNumber(s.totalUnits)} units` : "No items", up: s.count > 0 }} hint={s.count > 0 ? `${formatNumber(s.totalUnits)} units in stock` : "Add items to see value"} />
+        <KpiCard title="Total Items" value={s.count} tone="sky" delta={{ value: s.count > 0 ? `${inventory.filter((i) => i.type === "Product").length} products` : "No items", up: s.count > 0 }} hint="Across all stores & categories" />
+        <KpiCard title="Low Stock" value={s.low} tone="amber" delta={{ value: s.low > 0 ? "needs action" : "all clear", up: s.low === 0 }} hint={s.low > 0 ? "Below minimum level" : "No items below minimum"} />
+        <KpiCard title="Excess Stock" value={s.excess} tone="violet" delta={{ value: s.excess > 0 ? "review" : "all clear", up: s.excess === 0 }} hint={s.excess > 0 ? "Above maximum level" : "No items above maximum"} />
       </div>
 
       {/* Secondary stat tiles — clickable drill-down into Item Master */}
@@ -121,6 +182,13 @@ export default function InventoryDashboard() {
           description="Distribution of items across stock-level bands"
           className="lg:col-span-2"
         >
+          {inventory.length === 0 ? (
+            <div className="flex h-[180px] flex-col items-center justify-center gap-2 text-muted-foreground">
+              <Gauge className="h-8 w-8 opacity-40" />
+              <p className="text-[13px] font-medium">No data available</p>
+              <p className="text-[11px]">Add inventory items to see health distribution</p>
+            </div>
+          ) : (
           <div className="grid grid-cols-1 items-center gap-6 sm:grid-cols-[180px_1fr]">
             <div className="relative mx-auto h-[180px] w-[180px]">
               <ResponsiveContainer width="100%" height="100%">
@@ -162,6 +230,7 @@ export default function InventoryDashboard() {
               ))}
             </div>
           </div>
+          )}
         </SectionCard>
 
         <SectionCard
@@ -196,11 +265,25 @@ export default function InventoryDashboard() {
       {/* Top selling / purchased + activity */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <SectionCard icon={PackageMinus} title="Top Selling Items" description="By units sold (30 days)">
-          <RankList rows={topSelling.map((i) => ({ name: i.name, sub: i.category, value: i.soldUnits }))} accent="emerald" />
+          {topSelling.length === 0 ? (
+            <div className="flex h-24 flex-col items-center justify-center gap-1 text-muted-foreground">
+              <p className="text-[13px] font-medium">No data available</p>
+              <p className="text-[11px]">No sales recorded yet</p>
+            </div>
+          ) : (
+            <RankList rows={topSelling.map((i) => ({ name: i.name, sub: i.category, value: i.soldUnits }))} accent="emerald" />
+          )}
         </SectionCard>
 
         <SectionCard icon={PackagePlus} title="Top Purchased Items" description="By units purchased (30 days)">
-          <RankList rows={topPurchased.map((i) => ({ name: i.name, sub: i.category, value: i.purchasedUnits }))} accent="brand" />
+          {topPurchased.length === 0 ? (
+            <div className="flex h-24 flex-col items-center justify-center gap-1 text-muted-foreground">
+              <p className="text-[13px] font-medium">No data available</p>
+              <p className="text-[11px]">No purchases recorded yet</p>
+            </div>
+          ) : (
+            <RankList rows={topPurchased.map((i) => ({ name: i.name, sub: i.category, value: i.purchasedUnits }))} accent="brand" />
+          )}
         </SectionCard>
 
         <SectionCard
@@ -213,6 +296,12 @@ export default function InventoryDashboard() {
             </Link>
           }
         >
+          {recentActivity.length === 0 ? (
+            <div className="flex h-24 flex-col items-center justify-center gap-1 text-muted-foreground">
+              <p className="text-[13px] font-medium">No data available</p>
+              <p className="text-[11px]">No stock movements recorded yet</p>
+            </div>
+          ) : (
           <ul className="space-y-1">
             {recentActivity.map((a, i) => {
               const cfg = ACTIVITY_ICON[a.kind];
@@ -237,6 +326,7 @@ export default function InventoryDashboard() {
               );
             })}
           </ul>
+          )}
         </SectionCard>
       </div>
     </div>
