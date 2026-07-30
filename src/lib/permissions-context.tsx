@@ -48,6 +48,7 @@ import {
 } from "@/lib/auth";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { rowToStaff, type StaffRow } from "@/lib/staff-map";
+import { setCurrentActor } from "@/lib/activity-log";
 
 export type GrantMap = Record<string, PermissionKey[] | "all">;
 
@@ -364,6 +365,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     const norm = normalizeEmail(currentUserEmail);
     return team.find((m) => normalizeEmail(m.email) === norm) ?? null;
   }, [currentUserEmail, team]);
+
+  // Keep the activity-log actor in sync with the real signed-in user.
+  useEffect(() => {
+    setCurrentActor(
+      currentUser?.name ?? null,
+      currentUser?.branch ?? CURRENT_USER.branch
+    );
+  }, [currentUser?.name, currentUser?.branch]);
 
   const adminRoleId = currentUser?.roleId ?? CURRENT_USER.roleId;
   const activeRoleId = previewRoleId ?? adminRoleId;

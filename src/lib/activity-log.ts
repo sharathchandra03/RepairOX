@@ -62,6 +62,17 @@ let mode: "db" | "local" = isSupabaseConfigured ? "db" : "local";
 const listeners = new Set<() => void>();
 let _counter = 0;
 
+/* ─── Dynamic actor override ─────────────────────────────────────── */
+let _currentActor: string | null = null;
+let _currentBranch: string | null = null;
+
+/** Call this from the permissions context whenever the signed-in user changes.
+ *  logActivity() will then use this name instead of the hardcoded CURRENT_USER fallback. */
+export function setCurrentActor(name: string | null, branch?: string | null) {
+  _currentActor = name;
+  _currentBranch = branch ?? null;
+}
+
 function genId(): string {
   _counter += 1;
   return `act-${Date.now().toString(36)}-${_counter}`;
@@ -151,9 +162,9 @@ export function logActivity(input: ActivityInput): ActivityEntry {
     entity: input.entity,
     reference: input.reference,
     description: input.description,
-    actor: input.actor ?? CURRENT_USER.name,
+    actor: input.actor ?? _currentActor ?? CURRENT_USER.name,
     role: input.role ?? role?.label,
-    branch: input.branch ?? CURRENT_USER.branch,
+    branch: input.branch ?? _currentBranch ?? CURRENT_USER.branch,
     changes: input.changes?.filter((c) => c.from !== c.to),
     reason: input.reason,
     meta: input.meta,
