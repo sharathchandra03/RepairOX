@@ -855,6 +855,35 @@ function MatrixTab({
             )}
           </div>
 
+          {/* Grant Full Access toggle */}
+          {!isPlatformOwner && (
+            <label className={cn(
+              "flex cursor-pointer items-center gap-3 rounded-2xl border px-5 py-4 transition",
+              grantedCount === ALL_PERMISSIONS.length
+                ? "border-[#4361EE] bg-[#F5F7FF] shadow-[0_0_0_1px_rgba(67,97,238,0.2)]"
+                : "border-border bg-card hover:border-[#B3BFF6] hover:bg-[#F5F7FF]/50"
+            )}>
+              <Checkbox
+                checked={grantedCount === ALL_PERMISSIONS.length}
+                indeterminate={grantedCount > 0 && grantedCount < ALL_PERMISSIONS.length}
+                onChange={(next) => {
+                  setGrants((prev) => ({
+                    ...prev,
+                    [activeRoleId]: next
+                      ? new Set(ALL_PERMISSIONS.map((p) => p.key))
+                      : new Set<PermissionKey>(),
+                  }));
+                  setDirty(true);
+                }}
+                aria-label="Grant full access"
+              />
+              <div>
+                <p className="text-[13.5px] font-semibold leading-tight">Grant Full Access</p>
+                <p className="mt-0.5 text-[11.5px] text-muted-foreground">Select all {ALL_PERMISSIONS.length} capabilities at once</p>
+              </div>
+            </label>
+          )}
+
           {filteredGroups.map((g, gi) => {
             const groupKeys = g.permissions.map((p) => p.key);
             const groupGrantedCount = groupKeys.filter((k) => grantedSet.has(k)).length;
