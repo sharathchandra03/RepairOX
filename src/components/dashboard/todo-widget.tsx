@@ -4,7 +4,7 @@ import * as React from "react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Plus, ListChecks, MoreHorizontal, Pencil, Trash2, CheckCircle2,
-  RotateCcw, Clock, Lock, Search, Loader2,
+  RotateCcw, Clock, Lock, Search, Loader2, Pin,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -51,7 +51,7 @@ function formatDue(task: Task): string | null {
 
 /* ── Single task row ── */
 function TaskRow({
-  task, index, assigneeName, onToggle, onEdit, onDelete,
+  task, index, assigneeName, onToggle, onEdit, onDelete, onPin,
 }: {
   task: Task;
   index: number;
@@ -59,6 +59,7 @@ function TaskRow({
   onToggle: (completed: boolean) => void;
   onEdit: () => void;
   onDelete: () => void;
+  onPin: () => void;
 }) {
   const due = formatDue(task);
   return (
@@ -115,6 +116,9 @@ function TaskRow({
                   {task.completed ? "Reopen" : "Complete"}
                 </MenuItem>
                 <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
+                <MenuItem icon={Pin} onClick={() => { onPin(); close(); }}>
+                  {task.pinned ? "Unpin" : "Pin to top"}
+                </MenuItem>
                 <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
               </>
             )}
@@ -135,6 +139,12 @@ function TaskRow({
           <Badge tone={PRIORITY_TONE[task.priority]} className={cn("px-2 py-0.5 text-[10px]", task.completed && "opacity-60")}>
             {PRIORITY_LABEL[task.priority]}
           </Badge>
+
+          {task.pinned && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-200/60 px-2 py-0.5 text-[10px] font-medium text-amber-800 ring-1 ring-inset ring-amber-300/60">
+              <Pin className="h-2.5 w-2.5" /> Pinned
+            </span>
+          )}
 
           {task.isPrivate && (
             <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-inset ring-zinc-200">
@@ -166,7 +176,7 @@ function TaskRow({
 export function TodoWidget() {
   const { currentUser, team, getStaffById } = usePermissions();
   const resolveStaffName = React.useCallback((id: string) => getStaffById(id)?.name, [getStaffById]);
-  const { tasks, loading, addTask, updateTask, setCompleted, deleteTask } =
+  const { tasks, loading, addTask, updateTask, setCompleted, deleteTask, togglePin } =
     useTasks({ currentStaffId: currentUser?.id ?? null, resolveStaffName });
 
   const [formOpen, setFormOpen] = React.useState(false);
@@ -189,6 +199,9 @@ export function TodoWidget() {
 
   const { active, done } = React.useMemo(() => {
     const byPriorityThenDate = (a: Task, b: Task) => {
+      // Pinned tasks always come first
+      if (a.pinned && !b.pinned) return -1;
+      if (!a.pinned && b.pinned) return 1;
       const p = PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority];
       if (p !== 0) return p;
       const ad = a.dueDate ?? "9999-99-99";
@@ -290,6 +303,7 @@ export function TodoWidget() {
                   onToggle={(c) => setCompleted(t.id, c)}
                   onEdit={() => openEdit(t)}
                   onDelete={() => setDeleteTarget(t)}
+                  onPin={() => togglePin(t.id)}
                 />
               ))}
             </AnimatePresence>
@@ -312,6 +326,7 @@ export function TodoWidget() {
                   onToggle={(c) => setCompleted(t.id, c)}
                   onEdit={() => openEdit(t)}
                   onDelete={() => setDeleteTarget(t)}
+                  onPin={() => togglePin(t.id)}
                 />
               ))}
             </AnimatePresence>

@@ -96,6 +96,8 @@ export type PrintInvoiceInfo = {
   employee: string;
   ticketId: string;
   paymentMode?: string;
+  /** Service category — "service" or "accessories" */
+  serviceCategory?: string;
   /** Multi-device: individual device sections for print */
   devices?: PrintInvoiceDeviceInfo[];
 };
@@ -264,6 +266,7 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     employee: invoice.employee || "",
     ticketId: invoice.ticketId || "",
     paymentMode: invoice.paymentMode || undefined,
+    serviceCategory: invoice.serviceCategory || "service",
     devices: printDevices,
   };
 }

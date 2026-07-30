@@ -12,14 +12,14 @@ import { TicketsDonut } from "@/components/dashboard/donut";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
 import { DraggableKpiRow, type KpiCardItem } from "@/components/dashboard/draggable-kpi-row";
 import { TodoWidget } from "@/components/dashboard/todo-widget";
+import { OrdersStatusWidget } from "@/components/dashboard/orders-status-widget";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { useState, useMemo } from "react";
-import { STATUS_LABEL, STATUS_TONE, type TicketStatus } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
@@ -53,18 +53,6 @@ export default function Dashboard() {
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
   const { cardOrder, reorder: reorderKpi } = useDashboardOrder();
-
-  // Compute live Orders Status from real ticket data
-  const ordersStatus = useMemo(() => {
-    const statusList: TicketStatus[] = ["received", "diagnosis", "repairing", "qc", "completed", "delivered"];
-    return statusList
-      .map((status) => {
-        const inStatus = tickets.filter((t) => t.status === status);
-        const assigned = inStatus.filter((t) => t.technician && t.technician.trim() !== "").length;
-        return { detail: STATUS_LABEL[status], assigned, received: inStatus.length };
-      })
-      .filter((row) => row.received > 0); // Only show statuses that have tickets
-  }, [tickets]);
 
   // Apply filters to tickets
   const filteredTickets = useMemo(() => {
@@ -490,41 +478,8 @@ export default function Dashboard() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
 
         {/* Orders status */}
-        <div className="lg:col-span-2 rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6">
-          <CardHeader title="Orders Status" badge={<Badge tone="info" dot>live</Badge>} />
-          <div className="mt-3 overflow-hidden rounded-xl border border-border">
-            <div className="grid grid-cols-3 bg-muted px-3 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <div>Status</div>
-              <div className="text-center">Assigned</div>
-              <div className="text-center">Total</div>
-            </div>
-            <ul>
-              {ordersStatus.length === 0 ? (
-                <li className="px-3 py-6 text-center text-sm text-muted-foreground">No active orders yet.</li>
-              ) : (
-                <>
-                  {ordersStatus.map((row, i) => (
-                    <motion.li
-                      key={row.detail}
-                      initial={{ opacity: 0, y: 4 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: 0.05 * i }}
-                      className="grid grid-cols-3 items-center px-3 py-2.5 text-sm odd:bg-background even:bg-muted/40"
-                    >
-                      <div className="font-medium">{row.detail}</div>
-                      <div className="text-center tabular-nums">{row.assigned}</div>
-                      <div className="text-center tabular-nums">{row.received}</div>
-                    </motion.li>
-                  ))}
-                  <li className="grid grid-cols-3 items-center bg-[#EEF1FD] px-3 py-2.5 text-sm font-semibold">
-                    <div>Total</div>
-                    <div className="text-center tabular-nums">{ordersStatus.reduce((s, r) => s + r.assigned, 0)}</div>
-                    <div className="text-center tabular-nums">{ordersStatus.reduce((s, r) => s + r.received, 0)}</div>
-                  </li>
-                </>
-              )}
-            </ul>
-          </div>
+        <div className="lg:col-span-2">
+          <OrdersStatusWidget />
         </div>
 
         {/* To-Do list — sticky pad design */}

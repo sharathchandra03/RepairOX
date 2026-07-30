@@ -104,6 +104,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                     <Row label="Issue" value={dev.issue || "General service"} />
                     <Row label="Technician" value={dev.technician || "Unassigned"} />
                     <Row label="Priority" value={dev.priority || "Normal"} />
+                    <Row label="Status" value={(dev.status || "Received").charAt(0).toUpperCase() + (dev.status || "received").slice(1)} />
                     <Row label="Estimate" value={formatPrintCurrency(dev.estimate)} bold />
                   </div>
                   {/* Parts assigned to this device */}
@@ -135,6 +136,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                 {ticket.service && ticket.service !== ticket.issue && <Row label="Service" value={ticket.service} />}
                 <Row label="Technician" value={ticket.technician || "Unassigned"} />
                 <Row label="Priority" value={ticket.priority} />
+                <Row label="Status" value={ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)} bold />
                 <Row label="Source" value={ticket.source || "Walk-In"} />
                 {ticket.dueDate && <Row label="Due" value={formatPrintDateTime(ticket.dueDate)} />}
               </div>
@@ -177,8 +179,9 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
             <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">Invoice Details</p>
             <div className="space-y-0.5">
               <Row label="Reference" value={invoice.reference} />
-              <Row label="Type" value={invoice.invoiceType === "business" ? "Business (GST)" : "Retail"} />
-              <Row label="Status" value={invoice.status} />
+              <Row label="Type" value={invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"} />
+              <Row label="Category" value={(invoice.serviceCategory || "service").charAt(0).toUpperCase() + (invoice.serviceCategory || "service").slice(1)} />
+              <Row label="Status" value={invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)} bold />
               <Row label="Due" value={formatPrintDate(invoice.dueDate)} />
               {invoice.paymentMode && <Row label="Payment" value={invoice.paymentMode.replace("_", " ")} />}
               {invoice.employee && <Row label="Employee" value={invoice.employee} />}
@@ -292,6 +295,21 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
 
       <Divider />
 
+      {/* ── Invoice Notes & Terms ── */}
+      {isInvoice && invoice && invoice.notes && (
+        <div className="mt-1">
+          <p className="text-[8px] font-bold uppercase tracking-wide mb-0.5">Notes</p>
+          <p className="text-[8px] text-gray-700 whitespace-pre-line leading-[1.3]">{invoice.notes}</p>
+        </div>
+      )}
+
+      {isInvoice && invoice && invoice.terms && (
+        <div className="mt-1">
+          <p className="text-[8px] font-bold uppercase tracking-wide mb-0.5">Invoice Terms</p>
+          <p className="text-[8px] text-gray-700 whitespace-pre-line leading-[1.3]">{invoice.terms}</p>
+        </div>
+      )}
+
       {/* ── Terms & Warranty ── */}
       {data.termsAndConditions && (
         <div className="mt-1">
@@ -316,10 +334,10 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
       </div>
 
       {/* ── Footer ── */}
-      {data.printFooter && (
+      {(data.printFooter || (isInvoice && invoice?.footer)) && (
         <div className="mt-3 text-center">
           <Divider />
-          <p className="text-[9px] font-semibold mt-1">{data.printFooter}</p>
+          <p className="text-[9px] font-semibold mt-1">{data.printFooter || invoice?.footer}</p>
         </div>
       )}
 

@@ -33,6 +33,7 @@ export interface Task {
   dueTime: string | null; // HH:MM
   assignedTo: string | null; // staff id
   isPrivate: boolean;
+  pinned: boolean;
   createdBy: string | null;
   createdAt: string;
   updatedAt: string | null;
@@ -84,6 +85,7 @@ interface TaskRow {
   due_time: string | null;
   assigned_to: string | null;
   is_private: boolean | null;
+  pinned: boolean | null;
   created_by: string | null;
   created_at: string | null;
   updated_at: string | null;
@@ -103,6 +105,7 @@ function rowToTask(r: TaskRow): Task {
     dueTime: r.due_time,
     assignedTo: r.assigned_to,
     isPrivate: Boolean(r.is_private),
+    pinned: Boolean(r.pinned),
     createdBy: r.created_by,
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at,
@@ -171,6 +174,7 @@ export interface UseTasksResult {
   updateTask: (id: string, patch: TaskInput) => Promise<void>;
   setCompleted: (id: string, completed: boolean) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
+  togglePin: (id: string) => Promise<void>;
 }
 
 export function useTasks(opts: UseTasksOptions = {}): UseTasksResult {
@@ -318,6 +322,7 @@ export function useTasks(opts: UseTasksOptions = {}): UseTasksResult {
       dueTime: input.dueTime || null,
       assignedTo: input.assignedTo || null,
       isPrivate: Boolean(input.isPrivate),
+      pinned: false,
       createdBy: currentStaffId ?? null,
       createdAt: now,
       updatedAt: now,
@@ -461,5 +466,37 @@ export function useTasks(opts: UseTasksOptions = {}): UseTasksResult {
     });
   }, [removeLocalState, upsert, currentStaffId]);
 
-  return { tasks, loading, mode, addTask, updateTask, setCompleted, deleteTask };
+  /* ── Pin / Unpin ── */
+  const togglePin = useCallback(async (id: string) => {
+    const prev = tasksRef.current.find((t) => t.id === id);
+    if (!prev) return;
+    const pinned = !prev.pinned;
+
+    if (modeRef.current === "db" && supabase) {
+      const { data, error } = await supabase
+        .from("tasks")
+        .update({ pinned, ...(currentStaffId ? { updated_by: currentStaffId } : {}) })
+        .eq("id", id)
+        .select("*")
+        .single();
+
+      if (error || !data) {
+        console.warn("[tasks] pin toggle failed:", error?.message);
+        return;
+      }
+      upsert(rowToTask(data as TaskRow));
+    } else {
+      upsert({ ...prev, pinned, updatedAt: new Date().toISOString() });
+    }
+
+    logActivity({
+      module: "Task",
+      action: pinned ? "Task Pinned" : "Task Unpinned",
+      severity: "info",
+      entity: "Task", reference: prev.title,
+      description: `${pinned ? "Pinned" : "Unpinned"} to-do "${prev.title}".`,
+    });
+  }, [upsert, currentStaffId]);
+
+  return { tasks, loading, mode, addTask, updateTask, setCompleted, deleteTask, togglePin };
 }

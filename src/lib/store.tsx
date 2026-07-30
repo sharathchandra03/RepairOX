@@ -168,6 +168,8 @@ function rowToInvoice(r: any): Invoice {
     footer: r.footer ?? "",
     employee: r.employee ?? "",
     ticketId: r.ticket_id ?? undefined,
+    paymentMode: r.payment_mode ?? undefined,
+    serviceCategory: r.service_category ?? "service",
     items: r.items ?? [],
     devices: r.devices ?? [],
     createdAt: r.created_at ?? new Date().toISOString(),
@@ -196,6 +198,8 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
     footer: inv.footer || null,
     employee: inv.employee || null,
     ticket_id: inv.ticketId || null,
+    payment_mode: inv.paymentMode || null,
+    service_category: inv.serviceCategory || "service",
     items: inv.items ?? [],
     devices: inv.devices ?? [],
   };
@@ -672,8 +676,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ── Invoice actions (DB-first) ── */
   const addInvoice = useCallback(async (invoice: Invoice) => {
     if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("invoices").insert(invoiceToRow(invoice)).select("*").single();
-      if (error || !data) { console.error("[store] addInvoice failed:", error?.message); return; }
+      const row = invoiceToRow(invoice);
+      const { data, error } = await supabase.from("invoices").insert(row).select("*").single();
+      if (error || !data) {
+        // If insert fails (e.g. missing columns), try without optional new columns
+        const fallbackRow = { ...row };
+        delete fallbackRow.service_category;
+        delete fallbackRow.payment_mode;
+        const { data: data2, error: error2 } = await supabase.from("invoices").insert(fallbackRow).select("*").single();
+        if (error2 || !data2) {
+          console.error("[store] addInvoice failed:", error2?.message || error?.message);
+          // Fallback: save locally so user doesn't lose data
+          setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
+          logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
+          return;
+        }
+        const saved2 = rowToInvoice(data2);
+        // Preserve serviceCategory/paymentMode locally even if DB doesn't have columns yet
+        saved2.serviceCategory = invoice.serviceCategory;
+        saved2.paymentMode = invoice.paymentMode;
+        setState((s) => ({ ...s, invoices: [saved2, ...s.invoices] }));
+        logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved2.reference || saved2.id, description: `Generated invoice for ${saved2.customer}.`, meta: { Total: inr(saved2.total) } });
+        return;
+      }
       const saved = rowToInvoice(data);
       setState((s) => ({ ...s, invoices: [saved, ...s.invoices] }));
       logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved.reference || saved.id, description: `Generated invoice for ${saved.customer}.`, meta: { Total: inr(saved.total) } });
@@ -704,8 +729,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("dueDate" in updates) row.due_date = updates.dueDate ?? null;
       if ("employee" in updates) row.employee = updates.employee ?? null;
       if ("invoiceType" in updates) row.invoice_type = updates.invoiceType ?? "retail";
+      if ("serviceCategory" in updates) row.service_category = updates.serviceCategory ?? "service";
+      if ("paymentMode" in updates) row.payment_mode = updates.paymentMode ?? null;
       const { error } = await supabase.from("invoices").update(row).eq("id", id);
-      if (error) { console.error("[store] updateInvoice failed:", error.message); return; }
+      if (error) {
+        // Retry without optional new columns that may not exist in DB yet
+        delete row.service_category;
+        delete row.payment_mode;
+        if (Object.keys(row).length > 0) {
+          const { error: error2 } = await supabase.from("invoices").update(row).eq("id", id);
+          if (error2) { console.error("[store] updateInvoice failed:", error2.message); }
+        }
+      }
     }
     setState((s) => ({ ...s, invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)) }));
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [

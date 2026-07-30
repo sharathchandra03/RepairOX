@@ -124,6 +124,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                   {ticket.service && ticket.service !== ticket.issue && <div><span className="text-gray-500">Service:</span> <span className="font-medium">{ticket.service}</span></div>}
                   <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{ticket.technician}</span></div>
                   <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{ticket.priority}</span></div>
+                  <div><span className="text-gray-500">Status:</span> <span className="font-semibold capitalize">{ticket.status}</span></div>
                   <div><span className="text-gray-500">Source:</span> <span className="font-medium">{ticket.source}</span></div>
                   {ticket.dueDate && <div className="col-span-2"><span className="text-gray-500">Expected by:</span> <span className="font-medium">{formatPrintDateTime(ticket.dueDate)}</span></div>}
                 </div>
@@ -164,8 +165,9 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
             <p className="text-[9px] font-bold uppercase tracking-wider text-gray-400 mb-1.5">Invoice Details</p>
             <div className="grid grid-cols-3 gap-x-4 gap-y-1 text-[10px]">
               <div><span className="text-gray-500">Reference:</span> <span className="font-medium">{invoice.reference}</span></div>
-              <div><span className="text-gray-500">Type:</span> <span className="font-medium capitalize">{invoice.invoiceType}</span></div>
-              <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{invoice.status}</span></div>
+              <div><span className="text-gray-500">Type:</span> <span className="font-medium capitalize">{invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"}</span></div>
+              <div><span className="text-gray-500">Category:</span> <span className="font-medium capitalize">{invoice.serviceCategory || "service"}</span></div>
+              <div><span className="text-gray-500">Status:</span> <span className="font-semibold capitalize">{invoice.status}</span></div>
               <div><span className="text-gray-500">Due Date:</span> <span className="font-medium">{formatPrintDate(invoice.dueDate)}</span></div>
               {invoice.employee && <div><span className="text-gray-500">Salesperson:</span> <span className="font-medium">{invoice.employee}</span></div>}
               {invoice.paymentMode && <div><span className="text-gray-500">Payment:</span> <span className="font-medium capitalize">{invoice.paymentMode.replace("_", " ")}</span></div>}
