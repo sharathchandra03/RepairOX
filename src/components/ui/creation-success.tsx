@@ -1,18 +1,20 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { CelebrationBurst } from "./celebration-burst";
 
 /* ─── Creation Success Animation ─────────────────────────────────────── */
 /*
- * A premium, UPI-style success animation shown after ticket/invoice creation.
- * Includes a subtle celebration burst — professional, not flashy.
+ * A premium success screen shown after ticket/invoice creation.
+ * Features a blue success icon that scales in, followed by a physics-based
+ * radial burst of ₹ symbols that explode outward and fall with gravity.
  *
  * Props:
  *  - type: "ticket" | "invoice"
  *  - id: the created document ID (e.g. "T-1234" or "INV001")
  *  - onComplete: callback when animation finishes and user should move on
- *  - autoAdvanceMs: time before auto-advance (default 3200ms)
+ *  - autoAdvanceMs: time before auto-advance (default 3500ms)
  */
 
 type CreationSuccessProps = {
@@ -22,69 +24,8 @@ type CreationSuccessProps = {
   autoAdvanceMs?: number;
 };
 
-/* ─── Celebration Particle Data ──────────────────────────────────────── */
-
-type Particle = {
-  id: number;
-  angle: number;   // degrees from center
-  distance: number; // how far to travel (px)
-  size: number;     // dot size
-  color: string;
-  delay: number;    // animation delay
-  duration: number; // animation duration
-};
-
-function generateParticles(count: number): Particle[] {
-  const colors = [
-    "#4361EE", "#6366F1", "#818CF8", "#A5B4FC", // blues/indigos
-    "#3B82F6", "#60A5FA", "#93C5FD",            // lighter blues
-    "#E0E7FF", "#C7D2FE",                        // very subtle lavenders
-  ];
-  const particles: Particle[] = [];
-  for (let i = 0; i < count; i++) {
-    particles.push({
-      id: i,
-      angle: (360 / count) * i + (Math.random() * 20 - 10),
-      distance: 60 + Math.random() * 80,
-      size: 3 + Math.random() * 4,
-      color: colors[Math.floor(Math.random() * colors.length)],
-      delay: 0.3 + Math.random() * 0.15,
-      duration: 0.6 + Math.random() * 0.3,
-    });
-  }
-  return particles;
-}
-
-/* ─── Sparkle Line Data ──────────────────────────────────────────────── */
-
-type SparkLine = {
-  id: number;
-  angle: number;
-  length: number;
-  delay: number;
-};
-
-function generateSparkLines(count: number): SparkLine[] {
-  const lines: SparkLine[] = [];
-  for (let i = 0; i < count; i++) {
-    lines.push({
-      id: i,
-      angle: (360 / count) * i + (Math.random() * 15 - 7.5),
-      length: 20 + Math.random() * 16,
-      delay: 0.35 + Math.random() * 0.1,
-    });
-  }
-  return lines;
-}
-
-/* ─── Main Component ─────────────────────────────────────────────────── */
-
-export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3200 }: CreationSuccessProps) {
+export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: CreationSuccessProps) {
   const [phase, setPhase] = useState<"animate" | "done">("animate");
-
-  // Generate particles once (stable across renders)
-  const particles = useMemo(() => generateParticles(14), []);
-  const sparkLines = useMemo(() => generateSparkLines(8), []);
 
   // Auto-advance after the animation plays
   useEffect(() => {
@@ -117,80 +58,18 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3200 }: 
           transition={{ duration: 0.25 }}
         />
 
+        {/* ── Physics-Based ₹ Celebration Burst ── */}
+        {/* Renders on a full-screen canvas behind/around the content */}
+        <CelebrationBurst
+          triggerDelay={280}
+          particleCount={48}
+          duration={3000}
+        />
+
         {/* Content */}
-        <div className="relative flex flex-col items-center px-6 text-center">
-          {/* Success Circle with Checkmark + Celebration */}
+        <div className="relative z-20 flex flex-col items-center px-6 text-center">
+          {/* Success Circle with Checkmark */}
           <div className="relative">
-            {/* ── Celebration Particles ── */}
-            {particles.map((p) => {
-              const rad = (p.angle * Math.PI) / 180;
-              const x = Math.cos(rad) * p.distance;
-              const y = Math.sin(rad) * p.distance;
-              return (
-                <motion.div
-                  key={p.id}
-                  className="absolute rounded-full"
-                  style={{
-                    width: p.size,
-                    height: p.size,
-                    backgroundColor: p.color,
-                    left: "50%",
-                    top: "50%",
-                    marginLeft: -p.size / 2,
-                    marginTop: -p.size / 2,
-                  }}
-                  initial={{ x: 0, y: 0, scale: 0, opacity: 0 }}
-                  animate={{
-                    x: [0, x * 0.6, x],
-                    y: [0, y * 0.6, y],
-                    scale: [0, 1.2, 0],
-                    opacity: [0, 1, 0],
-                  }}
-                  transition={{
-                    duration: p.duration,
-                    delay: p.delay,
-                    ease: [0.22, 1, 0.36, 1],
-                  }}
-                />
-              );
-            })}
-
-            {/* ── Spark Lines (short radial strokes) ── */}
-            {sparkLines.map((s) => {
-              const rad = (s.angle * Math.PI) / 180;
-              const startDist = 52;
-              const x1 = Math.cos(rad) * startDist;
-              const y1 = Math.sin(rad) * startDist;
-              return (
-                <motion.div
-                  key={`sl-${s.id}`}
-                  className="absolute"
-                  style={{
-                    width: s.length,
-                    height: 2,
-                    borderRadius: 1,
-                    background: "linear-gradient(90deg, #4361EE, transparent)",
-                    left: "50%",
-                    top: "50%",
-                    transformOrigin: "left center",
-                    rotate: `${s.angle}deg`,
-                  }}
-                  initial={{ x: x1 * 0.3, y: y1 * 0.3, scaleX: 0, opacity: 0 }}
-                  animate={{
-                    x: [x1 * 0.3, x1],
-                    y: [y1 * 0.3, y1],
-                    scaleX: [0, 1, 0],
-                    opacity: [0, 0.7, 0],
-                  }}
-                  transition={{
-                    duration: 0.5,
-                    delay: s.delay,
-                    ease: "easeOut",
-                  }}
-                />
-              );
-            })}
-
             {/* Outer pulse ring */}
             <motion.div
               className="absolute inset-0 rounded-full"
@@ -209,7 +88,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3200 }: 
               transition={{ duration: 1.6, delay: 0.5, ease: "easeOut" }}
             />
 
-            {/* Main circle */}
+            {/* Main circle — success icon */}
             <motion.div
               className="relative grid h-[88px] w-[88px] place-items-center rounded-full"
               style={{ background: "linear-gradient(135deg, #4361EE 0%, #3A56D4 100%)" }}

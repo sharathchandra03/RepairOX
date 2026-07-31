@@ -25,6 +25,8 @@ import { formatINR, cn } from "@/lib/utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
 import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
 import { useDashboardOrder } from "@/lib/use-dashboard-order";
+import { useMonthlyTarget } from "@/lib/use-monthly-target";
+import { usePermissions } from "@/lib/permissions-context";
 
 /* ── Device breakdown — computed from store data in component ── */
 
@@ -53,6 +55,11 @@ export default function Dashboard() {
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
   const { cardOrder, reorder: reorderKpi } = useDashboardOrder();
+  const { target: monthlyTarget, updateTarget: setMonthlyTarget } = useMonthlyTarget();
+  const [showTargetEdit, setShowTargetEdit] = useState(false);
+  const [editTargetValue, setEditTargetValue] = useState("");
+  const { can } = usePermissions();
+  const canEditTarget = can("edit_dashboard_targets");
 
   // Apply filters to tickets
   const filteredTickets = useMemo(() => {
@@ -147,7 +154,8 @@ export default function Dashboard() {
           tone="emerald"
           delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
           hint={`Projection: ${formatINR(revenueMetrics.projection)} this month`}
-          progress={{ value: Math.min(100, Math.round((revenueMetrics.totalRevenue / Math.max(revenueMetrics.projection, 1)) * 100)), label: "Monthly progress" }}
+          progress={{ value: Math.min(100, Math.round((revenueMetrics.totalRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
+          onCardClick={canEditTarget ? () => { setEditTargetValue(monthlyTarget.toLocaleString("en-IN")); setShowTargetEdit(true); } : undefined}
         />
       ),
     },
@@ -192,7 +200,7 @@ export default function Dashboard() {
         />
       ),
     },
-  }), [revenueMetrics, stockValue, inventory, duesMetrics, invoices, ticketMetrics]);
+  }), [revenueMetrics, stockValue, inventory, duesMetrics, invoices, ticketMetrics, monthlyTarget, canEditTarget]);
 
   // Ordered cards array based on saved user preference
   const orderedKpiCards = useMemo<KpiCardItem[]>(
@@ -487,6 +495,63 @@ export default function Dashboard() {
           <TodoWidget />
         </div>
       </div>
+
+      {/* Monthly Target Edit Modal */}
+      {showTargetEdit && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+          <div className="absolute inset-0 bg-black/30 backdrop-blur-sm" onClick={() => setShowTargetEdit(false)} />
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="relative w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-xl"
+          >
+            <h3 className="text-lg font-bold tracking-tight text-foreground">Set Monthly Target</h3>
+            <p className="mt-1 text-[13px] text-muted-foreground">
+              Enter your monthly revenue target. The progress bar will track your actual revenue against this goal.
+            </p>
+            <div className="mt-4 space-y-1.5">
+              <label className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Target Amount (₹)</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                value={editTargetValue}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/[^0-9]/g, "");
+                  if (raw === "") { setEditTargetValue(""); return; }
+                  const num = parseInt(raw, 10);
+                  setEditTargetValue(num.toLocaleString("en-IN"));
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    const val = Number(editTargetValue.replace(/,/g, ""));
+                    if (val > 0) { setMonthlyTarget(val); setShowTargetEdit(false); }
+                  }
+                }}
+                className="w-full rounded-xl border border-border bg-background px-4 py-3 text-base font-semibold tabular-nums outline-none ring-0 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20 transition"
+                placeholder="e.g. 2,00,000"
+                autoFocus
+              />
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                onClick={() => setShowTargetEdit(false)}
+                className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted transition"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => {
+                  const val = Number(editTargetValue.replace(/,/g, ""));
+                  if (val > 0) { setMonthlyTarget(val); setShowTargetEdit(false); }
+                }}
+                className="rounded-lg bg-[#4361EE] px-4 py-2 text-sm font-semibold text-white hover:bg-[#3A56D4] shadow-sm transition"
+              >
+                Save Target
+              </button>
+            </div>
+          </motion.div>
+        </div>
+      )}
     </div>
   );
 }

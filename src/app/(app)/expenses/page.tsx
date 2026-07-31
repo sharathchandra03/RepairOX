@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { Plus, Receipt, TrendingUp, AlertCircle, ChevronRight } from "lucide-react";
+import { Plus, IndianRupee, TrendingUp, AlertCircle, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -89,7 +89,7 @@ export default function ExpensesPage() {
           label="This Month"
           value={formatINR(stats.thisMonthTotal)}
           sub={`${stats.thisMonthCount} expenses`}
-          icon={<Receipt className="h-4 w-4 text-[#4361EE]" />}
+          icon={<IndianRupee className="h-4 w-4 text-[#4361EE]" />}
         />
         <StatCard
           label="Total (All Time)"

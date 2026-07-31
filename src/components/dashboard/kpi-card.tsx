@@ -17,7 +17,7 @@ export function AnimatedNumber({ value, format }: { value: number; format?: (n: 
 }
 
 export function KpiCard({
-  title, value, format, hint, delta, tone = "rose", progress,
+  title, value, format, hint, delta, tone = "rose", progress, onCardClick,
 }: {
   title: string;
   value: number;
@@ -26,7 +26,9 @@ export function KpiCard({
   delta?: { value: string; up?: boolean };
   tone?: "rose" | "amber" | "emerald" | "sky" | "violet";
   /** 0–100 progress value. Omit to hide the bar. */
-  progress?: { value: number; label?: string };
+  progress?: { value: number; label?: string; targetValue?: string };
+  /** If provided, the card becomes clickable (e.g. to edit target) */
+  onCardClick?: () => void;
 }) {
   const TONES: Record<string, { chip: string; bar: string }> = {
     rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", bar: "bg-[#4361EE]" },
@@ -42,7 +44,11 @@ export function KpiCard({
     <motion.div
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
-      className="group relative overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]"
+      onClick={onCardClick}
+      className={cn(
+        "group relative overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
+        onCardClick && "cursor-pointer"
+      )}
     >
       <div className="relative flex items-center justify-between">
         <p className="text-[11.5px] font-semibold uppercase tracking-wider text-muted-foreground">{title}</p>
@@ -64,7 +70,11 @@ export function KpiCard({
           {progress.label && (
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] text-muted-foreground">{progress.label}</span>
-              <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{pct}%</span>
+              {progress.targetValue ? (
+                <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{progress.targetValue}</span>
+              ) : (
+                <span className="text-[10px] font-semibold tabular-nums text-muted-foreground">{pct}%</span>
+              )}
             </div>
           )}
           <div className="h-1.5 w-full rounded-full bg-muted/80 overflow-hidden">

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import {
   Search, Download, ChevronLeft, ChevronRight, Filter,
-  CalendarDays, Tag, CreditCard, User, X, Receipt,
+  CalendarDays, Tag, CreditCard, User, X, IndianRupee,
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -344,7 +344,7 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
             </button>
           )) : (
             <div className="px-5 py-12 text-center">
-              <Receipt className="mx-auto h-8 w-8 text-zinc-300 mb-2" />
+              <IndianRupee className="mx-auto h-8 w-8 text-zinc-300 mb-2" />
               <p className="text-sm text-muted-foreground">
                 {search || hasActiveFilters ? "No expenses match your filters." : "No expenses recorded yet."}
               </p>

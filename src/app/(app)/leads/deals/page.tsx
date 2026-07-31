@@ -2,7 +2,7 @@
 
 import { motion } from "framer-motion";
 import {
-  Plus, TrendingUp, DollarSign, Target, Clock,
+  Plus, TrendingUp, IndianRupee, Target, Clock,
   MoreHorizontal, ArrowUpRight, ChevronRight,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -72,7 +72,7 @@ export default function DealsPage() {
         {[
           { label: "Pipeline Value", value: formatINR(pipelineValue), icon: Target, tone: "violet" },
           { label: "Won This Month", value: formatINR(wonValue), icon: TrendingUp, tone: "emerald" },
-          { label: "Avg Deal Size", value: formatINR(avgDealSize), icon: DollarSign, tone: "sky" },
+          { label: "Avg Deal Size", value: formatINR(avgDealSize), icon: IndianRupee, tone: "sky" },
           { label: "Closing Soon", value: String(closingThisWeek), icon: Clock, tone: "amber" },
         ].map((kpi, i) => {
           const Icon = kpi.icon;

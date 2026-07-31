@@ -95,6 +95,7 @@ export type PermissionKey =
   | "view_charts"
   | "view_activity_log"
   | "export_dashboard"
+  | "edit_dashboard_targets"
   /* Tickets */
   | "create_ticket"
   | "edit_ticket"
@@ -283,6 +284,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "view_charts", label: "View Charts" },
       { key: "view_activity_log", label: "View Activity Log" },
       { key: "export_dashboard", label: "Export Dashboard Data" },
+      { key: "edit_dashboard_targets", label: "Edit Dashboard Targets" },
     ],
   },
   {
@@ -540,7 +542,7 @@ export const ROLES: RoleDef[] = [
       "view_users", "create_users", "edit_users", "delete_users",
       "manage_users", "manage_roles", "manage_branches", "assign_roles", "reset_passwords",
       "deactivate_accounts", "view_login_activity",
-      "view_dashboard", "view_kpi_cards", "reorder_widgets", "view_charts", "view_activity_log", "export_dashboard",
+      "view_dashboard", "view_kpi_cards", "reorder_widgets", "view_charts", "view_activity_log", "export_dashboard", "edit_dashboard_targets",
       "create_ticket", "edit_ticket", "delete_ticket", "view_ticket", "assign_technician",
       "assign_technicians", "change_ticket_status", "update_repair_status",
       "add_parts", "remove_parts", "view_qc", "perform_qc",

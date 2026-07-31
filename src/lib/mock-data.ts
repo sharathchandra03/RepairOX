@@ -250,7 +250,7 @@ export const navItems: NavItem[] = [
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
-  { href: "/expenses",         label: "Expenses",      icon: "Receipt", permission: "manage_payments" },
+  { href: "/expenses",         label: "Expenses",      icon: "IndianRupee", permission: "manage_payments" },
 
   // Employee sub-pages
   { href: "/employees/directory",      label: "Employee Directory", icon: "Users", permission: ["manage_users", "assign_technicians"] },

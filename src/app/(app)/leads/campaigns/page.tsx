@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, Search, Filter, MoreVertical, Calendar, TrendingUp, DollarSign,
+  Plus, Search, Filter, MoreVertical, Calendar, TrendingUp, IndianRupee,
   Users, Target, X, Save, ChevronDown,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -63,7 +63,7 @@ export default function CampaignsPage() {
       <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
         {[
           { label: "Active", value: CAMPAIGNS.filter((c) => c.status === "active").length, icon: Target, color: "text-emerald-600" },
-          { label: "Total Budget", value: formatINR(CAMPAIGNS.reduce((a, c) => a + c.budget, 0)), icon: DollarSign, color: "text-[#4361EE]" },
+          { label: "Total Budget", value: formatINR(CAMPAIGNS.reduce((a, c) => a + c.budget, 0)), icon: IndianRupee, color: "text-[#4361EE]" },
           { label: "Leads Generated", value: CAMPAIGNS.reduce((a, c) => a + c.leads, 0), icon: Users, color: "text-violet-600" },
           { label: "Avg. CPL", value: formatINR(Math.round(CAMPAIGNS.reduce((a, c) => a + c.spent, 0) / Math.max(CAMPAIGNS.reduce((a, c) => a + c.leads, 0), 1))), icon: TrendingUp, color: "text-amber-600" },
         ].map((kpi, i) => {

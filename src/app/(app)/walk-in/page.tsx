@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal,
   Trash2, Ticket, Receipt, Clock, Users, TrendingUp, UserPlus,
-  DollarSign, RefreshCw, X,
+  IndianRupee, RefreshCw, X,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -146,7 +146,7 @@ export default function WalkInPage() {
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
         <KpiMini icon={Users} label="Total" value={String(kpis.total)} />
         <KpiMini icon={Clock} label="Today" value={String(kpis.today)} />
-        <KpiMini icon={DollarSign} label="Business Value" value={formatINR(kpis.businessValue)} />
+        <KpiMini icon={IndianRupee} label="Business Value" value={formatINR(kpis.businessValue)} />
         <KpiMini icon={Ticket} label="Converted" value={String(kpis.converted)} />
         <KpiMini icon={RefreshCw} label="Pending" value={String(kpis.pending)} />
         <KpiMini icon={UserPlus} label="Lost" value={String(kpis.lost)} />

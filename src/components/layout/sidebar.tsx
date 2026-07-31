@@ -10,6 +10,7 @@ import {
   LogOut, CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
   ClipboardCheck, Truck, Receipt, Activity, ChevronDown,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
+  IndianRupee, ReceiptIndianRupee,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
@@ -23,6 +24,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
   Wrench, ClipboardCheck, Truck, Receipt, Activity,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
+  IndianRupee, ReceiptIndianRupee,
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */

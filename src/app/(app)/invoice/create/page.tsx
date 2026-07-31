@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
-  User, FileText, Package, DollarSign, StickyNote, ClipboardCheck, Sparkles, X, Search,
+  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
@@ -25,7 +25,7 @@ const STEPS = [
   { id: 1, label: "Customer", icon: User },
   { id: 2, label: "Details", icon: FileText },
   { id: 3, label: "Products", icon: Package },
-  { id: 4, label: "Pricing", icon: DollarSign },
+  { id: 4, label: "Pricing", icon: IndianRupee },
   { id: 5, label: "Notes", icon: StickyNote },
   { id: 6, label: "Review", icon: ClipboardCheck },
   { id: 7, label: "Complete", icon: Sparkles },
@@ -717,7 +717,8 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           parts: d.parts.map((p) => {
             if (p.id !== partId) return p;
             const updated = { ...p, [key]: value };
-            updated.total = updated.qty * updated.price - updated.discount;
+            updated.total = updated.qty * updated.price;
+            updated.discount = 0;
             return updated;
           }),
         };
@@ -842,11 +843,10 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
             {/* Always-visible item entry row */}
             {activeDevice.parts.length === 0 && !showInventorySearch && (
               <div className="rounded-xl border border-border p-3 mb-2">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_70px_90px_auto]">
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
                   <div className="space-y-1"><Label>Item</Label><Input value="" onChange={() => addPart()} onFocus={() => addPart()} placeholder="Click to add an item…" /></div>
                   <div className="space-y-1"><Label>Qty</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">1</div></div>
                   <div className="space-y-1"><Label>Price</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
-                  <div className="space-y-1"><Label>Disc.</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
                   <div className="space-y-1"><Label>Total</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
                   <div className="flex items-end"><div className="h-9 w-9" /></div>
                 </div>
@@ -857,11 +857,10 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
               <div className="space-y-2">
                 {activeDevice.parts.map((item) => (
                   <div key={item.id} className="rounded-xl border border-border p-3">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_70px_90px_auto]">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
                       <div className="space-y-1"><Label>Item</Label><Input value={item.name} onChange={(e: any) => updatePart(item.id, "name", e.target.value)} placeholder="Display assembly" /></div>
                       <div className="space-y-1"><Label>Qty</Label><NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} /></div>
                       <div className="space-y-1"><Label>Price</Label><NumericInput value={item.price} onChange={(v) => updatePart(item.id, "price", v)} /></div>
-                      <div className="space-y-1"><Label>Disc.</Label><NumericInput value={item.discount} onChange={(v) => updatePart(item.id, "discount", v)} /></div>
                       <div className="space-y-1"><Label>Total</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums">{formatINR(item.total)}</div></div>
                       <div className="flex items-end"><button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 hover:bg-rose-50 transition"><Trash2 className="h-3.5 w-3.5" /></button></div>
                     </div>

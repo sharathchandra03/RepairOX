@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Download, Search, Eye, Pencil, MoreHorizontal,
   Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
-  DollarSign, AlertCircle, Clock, FileText, CreditCard, BarChart3,
+  IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
   PieChart, Settings2, GripVertical, RefreshCw,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -568,7 +568,7 @@ type KpiDef = { id: string; icon: any; label: string; value: string; subtext?: s
 
 function DraggableKpiGrid({ kpis }: { kpis: any }) {
   const allCards: KpiDef[] = [
-    { id: "revenue", icon: DollarSign, label: "Total Revenue", value: formatINR(kpis.totalRevenue), tone: "indigo" },
+    { id: "revenue", icon: IndianRupee, label: "Total Revenue", value: formatINR(kpis.totalRevenue), tone: "indigo" },
     { id: "invoices", icon: Receipt, label: "Total Invoices", value: String(kpis.totalInvoices), tone: "violet" },
     { id: "paid", icon: CreditCard, label: "Paid Amount", value: formatINR(kpis.paidAmount), tone: "emerald" },
     { id: "pending", icon: Clock, label: "Pending", value: formatINR(kpis.pending), tone: "amber" },
