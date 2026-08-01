@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import {
   Plus, TrendingUp, IndianRupee, Target, Clock,
@@ -10,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { cn, formatINR } from "@/lib/utils";
+import { AddDealModal } from "@/components/deals/add-deal-modal";
 
 /* ── Mock data ── */
 type DealStage = "discovery" | "proposal" | "negotiation" | "closing" | "won" | "lost";
@@ -52,6 +54,8 @@ const avgDealSize = Math.round(DEALS.reduce((a, d) => a + d.value, 0) / DEALS.le
 const closingThisWeek = DEALS.filter((d) => d.stage === "closing").length;
 
 export default function DealsPage() {
+  const [showAddDeal, setShowAddDeal] = useState(false);
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -60,11 +64,17 @@ export default function DealsPage() {
         subtitle="Track deals across stages from discovery to close."
         actions={
           <Can permission="manage_sales">
-            <Button size="sm" className="rounded-full gap-1.5">
+            <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowAddDeal(true)}>
               <Plus className="h-3.5 w-3.5" /> New Deal
             </Button>
           </Can>
         }
+      />
+
+      {/* Add Deal Modal */}
+      <AddDealModal
+        open={showAddDeal}
+        onClose={() => setShowAddDeal(false)}
       />
 
       {/* KPI Strip */}

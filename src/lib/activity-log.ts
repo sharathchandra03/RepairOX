@@ -22,7 +22,7 @@ export type ActivitySeverity = "success" | "info" | "warning" | "critical" | "ne
 export type ActivityModule =
   | "Ticket" | "Invoice" | "Inventory" | "Customer" | "Walk-In"
   | "Price List" | "Employee" | "Settings" | "Auth" | "System"
-  | "Expense" | "Task";
+  | "Expense" | "Task" | "Company";
 
 export interface ActivityChange {
   field: string;

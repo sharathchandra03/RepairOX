@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Search, Plus, Phone, Mail, MessageSquare, Building2,
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { AddContactModal } from "@/components/leads/add-contact-modal";
 import { cn } from "@/lib/utils";
 
 interface Contact {
@@ -45,6 +47,8 @@ const CONTACTS: Contact[] = [
 
 export default function ContactsPage() {
   const [query, setQuery] = useState("");
+  const [showAddModal, setShowAddModal] = useState(false);
+  const router = useRouter();
 
   const filtered = useMemo(
     () => CONTACTS.filter((c) =>
@@ -61,7 +65,7 @@ export default function ContactsPage() {
         subtitle="People and professionals connected to your leads and deals."
         actions={
           <Can permission="manage_customers">
-            <Button size="sm" className="rounded-full gap-1.5">
+            <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowAddModal(true)}>
               <Plus className="h-3.5 w-3.5" /> Add Contact
             </Button>
           </Can>
@@ -152,6 +156,9 @@ export default function ContactsPage() {
           <p className="text-sm text-muted-foreground">Try a different search term.</p>
         </div>
       )}
+
+      {/* Add Contact Modal */}
+      <AddContactModal open={showAddModal} onClose={() => setShowAddModal(false)} />
     </div>
   );
 }

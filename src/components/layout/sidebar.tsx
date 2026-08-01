@@ -204,23 +204,31 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
   if (allowed.length <= 1) return null; // single-workspace users never see a switcher
 
   if (collapsed) {
+    const WORKSPACE_ICONS: Record<WorkspaceId, React.ComponentType<{ className?: string }>> = {
+      shop: Store,
+      leads: UsersRound,
+      operations: Truck,
+    };
     return (
       <div className="mx-auto mb-3 flex flex-col items-center gap-1 px-1">
-        {allowed.map((w) => (
-          <button
-            key={w.id}
-            title={w.label}
-            onClick={() => onChange(w.id)}
-            className={cn(
-              "h-8 w-8 rounded-lg text-[10px] font-bold transition",
-              active === w.id
-                ? "bg-[#4361EE] text-white"
-                : "bg-muted text-zinc-500 hover:bg-slate-100"
-            )}
-          >
-            {w.short}
-          </button>
-        ))}
+        {allowed.map((w) => {
+          const Icon = WORKSPACE_ICONS[w.id];
+          return (
+            <button
+              key={w.id}
+              title={w.label}
+              onClick={() => onChange(w.id)}
+              className={cn(
+                "flex h-8 w-8 items-center justify-center rounded-lg transition",
+                active === w.id
+                  ? "bg-[#4361EE] text-white"
+                  : "bg-muted text-zinc-500 hover:bg-slate-100"
+              )}
+            >
+              <Icon className="h-4 w-4" />
+            </button>
+          );
+        })}
       </div>
     );
   }

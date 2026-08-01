@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "framer-motion";
 import { Plus, FileText, Clock, CheckCircle2, XCircle, Send } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -7,8 +8,9 @@ import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { cn, formatINR } from "@/lib/utils";
+import { AddQuotationModal, type CreatedQuotation } from "@/components/quotations/add-quotation-modal";
 
-type QuoteStatus = "draft" | "sent" | "viewed" | "accepted" | "expired" | "rejected";
+type QuoteStatus = "draft" | "pending" | "sent" | "viewed" | "accepted" | "expired" | "rejected";
 
 interface Quotation {
   id: string;
@@ -24,6 +26,7 @@ interface Quotation {
 
 const STATUS_CONFIG: Record<QuoteStatus, { label: string; icon: typeof FileText; color: string }> = {
   draft:    { label: "Draft",    icon: FileText,     color: "bg-zinc-100 text-zinc-600 ring-zinc-200" },
+  pending:  { label: "Pending",  icon: Clock,        color: "bg-amber-50 text-amber-700 ring-amber-200" },
   sent:     { label: "Sent",     icon: Send,         color: "bg-sky-50 text-sky-700 ring-sky-200" },
   viewed:   { label: "Viewed",   icon: Clock,        color: "bg-violet-50 text-violet-700 ring-violet-200" },
   accepted: { label: "Accepted", icon: CheckCircle2, color: "bg-emerald-50 text-emerald-700 ring-emerald-200" },
@@ -40,7 +43,35 @@ const QUOTES: Quotation[] = [
   { id: "QT-006", title: "Logic Board Repair — Enterprise",          contact: "Bina Soni",     company: "DesignHub", value: 56000,  status: "rejected", createdAt: "Jul 5",  validUntil: "Jul 20", items: 3 },
 ];
 
+function formatDay(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", { month: "short", day: "numeric" });
+}
+
 export default function QuotationsPage() {
+  const [showAdd, setShowAdd] = useState(false);
+  const [created, setCreated] = useState<Quotation[]>([]);
+
+  const handleSave = (q: CreatedQuotation) => {
+    setCreated((prev) => [
+      {
+        id: q.id,
+        title: q.title || "Untitled Quotation",
+        contact: q.contact || "—",
+        company: q.company || "—",
+        value: q.value,
+        status: q.status,
+        createdAt: formatDay(q.createdAt),
+        validUntil: formatDay(q.validUntil),
+        items: q.items,
+      },
+      ...prev.filter((c) => c.id !== q.id),
+    ]);
+  };
+
+  const quotes = [...created, ...QUOTES];
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -49,16 +80,18 @@ export default function QuotationsPage() {
         subtitle="Proposals and estimates sent to leads — track views and approvals."
         actions={
           <Can permission="manage_sales">
-            <Button size="sm" className="rounded-full gap-1.5">
+            <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowAdd(true)}>
               <Plus className="h-3.5 w-3.5" /> New Quote
             </Button>
           </Can>
         }
       />
 
+      <AddQuotationModal open={showAdd} onClose={() => setShowAdd(false)} onSave={handleSave} />
+
       {/* Quotations list */}
       <div className="space-y-3">
-        {QUOTES.map((quote, i) => {
+        {quotes.map((quote, i) => {
           const cfg = STATUS_CONFIG[quote.status];
           const Icon = cfg.icon;
           return (

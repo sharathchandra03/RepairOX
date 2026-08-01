@@ -9,6 +9,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Can } from "@/components/common/can";
+import { AddCompanyModal } from "@/components/leads/add-company-modal";
+import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 
 interface Company {
@@ -41,12 +43,31 @@ const COMPANIES: Company[] = [
 
 export default function CompaniesPage() {
   const [query, setQuery] = useState("");
+  const [showAddModal, setShowAddModal] = useState(false);
+  const { companies } = useStore();
+
+  // Merge store companies with fallback static data for display
+  const displayCompanies = useMemo(() => {
+    if (companies.length > 0) {
+      return companies.map((c) => ({
+        id: c.id,
+        name: c.name,
+        industry: c.industry || "—",
+        location: c.address.city || "—",
+        contacts: c.totalContacts,
+        deals: c.totalDeals,
+        revenue: c.lifetimeValue,
+        status: c.status,
+      }));
+    }
+    return COMPANIES;
+  }, [companies]);
 
   const filtered = useMemo(
-    () => COMPANIES.filter((c) =>
+    () => displayCompanies.filter((c) =>
       !query || `${c.name} ${c.industry} ${c.location}`.toLowerCase().includes(query.toLowerCase())
     ),
-    [query]
+    [query, displayCompanies]
   );
 
   return (
@@ -57,7 +78,7 @@ export default function CompaniesPage() {
         subtitle="Organisations in your pipeline with linked contacts and deals."
         actions={
           <Can permission="manage_customers">
-            <Button size="sm" className="rounded-full gap-1.5">
+            <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowAddModal(true)}>
               <Plus className="h-3.5 w-3.5" /> Add Company
             </Button>
           </Can>
@@ -126,6 +147,9 @@ export default function CompaniesPage() {
           </motion.div>
         ))}
       </div>
+
+      {/* Add Company Modal */}
+      <AddCompanyModal open={showAddModal} onClose={() => setShowAddModal(false)} />
     </div>
   );
 }

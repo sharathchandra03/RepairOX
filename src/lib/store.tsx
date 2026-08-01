@@ -26,6 +26,7 @@ import {
   type InventoryItem, type StockMovement,
 } from "@/lib/inventory-data";
 import { seedCustomers as SEED_CUSTOMERS, type Customer } from "@/lib/customer-data";
+import { seedCompanies as SEED_COMPANIES, type Company } from "@/lib/company-data";
 import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
   type Brand, type DeviceModel,
@@ -46,6 +47,7 @@ interface StoreState {
   inventory: InventoryItem[];
   stockMovements: StockMovement[];
   customers: Customer[];
+  companies: Company[];
   brands: Brand[];
   deviceModels: DeviceModel[];
   /** True once initial DB load completes (or localStorage is read). */
@@ -74,6 +76,9 @@ interface StoreActions {
   addCustomer: (customer: Customer) => Promise<void>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
+  addCompany: (company: Company) => Promise<void>;
+  updateCompany: (id: string, updates: Partial<Company>) => Promise<void>;
+  deleteCompany: (id: string) => Promise<void>;
   addBrand: (brand: Brand) => Promise<void>;
   addDeviceModel: (model: DeviceModel) => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
@@ -377,6 +382,78 @@ function customerToRow(c: Customer): Record<string, unknown> {
   };
 }
 
+function rowToCompany(r: any): Company {
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    companyType: r.company_type ?? "pvt_ltd",
+    industry: r.industry ?? "",
+    businessCategory: r.business_category ?? "",
+    businessSize: r.business_size ?? "small",
+    numberOfEmployees: r.number_of_employees ?? "",
+    annualRevenue: r.annual_revenue ?? "",
+    gstNumber: r.gst_number ?? "",
+    panNumber: r.pan_number ?? "",
+    website: r.website ?? "",
+    owner: r.owner ?? "",
+    branch: r.branch ?? "",
+    assignedEmployee: r.assigned_employee ?? "",
+    status: r.status ?? "active",
+    phones: r.phones ?? [],
+    emails: r.emails ?? [],
+    communicationPreferences: r.communication_preferences ?? { email: true, phone: true, whatsapp: false },
+    address: r.address_data ?? { addressLine1: "", addressLine2: "", area: "", city: "", district: "", state: "", country: "India", pinCode: "", landmark: "", googleMapsUrl: "", gpsLocation: "" },
+    businessDetails: r.business_details ?? { registrationNumber: "", gstin: "", pan: "", taxType: "", billingCycle: "", creditLimit: 0, paymentTerms: "", preferredPaymentMode: "", currency: "INR", businessSince: "", annualTurnover: "", description: "" },
+    socialLinks: r.social_links ?? { facebook: "", instagram: "", linkedin: "", twitter: "", youtube: "", website: "" },
+    notes: r.notes ?? "",
+    totalContacts: Number(r.total_contacts ?? 0),
+    totalDeals: Number(r.total_deals ?? 0),
+    totalTickets: Number(r.total_tickets ?? 0),
+    totalInvoices: Number(r.total_invoices ?? 0),
+    lifetimeValue: Number(r.lifetime_value ?? 0),
+    workspace: r.workspace ?? "leads",
+    createdBy: r.created_by ?? "",
+    updatedBy: r.updated_by ?? "",
+    createdAt: r.created_at ?? new Date().toISOString(),
+    updatedAt: r.updated_at ?? new Date().toISOString(),
+  };
+}
+
+function companyToRow(c: Company): Record<string, unknown> {
+  return {
+    id: c.id,
+    name: c.name || null,
+    company_type: c.companyType || null,
+    industry: c.industry || null,
+    business_category: c.businessCategory || null,
+    business_size: c.businessSize || null,
+    number_of_employees: c.numberOfEmployees || null,
+    annual_revenue: c.annualRevenue || null,
+    gst_number: c.gstNumber || null,
+    pan_number: c.panNumber || null,
+    website: c.website || null,
+    owner: c.owner || null,
+    branch: c.branch || null,
+    assigned_employee: c.assignedEmployee || null,
+    status: c.status,
+    phones: c.phones,
+    emails: c.emails,
+    communication_preferences: c.communicationPreferences,
+    address_data: c.address,
+    business_details: c.businessDetails,
+    social_links: c.socialLinks,
+    notes: c.notes || null,
+    total_contacts: c.totalContacts,
+    total_deals: c.totalDeals,
+    total_tickets: c.totalTickets,
+    total_invoices: c.totalInvoices,
+    lifetime_value: c.lifetimeValue,
+    workspace: c.workspace || "leads",
+    created_by: c.createdBy || null,
+    updated_by: c.updatedBy || null,
+  };
+}
+
 function rowToBrand(r: any): Brand {
   return { id: r.id, name: r.name ?? "", createdAt: r.created_at ?? new Date().toISOString() };
 }
@@ -403,6 +480,7 @@ function loadFromStorage(): StoreState | null {
       inventory: (saved.inventory ?? SEED_INVENTORY).map((i: any) => ({ ...i, reservedStock: i.reservedStock ?? 0 })),
       stockMovements: saved.stockMovements ?? SEED_MOVEMENTS,
       customers: saved.customers ?? SEED_CUSTOMERS,
+      companies: saved.companies ?? SEED_COMPANIES,
       brands: saved.brands ?? SEED_BRANDS,
       deviceModels: saved.deviceModels ?? SEED_MODELS,
       hydrated: true,
@@ -425,7 +503,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return {
         tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
         team: [], inventory: [], stockMovements: [], customers: [],
-        brands: [], deviceModels: [], hydrated: false, mode: "db",
+        companies: [], brands: [], deviceModels: [], hydrated: false, mode: "db",
       };
     }
     const saved = loadFromStorage();
@@ -435,6 +513,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
       inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
       customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+      companies: SEED_COMPANIES,
       hydrated: true, mode: "local",
     };
   });
@@ -458,6 +537,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: invItems },
         { data: moves },
         { data: custs },
+        { data: comps },
         { data: brds },
         { data: models },
       ] = await Promise.all([
@@ -467,6 +547,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         supabase.from("inventory_items").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         supabase.from("stock_movements").select("*").order("created_at", { ascending: false }),
         supabase.from("customers").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
+        supabase.from("companies").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         supabase.from("brands").select("*").order("created_at", { ascending: false }),
         supabase.from("device_models").select("*").order("created_at", { ascending: false }),
       ]);
@@ -481,6 +562,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         inventory: (invItems ?? []).map(rowToInventoryItem),
         stockMovements: (moves ?? []).map(rowToStockMovement),
         customers: (custs ?? []).map(rowToCustomer),
+        companies: (comps ?? []).map(rowToCompany),
         brands: (brds ?? []).map(rowToBrand),
         deviceModels: (models ?? []).map(rowToDeviceModel),
         hydrated: true,
@@ -549,6 +631,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const next = [...prev.customers]; next[idx] = cust;
             return { ...prev, customers: next };
           }
+          case "companies": {
+            if (isDelete) return { ...prev, companies: prev.companies.filter((c) => c.id !== row.id) };
+            const comp = rowToCompany(row);
+            const idx = prev.companies.findIndex((c) => c.id === row.id);
+            if (idx === -1) return { ...prev, companies: [comp, ...prev.companies] };
+            const next = [...prev.companies]; next[idx] = comp;
+            return { ...prev, companies: next };
+          }
           case "brands": {
             if (isDelete) return { ...prev, brands: prev.brands.filter((b) => b.id !== row.id) };
             const brand = rowToBrand(row);
@@ -570,7 +660,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "brands", "device_models"];
+    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "companies", "brands", "device_models"];
 
     const channel = client.channel("store-realtime");
     for (const table of tables) {
@@ -998,6 +1088,65 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Customer", action: "Customer Deleted", severity: "critical", entity: "Customer", reference: id, description: prev ? `Deleted customer ${prev.fullName}.` : `Deleted customer ${id}.`, meta: prev ? { Mobile: prev.mobile } : undefined });
   }, []);
 
+  /* ── Company actions (DB-first) ── */
+  const addCompany = useCallback(async (company: Company) => {
+    if (isSupabaseConfigured && supabase) {
+      const { data, error } = await supabase.from("companies").insert(companyToRow(company)).select("*").single();
+      if (error || !data) { console.error("[store] addCompany failed:", error?.message); return; }
+      const saved = rowToCompany(data);
+      setState((s) => ({ ...s, companies: [saved, ...s.companies] }));
+      logActivity({ module: "Company", action: "Company Created", severity: "success", entity: "Company", reference: saved.id, description: `Added new company ${saved.name}.`, meta: { Industry: saved.industry || "—", Owner: saved.owner || "—" } });
+      return;
+    }
+    setState((s) => ({ ...s, companies: [company, ...s.companies] }));
+    logActivity({ module: "Company", action: "Company Created", severity: "success", entity: "Company", reference: company.id, description: `Added new company ${company.name}.`, meta: { Industry: company.industry || "—", Owner: company.owner || "—" } });
+  }, []);
+
+  const updateCompany = useCallback(async (id: string, updates: Partial<Company>) => {
+    const prev = stateRef.current.companies.find((c) => c.id === id);
+    if (isSupabaseConfigured && supabase) {
+      const row: Record<string, unknown> = {};
+      if ("name" in updates) row.name = updates.name ?? null;
+      if ("companyType" in updates) row.company_type = updates.companyType ?? null;
+      if ("industry" in updates) row.industry = updates.industry ?? null;
+      if ("businessCategory" in updates) row.business_category = updates.businessCategory ?? null;
+      if ("businessSize" in updates) row.business_size = updates.businessSize ?? null;
+      if ("numberOfEmployees" in updates) row.number_of_employees = updates.numberOfEmployees ?? null;
+      if ("annualRevenue" in updates) row.annual_revenue = updates.annualRevenue ?? null;
+      if ("gstNumber" in updates) row.gst_number = updates.gstNumber ?? null;
+      if ("panNumber" in updates) row.pan_number = updates.panNumber ?? null;
+      if ("website" in updates) row.website = updates.website ?? null;
+      if ("owner" in updates) row.owner = updates.owner ?? null;
+      if ("branch" in updates) row.branch = updates.branch ?? null;
+      if ("assignedEmployee" in updates) row.assigned_employee = updates.assignedEmployee ?? null;
+      if ("status" in updates) row.status = updates.status;
+      if ("phones" in updates) row.phones = updates.phones;
+      if ("emails" in updates) row.emails = updates.emails;
+      if ("communicationPreferences" in updates) row.communication_preferences = updates.communicationPreferences;
+      if ("address" in updates) row.address_data = updates.address;
+      if ("businessDetails" in updates) row.business_details = updates.businessDetails;
+      if ("socialLinks" in updates) row.social_links = updates.socialLinks;
+      if ("notes" in updates) row.notes = updates.notes ?? null;
+      const { error } = await supabase.from("companies").update(row).eq("id", id);
+      if (error) { console.error("[store] updateCompany failed:", error.message); return; }
+    }
+    setState((s) => ({ ...s, companies: s.companies.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c)) }));
+    const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
+      { key: "name", label: "Name" }, { key: "industry", label: "Industry" }, { key: "status", label: "Status" }, { key: "owner", label: "Owner" },
+    ]);
+    logActivity({ module: "Company", action: "Company Updated", severity: "info", entity: "Company", reference: id, description: `Updated company ${prev?.name || id}.`, changes });
+  }, []);
+
+  const deleteCompany = useCallback(async (id: string) => {
+    const prev = stateRef.current.companies.find((c) => c.id === id);
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("companies").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      if (error) { console.error("[store] deleteCompany failed:", error.message); return; }
+    }
+    setState((s) => ({ ...s, companies: s.companies.filter((c) => c.id !== id) }));
+    logActivity({ module: "Company", action: "Company Deleted", severity: "critical", entity: "Company", reference: id, description: prev ? `Deleted company ${prev.name}.` : `Deleted company ${id}.` });
+  }, []);
+
   /* ── Brand & Model actions (DB-first) ── */
   const addBrand = useCallback(async (brand: Brand) => {
     if (isSupabaseConfigured && supabase) {
@@ -1075,6 +1224,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addCustomer,
     updateCustomer,
     deleteCustomer,
+    addCompany,
+    updateCompany,
+    deleteCompany,
     addBrand,
     addDeviceModel,
     deleteBrand,
