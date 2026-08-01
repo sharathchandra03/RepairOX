@@ -48,3 +48,10 @@ next-env.d.ts
 # OS files
 .DS_Store
 Thumbs.db
+
+# project documentation (not tracked)
+/docs
+
+# AI skills and documentation (not tracked)
+Skills/
+project-brain/
