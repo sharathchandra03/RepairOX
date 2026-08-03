@@ -21,6 +21,8 @@ import { useStore } from "@/lib/store";
 import { InvoiceFilters, type FilterState } from "@/components/filters/invoice-filters";
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
 import { formatINR, cn } from "@/lib/utils";
+import { usePdfDownload } from "@/hooks/use-pdf-download";
+import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
@@ -105,6 +107,16 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
 export default function InvoicePage() {
   const router = useRouter();
   const { invoices, deleteInvoice, addInvoice, updateInvoice } = useStore();
+  const {
+    downloadInvoice,
+    startBulkInvoiceDownload,
+    executeBulkDownload,
+    retryFailed,
+    isDownloading,
+    bulkDialog,
+    bulkProgress,
+    canDownload,
+  } = usePdfDownload();
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -151,11 +163,17 @@ export default function InvoicePage() {
     return { totalRevenue, paidAmount, pending, overdue, overdueCount, draftCount, taxCollected, totalInvoices };
   }, [invoices]);
 
-  /* Status distribution for chart */
-  const statusDistribution = useMemo(() => {
-    const counts: Record<string, number> = {};
-    invoices.forEach((i) => { counts[i.status] = (counts[i.status] || 0) + 1; });
-    return Object.entries(counts).map(([status, count]) => ({ status: status as InvoiceStatus, count }));
+  /* Invoice status view — presentation only, derived from existing invoice data */
+  const invoiceStatusView = useMemo(() => {
+    const countOf = (s: InvoiceStatus) => invoices.filter((i) => i.status === s).length;
+    const total = invoices.length;
+    const paidCount = countOf("paid");
+    const rows = [
+      { key: "overdue", label: "Overdue", count: countOf("overdue"), color: "rose" as const },
+      { key: "paid", label: "Paid", count: paidCount, color: "emerald" as const },
+      { key: "sent", label: "Sent", count: countOf("sent"), color: "sky" as const },
+    ];
+    return { rows, total, completed: paidCount, pending: total - paidCount, denom: total || 1 };
   }, [invoices]);
 
   const handleDuplicate = useCallback((inv: Invoice) => {
@@ -167,68 +185,78 @@ export default function InvoicePage() {
       {/* Header */}
       <PageHeader eyebrow="Billing" title="Invoices" subtitle="Issue, track and reconcile invoices — GST-ready."
         actions={<>
-          <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button></Can>
-          <Can permission="manage_invoices"><Link href="/invoice/settings"><Button variant="outline" size="md" className="rounded-full"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
-          <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
+          <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-[10px]"><Download className="h-4 w-4" /> Export</Button></Can>
+          <Can permission="manage_invoices"><Link href="/invoice/settings"><Button variant="outline" size="md" className="rounded-[10px]"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
+          <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-[10px]"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
         </>}
       />
 
       {/* KPI Cards — Draggable */}
       <DraggableKpiGrid kpis={kpis} />
 
-      {/* Analytics — Status Distribution + Payment Overview */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Invoice Status Distribution */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-          <div className="flex items-center gap-2 mb-4">
-            <PieChart className="h-4 w-4 text-muted-foreground" />
+      {/* Analytics — Invoice Status + Payment Overview */}
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {/* Invoice Status */}
+        <div className="rounded-[10px] border border-border/70 bg-card p-6 shadow-card">
+          <div className="mb-5 flex items-center gap-2.5">
+            <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
+              <PieChart className="h-3.5 w-3.5" />
+            </span>
             <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice Status</p>
           </div>
-          <div className="space-y-2.5">
-            {statusDistribution.map(({ status, count }) => (
-              <div key={status} className="flex items-center gap-3">
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset w-20 justify-center ${INVOICE_STATUS_TONE[status]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[status]}
-                </span>
-                <div className="flex-1 h-5 rounded-full bg-muted/60 overflow-hidden">
-                  <motion.div initial={{ width: 0 }} animate={{ width: `${(count / Math.max(kpis.totalInvoices, 1)) * 100}%` }}
-                    transition={{ duration: 0.6, ease: "easeOut" }}
-                    className={cn("h-full rounded-full", status === "paid" ? "bg-emerald-400" : status === "overdue" ? "bg-rose-400" : status === "sent" ? "bg-sky-400" : status === "partial" ? "bg-amber-400" : status === "draft" ? "bg-zinc-300" : "bg-zinc-200")}
-                  />
+
+          <div className="space-y-4">
+            {invoiceStatusView.rows.map((row) => {
+              const pct = (row.count / invoiceStatusView.denom) * 100;
+              const c = STATUS_BAR_TONES[row.color];
+              return (
+                <div key={row.key} className="flex items-center gap-4">
+                  <div className="w-[68px] shrink-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className={cn("h-2 w-2 rounded-full", c.dot)} />
+                      <span className="text-[13px] font-semibold text-foreground">{row.label}</span>
+                    </div>
+                    <p className="mt-0.5 pl-3.5 text-[11px] text-muted-foreground">{row.count} invoice{row.count !== 1 ? "s" : ""}</p>
+                  </div>
+                  <div className="relative h-2.5 flex-1 overflow-hidden rounded-[4px] bg-muted/70 shadow-[inset_0_1px_2px_rgba(20,30,80,0.07)]">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${pct}%` }}
+                      transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+                      className={cn("h-full rounded-[4px] shadow-[0_1px_3px_-1px_rgba(20,30,80,0.4)]", c.bar)}
+                    />
+                  </div>
+                  <span className="w-12 text-right text-[13px] font-bold tabular-nums text-foreground">{pct.toFixed(1)}%</span>
                 </div>
-                <span className="w-6 text-right text-xs font-semibold tabular-nums">{count}</span>
-              </div>
-            ))}
+              );
+            })}
+          </div>
+
+          {/* Statistics footer */}
+          <div className="mt-6 grid grid-cols-3 overflow-hidden rounded-[10px] border border-border/60 bg-muted/30">
+            <StatFooterItem label="Total" value={invoiceStatusView.total} sub="Invoices" />
+            <StatFooterItem label="Completed" value={invoiceStatusView.completed} sub="Invoices" divider />
+            <StatFooterItem label="Pending" value={invoiceStatusView.pending} sub="Invoices" divider />
           </div>
         </div>
 
         {/* Payment Overview */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-          <div className="flex items-center gap-2 mb-4">
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+        <div className="rounded-[10px] border border-border/70 bg-card p-6 shadow-card">
+          <div className="mb-5 flex items-center gap-2.5">
+            <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
+              <BarChart3 className="h-3.5 w-3.5" />
+            </span>
             <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Payment Overview</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50/50 p-4">
-              <p className="text-[11px] font-medium text-emerald-700 uppercase tracking-wider">Collected</p>
-              <p className="mt-1 font-display text-xl font-bold text-emerald-800 tabular-nums">{formatINR(kpis.paidAmount)}</p>
-              <p className="mt-1 text-[11px] text-emerald-600">{kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0}% of total</p>
-            </div>
-            <div className="rounded-xl border border-rose-200 bg-rose-50/50 p-4">
-              <p className="text-[11px] font-medium text-rose-700 uppercase tracking-wider">Outstanding</p>
-              <p className="mt-1 font-display text-xl font-bold text-rose-800 tabular-nums">{formatINR(kpis.pending + kpis.overdue)}</p>
-              <p className="mt-1 text-[11px] text-rose-600">{kpis.overdueCount} overdue</p>
-            </div>
-            <div className="rounded-xl border border-amber-200 bg-amber-50/50 p-4">
-              <p className="text-[11px] font-medium text-amber-700 uppercase tracking-wider">Tax (GST)</p>
-              <p className="mt-1 font-display text-xl font-bold text-amber-800 tabular-nums">{formatINR(kpis.taxCollected)}</p>
-              <p className="mt-1 text-[11px] text-amber-600">on paid invoices</p>
-            </div>
-            <div className="rounded-xl border border-indigo-200 bg-indigo-50/50 p-4">
-              <p className="text-[11px] font-medium text-indigo-700 uppercase tracking-wider">Avg Invoice</p>
-              <p className="mt-1 font-display text-xl font-bold text-indigo-800 tabular-nums">{formatINR(kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0)}</p>
-              <p className="mt-1 text-[11px] text-indigo-600">{kpis.totalInvoices} total</p>
-            </div>
+            <PaymentCard tone="emerald" icon={CreditCard} label="Collected" value={formatINR(kpis.paidAmount)}
+              sub={`${kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0}% of total`} />
+            <PaymentCard tone="rose" icon={AlertCircle} label="Outstanding" value={formatINR(kpis.pending + kpis.overdue)}
+              sub={`${kpis.overdueCount} overdue`} />
+            <PaymentCard tone="amber" icon={Receipt} label="Tax (GST)" value={formatINR(kpis.taxCollected)}
+              sub="on paid invoices" />
+            <PaymentCard tone="brand" icon={FileText} label="Avg Invoice" value={formatINR(kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0)}
+              sub={`${kpis.totalInvoices} total`} />
           </div>
         </div>
       </div>
@@ -278,6 +306,11 @@ export default function InvoicePage() {
       {selected.size > 0 && (
         <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
           <span className="text-xs font-medium text-indigo-700">{selected.size} selected —</span>
+          {canDownload && (
+            <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => startBulkInvoiceDownload(Array.from(selected))}>
+              <Download className="h-3 w-3" /> Download Selected PDFs
+            </Button>
+          )}
           <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
             <RefreshCw className="h-3 w-3" /> Change Status
           </Button>
@@ -331,7 +364,7 @@ export default function InvoicePage() {
                   </td>
                   {activeInvCols.map((col) => (
                     <td key={col.id} className={cn("py-3.5 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
-                      {renderInvCell(col.id, inv, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`))}
+                      {renderInvCell(col.id, inv, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv))}
                     </td>
                   ))}
                 </motion.tr>
@@ -366,34 +399,106 @@ export default function InvoicePage() {
         confirmLabel={`Delete ${selected.size} Invoice${selected.size > 1 ? "s" : ""}`}
         danger
       />
+
+      {/* Bulk Download Dialog */}
+      <BulkDownloadDialog
+        open={bulkDialog.open}
+        onClose={bulkDialog.close}
+        title={bulkDialog.title}
+        count={bulkDialog.count}
+        onDownload={executeBulkDownload}
+        progress={bulkProgress}
+        onRetryFailed={retryFailed}
+      />
     </div>
   );
 }
 
 /* ─── KPI Card ───────────────────────────────────────────────────────── */
 
+/* Premium tone maps — soft, slightly desaturated enterprise palette */
+const KPI_TONES: Record<string, { icon: string; title: string }> = {
+  indigo:  { icon: "from-brand-50 to-brand-100/70 ring-brand-200/70 text-brand-600",       title: "text-brand-600/90" },
+  violet:  { icon: "from-violet-50 to-violet-100/70 ring-violet-200/70 text-violet-600",    title: "text-violet-600/90" },
+  emerald: { icon: "from-emerald-50 to-emerald-100/70 ring-emerald-200/70 text-emerald-600", title: "text-emerald-700/90" },
+  amber:   { icon: "from-amber-50 to-amber-100/70 ring-amber-200/70 text-amber-600",         title: "text-amber-700/90" },
+  rose:    { icon: "from-rose-50 to-rose-100/70 ring-rose-200/70 text-rose-500",             title: "text-rose-500/90" },
+  zinc:    { icon: "from-slate-50 to-slate-100 ring-slate-200 text-slate-500",               title: "text-slate-500" },
+  teal:    { icon: "from-teal-50 to-teal-100/70 ring-teal-200/70 text-teal-600",             title: "text-teal-700/90" },
+};
+
+const STATUS_BAR_TONES: Record<string, { dot: string; bar: string }> = {
+  rose:    { dot: "bg-rose-500",    bar: "bg-gradient-to-r from-rose-400 to-rose-500" },
+  emerald: { dot: "bg-emerald-500", bar: "bg-gradient-to-r from-emerald-400 to-emerald-500" },
+  sky:     { dot: "bg-sky-500",     bar: "bg-gradient-to-r from-sky-400 to-blue-500" },
+};
+
+const PAYMENT_TONES: Record<string, { card: string; label: string; value: string; sub: string; icon: string; spark: string }> = {
+  emerald: { card: "border-emerald-200/70 bg-gradient-to-br from-emerald-50 to-emerald-100/40", label: "text-emerald-700", value: "text-emerald-800", sub: "text-emerald-600/80", icon: "bg-white/70 text-emerald-600 ring-emerald-200", spark: "text-emerald-500" },
+  rose:    { card: "border-rose-200/70 bg-gradient-to-br from-rose-50 to-rose-100/40",           label: "text-rose-700",    value: "text-rose-800",    sub: "text-rose-500/80",    icon: "bg-white/70 text-rose-500 ring-rose-200",       spark: "text-rose-500" },
+  amber:   { card: "border-amber-200/70 bg-gradient-to-br from-amber-50 to-amber-100/40",         label: "text-amber-700",   value: "text-amber-800",   sub: "text-amber-600/80",   icon: "bg-white/70 text-amber-600 ring-amber-200",     spark: "text-amber-500" },
+  brand:   { card: "border-brand-200/70 bg-gradient-to-br from-brand-50 to-brand-100/40",         label: "text-brand-700",   value: "text-brand-700",   sub: "text-brand-600/80",   icon: "bg-white/70 text-brand-600 ring-brand-200",     spark: "text-brand-500" },
+};
+
 function KpiCard({ icon: Icon, label, value, subtext, tone }: { icon: any; label: string; value: string; subtext?: string; tone: string }) {
-  const toneMap: Record<string, string> = {
-    emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-    indigo: "bg-indigo-50 text-[#4361EE] ring-indigo-200",
-    amber: "bg-amber-50 text-amber-700 ring-amber-200",
-    rose: "bg-rose-50 text-rose-700 ring-rose-200",
-    violet: "bg-violet-50 text-violet-700 ring-violet-200",
-    zinc: "bg-zinc-100 text-zinc-600 ring-zinc-200",
-    teal: "bg-teal-50 text-teal-700 ring-teal-200",
-  };
+  const t = KPI_TONES[tone] || KPI_TONES.indigo;
   return (
-    <motion.div initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }}
-      className="rounded-2xl border border-border bg-card p-4 shadow-card">
-      <div className="flex items-start gap-3">
-        <span className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ring-inset ${toneMap[tone] || toneMap.indigo}`}>
-          <Icon className="h-4 w-4" />
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
+      whileHover={{ y: -3 }}
+      className="group flex h-full min-h-[118px] flex-col justify-between rounded-[10px] border border-border/70 bg-card p-4 shadow-card transition-shadow duration-200 hover:shadow-card-hover"
+    >
+      <div className="flex items-center gap-2.5">
+        <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-[8px] bg-gradient-to-br ring-1 ring-inset transition-transform duration-200 group-hover:scale-105", t.icon)}>
+          <Icon className="h-[18px] w-[18px]" />
         </span>
-        <div className="min-w-0">
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="font-display text-lg font-bold tracking-tight leading-tight mt-0.5">{value}</p>
-          {subtext && <p className="text-[10px] text-muted-foreground mt-0.5">{subtext}</p>}
-        </div>
+        <p className={cn("text-[10.5px] font-semibold uppercase tracking-wider", t.title)}>{label}</p>
+      </div>
+      <div className="mt-3">
+        <p className="font-display text-[22px] font-bold leading-none tracking-tight tabular-nums text-foreground">{value}</p>
+        {subtext && <p className="mt-1.5 text-[11px] font-medium text-muted-foreground">{subtext}</p>}
+      </div>
+    </motion.div>
+  );
+}
+
+/* ─── Invoice Status footer stat ─────────────────────────────────────── */
+
+function StatFooterItem({ label, value, sub, divider }: { label: string; value: number; sub: string; divider?: boolean }) {
+  return (
+    <div className={cn("px-4 py-3.5", divider && "border-l border-border/60")}>
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className="mt-1 font-display text-xl font-bold leading-none tabular-nums text-foreground">{value}</p>
+      <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
+    </div>
+  );
+}
+
+/* ─── Payment Overview card ──────────────────────────────────────────── */
+
+function PaymentCard({ tone, icon: Icon, label, value, sub }: { tone: string; icon: any; label: string; value: string; sub: string }) {
+  const t = PAYMENT_TONES[tone] || PAYMENT_TONES.brand;
+  return (
+    <motion.div
+      whileHover={{ y: -2 }}
+      transition={{ type: "spring", stiffness: 300, damping: 22 }}
+      className={cn("relative min-h-[108px] overflow-hidden rounded-[10px] border p-4 transition-shadow duration-200 hover:shadow-card", t.card)}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <p className={cn("text-[11px] font-semibold uppercase tracking-wider", t.label)}>{label}</p>
+        <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-[8px] ring-1 ring-inset", t.icon)}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      </div>
+      <p className={cn("mt-2 font-display text-2xl font-bold leading-none tabular-nums", t.value)}>{value}</p>
+      <p className={cn("mt-1 text-[11px] font-medium", t.sub)}>{sub}</p>
+      <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-8", t.spark)}>
+        <svg viewBox="0 0 120 32" preserveAspectRatio="none" className="h-full w-full">
+          <path d="M0 26 C 15 12, 25 28, 40 20 C 55 12, 65 24, 80 15 C 95 7, 108 22, 120 13 L120 32 L0 32 Z" fill="currentColor" fillOpacity="0.12" />
+          <path d="M0 26 C 15 12, 25 28, 40 20 C 55 12, 65 24, 80 15 C 95 7, 108 22, 120 13" fill="none" stroke="currentColor" strokeOpacity="0.5" strokeWidth="1.5" strokeLinecap="round" />
+        </svg>
       </div>
     </motion.div>
   );
@@ -412,6 +517,7 @@ function renderInvCell(
   onDuplicate: () => void,
   onDelete: () => void,
   onPrint: () => void,
+  onDownloadPdf: () => void,
 ) {
   switch (colId) {
     case "id": return (
@@ -459,7 +565,7 @@ function renderInvCell(
             <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
             <MenuItem icon={Copy} onClick={() => { onDuplicate(); close(); }}>Duplicate</MenuItem>
             <MenuItem icon={Printer} onClick={() => { onPrint(); close(); }}>Print</MenuItem>
-            <MenuItem icon={FileDown} onClick={close}>Download PDF</MenuItem>
+            <MenuItem icon={FileDown} onClick={() => { onDownloadPdf(); close(); }}>Download PDF</MenuItem>
             <MenuItem icon={Mail} onClick={close}>Email Invoice</MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
@@ -567,15 +673,16 @@ const KPI_STORAGE_KEY = "repairox-invoice-kpi-order";
 type KpiDef = { id: string; icon: any; label: string; value: string; subtext?: string; tone: string };
 
 function DraggableKpiGrid({ kpis }: { kpis: any }) {
+  const rate = kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0;
   const allCards: KpiDef[] = [
-    { id: "revenue", icon: IndianRupee, label: "Total Revenue", value: formatINR(kpis.totalRevenue), tone: "indigo" },
-    { id: "invoices", icon: Receipt, label: "Total Invoices", value: String(kpis.totalInvoices), tone: "violet" },
-    { id: "paid", icon: CreditCard, label: "Paid Amount", value: formatINR(kpis.paidAmount), tone: "emerald" },
-    { id: "pending", icon: Clock, label: "Pending", value: formatINR(kpis.pending), tone: "amber" },
-    { id: "overdue", icon: AlertCircle, label: "Overdue", value: formatINR(kpis.overdue), subtext: `${kpis.overdueCount} invoice${kpis.overdueCount !== 1 ? "s" : ""}`, tone: "rose" },
-    { id: "drafts", icon: FileText, label: "Drafts", value: String(kpis.draftCount), tone: "zinc" },
-    { id: "tax", icon: TrendingUp, label: "Tax Collected", value: formatINR(kpis.taxCollected), tone: "teal" },
-    { id: "rate", icon: BarChart3, label: "Collection Rate", value: kpis.totalRevenue > 0 ? `${Math.round((kpis.paidAmount / kpis.totalRevenue) * 100)}%` : "0%", tone: "indigo" },
+    { id: "revenue", icon: IndianRupee, label: "Total Revenue", value: formatINR(kpis.totalRevenue), subtext: `Across ${kpis.totalInvoices} invoice${kpis.totalInvoices !== 1 ? "s" : ""}`, tone: "indigo" },
+    { id: "invoices", icon: Receipt, label: "Total Invoices", value: String(kpis.totalInvoices), subtext: `${kpis.draftCount} in draft`, tone: "violet" },
+    { id: "paid", icon: CreditCard, label: "Paid Amount", value: formatINR(kpis.paidAmount), subtext: `${rate}% of revenue`, tone: "emerald" },
+    { id: "pending", icon: Clock, label: "Pending", value: formatINR(kpis.pending), subtext: "Awaiting collection", tone: "amber" },
+    { id: "overdue", icon: AlertCircle, label: "Overdue", value: formatINR(kpis.overdue), subtext: `${kpis.overdueCount} invoice${kpis.overdueCount !== 1 ? "s" : ""} overdue`, tone: "rose" },
+    { id: "drafts", icon: FileText, label: "Drafts", value: String(kpis.draftCount), subtext: kpis.draftCount === 0 ? "No draft invoices" : "Awaiting action", tone: "zinc" },
+    { id: "tax", icon: TrendingUp, label: "Tax Collected", value: formatINR(kpis.taxCollected), subtext: "On paid invoices", tone: "teal" },
+    { id: "rate", icon: BarChart3, label: "Collection Rate", value: `${rate}%`, subtext: `${formatINR(kpis.paidAmount)} collected`, tone: "indigo" },
   ];
 
   const defaultOrder = allCards.map((c) => c.id);
@@ -604,7 +711,7 @@ function DraggableKpiGrid({ kpis }: { kpis: any }) {
   };
 
   return (
-    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+    <div className="grid grid-cols-2 items-stretch gap-4 lg:grid-cols-4">
       {sorted.map((card) => (
         <div
           key={card.id}
@@ -612,7 +719,7 @@ function DraggableKpiGrid({ kpis }: { kpis: any }) {
           onDragStart={() => setDragId(card.id)}
           onDragOver={(e) => handleDragOver(e, card.id)}
           onDragEnd={handleDragEnd}
-          className={cn("transition-all", dragId === card.id && "opacity-50 scale-95")}
+          className={cn("h-full transition-all", dragId === card.id && "opacity-50 scale-95")}
         >
           <KpiCard icon={card.icon} label={card.label} value={card.value} subtext={card.subtext} tone={card.tone} />
         </div>

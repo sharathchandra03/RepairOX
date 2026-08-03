@@ -61,7 +61,7 @@ interface StoreActions {
   updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
   deleteTicket: (id: string) => Promise<void>;
   bulkUpdateStatus: (ids: string[], status: TicketStatus) => Promise<void>;
-  addInvoice: (invoice: Invoice) => Promise<void>;
+  addInvoice: (invoice: Invoice) => Promise<string>;
   updateInvoice: (id: string, updates: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
   addWalkIn: (walkIn: WalkIn) => Promise<void>;
@@ -208,6 +208,31 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
     items: inv.items ?? [],
     devices: inv.devices ?? [],
   };
+}
+
+/** True when a Supabase error is a primary-key / unique-constraint violation. */
+function isDuplicateKeyError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === "23505" || /duplicate key|already exists/i.test(err.message ?? "");
+}
+
+/**
+ * Compute the next sequential invoice id straight from the DB, counting ALL rows
+ * of that type — including soft-deleted ones, which keep their primary key.
+ * The in-memory list only holds live invoices, so relying on it can regenerate
+ * an id that still belongs to a soft-deleted row and collide on insert.
+ */
+async function nextInvoiceIdFromDb(type: string): Promise<string> {
+  const prefix = type === "business" ? "INVG" : "INV";
+  let maxNum = 0;
+  if (supabase) {
+    const { data } = await supabase.from("invoices").select("id").eq("invoice_type", type);
+    maxNum = (data ?? []).reduce((max: number, r: { id: string }) => {
+      const match = String(r.id).match(/\d+$/);
+      return match ? Math.max(max, parseInt(match[0], 10)) : max;
+    }, 0);
+  }
+  return `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
 }
 
 function rowToWalkIn(r: any): WalkIn {
@@ -764,38 +789,56 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /* ── Invoice actions (DB-first) ── */
-  const addInvoice = useCallback(async (invoice: Invoice) => {
+  const addInvoice = useCallback(async (invoice: Invoice): Promise<string> => {
     if (isSupabaseConfigured && supabase) {
-      const row = invoiceToRow(invoice);
-      const { data, error } = await supabase.from("invoices").insert(row).select("*").single();
-      if (error || !data) {
-        // If insert fails (e.g. missing columns), try without optional new columns
-        const fallbackRow = { ...row };
-        delete fallbackRow.service_category;
-        delete fallbackRow.payment_mode;
-        const { data: data2, error: error2 } = await supabase.from("invoices").insert(fallbackRow).select("*").single();
-        if (error2 || !data2) {
-          console.error("[store] addInvoice failed:", error2?.message || error?.message);
-          // Fallback: save locally so user doesn't lose data
-          setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
-          logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
-          return;
+      // Single insert attempt. Retries once without the optional columns in case
+      // an older DB is missing them.
+      const attemptInsert = async (inv: Invoice) => {
+        const row = invoiceToRow(inv);
+        let res = await supabase!.from("invoices").insert(row).select("*").single();
+        if (res.error && !isDuplicateKeyError(res.error)) {
+          const fallbackRow = { ...row };
+          delete fallbackRow.service_category;
+          delete fallbackRow.payment_mode;
+          res = await supabase!.from("invoices").insert(fallbackRow).select("*").single();
         }
-        const saved2 = rowToInvoice(data2);
-        // Preserve serviceCategory/paymentMode locally even if DB doesn't have columns yet
-        saved2.serviceCategory = invoice.serviceCategory;
-        saved2.paymentMode = invoice.paymentMode;
-        setState((s) => ({ ...s, invoices: [saved2, ...s.invoices] }));
-        logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved2.reference || saved2.id, description: `Generated invoice for ${saved2.customer}.`, meta: { Total: inr(saved2.total) } });
-        return;
+        return res;
+      };
+
+      let current = invoice;
+      let res = await attemptInsert(current);
+
+      // The generated id can collide with an existing row — most commonly a
+      // soft-deleted invoice, which keeps its primary key but is hidden from the
+      // in-memory list the id was derived from. Regenerate from the DB and retry.
+      let guard = 0;
+      while (res.error && isDuplicateKeyError(res.error) && guard < 5) {
+        guard += 1;
+        const nextId = await nextInvoiceIdFromDb(current.invoiceType);
+        current = { ...current, id: nextId };
+        res = await attemptInsert(current);
       }
-      const saved = rowToInvoice(data);
+
+      if (res.error || !res.data) {
+        console.error("[store] addInvoice failed:", res.error?.message);
+        // Last resort: keep locally so the user doesn't lose their work. (Won't
+        // survive a reload, but avoids data loss mid-session.)
+        setState((s) => ({ ...s, invoices: [current, ...s.invoices] }));
+        logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: current.reference || current.id, description: `Generated invoice for ${current.customer}.`, meta: { Total: inr(current.total) } });
+        return current.id;
+      }
+
+      const saved = rowToInvoice(res.data);
+      // Preserve serviceCategory/paymentMode locally even if DB lacks the columns.
+      saved.serviceCategory = current.serviceCategory;
+      saved.paymentMode = current.paymentMode;
       setState((s) => ({ ...s, invoices: [saved, ...s.invoices] }));
       logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved.reference || saved.id, description: `Generated invoice for ${saved.customer}.`, meta: { Total: inr(saved.total) } });
-      return;
+      return saved.id;
     }
     setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
     logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
+    return invoice.id;
   }, []);
 
   const updateInvoice = useCallback(async (id: string, updates: Partial<Invoice>) => {

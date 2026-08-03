@@ -279,7 +279,7 @@ function InvoiceWizard() {
   }, [form.devices, form.items, form.pricing]);
 
   // Submit
-  const handleSubmit = useCallback(() => {
+  const handleSubmit = useCallback(async () => {
     // Build invoice device records for storage
     const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
     const invoiceDevices: InvoiceDeviceRecord[] = hasDevices ? form.devices.map((d) => ({
@@ -330,19 +330,20 @@ function InvoiceWizard() {
       devices: invoiceDevices.length > 0 ? invoiceDevices : undefined,
     };
 
-    if (isEdit) {
-      updateInvoice(editId!, invoice);
-    } else {
-      addInvoice(invoice);
-    }
-    setCreatedInvoiceId(invoice.id);
     setDirty(false);
     if (isEdit) {
+      updateInvoice(editId!, invoice);
+      setCreatedInvoiceId(invoice.id);
       router.push("/invoice");
     } else {
+      // Use the id actually persisted by the store — it may differ from the
+      // locally generated one if it collided with an existing (or soft-deleted)
+      // invoice, so the print/share links point at a real, retrievable record.
+      const savedId = await addInvoice(invoice);
+      setCreatedInvoiceId(savedId || invoice.id);
       setShowSuccessAnimation(true);
     }
-  }, [form, totals, editId, isEdit, invoices, addInvoice, updateInvoice]);
+  }, [form, totals, editId, isEdit, invoices, addInvoice, updateInvoice, router]);
 
   // Step navigation
   const goNext = () => setStep((s) => Math.min(s + 1, 6));

@@ -26,6 +26,8 @@ import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
+import { usePdfDownload } from "@/hooks/use-pdf-download";
+import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 
 /* ─── Column Definition ──────────────────────────────────────────────── */
 
@@ -145,6 +147,16 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
 export default function TicketsPage() {
   const router = useRouter();
   const { tickets, bulkUpdateStatus, deleteTicket, updateTicket, deductPartsForTicket } = useStore();
+  const {
+    downloadTicket,
+    startBulkTicketDownload,
+    executeBulkDownload,
+    retryFailed,
+    isDownloading,
+    bulkDialog,
+    bulkProgress,
+    canDownload,
+  } = usePdfDownload();
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -280,6 +292,7 @@ export default function TicketsPage() {
   const handleAction = useCallback((action: TicketAction, ticket: Ticket) => {
     if (action === "view") { router.push(`/tickets/${ticket.id}`); return; }
     if (action === "edit") { router.push(`/tickets/${ticket.id}`); return; }
+    if (action === "download-pdf") { downloadTicket(ticket); return; }
     if (action === "invoice") {
       const p = new URLSearchParams();
       p.set("fromTicket", ticket.id);
@@ -329,7 +342,7 @@ export default function TicketsPage() {
     }
     setActiveTicket(ticket);
     setActiveDrawer(action);
-  }, [router, deleteTicket]);
+  }, [router, deleteTicket, downloadTicket]);
 
   const closeDrawer = useCallback(() => { setActiveDrawer(null); setActiveTicket(null); }, []);
 
@@ -525,6 +538,11 @@ export default function TicketsPage() {
           {someSelected && (
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">{selected.size} selected</span>
+              {canDownload && (
+                <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => startBulkTicketDownload(Array.from(selected))}>
+                  <Download className="h-3 w-3" /> Download PDFs
+                </Button>
+              )}
               <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
                 <RefreshCw className="h-3 w-3" /> Change Status
               </Button>
@@ -727,6 +745,17 @@ export default function TicketsPage() {
           </motion.div>
         </div>
       )}
+
+      {/* Bulk Download Dialog */}
+      <BulkDownloadDialog
+        open={bulkDialog.open}
+        onClose={bulkDialog.close}
+        title={bulkDialog.title}
+        count={bulkDialog.count}
+        onDownload={executeBulkDownload}
+        progress={bulkProgress}
+        onRetryFailed={retryFailed}
+      />
     </div>
   );
 }
