@@ -608,7 +608,11 @@ function CategoryCard({
                   : "text-foreground hover:bg-muted/70 border-l-[3px] border-transparent"
               )}
             >
-              <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-brand-500" : "text-muted-foreground")} />
+              {cat.imageUrl ? (
+                <img src={cat.imageUrl} alt={cat.name} className="h-5 w-5 shrink-0 rounded object-cover" />
+              ) : (
+                <Icon className={cn("h-4 w-4 shrink-0", isActive ? "text-brand-500" : "text-muted-foreground")} />
+              )}
               <span className="flex-1 truncate">{cat.name}</span>
               <span className={cn(
                 "tabular-nums rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none",

@@ -12,6 +12,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useCatalog } from "@/lib/catalog-context";
 import { useCatalogSelection } from "./catalog-selection";
+import { ImageUpload } from "./image-upload";
 import type { DeviceCategory } from "@/lib/price-list-data";
 
 /** Icons offered for categories — must stay in sync with the shop browser's iconMap. */
@@ -95,8 +96,12 @@ export function CategoriesTab() {
             >
               {/* Header: icon + name/stats + chevron */}
               <div className="flex items-center gap-3">
-                <span className="grid h-11 w-11 shrink-0 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
-                  <Icon className="h-5 w-5" />
+                <span className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
+                  {cat.imageUrl ? (
+                    <img src={cat.imageUrl} alt={cat.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <Icon className="h-5 w-5" />
+                  )}
                 </span>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-semibold">{cat.name}</p>
@@ -226,6 +231,15 @@ function CategoryDetailDrawer({
     >
       {category && (
         <div className="space-y-4">
+          {/* Category Image */}
+          {category.imageUrl && (
+            <div className="grid place-items-center rounded-2xl border border-border bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 p-4">
+              <div className="grid h-32 w-full place-items-center overflow-hidden rounded-xl">
+                <img src={category.imageUrl} alt={category.name} className="max-h-32 w-auto object-contain" />
+              </div>
+            </div>
+          )}
+
           {/* Stats */}
           <div className="grid grid-cols-3 gap-2">
             <Stat icon={Building2} label="Brands" value={brands.length} />
@@ -302,11 +316,12 @@ function CategoryDrawer({
 }: {
   category: DeviceCategory | null;
   onClose: () => void;
-  onSave: (data: { name: string; icon: string; enabled: boolean }) => void;
+  onSave: (data: { name: string; icon: string; enabled: boolean; imageUrl?: string }) => void;
 }) {
   const [name, setName] = useState(category?.name ?? "");
   const [icon, setIcon] = useState(category?.icon ?? "Box");
   const [enabled, setEnabled] = useState(category?.enabled ?? true);
+  const [imageUrl, setImageUrl] = useState(category?.imageUrl ?? "");
   const Preview = CATEGORY_ICONS[icon] || Box;
 
   return (
@@ -319,13 +334,17 @@ function CategoryDrawer({
       footer={
         <div className="flex justify-start gap-2">
           <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" disabled={!name.trim()} onClick={() => onSave({ name: name.trim(), icon, enabled })}>
+          <Button size="sm" disabled={!name.trim()} onClick={() => onSave({ name: name.trim(), icon, enabled, imageUrl: imageUrl || undefined })}>
             {category ? "Save Changes" : "Create Category"}
           </Button>
         </div>
       }
     >
       <div className="space-y-4">
+        <div className="space-y-1.5">
+          <Label>Category Image</Label>
+          <ImageUpload value={imageUrl} onChange={setImageUrl} size="lg" label="Shown across the price list & shop browser" />
+        </div>
         <div className="space-y-1.5">
           <Label>Category Name</Label>
           <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Gaming Console" autoFocus />

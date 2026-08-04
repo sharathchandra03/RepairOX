@@ -177,7 +177,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
           supabase.from("price_list_parts").select("*").order("created_at", { ascending: true }),
         ]);
         const dbState: CatalogState = {
-          categories: (cats ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, enabled: r.enabled ?? true })),
+          categories: (cats ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })),
           brands: (brds ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })),
           models: (mods ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })),
           parts: (prts ?? []).map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })),
@@ -191,7 +191,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       const channel = supabase.channel("catalog-realtime")
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_categories" }, () => {
           supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).then(({ data }) => {
-            if (data) setState((s) => ({ ...s, categories: data.map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, enabled: r.enabled ?? true })) }));
+            if (data) setState((s) => ({ ...s, categories: data.map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_brands" }, () => {
@@ -236,11 +236,12 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       name: data.name.trim(),
       icon: data.icon || "Box",
       count: 0,
+      imageUrl: data.imageUrl,
       enabled: data.enabled ?? true,
     };
     setState((s) => ({ ...s, categories: [...s.categories, cat] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_categories").insert({ id: cat.id, name: cat.name, icon: cat.icon, item_count: 0, enabled: cat.enabled }).then();
+      supabase.from("price_list_categories").insert({ id: cat.id, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled }).then();
     }
     logActivity({
       module: "Price List", action: "Category Created", severity: "success",
@@ -260,6 +261,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       if ("name" in updates) row.name = updates.name;
       if ("icon" in updates) row.icon = updates.icon;
       if ("enabled" in updates) row.enabled = updates.enabled;
+      if ("imageUrl" in updates) row.image_url = updates.imageUrl ?? null;
       supabase.from("price_list_categories").update(row).eq("id", id).then();
     }
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
@@ -495,10 +497,11 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       availability: data.availability ?? "In Stock",
       lastUpdated: nowStamp(),
       modelId: data.modelId,
+      imageUrl: data.imageUrl,
     };
     setState((s) => ({ ...s, parts: [...s.parts, part] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_parts").insert({ id: String(part.id), model_id: part.modelId, part_name: part.partName, part_number: part.partNumber ?? null, price: part.price, warranty: part.warranty ?? null, availability: part.availability ?? "In Stock" }).then();
+      supabase.from("price_list_parts").insert({ id: String(part.id), model_id: part.modelId, part_name: part.partName, part_number: part.partNumber ?? null, price: part.price, warranty: part.warranty ?? null, availability: part.availability ?? "In Stock", image_url: part.imageUrl ?? null }).then();
     }
     logActivity({
       module: "Price List", action: "Part Added", severity: "success",
@@ -521,6 +524,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       if ("price" in updates) row.price = updates.price;
       if ("warranty" in updates) row.warranty = updates.warranty ?? null;
       if ("availability" in updates) row.availability = updates.availability ?? null;
+      if ("imageUrl" in updates) row.image_url = updates.imageUrl ?? null;
       supabase.from("price_list_parts").update(row).eq("id", String(id)).then();
     }
     const inr = (v: unknown) => `₹${Number(v ?? 0).toLocaleString("en-IN")}`;

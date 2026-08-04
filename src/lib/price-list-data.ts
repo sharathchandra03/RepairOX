@@ -5,6 +5,8 @@ export type DeviceCategory = {
   name: string;
   icon: string;
   count: number;
+  /** Base64 or URL of the category image. */
+  imageUrl?: string;
   /** Whether the category is visible/usable across modules. Defaults to true. */
   enabled?: boolean;
   /** True for built-in sample data; cleared automatically on first import. */
