@@ -34,7 +34,12 @@ function NavItem({ item, collapsed, pathname }: {
   pathname: string;
 }) {
   const Icon = ICONS[item.icon] ?? Home;
-  const active = pathname === item.href || pathname.startsWith(item.href + "/");
+  // Exact match for module root pages (e.g. /operations, /lead-management) to
+  // avoid them staying "active" when a sibling sub-route like /operations/reports is open.
+  const isModuleRoot = item.href === "/operations" || item.href === "/lead-management" || item.href === "/dashboard";
+  const active = isModuleRoot
+    ? pathname === item.href
+    : pathname === item.href || pathname.startsWith(item.href + "/");
   return (
     <motion.li
       layout

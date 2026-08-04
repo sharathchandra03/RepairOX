@@ -164,18 +164,39 @@ const CatalogContext = createContext<Catalog | null>(null);
 export function CatalogProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<CatalogState>(seedState);
   const [hydrated, setHydrated] = useState(false);
+  /** Organization ID resolved from the authenticated user's staff row. */
+  const orgIdRef = useRef<string | null>(null);
 
   // Hydrate from DB (Supabase) or localStorage after mount.
   useEffect(() => {
     if (isSupabaseConfigured && supabase) {
       // Load catalog from Supabase.
       (async () => {
-        const [{ data: cats }, { data: brds }, { data: mods }, { data: prts }] = await Promise.all([
-          supabase.from("price_list_categories").select("*").order("created_at", { ascending: true }),
-          supabase.from("price_list_brands").select("*").order("created_at", { ascending: true }),
-          supabase.from("price_list_models").select("*").order("created_at", { ascending: true }),
-          supabase.from("price_list_parts").select("*").order("created_at", { ascending: true }),
-        ]);
+        // Resolve the user's organization_id first.
+        const { data: sessionData } = await supabase.auth.getSession();
+        if (sessionData.session?.user) {
+          const { data: staffRow } = await supabase
+            .from("staff")
+            .select("organization_id")
+            .eq("auth_user_id", sessionData.session.user.id)
+            .maybeSingle();
+          orgIdRef.current = (staffRow?.organization_id as string) ?? null;
+        }
+
+        const orgId = orgIdRef.current;
+        // Build queries — filter by org when available.
+        let catsQ = supabase.from("price_list_categories").select("*").order("created_at", { ascending: true });
+        let brdsQ = supabase.from("price_list_brands").select("*").order("created_at", { ascending: true });
+        let modsQ = supabase.from("price_list_models").select("*").order("created_at", { ascending: true });
+        let prtsQ = supabase.from("price_list_parts").select("*").order("created_at", { ascending: true });
+        if (orgId) {
+          catsQ = catsQ.eq("organization_id", orgId);
+          brdsQ = brdsQ.eq("organization_id", orgId);
+          modsQ = modsQ.eq("organization_id", orgId);
+          prtsQ = prtsQ.eq("organization_id", orgId);
+        }
+
+        const [{ data: cats }, { data: brds }, { data: mods }, { data: prts }] = await Promise.all([catsQ, brdsQ, modsQ, prtsQ]);
         const dbState: CatalogState = {
           categories: (cats ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })),
           brands: (brds ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })),
@@ -183,29 +204,53 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
           parts: (prts ?? []).map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })),
         };
         // Only use DB data if there's actual content; otherwise fall through to seed.
-        if (dbState.categories.length > 0 || dbState.brands.length > 0) setState(dbState);
+        if (dbState.categories.length > 0 || dbState.brands.length > 0) {
+          setState(dbState);
+        } else if (orgId) {
+          // DB is empty for this org — push seed data so subsequent operations persist.
+          const seed = seedState();
+          const seedCatRows = seed.categories.map((c) => ({ id: c.id, organization_id: orgId, name: c.name, icon: c.icon, item_count: c.count, enabled: c.enabled ?? true, image_url: null }));
+          const seedBrandRows = seed.brands.map((b) => ({ id: b.id, organization_id: orgId, name: b.name, category_id: b.categoryId, item_count: b.count, logo_url: b.logoUrl ?? null, enabled: b.enabled ?? true }));
+          const seedModelRows = seed.models.map((m) => ({ id: m.id, organization_id: orgId, brand_id: m.brandId, category_id: m.categoryId, name: m.name, model_year: m.year, chip: m.chip ?? null, storage: m.storage ?? null, display_size: m.displaySize ?? null, variant: m.variant ?? null, image_url: m.imageUrl ?? null, status: m.status ?? "active" }));
+          const seedPartRows = seed.parts.map((p) => ({ id: String(p.id), organization_id: orgId, model_id: p.modelId, part_name: p.partName, part_number: p.partNumber ?? null, price: p.price, price_known: p.priceKnown ?? true, warranty: p.warranty ?? null, availability: p.availability ?? "In Stock", repair_category: p.repairCategory ?? null, image_url: p.imageUrl ?? null }));
+          // Insert in sequence to satisfy foreign keys (categories → brands → models → parts).
+          await supabase.from("price_list_categories").insert(seedCatRows);
+          await supabase.from("price_list_brands").insert(seedBrandRows);
+          await supabase.from("price_list_models").insert(seedModelRows);
+          await supabase.from("price_list_parts").insert(seedPartRows);
+          // Mark seed items so the UI can strip them on first real import.
+          setState(seed);
+        }
         setHydrated(true);
       })();
 
       // Realtime subscription for catalog tables.
       const channel = supabase.channel("catalog-realtime")
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_categories" }, () => {
-          supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+          let q = supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true });
+          if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
+          q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, categories: data.map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_brands" }, () => {
-          supabase!.from("price_list_brands").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+          let q = supabase!.from("price_list_brands").select("*").order("created_at", { ascending: true });
+          if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
+          q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, brands: data.map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_models" }, () => {
-          supabase!.from("price_list_models").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+          let q = supabase!.from("price_list_models").select("*").order("created_at", { ascending: true });
+          if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
+          q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, models: data.map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_parts" }, () => {
-          supabase!.from("price_list_parts").select("*").order("created_at", { ascending: true }).then(({ data }) => {
+          let q = supabase!.from("price_list_parts").select("*").order("created_at", { ascending: true });
+          if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
+          q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, parts: data.map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })) }));
           });
         })
@@ -241,7 +286,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     };
     setState((s) => ({ ...s, categories: [...s.categories, cat] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_categories").insert({ id: cat.id, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled }).then();
+      supabase.from("price_list_categories").insert({ id: cat.id, organization_id: orgIdRef.current, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled }).then();
     }
     logActivity({
       module: "Price List", action: "Category Created", severity: "success",
@@ -329,7 +374,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     };
     setState((s) => ({ ...s, brands: [...s.brands, brand] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_brands").insert({ id: brand.id, name: brand.name, category_id: brand.categoryId, item_count: 0, logo_url: brand.logoUrl ?? null, enabled: brand.enabled }).then();
+      supabase.from("price_list_brands").insert({ id: brand.id, organization_id: orgIdRef.current, name: brand.name, category_id: brand.categoryId, item_count: 0, logo_url: brand.logoUrl ?? null, enabled: brand.enabled }).then();
     }
     logActivity({
       module: "Price List", action: "Brand Added", severity: "success",
@@ -405,7 +450,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     };
     setState((s) => ({ ...s, models: [...s.models, model] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_models").insert({ id: model.id, brand_id: model.brandId, category_id: model.categoryId, name: model.name, model_year: model.year, chip: model.chip ?? null, storage: model.storage ?? null, display_size: model.displaySize ?? null, variant: model.variant ?? null, image_url: model.imageUrl ?? null, status: model.status ?? "active" }).then();
+      supabase.from("price_list_models").insert({ id: model.id, organization_id: orgIdRef.current, brand_id: model.brandId, category_id: model.categoryId, name: model.name, model_year: model.year, chip: model.chip ?? null, storage: model.storage ?? null, display_size: model.displaySize ?? null, variant: model.variant ?? null, image_url: model.imageUrl ?? null, status: model.status ?? "active" }).then();
     }
     logActivity({
       module: "Price List", action: "Model Added", severity: "success",
@@ -501,7 +546,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     };
     setState((s) => ({ ...s, parts: [...s.parts, part] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_parts").insert({ id: String(part.id), model_id: part.modelId, part_name: part.partName, part_number: part.partNumber ?? null, price: part.price, warranty: part.warranty ?? null, availability: part.availability ?? "In Stock", image_url: part.imageUrl ?? null }).then();
+      supabase.from("price_list_parts").insert({ id: String(part.id), organization_id: orgIdRef.current, model_id: part.modelId, part_name: part.partName, part_number: part.partNumber ?? null, price: part.price, warranty: part.warranty ?? null, availability: part.availability ?? "In Stock", image_url: part.imageUrl ?? null }).then();
     }
     logActivity({
       module: "Price List", action: "Part Added", severity: "success",

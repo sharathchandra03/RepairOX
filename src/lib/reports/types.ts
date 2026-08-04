@@ -34,7 +34,23 @@ export type DataSourceId =
   | "expenses"
   | "customers"
   | "employees"
-  | "ledger";
+  | "ledger"
+  // Sales Management
+  | "leads"
+  | "deals"
+  | "quotations"
+  | "contacts"
+  | "companies"
+  | "activities"
+  | "pipelines"
+  // Field Management
+  | "field_jobs"
+  | "visits"
+  | "routes"
+  | "installations"
+  | "technicians"
+  | "service_calls"
+  | "van_inventory";
 
 /* ─── Date range presets ────────────────────────────────────────────────── */
 

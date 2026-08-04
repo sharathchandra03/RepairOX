@@ -273,6 +273,7 @@ export const navItems: NavItem[] = [
   { href: "/operations/purchase-orders", label: "Purchase Orders", icon: "ClipboardList", permission: "manage_purchases" },
   { href: "/operations/transfers",   label: "Parts Transfers", icon: "Recycle", permission: "transfer_inventory" },
   { href: "/operations/products",    label: "Product Items",   icon: "Package", permission: "manage_inventory" },
+  { href: "/operations/reports",    label: "Reports",         icon: "BarChart3", permission: ["manage_reports", "view_financial_reports"] },
 
   // Leads
   { href: "/lead-management",  label: "Dashboard",    icon: "Home", permission: "view_dashboard" },
@@ -291,8 +292,7 @@ export const navItems: NavItem[] = [
   { href: "/leads/whatsapp",   label: "WhatsApp",     icon: "BookUser", permission: "send_communications" },
   { href: "/leads/smart-lists", label: "Smart Lists", icon: "ClipboardList" },
   { href: "/leads/map-view",   label: "Map View",     icon: "Map" },
-  { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_financial_reports"] },
-  { href: "/leads/report-builder", label: "Report Builder", icon: "BarChart3", permission: "manage_reports" },
+  { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
 
@@ -678,13 +678,13 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   operations: [
     { label: "MODULE",     items: ["/operations", "/stock"] },
     { label: "PURCHASING", items: ["/operations/vendors", "/operations/purchase-orders", "/operations/transfers", "/operations/products"] },
-    { label: "GENERAL",    items: ["/reports", "/settings"] },
+    { label: "GENERAL",    items: ["/operations/reports", "/settings"] },
   ],
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
-    { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/reports", "/leads/report-builder", "/leads/campaigns"] },
-    { label: "GENERAL",        items: ["/leads/settings"] },
+    { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/campaigns"] },
+    { label: "GENERAL",        items: ["/leads/reports", "/leads/settings"] },
   ],
 };

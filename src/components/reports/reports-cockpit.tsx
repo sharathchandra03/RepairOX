@@ -17,6 +17,7 @@
 
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 import { Printer, FileSpreadsheet, SlidersHorizontal, Loader2, Store, TrendingUp, Map } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -54,14 +55,14 @@ import { ComparisonEngine } from "./comparison-engine";
 import { CustomReportBuilder } from "./custom-report-builder";
 import { SavedReportsPanel } from "./saved-reports-panel";
 import { EmptyState } from "./empty-state";
-import { SalesCockpit } from "./sales/sales-cockpit";
-import { FieldCockpit } from "./field/field-cockpit";
+import { SalesOverview } from "./sales/sales-overview";
+import { FieldOverview } from "./field/field-overview";
+import { useReportContext } from "@/lib/reports/report-context";
 
-import type { ReportFilters } from "@/lib/reports/types";
-
-type ModuleScope = "shop" | "sales" | "field";
+import type { ReportFilters, ReportModuleId } from "@/lib/reports/types";
 
 const MODULE_ICON: Record<string, any> = { shop: Store, sales: TrendingUp, field: Map };
+const MODULE_ROUTE: Record<string, string> = { shop: "/reports", sales: "/leads/reports", field: "/operations/reports" };
 
 export function ReportsCockpit() {
   const data = useReportData();
@@ -71,7 +72,8 @@ export function ReportsCockpit() {
   const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS);
   const [tab, setTab] = useState<ReportsTabId>("overview");
   const [filtersOpen, setFiltersOpen] = useState(false);
-  const [moduleScope, setModuleScope] = useState<ModuleScope>("shop");
+  const { moduleScope, setModuleScope, meta: moduleMeta } = useReportContext();
+  const router = useRouter();
 
   const options = useMemo(() => buildFilterOptions(data), [data]);
   const range = useMemo(() => rangeFromFilters(filters), [filters]);
@@ -159,9 +161,9 @@ export function ReportsCockpit() {
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div>
           <p className="text-[11px] font-medium uppercase tracking-widest text-muted-foreground">Business Intelligence</p>
-          <h1 className="font-display mt-0.5 text-2xl font-extrabold tracking-tight md:text-[1.75rem]">Reports</h1>
+          <h1 className="font-display mt-0.5 text-2xl font-extrabold tracking-tight md:text-[1.75rem]">{moduleMeta.reportTitle}</h1>
           <p className="mt-0.5 text-[13px] text-muted-foreground">
-            Your executive cockpit — understand the whole business at a glance, no spreadsheets required.
+            {moduleMeta.description}
           </p>
         </div>
 
@@ -200,7 +202,7 @@ export function ReportsCockpit() {
           return (
             <button
               key={m.id}
-              onClick={() => { setModuleScope(m.id as ModuleScope); setTab("overview"); }}
+              onClick={() => { setModuleScope(m.id as ReportModuleId); setTab("overview"); router.push(MODULE_ROUTE[m.id] ?? "/reports"); }}
               className={cn(
                 "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-medium transition",
                 active ? "border-[#4361EE]/40 bg-[#EEF1FD] text-[#3347D6]" : "border-border bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -217,12 +219,7 @@ export function ReportsCockpit() {
         </span>
       </div>
 
-      {/* ── Module-specific cockpit or Shop inline ────────────────────── */}
-      {moduleScope === "sales" && <SalesCockpit />}
-      {moduleScope === "field" && <FieldCockpit />}
-
-      {moduleScope === "shop" && (
-        <>
+      {/* ── Unified cockpit for all module scopes ─────────────────────── */}
       {/* ── Collapsible filter drawer ────────────────────────────────── */}
       <AnimatePresence initial={false}>
         {filtersOpen && (
@@ -243,7 +240,7 @@ export function ReportsCockpit() {
 
       {/* ── Content ──────────────────────────────────────────────────── */}
       <motion.div key={tab} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.2 }}>
-        {tab === "overview" && (
+        {tab === "overview" && moduleScope === "shop" && (
           <div className="space-y-5">
             {/* Section 1 — Executive Summary */}
             <ExecutiveSummary cards={execCards} comparisonLabel="previous period" />
@@ -271,6 +268,9 @@ export function ReportsCockpit() {
           </div>
         )}
 
+        {tab === "overview" && moduleScope === "sales" && <SalesOverview />}
+        {tab === "overview" && moduleScope === "field" && <FieldOverview />}
+
         {tab === "reports" && <ReportCategories data={filtered} range={range} />}
         {tab === "comparison" && <ComparisonEngine data={data} filters={filters} options={options} />}
         {tab === "builder" && <CustomReportBuilder data={data} baseFilters={filters} />}
@@ -287,8 +287,6 @@ export function ReportsCockpit() {
           </div>
         )}
       </motion.div>
-        </>
-      )}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Sidebar, MobileSidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { motion } from "framer-motion";
@@ -11,6 +11,8 @@ import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 import { PreviewBanner } from "@/components/common/preview-banner";
 import { InternalChat } from "@/components/common/internal-chat";
+import { ReportContextProvider, workspaceToModule, moduleToWorkspace } from "@/lib/reports/report-context";
+import type { ReportModuleId } from "@/lib/reports/types";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -62,6 +64,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, [allowed, activeWorkspace]);
 
+  // Bidirectional sync: when the report context scope changes, update workspace.
+  const handleReportScopeChange = useCallback((mod: ReportModuleId) => {
+    const ws = moduleToWorkspace(mod);
+    if (ws !== activeWorkspace) setActiveWorkspace(ws);
+  }, [activeWorkspace]);
+
   // Hold rendering until we know who (if anyone) is signed in — avoids a flash
   // of app content before the guard above redirects an unauthenticated user.
   if (!authReady || !currentUser) {
@@ -69,6 +77,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
+    <ReportContextProvider
+      externalScope={workspaceToModule(activeWorkspace)}
+      onScopeChange={handleReportScopeChange}
+    >
     <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]">
       <Sidebar
         collapsed={collapsed}
@@ -103,5 +115,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
       <InternalChat />
     </div>
+    </ReportContextProvider>
   );
 }

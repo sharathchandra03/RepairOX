@@ -834,18 +834,18 @@ function DeviceHeroCard({
         {/* Device image — uploaded image (from Settings → Price List) fills the
             whole panel. Falls back to a category illustration when none exists.
             Never a broken image. */}
-        <div className="w-[200px] shrink-0 self-stretch bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 grid place-items-center relative overflow-hidden">
+        <div className="w-[220px] shrink-0 self-stretch bg-white grid place-items-center relative overflow-hidden p-4">
           {model.imageUrl ? (
             <img
               src={model.imageUrl}
               alt={model.name}
-              className="absolute inset-0 h-full w-full object-cover"
+              className="h-full w-full object-contain rounded-xl"
             />
           ) : (
             <>
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(67,97,238,0.15),transparent_70%)]" />
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(67,97,238,0.08),transparent_70%)]" />
               <div className="relative">
-                <CategoryIcon className="h-24 w-24 text-blue-400/90" />
+                <CategoryIcon className="h-24 w-24 text-brand-400/70" />
               </div>
             </>
           )}
@@ -909,7 +909,6 @@ function PartsAndPricing({
   search: string;
   onSearchChange: (v: string) => void;
 }) {
-  const tabs = ["Parts & Pricing", "Price History", "Compatibility", "Notes"];
   const [activeTab, setActiveTab] = useState("parts");
   const [page, setPage] = useState(1);
   const pageSize = 10;
@@ -1035,31 +1034,10 @@ function PartsAndPricing({
       transition={{ duration: 0.3, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
       className="rounded-2xl border border-border bg-card shadow-card overflow-hidden"
     >
-      {/* Tab Bar + Search + Filter */}
-      <div className="flex items-center justify-between border-b border-border px-5 pt-3 pb-0">
-        <div className="flex items-center gap-1">
-          {tabs.map((tab) => {
-            const tabKey = tab.toLowerCase().replace(/ & /g, "-").replace(/ /g, "-");
-            const norm = tabKey === "parts-pricing" ? "parts" : tabKey;
-            const isActive = activeTab === norm;
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(norm)}
-                className={cn(
-                  "relative px-4 py-2.5 text-[13px] font-medium transition-colors whitespace-nowrap",
-                  isActive ? "text-brand-600" : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {tab}
-                {isActive && (
-                  <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-full bg-brand-500" />
-                )}
-              </button>
-            );
-          })}
-        </div>
-        <div className="flex items-center gap-2 pb-2">
+      {/* Header + Search + Filter */}
+      <div className="flex flex-col items-center border-b border-border px-5 pt-4 pb-3 gap-3">
+        <h3 className="text-[16px] font-bold text-foreground">Parts & Pricing</h3>
+        <div className="flex items-center gap-2">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
