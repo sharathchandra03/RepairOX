@@ -176,6 +176,8 @@ export default function TicketDetailPage() {
     if (ticket.email) params.set("email", ticket.email);
     if (ticket.address) params.set("address", ticket.address);
     if (ticket.company) params.set("company", ticket.company);
+    // Pass customer type to auto-set invoice type (retail vs business/GST)
+    if (ticket.customerType) params.set("customerType", ticket.customerType);
     params.set("amount", String(ticket.amount));
     if (ticket.technician) params.set("employee", ticket.technician);
 
@@ -416,8 +418,20 @@ export default function TicketDetailPage() {
               </div>
               <DetailField label="Estimated Cost" value={formatINR(ticket.amount)} />
               <DetailField label="Created" value={fmtDate(ticket.createdAt)} />
-              <DetailField label="Expected Resolution" value={ticket.resolutionMinutes ? (ticket.resolutionMinutes >= 60 ? `${Math.floor(ticket.resolutionMinutes / 60)}h ${ticket.resolutionMinutes % 60 ? `${ticket.resolutionMinutes % 60}m` : ""}`.trim() : `${ticket.resolutionMinutes} min`) : "59 min (default)"} />
-              {ticket.dueDate && <DetailField label="Due Time" value={fmtDate(ticket.dueDate)} />}
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-0.5">Expected Resolution</p>
+                <p className="text-sm font-semibold text-[#922B21]">
+                  {ticket.resolutionMinutes ? (ticket.resolutionMinutes >= 60 ? `${Math.floor(ticket.resolutionMinutes / 60)}h ${ticket.resolutionMinutes % 60 ? `${ticket.resolutionMinutes % 60}m` : ""}`.trim() : `${ticket.resolutionMinutes} min`) : "59 min (default)"}
+                </p>
+              </div>
+              {ticket.dueDate && (
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground mb-0.5">Due Time</p>
+                  <p className={cn("text-sm font-semibold", Date.now() > new Date(ticket.dueDate).getTime() && ticket.status !== "completed" && ticket.status !== "delivered" ? "text-[#922B21]" : "text-[#922B21]/80")}>
+                    {fmtDate(ticket.dueDate)}
+                  </p>
+                </div>
+              )}
             </div>
           </DetailSection>
 

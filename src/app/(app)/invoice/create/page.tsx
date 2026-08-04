@@ -237,7 +237,7 @@ function InvoiceWizard() {
       setForm((prev) => ({
         ...prev,
         customer: { name: customer, phone, email, company },
-        details: { ...prev.details, ticketId: fromTicket, employee, status: "draft" },
+        details: { ...prev.details, ticketId: fromTicket, employee, status: "draft", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
         items: flatItems,
         devices: formDevices.length > 0 ? formDevices : prev.devices,
         activeDeviceIndex: 0,

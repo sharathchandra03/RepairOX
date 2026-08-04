@@ -8,7 +8,7 @@ import {
   CheckCircle2, Check, XCircle, MinusCircle, Mail, Phone, MessageCircle,
   Printer, FileText, Plus, Search, User, Building2, Sparkles, ListPlus,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
-  Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList,
+  Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
@@ -96,6 +96,7 @@ type WizardJobData = {
   issue: string;
   priority: string;
   resolutionMinutes: string;
+  customResolutionDate: string;
   accessories: string;
   description: string;
   notes: string;
@@ -125,7 +126,7 @@ function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     device: { brand: "", model: "", imei: "", imeiType: "imei1", assignedBy: "", assignedTo: "", source: "", type: "" },
-    job: { jobType: "service", estimate: "", warranty: "", issue: "", priority: "normal", resolutionMinutes: "", accessories: "", description: "", notes: "" },
+    job: { jobType: "service", estimate: "", warranty: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
     category,
@@ -140,6 +141,7 @@ type WizardData = {
   /** Index of the currently active/expanded device */
   activeDeviceIndex: number;
   contactType: "personal" | "business";
+  gstRate: number;
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
   files: string[];
@@ -156,6 +158,7 @@ const DEFAULT: WizardData = {
   devices: [createWizardDevice()],
   activeDeviceIndex: 0,
   contactType: "personal",
+  gstRate: 18,
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
   files: [],
@@ -197,6 +200,7 @@ function ticketToWizard(t: Ticket): WizardData {
         issue: dr.issue || "",
         priority: dr.priority || "normal",
         resolutionMinutes: dr.resolutionMinutes ? String(dr.resolutionMinutes) : "",
+        customResolutionDate: (dr as any).customResolutionDate || "",
         accessories: dr.accessories || "",
         description: dr.description || "",
         notes: dr.notes || "",
@@ -212,6 +216,7 @@ function ticketToWizard(t: Ticket): WizardData {
       devices,
       activeDeviceIndex: 0,
       contactType: t.company ? "business" : "personal",
+      gstRate: 18,
       customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
       customerId: (t as any).customerId || null,
       files: [],
@@ -239,6 +244,7 @@ function ticketToWizard(t: Ticket): WizardData {
       issue: t.issue,
       priority: t.priority || "normal",
       resolutionMinutes: t.resolutionMinutes ? String(t.resolutionMinutes) : "",
+      customResolutionDate: (t as any).customResolutionDate || "",
       accessories: "",
       description: t.issue,
       notes: t.internalNotes || "",
@@ -254,6 +260,7 @@ function ticketToWizard(t: Ticket): WizardData {
     devices: [singleDevice],
     activeDeviceIndex: 0,
     contactType: t.company ? "business" : "personal",
+    gstRate: 18,
     customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     customerId: (t as any).customerId || null,
     files: [],
@@ -326,7 +333,10 @@ function NewTicketWizard() {
     const allParts = data.devices.flatMap((d) => d.parts);
     const resMinutes = Number(primaryDevice.job.resolutionMinutes) || 59;
     const createdAt = isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString();
-    const dueDate = new Date(new Date(createdAt).getTime() + resMinutes * 60_000).toISOString();
+    // If a custom resolution date was set, use it directly as dueDate
+    const dueDate = primaryDevice.job.customResolutionDate
+      ? primaryDevice.job.customResolutionDate
+      : new Date(new Date(createdAt).getTime() + resMinutes * 60_000).toISOString();
 
     // If no existing customer was selected and we have customer details, save as new customer
     let finalCustomerId = data.customerId;
@@ -412,6 +422,7 @@ function NewTicketWizard() {
       imeiType: primaryDevice.device.imei ? (primaryDevice.device.imeiType as "imei1" | "imei2" | "serial") || "imei1" : undefined,
       internalNotes: primaryDevice.job.notes || undefined,
       customerId: finalCustomerId || undefined,
+      customerType: data.contactType as "personal" | "business",
       // Multi-device data — always store for data consistency
       devices: deviceRecords,
     };
@@ -528,10 +539,10 @@ function NewTicketWizard() {
           {step === 5 && <PartsAssignment data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 6 && <ContactSearch data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 7 && <CustomerForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 8 && <QuoteSummary data={data} onNext={next} isEdit={isEdit} />}
+          {step === 8 && <QuoteSummary data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 9 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 10 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 11 && <SignatureStep onSubmit={handleSubmit} isEdit={isEdit} />}
+          {step === 11 && <ConfirmationStep onSubmit={handleSubmit} isEdit={isEdit} data={data} />}
         </div>
       </WizardShell>
 
@@ -640,7 +651,7 @@ function titleFor(step: number) {
     "Quotation Summary",
     "Pre-Quality Check",
     "Upload Photos & Documents",
-    "Customer Signature",
+    "Ticket Confirmation",
   ][step - 1];
 }
 function subtitleFor(step: number) {
@@ -655,7 +666,7 @@ function subtitleFor(step: number) {
     "Review the estimate before approval.",
     "Tick the visible condition checkpoints.",
     "Attach device photos and any paperwork.",
-    "Capture the customer signature to confirm.",
+    "Verify all details before creating the ticket.",
   ][step - 1];
 }
 
@@ -1087,14 +1098,62 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
     );
     setData({ ...data, devices: updatedDevices });
   };
+
+  // Custom date/time picker state
+  const [showCustomPicker, setShowCustomPicker] = useState(false);
+  const [customDate, setCustomDate] = useState<Date | null>(j.customResolutionDate ? new Date(j.customResolutionDate) : null);
+  const [pickerMonth, setPickerMonth] = useState(new Date().getMonth());
+  const [pickerYear, setPickerYear] = useState(new Date().getFullYear());
+  const [pickerHour, setPickerHour] = useState(customDate ? customDate.getHours() % 12 || 12 : 4);
+  const [pickerMinute, setPickerMinute] = useState(customDate ? customDate.getMinutes() : 30);
+  const [pickerAmPm, setPickerAmPm] = useState<"AM" | "PM">(customDate ? (customDate.getHours() >= 12 ? "PM" : "AM") : "PM");
+
+  const handleResolutionChange = (v: string) => {
+    if (v === "custom") {
+      setShowCustomPicker(true);
+    } else {
+      set("resolutionMinutes", v);
+      // Clear custom date when a preset is selected
+      const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+        i === activeIdx ? { ...dev, job: { ...dev.job, resolutionMinutes: v, customResolutionDate: "" } } : dev
+      );
+      setData({ ...data, devices: updatedDevices });
+    }
+  };
+
+  const confirmCustomDate = () => {
+    if (!customDate) return;
+    const finalDate = new Date(customDate);
+    const hours = pickerAmPm === "PM" ? (pickerHour === 12 ? 12 : pickerHour + 12) : (pickerHour === 12 ? 0 : pickerHour);
+    finalDate.setHours(hours, pickerMinute, 0, 0);
+    // Calculate minutes from now
+    const minutesFromNow = Math.max(1, Math.round((finalDate.getTime() - Date.now()) / 60000));
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, job: { ...dev.job, resolutionMinutes: String(minutesFromNow), customResolutionDate: finalDate.toISOString() } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+    setShowCustomPicker(false);
+  };
+
+  // Format custom date for display
+  const customResLabel = j.customResolutionDate ? (() => {
+    const d = new Date(j.customResolutionDate);
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" }) + " • " + d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+  })() : null;
+
+  // Calendar helpers
+  const getDaysInMonth = (month: number, year: number) => new Date(year, month + 1, 0).getDate();
+  const getFirstDayOfMonth = (month: number, year: number) => new Date(year, month, 1).getDay();
+  const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+
   return (
-    <div className={FORM_CARD}>
+    <div className={FORM_CARD_COMPACT}>
       <DeviceSwitcher data={data} setData={setData} />
-      <div className="grid grid-cols-1 gap-x-8 gap-y-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-6 gap-y-3 lg:grid-cols-2">
         {/* Left Column — Job Overview */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <SectionLabel icon={ClipboardList}>Job Overview</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
             <Field label="Job Type">
               <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
                 { label: "Service", value: "service" },
@@ -1118,14 +1177,29 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               ]} />
             </Field>
             <Field label="Expected Resolution Time">
-              <RSelect value={j.resolutionMinutes} onChange={(v) => set("resolutionMinutes", v)} placeholder="Default (59 min)" options={[
-                { label: "30 Minutes", value: "30" },
-                { label: "45 Minutes", value: "45" },
-                { label: "1 Hour", value: "60" },
-                { label: "2 Hours", value: "120" },
-                { label: "4 Hours", value: "240" },
-                { label: "8 Hours (End of Day)", value: "480" },
-              ]} />
+              {customResLabel ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCustomPicker(true)}
+                  className="flex h-11 w-full items-center justify-between gap-2 rounded-xl border border-[#C0392B]/30 bg-[#C0392B]/[0.04] px-3.5 text-sm font-medium text-[#922B21] transition hover:border-[#C0392B]/50"
+                >
+                  <span className="flex items-center gap-1.5 truncate">
+                    <Clock className="h-3.5 w-3.5 text-[#C0392B]/70" />
+                    {customResLabel}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 shrink-0 text-[#C0392B]/50" />
+                </button>
+              ) : (
+                <RSelect value={j.resolutionMinutes} onChange={handleResolutionChange} placeholder="Default (59 min)" options={[
+                  { label: "30 Minutes", value: "30" },
+                  { label: "45 Minutes", value: "45" },
+                  { label: "1 Hour", value: "60" },
+                  { label: "2 Hours", value: "120" },
+                  { label: "4 Hours", value: "240" },
+                  { label: "8 Hours (End of Day)", value: "480" },
+                  { label: "Custom Date & Time", value: "custom" },
+                ]} />
+              )}
             </Field>
           </div>
           <Field label="Issue"><Input value={j.issue} onChange={(e: any) => set("issue", e.target.value)} placeholder="Display not working" className="h-11" /></Field>
@@ -1133,16 +1207,110 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
         </div>
 
         {/* Right Column — Notes */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           <SectionLabel icon={StickyNote}>Notes</SectionLabel>
-          <Field label="Problem Description"><Textarea value={j.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" rows={5} className="min-h-0 h-[124px]" /></Field>
-          <Field label="Internal Notes"><Textarea value={j.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" rows={3} className="min-h-0 h-[76px]" /></Field>
+          <Field label="Problem Description"><Textarea value={j.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" rows={4} className="min-h-0 h-[108px]" /></Field>
+          <Field label="Internal Notes"><Textarea value={j.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" rows={3} className="min-h-0 h-[72px]" /></Field>
           <Field label="Estimate (₹)"><Input value={j.estimate} onChange={(e: any) => set("estimate", e.target.value)} placeholder="0" type="number" className="h-11 tabular-nums" /></Field>
         </div>
       </div>
       {!isEdit && (
-        <div className="mt-6 flex justify-end">
+        <div className="mt-5 flex justify-end">
           <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
+        </div>
+      )}
+
+      {/* Custom Date & Time Picker Modal */}
+      {showCustomPicker && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowCustomPicker(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <h3 className="text-base font-bold">Select Resolution Date & Time</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">Choose a custom expected resolution deadline.</p>
+
+            {/* Month/Year Navigation */}
+            <div className="mt-4 flex items-center justify-between">
+              <button type="button" onClick={() => { if (pickerMonth === 0) { setPickerMonth(11); setPickerYear(pickerYear - 1); } else setPickerMonth(pickerMonth - 1); }}
+                className="grid h-8 w-8 place-items-center rounded-lg border border-border hover:bg-muted transition">
+                <ArrowLeft className="h-3.5 w-3.5" />
+              </button>
+              <span className="text-sm font-semibold">{MONTHS[pickerMonth]} {pickerYear}</span>
+              <button type="button" onClick={() => { if (pickerMonth === 11) { setPickerMonth(0); setPickerYear(pickerYear + 1); } else setPickerMonth(pickerMonth + 1); }}
+                className="grid h-8 w-8 place-items-center rounded-lg border border-border hover:bg-muted transition">
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
+
+            {/* Calendar Grid */}
+            <div className="mt-3">
+              <div className="grid grid-cols-7 text-center text-[10px] font-semibold text-muted-foreground mb-1">
+                {["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((d) => <span key={d}>{d}</span>)}
+              </div>
+              <div className="grid grid-cols-7 gap-0.5">
+                {Array.from({ length: getFirstDayOfMonth(pickerMonth, pickerYear) }).map((_, i) => <span key={`e-${i}`} />)}
+                {Array.from({ length: getDaysInMonth(pickerMonth, pickerYear) }).map((_, i) => {
+                  const day = i + 1;
+                  const thisDate = new Date(pickerYear, pickerMonth, day);
+                  const today = new Date(); today.setHours(0, 0, 0, 0);
+                  const isPast = thisDate < today;
+                  const isSelected = customDate && customDate.getDate() === day && customDate.getMonth() === pickerMonth && customDate.getFullYear() === pickerYear;
+                  const isToday = thisDate.getTime() === today.getTime();
+                  return (
+                    <button
+                      key={day}
+                      type="button"
+                      disabled={isPast}
+                      onClick={() => setCustomDate(new Date(pickerYear, pickerMonth, day))}
+                      className={cn(
+                        "h-8 w-full rounded-lg text-[12px] font-medium transition",
+                        isPast && "text-muted-foreground/40 cursor-not-allowed",
+                        !isPast && !isSelected && "hover:bg-[#EEF1FD] hover:text-[#4361EE]",
+                        isSelected && "bg-[#4361EE] text-white shadow-sm",
+                        isToday && !isSelected && "ring-1 ring-[#4361EE]/40"
+                      )}
+                    >
+                      {day}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Time Picker */}
+            <div className="mt-4 flex items-center gap-2">
+              <div className="flex-1">
+                <Label className="text-[10px]">Hour</Label>
+                <select value={pickerHour} onChange={(e) => setPickerHour(Number(e.target.value))}
+                  className="h-10 w-full rounded-xl border border-border bg-card px-2 text-sm font-medium focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15">
+                  {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
+                </select>
+              </div>
+              <span className="mt-4 text-lg font-bold text-muted-foreground">:</span>
+              <div className="flex-1">
+                <Label className="text-[10px]">Minute</Label>
+                <select value={pickerMinute} onChange={(e) => setPickerMinute(Number(e.target.value))}
+                  className="h-10 w-full rounded-xl border border-border bg-card px-2 text-sm font-medium focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15">
+                  {[0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55].map((m) => <option key={m} value={m}>{String(m).padStart(2, "0")}</option>)}
+                </select>
+              </div>
+              <div className="flex-1">
+                <Label className="text-[10px]">AM/PM</Label>
+                <select value={pickerAmPm} onChange={(e) => setPickerAmPm(e.target.value as "AM" | "PM")}
+                  className="h-10 w-full rounded-xl border border-border bg-card px-2 text-sm font-medium focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15">
+                  <option value="AM">AM</option>
+                  <option value="PM">PM</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowCustomPicker(false)}>Cancel</Button>
+              <Button size="sm" onClick={confirmCustomDate} disabled={!customDate}>
+                <Check className="h-3.5 w-3.5" /> Confirm
+              </Button>
+            </div>
+          </motion.div>
         </div>
       )}
     </div>
@@ -1150,6 +1318,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
 }
 
 const FORM_CARD = "rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 sm:p-8 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
+const FORM_CARD_COMPACT = "rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-5 sm:p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
 
 /** Inline device tab switcher — shown above Job Details & Parts steps when multiple devices exist */
 function DeviceSwitcher({ data, setData }: { data: any; setData: (d: any) => void }) {
@@ -1416,8 +1585,9 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(data.customerId || null);
 
-  // Live search results
-  const results = q.trim().length >= 2 ? searchCustomers(customers, q) : [];
+  // Live search results — filtered by contact type
+  const allResults = q.trim().length >= 2 ? searchCustomers(customers, q) : [];
+  const results = allResults.filter((c) => c.type === data.contactType);
 
   // Select an existing customer and auto-populate step 7
   const selectCustomer = (c: Customer) => {
@@ -1445,7 +1615,14 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="flex flex-col items-center">
-        <SegmentedTabs value={data.contactType} onChange={(v) => setData({ ...data, contactType: v })} options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]} />
+        <SegmentedTabs value={data.contactType} onChange={(v) => { setData({ ...data, contactType: v }); setSelectedId(null); }} options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]} />
+        {/* Type explanation */}
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">
+          {data.contactType === "personal"
+            ? "Retail customer — invoice will be generated without GST details."
+            : "GST / Business customer — invoice will include tax details and company billing."
+          }
+        </p>
 
         {/* Search Input */}
         <div className="relative mt-6 w-full max-w-lg">
@@ -1640,60 +1817,113 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
 }
 
 /* ---------------- Step 8: Quote ---------------- */
-function QuoteSummary({ data, onNext, isEdit }: any) {
+function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const allParts = data.devices.flatMap((d: WizardDevice) => d.parts);
   const partsTotal = allParts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
   const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
-  // Use device estimates if set, otherwise fall back to parts-based calculation
-  const subtotal = estimatesTotal > 0 ? estimatesTotal : partsTotal;
-  const tax = Math.round(subtotal * 0.18);
+  // Subtotal: use whichever is higher — parts total or estimates total — to reflect actual charges
+  const subtotal = Math.max(estimatesTotal, partsTotal) || estimatesTotal || partsTotal;
+  const isBusiness = data.contactType === "business";
+  const gstRate = data.gstRate || 18;
+  const tax = isBusiness ? Math.round(subtotal * (gstRate / 100)) : 0;
   const total = subtotal + tax;
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
-        <div className="rounded-2xl border border-border">
+        {/* Line Items Table */}
+        <div className="rounded-2xl border border-border overflow-hidden">
           <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
           </div>
-          {/* Per-device estimates */}
+          {/* Per-device estimates (multi-device) */}
           {data.devices.length > 1 && data.devices.map((d: WizardDevice, idx: number) => {
             const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
-            const devEstimate = Number(d.job.estimate) || d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+            const devTotal = d.parts.length > 0
+              ? d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0)
+              : (Number(d.job.estimate) || 0);
             return (
-              <div key={d.id} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30 border-t border-border first:border-0">
-                <div>
-                  <span className="font-medium">{d.job.issue || "Repair"}</span>
-                  <span className="block text-[11px] text-muted-foreground">{devLabel}</span>
+              <div key={d.id}>
+                {/* Device header */}
+                <div className="grid grid-cols-3 px-4 py-3 text-sm bg-background border-t border-border">
+                  <div>
+                    <span className="font-medium">{d.job.issue || "Repair"}</span>
+                    <span className="block text-[11px] text-muted-foreground">{devLabel}</span>
+                  </div>
+                  <div className="text-center">1</div>
+                  <div className="text-right tnum font-medium">{formatINR(devTotal)}</div>
                 </div>
-                <div className="text-center">1</div>
-                <div className="text-right tnum">{formatINR(devEstimate)}</div>
+                {/* Device parts */}
+                {d.parts.map((p: any, pi: number) => (
+                  <div key={pi} className="grid grid-cols-3 px-4 py-2 text-[13px] text-muted-foreground bg-muted/20 border-t border-border/50 pl-7">
+                    <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
+                  </div>
+                ))}
               </div>
             );
           })}
-          {/* Parts breakdown */}
-          {allParts.length > 0 && data.devices.length <= 1 && allParts.map((p: any, i: number) => (
-            <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm odd:bg-background even:bg-muted/30 border-t border-border first:border-0">
+          {/* Single device: show parts */}
+          {data.devices.length <= 1 && allParts.length > 0 && allParts.map((p: any, i: number) => (
+            <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border odd:bg-background even:bg-muted/20">
               <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
             </div>
           ))}
-          {allParts.length === 0 && data.devices.length <= 1 && (
-            <div className="p-6 text-center text-sm text-muted-foreground">No parts added - quotation will reflect estimate only.</div>
+          {/* Single device: estimate line if estimate differs from parts total */}
+          {data.devices.length <= 1 && estimatesTotal > 0 && estimatesTotal !== partsTotal && (
+            <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
+              <div className="font-medium">{data.devices[0]?.job?.issue || "Service Charges"}</div>
+              <div className="text-center">1</div>
+              <div className="text-right tnum">{formatINR(estimatesTotal)}</div>
+            </div>
           )}
-          <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border">
-            <div>GST (18%)</div><div className="text-center">—</div><div className="text-right tnum">{formatINR(tax)}</div>
-          </div>
+          {/* Empty state */}
+          {allParts.length === 0 && estimatesTotal === 0 && (
+            <div className="p-6 text-center text-sm text-muted-foreground">No parts or estimate added.</div>
+          )}
+          {/* GST row for business */}
+          {isBusiness && (
+            <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-muted/30">
+              <div className="font-medium">GST ({gstRate}%)</div><div className="text-center">—</div><div className="text-right tnum">{formatINR(tax)}</div>
+            </div>
+          )}
         </div>
+
+        {/* Right Summary Panel */}
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
-            {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(estimatesTotal || partsTotal)} />}
+            {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(subtotal)} />}
             {data.devices.length <= 1 && <QRow k="Sub-total" v={formatINR(subtotal)} />}
-            <QRow k="Tax (18%)" v={formatINR(tax)} />
+            {isBusiness && <QRow k={`GST (${gstRate}%)`} v={formatINR(tax)} />}
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
+
+          {/* GST Rate selector for Business */}
+          {isBusiness && setData && (
+            <div className="mt-4 pt-3 border-t border-border">
+              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">GST Rate</Label>
+              <div className="mt-1.5 flex items-center gap-1.5">
+                {[5, 12, 18, 28].map((rate) => (
+                  <button
+                    key={rate}
+                    type="button"
+                    onClick={() => setData({ ...data, gstRate: rate })}
+                    className={cn(
+                      "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
+                      gstRate === rate
+                        ? "bg-[#4361EE] text-white shadow-sm"
+                        : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                    )}
+                  >
+                    {rate}%
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           {!isEdit && <Button size="lg" className="mt-4 w-full" onClick={onNext}>Approve Quote <ArrowRight className="h-4 w-4" /></Button>}
-          <p className="mt-2 text-center text-[11px] text-muted-foreground">Customer will be asked to sign at the end of this flow.</p>
+          <p className="mt-2 text-center text-[11px] text-muted-foreground">You'll confirm all details in the final step.</p>
         </div>
       </div>
     </div>
@@ -1955,32 +2185,65 @@ function UploadStep({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 11: Signature ---------------- */
-function SignatureStep({ onSubmit, isEdit }: { onSubmit: () => void; isEdit: boolean }) {
-  const [signed, setSigned] = useState(false);
+/* ---------------- Step 11: Ticket Confirmation ---------------- */
+function ConfirmationStep({ onSubmit, isEdit, data }: { onSubmit: () => void; isEdit: boolean; data: any }) {
+  const [confirmed, setConfirmed] = useState(false);
+  const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
+  const primaryDevice = data.devices[0];
+  const hasIssue = !!(primaryDevice?.job?.issue || primaryDevice?.job?.description);
+  const hasEstimate = !!(Number(primaryDevice?.job?.estimate) > 0 || data.devices.some((d: any) => d.parts.length > 0));
+
   return (
-    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
-      <p className="text-center text-sm text-muted-foreground">
-        {isEdit ? "Confirm your changes by signing below." : "By signing below the customer agrees to the diagnosis, estimate and our service terms."}
-      </p>
-      <div onClick={() => setSigned(true)} className={cn("relative mt-5 grid h-[260px] cursor-crosshair place-items-center overflow-hidden rounded-2xl border-2 border-dashed bg-gradient-to-b from-indigo-50/40 to-white transition", signed ? "border-indigo-300" : "border-border")}>
-        {!signed ? (
-          <div className="text-center text-muted-foreground">
-            <FileSignature className="mx-auto h-10 w-10" />
-            <p className="mt-2 text-sm">Tap & sign here</p>
-          </div>
-        ) : (
-          <motion.svg initial={{ opacity: 0 }} animate={{ opacity: 1 }} viewBox="0 0 400 120" className="h-32 w-[80%] text-brand-700" fill="none">
-            <motion.path initial={{ pathLength: 0 }} animate={{ pathLength: 1 }} transition={{ duration: 0.9 }} d="M10 90 C 60 30, 90 110, 130 50 S 220 110, 260 60 S 340 100, 390 50" stroke="currentColor" strokeWidth="3" strokeLinecap="round" />
-          </motion.svg>
-        )}
-        <span className="absolute bottom-3 left-1/2 -translate-x-1/2 text-[10px] uppercase tracking-wider text-muted-foreground">x ─────────────── customer signature</span>
+    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-5 sm:p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-4">
+        <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
+          <ShieldCheck className="h-4.5 w-4.5" />
+        </span>
+        <div>
+          <h3 className="text-sm font-bold">{isEdit ? "Confirm Changes" : "Ticket Confirmation"}</h3>
+          <p className="text-[11px] text-muted-foreground">Verify all details before {isEdit ? "saving" : "creating the ticket"}.</p>
+        </div>
       </div>
-      <div className={cn("mt-5 flex items-center justify-between", isEdit && "hidden")}>
-        <Button variant="outline" onClick={() => setSigned(false)}><RotateCcw className="h-4 w-4" /> Clear</Button>
-        <Button size="lg" onClick={onSubmit} disabled={!signed}>
-          <ShieldCheck className="h-4 w-4" /> {isEdit ? "Save Changes" : "Submit & finalise"}
+
+      {/* Verification Checklist — compact grid */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-4">
+        <ConfirmCheckItem checked={!!customerName && customerName !== "Walk-in Customer"} label="Customer verified" sublabel={customerName} />
+        <ConfirmCheckItem checked={!!(primaryDevice?.device?.brand || primaryDevice?.device?.model)} label="Device verified" sublabel={[primaryDevice?.device?.brand, primaryDevice?.device?.model].filter(Boolean).join(" ") || "Not specified"} />
+        <ConfirmCheckItem checked={hasIssue} label="Problem confirmed" sublabel={primaryDevice?.job?.issue || primaryDevice?.job?.description || "Not specified"} />
+        <ConfirmCheckItem checked={hasEstimate} label="Charges explained" sublabel={hasEstimate ? `₹${primaryDevice?.job?.estimate || data.devices.reduce((s: number, d: any) => s + d.parts.reduce((ps: number, p: any) => ps + (p.total || 0), 0), 0)}` : "No estimate"} />
+      </div>
+
+      {/* Confirmation Checkbox + Submit — inline */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 rounded-xl border border-border bg-white px-4 py-3">
+        <label className="flex items-center gap-2.5 cursor-pointer select-none flex-1 min-w-0">
+          <input
+            type="checkbox"
+            checked={confirmed}
+            onChange={(e) => setConfirmed(e.target.checked)}
+            className="h-4.5 w-4.5 rounded border-2 border-border text-[#4361EE] focus:ring-[#4361EE]/20 focus:ring-2 accent-[#4361EE] shrink-0"
+          />
+          <span className="text-[13px] font-medium text-foreground leading-tight">
+            I confirm all ticket details have been verified.
+          </span>
+        </label>
+        <Button size="md" onClick={onSubmit} disabled={!confirmed} className="shrink-0 whitespace-nowrap">
+          <ShieldCheck className="h-3.5 w-3.5" /> {isEdit ? "Save Changes" : "Create Ticket"}
         </Button>
+      </div>
+    </div>
+  );
+}
+
+function ConfirmCheckItem({ checked, label, sublabel }: { checked: boolean; label: string; sublabel: string }) {
+  return (
+    <div className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2.5 transition", checked ? "bg-emerald-50/70 border border-emerald-100" : "bg-amber-50/60 border border-amber-100")}>
+      <span className={cn("grid h-5 w-5 shrink-0 place-items-center rounded-full", checked ? "bg-emerald-500 text-white" : "bg-amber-300 text-amber-800")}>
+        {checked ? <Check className="h-3 w-3" strokeWidth={3} /> : <Minus className="h-3 w-3" strokeWidth={3} />}
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className={cn("text-[12px] font-semibold leading-tight", checked ? "text-emerald-800" : "text-amber-800")}>{label}</p>
+        <p className="text-[10px] text-muted-foreground truncate">{sublabel}</p>
       </div>
     </div>
   );

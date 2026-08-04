@@ -13,6 +13,7 @@ import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
 import { DraggableKpiRow, type KpiCardItem } from "@/components/dashboard/draggable-kpi-row";
 import { TodoWidget } from "@/components/dashboard/todo-widget";
 import { OrdersStatusWidget } from "@/components/dashboard/orders-status-widget";
+import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
@@ -50,7 +51,9 @@ function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }
 export default function Dashboard() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_high" | "amount_low">("newest");
   const [filterBy, setFilterBy] = useState<"all" | "received" | "repairing" | "completed" | "delivered">("all");
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "30days" | "all">("all");
+  const [dateRange, setDateRange] = useState<"yesterday" | "this_month" | "last_month" | "this_year" | "custom">("this_month");
+  const [customRange, setCustomRange] = useState<DateRange>({ start: null, end: null });
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const { tickets, invoices, inventory } = useStore();
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
@@ -61,27 +64,59 @@ export default function Dashboard() {
   const { can } = usePermissions();
   const canEditTarget = can("edit_dashboard_targets");
 
+  // Date range label helper
+  const dateRangeLabel = useMemo(() => {
+    switch (dateRange) {
+      case "yesterday": return "Yesterday";
+      case "this_month": return "This Month";
+      case "last_month": return "Last Month";
+      case "this_year": return "This Year";
+      case "custom": {
+        if (customRange.start && customRange.end) {
+          const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+          return `${fmt(customRange.start)} – ${fmt(customRange.end)}`;
+        }
+        return "Custom Range";
+      }
+      default: return "This Month";
+    }
+  }, [dateRange, customRange]);
+
   // Apply filters to tickets
   const filteredTickets = useMemo(() => {
     let list = tickets;
     // Filter by status
     if (filterBy !== "all") list = list.filter((t) => t.status === filterBy);
     // Filter by date
-    if (dateRange !== "all") {
-      const now = new Date();
-      const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
-      const ts = todayStart.getTime();
-      list = list.filter((t) => {
-        const created = new Date(t.createdAt).getTime();
-        switch (dateRange) {
-          case "today": return created >= ts;
-          case "yesterday": return created >= ts - 86_400_000 && created < ts;
-          case "7days": return created >= ts - 7 * 86_400_000;
-          case "30days": return created >= ts - 30 * 86_400_000;
-          default: return true;
+    const now = new Date();
+    const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
+    const ts = todayStart.getTime();
+    list = list.filter((t) => {
+      const created = new Date(t.createdAt).getTime();
+      switch (dateRange) {
+        case "yesterday": return created >= ts - 86_400_000 && created < ts;
+        case "this_month": {
+          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+          return created >= monthStart;
         }
-      });
-    }
+        case "last_month": {
+          const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
+          const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+          return created >= lastMonthStart && created < thisMonthStart;
+        }
+        case "this_year": {
+          const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
+          return created >= yearStart;
+        }
+        case "custom": {
+          if (!customRange.start || !customRange.end) return true;
+          const s = new Date(customRange.start); s.setHours(0,0,0,0);
+          const e = new Date(customRange.end); e.setHours(23,59,59,999);
+          return created >= s.getTime() && created <= e.getTime();
+        }
+        default: return true;
+      }
+    });
     // Sort
     list = [...list].sort((a, b) => {
       switch (sortBy) {
@@ -93,54 +128,109 @@ export default function Dashboard() {
       }
     });
     return list;
-  }, [tickets, filterBy, dateRange, sortBy]);
+  }, [tickets, filterBy, dateRange, customRange, sortBy]);
 
   // Compute live KPIs from real data
   const now = useMemo(() => new Date(), []);
   const todayStart = useMemo(() => { const d = new Date(now); d.setHours(0,0,0,0); return d; }, [now]);
-  const monthStart = useMemo(() => new Date(now.getFullYear(), now.getMonth(), 1), [now]);
-  const daysInMonth = useMemo(() => new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate(), [now]);
-  const daysElapsed = useMemo(() => Math.max(1, now.getDate()), [now]);
 
-  // Revenue from invoices (not tickets) — this month
+  // Date range boundaries for KPI calculations — derived from the active filter
+  const { rangeStart, rangeEnd, rangeDays } = useMemo(() => {
+    const n = new Date();
+    const today = new Date(n); today.setHours(0, 0, 0, 0);
+    let start: Date;
+    let end: Date = new Date(n); // now
+    let days: number;
+
+    switch (dateRange) {
+      case "yesterday": {
+        start = new Date(today.getTime() - 86_400_000);
+        end = new Date(today.getTime() - 1); // end of yesterday
+        days = 1;
+        break;
+      }
+      case "this_month": {
+        start = new Date(n.getFullYear(), n.getMonth(), 1);
+        days = Math.max(1, n.getDate());
+        break;
+      }
+      case "last_month": {
+        start = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+        end = new Date(n.getFullYear(), n.getMonth(), 0, 23, 59, 59, 999);
+        days = end.getDate();
+        break;
+      }
+      case "this_year": {
+        start = new Date(n.getFullYear(), 0, 1);
+        days = Math.max(1, Math.ceil((n.getTime() - start.getTime()) / 86_400_000));
+        break;
+      }
+      case "custom": {
+        if (customRange.start && customRange.end) {
+          start = new Date(customRange.start); start.setHours(0, 0, 0, 0);
+          end = new Date(customRange.end); end.setHours(23, 59, 59, 999);
+          days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86_400_000));
+        } else {
+          start = new Date(n.getFullYear(), n.getMonth(), 1);
+          days = Math.max(1, n.getDate());
+        }
+        break;
+      }
+      default: {
+        start = new Date(n.getFullYear(), n.getMonth(), 1);
+        days = Math.max(1, n.getDate());
+      }
+    }
+    return { rangeStart: start, rangeEnd: end, rangeDays: days };
+  }, [dateRange, customRange]);
+
+  // Filtered invoices by date range
+  const filteredInvoices = useMemo(() => {
+    return invoices.filter((i) => {
+      const created = new Date(i.createdAt).getTime();
+      return created >= rangeStart.getTime() && created <= rangeEnd.getTime();
+    });
+  }, [invoices, rangeStart, rangeEnd]);
+
+  // Revenue from invoices within the selected range
   const revenueMetrics = useMemo(() => {
-    const monthInvoices = invoices.filter((i) => new Date(i.createdAt).getTime() >= monthStart.getTime());
-    const totalRevenue = monthInvoices.reduce((s, i) => s + i.total, 0);
-    const avgRevenue = Math.round(totalRevenue / daysElapsed);
+    const totalRevenue = filteredInvoices.reduce((s, i) => s + i.total, 0);
+    const avgRevenue = Math.round(totalRevenue / rangeDays);
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const projection = avgRevenue * daysInMonth;
     return { totalRevenue, avgRevenue, projection };
-  }, [invoices, monthStart, daysElapsed, daysInMonth]);
+  }, [filteredInvoices, rangeDays, now]);
 
-  // Stock value from inventory (cost basis — buying price)
+  // Stock value from inventory (cost basis — point-in-time, not date-filtered)
   const stockValue = useMemo(() => {
     if (inventory.length === 0) return 0;
     return inventory.reduce((s, item) => s + (item.currentStock * (item.regularBuyingPrice || item.defaultPrice || 0)), 0);
   }, [inventory]);
 
-  // Dues outstanding from invoices (overdue + unpaid balances)
+  // Dues outstanding from invoices within the selected range
   const duesMetrics = useMemo(() => {
-    const outstanding = invoices.filter((i) => {
+    const outstanding = filteredInvoices.filter((i) => {
       if (i.status === "paid" || i.status === "cancelled") return false;
       return i.total - i.paidAmount > 0;
     });
     const totalDues = outstanding.reduce((s, i) => s + (i.total - i.paidAmount), 0);
-    const overdueInvoices = invoices.filter((i) => {
+    const overdueInvoices = filteredInvoices.filter((i) => {
       if (i.status === "paid" || i.status === "cancelled") return false;
       if (i.total - i.paidAmount <= 0) return false;
       return i.dueDate && Date.now() > new Date(i.dueDate).getTime();
     });
     const overdueAmount = overdueInvoices.reduce((s, i) => s + (i.total - i.paidAmount), 0);
     return { totalDues, overdueCount: overdueInvoices.length, overdueAmount, outstandingCount: outstanding.length };
-  }, [invoices]);
+  }, [filteredInvoices]);
 
-  // Tickets today with average and projection
+  // Tickets within selected range
   const ticketMetrics = useMemo(() => {
-    const todayTickets = tickets.filter((t) => new Date(t.createdAt).getTime() >= todayStart.getTime()).length;
-    const monthTickets = tickets.filter((t) => new Date(t.createdAt).getTime() >= monthStart.getTime()).length;
-    const avgPerDay = Math.round((monthTickets / daysElapsed) * 10) / 10;
+    const rangeTickets = filteredTickets.length;
+    const avgPerDay = Math.round((rangeTickets / rangeDays) * 10) / 10;
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const projection = Math.round(avgPerDay * daysInMonth);
-    return { todayTickets, avgPerDay, projection };
-  }, [tickets, todayStart, monthStart, daysElapsed, daysInMonth]);
+    return { rangeTickets, avgPerDay, projection };
+  }, [filteredTickets, rangeDays, now]);
 
   // KPI cards map — each card definition keyed by its stable ID
   const kpiCardsMap = useMemo<Record<string, KpiCardItem>>(() => ({
@@ -153,7 +243,7 @@ export default function Dashboard() {
           format={formatINR}
           tone="emerald"
           delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
-          hint={`Projection: ${formatINR(revenueMetrics.projection)} this month`}
+          hint={`${rangeDays} day${rangeDays !== 1 ? "s" : ""} · ${filteredInvoices.length} invoice${filteredInvoices.length !== 1 ? "s" : ""}`}
           progress={{ value: Math.min(100, Math.round((revenueMetrics.totalRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
           onCardClick={canEditTarget ? () => { setEditTargetValue(monthlyTarget.toLocaleString("en-IN")); setShowTargetEdit(true); } : undefined}
         />
@@ -191,16 +281,16 @@ export default function Dashboard() {
       id: "tickets_today",
       node: (
         <KpiCard
-          title="Tickets Today"
-          value={ticketMetrics.todayTickets}
+          title="Tickets"
+          value={ticketMetrics.rangeTickets}
           tone="violet"
           delta={{ value: `Avg ${ticketMetrics.avgPerDay}/day`, up: true }}
           hint={`Projection: ${ticketMetrics.projection} tickets this month`}
-          progress={{ value: ticketMetrics.todayTickets > 0 ? Math.min(100, Math.round((ticketMetrics.todayTickets / Math.max(ticketMetrics.avgPerDay, 1)) * 100)) : 0, label: "vs daily avg" }}
+          progress={{ value: ticketMetrics.rangeTickets > 0 ? Math.min(100, Math.round((ticketMetrics.rangeTickets / Math.max(ticketMetrics.avgPerDay * rangeDays, 1)) * 100)) : 0, label: "vs avg" }}
         />
       ),
     },
-  }), [revenueMetrics, stockValue, inventory, duesMetrics, invoices, ticketMetrics, monthlyTarget, canEditTarget]);
+  }), [revenueMetrics, stockValue, inventory, duesMetrics, invoices, ticketMetrics, monthlyTarget, canEditTarget, rangeDays, filteredInvoices]);
 
   // Ordered cards array based on saved user preference
   const orderedKpiCards = useMemo<KpiCardItem[]>(
@@ -267,22 +357,51 @@ export default function Dashboard() {
         </Dropdown>
 
         {/* Date */}
-        <Dropdown align="left" width="w-40" trigger={({ toggle }) => (
-          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", dateRange !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50")}>
-            <CalendarDays className="h-3.5 w-3.5" /> {dateRange === "all" ? "All Time" : dateRange === "today" ? "Today" : dateRange === "yesterday" ? "Yesterday" : dateRange === "7days" ? "Last 7 Days" : "Last 30 Days"}
+        <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
+          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", dateRange !== "this_month" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50")}>
+            <CalendarDays className="h-3.5 w-3.5" /> {dateRangeLabel}
           </button>
         )}>
           {(close) => (<>
-            <MenuItem onClick={() => { setDateRange("all"); close(); }} className={cn(dateRange === "all" && "bg-muted font-semibold")}>All Time</MenuItem>
-            <MenuItem onClick={() => { setDateRange("today"); close(); }} className={cn(dateRange === "today" && "bg-muted font-semibold")}>Today</MenuItem>
             <MenuItem onClick={() => { setDateRange("yesterday"); close(); }} className={cn(dateRange === "yesterday" && "bg-muted font-semibold")}>Yesterday</MenuItem>
-            <MenuItem onClick={() => { setDateRange("7days"); close(); }} className={cn(dateRange === "7days" && "bg-muted font-semibold")}>Last 7 Days</MenuItem>
-            <MenuItem onClick={() => { setDateRange("30days"); close(); }} className={cn(dateRange === "30days" && "bg-muted font-semibold")}>Last 30 Days</MenuItem>
+            <MenuItem onClick={() => { setDateRange("this_month"); close(); }} className={cn(dateRange === "this_month" && "bg-muted font-semibold")}>This Month</MenuItem>
+            <MenuItem onClick={() => { setDateRange("last_month"); close(); }} className={cn(dateRange === "last_month" && "bg-muted font-semibold")}>Last Month</MenuItem>
+            <MenuItem onClick={() => { setDateRange("this_year"); close(); }} className={cn(dateRange === "this_year" && "bg-muted font-semibold")}>This Year</MenuItem>
+            <MenuItem onClick={() => { setShowDatePicker(true); close(); }} className={cn(dateRange === "custom" && "bg-muted font-semibold")}>Custom Range</MenuItem>
           </>)}
         </Dropdown>
 
-        <span className="ml-auto text-[11px] text-muted-foreground">{filteredTickets.length} ticket{filteredTickets.length !== 1 ? "s" : ""}</span>
+        {/* Quick date filter strip — right side */}
+        <div className="ml-auto flex items-center gap-1.5">
+          {([
+            { label: "Yesterday", value: "yesterday" as const },
+            { label: "This Month", value: "this_month" as const },
+            { label: "Last Month", value: "last_month" as const },
+            { label: "This Year", value: "this_year" as const },
+          ] as const).map((opt) => (
+            <button
+              key={opt.value}
+              onClick={() => setDateRange(opt.value)}
+              className={cn(
+                "rounded-full px-3 py-1 text-[11px] font-medium transition-all",
+                dateRange === opt.value
+                  ? "bg-[#4361EE] text-white shadow-sm"
+                  : "bg-muted/60 text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+              )}
+            >
+              {opt.label}
+            </button>
+          ))}
+        </div>
       </div>
+
+      {/* Custom Date Range Picker */}
+      <DateRangePicker
+        open={showDatePicker}
+        onClose={() => setShowDatePicker(false)}
+        onApply={(range) => { setCustomRange(range); setDateRange("custom"); }}
+        initialRange={customRange}
+      />
 
       {/* KPI Row — Draggable */}
       <DraggableKpiRow cards={orderedKpiCards} onReorder={reorderKpi} />
@@ -465,6 +584,20 @@ export default function Dashboard() {
         </div>
       </div>
 
+      {/* Orders Status + Today's Focus — operational summary */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
+
+        {/* Orders status */}
+        <div className="lg:col-span-2">
+          <OrdersStatusWidget />
+        </div>
+
+        {/* To-Do list — sticky pad design */}
+        <div className="lg:col-span-3">
+          <TodoWidget />
+        </div>
+      </div>
+
       {/* Recent Activity — centralized audit trail (latest entries only) */}
       <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
         <div className="flex items-center justify-between gap-3 p-5 sm:px-6">
@@ -481,20 +614,6 @@ export default function Dashboard() {
         </div>
       </div>
       <ActivityDetailDrawer entry={selectedActivity} onClose={() => setSelectedActivity(null)} />
-
-      {/* Row 4: Orders status + To-Do */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-
-        {/* Orders status */}
-        <div className="lg:col-span-2">
-          <OrdersStatusWidget />
-        </div>
-
-        {/* To-Do list — sticky pad design */}
-        <div className="lg:col-span-3">
-          <TodoWidget />
-        </div>
-      </div>
 
       {/* Monthly Target Edit Modal */}
       {showTargetEdit && (

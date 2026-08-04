@@ -301,6 +301,7 @@ export default function TicketsPage() {
       if (ticket.email) p.set("email", ticket.email);
       if (ticket.address) p.set("address", ticket.address);
       if (ticket.company) p.set("company", ticket.company);
+      if (ticket.customerType) p.set("customerType", ticket.customerType);
       p.set("amount", String(ticket.amount));
       if (ticket.technician) p.set("employee", ticket.technician);
 
@@ -608,7 +609,7 @@ export default function TicketsPage() {
                     onClick={() => router.push(`/tickets/${t.id}`)}
                     className={cn(
                       "group border-t border-border transition-colors align-top cursor-pointer",
-                      isWaiting && "bg-sky-50/70",
+                      isWaiting && "bg-red-50/80",
                       isSelected && !isWaiting && "bg-indigo-50/40",
                       !isWaiting && !isSelected && "hover:bg-[#EEF1FD]/50"
                     )}
@@ -639,7 +640,7 @@ export default function TicketsPage() {
           const isSelected = selected.has(t.id);
           return (
             <motion.div key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.03 * i }}
-              className={cn("rounded-2xl border border-border bg-card p-4 shadow-card", isWaiting && "border-sky-200 bg-sky-50/50", isSelected && !isWaiting && "border-indigo-200 bg-indigo-50/30")}
+              className={cn("rounded-2xl border border-border bg-card p-4 shadow-card", isWaiting && "border-red-200/70 bg-red-50/60", isSelected && !isWaiting && "border-indigo-200 bg-indigo-50/30")}
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-3">
@@ -671,7 +672,7 @@ export default function TicketsPage() {
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold tabular-nums text-sm">{formatINR(t.amount)}</span>
-                  {isWaiting && <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-inset ring-sky-200"><Clock className="h-2.5 w-2.5" />{elapsed}m+</span>}
+                  {isWaiting && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-[#922B21] ring-1 ring-inset ring-red-200/60"><Clock className="h-2.5 w-2.5" />{elapsed}m+</span>}
                 </div>
                 <TicketActionsMenu ticket={t} onAction={handleAction} />
               </div>
@@ -838,7 +839,7 @@ function renderCell(
             <span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}
           </span>
           {isWaiting && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-sky-100 px-2 py-0.5 text-[10px] font-medium text-sky-700 ring-1 ring-inset ring-sky-200 whitespace-nowrap">
+            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-[#922B21] ring-1 ring-inset ring-red-200/60 whitespace-nowrap">
               <Clock className="h-2.5 w-2.5" />{elapsed}m+
             </span>
           )}
@@ -846,7 +847,7 @@ function renderCell(
       );
     case "dueDate":
       return t.dueDate ? (
-        <div className="text-[12px] text-muted-foreground">
+        <div className={cn("text-[12px]", isOverdue(t) ? "text-[#922B21] font-semibold" : "text-[#922B21]/70")}>
           <p>{new Date(t.dueDate).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
           <p className="text-[11px]">{new Date(t.dueDate).toLocaleTimeString("en-IN", { timeStyle: "short" })}</p>
         </div>

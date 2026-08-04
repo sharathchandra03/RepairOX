@@ -203,6 +203,7 @@ export type Ticket = {
   imeiType?: "imei1" | "imei2" | "serial";
   qcStatus?: "pending" | "pass" | "fail";
   customerId?: string;
+  customerType?: "personal" | "business";
   /** Multi-device support — when present, each device has its own record */
   devices?: DeviceRecord[];
 };
