@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
+import { PenWriteAnimation, usePenAnimation } from "./pen-write-animation";
 import {
   useTasks, PRIORITY_LABEL, PRIORITY_TONE, PRIORITY_RANK,
   type Task, type TaskInput,
@@ -186,6 +187,9 @@ export function TodoWidget() {
   const [deleteTarget, setDeleteTarget] = React.useState<Task | null>(null);
   const [query, setQuery] = React.useState("");
 
+  // One-time pen onboarding animation (plays once per page refresh)
+  const [showPenAnim, penAnimComplete] = usePenAnimation();
+
   const assignees = React.useMemo(
     () => team.filter((m) => m.status !== "suspended").map((m) => ({ label: m.name, value: m.id })),
     [team]
@@ -236,8 +240,13 @@ export function TodoWidget() {
       {/* Subtle lined-paper effect */}
       <div className="pointer-events-none absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "repeating-linear-gradient(transparent, transparent 27px, #B8860B 27px, #B8860B 28px)", backgroundPosition: "0 48px" }} />
 
+      {/* One-time pen writing onboarding animation */}
+      {showPenAnim && (
+        <PenWriteAnimation onComplete={penAnimComplete} />
+      )}
+
       {/* Header */}
-      <div className="relative flex items-center justify-between">
+      <div className={cn("relative flex items-center justify-between transition-opacity duration-300", showPenAnim && "opacity-0")}>
         <div>
           <p className="text-[12px] font-semibold uppercase tracking-wider text-amber-800/70">Today&apos;s Focus</p>
           <h3 className="font-display mt-0.5 flex items-center gap-2 text-base font-bold text-amber-900">
@@ -260,7 +269,7 @@ export function TodoWidget() {
 
       {/* Search */}
       {showSearch && (
-        <div className="relative mt-3">
+        <div className={cn("relative mt-3 transition-opacity duration-300", showPenAnim && "opacity-0")}>
           <Input
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -272,7 +281,7 @@ export function TodoWidget() {
       )}
 
       {/* Body */}
-      <div className="relative mt-4">
+      <div className={cn("relative mt-4 transition-opacity duration-300", showPenAnim && "opacity-0")}>
         {loading ? (
           <div className="grid place-items-center py-10 text-amber-700/70">
             <Loader2 className="h-5 w-5 animate-spin" />

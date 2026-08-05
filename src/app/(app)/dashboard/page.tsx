@@ -26,6 +26,7 @@ import { formatINR, cn } from "@/lib/utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
 import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
 import { useDashboardOrder } from "@/lib/use-dashboard-order";
+import { useGridLayout } from "@/lib/use-widget-order";
 import { useMonthlyTarget } from "@/lib/use-monthly-target";
 import { usePermissions } from "@/lib/permissions-context";
 
@@ -58,6 +59,7 @@ export default function Dashboard() {
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
   const { cardOrder, reorder: reorderKpi } = useDashboardOrder();
+  const { savedLayouts, persistLayout } = useGridLayout();
   const { target: monthlyTarget, updateTarget: setMonthlyTarget } = useMonthlyTarget();
   const [showTargetEdit, setShowTargetEdit] = useState(false);
   const [editTargetValue, setEditTargetValue] = useState("");
@@ -403,11 +405,15 @@ export default function Dashboard() {
         initialRange={customRange}
       />
 
-      {/* KPI Row — Draggable */}
+      {/* KPI Row — Draggable cards */}
       <DraggableKpiRow cards={orderedKpiCards} onReorder={reorderKpi} />
 
-      {/* Resizable dashboard widgets — drag edges to resize, drag title to reorder */}
-      <DashboardGrid keys={["revenue", "donut", "devices", "transactions"]}>
+      {/* Main dashboard grid — all widgets are draggable and resizable */}
+      <DashboardGrid
+        keys={["revenue", "donut", "devices", "transactions", "todays_focus", "orders_status"]}
+        savedLayouts={savedLayouts}
+        onLayoutPersist={persistLayout}
+      >
         {/* Revenue Chart */}
         <div className="h-full rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
@@ -427,38 +433,27 @@ export default function Dashboard() {
         {/* Tickets by Device */}
         <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
-          <CardHeader title="Tickets by Device" badge={
-            <span className="text-[11px] text-muted-foreground">Last 7 days</span>
-          } />
+          <CardHeader title="Tickets by Device" badge={<span className="text-[11px] text-muted-foreground">Last 7 days</span>} />
           {deviceData.length === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center gap-1 text-muted-foreground">
               <p className="text-[13px] font-medium">No data available</p>
               <p className="text-[11px]">No tickets found for this period</p>
             </div>
-          ) : (
-          <>
+          ) : (<>
           <p className="text-[11px] text-muted-foreground mb-4">{deviceData.reduce((s,d)=>s+d.count,0)} total tickets</p>
           <div className="space-y-2.5">
             {deviceData.map((d) => (
               <div key={d.device} className="flex items-center gap-3">
                 <span className="w-[56px] shrink-0 text-[12px] text-muted-foreground text-right">{d.device}</span>
                 <div className="flex-1 h-6 rounded-full bg-slate-100 overflow-hidden">
-                  <motion.div
-                    initial={{ width: 0 }}
-                    animate={{ width: `${(d.count / Math.max(...deviceData.map(x => x.count), 1)) * 100}%` }}
-                    transition={{ type: "spring", stiffness: 80, damping: 20 }}
-                    className={`h-full rounded-full ${d.highlight ? "bg-orange-400" : "bg-[#4361EE]"}`}
-                  />
+                  <motion.div initial={{ width: 0 }} animate={{ width: `${(d.count / Math.max(...deviceData.map(x => x.count), 1)) * 100}%` }} transition={{ type: "spring", stiffness: 80, damping: 20 }} className={`h-full rounded-full ${d.highlight ? "bg-orange-400" : "bg-[#4361EE]"}`} />
                 </div>
                 <span className="w-[24px] shrink-0 text-[12px] font-semibold tnum text-right">{d.count}</span>
               </div>
             ))}
           </div>
-          <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> {deviceData[0]?.device || "N/A"} flagged as highest volume
-          </p>
-          </>
-          )}
+          <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> {deviceData[0]?.device || "N/A"} flagged as highest volume</p>
+          </>)}
         </div>
 
         {/* Transactions */}
@@ -466,108 +461,60 @@ export default function Dashboard() {
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Recent Transactions" />
           {filteredTickets.length === 0 ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-1 text-muted-foreground">
-              <p className="text-[13px] font-medium">No data available</p>
-              <p className="text-[11px]">No transactions found</p>
-            </div>
+            <div className="flex flex-1 flex-col items-center justify-center gap-1 text-muted-foreground"><p className="text-[13px] font-medium">No data available</p><p className="text-[11px]">No transactions found</p></div>
           ) : (
-          <div className="flex-1 mt-2 space-y-0 overflow-hidden">
+          <div className="flex-1 mt-2 space-y-0 overflow-auto min-h-0">
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Recent</p>
             <ul className="space-y-1">
-              {filteredTickets.slice(0, 6).map((tx, i) => (
-                <motion.li
-                  key={tx.id}
-                  initial={{ opacity: 0, x: 6 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ delay: 0.04 * i }}
-                  className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-[#EEF1FD]/50 transition"
-                >
+              {filteredTickets.slice(0, 20).map((tx, i) => (
+                <motion.li key={tx.id} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.04 * i }} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-[#EEF1FD]/50 transition">
                   <Avatar name={tx.customer} size={30} />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[13px] font-semibold leading-tight">{tx.customer}</p>
-                    <p className="text-[11px] text-muted-foreground">{tx.model}</p>
-                  </div>
-                  <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">
-                    {formatINR(tx.amount)}
-                  </span>
+                  <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold leading-tight">{tx.customer}</p><p className="text-[11px] text-muted-foreground">{tx.model}</p></div>
+                  <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">{formatINR(tx.amount)}</span>
                 </motion.li>
               ))}
             </ul>
           </div>
           )}
           <div className="mt-2 border-t border-border pt-3 flex items-center justify-between">
-            <Can permission={["manage_reports", "export_reports"]}>
-              <button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">
-                <ArrowDownToLine className="h-3.5 w-3.5" /> Download Report
-              </button>
-            </Can>
-            <Link href="/reports" className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">
-              View All <ArrowRight className="h-3 w-3" />
-            </Link>
+            <Can permission={["manage_reports", "export_reports"]}><button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline"><ArrowDownToLine className="h-3.5 w-3.5" /> Download Report</button></Can>
+            <Link href="/reports" className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View All <ArrowRight className="h-3 w-3" /></Link>
           </div>
+        </div>
+
+        {/* Today's Focus */}
+        <div className="h-full overflow-hidden flex flex-col">
+          <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
+          <div className="flex-1 overflow-auto min-h-0"><TodoWidget /></div>
+        </div>
+
+        {/* Orders Status */}
+        <div className="h-full overflow-hidden flex flex-col">
+          <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
+          <div className="flex-1 overflow-auto"><OrdersStatusWidget /></div>
         </div>
       </DashboardGrid>
 
-      {/* Critical tasks table — full width */}
+      {/* Critical tasks table — fixed position, not in grid */}
       <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
-          <div>
-            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Critical Tasks</p>
-            <h3 className="font-display mt-0.5 text-base font-bold">Critical & high-priority tickets to resolve</h3>
-          </div>
+          <div><p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Critical Tasks</p><h3 className="font-display mt-0.5 text-base font-bold">Critical & high-priority tickets to resolve</h3></div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5 rounded-full">
-              <Filter className="h-3.5 w-3.5" /> Filter
-            </Button>
-            <Can permission="export_reports">
-              <Button variant="primary" size="sm" className="gap-1.5 rounded-full">
-                <Download className="h-3.5 w-3.5" /> Export
-              </Button>
-            </Can>
+            <Button variant="outline" size="sm" className="gap-1.5 rounded-full"><Filter className="h-3.5 w-3.5" /> Filter</Button>
+            <Can permission="export_reports"><Button variant="primary" size="sm" className="gap-1.5 rounded-full"><Download className="h-3.5 w-3.5" /> Export</Button></Can>
           </div>
         </div>
-
         <div className="overflow-x-auto">
           <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-[#EEF1FD]">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
-                <th className="w-[90px] px-5 py-2.5">Ticket</th>
-                <th className="py-2.5">Customer</th>
-                <th className="py-2.5">Device</th>
-                <th className="py-2.5 w-[80px]">Priority</th>
-                <th className="w-[140px] py-2.5">Status</th>
-                <th className="w-[100px] py-2.5">Waiting</th>
-                <th className="w-[100px] py-2.5 pr-5 text-right">Amount</th>
-              </tr>
-            </thead>
+            <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[90px] px-5 py-2.5">Ticket</th><th className="py-2.5">Customer</th><th className="py-2.5">Device</th><th className="py-2.5 w-[80px]">Priority</th><th className="w-[140px] py-2.5">Status</th><th className="w-[100px] py-2.5">Waiting</th><th className="w-[100px] py-2.5 pr-5 text-right">Amount</th></tr></thead>
             <tbody>
               {filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "completed" && t.status !== "delivered").sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).slice(0, 5).map((t, i) => (
-                <motion.tr
-                  key={t.id}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.04 * i }}
-                  className="group border-t border-border transition hover:bg-[#EEF1FD]/50"
-                >
+                <motion.tr key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * i }} className="group border-t border-border transition hover:bg-[#EEF1FD]/50">
                   <td className="px-5 py-3 whitespace-nowrap font-medium">{t.id}</td>
-                  <td className="py-3">
-                    <div className="flex items-center gap-2">
-                      <Avatar name={t.customer} size={28} />
-                      <span className="whitespace-nowrap">{t.customer}</span>
-                    </div>
-                  </td>
+                  <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
                   <td className="py-3 whitespace-nowrap text-muted-foreground">{t.model}</td>
-                  <td className="py-3">
-                    <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>
-                      {t.priority === "critical" ? "Critical" : "High"}
-                    </span>
-                  </td>
-                  <td className="py-3">
-                    <span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                      {STATUS_LABEL[t.status]}
-                    </span>
-                  </td>
+                  <td className="py-3"><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>{t.priority === "critical" ? "Critical" : "High"}</span></td>
+                  <td className="py-3"><span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}</span></td>
                   <td className="py-3 text-[12px] text-muted-foreground whitespace-nowrap">{(() => { const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000); if (mins < 60) return `${mins}m`; if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`; return `${Math.floor(mins/1440)}d`; })()}</td>
                   <td className="py-3 pr-5 text-right font-semibold tnum whitespace-nowrap">{formatINR(t.amount)}</td>
                 </motion.tr>
@@ -575,43 +522,19 @@ export default function Dashboard() {
             </tbody>
           </table>
         </div>
-
         <div className="flex items-center justify-between border-t border-border p-4">
           <p className="text-xs text-muted-foreground">Showing {Math.min(5, filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "completed" && t.status !== "delivered").length)} critical/high priority</p>
-          <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">
-            View all tickets <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">View all tickets <ArrowRight className="h-3.5 w-3.5" /></Link>
         </div>
       </div>
 
-      {/* Orders Status + Today's Focus — operational summary */}
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-5">
-
-        {/* Orders status */}
-        <div className="lg:col-span-2">
-          <OrdersStatusWidget />
-        </div>
-
-        {/* To-Do list — sticky pad design */}
-        <div className="lg:col-span-3">
-          <TodoWidget />
-        </div>
-      </div>
-
-      {/* Recent Activity — centralized audit trail (latest entries only) */}
+      {/* Recent Activity */}
       <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
         <div className="flex items-center justify-between gap-3 p-5 sm:px-6">
-          <div>
-            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Activity</p>
-            <h3 className="font-display mt-0.5 text-base font-bold">Audit trail across every module</h3>
-          </div>
-          <Link href="/activity" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">
-            View all activities <ArrowRight className="h-3.5 w-3.5" />
-          </Link>
+          <div><p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Activity</p><h3 className="font-display mt-0.5 text-base font-bold">Audit trail across every module</h3></div>
+          <Link href="/activity" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View all activities <ArrowRight className="h-3.5 w-3.5" /></Link>
         </div>
-        <div className="max-h-[420px] overflow-auto px-3 pb-3 sm:px-4">
-          <ActivityTimeline entries={activities.slice(0, 15)} onSelect={setSelectedActivity} />
-        </div>
+        <div className="max-h-[420px] overflow-auto px-3 pb-3 sm:px-4"><ActivityTimeline entries={activities.slice(0, 15)} onSelect={setSelectedActivity} /></div>
       </div>
       <ActivityDetailDrawer entry={selectedActivity} onClose={() => setSelectedActivity(null)} />
 

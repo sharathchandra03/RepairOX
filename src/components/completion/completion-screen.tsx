@@ -1,8 +1,9 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { CheckCircle2, Printer, MessageCircle, Mail, ArrowLeft, Eye } from "lucide-react";
+import { CheckCircle2, Printer, MessageCircle, Mail, Eye, Plus, Home, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getTicketPrintUrl, getInvoicePrintUrl, type PrintFormat } from "@/lib/print-utils";
@@ -28,11 +29,14 @@ type CompletionScreenProps = {
   onView: () => void;
 };
 
-export function CompletionScreen({ type, id, isEdit = false, onBack, onView }: CompletionScreenProps) {
+export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onView: _onView }: CompletionScreenProps) {
+  const router = useRouter();
   const [format, setFormat] = useState<PrintFormat>("a4");
 
   const label = type === "ticket" ? "Ticket" : "Invoice";
   const backLabel = type === "ticket" ? "tickets" : "invoices";
+  const viewPath = type === "ticket" ? `/tickets/${id}` : `/invoice/${id}`;
+  const createPath = type === "ticket" ? "/tickets/new" : "/invoice/create";
 
   /** Build the print-preview URL for the currently selected format */
   const previewUrl = (auto: boolean) => {
@@ -67,17 +71,29 @@ export function CompletionScreen({ type, id, isEdit = false, onBack, onView }: C
 
         {!isEdit && (
           <>
-            <div className="mt-8 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
               {[
-                { id: "a4", label: "A4 Receipt", desc: "Best for filing & email" },
-                { id: "thermal", label: "Thermal Receipt", desc: "Quick counter print" },
+                { id: "a4", label: "A4 Receipt", desc: "Best for filing & email", icon: Printer },
+                { id: "thermal", label: "Thermal Receipt", desc: "Quick counter print", icon: Printer },
+                { id: "label", label: "Label Print", desc: "Compact sticker label", icon: Tag },
               ].map((p) => {
                 const active = format === (p.id as PrintFormat);
+                const Icon = p.icon;
                 return (
-                  <motion.button key={p.id} whileHover={{ y: -2 }} onClick={() => setFormat(p.id as PrintFormat)} className={cn("rounded-2xl border bg-card p-5 text-left shadow-card transition", active ? "border-indigo-300 ring-2 ring-indigo-200/70" : "border-border")}>
-                    <span className="grid h-12 w-12 place-items-center rounded-xl bg-indigo-50 text-brand-700 ring-1 ring-brand-200"><Printer className="h-5 w-5" /></span>
-                    <p className="font-display mt-3 text-lg font-bold">{p.label}</p>
-                    <p className="text-xs text-muted-foreground">{p.desc}</p>
+                  <motion.button
+                    key={p.id}
+                    whileHover={{ y: -2 }}
+                    onClick={() => setFormat(p.id as PrintFormat)}
+                    className={cn(
+                      "relative cursor-pointer rounded-2xl border bg-card p-4 text-left shadow-card transition-all duration-200",
+                      active
+                        ? "border-indigo-300 ring-2 ring-indigo-200/70 shadow-[0_0_16px_-4px_rgba(67,97,238,0.25)]"
+                        : "border-border hover:border-[#4361EE]/50 hover:shadow-[0_0_12px_-4px_rgba(67,97,238,0.15)] hover:ring-1 hover:ring-[#4361EE]/20"
+                    )}
+                  >
+                    <span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-brand-700 ring-1 ring-brand-200"><Icon className="h-4.5 w-4.5" /></span>
+                    <p className="font-display mt-2.5 text-base font-bold">{p.label}</p>
+                    <p className="text-[11px] text-muted-foreground">{p.desc}</p>
                   </motion.button>
                 );
               })}
@@ -90,12 +106,15 @@ export function CompletionScreen({ type, id, isEdit = false, onBack, onView }: C
           </>
         )}
 
-        <div className="mt-6 flex items-center gap-5">
-          <button onClick={onView} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 hover:text-brand-800">
+        <div className="mt-6 flex items-center justify-center gap-6">
+          <button onClick={() => { window.location.href = viewPath; }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
             <Eye className="h-3.5 w-3.5" /> View {label}
           </button>
-          <button onClick={onBack} className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back to {backLabel}
+          <button onClick={() => { window.location.href = createPath; }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+            <Plus className="h-3.5 w-3.5" /> Create {label}
+          </button>
+          <button onClick={() => router.push("/dashboard")} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+            <Home className="h-3.5 w-3.5" /> Dashboard
           </button>
         </div>
       </div>

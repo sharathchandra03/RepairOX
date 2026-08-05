@@ -202,7 +202,7 @@ export function CategoryWheel({
                     >
                       <div
                         className={cn(
-                          "relative grid h-24 w-24 place-items-center rounded-[20px] bg-gradient-to-b ring-1 ring-zinc-900/10 transition-shadow",
+                          "relative grid h-24 w-24 place-items-center rounded-[20px] bg-gradient-to-b ring-1 ring-zinc-900/10 transition-shadow overflow-hidden",
                           c.tint
                         )}
                         style={{
@@ -212,9 +212,9 @@ export function CategoryWheel({
                         }}
                       >
                         {c.image ? (
-                          <img src={c.image} alt={c.label} className="h-12 w-12 rounded-lg object-cover" />
+                          <img src={c.image} alt={c.label} className="absolute inset-[3px] h-[calc(100%-6px)] w-[calc(100%-6px)] rounded-[17px] object-cover" />
                         ) : (
-                          <Icon className="h-10 w-10 text-white/95" strokeWidth={1.4} />
+                          <Icon className="h-12 w-12 text-white/95" strokeWidth={1.4} />
                         )}
                         {/* Specular highlight */}
                         <div className="pointer-events-none absolute inset-x-3 top-2 h-7 rounded-full bg-white/15 blur-md" />

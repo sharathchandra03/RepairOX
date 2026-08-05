@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, Suspense } from "react";
+import React, { useState, useEffect, useRef, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -9,6 +9,7 @@ import {
   Printer, FileText, Plus, Search, User, Building2, Sparkles, ListPlus,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
   Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
+  X, IndianRupee,
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
@@ -26,6 +27,9 @@ import type { Ticket, TicketStatus } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
 import { searchBrands, searchModels, getModelsForBrand, createBrand, createDeviceModel, type Brand, type DeviceModel } from "@/lib/brand-model-data";
+import { getIssueLibrary, addIssueToLibrary, parseIssueString, serializeIssues } from "@/lib/issue-library";
+import { createAssignedByOption } from "@/lib/assigned-by-data";
+import { createAssignedToOption } from "@/lib/assigned-to-data";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
 export default function NewTicketPage() {
@@ -142,6 +146,7 @@ type WizardData = {
   activeDeviceIndex: number;
   contactType: "personal" | "business";
   gstRate: number;
+  customGstRate?: boolean;
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
   files: string[];
@@ -587,53 +592,194 @@ function NewTicketWizard() {
 
 /* ---------------- Process Selector (Premium) ---------------- */
 
-const PROCESS_CARDS = [
-  { id: "ticket", title: "New Ticket", desc: "Repair job intake and tracking", icon: "🧰", tone: "bg-rose-50 text-rose-500" },
-  { id: "invoice", title: "New Invoice", desc: "Create bill and manage payments", icon: "🧾", tone: "bg-violet-50 text-violet-500" },
-  { id: "stock", title: "Add Stock", desc: "Add new inventory to your store", icon: "📦", tone: "bg-amber-50 text-amber-500" },
-  { id: "walkin", title: "Walk-In", desc: "Counter customer billing", icon: "🏪", tone: "bg-sky-50 text-sky-500" },
-  { id: "estimate", title: "Estimate", desc: "Send quote to your customer", icon: "💵", tone: "bg-emerald-50 text-emerald-500" },
-  { id: "warranty", title: "Warranty", desc: "Claim or warranty check", icon: "🛡️", tone: "bg-cyan-50 text-cyan-500" },
+const PROCESS_CARDS: {
+  id: string;
+  title: string;
+  desc: string;
+  icon: React.ReactNode;
+  gradient: string;
+  accentColor: string;
+  badge?: string;
+}[] = [
+  {
+    id: "ticket",
+    title: "New Ticket",
+    desc: "Create a new repair ticket and track progress",
+    icon: <ClipboardList className="h-7 w-7" />,
+    gradient: "from-blue-400/80 to-blue-600/80",
+    accentColor: "#4361EE",
+    badge: "Popular",
+  },
+  {
+    id: "invoice",
+    title: "New Invoice",
+    desc: "Create bill, manage payments and send invoices",
+    icon: <FileText className="h-7 w-7" />,
+    gradient: "from-emerald-400/80 to-emerald-600/80",
+    accentColor: "#10B981",
+  },
+  {
+    id: "stock",
+    title: "Add Stock",
+    desc: "Add new inventory items to your store",
+    icon: <Package className="h-7 w-7" />,
+    gradient: "from-orange-400/80 to-orange-600/80",
+    accentColor: "#F59E0B",
+  },
+  {
+    id: "walkin",
+    title: "Walk-In",
+    desc: "Quick counter billing for walk-in customers",
+    icon: <Building2 className="h-7 w-7" />,
+    gradient: "from-violet-400/80 to-violet-600/80",
+    accentColor: "#8B5CF6",
+  },
+  {
+    id: "estimate",
+    title: "Estimate",
+    desc: "Send quote and estimated cost to your customer",
+    icon: <IndianRupee className="h-7 w-7" />,
+    gradient: "from-teal-400/80 to-teal-600/80",
+    accentColor: "#14B8A6",
+  },
+  {
+    id: "warranty",
+    title: "Warranty",
+    desc: "Claim or warranty check process",
+    icon: <Shield className="h-7 w-7" />,
+    gradient: "from-rose-400/80 to-rose-600/80",
+    accentColor: "#F43F5E",
+  },
 ];
 
 function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: string) => void }) {
   return (
-    <div className="max-w-3xl mx-auto">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {PROCESS_CARDS.map((card, i) => (
-          <motion.button
-            key={card.id}
-            type="button"
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ delay: 0.04 * i, duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
-            onClick={() => onChange(card.id)}
-            className={cn(
-              "group relative flex flex-col items-center text-center rounded-xl border bg-white p-4 sm:p-5 transition-all duration-250 ease-out",
-              "hover:-translate-y-0.5 hover:shadow-[0_8px_24px_-8px_rgba(67,97,238,0.15)] hover:border-[#4361EE]/30",
-              "active:scale-[0.98]",
-              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
-              value === card.id ? "border-[#4361EE] shadow-[0_4px_16px_-6px_rgba(67,97,238,0.2)]" : "border-border/60 shadow-[0_1px_2px_rgba(0,0,0,0.03)]"
-            )}
-            aria-label={`Create ${card.title}`}
-          >
-            <span className={cn("grid h-10 w-10 place-items-center rounded-full text-lg transition-transform duration-250 group-hover:scale-110", card.tone)}>
-              {card.icon}
-            </span>
-            <h3 className="mt-3 text-[13px] font-bold text-zinc-800 tracking-tight">{card.title}</h3>
-            <p className="mt-1 text-[11px] text-zinc-500 leading-snug">{card.desc}</p>
-            <span className="mt-3 grid h-6 w-6 place-items-center rounded-full border border-border/80 text-zinc-400 transition-all duration-250 group-hover:border-[#4361EE] group-hover:bg-[#4361EE] group-hover:text-white">
-              <ArrowRight className="h-3 w-3 transition-transform duration-250 group-hover:translate-x-0.5" />
-            </span>
-          </motion.button>
-        ))}
+    <div className="max-w-[780px] mx-auto">
+      {/* Decorative background elements */}
+      <div className="pointer-events-none absolute top-20 left-8 h-2 w-2 rounded-full bg-[#4361EE]/20 animate-pulse-dot" />
+      <div className="pointer-events-none absolute top-32 left-12 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15" />
+      <div className="pointer-events-none absolute top-24 right-16 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15 animate-pulse-dot" style={{ animationDelay: "0.5s" }} />
+
+      {/* Cards Grid */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {PROCESS_CARDS.map((card, i) => {
+          const isSelected = value === card.id;
+          return (
+            <motion.button
+              key={card.id}
+              type="button"
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: 0.07 * i + 0.1, duration: 0.45, ease: [0.32, 0.72, 0, 1] }}
+              whileHover={{
+                y: -6,
+                scale: 1.02,
+                transition: { type: "spring", stiffness: 400, damping: 25, mass: 0.8 },
+              }}
+              whileTap={{ scale: 0.97, transition: { duration: 0.1 } }}
+              onClick={() => onChange(card.id)}
+              className={cn(
+                "group relative flex flex-col items-center text-center rounded-2xl border p-6 sm:p-7 cursor-pointer",
+                "transition-[background,border-color,box-shadow] duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                "backdrop-blur-sm",
+                "shadow-[0_1px_3px_rgba(20,30,80,0.04),0_4px_12px_-4px_rgba(20,30,80,0.06)]",
+                // Hover: light blue background + stronger shadow + blue border
+                "hover:bg-[#EEF2FF] hover:shadow-[0_12px_40px_-8px_rgba(67,97,238,0.22),0_4px_16px_-2px_rgba(20,30,80,0.08)]",
+                "hover:border-[#4361EE]/60",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40 focus-visible:ring-offset-2",
+                // Selected vs default
+                isSelected
+                  ? "bg-[#EEF2FF] border-[#4361EE] shadow-[0_0_0_1px_rgba(67,97,238,0.15),0_12px_32px_-6px_rgba(67,97,238,0.22)] ring-1 ring-[#4361EE]/20"
+                  : "bg-white/80 border-white/60 dark:border-zinc-700/60"
+              )}
+              aria-label={`Create ${card.title}`}
+            >
+              {/* Badge */}
+              {card.badge && (
+                <motion.span
+                  initial={{ opacity: 0, scale: 0.8 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  transition={{ delay: 0.4, duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
+                  className="absolute top-3 left-3 flex items-center gap-1 rounded-full bg-[#4361EE] px-2.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                >
+                  <Sparkles className="h-2.5 w-2.5" />
+                  {card.badge}
+                </motion.span>
+              )}
+
+              {/* Icon Circle — scales on hover via group */}
+              <span
+                className={cn(
+                  "relative grid h-16 w-16 place-items-center rounded-full text-white",
+                  "bg-gradient-to-br shadow-lg",
+                  "transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                  "group-hover:scale-[1.12]",
+                  card.gradient
+                )}
+                style={{
+                  boxShadow: `0 8px 24px -6px ${card.accentColor}50`,
+                }}
+              >
+                {card.icon}
+                {/* Sparkle decorations — reveal on hover */}
+                <span className="absolute -top-0.5 -right-0.5 h-2 w-2 text-[#4361EE]/60 opacity-0 group-hover:opacity-100 transition-all duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:translate-x-0.5">
+                  <svg viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l.7 2.3L7 3l-2.3.7L4 6l-.7-2.3L1 3l2.3-.7z" /></svg>
+                </span>
+                <span className="absolute -bottom-0.5 -left-1 h-1.5 w-1.5 text-[#4361EE]/40 opacity-0 group-hover:opacity-100 transition-all duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:scale-110 group-hover:translate-y-0.5 group-hover:-translate-x-0.5" style={{ transitionDelay: "60ms" }}>
+                  <svg viewBox="0 0 8 8" fill="currentColor"><path d="M4 0l.7 2.3L7 3l-2.3.7L4 6l-.7-2.3L1 3l2.3-.7z" /></svg>
+                </span>
+              </span>
+
+              {/* Title */}
+              <h3 className="mt-4 text-sm font-bold text-zinc-800 tracking-tight transition-colors duration-[350ms] group-hover:text-[#2A3AB8]">{card.title}</h3>
+
+              {/* Description */}
+              <p className="mt-1.5 text-[12px] text-zinc-500 leading-relaxed max-w-[180px]">{card.desc}</p>
+
+              {/* Arrow Button — magnetic hover physics */}
+              <span
+                className={cn(
+                  "mt-4 grid h-8 w-8 place-items-center rounded-full",
+                  "transition-all duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                  isSelected
+                    ? "bg-[#4361EE] text-white shadow-[0_4px_16px_-2px_rgba(67,97,238,0.5)]"
+                    : "bg-[#4361EE] text-white shadow-sm",
+                  "group-hover:shadow-[0_6px_20px_-2px_rgba(67,97,238,0.5)] group-hover:scale-[1.15]"
+                )}
+              >
+                <ArrowRight className="h-3.5 w-3.5 transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)] group-hover:translate-x-[3px]" />
+              </span>
+
+              {/* Bottom accent line — animates width on hover */}
+              <span
+                className={cn(
+                  "absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] rounded-full",
+                  "transition-all duration-[400ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
+                  isSelected ? "w-[calc(100%-2rem)] opacity-100" : "w-[40%] opacity-50 group-hover:w-[calc(100%-2rem)] group-hover:opacity-100"
+                )}
+                style={{
+                  background: `linear-gradient(90deg, transparent, ${card.accentColor}, transparent)`,
+                }}
+              />
+            </motion.button>
+          );
+        })}
       </div>
 
-      <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.35 }}
-        className="mt-5 flex items-center justify-center gap-1.5 text-[10px] text-zinc-400">
-        <Sparkles className="h-3 w-3 text-[#4361EE]/50" />
-        Tip: You can access these options anytime from the main menu.
-      </motion.p>
+      {/* Premium Tip Card */}
+      <motion.div
+        initial={{ opacity: 0, y: 8 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.55, duration: 0.35, ease: [0.32, 0.72, 0, 1] }}
+        className="mt-7 mx-auto max-w-sm flex items-center gap-2.5 rounded-xl border border-border/50 bg-white/60 backdrop-blur-sm px-4 py-2.5 shadow-[0_1px_4px_rgba(20,30,80,0.03)]"
+      >
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-500 text-xs">
+          💡
+        </span>
+        <p className="text-[11px] text-zinc-500 leading-snug">
+          <span className="font-semibold text-zinc-700">Tip:</span> You can access these options anytime from the sidebar.
+        </p>
+      </motion.div>
     </div>
   );
 }
@@ -641,7 +787,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
 /* ---------------- Helpers ---------------- */
 function titleFor(step: number) {
   return [
-    "Select Your Process",
+    "What would you like to do today?",
     "Select Your Category",
     "Device Details",
     "Job Details",
@@ -656,7 +802,7 @@ function titleFor(step: number) {
 }
 function subtitleFor(step: number) {
   return [
-    "Pick what you're creating today.",
+    "Choose a process to get started. We'll handle the rest.",
     "What kind of device is it?",
     "Capture brand, model and identifiers.",
     "Capture job type, priority and repair notes.",
@@ -672,7 +818,7 @@ function subtitleFor(step: number) {
 
 /* ---------------- Step 3: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
-  const { brands, deviceModels, addBrand, addDeviceModel } = useStore();
+  const { brands, deviceModels, addBrand, addDeviceModel, assignedByOptions, addAssignedByOption, assignedToOptions, addAssignedToOption } = useStore();
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
   const d = activeDevice.device;
@@ -731,6 +877,14 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const [modelOpen, setModelOpen] = useState(false);
   const [showNewModel, setShowNewModel] = useState(false);
   const [newModelName, setNewModelName] = useState("");
+
+  // Add New Assigned By modal state
+  const [showNewAssignedBy, setShowNewAssignedBy] = useState(false);
+  const [newAssignedByName, setNewAssignedByName] = useState("");
+
+  // Add New Assigned To modal state
+  const [showNewAssignedTo, setShowNewAssignedTo] = useState(false);
+  const [newAssignedToName, setNewAssignedToName] = useState("");
 
   // Sync local queries when active device changes
   useEffect(() => {
@@ -897,6 +1051,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   placeholder="Search brand…"
                   className="h-11"
                   iconLeft={<Search className="h-4 w-4" />}
+                  iconRight={<ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", brandOpen && "rotate-180")} />}
                 />
               </Field>
               {brandOpen && (
@@ -937,6 +1092,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   placeholder={selectedBrand ? `Search ${selectedBrand.name} models…` : "Select brand first…"}
                   className="h-11"
                   iconLeft={<Search className="h-4 w-4" />}
+                  iconRight={<ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", modelOpen && "rotate-180")} />}
                 />
               </Field>
               {modelOpen && (
@@ -1002,15 +1158,31 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                 { label: "Reference", value: "ref" },
               ]} />
             </Field>
-            <Field label="Assigned By"><Input value={d.assignedBy} onChange={(e: any) => set("assignedBy", e.target.value)} placeholder="Front desk" className="h-11" /></Field>
+            <Field label="Assigned By">
+              <RSelect
+                value={d.assignedBy}
+                onChange={(v) => set("assignedBy", v)}
+                placeholder="Select…"
+                searchable
+                onAddNew={(name) => {
+                  setNewAssignedByName(name);
+                  setShowNewAssignedBy(true);
+                }}
+                options={assignedByOptions.map((o) => ({ label: o.name, value: o.id }))}
+              />
+            </Field>
             <Field label="Assigned To">
-              <RSelect value={d.assignedTo} onChange={(v) => set("assignedTo", v)} placeholder="Select technician" searchable options={[
-                { label: "Anand · L2 Mobile", value: "anand" },
-                { label: "Pooja · Logic-board", value: "pooja" },
-                { label: "Vikas · Watch & iPad", value: "vikas" },
-                { label: "Shubham · Hardware", value: "shubham" },
-                { label: "Ravi · Android", value: "ravi" },
-              ]} />
+              <RSelect
+                value={d.assignedTo}
+                onChange={(v) => set("assignedTo", v)}
+                placeholder="Select technician…"
+                searchable
+                onAddNew={(name) => {
+                  setNewAssignedToName(name);
+                  setShowNewAssignedTo(true);
+                }}
+                options={assignedToOptions.map((o) => ({ label: o.name, value: o.id }))}
+              />
             </Field>
           </div>
         </div>
@@ -1077,6 +1249,60 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               <Button variant="outline" size="sm" onClick={() => setShowNewModel(false)}>Cancel</Button>
               <Button size="sm" onClick={handleSaveNewModel} disabled={!newModelName.trim()}>
                 <CheckCircle2 className="h-3.5 w-3.5" /> Save Model
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add New Assigned By Modal */}
+      {showNewAssignedBy && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewAssignedBy(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <h3 className="text-base font-bold">Add New Assigned By</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">This name will be saved permanently and available in future tickets.</p>
+            <div className="mt-4 space-y-1">
+              <Label>Name</Label>
+              <Input value={newAssignedByName} onChange={(e: any) => setNewAssignedByName(e.target.value)} placeholder="e.g. Front Desk, Counter 1" className="h-11" autoFocus />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setShowNewAssignedBy(false); setNewAssignedByName(""); }}>Cancel</Button>
+              <Button size="sm" disabled={!newAssignedByName.trim()} onClick={() => {
+                const option = createAssignedByOption(newAssignedByName.trim());
+                addAssignedByOption(option);
+                set("assignedBy", option.id);
+                setShowNewAssignedBy(false);
+                setNewAssignedByName("");
+              }}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Save
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add New Assigned To Modal */}
+      {showNewAssignedTo && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewAssignedTo(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <h3 className="text-base font-bold">Add New Technician</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">This name will be saved permanently and available in future tickets.</p>
+            <div className="mt-4 space-y-1">
+              <Label>Name</Label>
+              <Input value={newAssignedToName} onChange={(e: any) => setNewAssignedToName(e.target.value)} placeholder="e.g. Anand, Pooja" className="h-11" autoFocus />
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => { setShowNewAssignedTo(false); setNewAssignedToName(""); }}>Cancel</Button>
+              <Button size="sm" disabled={!newAssignedToName.trim()} onClick={() => {
+                const option = createAssignedToOption(newAssignedToName.trim());
+                addAssignedToOption(option);
+                set("assignedTo", option.id);
+                setShowNewAssignedTo(false);
+                setNewAssignedToName("");
+              }}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Save
               </Button>
             </div>
           </motion.div>
@@ -1149,11 +1375,11 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
   return (
     <div className={FORM_CARD_COMPACT}>
       <DeviceSwitcher data={data} setData={setData} />
-      <div className="grid grid-cols-1 gap-x-6 gap-y-3 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-6 lg:grid-cols-2 lg:items-stretch">
         {/* Left Column — Job Overview */}
-        <div className="space-y-3">
+        <div className="flex flex-col">
           <SectionLabel icon={ClipboardList}>Job Overview</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
+          <div className="mt-4 grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
             <Field label="Job Type">
               <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
                 { label: "Service", value: "service" },
@@ -1202,16 +1428,57 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               )}
             </Field>
           </div>
-          <Field label="Issue"><Input value={j.issue} onChange={(e: any) => set("issue", e.target.value)} placeholder="Display not working" className="h-11" /></Field>
-          <Field label="User Accessories"><Textarea value={j.accessories} onChange={(e: any) => set("accessories", e.target.value)} placeholder="e.g. Charger, case, SIM tray received" rows={2} className="min-h-0" /></Field>
+          <div className="mt-4">
+            <Field label="Issue">
+              <IssueSelector
+                value={j.issue}
+                onChange={(v) => set("issue", v)}
+                className="min-h-[120px] items-start py-3"
+              />
+            </Field>
+          </div>
+          <div className="mt-auto pt-4">
+            <Field label="User Accessories"><Input value={j.accessories} onChange={(e: any) => set("accessories", e.target.value)} placeholder="e.g. Charger, case, SIM tray received" className="h-11" /></Field>
+          </div>
         </div>
 
-        {/* Right Column — Notes */}
-        <div className="space-y-3">
-          <SectionLabel icon={StickyNote}>Notes</SectionLabel>
-          <Field label="Problem Description"><Textarea value={j.description} onChange={(e: any) => set("description", e.target.value)} placeholder="Customer reported intermittent reboots when charging…" rows={4} className="min-h-0 h-[108px]" /></Field>
-          <Field label="Internal Notes"><Textarea value={j.notes} onChange={(e: any) => set("notes", e.target.value)} placeholder="Visible water damage on bottom left" rows={3} className="min-h-0 h-[72px]" /></Field>
-          <Field label="Estimate (₹)"><Input value={j.estimate} onChange={(e: any) => set("estimate", e.target.value)} placeholder="0" type="number" className="h-11 tabular-nums" /></Field>
+        {/* Right Column — Notes & Estimate */}
+        <div className="flex flex-col">
+          <SectionLabel icon={StickyNote}>Notes & Estimate</SectionLabel>
+          <div className="mt-4">
+            <Field label="Problem Description">
+              <Textarea
+                value={j.description}
+                onChange={(e: any) => set("description", e.target.value)}
+                placeholder="Customer reported intermittent reboots when charging…"
+                rows={4}
+                className="min-h-0 h-[120px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+              />
+            </Field>
+          </div>
+          <div className="mt-4">
+            <Field label="Internal Notes">
+              <Textarea
+                value={j.notes}
+                onChange={(e: any) => set("notes", e.target.value)}
+                placeholder="Visible water damage on bottom left"
+                rows={4}
+                className="min-h-0 h-[120px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+              />
+            </Field>
+          </div>
+          <div className="mt-auto pt-4">
+            <Field label="Estimate">
+              <Input
+                value={j.estimate}
+                onChange={(e: any) => set("estimate", e.target.value)}
+                placeholder="0"
+                type="number"
+                className="h-11 tabular-nums pl-9"
+                iconLeft={<IndianRupee className="h-3.5 w-3.5" />}
+              />
+            </Field>
+          </div>
         </div>
       </div>
       {!isEdit && (
@@ -1373,6 +1640,136 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
     <div className="space-y-1">
       <Label>{label}</Label>
       {children}
+    </div>
+  );
+}
+
+/* ── Issue Multi-Select with search, pills, and "create new" ── */
+function IssueSelector({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [library, setLibrary] = useState<string[]>(() => getIssueLibrary());
+  const containerRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const selected = parseIssueString(value);
+
+  // Close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  const filtered = library.filter(
+    (item) =>
+      !selected.some((s) => s.toLowerCase() === item.toLowerCase()) &&
+      item.toLowerCase().includes(query.trim().toLowerCase())
+  );
+
+  const addIssue = (issue: string) => {
+    const trimmed = issue.trim();
+    if (!trimmed) return;
+    if (selected.some((s) => s.toLowerCase() === trimmed.toLowerCase())) return;
+    const updated = [...selected, trimmed];
+    onChange(serializeIssues(updated));
+    // Also persist to the library
+    const newLib = addIssueToLibrary(trimmed);
+    setLibrary(newLib);
+    setQuery("");
+  };
+
+  const removeIssue = (issue: string) => {
+    const updated = selected.filter((s) => s.toLowerCase() !== issue.toLowerCase());
+    onChange(serializeIssues(updated));
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && query.trim()) {
+      e.preventDefault();
+      addIssue(query);
+    }
+    if (e.key === "Backspace" && !query && selected.length > 0) {
+      removeIssue(selected[selected.length - 1]);
+    }
+  };
+
+  const showCreate = query.trim() && !library.some((i) => i.toLowerCase() === query.trim().toLowerCase());
+
+  return (
+    <div ref={containerRef} className="relative">
+      {/* Trigger / pill container */}
+      <div
+        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }}
+        className={cn(
+          "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-center gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
+          open
+            ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
+            : "border-border hover:border-[#4361EE]/40",
+          className
+        )}
+      >
+        {selected.map((issue) => (
+          <span
+            key={issue}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-[13px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40"
+          >
+            {issue}
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); removeIssue(issue); }}
+              className="grid h-4 w-4 place-items-center rounded-full hover:bg-[#4361EE]/10 transition"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
+        <input
+          ref={inputRef}
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); if (!open) setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={handleKeyDown}
+          placeholder={selected.length === 0 ? "Search or add issues…" : "Add more…"}
+          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        />
+      </div>
+
+      {/* Dropdown */}
+      {open && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-xl border border-border bg-card p-1 shadow-lg max-h-60 overflow-y-auto">
+          {showCreate && (
+            <button
+              type="button"
+              onClick={() => addIssue(query)}
+              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#EEF1FD]/60 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5 text-[#4361EE]" />
+              <span>Create &ldquo;<span className="font-medium text-[#4361EE]">{query.trim()}</span>&rdquo;</span>
+            </button>
+          )}
+          {filtered.length > 0 ? (
+            filtered.slice(0, 15).map((item) => (
+              <button
+                key={item}
+                type="button"
+                onClick={() => addIssue(item)}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#EEF1FD]/60 transition-colors"
+              >
+                <span className="grid h-4 w-4 shrink-0 place-items-center text-muted-foreground opacity-0">
+                  <Check className="h-3.5 w-3.5" />
+                </span>
+                <span className="truncate">{item}</span>
+              </button>
+            ))
+          ) : !showCreate ? (
+            <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No issues found</p>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -1824,9 +2221,13 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   // Subtotal: use whichever is higher — parts total or estimates total — to reflect actual charges
   const subtotal = Math.max(estimatesTotal, partsTotal) || estimatesTotal || partsTotal;
   const isBusiness = data.contactType === "business";
-  const gstRate = data.gstRate || 18;
+  const gstRate = data.gstRate || (data.customGstRate ? 0 : 18);
   const tax = isBusiness ? Math.round(subtotal * (gstRate / 100)) : 0;
   const total = subtotal + tax;
+
+  // Local raw string state for custom GST input — allows full editing freedom
+  const [customGstRaw, setCustomGstRaw] = useState<string>(data.customGstRate ? (gstRate === 0 ? "" : String(gstRate)) : "");
+  const [customGstFocused, setCustomGstFocused] = useState(false);
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
@@ -1903,14 +2304,14 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
             <div className="mt-4 pt-3 border-t border-border">
               <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">GST Rate</Label>
               <div className="mt-1.5 flex items-center gap-1.5">
-                {[5, 12, 18, 28].map((rate) => (
+                {[5, 12, 18].map((rate) => (
                   <button
                     key={rate}
                     type="button"
-                    onClick={() => setData({ ...data, gstRate: rate })}
+                    onClick={() => setData({ ...data, gstRate: rate, customGstRate: false })}
                     className={cn(
                       "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
-                      gstRate === rate
+                      gstRate === rate && !data.customGstRate
                         ? "bg-[#4361EE] text-white shadow-sm"
                         : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
                     )}
@@ -1918,7 +2319,52 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                     {rate}%
                   </button>
                 ))}
+                <button
+                  type="button"
+                  onClick={() => setData({ ...data, customGstRate: true })}
+                  className={cn(
+                    "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
+                    data.customGstRate
+                      ? "bg-[#4361EE] text-white shadow-sm"
+                      : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                  )}
+                >
+                  Custom
+                </button>
               </div>
+              {data.customGstRate && (
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={customGstFocused ? customGstRaw : (gstRate === 0 ? "" : String(gstRate))}
+                    onFocus={() => {
+                      setCustomGstFocused(true);
+                      setCustomGstRaw(gstRate === 0 ? "" : String(gstRate));
+                    }}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9.]/g, "");
+                      setCustomGstRaw(raw);
+                      const v = parseFloat(raw);
+                      if (!isNaN(v) && v >= 0 && v <= 100) {
+                        setData({ ...data, gstRate: v, customGstRate: true });
+                      } else if (raw === "" || raw === ".") {
+                        setData({ ...data, gstRate: 0, customGstRate: true });
+                      }
+                    }}
+                    onBlur={() => {
+                      setCustomGstFocused(false);
+                      const v = parseFloat(customGstRaw);
+                      if (isNaN(v) || customGstRaw === "") {
+                        setData({ ...data, gstRate: 0, customGstRate: true });
+                      }
+                    }}
+                    placeholder="Rate"
+                    className="h-9 w-20 rounded-lg border border-border bg-card px-2.5 text-sm font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+                  />
+                  <span className="text-[12px] font-medium text-muted-foreground">%</span>
+                </div>
+              )}
             </div>
           )}
 

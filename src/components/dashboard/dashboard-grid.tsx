@@ -9,34 +9,57 @@ import "react-resizable/css/styles.css";
 interface DashboardGridProps {
   children: React.ReactNode[];
   keys: string[];
+  /** Optional saved layouts to restore (per-user persistence) */
+  savedLayouts?: Record<string, LayoutItem[]> | null;
+  /** Called when layout changes (for persistence) */
+  onLayoutPersist?: (layouts: Record<string, LayoutItem[]>) => void;
 }
 
 const DEFAULT_LAYOUTS: Record<string, LayoutItem[]> = {
   lg: [
-    { i: "revenue",      x: 0, y: 0, w: 8, h: 5, minW: 4, minH: 3 },
-    { i: "donut",        x: 8, y: 0, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: "devices",      x: 0, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
-    { i: "transactions", x: 6, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: "revenue",       x: 0, y: 0, w: 8, h: 5, minW: 4, minH: 3 },
+    { i: "donut",         x: 8, y: 0, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: "devices",       x: 0, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: "transactions",  x: 6, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: "todays_focus",  x: 0, y: 10, w: 7, h: 6, minW: 4, minH: 4 },
+    { i: "orders_status", x: 7, y: 10, w: 5, h: 6, minW: 3, minH: 4 },
   ],
   md: [
-    { i: "revenue",      x: 0, y: 0, w: 8, h: 5, minW: 4, minH: 3 },
-    { i: "donut",        x: 8, y: 0, w: 4, h: 5, minW: 3, minH: 3 },
-    { i: "devices",      x: 0, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
-    { i: "transactions", x: 6, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: "revenue",       x: 0, y: 0, w: 8, h: 5, minW: 4, minH: 3 },
+    { i: "donut",         x: 8, y: 0, w: 4, h: 5, minW: 3, minH: 3 },
+    { i: "devices",       x: 0, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: "transactions",  x: 6, y: 5, w: 6, h: 5, minW: 3, minH: 4 },
+    { i: "todays_focus",  x: 0, y: 10, w: 7, h: 6, minW: 4, minH: 4 },
+    { i: "orders_status", x: 7, y: 10, w: 5, h: 6, minW: 3, minH: 4 },
   ],
   sm: [
-    { i: "revenue",      x: 0, y: 0, w: 12, h: 5, minW: 12, minH: 3 },
-    { i: "donut",        x: 0, y: 5, w: 12, h: 5, minW: 12, minH: 3 },
-    { i: "devices",      x: 0, y: 10, w: 12, h: 5, minW: 12, minH: 4 },
-    { i: "transactions", x: 0, y: 15, w: 12, h: 5, minW: 12, minH: 4 },
+    { i: "revenue",       x: 0, y: 0,  w: 12, h: 5, minW: 12, minH: 3 },
+    { i: "donut",         x: 0, y: 5,  w: 12, h: 5, minW: 12, minH: 3 },
+    { i: "devices",       x: 0, y: 10, w: 12, h: 5, minW: 12, minH: 4 },
+    { i: "transactions",  x: 0, y: 15, w: 12, h: 5, minW: 12, minH: 4 },
+    { i: "todays_focus",  x: 0, y: 20, w: 12, h: 6, minW: 12, minH: 4 },
+    { i: "orders_status", x: 0, y: 26, w: 12, h: 6, minW: 12, minH: 4 },
   ],
 };
 
-export function DashboardGrid({ children, keys }: DashboardGridProps) {
+export { DEFAULT_LAYOUTS };
+
+export function DashboardGrid({ children, keys, savedLayouts, onLayoutPersist }: DashboardGridProps) {
   const { resizeEnabled } = useDashboardSettings();
-  const [layouts, setLayouts] = useState(DEFAULT_LAYOUTS);
+  // Use saved layouts if available, otherwise defaults
+  const activeLayouts = savedLayouts ?? DEFAULT_LAYOUTS;
+  const [layouts, setLayouts] = useState<Record<string, LayoutItem[]>>(activeLayouts);
   const [width, setWidth] = useState(1200);
   const containerRef = useRef<HTMLDivElement>(null);
+  const prevSavedRef = useRef(savedLayouts);
+
+  // Only sync from savedLayouts when it actually changes (Supabase background update)
+  useEffect(() => {
+    if (savedLayouts && savedLayouts !== prevSavedRef.current) {
+      prevSavedRef.current = savedLayouts;
+      setLayouts(savedLayouts);
+    }
+  }, [savedLayouts]);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -63,7 +86,8 @@ export function DashboardGrid({ children, keys }: DashboardGridProps) {
 
   const handleLayoutChange = useCallback((_current: LayoutItem[], allLayouts: Record<string, LayoutItem[]>) => {
     setLayouts(allLayouts);
-  }, []);
+    onLayoutPersist?.(allLayouts);
+  }, [onLayoutPersist]);
 
   return (
     <div ref={containerRef} className="w-full">

@@ -31,6 +31,12 @@ import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
   type Brand, type DeviceModel,
 } from "@/lib/brand-model-data";
+import {
+  SEED_ASSIGNED_BY_OPTIONS, type AssignedByOption,
+} from "@/lib/assigned-by-data";
+import {
+  SEED_ASSIGNED_TO_OPTIONS, type AssignedToOption,
+} from "@/lib/assigned-to-data";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -50,6 +56,8 @@ interface StoreState {
   companies: Company[];
   brands: Brand[];
   deviceModels: DeviceModel[];
+  assignedByOptions: AssignedByOption[];
+  assignedToOptions: AssignedToOption[];
   /** True once initial DB load completes (or localStorage is read). */
   hydrated: boolean;
   /** "db" when Supabase is active, "local" otherwise. */
@@ -83,6 +91,8 @@ interface StoreActions {
   addDeviceModel: (model: DeviceModel) => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
   deleteDeviceModel: (id: string) => Promise<void>;
+  addAssignedByOption: (option: AssignedByOption) => Promise<void>;
+  addAssignedToOption: (option: AssignedToOption) => Promise<void>;
   resetBrandsAndModels: () => void;
 }
 
@@ -487,6 +497,14 @@ function rowToDeviceModel(r: any): DeviceModel {
   return { id: r.id, brandId: r.brand_id ?? "", name: r.name ?? "", createdAt: r.created_at ?? new Date().toISOString() };
 }
 
+function rowToAssignedByOption(r: any): AssignedByOption {
+  return { id: r.id, name: r.name ?? "", createdAt: r.created_at ?? new Date().toISOString() };
+}
+
+function rowToAssignedToOption(r: any): AssignedToOption {
+  return { id: r.id, name: r.name ?? "", createdAt: r.created_at ?? new Date().toISOString() };
+}
+
 /* ─── Context + localStorage fallback ────────────────────────────────── */
 
 const StoreContext = createContext<Store | null>(null);
@@ -508,6 +526,8 @@ function loadFromStorage(): StoreState | null {
       companies: saved.companies ?? SEED_COMPANIES,
       brands: saved.brands ?? SEED_BRANDS,
       deviceModels: saved.deviceModels ?? SEED_MODELS,
+      assignedByOptions: saved.assignedByOptions ?? SEED_ASSIGNED_BY_OPTIONS,
+      assignedToOptions: saved.assignedToOptions ?? SEED_ASSIGNED_TO_OPTIONS,
       hydrated: true,
       mode: "local" as const,
     };
@@ -528,7 +548,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return {
         tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
         team: [], inventory: [], stockMovements: [], customers: [],
-        companies: [], brands: [], deviceModels: [], hydrated: false, mode: "db",
+        companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [], hydrated: false, mode: "db",
       };
     }
     const saved = loadFromStorage();
@@ -538,7 +558,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
       inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
       customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
-      companies: SEED_COMPANIES,
+      companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
+      assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
       hydrated: true, mode: "local",
     };
   });
@@ -565,6 +586,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: comps },
         { data: brds },
         { data: models },
+        { data: abOpts },
+        { data: atOpts },
       ] = await Promise.all([
         supabase.from("tickets").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         supabase.from("invoices").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
@@ -575,6 +598,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         supabase.from("companies").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         supabase.from("brands").select("*").order("created_at", { ascending: false }),
         supabase.from("device_models").select("*").order("created_at", { ascending: false }),
+        supabase.from("assigned_by_options").select("*").order("created_at", { ascending: false }),
+        supabase.from("assigned_to_options").select("*").order("created_at", { ascending: false }),
       ]);
 
       if (!active) return;
@@ -590,6 +615,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         companies: (comps ?? []).map(rowToCompany),
         brands: (brds ?? []).map(rowToBrand),
         deviceModels: (models ?? []).map(rowToDeviceModel),
+        assignedByOptions: (abOpts ?? []).map(rowToAssignedByOption),
+        assignedToOptions: (atOpts ?? []).map(rowToAssignedToOption),
         hydrated: true,
       }));
     })();
@@ -680,12 +707,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const next = [...prev.deviceModels]; next[idx] = model;
             return { ...prev, deviceModels: next };
           }
+          case "assigned_by_options": {
+            if (isDelete) return { ...prev, assignedByOptions: prev.assignedByOptions.filter((o) => o.id !== row.id) };
+            const opt = rowToAssignedByOption(row);
+            const idx = prev.assignedByOptions.findIndex((o) => o.id === row.id);
+            if (idx === -1) return { ...prev, assignedByOptions: [opt, ...prev.assignedByOptions] };
+            const next = [...prev.assignedByOptions]; next[idx] = opt;
+            return { ...prev, assignedByOptions: next };
+          }
+          case "assigned_to_options": {
+            if (isDelete) return { ...prev, assignedToOptions: prev.assignedToOptions.filter((o) => o.id !== row.id) };
+            const opt = rowToAssignedToOption(row);
+            const idx = prev.assignedToOptions.findIndex((o) => o.id === row.id);
+            if (idx === -1) return { ...prev, assignedToOptions: [opt, ...prev.assignedToOptions] };
+            const next = [...prev.assignedToOptions]; next[idx] = opt;
+            return { ...prev, assignedToOptions: next };
+          }
           default: return prev;
         }
       });
     };
 
-    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "companies", "brands", "device_models"];
+    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options"];
 
     const channel = client.channel("store-realtime");
     for (const table of tables) {
@@ -1246,6 +1289,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, brands: SEED_BRANDS, deviceModels: SEED_MODELS }));
   }, []);
 
+  /* ── Assigned By master list actions (DB-first) ── */
+  const addAssignedByOption = useCallback(async (option: AssignedByOption) => {
+    // Prevent duplicates (case-insensitive)
+    const exists = stateRef.current.assignedByOptions.some((o) => o.name.toLowerCase() === option.name.toLowerCase());
+    if (exists) return;
+    // Optimistically add to state immediately so the UI reflects the change
+    setState((s) => ({ ...s, assignedByOptions: [...s.assignedByOptions, option] }));
+    logActivity({ module: "Ticket", action: "Assigned By Added", severity: "success", entity: "Assigned By", reference: option.name, description: `Added "${option.name}" to Assigned By master list.` });
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("assigned_by_options").insert({ id: option.id, name: option.name });
+      if (error) { console.error("[store] addAssignedByOption sync failed:", error.message); }
+    }
+  }, []);
+
+  /* ── Assigned To master list actions (DB-first) ── */
+  const addAssignedToOption = useCallback(async (option: AssignedToOption) => {
+    const exists = stateRef.current.assignedToOptions.some((o) => o.name.toLowerCase() === option.name.toLowerCase());
+    if (exists) return;
+    setState((s) => ({ ...s, assignedToOptions: [...s.assignedToOptions, option] }));
+    logActivity({ module: "Ticket", action: "Assigned To Added", severity: "success", entity: "Assigned To", reference: option.name, description: `Added "${option.name}" to Assigned To master list.` });
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("assigned_to_options").insert({ id: option.id, name: option.name });
+      if (error) { console.error("[store] addAssignedToOption sync failed:", error.message); }
+    }
+  }, []);
+
   const store: Store = {
     ...state,
     addTicket,
@@ -1274,6 +1343,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addDeviceModel,
     deleteBrand,
     deleteDeviceModel,
+    addAssignedByOption,
+    addAssignedToOption,
     resetBrandsAndModels,
   };
 

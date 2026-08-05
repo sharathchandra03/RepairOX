@@ -18,7 +18,7 @@ export const STEP_LABELS = [
   "Quote",
   "QC Form",
   "Upload",
-  "Signature",
+  "Confirmation",
 ];
 
 export function WizardShell({

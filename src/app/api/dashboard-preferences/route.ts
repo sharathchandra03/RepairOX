@@ -4,15 +4,17 @@ import { createAdminClient } from "@/lib/supabase-admin";
 export const dynamic = "force-dynamic";
 
 /* ──────────────────────────────────────────────────────────────────────────
-   GET /api/dashboard-preferences — Load the signed-in user's KPI card order.
-   POST /api/dashboard-preferences — Save a new card order for the user.
+   GET /api/dashboard-preferences — Load the signed-in user's saved order for
+       a given section. Pass ?section=kpi_cards (default) or ?section=widget_row.
+   POST /api/dashboard-preferences — Save a new card/widget order for the user.
+       Body: { cardOrder: string[], section?: string }
 
    Storage: `dashboard_preferences` table in Supabase.
    Schema:
      id           uuid (PK, default gen_random_uuid())
-     auth_user_id uuid (unique, FK → auth.users.id)
-     section      text (e.g. "kpi_cards")
-     card_order   text[] (ordered card IDs)
+     auth_user_id uuid (unique per section, FK → auth.users.id)
+     section      text (e.g. "kpi_cards", "widget_row")
+     card_order   text[] (ordered IDs)
      updated_at   timestamptz (default now())
 
    Falls back gracefully when Supabase is not configured (the client layer
@@ -41,11 +43,15 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Invalid session." }, { status: 401 });
   }
 
+  // Determine which section to load (default: kpi_cards for backwards compat)
+  const { searchParams } = new URL(req.url);
+  const section = searchParams.get("section") || "kpi_cards";
+
   const { data, error } = await admin
     .from("dashboard_preferences")
     .select("section, card_order, updated_at")
     .eq("auth_user_id", auth.user.id)
-    .eq("section", "kpi_cards")
+    .eq("section", section)
     .maybeSingle();
 
   if (error) {
@@ -77,6 +83,7 @@ export async function POST(req: Request) {
 
   const body = await req.json().catch(() => ({} as Record<string, unknown>));
   const cardOrder = body.cardOrder;
+  const section = typeof body.section === "string" && body.section.length > 0 ? body.section : "kpi_cards";
 
   if (!Array.isArray(cardOrder) || cardOrder.length === 0 || !cardOrder.every((id: unknown) => typeof id === "string")) {
     return NextResponse.json({ ok: false, error: "cardOrder must be a non-empty array of strings." }, { status: 400 });
@@ -88,7 +95,7 @@ export async function POST(req: Request) {
     .upsert(
       {
         auth_user_id: auth.user.id,
-        section: "kpi_cards",
+        section,
         card_order: cardOrder,
         updated_at: new Date().toISOString(),
       },
