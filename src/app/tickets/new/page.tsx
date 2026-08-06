@@ -284,6 +284,8 @@ function NewTicketWizard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
+  const fromPage = searchParams.get("from");
+  const closeTarget = fromPage === "dashboard" ? "/dashboard" : "/tickets";
   const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer } = useStore();
 
   const [step, setStep] = useState(editId ? 3 : 1);
@@ -317,7 +319,7 @@ function NewTicketWizard() {
   const next = () => setStep((s) => Math.min(s + 1, 11));
   const back = () => {
     if (step === 1) {
-      attemptNav("/tickets");
+      attemptNav(closeTarget);
     } else {
       setStep((s) => Math.max(1, s - 1));
     }
@@ -499,7 +501,7 @@ function NewTicketWizard() {
         step={step}
         onBack={back}
         onClose={isEdit ? () => attemptNav(`/tickets/${editId}`) : undefined}
-        closeHref={isEdit ? undefined : "/tickets"}
+        closeHref={isEdit ? undefined : closeTarget}
         title={isEdit ? `Edit Ticket ${editId}` : titleFor(step)}
         subtitle={isEdit ? "Update ticket details below." : subtitleFor(step)}
         isEdit={isEdit}
@@ -654,14 +656,14 @@ const PROCESS_CARDS: {
 
 function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: string) => void }) {
   return (
-    <div className="max-w-[700px] mx-auto">
+    <div className="max-w-[660px] mx-auto">
       {/* Decorative background elements */}
       <div className="pointer-events-none absolute top-20 left-8 h-2 w-2 rounded-full bg-[#4361EE]/20 animate-pulse-dot" />
       <div className="pointer-events-none absolute top-32 left-12 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15" />
       <div className="pointer-events-none absolute top-24 right-16 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15 animate-pulse-dot" style={{ animationDelay: "0.5s" }} />
 
       {/* Cards Grid */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {PROCESS_CARDS.map((card, i) => {
           const isSelected = value === card.id;
           return (
@@ -679,7 +681,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               whileTap={{ scale: 0.97, transition: { duration: 0.1 } }}
               onClick={() => onChange(card.id)}
               className={cn(
-                "group relative flex flex-col items-center text-center rounded-2xl border p-4 sm:p-5 cursor-pointer",
+                "group relative flex flex-col items-center text-center rounded-2xl border p-3 sm:p-4 cursor-pointer",
                 "transition-[background,border-color,box-shadow] duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                 "backdrop-blur-sm",
                 "shadow-[0_1px_3px_rgba(20,30,80,0.04),0_4px_12px_-4px_rgba(20,30,80,0.06)]",
@@ -700,9 +702,9 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
                   initial={{ opacity: 0, scale: 0.8 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ delay: 0.4, duration: 0.3, ease: [0.32, 0.72, 0, 1] }}
-                  className="absolute top-3 left-3 flex items-center gap-1 rounded-full bg-[#4361EE] px-2.5 py-0.5 text-[10px] font-semibold text-white shadow-sm"
+                  className="absolute top-2.5 left-2.5 flex items-center gap-0.5 rounded-full bg-[#4361EE] px-2 py-[1px] text-[9px] font-semibold text-white shadow-sm"
                 >
-                  <Sparkles className="h-2.5 w-2.5" />
+                  <Sparkles className="h-2 w-2" />
                   {card.badge}
                 </motion.span>
               )}
@@ -710,7 +712,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               {/* Icon Circle — scales on hover via group */}
               <span
                 className={cn(
-                  "relative grid h-14 w-14 place-items-center rounded-full text-white",
+                  "relative grid h-12 w-12 place-items-center rounded-full text-white",
                   "bg-gradient-to-br shadow-lg",
                   "transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                   "group-hover:scale-[1.12]",
@@ -731,7 +733,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               </span>
 
               {/* Title */}
-              <h3 className="mt-3 text-[13px] font-bold text-zinc-800 tracking-tight transition-colors duration-[350ms] group-hover:text-[#2A3AB8]">{card.title}</h3>
+              <h3 className="mt-2 text-[13px] font-bold text-zinc-800 tracking-tight transition-colors duration-[350ms] group-hover:text-[#2A3AB8]">{card.title}</h3>
 
               {/* Description */}
               <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed max-w-[180px]">{card.desc}</p>
@@ -739,7 +741,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               {/* Arrow Button — magnetic hover physics */}
               <span
                 className={cn(
-                  "mt-3 grid h-7 w-7 place-items-center rounded-full",
+                  "mt-2.5 grid h-7 w-7 place-items-center rounded-full",
                   "transition-all duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                   isSelected
                     ? "bg-[#4361EE] text-white shadow-[0_4px_16px_-2px_rgba(67,97,238,0.5)]"
@@ -1471,10 +1473,13 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
             <Field label="Estimate">
               <Input
                 value={j.estimate}
-                onChange={(e: any) => set("estimate", e.target.value)}
+                onChange={(e: any) => {
+                  const v = e.target.value.replace(/[^0-9.]/g, "");
+                  set("estimate", v);
+                }}
                 placeholder="0"
-                type="number"
-                className="h-11 tabular-nums pl-9"
+                inputMode="numeric"
+                className="h-11 tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]"
                 iconLeft={<IndianRupee className="h-3.5 w-3.5" />}
               />
             </Field>

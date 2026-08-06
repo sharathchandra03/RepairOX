@@ -52,7 +52,7 @@ function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }
 export default function Dashboard() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_high" | "amount_low">("newest");
   const [filterBy, setFilterBy] = useState<"all" | "received" | "repairing" | "completed" | "delivered">("all");
-  const [dateRange, setDateRange] = useState<"yesterday" | "this_month" | "last_month" | "this_year" | "custom">("this_month");
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "this_month" | "this_year" | "all" | "custom">("today");
   const [customRange, setCustomRange] = useState<DateRange>({ start: null, end: null });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const { tickets, invoices, inventory } = useStore();
@@ -113,10 +113,11 @@ export default function Dashboard() {
   // Date range label helper
   const dateRangeLabel = useMemo(() => {
     switch (dateRange) {
+      case "today": return "Today";
       case "yesterday": return "Yesterday";
       case "this_month": return "This Month";
-      case "last_month": return "Last Month";
       case "this_year": return "This Year";
+      case "all": return "All";
       case "custom": {
         if (customRange.start && customRange.end) {
           const fmt = (d: Date) => d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
@@ -124,7 +125,7 @@ export default function Dashboard() {
         }
         return "Custom Range";
       }
-      default: return "This Month";
+      default: return "Today";
     }
   }, [dateRange, customRange]);
 
@@ -140,20 +141,17 @@ export default function Dashboard() {
     list = list.filter((t) => {
       const created = new Date(t.createdAt).getTime();
       switch (dateRange) {
+        case "today": return created >= ts;
         case "yesterday": return created >= ts - 86_400_000 && created < ts;
         case "this_month": {
           const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
           return created >= monthStart;
         }
-        case "last_month": {
-          const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime();
-          const thisMonthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-          return created >= lastMonthStart && created < thisMonthStart;
-        }
         case "this_year": {
           const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
           return created >= yearStart;
         }
+        case "all": return true;
         case "custom": {
           if (!customRange.start || !customRange.end) return true;
           const s = new Date(customRange.start); s.setHours(0,0,0,0);
@@ -189,6 +187,11 @@ export default function Dashboard() {
     let days: number;
 
     switch (dateRange) {
+      case "today": {
+        start = new Date(today);
+        days = 1;
+        break;
+      }
       case "yesterday": {
         start = new Date(today.getTime() - 86_400_000);
         end = new Date(today.getTime() - 1); // end of yesterday
@@ -200,14 +203,13 @@ export default function Dashboard() {
         days = Math.max(1, n.getDate());
         break;
       }
-      case "last_month": {
-        start = new Date(n.getFullYear(), n.getMonth() - 1, 1);
-        end = new Date(n.getFullYear(), n.getMonth(), 0, 23, 59, 59, 999);
-        days = end.getDate();
-        break;
-      }
       case "this_year": {
         start = new Date(n.getFullYear(), 0, 1);
+        days = Math.max(1, Math.ceil((n.getTime() - start.getTime()) / 86_400_000));
+        break;
+      }
+      case "all": {
+        start = new Date(2000, 0, 1); // far past to include everything
         days = Math.max(1, Math.ceil((n.getTime() - start.getTime()) / 86_400_000));
         break;
       }
@@ -217,14 +219,14 @@ export default function Dashboard() {
           end = new Date(customRange.end); end.setHours(23, 59, 59, 999);
           days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86_400_000));
         } else {
-          start = new Date(n.getFullYear(), n.getMonth(), 1);
-          days = Math.max(1, n.getDate());
+          start = new Date(today);
+          days = 1;
         }
         break;
       }
       default: {
-        start = new Date(n.getFullYear(), n.getMonth(), 1);
-        days = Math.max(1, n.getDate());
+        start = new Date(today);
+        days = 1;
       }
     }
     return { rangeStart: start, rangeEnd: end, rangeDays: days };
@@ -246,6 +248,19 @@ export default function Dashboard() {
     const projection = avgRevenue * daysInMonth;
     return { totalRevenue, avgRevenue, projection };
   }, [filteredInvoices, rangeDays, now]);
+
+  // Monthly revenue — always computed for the full current month regardless of date filter
+  // Used for the monthly target progress bar which shouldn't change with date filter
+  const monthlyRevenue = useMemo(() => {
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const monthEnd = new Date().getTime();
+    return invoices
+      .filter((i) => {
+        const created = new Date(i.createdAt).getTime();
+        return created >= monthStart && created <= monthEnd;
+      })
+      .reduce((s, i) => s + i.total, 0);
+  }, [invoices, now]);
 
   // Stock value from inventory (cost basis — point-in-time, not date-filtered)
   const stockValue = useMemo(() => {
@@ -290,7 +305,7 @@ export default function Dashboard() {
           tone="emerald"
           delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
           hint={`Projected: ${formatINR(revenueMetrics.projection)}/month`}
-          progress={{ value: Math.min(100, Math.round((revenueMetrics.totalRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
+          progress={{ value: Math.min(100, Math.round((monthlyRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
           onCardClick={canEditTarget ? () => { setEditTargetValue(monthlyTarget.toLocaleString("en-IN")); setShowTargetEdit(true); } : undefined}
         />
       ),
@@ -336,7 +351,7 @@ export default function Dashboard() {
         />
       ),
     },
-  }), [revenueMetrics, stockValue, inventory, duesMetrics, invoices, ticketMetrics, monthlyTarget, canEditTarget, rangeDays, filteredInvoices]);
+  }), [revenueMetrics, monthlyRevenue, stockValue, inventory, duesMetrics, invoices, ticketMetrics, monthlyTarget, canEditTarget, rangeDays, filteredInvoices]);
 
   // Ordered cards array based on saved user preference
   const orderedKpiCards = useMemo<KpiCardItem[]>(
@@ -362,7 +377,7 @@ export default function Dashboard() {
         title="Business Overview"
         actions={
           <Can permission="manage_repair_jobs">
-            <Link href="/tickets/new">
+            <Link href="/tickets/new?from=dashboard">
               <button className="relative inline-flex items-center gap-2 rounded-full h-11 px-6 bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white font-semibold text-[14px] shadow-lg shadow-[#4361EE]/25 transition-all duration-300 hover:scale-[1.05] hover:shadow-xl hover:shadow-[#4361EE]/30 active:scale-[0.97]">
                 {/* Breathing glow ring */}
                 <span className="absolute -inset-[2px] rounded-full bg-gradient-to-r from-[#4361EE]/40 to-[#6366F1]/40 animate-[breathe_3s_ease-in-out_infinite] blur-[6px]" />
@@ -379,10 +394,11 @@ export default function Dashboard() {
         {/* Segmented control — left aligned */}
         <div className="inline-flex items-center rounded-full border border-border bg-muted/40 p-1 shadow-sm">
           {([
+            { label: "Today", value: "today" as const },
             { label: "Yesterday", value: "yesterday" as const },
             { label: "This Month", value: "this_month" as const },
-            { label: "Last Month", value: "last_month" as const },
             { label: "This Year", value: "this_year" as const },
+            { label: "All", value: "all" as const },
             { label: "Custom", value: "custom" as const },
           ] as const).map((opt) => (
             <button

@@ -62,7 +62,11 @@ export function KpiCard({
       <p className="relative font-display mt-3 text-[28px] font-extrabold leading-none tracking-tight tnum">
         <AnimatedNumber value={value} format={format} />
       </p>
-      {hint && <p className="relative mt-2 text-[11.5px] leading-relaxed text-muted-foreground">{hint}</p>}
+      {hint && (
+        <p className="relative mt-2 inline-flex items-center rounded-full bg-[#EEF1FD] px-2.5 py-0.5 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
+          {hint}
+        </p>
+      )}
 
       {/* Progress indicator */}
       {progress && (
