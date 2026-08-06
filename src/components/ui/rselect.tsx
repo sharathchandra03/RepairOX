@@ -62,7 +62,7 @@ export function RSelect({
           type="button"
           onClick={toggle}
           className={cn(
-            "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
+            "flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all duration-150",
             open
               ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
               : "border-border hover:border-[#4361EE]/40 hover:bg-[#4361EE]/[0.03]",

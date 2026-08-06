@@ -1377,11 +1377,11 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
   return (
     <div className={FORM_CARD_COMPACT}>
       <DeviceSwitcher data={data} setData={setData} />
-      <div className="grid grid-cols-1 gap-x-5 lg:grid-cols-2 lg:items-stretch">
+      <div className="grid grid-cols-1 gap-x-4 lg:grid-cols-2 lg:items-stretch">
         {/* Left Column — Job Overview */}
         <div className="flex flex-col">
           <SectionLabel icon={ClipboardList}>Job Overview</SectionLabel>
-          <div className="mt-2.5 grid grid-cols-1 gap-x-2.5 gap-y-2 sm:grid-cols-2">
+          <div className="mt-2 grid grid-cols-1 gap-x-2 gap-y-1.5 sm:grid-cols-2">
             <Field label="Job Type">
               <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
                 { label: "Service", value: "service" },
@@ -1409,7 +1409,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 <button
                   type="button"
                   onClick={() => setShowCustomPicker(true)}
-                  className="flex h-9 w-full items-center justify-between gap-2 rounded-xl border border-[#C0392B]/30 bg-[#C0392B]/[0.04] px-3 text-sm font-medium text-[#922B21] transition hover:border-[#C0392B]/50"
+                  className="flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border border-[#C0392B]/30 bg-[#C0392B]/[0.04] px-3 text-[13px] font-medium text-[#922B21] transition hover:border-[#C0392B]/50"
                 >
                   <span className="flex items-center gap-1.5 truncate">
                     <Clock className="h-3.5 w-3.5 text-[#C0392B]/70" />
@@ -1430,46 +1430,46 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               )}
             </Field>
           </div>
-          <div className="mt-2.5">
+          <div className="mt-4">
             <Field label="Issue">
               <IssueSelector
                 value={j.issue}
                 onChange={(v) => set("issue", v)}
-                className="min-h-[96px] items-start py-2"
+                className="min-h-[82px] items-start py-1.5"
               />
             </Field>
           </div>
-          <div className="mt-auto pt-2.5">
-            <Field label="User Accessories"><Input value={j.accessories} onChange={(e: any) => set("accessories", e.target.value)} placeholder="e.g. Charger, case, SIM tray received" className="h-9" /></Field>
+          <div className="mt-auto pt-2">
+            <Field label="User Accessories"><Input value={j.accessories} onChange={(e: any) => set("accessories", e.target.value)} placeholder="e.g. Charger, case, SIM tray received" className="h-[34px]" /></Field>
           </div>
         </div>
 
         {/* Right Column — Notes & Estimate */}
         <div className="flex flex-col">
           <SectionLabel icon={StickyNote}>Notes & Estimate</SectionLabel>
-          <div className="mt-2.5">
+          <div className="mt-2">
             <Field label="Problem Description">
               <Textarea
                 value={j.description}
                 onChange={(e: any) => set("description", e.target.value)}
                 placeholder="Customer reported intermittent reboots when charging…"
                 rows={3}
-                className="min-h-0 h-[114px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+                className="min-h-0 h-[103px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
               />
             </Field>
           </div>
-          <div className="mt-2.5">
+          <div className="mt-2">
             <Field label="Internal Notes">
               <Textarea
                 value={j.notes}
                 onChange={(e: any) => set("notes", e.target.value)}
                 placeholder="Visible water damage on bottom left"
                 rows={3}
-                className="min-h-0 h-[96px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+                className="min-h-0 h-[82px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
               />
             </Field>
           </div>
-          <div className="mt-auto pt-2.5">
+          <div className="mt-auto pt-2">
             <Field label="Estimate">
               <Input
                 value={j.estimate}
@@ -1479,7 +1479,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 }}
                 placeholder="0"
                 inputMode="numeric"
-                className="h-9 tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]"
+                className="h-[34px] tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]"
                 iconLeft={<IndianRupee className="h-3.5 w-3.5" />}
               />
             </Field>
@@ -1487,8 +1487,8 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
         </div>
       </div>
       {!isEdit && (
-        <div className="mt-3 flex justify-end">
-          <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
+        <div className="mt-2.5 flex justify-end">
+          <Button size="sm" onClick={onNext}>Next <ArrowRight className="h-3.5 w-3.5" /></Button>
         </div>
       )}
 
@@ -1590,14 +1590,14 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
 }
 
 const FORM_CARD = "rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 sm:p-8 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
-const FORM_CARD_COMPACT = "rounded-[18px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-3.5 sm:p-4 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
+const FORM_CARD_COMPACT = "rounded-[16px] border border-[#E2E8F8]/80 bg-[#F7FAFF] px-5 py-3 sm:px-6 sm:py-3.5 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
 
 /** Inline device tab switcher — shown above Job Details & Parts steps when multiple devices exist */
 function DeviceSwitcher({ data, setData }: { data: any; setData: (d: any) => void }) {
   if (data.devices.length <= 1) return null;
   const activeIdx = data.activeDeviceIndex;
   return (
-    <div className="mb-3 flex items-center gap-1.5 overflow-x-auto pb-1" role="tablist" aria-label="Select device">
+    <div className="mb-2.5 flex items-center gap-1.5 overflow-x-auto pb-0.5" role="tablist" aria-label="Select device">
       {data.devices.map((dev: WizardDevice, idx: number) => {
         const label = [dev.device.brand, dev.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
         const isActive = idx === activeIdx;
