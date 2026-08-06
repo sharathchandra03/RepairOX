@@ -66,7 +66,7 @@ export function Topbar({
                 <button
                   onClick={toggle}
                   className={cn(
-                    "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
+                    "relative flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95 animate-module-breathe",
                     meta.bg, meta.color,
                     open ? "border-[#B3BFF6]" : "border-transparent hover:border-[#E5E9F8]"
                   )}
@@ -103,7 +103,7 @@ export function Topbar({
               )}
             </Dropdown>
           ) : (
-            <span className={cn("rounded-full px-3 py-1.5 text-[12px] font-semibold", meta.bg, meta.color)}>
+            <span className={cn("rounded-full px-3 py-1.5 text-[12px] font-semibold animate-module-breathe", meta.bg, meta.color)}>
               {meta.label}
             </span>
           )}

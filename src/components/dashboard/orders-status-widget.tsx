@@ -176,7 +176,7 @@ function OrderTypeDetailDrawer({
 }
 
 /* ── Widget ── */
-export function OrdersStatusWidget() {
+export function OrdersStatusWidget({ className }: { className?: string }) {
   const { tickets } = useStore();
   const [selectedRow, setSelectedRow] = React.useState<OrderTypeRow | null>(null);
   const [selectedColumn, setSelectedColumn] = React.useState<"assigned" | "received" | null>(null);
@@ -242,7 +242,7 @@ export function OrdersStatusWidget() {
   };
 
   return (
-    <div className="rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6">
+    <div className={cn("rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6", className)}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Orders Status</p>

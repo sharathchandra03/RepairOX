@@ -7,7 +7,7 @@ import Link from "next/link";
 import {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
   Store, Wallet, Settings, BarChart3, ChevronLeft, ChevronRight,
-  LogOut, CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
+  CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
   ClipboardCheck, Truck, Receipt, Activity, ChevronDown,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
   IndianRupee, ReceiptIndianRupee,
@@ -15,7 +15,6 @@ import {
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
 import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
-import { Avatar } from "@/components/ui/avatar";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 
@@ -266,9 +265,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { can, allowedWorkspaces, role, isPreviewing, currentUser, logout } = usePermissions();
-  const displayName = currentUser?.name ?? "User";
-  const displayEmail = currentUser?.email ?? "";
+  const { can, allowedWorkspaces, role, isPreviewing } = usePermissions();
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
   const groups = navGroups[activeWorkspace];
   const expandableGroups = expandableNavGroups[activeWorkspace] ?? [];
@@ -367,38 +364,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
         })}
       </nav>
 
-      {/* Profile footer — centred avatar only when collapsed. Role label reflects
-          whichever role is currently driving the UI (real admin, or the role
-          being previewed) so the sidebar never looks out of sync with itself. */}
-      <div className={cn(
-        "mx-3 mb-3 shrink-0 rounded-2xl border shadow-[0_1px_4px_0_rgba(20,30,80,0.06)] transition-colors",
-        isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card",
-        collapsed ? "flex justify-center p-2" : "p-3"
-      )}>
-        {collapsed ? (
-          <Avatar name={isPreviewing ? role.label : displayName} src={isPreviewing ? undefined : currentUser?.avatarUrl} size={36} />
-        ) : (
-          <div className="flex items-center gap-3">
-            <Avatar name={isPreviewing ? role.label : displayName} src={isPreviewing ? undefined : currentUser?.avatarUrl} />
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-semibold leading-tight">
-                {isPreviewing ? role.label : displayName}
-              </p>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {isPreviewing ? "Previewing this role" : displayEmail}
-              </p>
-            </div>
-            <button
-              onClick={() => { logout(); router.push("/login"); }}
-              title="Log out"
-              aria-label="Log out"
-              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground hover:text-foreground hover:bg-muted transition"
-            >
-              <LogOut className="h-4 w-4" />
-            </button>
-          </div>
-        )}
-      </div>
+
     </aside>
   );
 }

@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { StoreLogo } from "@/components/ui/store-logo";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
 import { Input, Textarea, Label, NumericInput } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
@@ -1310,8 +1311,8 @@ function QuotationSuccess({
     <div className="relative flex flex-1 flex-col items-center justify-center overflow-y-auto px-6 py-10 text-center">
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-20" />
       <motion.div initial={{ scale: 0.6, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 240, damping: 18 }}
-        className="relative grid h-20 w-20 place-items-center rounded-full brand-gradient text-white shadow-glow">
-        <CheckCircle2 className="h-10 w-10" />
+        className="relative flex items-center justify-center">
+        <StoreLogo size="xl" />
       </motion.div>
       <motion.h2 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="font-display mt-6 text-3xl font-extrabold tracking-tight">
         Quotation <span className="brand-gradient-text">saved</span>

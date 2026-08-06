@@ -176,7 +176,7 @@ function TaskRow({
 }
 
 /* ── Widget ── */
-export function TodoWidget() {
+export function TodoWidget({ className }: { className?: string }) {
   const { currentUser, team, getStaffById } = usePermissions();
   const resolveStaffName = React.useCallback((id: string) => getStaffById(id)?.name, [getStaffById]);
   const { tasks, loading, addTask, updateTask, setCompleted, deleteTask, togglePin } =
@@ -234,7 +234,7 @@ export function TodoWidget() {
   const isEmpty = !loading && tasks.length === 0;
 
   return (
-    <div className="relative rounded-2xl border border-[#F0E68C]/60 bg-[#FFF9C4] p-5 shadow-[0_4px_16px_-4px_rgba(200,180,0,0.15),0_8px_32px_-8px_rgba(200,180,0,0.1)] sm:p-6">
+    <div className={cn("relative rounded-2xl border border-[#F0E68C]/60 bg-[#FFF9C4] p-5 shadow-[0_4px_16px_-4px_rgba(200,180,0,0.15),0_8px_32px_-8px_rgba(200,180,0,0.1)] sm:p-6", className)}>
       {/* Decorative tape */}
       <div className="absolute -top-1 left-1/2 h-6 w-16 -translate-x-1/2 rounded-b-md bg-[#FFE082]/80 shadow-sm" />
       {/* Subtle lined-paper effect */}

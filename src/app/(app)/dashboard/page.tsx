@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import {
   Plus, Filter, Download, ArrowRight, MoreHorizontal, ArrowDownToLine,
-  ArrowUpDown, SlidersHorizontal, CalendarDays,
+  ChevronUp, ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -18,8 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
-import { Dropdown, MenuItem } from "@/components/ui/dropdown";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
@@ -29,6 +28,7 @@ import { useDashboardOrder } from "@/lib/use-dashboard-order";
 import { useGridLayout } from "@/lib/use-widget-order";
 import { useMonthlyTarget } from "@/lib/use-monthly-target";
 import { usePermissions } from "@/lib/permissions-context";
+import { useActivityCollapse } from "@/lib/use-activity-collapse";
 
 /* ── Device breakdown — computed from store data in component ── */
 
@@ -65,6 +65,50 @@ export default function Dashboard() {
   const [editTargetValue, setEditTargetValue] = useState("");
   const { can } = usePermissions();
   const canEditTarget = can("edit_dashboard_targets");
+  const { isCollapsed: activityCollapsed, toggle: toggleActivityCollapse } = useActivityCollapse();
+  const activityCardRef = useRef<HTMLDivElement>(null);
+
+  const handleActivityExpandClick = useCallback(() => {
+    if (activityCollapsed) {
+      // Expanding: toggle, then after animation settles, scroll so the card's top
+      // is near the top of the viewport — making the full expanded content visible.
+      const el = activityCardRef.current;
+      const collapsedCardTop = el ? el.getBoundingClientRect().top + window.scrollY : null;
+      toggleActivityCollapse();
+
+      if (!el || collapsedCardTop === null) return;
+
+      // Wait for framer-motion animation (220ms) + layout paint to finish
+      setTimeout(() => {
+        requestAnimationFrame(() => {
+          const rect = el.getBoundingClientRect();
+          const viewportH = window.innerHeight;
+          const cardH = rect.height;
+
+          // Already fully visible — nothing to do
+          if (rect.top >= 0 && rect.bottom <= viewportH) return;
+
+          let scrollTarget: number;
+          if (cardH <= viewportH) {
+            // Card fits in viewport — scroll so the bottom of the card aligns
+            // with the bottom of the viewport (with padding), showing everything
+            scrollTarget = collapsedCardTop + cardH - viewportH + 24;
+            // Don't scroll past the card's top
+            scrollTarget = Math.min(scrollTarget, collapsedCardTop - 16);
+            scrollTarget = Math.max(0, scrollTarget);
+          } else {
+            // Card taller than viewport — align its top near the top of viewport
+            scrollTarget = collapsedCardTop - 16;
+          }
+
+          window.scrollTo({ top: scrollTarget, behavior: "smooth" });
+        });
+      }, 300);
+    } else {
+      // Collapsing: just toggle
+      toggleActivityCollapse();
+    }
+  }, [activityCollapsed, toggleActivityCollapse]);
 
   // Date range label helper
   const dateRangeLabel = useMemo(() => {
@@ -245,7 +289,7 @@ export default function Dashboard() {
           format={formatINR}
           tone="emerald"
           delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
-          hint={`${rangeDays} day${rangeDays !== 1 ? "s" : ""} · ${filteredInvoices.length} invoice${filteredInvoices.length !== 1 ? "s" : ""}`}
+          hint={`Projected: ${formatINR(revenueMetrics.projection)}/month`}
           progress={{ value: Math.min(100, Math.round((revenueMetrics.totalRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
           onCardClick={canEditTarget ? () => { setEditTargetValue(monthlyTarget.toLocaleString("en-IN")); setShowTargetEdit(true); } : undefined}
         />
@@ -315,83 +359,51 @@ export default function Dashboard() {
       <div aria-hidden className="pointer-events-none fixed inset-x-0 top-0 -z-10 h-[420px] bg-gradient-to-b from-[#EEF1FD]/60 via-[#EEF1FD]/15 to-transparent" />
 
       <PageHeader
-        title="Analytics Overview"
+        title="Business Overview"
         actions={
           <Can permission="manage_repair_jobs">
             <Link href="/tickets/new">
-              <Button size="sm" className="rounded-full gap-1.5">
-                <Plus className="h-3.5 w-3.5" /> Add New
-              </Button>
+              <button className="relative inline-flex items-center gap-2 rounded-full h-11 px-6 bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white font-semibold text-[14px] shadow-lg shadow-[#4361EE]/25 transition-all duration-300 hover:scale-[1.05] hover:shadow-xl hover:shadow-[#4361EE]/30 active:scale-[0.97]">
+                {/* Breathing glow ring */}
+                <span className="absolute -inset-[2px] rounded-full bg-gradient-to-r from-[#4361EE]/40 to-[#6366F1]/40 animate-[breathe_3s_ease-in-out_infinite] blur-[6px]" />
+                <Plus className="h-4 w-4 relative z-10" />
+                <span className="relative z-10">Add New</span>
+              </button>
             </Link>
           </Can>
         }
       />
 
-      {/* Functional filter bar */}
-      <div className="flex flex-wrap items-center gap-2 -mt-3">
-        {/* Sort By */}
-        <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3.5 py-1.5 text-[12px] font-medium text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50 transition">
-            <ArrowUpDown className="h-3.5 w-3.5" /> Sort By
-          </button>
-        )}>
-          {(close) => (<>
-            <MenuItem onClick={() => { setSortBy("newest"); close(); }} className={cn(sortBy === "newest" && "bg-muted font-semibold")}>Newest First</MenuItem>
-            <MenuItem onClick={() => { setSortBy("oldest"); close(); }} className={cn(sortBy === "oldest" && "bg-muted font-semibold")}>Oldest First</MenuItem>
-            <MenuItem onClick={() => { setSortBy("amount_high"); close(); }} className={cn(sortBy === "amount_high" && "bg-muted font-semibold")}>Amount High → Low</MenuItem>
-            <MenuItem onClick={() => { setSortBy("amount_low"); close(); }} className={cn(sortBy === "amount_low" && "bg-muted font-semibold")}>Amount Low → High</MenuItem>
-          </>)}
-        </Dropdown>
-
-        {/* Filter By */}
-        <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", filterBy !== "all" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50")}>
-            <SlidersHorizontal className="h-3.5 w-3.5" /> Filter By {filterBy !== "all" && <span className="h-1.5 w-1.5 rounded-full bg-[#4361EE]" />}
-          </button>
-        )}>
-          {(close) => (<>
-            <MenuItem onClick={() => { setFilterBy("all"); close(); }} className={cn(filterBy === "all" && "bg-muted font-semibold")}>All Tickets</MenuItem>
-            <MenuItem onClick={() => { setFilterBy("received"); close(); }} className={cn(filterBy === "received" && "bg-muted font-semibold")}>Received</MenuItem>
-            <MenuItem onClick={() => { setFilterBy("repairing"); close(); }} className={cn(filterBy === "repairing" && "bg-muted font-semibold")}>Repairing</MenuItem>
-            <MenuItem onClick={() => { setFilterBy("completed"); close(); }} className={cn(filterBy === "completed" && "bg-muted font-semibold")}>Completed</MenuItem>
-            <MenuItem onClick={() => { setFilterBy("delivered"); close(); }} className={cn(filterBy === "delivered" && "bg-muted font-semibold")}>Delivered</MenuItem>
-          </>)}
-        </Dropdown>
-
-        {/* Date */}
-        <Dropdown align="left" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className={cn("inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition", dateRange !== "this_month" ? "border-[#4361EE] text-[#4361EE] bg-indigo-50" : "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50")}>
-            <CalendarDays className="h-3.5 w-3.5" /> {dateRangeLabel}
-          </button>
-        )}>
-          {(close) => (<>
-            <MenuItem onClick={() => { setDateRange("yesterday"); close(); }} className={cn(dateRange === "yesterday" && "bg-muted font-semibold")}>Yesterday</MenuItem>
-            <MenuItem onClick={() => { setDateRange("this_month"); close(); }} className={cn(dateRange === "this_month" && "bg-muted font-semibold")}>This Month</MenuItem>
-            <MenuItem onClick={() => { setDateRange("last_month"); close(); }} className={cn(dateRange === "last_month" && "bg-muted font-semibold")}>Last Month</MenuItem>
-            <MenuItem onClick={() => { setDateRange("this_year"); close(); }} className={cn(dateRange === "this_year" && "bg-muted font-semibold")}>This Year</MenuItem>
-            <MenuItem onClick={() => { setShowDatePicker(true); close(); }} className={cn(dateRange === "custom" && "bg-muted font-semibold")}>Custom Range</MenuItem>
-          </>)}
-        </Dropdown>
-
-        {/* Quick date filter strip — right side */}
-        <div className="ml-auto flex items-center gap-1.5">
+      {/* Segmented date filter bar */}
+      <div className="flex items-center gap-3 -mt-3">
+        {/* Segmented control — left aligned */}
+        <div className="inline-flex items-center rounded-full border border-border bg-muted/40 p-1 shadow-sm">
           {([
             { label: "Yesterday", value: "yesterday" as const },
             { label: "This Month", value: "this_month" as const },
             { label: "Last Month", value: "last_month" as const },
             { label: "This Year", value: "this_year" as const },
+            { label: "Custom", value: "custom" as const },
           ] as const).map((opt) => (
             <button
               key={opt.value}
-              onClick={() => setDateRange(opt.value)}
+              onClick={() => {
+                if (opt.value === "custom") {
+                  setShowDatePicker(true);
+                } else {
+                  setDateRange(opt.value);
+                }
+              }}
               className={cn(
-                "rounded-full px-3 py-1 text-[11px] font-medium transition-all",
+                "relative rounded-full px-4 py-1.5 text-[12px] font-semibold transition-all duration-200",
                 dateRange === opt.value
-                  ? "bg-[#4361EE] text-white shadow-sm"
-                  : "bg-muted/60 text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                  ? "bg-[#4361EE] text-white shadow-md shadow-[#4361EE]/25"
+                  : "text-muted-foreground hover:text-[#4361EE] hover:bg-[#EEF1FD]"
               )}
             >
-              {opt.label}
+              {opt.value === "custom" && dateRange === "custom" && customRange.start && customRange.end
+                ? dateRangeLabel
+                : opt.label}
             </button>
           ))}
         </div>
@@ -415,7 +427,7 @@ export default function Dashboard() {
         onLayoutPersist={persistLayout}
       >
         {/* Revenue Chart */}
-        <div className="h-full rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
+        <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
           <div className="px-1 pb-1 h-[calc(100%-16px)]">
             <RevenueChart darkTooltip />
@@ -423,7 +435,7 @@ export default function Dashboard() {
         </div>
 
         {/* Tickets Donut */}
-        <div className="h-full rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
+        <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
           <div className="px-1 pb-1 h-[calc(100%-16px)]">
             <TicketsDonut />
@@ -431,7 +443,7 @@ export default function Dashboard() {
         </div>
 
         {/* Tickets by Device */}
-        <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
+        <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Tickets by Device" badge={<span className="text-[11px] text-muted-foreground">Last 7 days</span>} />
           {deviceData.length === 0 ? (
@@ -457,7 +469,7 @@ export default function Dashboard() {
         </div>
 
         {/* Transactions */}
-        <div className="h-full rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] flex flex-col overflow-auto">
+        <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] flex flex-col overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
           <CardHeader title="Recent Transactions" />
           {filteredTickets.length === 0 ? (
@@ -483,15 +495,13 @@ export default function Dashboard() {
         </div>
 
         {/* Today's Focus */}
-        <div className="h-full overflow-hidden flex flex-col">
-          <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
-          <div className="flex-1 overflow-auto min-h-0"><TodoWidget /></div>
+        <div className="h-full overflow-hidden">
+          <TodoWidget className="h-full drag-handle cursor-grab active:cursor-grabbing" />
         </div>
 
         {/* Orders Status */}
-        <div className="h-full overflow-hidden flex flex-col">
-          <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
-          <div className="flex-1 overflow-auto"><OrdersStatusWidget /></div>
+        <div className="h-full overflow-hidden">
+          <OrdersStatusWidget className="h-full drag-handle cursor-grab active:cursor-grabbing" />
         </div>
       </DashboardGrid>
 
@@ -529,12 +539,37 @@ export default function Dashboard() {
       </div>
 
       {/* Recent Activity */}
-      <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
+      <div ref={activityCardRef} className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
         <div className="flex items-center justify-between gap-3 p-5 sm:px-6">
-          <div><p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Activity</p><h3 className="font-display mt-0.5 text-base font-bold">Audit trail across every module</h3></div>
-          <Link href="/activity" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View all activities <ArrowRight className="h-3.5 w-3.5" /></Link>
+          <div><p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Recent Activity</p><h3 className="font-display mt-0.5 text-base font-bold">Everything happening in your business.</h3></div>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleActivityExpandClick}
+              aria-label={activityCollapsed ? "Expand activity list" : "Collapse activity list"}
+              className="grid h-8 w-8 place-items-center rounded-full bg-[#EEF1FD] text-[#4361EE] transition-all duration-200 hover:bg-[#D9DFFA] hover:shadow-sm cursor-pointer"
+            >
+              <motion.span
+                animate={{ rotate: activityCollapsed ? 180 : 0 }}
+                transition={{ duration: 0.2 }}
+                className="flex items-center justify-center"
+              >
+                <ChevronUp className="h-4 w-4" />
+              </motion.span>
+            </button>
+            <Link href="/activity" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View all activities <ArrowRight className="h-3.5 w-3.5" /></Link>
+          </div>
         </div>
-        <div className="max-h-[420px] overflow-auto px-3 pb-3 sm:px-4"><ActivityTimeline entries={activities.slice(0, 15)} onSelect={setSelectedActivity} /></div>
+        <motion.div
+          initial={false}
+          animate={{
+            height: activityCollapsed ? 0 : "auto",
+            opacity: activityCollapsed ? 0 : 1,
+          }}
+          transition={{ duration: 0.22, ease: [0.4, 0, 0.2, 1] }}
+          className="overflow-hidden"
+        >
+          <div className="max-h-[420px] overflow-auto px-3 pb-3 sm:px-4"><ActivityTimeline entries={activities.slice(0, 15)} onSelect={setSelectedActivity} /></div>
+        </motion.div>
       </div>
       <ActivityDetailDrawer entry={selectedActivity} onClose={() => setSelectedActivity(null)} />
 

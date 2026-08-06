@@ -57,12 +57,16 @@ const config: Config = {
         "fade-up": { from: { opacity: "0", transform: "translateY(8px)" }, to: { opacity: "1", transform: "translateY(0)" } },
         shimmer: { "100%": { transform: "translateX(100%)" } },
         pulseDot: { "0%,100%": { opacity: "1" }, "50%": { opacity: "0.35" } },
+        breathe: { "0%,100%": { opacity: "0.4", transform: "scale(1)" }, "50%": { opacity: "0.8", transform: "scale(1.04)" } },
+        "module-breathe": { "0%,100%": { boxShadow: "0 0 0 0 rgba(67,97,238,0.0), 0 0 0 0 rgba(67,97,238,0.0)" }, "50%": { boxShadow: "0 0 12px 2px rgba(67,97,238,0.15), 0 0 4px 1px rgba(67,97,238,0.10)" } },
       },
       animation: {
         "fade-in": "fade-in 240ms ease-out both",
         "fade-up": "fade-up 360ms cubic-bezier(0.22,1,0.36,1) both",
         shimmer: "shimmer 1.6s infinite",
         "pulse-dot": "pulseDot 1.4s ease-in-out infinite",
+        breathe: "breathe 3s ease-in-out infinite",
+        "module-breathe": "module-breathe 3s ease-in-out infinite",
       },
       backgroundImage: {
         "grid-faint":

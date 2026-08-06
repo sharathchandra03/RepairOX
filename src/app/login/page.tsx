@@ -142,7 +142,7 @@ export default function LoginPage() {
               </span>
               <div>
                 <p className="text-[11px] uppercase tracking-wide text-muted-foreground">For more info</p>
-                <p className="text-sm font-semibold">Call us · +91 91089 55544</p>
+                <p className="text-sm font-semibold">Call us · +91 9880984510</p>
               </div>
             </div>
           </div>

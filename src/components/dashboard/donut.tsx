@@ -13,6 +13,7 @@ const STATUS_COLORS: Record<string, string> = {
   completed: "#22C55E",
   delivered: "#B3BFF6",
   "quality-check": "#8B5CF6",
+  qc: "#8B5CF6",
   "waiting-parts": "#EF4444",
   cancelled: "#94A3B8",
 };
@@ -23,6 +24,7 @@ const STATUS_DISPLAY: Record<string, string> = {
   completed: "Completed",
   delivered: "Delivered",
   "quality-check": "Quality Check",
+  qc: "Quality Check",
   "waiting-parts": "Waiting for Parts",
   cancelled: "Cancelled",
 };

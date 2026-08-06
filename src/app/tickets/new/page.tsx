@@ -605,7 +605,7 @@ const PROCESS_CARDS: {
     id: "ticket",
     title: "New Ticket",
     desc: "Create a new repair ticket and track progress",
-    icon: <ClipboardList className="h-7 w-7" />,
+    icon: <ClipboardList className="h-6 w-6" />,
     gradient: "from-blue-400/80 to-blue-600/80",
     accentColor: "#4361EE",
     badge: "Popular",
@@ -614,7 +614,7 @@ const PROCESS_CARDS: {
     id: "invoice",
     title: "New Invoice",
     desc: "Create bill, manage payments and send invoices",
-    icon: <FileText className="h-7 w-7" />,
+    icon: <FileText className="h-6 w-6" />,
     gradient: "from-emerald-400/80 to-emerald-600/80",
     accentColor: "#10B981",
   },
@@ -622,7 +622,7 @@ const PROCESS_CARDS: {
     id: "stock",
     title: "Add Stock",
     desc: "Add new inventory items to your store",
-    icon: <Package className="h-7 w-7" />,
+    icon: <Package className="h-6 w-6" />,
     gradient: "from-orange-400/80 to-orange-600/80",
     accentColor: "#F59E0B",
   },
@@ -630,7 +630,7 @@ const PROCESS_CARDS: {
     id: "walkin",
     title: "Walk-In",
     desc: "Quick counter billing for walk-in customers",
-    icon: <Building2 className="h-7 w-7" />,
+    icon: <Building2 className="h-6 w-6" />,
     gradient: "from-violet-400/80 to-violet-600/80",
     accentColor: "#8B5CF6",
   },
@@ -638,7 +638,7 @@ const PROCESS_CARDS: {
     id: "estimate",
     title: "Estimate",
     desc: "Send quote and estimated cost to your customer",
-    icon: <IndianRupee className="h-7 w-7" />,
+    icon: <IndianRupee className="h-6 w-6" />,
     gradient: "from-teal-400/80 to-teal-600/80",
     accentColor: "#14B8A6",
   },
@@ -646,7 +646,7 @@ const PROCESS_CARDS: {
     id: "warranty",
     title: "Warranty",
     desc: "Claim or warranty check process",
-    icon: <Shield className="h-7 w-7" />,
+    icon: <Shield className="h-6 w-6" />,
     gradient: "from-rose-400/80 to-rose-600/80",
     accentColor: "#F43F5E",
   },
@@ -654,14 +654,14 @@ const PROCESS_CARDS: {
 
 function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: string) => void }) {
   return (
-    <div className="max-w-[780px] mx-auto">
+    <div className="max-w-[700px] mx-auto">
       {/* Decorative background elements */}
       <div className="pointer-events-none absolute top-20 left-8 h-2 w-2 rounded-full bg-[#4361EE]/20 animate-pulse-dot" />
       <div className="pointer-events-none absolute top-32 left-12 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15" />
       <div className="pointer-events-none absolute top-24 right-16 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15 animate-pulse-dot" style={{ animationDelay: "0.5s" }} />
 
       {/* Cards Grid */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {PROCESS_CARDS.map((card, i) => {
           const isSelected = value === card.id;
           return (
@@ -679,7 +679,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               whileTap={{ scale: 0.97, transition: { duration: 0.1 } }}
               onClick={() => onChange(card.id)}
               className={cn(
-                "group relative flex flex-col items-center text-center rounded-2xl border p-6 sm:p-7 cursor-pointer",
+                "group relative flex flex-col items-center text-center rounded-2xl border p-4 sm:p-5 cursor-pointer",
                 "transition-[background,border-color,box-shadow] duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                 "backdrop-blur-sm",
                 "shadow-[0_1px_3px_rgba(20,30,80,0.04),0_4px_12px_-4px_rgba(20,30,80,0.06)]",
@@ -710,7 +710,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               {/* Icon Circle — scales on hover via group */}
               <span
                 className={cn(
-                  "relative grid h-16 w-16 place-items-center rounded-full text-white",
+                  "relative grid h-14 w-14 place-items-center rounded-full text-white",
                   "bg-gradient-to-br shadow-lg",
                   "transition-transform duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                   "group-hover:scale-[1.12]",
@@ -731,15 +731,15 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
               </span>
 
               {/* Title */}
-              <h3 className="mt-4 text-sm font-bold text-zinc-800 tracking-tight transition-colors duration-[350ms] group-hover:text-[#2A3AB8]">{card.title}</h3>
+              <h3 className="mt-3 text-[13px] font-bold text-zinc-800 tracking-tight transition-colors duration-[350ms] group-hover:text-[#2A3AB8]">{card.title}</h3>
 
               {/* Description */}
-              <p className="mt-1.5 text-[12px] text-zinc-500 leading-relaxed max-w-[180px]">{card.desc}</p>
+              <p className="mt-1 text-[11px] text-zinc-500 leading-relaxed max-w-[180px]">{card.desc}</p>
 
               {/* Arrow Button — magnetic hover physics */}
               <span
                 className={cn(
-                  "mt-4 grid h-8 w-8 place-items-center rounded-full",
+                  "mt-3 grid h-7 w-7 place-items-center rounded-full",
                   "transition-all duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                   isSelected
                     ? "bg-[#4361EE] text-white shadow-[0_4px_16px_-2px_rgba(67,97,238,0.5)]"
@@ -771,7 +771,7 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.55, duration: 0.35, ease: [0.32, 0.72, 0, 1] }}
-        className="mt-7 mx-auto max-w-sm flex items-center gap-2.5 rounded-xl border border-border/50 bg-white/60 backdrop-blur-sm px-4 py-2.5 shadow-[0_1px_4px_rgba(20,30,80,0.03)]"
+        className="mt-5 mx-auto max-w-sm flex items-center gap-2.5 rounded-xl border border-border/50 bg-white/60 backdrop-blur-sm px-4 py-2 shadow-[0_1px_4px_rgba(20,30,80,0.03)]"
       >
         <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-500 text-xs">
           💡

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { CheckCircle2, Printer, MessageCircle, Mail, Eye, Plus, Home, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { StoreLogo } from "@/components/ui/store-logo";
 import { cn } from "@/lib/utils";
 import { getTicketPrintUrl, getInvoicePrintUrl, type PrintFormat } from "@/lib/print-utils";
 
@@ -59,8 +60,8 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-indigo-50/30 to-white">
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-25" />
       <div className="relative mx-auto flex min-h-screen max-w-3xl flex-col items-center px-4 py-10 text-center sm:px-6">
-        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 220, damping: 18 }} className="grid h-20 w-20 place-items-center rounded-full brand-gradient text-white shadow-glow">
-          <CheckCircle2 className="h-10 w-10" />
+        <motion.div initial={{ scale: 0.5, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} transition={{ type: "spring", stiffness: 220, damping: 18 }} className="flex items-center justify-center">
+          <StoreLogo size="xl" />
         </motion.div>
         <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="font-display mt-6 text-4xl font-extrabold tracking-tight md:text-5xl">
           {isEdit ? <><span className="brand-gradient-text">{label} updated!</span></> : <>Thank you! <span className="brand-gradient-text">{label} created.</span></>}
@@ -71,11 +72,11 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
 
         {!isEdit && (
           <>
-            <div className="mt-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className={cn("mt-8 grid grid-cols-1 gap-3", type === "ticket" ? "sm:grid-cols-3" : "sm:grid-cols-2 max-w-md")}>
               {[
                 { id: "a4", label: "A4 Receipt", desc: "Best for filing & email", icon: Printer },
                 { id: "thermal", label: "Thermal Receipt", desc: "Quick counter print", icon: Printer },
-                { id: "label", label: "Label Print", desc: "Compact sticker label", icon: Tag },
+                ...(type === "ticket" ? [{ id: "label", label: "Label Print", desc: "Compact sticker label", icon: Tag }] : []),
               ].map((p) => {
                 const active = format === (p.id as PrintFormat);
                 const Icon = p.icon;

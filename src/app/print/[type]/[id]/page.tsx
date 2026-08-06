@@ -159,7 +159,13 @@ export default function PrintPreviewPage() {
         <div style={{ maxWidth: 1280, margin: "0 auto", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
             <button
-              onClick={() => router.back()}
+              onClick={() => {
+                if (window.history.length > 1) {
+                  router.back();
+                } else {
+                  window.close();
+                }
+              }}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", padding: "6px 12px", fontSize: 12, fontWeight: 500, color: "#4b5563", cursor: "pointer" }}
             >
               <ArrowLeft style={{ width: 14, height: 14 }} /> Back

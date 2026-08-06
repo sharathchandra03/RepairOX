@@ -67,7 +67,7 @@ export function DraggableKpiRow({ cards, onReorder }: DraggableKpiRowProps) {
                     {...provided.draggableProps}
                     {...provided.dragHandleProps}
                     className={cn(
-                      "transition-shadow duration-200 rounded-2xl",
+                      "transition-shadow duration-200 rounded-2xl ring-1 ring-[#B3BFF6]/40",
                       snapshot.isDragging &&
                         "z-50 scale-[1.02] shadow-[0_12px_40px_-8px_rgba(67,97,238,0.35),0_4px_16px_-4px_rgba(0,0,0,0.12)] ring-2 ring-[#4361EE]/30"
                     )}
