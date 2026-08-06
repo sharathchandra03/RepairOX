@@ -769,6 +769,7 @@ create table if not exists public.price_list_categories (
   branch_id       uuid references public.branches(id) on delete set null,
   name            text not null,
   icon            text,
+  image_url       text,
   item_count      integer not null default 0,
   enabled         boolean not null default true,
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,

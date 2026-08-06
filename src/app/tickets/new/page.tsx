@@ -1033,12 +1033,12 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         </div>
       )}
 
-    <div ref={formRef} className={FORM_CARD}>
-      <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
+    <div ref={formRef} className={FORM_CARD_COMPACT}>
+      <div className="grid grid-cols-1 gap-x-4 gap-y-4 lg:grid-cols-2">
         {/* Left Column — Device Identity */}
-        <div className="space-y-4">
+        <div className="space-y-2">
           <SectionLabel icon={Package}>Device Identity</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-2">
             {/* Brand Combobox */}
             <div className="relative">
               <Field label="Brand Name">
@@ -1051,9 +1051,9 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   }}
                   onFocus={() => setBrandOpen(true)}
                   placeholder="Search brand…"
-                  className="h-11"
-                  iconLeft={<Search className="h-4 w-4" />}
-                  iconRight={<ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", brandOpen && "rotate-180")} />}
+                  className="h-[34px]"
+                  iconLeft={<Search className="h-3.5 w-3.5" />}
+                  iconRight={<ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-200", brandOpen && "rotate-180")} />}
                 />
               </Field>
               {brandOpen && (
@@ -1092,9 +1092,9 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   }}
                   onFocus={() => setModelOpen(true)}
                   placeholder={selectedBrand ? `Search ${selectedBrand.name} models…` : "Select brand first…"}
-                  className="h-11"
-                  iconLeft={<Search className="h-4 w-4" />}
-                  iconRight={<ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform duration-200", modelOpen && "rotate-180")} />}
+                  className="h-[34px]"
+                  iconLeft={<Search className="h-3.5 w-3.5" />}
+                  iconRight={<ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-200", modelOpen && "rotate-180")} />}
                 />
               </Field>
               {modelOpen && (
@@ -1135,15 +1135,15 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               </Field>
             </div>
             <div className="col-span-1">
-              <Field label="IMEI / Serial Number"><Input value={d.imei} onChange={(e: any) => set("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="h-11 font-mono" /></Field>
+              <Field label="IMEI / Serial Number"><Input value={d.imei} onChange={(e: any) => set("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="h-[34px] font-mono" /></Field>
             </div>
           </div>
         </div>
 
         {/* Right Column — Intake */}
-        <div className="space-y-4">
+        <div className="space-y-2">
           <SectionLabel icon={ListPlus}>Intake Details</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-2">
             <Field label="Type">
               <RSelect value={d.type} onChange={(v) => set("type", v)} placeholder="Select type" options={[
                 { label: "Walk-In", value: "walkin" },
@@ -1191,13 +1191,13 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
       </div>
 
       {/* + Add Device & Next */}
-      <div className="mt-6 flex items-center justify-between gap-3">
+      <div className="mt-4 flex items-center justify-between gap-3">
         <motion.button
           type="button"
           onClick={addNewDevice}
           whileHover={{ scale: 1.02 }}
           whileTap={{ scale: 0.97 }}
-          className="inline-flex items-center gap-2 rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD]/30 px-4 py-2.5 text-[13px] font-semibold text-[#4361EE] transition-all hover:bg-[#EEF1FD] hover:border-[#4361EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD]/30 px-3 py-2 text-[12px] font-semibold text-[#4361EE] transition-all hover:bg-[#EEF1FD] hover:border-[#4361EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
           aria-label={`Add another device to this ticket (currently ${data.devices.length} device${data.devices.length > 1 ? "s" : ""})`}
         >
           <Plus className="h-4 w-4" />
@@ -1209,7 +1209,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
           )}
         </motion.button>
         {!isEdit && (
-          <Button size="lg" onClick={onNext}>Next <ArrowRight className="h-4 w-4" /></Button>
+          <Button size="sm" onClick={onNext}>Next <ArrowRight className="h-3.5 w-3.5" /></Button>
         )}
       </div>
 

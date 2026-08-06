@@ -3,15 +3,19 @@
 import { useRef, useState } from "react";
 import { Upload, X, Image as ImageIcon, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+
+const BUCKET_NAME = "catalog-images";
 
 /**
  * Image uploader for the Device Catalog.
  *
- * Accepts ANY image format the browser can decode (PNG, JPG, JPEG, WEBP, GIF,
- * SVG, AVIF, BMP, HEIC where supported, …). Every upload is rasterized and
- * downscaled on a canvas to a compact, high-quality data URL — so large files
- * are accepted without blowing the localStorage quota, and transparency is
- * preserved (exported as WEBP, falling back to PNG).
+ * When Supabase is configured, images are uploaded to Supabase Storage
+ * (catalog-images bucket) and a public URL is returned — making them globally
+ * accessible across all users and sessions.
+ *
+ * When Supabase is NOT configured, falls back to the original base64 data URL
+ * behaviour (stored in localStorage).
  */
 export function ImageUpload({
   value,
@@ -20,23 +24,57 @@ export function ImageUpload({
   label,
   maxDimension = 1400,
   rounded = "rounded-xl",
+  folder = "categories",
 }: {
   value?: string;
-  onChange: (dataUrl: string) => void;
+  onChange: (url: string) => void;
   size?: "sm" | "md" | "lg";
   label?: string;
   /** Longest-edge cap in px; images larger are scaled down (aspect kept). */
   maxDimension?: number;
   rounded?: string;
+  /** Sub-folder inside the bucket (e.g. "categories", "brands", "models"). */
+  folder?: string;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
 
   const dims = size === "sm" ? "h-12 w-12" : size === "lg" ? "h-24 w-24" : "h-16 w-16";
 
+  /** Convert a canvas blob to a Supabase Storage public URL. */
+  const uploadToStorage = async (blob: Blob, ext: string): Promise<string | null> => {
+    if (!isSupabaseConfigured || !supabase) return null;
+    const fileName = `${folder}/${crypto.randomUUID()}.${ext}`;
+    const { error } = await supabase.storage
+      .from(BUCKET_NAME)
+      .upload(fileName, blob, {
+        contentType: blob.type,
+        cacheControl: "31536000", // 1 year cache
+        upsert: false,
+      });
+    if (error) {
+      console.error("Supabase Storage upload failed:", error.message);
+      return null;
+    }
+    const { data: urlData } = supabase.storage
+      .from(BUCKET_NAME)
+      .getPublicUrl(fileName);
+    return urlData?.publicUrl ?? null;
+  };
+
+  /** Remove a previously uploaded file from Storage (best-effort). */
+  const removeFromStorage = (url: string) => {
+    if (!isSupabaseConfigured || !supabase) return;
+    // Extract the path after /object/public/catalog-images/
+    const marker = `/object/public/${BUCKET_NAME}/`;
+    const idx = url.indexOf(marker);
+    if (idx === -1) return;
+    const filePath = url.slice(idx + marker.length);
+    supabase.storage.from(BUCKET_NAME).remove([filePath]).catch(() => {});
+  };
+
   const processFile = (file?: File) => {
     if (!file) return;
-    // Generous guard only to avoid decoding absurdly large files into memory.
     if (file.size > 30 * 1024 * 1024) {
       alert("Image is larger than 30MB. Please pick a smaller file.");
       return;
@@ -45,8 +83,8 @@ export function ImageUpload({
     const reader = new FileReader();
     reader.onload = () => {
       const raw = reader.result as string;
-      const img = new Image();
-      img.onload = () => {
+      const img = new window.Image();
+      img.onload = async () => {
         try {
           let { width, height } = img;
           if (!width || !height) { onChange(raw); setBusy(false); return; }
@@ -61,12 +99,32 @@ export function ImageUpload({
           if (!ctx) { onChange(raw); setBusy(false); return; }
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Prefer WEBP (small + keeps alpha); fall back to PNG if unsupported.
+          // Try to upload to Supabase Storage for global access.
+          if (isSupabaseConfigured && supabase) {
+            // Convert canvas to blob (prefer webp, fallback png).
+            const blob = await new Promise<Blob | null>((resolve) => {
+              canvas.toBlob((b) => resolve(b), "image/webp", 0.9);
+            });
+            if (blob && blob.type === "image/webp") {
+              const publicUrl = await uploadToStorage(blob, "webp");
+              if (publicUrl) { onChange(publicUrl); setBusy(false); return; }
+            }
+            // Fallback: try PNG if webp blob failed.
+            const pngBlob = await new Promise<Blob | null>((resolve) => {
+              canvas.toBlob((b) => resolve(b), "image/png");
+            });
+            if (pngBlob) {
+              const publicUrl = await uploadToStorage(pngBlob, "png");
+              if (publicUrl) { onChange(publicUrl); setBusy(false); return; }
+            }
+          }
+
+          // Fallback: base64 data URL (localStorage mode or if upload failed).
           let out = canvas.toDataURL("image/webp", 0.9);
           if (!out.startsWith("data:image/webp")) out = canvas.toDataURL("image/png");
           onChange(out);
         } catch {
-          onChange(raw); // last-resort: store the original data URL
+          onChange(raw);
         } finally {
           setBusy(false);
         }
@@ -76,6 +134,14 @@ export function ImageUpload({
     };
     reader.onerror = () => setBusy(false);
     reader.readAsDataURL(file);
+  };
+
+  const handleRemove = () => {
+    // If the current value is a Supabase Storage URL, delete the file.
+    if (value && value.includes(`/storage/v1/object/public/${BUCKET_NAME}/`)) {
+      removeFromStorage(value);
+    }
+    onChange("");
   };
 
   return (
@@ -109,7 +175,7 @@ export function ImageUpload({
         {value && !busy && (
           <button
             type="button"
-            onClick={() => onChange("")}
+            onClick={handleRemove}
             className="absolute -right-1.5 -top-1.5 grid h-5 w-5 place-items-center rounded-full bg-rose-500 text-white shadow"
             aria-label="Remove image"
           >
