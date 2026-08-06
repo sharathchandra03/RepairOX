@@ -68,14 +68,14 @@ export function WizardShell({
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="flex items-center gap-3 rounded-full border border-[#B3BFF6]/40 bg-card px-4 py-1.5 shadow-card"
+            className="flex items-center gap-3 rounded-full bg-[#4361EE] px-4 py-1.5 shadow-lg shadow-[#4361EE]/25"
           >
-            <Sparkles className="h-3.5 w-3.5 text-[#4361EE]" />
-            <span className="text-xs uppercase tracking-wider text-muted-foreground">Step</span>
-            <span className="font-display tnum text-base font-bold">
+            <Sparkles className="h-3.5 w-3.5 text-white/80" />
+            <span className="text-xs uppercase tracking-wider text-white/70">Step</span>
+            <span className="font-display tnum text-base font-bold text-white">
               {String(step).padStart(2, "0")}
-              <span className="mx-1 text-muted-foreground">/</span>
-              <span className="brand-gradient-text">11</span>
+              <span className="mx-1 text-white/50">/</span>
+              <span className="text-white/90">11</span>
             </span>
           </motion.div>
         </div>

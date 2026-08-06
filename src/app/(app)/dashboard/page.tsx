@@ -454,7 +454,7 @@ export default function Dashboard() {
         <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-hidden">
           <div className="drag-handle h-4 cursor-grab active:cursor-grabbing" />
           <div className="px-1 pb-1 h-[calc(100%-16px)]">
-            <TicketsDonut />
+            <TicketsDonut tickets={filteredTickets} />
           </div>
         </div>
 
@@ -517,7 +517,7 @@ export default function Dashboard() {
 
         {/* Orders Status */}
         <div className="h-full overflow-hidden">
-          <OrdersStatusWidget className="h-full drag-handle cursor-grab active:cursor-grabbing" />
+          <OrdersStatusWidget tickets={filteredTickets} className="h-full drag-handle cursor-grab active:cursor-grabbing" />
         </div>
       </DashboardGrid>
 

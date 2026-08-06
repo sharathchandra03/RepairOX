@@ -176,8 +176,9 @@ function OrderTypeDetailDrawer({
 }
 
 /* ── Widget ── */
-export function OrdersStatusWidget({ className }: { className?: string }) {
-  const { tickets } = useStore();
+export function OrdersStatusWidget({ className, tickets: ticketsProp }: { className?: string; tickets?: Ticket[] }) {
+  const store = useStore();
+  const tickets = ticketsProp ?? store.tickets;
   const [selectedRow, setSelectedRow] = React.useState<OrderTypeRow | null>(null);
   const [selectedColumn, setSelectedColumn] = React.useState<"assigned" | "received" | null>(null);
   const [drawerOpen, setDrawerOpen] = React.useState(false);

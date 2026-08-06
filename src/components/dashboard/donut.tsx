@@ -5,7 +5,12 @@ import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts";
 import { motion } from "framer-motion";
 import { PieChart as PieChartIcon } from "lucide-react";
 import { useStore } from "@/lib/store";
+import type { Ticket } from "@/lib/mock-data";
 import { AnimatedNumber } from "./kpi-card";
+
+interface TicketsDonutProps {
+  tickets?: Ticket[];
+}
 
 const STATUS_COLORS: Record<string, string> = {
   received: "#4361EE",
@@ -29,8 +34,9 @@ const STATUS_DISPLAY: Record<string, string> = {
   cancelled: "Cancelled",
 };
 
-export function TicketsDonut() {
-  const { tickets } = useStore();
+export function TicketsDonut({ tickets: ticketsProp }: TicketsDonutProps) {
+  const store = useStore();
+  const tickets = ticketsProp ?? store.tickets;
 
   const data = useMemo(() => {
     const counts: Record<string, number> = {};
