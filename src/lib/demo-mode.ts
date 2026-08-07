@@ -60,8 +60,11 @@ export function removeDemoRole(roleId: string): void {
   setDemoRoleIds(getDemoRoleIds().filter((id) => id !== roleId));
 }
 
-/** Check if a role is marked as demo. */
+/** Check if a role is marked as demo. Also auto-detects roles with "demo" in the id/name. */
 export function isDemoRole(roleId: string): boolean {
+  // Auto-detect: any role with "demo" in the ID is treated as demo
+  if (roleId.toLowerCase().includes("demo")) return true;
+  // Explicitly marked via the Feature Visibility panel
   return getDemoRoleIds().includes(roleId);
 }
 
