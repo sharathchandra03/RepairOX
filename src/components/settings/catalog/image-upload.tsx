@@ -10,19 +10,17 @@ const BUCKET_NAME = "catalog-images";
 /**
  * Image uploader for the Device Catalog.
  *
- * When Supabase is configured, images are uploaded to Supabase Storage
- * (catalog-images bucket) and a public URL is returned — making them globally
- * accessible across all users and sessions.
- *
- * When Supabase is NOT configured, falls back to the original base64 data URL
- * behaviour (stored in localStorage).
+ * When Supabase Storage is available (bucket exists), images are uploaded
+ * there and a public URL is returned. Otherwise, images are rasterized to a
+ * compact base64 data URL which is stored directly in the DB text column
+ * (same as model images) — still globally accessible to all users.
  */
 export function ImageUpload({
   value,
   onChange,
   size = "md",
   label,
-  maxDimension = 1400,
+  maxDimension = 512,
   rounded = "rounded-xl",
   folder = "categories",
 }: {
@@ -41,31 +39,35 @@ export function ImageUpload({
 
   const dims = size === "sm" ? "h-12 w-12" : size === "lg" ? "h-24 w-24" : "h-16 w-16";
 
-  /** Convert a canvas blob to a Supabase Storage public URL. */
+  /** Try uploading to Supabase Storage. Returns public URL or null on failure. */
   const uploadToStorage = async (blob: Blob, ext: string): Promise<string | null> => {
     if (!isSupabaseConfigured || !supabase) return null;
-    const fileName = `${folder}/${crypto.randomUUID()}.${ext}`;
-    const { error } = await supabase.storage
-      .from(BUCKET_NAME)
-      .upload(fileName, blob, {
-        contentType: blob.type,
-        cacheControl: "31536000", // 1 year cache
-        upsert: false,
-      });
-    if (error) {
-      console.error("Supabase Storage upload failed:", error.message);
+    try {
+      const fileName = `${folder}/${crypto.randomUUID()}.${ext}`;
+      const { error } = await supabase.storage
+        .from(BUCKET_NAME)
+        .upload(fileName, blob, {
+          contentType: blob.type,
+          cacheControl: "31536000",
+          upsert: false,
+        });
+      if (error) {
+        console.warn("[ImageUpload] Storage upload failed:", error.message);
+        return null;
+      }
+      const { data: urlData } = supabase.storage
+        .from(BUCKET_NAME)
+        .getPublicUrl(fileName);
+      return urlData?.publicUrl ?? null;
+    } catch (e) {
+      console.warn("[ImageUpload] Storage upload error:", e);
       return null;
     }
-    const { data: urlData } = supabase.storage
-      .from(BUCKET_NAME)
-      .getPublicUrl(fileName);
-    return urlData?.publicUrl ?? null;
   };
 
   /** Remove a previously uploaded file from Storage (best-effort). */
   const removeFromStorage = (url: string) => {
     if (!isSupabaseConfigured || !supabase) return;
-    // Extract the path after /object/public/catalog-images/
     const marker = `/object/public/${BUCKET_NAME}/`;
     const idx = url.indexOf(marker);
     if (idx === -1) return;
@@ -99,28 +101,25 @@ export function ImageUpload({
           if (!ctx) { onChange(raw); setBusy(false); return; }
           ctx.drawImage(img, 0, 0, width, height);
 
-          // Try to upload to Supabase Storage for global access.
+          // Try Supabase Storage first (if bucket exists).
           if (isSupabaseConfigured && supabase) {
-            // Convert canvas to blob (prefer webp, fallback png).
             const blob = await new Promise<Blob | null>((resolve) => {
-              canvas.toBlob((b) => resolve(b), "image/webp", 0.9);
+              canvas.toBlob((b) => resolve(b), "image/webp", 0.85);
             });
-            if (blob && blob.type === "image/webp") {
+            if (blob) {
               const publicUrl = await uploadToStorage(blob, "webp");
-              if (publicUrl) { onChange(publicUrl); setBusy(false); return; }
-            }
-            // Fallback: try PNG if webp blob failed.
-            const pngBlob = await new Promise<Blob | null>((resolve) => {
-              canvas.toBlob((b) => resolve(b), "image/png");
-            });
-            if (pngBlob) {
-              const publicUrl = await uploadToStorage(pngBlob, "png");
-              if (publicUrl) { onChange(publicUrl); setBusy(false); return; }
+              if (publicUrl) {
+                onChange(publicUrl);
+                setBusy(false);
+                return;
+              }
             }
           }
 
-          // Fallback: base64 data URL (localStorage mode or if upload failed).
-          let out = canvas.toDataURL("image/webp", 0.9);
+          // Fallback: base64 data URL — stored directly in the DB text column.
+          // This still works globally because catalog-context writes it to
+          // price_list_categories.image_url in Supabase DB.
+          let out = canvas.toDataURL("image/webp", 0.7);
           if (!out.startsWith("data:image/webp")) out = canvas.toDataURL("image/png");
           onChange(out);
         } catch {
@@ -137,7 +136,6 @@ export function ImageUpload({
   };
 
   const handleRemove = () => {
-    // If the current value is a Supabase Storage URL, delete the file.
     if (value && value.includes(`/storage/v1/object/public/${BUCKET_NAME}/`)) {
       removeFromStorage(value);
     }

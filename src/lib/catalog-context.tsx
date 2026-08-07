@@ -286,7 +286,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     };
     setState((s) => ({ ...s, categories: [...s.categories, cat] }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_categories").insert({ id: cat.id, organization_id: orgIdRef.current, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled }).then();
+      supabase.from("price_list_categories").insert({ id: cat.id, organization_id: orgIdRef.current, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled }).then(({ error }) => {
+        if (error) console.error("[CatalogContext] addCategory DB error:", error.message);
+      });
     }
     logActivity({
       module: "Price List", action: "Category Created", severity: "success",
@@ -307,7 +309,9 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       if ("icon" in updates) row.icon = updates.icon;
       if ("enabled" in updates) row.enabled = updates.enabled;
       if ("imageUrl" in updates) row.image_url = updates.imageUrl ?? null;
-      supabase.from("price_list_categories").update(row).eq("id", id).then();
+      supabase.from("price_list_categories").update(row).eq("id", id).then(({ error }) => {
+        if (error) console.error("[CatalogContext] updateCategory DB error:", error.message, "| row:", JSON.stringify(row).slice(0, 200));
+      });
     }
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "name", label: "Name" },
