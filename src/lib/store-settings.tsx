@@ -273,7 +273,7 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!authReady) return;
 
-    // Demo mode: always use clean defaults — never load from DB.
+    // Demo mode: always use clean defaults — fresh on every login.
     if (isDemoMode) {
       setSettings({ ...DEFAULT_STORE_SETTINGS, storeName: "RepairOX Demo Store", email: "demo@repairox.in" });
       setHydrated(true);

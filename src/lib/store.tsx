@@ -577,24 +577,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Wait until we know who the user is before deciding data source.
     if (!authReady) return;
 
-    // Demo mode: load from demo localStorage (or seed fresh data).
+    // Demo mode: always start fresh — wipe any stale demo data and seed clean.
     if (isDemoMode) {
-      const saved = loadFromStorage(resolvedKey);
-      if (saved) {
-        setState(saved);
-      } else {
-        const fresh: StoreState = {
-          tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
-          orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
-          inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-          customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
-          companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
-          assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
-          hydrated: true, mode: "local",
-        };
-        setState(fresh);
-        saveToStorage(fresh, resolvedKey);
-      }
+      const fresh: StoreState = {
+        tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
+        orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
+        inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
+        customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+        companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
+        assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
+        hydrated: true, mode: "local",
+      };
+      setState(fresh);
+      saveToStorage(fresh, resolvedKey);
       return; // No DB connection for demo.
     }
 
