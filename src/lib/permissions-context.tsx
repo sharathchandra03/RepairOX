@@ -358,7 +358,15 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       }
       const fv = loadFeatureVisibility();
       if (fv) setFeatureVisibilityState(fv);
-      setCurrentUserEmail(loadSessionEmail());
+      const sessionEmail = loadSessionEmail();
+      setCurrentUserEmail(sessionEmail);
+      // Auto-reset for demo users on session restore
+      if (sessionEmail) {
+        const member = (access?.team ?? TEAM_SEED).find((m) => normalizeEmail(m.email) === normalizeEmail(sessionEmail));
+        if (member && isDemoRole(member.roleId)) {
+          resetDemoData();
+        }
+      }
       setHydrated(true);
       return;
     }
@@ -380,6 +388,15 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       if (email) {
         await refreshTeamFromDb();
         if (active) setCurrentUserEmail(email);
+      }
+      // If this is a demo user, auto-reset demo data on every session restore
+      if (active && email) {
+        // Find their role from the team loaded above
+        const staffList = await supabase.from("staff").select("role_id").ilike("email", email).limit(1);
+        const roleId = staffList.data?.[0]?.role_id;
+        if (roleId && isDemoRole(roleId)) {
+          resetDemoData();
+        }
       }
       if (active) setHydrated(true);
     })();
@@ -833,7 +850,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const resetDemo = useCallback(() => {
     resetDemoData();
-    setDemoResetCounter((c) => c + 1);
+    if (typeof window !== "undefined") window.location.reload();
   }, []);
 
   const role = useMemo(
