@@ -93,6 +93,8 @@ interface StoreActions {
   deleteDeviceModel: (id: string) => Promise<void>;
   addAssignedByOption: (option: AssignedByOption) => Promise<void>;
   addAssignedToOption: (option: AssignedToOption) => Promise<void>;
+  deleteAssignedByOption: (id: string) => Promise<void>;
+  deleteAssignedToOption: (id: string) => Promise<void>;
   resetBrandsAndModels: () => void;
 }
 
@@ -1315,6 +1317,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /* ── Delete Assigned By option (DB-first) ── */
+  const deleteAssignedByOption = useCallback(async (id: string) => {
+    setState((s) => ({ ...s, assignedByOptions: s.assignedByOptions.filter((o) => o.id !== id) }));
+    logActivity({ module: "Ticket", action: "Assigned By Removed", severity: "warning", entity: "Assigned By", reference: id, description: `Removed entry from Assigned By master list.` });
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("assigned_by_options").delete().eq("id", id);
+      if (error) { console.error("[store] deleteAssignedByOption sync failed:", error.message); }
+    }
+  }, []);
+
+  /* ── Delete Assigned To option (DB-first) ── */
+  const deleteAssignedToOption = useCallback(async (id: string) => {
+    setState((s) => ({ ...s, assignedToOptions: s.assignedToOptions.filter((o) => o.id !== id) }));
+    logActivity({ module: "Ticket", action: "Assigned To Removed", severity: "warning", entity: "Assigned To", reference: id, description: `Removed entry from Assigned To master list.` });
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase.from("assigned_to_options").delete().eq("id", id);
+      if (error) { console.error("[store] deleteAssignedToOption sync failed:", error.message); }
+    }
+  }, []);
+
   const store: Store = {
     ...state,
     addTicket,
@@ -1345,6 +1367,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     deleteDeviceModel,
     addAssignedByOption,
     addAssignedToOption,
+    deleteAssignedByOption,
+    deleteAssignedToOption,
     resetBrandsAndModels,
   };
 

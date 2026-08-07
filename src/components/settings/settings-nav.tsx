@@ -55,6 +55,7 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Ticket Settings", href: "/settings/tickets/general" },
       { label: "QC Settings", href: "/settings/tickets/qc" },
       { label: "Workflow", href: "/settings/tickets/workflow" },
+      { label: "Assigned By & To", href: "/settings/tickets/assigned" },
       { label: "Device Categories", href: "/settings/categories" },
     ],
   },
@@ -69,6 +70,7 @@ const SETTINGS_NAV: NavSection[] = [
   {
     id: "customers", label: "Customers", icon: UserCheck,
     children: [
+      { label: "Manage Customers", href: "/settings/customers/manage" },
       { label: "Customer Groups", href: "/settings/customers/groups" },
       { label: "Loyalty", href: "/settings/customers/loyalty" },
     ],

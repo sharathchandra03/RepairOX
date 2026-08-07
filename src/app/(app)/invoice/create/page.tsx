@@ -18,6 +18,7 @@ import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDevic
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
+import { searchCustomers, type Customer } from "@/lib/customer-data";
 
 /* ─── Step Definitions ───────────────────────────────────────────────── */
 
@@ -533,10 +534,34 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
 /* ─── Step 1: Customer ───────────────────────────────────────────────── */
 
 function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
+  const { customers } = useStore();
   const c = form.customer;
   const d = form.details;
+  const [showResults, setShowResults] = useState(false);
+
   const set = (k: keyof typeof c, v: string) => updateForm((f) => ({ ...f, customer: { ...f.customer, [k]: v } }));
   const setType = (v: string) => updateForm((f) => ({ ...f, details: { ...f.details, invoiceType: v as any } }));
+
+  // Search from customer name input
+  const results = c.name.trim().length >= 2 ? searchCustomers(customers, c.name) : [];
+
+  const selectCustomer = (cust: Customer) => {
+    setShowResults(false);
+    updateForm((f) => ({
+      ...f,
+      customer: {
+        name: cust.fullName,
+        phone: cust.mobile,
+        email: cust.email,
+        company: cust.company,
+      },
+      details: {
+        ...f.details,
+        invoiceType: cust.type === "business" ? "business" : f.details.invoiceType,
+      },
+    }));
+  };
+
   return (
     <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
       {/* Invoice Type — compact inline selector */}
@@ -562,11 +587,51 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
         </div>
       </div>
 
-      {/* Customer Info — same card, below the type */}
+      {/* Customer Info */}
       <div className="px-6 py-5 sm:px-8">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-4">Customer Information</p>
         <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-          <div className="space-y-1"><Label>Customer Name *</Label><Input value={c.name} onChange={(e: any) => set("name", e.target.value)} placeholder="Rahul Kapoor" /></div>
+          {/* Customer Name with inline search */}
+          <div className="space-y-1 relative">
+            <Label>Customer Name *</Label>
+            <Input
+              value={c.name}
+              onChange={(e: any) => { set("name", e.target.value); setShowResults(true); }}
+              onFocus={() => setShowResults(true)}
+              placeholder="Type to search or enter name"
+              iconLeft={<Search className="h-3.5 w-3.5" />}
+            />
+            {/* Autocomplete dropdown */}
+            {showResults && results.length > 0 && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                {results.slice(0, 6).map((cust) => (
+                  <button
+                    key={cust.id}
+                    type="button"
+                    onClick={() => selectCustomer(cust)}
+                    className="flex w-full items-center gap-3 px-4 py-2.5 text-left transition border-b border-border last:border-0 hover:bg-indigo-50/50"
+                  >
+                    <span className={cn(
+                      "grid h-8 w-8 shrink-0 place-items-center rounded-full text-[10px] font-bold",
+                      cust.type === "business" ? "bg-violet-100 text-violet-700" : "bg-[#EEF1FD] text-[#4361EE]"
+                    )}>
+                      {cust.firstName[0]}{cust.lastName[0] || ""}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{cust.fullName}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {cust.mobile}
+                        {cust.company && <> · {cust.company}</>}
+                      </p>
+                    </div>
+                    {cust.type === "business" && (
+                      <span className="shrink-0 rounded-full bg-violet-100 px-1.5 py-0.5 text-[9px] font-semibold text-violet-700 uppercase">Biz</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <div className="space-y-1"><Label>Phone</Label><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" /></div>
           <div className="space-y-1"><Label>Email</Label><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="customer@email.com" type="email" /></div>
           <div className="space-y-1"><Label>Company / Organization</Label><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></div>

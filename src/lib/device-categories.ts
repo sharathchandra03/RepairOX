@@ -71,12 +71,64 @@ async function getOrgId(): Promise<string | null> {
   return (staffRow?.organization_id as string) ?? null;
 }
 
+/* ─── In-memory cache ────────────────────────────────────────────── */
+
+let _cache: DeviceCategoryItem[] | null = null;
+let _cachePromise: Promise<DeviceCategoryItem[]> | null = null;
+
+/**
+ * Preload category images into the browser cache so they render instantly.
+ * Works for both base64 data-URLs and remote URLs.
+ */
+export function preloadCategoryImages(cats: DeviceCategoryItem[]): void {
+  if (typeof window === "undefined") return;
+  for (const c of cats) {
+    if (c.image) {
+      const img = new window.Image();
+      img.decoding = "async";
+      img.src = c.image;
+    }
+  }
+}
+
+/**
+ * Returns cached categories synchronously (or null if not yet loaded).
+ * Useful for rendering immediately without an async delay.
+ */
+export function getCachedCategories(): DeviceCategoryItem[] | null {
+  return _cache;
+}
+
+/**
+ * Invalidate the in-memory cache (call after saving changes).
+ */
+export function invalidateCategoryCache(): void {
+  _cache = null;
+  _cachePromise = null;
+}
+
 /* ─── Public API ─────────────────────────────────────────────────── */
 
 /**
  * Load device categories from Supabase (or localStorage fallback).
+ * Results are cached in-memory — subsequent calls resolve instantly.
  */
 export async function loadDeviceCategories(): Promise<DeviceCategoryItem[]> {
+  // Return from cache instantly if available.
+  if (_cache) return _cache;
+
+  // Deduplicate in-flight requests.
+  if (_cachePromise) return _cachePromise;
+
+  _cachePromise = _loadDeviceCategoriesImpl();
+  const result = await _cachePromise;
+  _cache = result;
+  // Preload images into browser cache as soon as data arrives.
+  preloadCategoryImages(result);
+  return result;
+}
+
+async function _loadDeviceCategoriesImpl(): Promise<DeviceCategoryItem[]> {
   if (!isSupabaseConfigured || !supabase) {
     return loadFromLocalStorage();
   }
@@ -116,6 +168,8 @@ export async function loadDeviceCategories(): Promise<DeviceCategoryItem[]> {
  * This does a full replace (delete all + insert) to handle reordering/removal.
  */
 export async function saveDeviceCategories(cats: DeviceCategoryItem[]): Promise<boolean> {
+  // Invalidate in-memory cache so next load fetches fresh data.
+  invalidateCategoryCache();
   // Always update localStorage as a cache.
   saveToLocalStorage(cats);
 

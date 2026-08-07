@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { loadDeviceCategories, DEFAULT_CATEGORIES, type DeviceCategoryItem } from "@/lib/device-categories";
+import { loadDeviceCategories, getCachedCategories, DEFAULT_CATEGORIES, type DeviceCategoryItem } from "@/lib/device-categories";
 
 type Cat = {
   id: string;
@@ -61,16 +61,22 @@ export function CategoryWheel({
   onNext: () => void;
   isEdit?: boolean;
 }) {
-  const [CATS, setCats] = useState<Cat[]>(() => getDefaultCats());
-  const [loaded, setLoaded] = useState(false);
+  // Use cached categories synchronously if available (instant render).
+  const [CATS, setCats] = useState<Cat[]>(() => {
+    const cached = getCachedCategories();
+    return cached ? toCats(cached) : getDefaultCats();
+  });
+  const [loaded, setLoaded] = useState(() => !!getCachedCategories());
 
-  // Load categories from Supabase (or localStorage fallback).
+  // Load categories from Supabase (or localStorage fallback) — resolves
+  // instantly if cache is already warm from preloading.
   useEffect(() => {
+    if (loaded) return; // Already have data from cache.
     loadDeviceCategories().then((items) => {
       setCats(toCats(items));
       setLoaded(true);
     });
-  }, []);
+  }, [loaded]);
 
   const initial = value ? CATS.findIndex((c) => c.id === value) : Math.min(3, CATS.length - 1);
   const [active, setActive] = useState(initial >= 0 ? initial : 0);

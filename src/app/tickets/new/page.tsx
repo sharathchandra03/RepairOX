@@ -30,6 +30,7 @@ import { searchBrands, searchModels, getModelsForBrand, createBrand, createDevic
 import { getIssueLibrary, addIssueToLibrary, parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
+import { loadDeviceCategories } from "@/lib/device-categories";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
 export default function NewTicketPage() {
@@ -308,6 +309,11 @@ function NewTicketWizard() {
       }
     }
   }, [editId, tickets]);
+
+  // Preload device categories + images on mount so the wheel renders instantly.
+  useEffect(() => {
+    loadDeviceCategories();
+  }, []);
 
   // Track dirty state on data change (skip initial load)
   const [initialLoaded, setInitialLoaded] = useState(false);
@@ -1987,9 +1993,9 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(data.customerId || null);
 
-  // Live search results — filtered by contact type
+  // Live search results — show all customers regardless of type so same customer works for both
   const allResults = q.trim().length >= 2 ? searchCustomers(customers, q) : [];
-  const results = allResults.filter((c) => c.type === data.contactType);
+  const results = allResults;
 
   // Select an existing customer and auto-populate step 7
   const selectCustomer = (c: Customer) => {
@@ -2223,8 +2229,8 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const allParts = data.devices.flatMap((d: WizardDevice) => d.parts);
   const partsTotal = allParts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
   const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
-  // Subtotal: use whichever is higher — parts total or estimates total — to reflect actual charges
-  const subtotal = Math.max(estimatesTotal, partsTotal) || estimatesTotal || partsTotal;
+  // Subtotal: estimate (service/labor charges) + parts (material costs) when both exist
+  const subtotal = (estimatesTotal + partsTotal) || 0;
   const isBusiness = data.contactType === "business";
   const gstRate = data.gstRate || (data.customGstRate ? 0 : 18);
   const tax = isBusiness ? Math.round(subtotal * (gstRate / 100)) : 0;
@@ -2244,9 +2250,9 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
           {/* Per-device estimates (multi-device) */}
           {data.devices.length > 1 && data.devices.map((d: WizardDevice, idx: number) => {
             const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
-            const devTotal = d.parts.length > 0
-              ? d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0)
-              : (Number(d.job.estimate) || 0);
+            const devPartsTotal = d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+            const devEstimate = Number(d.job.estimate) || 0;
+            const devTotal = devEstimate + devPartsTotal;
             return (
               <div key={d.id}>
                 {/* Device header */}
@@ -2264,6 +2270,12 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                     <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
                   </div>
                 ))}
+                {/* Device estimate (service charges) */}
+                {devEstimate > 0 && (
+                  <div className="grid grid-cols-3 px-4 py-2 text-[13px] text-muted-foreground bg-muted/20 border-t border-border/50 pl-7">
+                    <div>Service Charges</div><div className="text-center">1</div><div className="text-right tnum">{formatINR(devEstimate)}</div>
+                  </div>
+                )}
               </div>
             );
           })}
@@ -2273,8 +2285,8 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
               <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
             </div>
           ))}
-          {/* Single device: estimate line if estimate differs from parts total */}
-          {data.devices.length <= 1 && estimatesTotal > 0 && estimatesTotal !== partsTotal && (
+          {/* Single device: always show estimate as Service Charges when present */}
+          {data.devices.length <= 1 && estimatesTotal > 0 && (
             <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
               <div className="font-medium">{data.devices[0]?.job?.issue || "Service Charges"}</div>
               <div className="text-center">1</div>
