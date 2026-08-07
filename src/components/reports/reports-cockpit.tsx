@@ -67,7 +67,7 @@ const MODULE_ROUTE: Record<string, string> = { shop: "/reports", sales: "/leads/
 export function ReportsCockpit() {
   const data = useReportData();
   const { settings } = useStoreSettings();
-  const { currentUser } = usePermissions();
+  const { currentUser, isDemoMode } = usePermissions();
 
   const [filters, setFilters] = useState<ReportFilters>(EMPTY_FILTERS);
   const [tab, setTab] = useState<ReportsTabId>("overview");

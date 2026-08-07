@@ -22,12 +22,12 @@ export function useReportData(): ReportDataset {
   const expenses = useExpenses();
   const ledger = useDailyLedger();
   const accounting = useLedger();
-  const { team } = usePermissions();
+  const { team, isDemoMode } = usePermissions();
 
   const ledgerSummaries = useMemo(
-    () => ledger.getAllDailySummaries(),
+    () => isDemoMode ? [] : ledger.getAllDailySummaries(),
     // getAllDailySummaries reads the module singleton; re-run when tx/sessions change.
-    [ledger.transactions, ledger.sessions] // eslint-disable-line react-hooks/exhaustive-deps
+    [ledger.transactions, ledger.sessions, isDemoMode] // eslint-disable-line react-hooks/exhaustive-deps
   );
 
   return useMemo<ReportDataset>(
@@ -40,16 +40,16 @@ export function useReportData(): ReportDataset {
       brands: store.brands,
       deviceModels: store.deviceModels,
       team,
-      expenses,
-      ledgerTx: ledger.transactions,
-      ledgerEntries: accounting.entries,
+      expenses: isDemoMode ? [] : expenses,
+      ledgerTx: isDemoMode ? [] : ledger.transactions,
+      ledgerEntries: isDemoMode ? [] : accounting.entries,
       ledgerSummaries,
       hydrated: store.hydrated,
     }),
     [
       store.tickets, store.invoices, store.walkIns, store.inventory, store.customers,
       store.brands, store.deviceModels, store.hydrated,
-      team, expenses, ledger.transactions, accounting.entries, ledgerSummaries,
+      team, expenses, ledger.transactions, accounting.entries, ledgerSummaries, isDemoMode,
     ]
   );
 }

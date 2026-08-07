@@ -25,19 +25,44 @@ import {
   fieldOperationsCards, fieldFinancialCards, fieldTopPartsUsed, fieldFastMovingVanStock,
   fieldLowStockVans, fieldInsights, fieldPerformerDimensions,
 } from "./mock-data";
+import { usePermissions } from "@/lib/permissions-context";
+import type { MetricCard } from "../selectors";
+import type { SeriesPoint } from "@/lib/reports/types";
+
+/** Zero out all values for demo mode — keeps labels/structure intact */
+function zeroCards(cards: MetricCard[]): MetricCard[] {
+  return cards.map((c) => ({ ...c, value: 0, previous: 0, deltaPct: 0, sparkline: [] }));
+}
+function zeroSeries(data: SeriesPoint[]): SeriesPoint[] {
+  return data.map((d) => ({ ...d, value: 0 }));
+}
 
 export function FieldOverview() {
+  const { isDemoMode } = usePermissions();
+
+  const cards = isDemoMode ? zeroCards(fieldExecutiveCards) : fieldExecutiveCards;
+  const trend = isDemoMode ? zeroSeries(fieldVisitTrend) : fieldVisitTrend;
+  const split = isDemoMode ? zeroSeries(fieldRevenueSplit) : fieldRevenueSplit;
+  const collections = isDemoMode ? { collected: 0, pending: 0, overdue: 0, total: 0 } : fieldCollections;
+  const opsCards = isDemoMode ? zeroCards(fieldOperationsCards) : fieldOperationsCards;
+  const finCards = isDemoMode ? zeroCards(fieldFinancialCards) : fieldFinancialCards;
+  const topParts = isDemoMode ? [] : fieldTopPartsUsed;
+  const fastMoving = isDemoMode ? [] : fieldFastMovingVanStock;
+  const lowStock = isDemoMode ? [] : fieldLowStockVans;
+  const insights = isDemoMode ? [] : fieldInsights;
+  const performers = isDemoMode ? fieldPerformerDimensions.map((d) => ({ ...d, data: [] })) : fieldPerformerDimensions;
+
   return (
     <div className="space-y-5">
-      <ModulePreviewBanner moduleLabel="Field Management" />
+      {!isDemoMode && <ModulePreviewBanner moduleLabel="Field Management" />}
 
       {/* Section 1 — Executive Summary */}
-      <ExecutiveSummary cards={fieldExecutiveCards} comparisonLabel="previous period" />
+      <ExecutiveSummary cards={cards} comparisonLabel="previous period" />
 
       {/* Section 2 — Business Performance */}
       <BusinessPerformance
-        trend={fieldVisitTrend}
-        split={fieldRevenueSplit}
+        trend={trend}
+        split={split}
         rangeLabel="Last 30 days"
         trendTitle="On-Site Revenue Trend"
         trendSubtitle="Billed revenue from field visits over time"
@@ -51,7 +76,7 @@ export function FieldOverview() {
 
       {/* Section 3 — Collections → Settled / Pending / Overdue */}
       <CollectionsPanel
-        data={fieldCollections}
+        data={collections}
         title="Field Collections"
         subtitle="Settled, pending and overdue revenue from on-site visits"
         segmentLabels={["Settled", "Pending", "Overdue"]}
@@ -62,14 +87,14 @@ export function FieldOverview() {
 
       {/* Section 4 — Operations → Field jobs health */}
       <OperationsHealth
-        cards={fieldOperationsCards}
+        cards={opsCards}
         title="Field Operations Health"
         subtitle="How on-site visits and routes are performing right now"
       />
 
       {/* Section 5 — Financial Health */}
       <FinancialHealth
-        cards={fieldFinancialCards}
+        cards={finCards}
         title="Field Financial Health"
         subtitle="Travel cost, on-site collections and margin"
       />
@@ -81,29 +106,33 @@ export function FieldOverview() {
         tone="inventory"
         drillHref="/operations/vendors"
         drillLabel="View vendors →"
-        stats={[
+        stats={isDemoMode ? [
+          { label: "Parts Used", value: "0" },
+          { label: "Value Consumed", value: "₹0" },
+          { label: "Van Stock Value", value: "₹0" },
+        ] : [
           { label: "Parts Used", value: "56" },
           { label: "Value Consumed", value: "₹1,42,000" },
           { label: "Van Stock Value", value: "₹3,86,000" },
         ]}
         primaryLeaderboardTitle="Top Parts Used On-Site"
-        primaryLeaderboard={fieldTopPartsUsed}
+        primaryLeaderboard={topParts}
         primaryEmptyTitle="No parts consumed"
         primaryEmptyDetail="Parts used during field visits will appear here."
         secondaryLeaderboardTitle="Fast-Moving Van Stock"
-        secondaryLeaderboard={fieldFastMovingVanStock}
+        secondaryLeaderboard={fastMoving}
         secondaryEmptyTitle="No van stock velocity data"
         secondaryEmptyDetail="Units used per van will populate this leaderboard."
-        watchlistLabel={`Low Stock — ${fieldLowStockVans.length} van${fieldLowStockVans.length > 1 ? "s" : ""} need restocking`}
-        watchlist={fieldLowStockVans}
+        watchlistLabel={`Low Stock — ${lowStock.length} van${lowStock.length > 1 ? "s" : ""} need restocking`}
+        watchlist={lowStock}
         watchlistTone="amber"
       />
 
       {/* Section 7 — Business Insights */}
-      <InsightsPanel insights={fieldInsights} />
+      <InsightsPanel insights={insights} />
 
       {/* Section 8 — Top Performers */}
-      <PerformersLeaderboardPanel dimensions={fieldPerformerDimensions} emptyIcon="route" />
+      <PerformersLeaderboardPanel dimensions={performers} emptyIcon="route" />
     </div>
   );
 }

@@ -25,19 +25,44 @@ import {
   salesOperationsCards, salesFinancialCards, salesTopCampaigns, salesTopChannels,
   salesAtRiskDeals, salesInsights, salesPerformerDimensions,
 } from "./mock-data";
+import { usePermissions } from "@/lib/permissions-context";
+import type { MetricCard } from "../selectors";
+import type { SeriesPoint } from "@/lib/reports/types";
+
+/** Zero out all values for demo mode — keeps labels/structure intact */
+function zeroCards(cards: MetricCard[]): MetricCard[] {
+  return cards.map((c) => ({ ...c, value: 0, previous: 0, deltaPct: 0, sparkline: [] }));
+}
+function zeroSeries(data: SeriesPoint[]): SeriesPoint[] {
+  return data.map((d) => ({ ...d, value: 0 }));
+}
 
 export function SalesOverview() {
+  const { isDemoMode } = usePermissions();
+
+  const cards = isDemoMode ? zeroCards(salesExecutiveCards) : salesExecutiveCards;
+  const trend = isDemoMode ? zeroSeries(salesPipelineTrend) : salesPipelineTrend;
+  const split = isDemoMode ? zeroSeries(salesPipelineSplit) : salesPipelineSplit;
+  const collections = isDemoMode ? { collected: 0, pending: 0, overdue: 0, total: 0 } : salesCollections;
+  const opsCards = isDemoMode ? zeroCards(salesOperationsCards) : salesOperationsCards;
+  const finCards = isDemoMode ? zeroCards(salesFinancialCards) : salesFinancialCards;
+  const campaigns = isDemoMode ? [] : salesTopCampaigns;
+  const channels = isDemoMode ? [] : salesTopChannels;
+  const atRisk = isDemoMode ? [] : salesAtRiskDeals;
+  const insights = isDemoMode ? [] : salesInsights;
+  const performers = isDemoMode ? salesPerformerDimensions.map((d) => ({ ...d, data: [] })) : salesPerformerDimensions;
+
   return (
     <div className="space-y-5">
-      <ModulePreviewBanner moduleLabel="Sales Management" />
+      {!isDemoMode && <ModulePreviewBanner moduleLabel="Sales Management" />}
 
       {/* Section 1 — Executive Summary */}
-      <ExecutiveSummary cards={salesExecutiveCards} comparisonLabel="previous period" />
+      <ExecutiveSummary cards={cards} comparisonLabel="previous period" />
 
       {/* Section 2 — Business Performance */}
       <BusinessPerformance
-        trend={salesPipelineTrend}
-        split={salesPipelineSplit}
+        trend={trend}
+        split={split}
         rangeLabel="Last 30 days"
         trendTitle="Pipeline Trend"
         trendSubtitle="New pipeline value created over time"
@@ -51,7 +76,7 @@ export function SalesOverview() {
 
       {/* Section 3 — Collections → Won / In Progress / At Risk */}
       <CollectionsPanel
-        data={salesCollections}
+        data={collections}
         title="Revenue Status"
         subtitle="Won, in-progress and at-risk pipeline value"
         segmentLabels={["Won", "In Progress", "At Risk"]}
@@ -62,14 +87,14 @@ export function SalesOverview() {
 
       {/* Section 4 — Operations → Pipeline health */}
       <OperationsHealth
-        cards={salesOperationsCards}
+        cards={opsCards}
         title="Pipeline Health"
         subtitle="How the sales pipeline is moving right now"
       />
 
       {/* Section 5 — Financial Health */}
       <FinancialHealth
-        cards={salesFinancialCards}
+        cards={finCards}
         title="Sales Financial Health"
         subtitle="Acquisition cost, commissions and margin"
       />
@@ -87,24 +112,24 @@ export function SalesOverview() {
           { label: "Attributed Revenue", value: "₹6,92,000" },
         ]}
         primaryLeaderboardTitle="Top Campaigns"
-        primaryLeaderboard={salesTopCampaigns}
+        primaryLeaderboard={campaigns}
         primaryEmptyTitle="No campaign activity"
         primaryEmptyDetail="Deals linked to a campaign will appear here."
         secondaryLeaderboardTitle="Revenue by Channel"
-        secondaryLeaderboard={salesTopChannels}
+        secondaryLeaderboard={channels}
         secondaryEmptyTitle="No channel data"
         secondaryEmptyDetail="Revenue by lead source will populate this leaderboard."
         secondaryCurrency
-        watchlistLabel={`At Risk — ${salesAtRiskDeals.length} deal${salesAtRiskDeals.length > 1 ? "s" : ""} stalled`}
-        watchlist={salesAtRiskDeals}
+        watchlistLabel={`At Risk — ${atRisk.length} deal${atRisk.length > 1 ? "s" : ""} stalled`}
+        watchlist={atRisk}
         watchlistTone="rose"
       />
 
       {/* Section 7 — Business Insights */}
-      <InsightsPanel insights={salesInsights} />
+      <InsightsPanel insights={insights} />
 
       {/* Section 8 — Top Performers */}
-      <PerformersLeaderboardPanel dimensions={salesPerformerDimensions} emptyIcon="target" />
+      <PerformersLeaderboardPanel dimensions={performers} emptyIcon="target" />
     </div>
   );
 }
