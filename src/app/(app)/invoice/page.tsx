@@ -12,7 +12,6 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
@@ -64,13 +63,12 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | "all" }[] = [
 ];
 
 const DATE_RANGES = [
+  { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
   { label: "7 Days", value: "7days" },
-  { label: "This Month", value: "month" },
-  { label: "Last Month", value: "lastmonth" },
-  { label: "This Year", value: "year" },
-  { label: "All", value: "all" },
+  { label: "14 Days", value: "14days" },
+  { label: "30 Days", value: "30days" },
 ] as const;
 
 type DateRange = (typeof DATE_RANGES)[number]["value"];
@@ -95,9 +93,8 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
     case "today": return created >= todayStart;
     case "yesterday": return created >= todayStart - 86_400_000 && created < todayStart;
     case "7days": return created >= todayStart - 7 * 86_400_000;
-    case "month": { const ms = new Date(now.getFullYear(), now.getMonth(), 1).getTime(); return created >= ms; }
-    case "lastmonth": { const s = new Date(now.getFullYear(), now.getMonth()-1, 1).getTime(); const e = new Date(now.getFullYear(), now.getMonth(), 1).getTime(); return created >= s && created < e; }
-    case "year": { const ys = new Date(now.getFullYear(), 0, 1).getTime(); return created >= ys; }
+    case "14days": return created >= todayStart - 14 * 86_400_000;
+    case "30days": return created >= todayStart - 30 * 86_400_000;
     default: return true;
   }
 }
@@ -261,32 +258,23 @@ export default function InvoicePage() {
         </div>
       </div>
 
-      {/* Enterprise Filter System */}
+      {/* Filter System */}
       <InvoiceFilters
         onSearch={(filterState) => {
           setStatusFilter(filterState.invoiceStatus);
-          setQ(filterState.customerName || filterState.invoiceId || "");
+          // Combine customer name and invoice ID into search query
+          const searchParts = [filterState.customerName, filterState.pinnedIds?.[0] || ""].filter(Boolean);
+          setQ(searchParts.join(" "));
+          // filterState.invoiceId carries the quickDate value
+          const qd = filterState.invoiceId as DateRange | "custom" | "";
+          if (qd && qd !== "custom") {
+            setDateRange(qd as DateRange);
+          }
+          if (qd === "custom") {
+            setDateRange("all");
+          }
         }}
         onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setCategoryFilter("all"); setDateRange("all"); setQ(""); }}
-        extraActions={<>
-          <Button variant="outline" size="sm" onClick={() => setShowColSettings(!showColSettings)}>
-            <Settings2 className="h-3.5 w-3.5" /> Columns
-          </Button>
-          <Select value={typeFilter} onChange={(e: any) => setTypeFilter(e.target.value)}
-            className="h-8 !rounded-lg text-xs"
-            options={[
-              { label: "All Types", value: "all" },
-              { label: "Retail Invoice", value: "retail" },
-              { label: "Business Invoice", value: "business" },
-            ]} />
-          <Select value={categoryFilter} onChange={(e: any) => setCategoryFilter(e.target.value)}
-            className="h-8 !rounded-lg text-xs"
-            options={[
-              { label: "All Categories", value: "all" },
-              { label: "Service", value: "service" },
-              { label: "Accessories", value: "accessories" },
-            ]} />
-        </>}
       />
 
       {/* Column Settings Panel */}
