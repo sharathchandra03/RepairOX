@@ -365,6 +365,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     let active = true;
     (async () => {
       await loadAccessFromDb();
+      // Also load feature visibility from localStorage (works as local cache
+      // and ensures visibility config set by the owner applies to demo users
+      // on the same device).
+      const fv = loadFeatureVisibility();
+      if (fv) setFeatureVisibilityState((prev) => {
+        // Merge: DB takes priority, localStorage fills gaps
+        return Object.keys(fv).length > 0 || Object.keys(prev).length === 0 ? { ...prev, ...fv } : prev;
+      });
       const { data } = await supabase.auth.getSession();
       const email = data.session?.user?.email ?? null;
       if (email) {
@@ -399,9 +407,9 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, [currentUserEmail, hydrated]);
 
-  // Persist feature visibility in local mode.
+  // Persist feature visibility — always use localStorage (shared across all users on this device).
   useEffect(() => {
-    if (isSupabaseConfigured || !hydrated || typeof window === "undefined") return;
+    if (!hydrated || typeof window === "undefined") return;
     try {
       localStorage.setItem(FEATURE_VISIBILITY_KEY, JSON.stringify(featureVisibility));
     } catch { /* ignore */ }
