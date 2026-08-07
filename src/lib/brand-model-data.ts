@@ -15,17 +15,12 @@ export type DeviceModel = {
 
 /* ─── ID Generation ──────────────────────────────────────────────── */
 
-let _brandCounter = 100;
-let _modelCounter = 1000;
-
 export function generateBrandId(): string {
-  _brandCounter += 1;
-  return `BRD-${String(_brandCounter).padStart(4, "0")}`;
+  return `BRD-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 export function generateModelId(): string {
-  _modelCounter += 1;
-  return `MDL-${String(_modelCounter).padStart(5, "0")}`;
+  return `MDL-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 /* ─── Factory ────────────────────────────────────────────────────── */
