@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { loadDeviceCategories, DEFAULT_CATEGORIES, type DeviceCategoryItem } from "@/lib/device-categories";
 
 type Cat = {
   id: string;
@@ -34,36 +35,19 @@ const TINT_MAP: Record<string, string> = {
   others: "from-violet-700 via-zinc-800 to-zinc-900",
 };
 
-const CATS_STORAGE_KEY = "repairox-device-categories";
-
-function loadCats(): Cat[] {
-  if (typeof window === "undefined") return getDefaultCats();
-  try {
-    const raw = localStorage.getItem(CATS_STORAGE_KEY);
-    if (!raw) return getDefaultCats();
-    const saved: { id: string; label: string; image?: string }[] = JSON.parse(raw);
-    return saved.map((c) => ({
-      id: c.id,
-      label: c.label,
-      icon: ICON_MAP[c.id] || Boxes,
-      tint: TINT_MAP[c.id] || "from-zinc-600 via-zinc-800 to-black",
-      glow: "rgba(79,70,229,0.5)",
-      image: c.image,
-    }));
-  } catch { return getDefaultCats(); }
+function toCats(items: DeviceCategoryItem[]): Cat[] {
+  return items.map((c) => ({
+    id: c.id,
+    label: c.label,
+    icon: ICON_MAP[c.id] || Boxes,
+    tint: TINT_MAP[c.id] || "from-zinc-600 via-zinc-800 to-black",
+    glow: "rgba(79,70,229,0.5)",
+    image: c.image,
+  }));
 }
 
 function getDefaultCats(): Cat[] {
-  return [
-    { id: "macbook", label: "MacBook", icon: Laptop, tint: "from-zinc-600 via-zinc-800 to-black", glow: "rgba(79,70,229,0.5)" },
-    { id: "ipad", label: "iPad", icon: Tablet, tint: "from-zinc-500 via-zinc-700 to-zinc-900", glow: "rgba(79,70,229,0.5)" },
-    { id: "iwatch", label: "iWatch", icon: Watch, tint: "from-zinc-600 via-zinc-800 to-zinc-900", glow: "rgba(79,70,229,0.5)" },
-    { id: "iphone", label: "iPhone", icon: Smartphone, tint: "from-indigo-700 via-indigo-900 to-black", glow: "rgba(79,70,229,0.6)" },
-    { id: "imac", label: "iMac", icon: Monitor, tint: "from-zinc-400 via-zinc-600 to-zinc-800", glow: "rgba(79,70,229,0.5)" },
-    { id: "android", label: "Android", icon: MonitorSmartphone, tint: "from-emerald-700 via-zinc-800 to-black", glow: "rgba(79,70,229,0.5)" },
-    { id: "windows", label: "Windows", icon: Laptop, tint: "from-sky-700 via-zinc-800 to-black", glow: "rgba(79,70,229,0.5)" },
-    { id: "others", label: "Others", icon: Boxes, tint: "from-violet-700 via-zinc-800 to-zinc-900", glow: "rgba(79,70,229,0.5)" },
-  ];
+  return toCats(DEFAULT_CATEGORIES);
 }
 
 export function CategoryWheel({
@@ -77,10 +61,28 @@ export function CategoryWheel({
   onNext: () => void;
   isEdit?: boolean;
 }) {
-  const [CATS] = useState<Cat[]>(() => loadCats());
+  const [CATS, setCats] = useState<Cat[]>(() => getDefaultCats());
+  const [loaded, setLoaded] = useState(false);
+
+  // Load categories from Supabase (or localStorage fallback).
+  useEffect(() => {
+    loadDeviceCategories().then((items) => {
+      setCats(toCats(items));
+      setLoaded(true);
+    });
+  }, []);
+
   const initial = value ? CATS.findIndex((c) => c.id === value) : Math.min(3, CATS.length - 1);
   const [active, setActive] = useState(initial >= 0 ? initial : 0);
   const cur = CATS[active] || CATS[0];
+
+  // Re-sync active index when CATS load from DB and value is set.
+  useEffect(() => {
+    if (loaded && value) {
+      const idx = CATS.findIndex((c) => c.id === value);
+      if (idx >= 0) setActive(idx);
+    }
+  }, [loaded, CATS, value]);
 
   // Sync external value if it changes (e.g. via dot navigation upstream)
   useEffect(() => {

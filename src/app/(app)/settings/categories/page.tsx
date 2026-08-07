@@ -2,56 +2,36 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Trash2, Upload, Save, RotateCcw, Image as ImageIcon, ChevronDown, ChevronUp } from "lucide-react";
+import { Plus, Trash2, Upload, Save, RotateCcw, Image as ImageIcon, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
-import { createBrand, createDeviceModel, seedBrands, seedModels } from "@/lib/brand-model-data";
-
-/* ─── Types ──────────────────────────────────────────────────────────── */
-
-type Category = {
-  id: string;
-  label: string;
-  image?: string; // base64 or URL
-};
-
-const DEFAULT_CATEGORIES: Category[] = [
-  { id: "iphone", label: "iPhone" },
-  { id: "macbook", label: "MacBook" },
-  { id: "ipad", label: "iPad" },
-  { id: "iwatch", label: "iWatch" },
-  { id: "imac", label: "iMac" },
-  { id: "android", label: "Android" },
-  { id: "windows", label: "Windows" },
-  { id: "others", label: "Others" },
-];
-
-const STORAGE_KEY = "repairox-device-categories";
-
-function loadCategories(): Category[] {
-  if (typeof window === "undefined") return DEFAULT_CATEGORIES;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_CATEGORIES;
-  } catch { return DEFAULT_CATEGORIES; }
-}
-
-function saveCategories(cats: Category[]) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(cats));
-}
+import { createBrand, createDeviceModel } from "@/lib/brand-model-data";
+import {
+  loadDeviceCategories,
+  saveDeviceCategories,
+  DEFAULT_CATEGORIES,
+  type DeviceCategoryItem,
+} from "@/lib/device-categories";
 
 /* ─── Page ───────────────────────────────────────────────────────────── */
 
 export default function CategoriesSettingsPage() {
-  const [categories, setCategories] = useState<Category[]>(DEFAULT_CATEGORIES);
+  const [categories, setCategories] = useState<DeviceCategoryItem[]>(DEFAULT_CATEGORIES);
   const [newLabel, setNewLabel] = useState("");
   const [saved, setSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loaded, setLoaded] = useState(false);
 
-  useEffect(() => { setCategories(loadCategories()); }, []);
+  // Load from Supabase (or localStorage fallback) on mount.
+  useEffect(() => {
+    loadDeviceCategories().then((cats) => {
+      setCategories(cats);
+      setLoaded(true);
+    });
+  }, []);
 
   const addCategory = () => {
     if (!newLabel.trim()) return;
@@ -66,17 +46,49 @@ export default function CategoriesSettingsPage() {
   };
 
   const updateImage = (id: string, file: File) => {
+    if (file.size > 5 * 1024 * 1024) {
+      alert("Image is too large (max 5MB). Please pick a smaller file.");
+      return;
+    }
+    // Resize on canvas to keep stored data small.
     const reader = new FileReader();
     reader.onload = () => {
-      setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: reader.result as string } : c));
+      const raw = reader.result as string;
+      const img = new window.Image();
+      img.onload = () => {
+        const maxDim = 512;
+        let { width, height } = img;
+        const scale = Math.min(1, maxDim / Math.max(width, height));
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) { setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: raw } : c)); return; }
+        ctx.drawImage(img, 0, 0, width, height);
+        let out = canvas.toDataURL("image/webp", 0.7);
+        if (!out.startsWith("data:image/webp")) out = canvas.toDataURL("image/png");
+        setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: out } : c));
+      };
+      img.onerror = () => {
+        setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: raw } : c));
+      };
+      img.src = raw;
     };
     reader.readAsDataURL(file);
   };
 
-  const handleSave = () => {
-    saveCategories(categories);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+  const handleSave = async () => {
+    setSaving(true);
+    const ok = await saveDeviceCategories(categories);
+    setSaving(false);
+    if (ok) {
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } else {
+      alert("Failed to save categories. Check console for details.");
+    }
   };
 
   return (
@@ -111,52 +123,58 @@ export default function CategoriesSettingsPage() {
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-4">
           Categories ({categories.length})
         </p>
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
-          <AnimatePresence>
-            {categories.map((cat) => (
-              <motion.div
-                key={cat.id}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
-                className="group relative flex flex-col items-center rounded-xl border border-border p-4 transition hover:border-zinc-300"
-              >
-                {/* Image / Upload Area */}
-                <label className="relative grid h-16 w-16 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-zinc-200 bg-zinc-50 transition hover:border-[#4361EE]/40 hover:bg-indigo-50/30 overflow-hidden">
-                  {cat.image ? (
-                    <img src={cat.image} alt={cat.label} className="h-full w-full object-cover rounded-xl" />
-                  ) : (
-                    <ImageIcon className="h-6 w-6 text-zinc-300" />
-                  )}
-                  <input
-                    type="file"
-                    accept="image/*"
-                    className="absolute inset-0 opacity-0 cursor-pointer"
-                    onChange={(e) => {
-                      const f = e.target.files?.[0];
-                      if (f) updateImage(cat.id, f);
-                    }}
-                  />
-                  <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/40 text-white opacity-0 group-hover:opacity-100 transition">
-                    <Upload className="h-4 w-4" />
-                  </span>
-                </label>
-
-                {/* Label */}
-                <p className="mt-2.5 text-[12px] font-semibold text-zinc-700 text-center">{cat.label}</p>
-
-                {/* Remove */}
-                <button
-                  onClick={() => removeCategory(cat.id)}
-                  className="absolute top-2 right-2 grid h-6 w-6 place-items-center rounded-md bg-white text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-rose-500 hover:bg-rose-50 transition shadow-sm ring-1 ring-border"
-                  title="Remove category"
+        {!loaded ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground">
+            <Loader2 className="h-5 w-5 animate-spin mr-2" /> Loading...
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <AnimatePresence>
+              {categories.map((cat) => (
+                <motion.div
+                  key={cat.id}
+                  initial={{ opacity: 0, scale: 0.95 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="group relative flex flex-col items-center rounded-xl border border-border p-4 transition hover:border-zinc-300"
                 >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </motion.div>
-            ))}
-          </AnimatePresence>
-        </div>
+                  {/* Image / Upload Area */}
+                  <label className="relative grid h-16 w-16 cursor-pointer place-items-center rounded-xl border-2 border-dashed border-zinc-200 bg-zinc-50 transition hover:border-[#4361EE]/40 hover:bg-indigo-50/30 overflow-hidden">
+                    {cat.image ? (
+                      <img src={cat.image} alt={cat.label} className="h-full w-full object-cover rounded-xl" />
+                    ) : (
+                      <ImageIcon className="h-6 w-6 text-zinc-300" />
+                    )}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        if (f) updateImage(cat.id, f);
+                      }}
+                    />
+                    <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/40 text-white opacity-0 group-hover:opacity-100 transition">
+                      <Upload className="h-4 w-4" />
+                    </span>
+                  </label>
+
+                  {/* Label */}
+                  <p className="mt-2.5 text-[12px] font-semibold text-zinc-700 text-center">{cat.label}</p>
+
+                  {/* Remove */}
+                  <button
+                    onClick={() => removeCategory(cat.id)}
+                    className="absolute top-2 right-2 grid h-6 w-6 place-items-center rounded-md bg-white text-zinc-400 opacity-0 group-hover:opacity-100 hover:text-rose-500 hover:bg-rose-50 transition shadow-sm ring-1 ring-border"
+                    title="Remove category"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </button>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
       </div>
 
       {/* Actions */}
@@ -164,8 +182,9 @@ export default function CategoriesSettingsPage() {
         <Button variant="outline" size="md" onClick={() => { setCategories(DEFAULT_CATEGORIES); }}>
           <RotateCcw className="h-4 w-4" /> Reset Defaults
         </Button>
-        <Button size="md" onClick={handleSave}>
-          <Save className="h-4 w-4" /> {saved ? "Saved!" : "Save Categories"}
+        <Button size="md" onClick={handleSave} disabled={saving}>
+          {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+          {saved ? "Saved!" : saving ? "Saving..." : "Save Categories"}
         </Button>
       </div>
 
