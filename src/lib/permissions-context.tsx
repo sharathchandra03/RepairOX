@@ -256,6 +256,7 @@ interface PermissionsContextValue {
   /* ── Demo Mode ── */
   isDemoMode: boolean;
   demoRoleIds: string[];
+  demoResetCounter: number;
   toggleDemoRole: (roleId: string, enabled: boolean) => void;
   resetDemo: () => void;
 }
@@ -272,6 +273,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [featureVisibility, setFeatureVisibilityState] = useState<StoreFeatureVisibility>({});
   const [demoRoleIds, setDemoRoleIdsState] = useState<string[]>(getDemoRoleIds);
+  const [demoResetCounter, setDemoResetCounter] = useState(0);
 
   /* ── Supabase read helpers ── */
   const refreshTeamFromDb = useCallback(async () => {
@@ -727,6 +729,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       // Auto-reset demo data on every login for demo users
       if (isDemoRole(account.roleId)) {
         resetDemoData();
+        setDemoResetCounter((c) => c + 1);
       }
       return { ok: true, account, landingHref: computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
     }
@@ -745,6 +748,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     // Auto-reset demo data on every login for demo users
     if (isDemoRole(acc.roleId)) {
       resetDemoData();
+      setDemoResetCounter((c) => c + 1);
     }
     return { ok: true, account: { ...acc, lastLogin: now }, landingHref: computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
   }, [team, allowedWorkspacesForRole, refreshTeamFromDb]);
@@ -829,8 +833,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const resetDemo = useCallback(() => {
     resetDemoData();
-    // Force a page reload to re-seed demo data
-    if (typeof window !== "undefined") window.location.reload();
+    setDemoResetCounter((c) => c + 1);
   }, []);
 
   const role = useMemo(
@@ -860,7 +863,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         adminRoleId, activeRoleId, role, can, allowedWorkspaces,
         isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
         featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
-        isDemoMode, demoRoleIds, toggleDemoRole, resetDemo,
+        isDemoMode, demoRoleIds, toggleDemoRole, resetDemo, demoResetCounter,
       };
     },
     [
@@ -870,7 +873,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       hydrated, currentUser, login, logout, landingForRole,
       adminRoleId, activeRoleId, role, can, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
       featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
-      isDemoMode, demoRoleIds, toggleDemoRole, resetDemo,
+      isDemoMode, demoRoleIds, toggleDemoRole, resetDemo, demoResetCounter,
     ]
   );
 

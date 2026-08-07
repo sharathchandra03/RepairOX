@@ -548,7 +548,7 @@ function saveToStorage(state: StoreState, storageKey?: string) {
 /* ─── Provider ───────────────────────────────────────────────────────── */
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const { isDemoMode, authReady } = usePermissions();
+  const { isDemoMode, authReady, demoResetCounter } = usePermissions();
   const resolvedKey = isDemoMode ? demoKey(STORAGE_KEY) : STORAGE_KEY;
 
   const [state, setState] = useState<StoreState>({
@@ -785,7 +785,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       active = false;
       client.removeChannel(channel);
     };
-  }, [authReady, isDemoMode, resolvedKey]);
+  }, [authReady, isDemoMode, resolvedKey, demoResetCounter]);
 
   // Persist local-mode state to localStorage.
   useEffect(() => {

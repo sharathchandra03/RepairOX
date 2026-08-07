@@ -264,7 +264,7 @@ function saveSettingsLocal(settings: StoreSettings) {
 /* ─── Provider ───────────────────────────────────────────────────────── */
 
 export function StoreSettingsProvider({ children }: { children: ReactNode }) {
-  const { isDemoMode, authReady } = usePermissions();
+  const { isDemoMode, authReady, demoResetCounter } = usePermissions();
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
   const orgIdRef = useRef<string | null>(null);
@@ -356,7 +356,7 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
       active = false;
       authSub.subscription.unsubscribe();
     };
-  }, [authReady, isDemoMode]);
+  }, [authReady, isDemoMode, demoResetCounter]);
 
   // ── Supabase Realtime subscription for organization_settings ──
   useEffect(() => {
