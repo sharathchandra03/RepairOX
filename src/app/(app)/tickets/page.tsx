@@ -46,11 +46,11 @@ const ALL_COLUMNS: ColumnDef[] = [
   { id: "ticket", label: "Ticket", width: "w-[72px]" },
   { id: "customer", label: "Customer", width: "w-[20%]" },
   { id: "device", label: "Device / Service", width: "w-[20%]" },
-  { id: "status", label: "Status", width: "w-[180px]" },
+  { id: "status", label: "Status", width: "w-[180px]", align: "center" },
   { id: "dueDate", label: "Due Date", width: "w-[120px]" },
   { id: "created", label: "Created", width: "w-[140px]" },
   { id: "amount", label: "Amount", width: "w-[90px]", align: "right" },
-  { id: "actions", label: "Actions", width: "w-[70px]", align: "right", locked: true },
+  { id: "actions", label: "Actions", width: "w-[90px]", align: "center", locked: true },
 ];
 
 const DEFAULT_VISIBLE: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
@@ -592,7 +592,7 @@ export default function TicketsPage() {
             <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
               <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
                 {activeColumns.map((col) => (
-                  <th key={col.id} className={cn("px-3 py-3", col.width, col.align === "right" && "text-right")}>
+                  <th key={col.id} className={cn("px-3 py-3", col.width, col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
                       <input
                         type="checkbox"
@@ -632,7 +632,8 @@ export default function TicketsPage() {
                       <td key={col.id} className={cn(
                         "px-3 py-3",
                         col.id !== "device" && "align-middle",
-                        col.align === "right" && "text-right"
+                        col.align === "right" && "text-right",
+                        col.align === "center" && "text-center"
                       )}>
                         {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange)}
                       </td>

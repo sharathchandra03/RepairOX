@@ -16,7 +16,7 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
       role="tablist"
       className={cn(
         "relative inline-flex items-center rounded-full border border-border bg-muted p-1",
-        size === "sm" ? "text-xs" : "text-sm",
+        size === "sm" ? "text-[11px]" : "text-sm",
         className
       )}
     >
@@ -29,8 +29,8 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
             aria-selected={active}
             onClick={() => onChange(o.value)}
             className={cn(
-              "relative z-10 inline-flex items-center justify-center rounded-full px-3.5 py-1.5 font-medium transition-colors",
-              size === "md" && "px-4 py-1.5",
+              "relative z-10 inline-flex items-center justify-center rounded-full font-medium transition-colors whitespace-nowrap",
+              size === "sm" ? "px-2.5 py-1" : "px-4 py-1.5",
               active ? "text-white" : "text-muted-foreground hover:text-foreground"
             )}
           >
