@@ -63,7 +63,7 @@ export default function Dashboard() {
   const { target: monthlyTarget, updateTarget: setMonthlyTarget } = useMonthlyTarget();
   const [showTargetEdit, setShowTargetEdit] = useState(false);
   const [editTargetValue, setEditTargetValue] = useState("");
-  const { can } = usePermissions();
+  const { can, isDemoMode } = usePermissions();
   const canEditTarget = can("edit_dashboard_targets");
   const { isCollapsed: activityCollapsed, toggle: toggleActivityCollapse } = useActivityCollapse();
   const activityCardRef = useRef<HTMLDivElement>(null);
@@ -319,7 +319,7 @@ export default function Dashboard() {
           format={formatINR}
           tone="amber"
           delta={{ value: inventory.length > 0 ? `${inventory.length} item${inventory.length !== 1 ? "s" : ""}` : "No items", up: inventory.length > 0 }}
-          hint={inventory.length > 0 ? `${inventory.filter((i) => i.currentStock <= i.minStock && i.active).length} low stock items` : "Add inventory items to track stock value"}
+          hint={inventory.length > 0 ? `${inventory.filter((i) => i.currentStock <= i.minStock && i.active).length} low stock items` : "No inventory data yet"}
           progress={{ value: inventory.length > 0 ? Math.min(100, Math.round((inventory.filter((i) => i.currentStock > i.minStock).length / inventory.length) * 100)) : 0, label: "Healthy stock" }}
         />
       ),
