@@ -61,12 +61,12 @@ const DEFAULT_ORDER: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
 const STATUS_FILTERS: { label: string; value: TicketStatus | "all" }[] = [
   { label: "All", value: "all" },
   { label: "In Progress", value: "in_progress" },
-  { label: "Waiting for Approval", value: "waiting_approval" },
-  { label: "Waiting for Parts", value: "waiting_parts" },
   { label: "Repaired", value: "repaired" },
   { label: "Repaired & Collected", value: "repaired_collected" },
-  { label: "Return", value: "return" },
-  { label: "Return & Collected", value: "return_collected" },
+  { label: "Waiting for Approval", value: "waiting_approval" },
+  { label: "Waiting for Parts", value: "waiting_parts" },
+  { label: "Returned", value: "return" },
+  { label: "Returned & Collected", value: "return_collected" },
 ];
 
 const DATE_RANGES = [
@@ -82,12 +82,12 @@ type DateRange = (typeof DATE_RANGES)[number]["value"];
 
 const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
   { label: "In Progress", value: "in_progress" },
-  { label: "Waiting for Approval", value: "waiting_approval" },
-  { label: "Waiting for Parts", value: "waiting_parts" },
   { label: "Repaired", value: "repaired" },
   { label: "Repaired & Collected", value: "repaired_collected" },
-  { label: "Return", value: "return" },
-  { label: "Return & Collected", value: "return_collected" },
+  { label: "Waiting for Approval", value: "waiting_approval" },
+  { label: "Waiting for Parts", value: "waiting_parts" },
+  { label: "Returned", value: "return" },
+  { label: "Returned & Collected", value: "return_collected" },
 ];
 
 const PRIORITY_OPTIONS = [

@@ -16,8 +16,8 @@ export const STATUS_LABEL: Record<TicketStatus, string> = {
   waiting_parts: "Waiting for Parts",
   repaired: "Repaired",
   repaired_collected: "Repaired & Collected",
-  return: "Return",
-  return_collected: "Return & Collected",
+  return: "Returned",
+  return_collected: "Returned & Collected",
 };
 
 export const STATUS_TONE: Record<TicketStatus, string> = {

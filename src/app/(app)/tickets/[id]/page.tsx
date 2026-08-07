@@ -774,7 +774,7 @@ export default function TicketDetailPage() {
             <p className="text-sm font-bold mb-1">Change Status</p>
             <p className="text-[11px] text-muted-foreground mb-4">Ticket {ticket.id}</p>
             <div className="space-y-2">
-              {(["in_progress", "waiting_approval", "waiting_parts", "repaired", "repaired_collected", "return", "return_collected"] as TicketStatus[]).map((s) => (
+              {(["in_progress", "repaired", "repaired_collected", "waiting_approval", "waiting_parts", "return", "return_collected"] as TicketStatus[]).map((s) => (
                 <button key={s} onClick={() => handleStatusChange(s)}
                   className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", ticket.status === s ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[s]}`}>
@@ -898,10 +898,10 @@ export default function TicketDetailPage() {
             { label: "Normal", value: "normal" }, { label: "High", value: "high" }, { label: "Critical", value: "critical" },
           ]},
           { key: "status", label: "Status", type: "select", options: [
-            { label: "In Progress", value: "in_progress" }, { label: "Waiting for Approval", value: "waiting_approval" },
-            { label: "Waiting for Parts", value: "waiting_parts" }, { label: "Repaired", value: "repaired" },
-            { label: "Repaired & Collected", value: "repaired_collected" }, { label: "Return", value: "return" },
-            { label: "Return & Collected", value: "return_collected" },
+            { label: "In Progress", value: "in_progress" }, { label: "Repaired", value: "repaired" },
+            { label: "Repaired & Collected", value: "repaired_collected" }, { label: "Waiting for Approval", value: "waiting_approval" },
+            { label: "Waiting for Parts", value: "waiting_parts" }, { label: "Returned", value: "return" },
+            { label: "Returned & Collected", value: "return_collected" },
           ]},
           { key: "resolutionMinutes", label: "Expected Resolution (minutes)", type: "number" },
         ]}

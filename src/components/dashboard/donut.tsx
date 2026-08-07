@@ -28,8 +28,8 @@ const STATUS_DISPLAY: Record<string, string> = {
   waiting_parts: "Waiting for Parts",
   repaired: "Repaired",
   repaired_collected: "Repaired & Collected",
-  return: "Return",
-  return_collected: "Return & Collected",
+  return: "Returned",
+  return_collected: "Returned & Collected",
 };
 
 export function TicketsDonut({ tickets: ticketsProp }: TicketsDonutProps) {
