@@ -746,7 +746,8 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       // Auto-reset demo data on every login for demo users
       if (isDemoRole(account.roleId)) {
         resetDemoData();
-        setDemoResetCounter((c) => c + 1);
+        // Set flag so app-shell does a hard refresh after navigation completes
+        if (typeof window !== "undefined") localStorage.setItem("repairox-demo-needs-reload", "1");
       }
       return { ok: true, account, landingHref: computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
     }
@@ -765,7 +766,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     // Auto-reset demo data on every login for demo users
     if (isDemoRole(acc.roleId)) {
       resetDemoData();
-      setDemoResetCounter((c) => c + 1);
+      if (typeof window !== "undefined") localStorage.setItem("repairox-demo-needs-reload", "1");
     }
     return { ok: true, account: { ...acc, lastLogin: now }, landingHref: computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
   }, [team, allowedWorkspacesForRole, refreshTeamFromDb]);

@@ -101,6 +101,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (authReady && !currentUser) router.replace("/login");
   }, [authReady, currentUser, router]);
 
+  // Demo auto-refresh: after a demo user logs in, the login function sets a flag.
+  // Once the app-shell mounts with the session active, we do one hard reload
+  // to ensure all providers load with fresh seed data.
+  useEffect(() => {
+    if (!authReady || !currentUser || !isDemoMode) return;
+    if (typeof window === "undefined") return;
+    const flag = localStorage.getItem("repairox-demo-needs-reload");
+    if (flag) {
+      localStorage.removeItem("repairox-demo-needs-reload");
+      window.location.reload();
+    }
+  }, [authReady, currentUser, isDemoMode]);
+
   // Keep the active workspace in sync with the current route (e.g. deep links, back/forward nav)
   useEffect(() => {
     const resolved = workspaceForPath(pathname);
