@@ -7,6 +7,10 @@ export const metadata: Metadata = {
   description:
     "End-to-end CRM for mobile and electronics repair shops. Tickets, inventory, billing, customers, and analytics - beautifully designed.",
   themeColor: "#4361EE",
+  icons: {
+    icon: "/favicon.png",
+    apple: "/favicon.png",
+  },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
