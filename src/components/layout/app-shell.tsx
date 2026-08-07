@@ -16,6 +16,7 @@ import { ReportContextProvider, workspaceToModule, moduleToWorkspace } from "@/l
 import type { ReportModuleId } from "@/lib/reports/types";
 import { ComingSoonPage } from "@/components/common/coming-soon";
 import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visibility";
+import { resetDemoData } from "@/lib/demo-mode";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -89,7 +90,7 @@ function FeatureGate({ pathname, getVisibilityByHref, router, children }: {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState(false);
-  const { allowedWorkspaces: allowed, currentUser, authReady, getVisibilityByHref } = usePermissions();
+  const { allowedWorkspaces: allowed, currentUser, authReady, getVisibilityByHref, isDemoMode } = usePermissions();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(allowed[0]?.id ?? "shop");
   const pathname = usePathname();
   const router = useRouter();
