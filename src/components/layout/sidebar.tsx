@@ -17,6 +17,7 @@ import { Logo } from "@/components/ui/logo";
 import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
+import { type VisibilityMode } from "@/lib/feature-visibility";
 
 const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Boxes, Users, Recycle, ClipboardList,
@@ -27,18 +28,20 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
-function NavItem({ item, collapsed, pathname }: {
+function NavItem({ item, collapsed, pathname, comingSoon }: {
   item: NavItemDef;
   collapsed: boolean;
   pathname: string;
+  comingSoon?: boolean;
 }) {
   const Icon = ICONS[item.icon] ?? Home;
+  const href = comingSoon ? `/coming-soon?from=${encodeURIComponent(item.href)}` : item.href;
   // Exact match for module root pages (e.g. /operations, /lead-management) to
   // avoid them staying "active" when a sibling sub-route like /operations/reports is open.
   const isModuleRoot = item.href === "/operations" || item.href === "/lead-management" || item.href === "/dashboard";
-  const active = isModuleRoot
+  const active = !comingSoon && (isModuleRoot
     ? pathname === item.href
-    : pathname === item.href || pathname.startsWith(item.href + "/");
+    : pathname === item.href || pathname.startsWith(item.href + "/"));
   return (
     <motion.li
       layout
@@ -49,12 +52,12 @@ function NavItem({ item, collapsed, pathname }: {
       style={{ overflow: "hidden" }}
     >
       <Link
-        href={item.href}
+        href={href}
         title={collapsed ? item.label : undefined}
         className={cn(
           "group relative flex items-center rounded-xl text-sm font-medium transition-colors",
           collapsed ? "justify-center px-0 py-2.5 mx-1" : "gap-3 px-3 py-2.5",
-          active ? "text-white" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          active ? "text-white" : comingSoon ? "text-slate-400 hover:bg-slate-50 hover:text-slate-600" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
         )}
       >
         {active && (
@@ -69,10 +72,17 @@ function NavItem({ item, collapsed, pathname }: {
           <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
         )}
         <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
-          <Icon className={cn("h-[18px] w-[18px]", active ? "text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
+          <Icon className={cn("h-[18px] w-[18px]", active ? "text-white" : comingSoon ? "text-zinc-300" : "text-zinc-400 group-hover:text-zinc-700")} />
         </span>
         {!collapsed && (
-          <span className="relative whitespace-nowrap">{item.label}</span>
+          <span className="relative flex items-center gap-2 whitespace-nowrap">
+            {item.label}
+            {comingSoon && (
+              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 ring-1 ring-inset ring-amber-200">
+                Soon
+              </span>
+            )}
+          </span>
         )}
       </Link>
     </motion.li>
@@ -265,7 +275,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { can, allowedWorkspaces, role, isPreviewing } = usePermissions();
+  const { can, allowedWorkspaces, role, isPreviewing, getVisibilityByHref } = usePermissions();
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
   const groups = navGroups[activeWorkspace];
   const expandableGroups = expandableNavGroups[activeWorkspace] ?? [];
@@ -273,6 +283,11 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
     !!item && (!item.permission || (Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission)));
   const visibleExpandableGroup = (group: ExpandableNavGroup): boolean =>
     !group.permission || (Array.isArray(group.permission) ? group.permission.some(can) : can(group.permission));
+
+  /** Check feature visibility — "hidden" items are excluded entirely. */
+  const featureVisible = (href: string): boolean => getVisibilityByHref(href) !== "hidden";
+  /** Check if an item is "coming_soon". */
+  const isComingSoon = (href: string): boolean => getVisibilityByHref(href) === "coming_soon";
 
   function handleWorkspaceChange(id: WorkspaceId) {
     setActiveWorkspace(id);
@@ -324,11 +339,13 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
       {/* Grouped nav — scrollable middle zone, filtered live by the active role's permissions */}
       <nav className="flex-1 overflow-y-auto px-3 pb-2">
         {groups.map((group) => {
-          const items = group.items.map((href) => itemMap[href]).filter(visibleItem);
+          const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href));
           // For ADMINISTRATION group, also render expandable groups
           const isAdminGroup = group.label === "ADMINISTRATION";
           const visibleExpandables = isAdminGroup
-            ? expandableGroups.filter(visibleExpandableGroup)
+            ? expandableGroups.filter(visibleExpandableGroup).filter((eg) =>
+                eg.children.some((c) => visibleItem(c) && featureVisible(c.href))
+              )
             : [];
 
           if (items.length === 0 && visibleExpandables.length === 0) return null;
@@ -346,7 +363,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
                     key={eg.id}
                     group={{
                       ...eg,
-                      children: eg.children.filter(visibleItem),
+                      children: eg.children.filter(visibleItem).filter((c) => featureVisible(c.href)),
                     }}
                     collapsed={collapsed}
                     pathname={pathname}
@@ -355,7 +372,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
                 {/* Regular flat nav items */}
                 <AnimatePresence initial={false}>
                   {items.map((item) => (
-                    <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} />
+                    <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} comingSoon={isComingSoon(item.href)} />
                   ))}
                 </AnimatePresence>
               </ul>
@@ -378,7 +395,7 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { can, allowedWorkspaces: allowed } = usePermissions();
+  const { can, allowedWorkspaces: allowed, getVisibilityByHref } = usePermissions();
   const itemMap = Object.fromEntries(navItems.map((n) => [n.href, n]));
   const groups = navGroups[activeWorkspace];
   const expandableGroups = expandableNavGroups[activeWorkspace] ?? [];
@@ -386,6 +403,9 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
     !!item && (!item.permission || (Array.isArray(item.permission) ? item.permission.some(can) : can(item.permission)));
   const visibleExpandableGroup = (group: ExpandableNavGroup): boolean =>
     !group.permission || (Array.isArray(group.permission) ? group.permission.some(can) : can(group.permission));
+
+  const featureVisible = (href: string): boolean => getVisibilityByHref(href) !== "hidden";
+  const isComingSoon = (href: string): boolean => getVisibilityByHref(href) === "coming_soon";
 
   function handleWorkspaceChange(id: WorkspaceId) {
     setActiveWorkspace(id);
@@ -427,10 +447,12 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
             {/* Nav */}
             <nav className="flex-1 overflow-y-auto px-3 pb-4">
               {groups.map((group) => {
-                const items = group.items.map((href) => itemMap[href]).filter(visibleItem);
+                const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href));
                 const isAdminGroup = group.label === "ADMINISTRATION";
                 const visibleExpandables = isAdminGroup
-                  ? expandableGroups.filter(visibleExpandableGroup)
+                  ? expandableGroups.filter(visibleExpandableGroup).filter((eg) =>
+                      eg.children.some((c) => visibleItem(c) && featureVisible(c.href))
+                    )
                   : [];
 
                 if (items.length === 0 && visibleExpandables.length === 0) return null;
@@ -445,7 +467,7 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
                           key={eg.id}
                           group={{
                             ...eg,
-                            children: eg.children.filter(visibleItem),
+                            children: eg.children.filter(visibleItem).filter((c) => featureVisible(c.href)),
                           }}
                           collapsed={false}
                           pathname={pathname}
@@ -453,7 +475,7 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
                       ))}
                       <AnimatePresence initial={false}>
                         {items.map((item) => (
-                          <NavItem key={item.href} item={item} collapsed={false} pathname={pathname} />
+                          <NavItem key={item.href} item={item} collapsed={false} pathname={pathname} comingSoon={isComingSoon(item.href)} />
                         ))}
                       </AnimatePresence>
                     </ul>

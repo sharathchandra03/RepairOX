@@ -15,6 +15,8 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logActivity, buildChanges, type ActivitySeverity } from "./activity-log";
+import { usePermissions } from "@/lib/permissions-context";
+import { demoKey } from "@/lib/demo-mode";
 import {
   tickets as SEED_TICKETS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE,
   TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS,
@@ -512,10 +514,11 @@ function rowToAssignedToOption(r: any): AssignedToOption {
 const StoreContext = createContext<Store | null>(null);
 const STORAGE_KEY = "repairox-store-v2";
 
-function loadFromStorage(): StoreState | null {
+function loadFromStorage(storageKey?: string): StoreState | null {
   if (typeof window === "undefined") return null;
+  const key = storageKey ?? STORAGE_KEY;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const saved = JSON.parse(raw) as any;
     return {
@@ -536,16 +539,20 @@ function loadFromStorage(): StoreState | null {
   } catch { return null; }
 }
 
-function saveToStorage(state: StoreState) {
+function saveToStorage(state: StoreState, storageKey?: string) {
   if (typeof window === "undefined") return;
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch { /* noop */ }
+  const key = storageKey ?? STORAGE_KEY;
+  try { localStorage.setItem(key, JSON.stringify(state)); } catch { /* noop */ }
 }
 
 /* ─── Provider ───────────────────────────────────────────────────────── */
 
 export function StoreProvider({ children }: { children: ReactNode }) {
+  const { isDemoMode } = usePermissions();
+  const resolvedKey = isDemoMode ? demoKey(STORAGE_KEY) : STORAGE_KEY;
+
   const [state, setState] = useState<StoreState>(() => {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && !isDemoMode) {
       // Start empty — data will be loaded from DB in useEffect.
       return {
         tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
@@ -553,7 +560,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [], hydrated: false, mode: "db",
       };
     }
-    const saved = loadFromStorage();
+    const saved = loadFromStorage(resolvedKey);
     if (saved) return saved;
     return {
       tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
@@ -573,7 +580,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── DB Load + Realtime Subscriptions ── */
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase || isDemoMode) return;
     let active = true;
 
     (async () => {
@@ -750,9 +757,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   // Persist local-mode state to localStorage (only when NOT using Supabase).
   useEffect(() => {
-    if (isSupabaseConfigured || !state.hydrated) return;
-    saveToStorage(state);
-  }, [state]);
+    if ((isSupabaseConfigured && !isDemoMode) || !state.hydrated) return;
+    saveToStorage(state, resolvedKey);
+  }, [state, resolvedKey, isDemoMode]);
 
   /* ── Ticket actions (DB-first) ── */
   const addTicket = useCallback(async (ticket: Ticket) => {

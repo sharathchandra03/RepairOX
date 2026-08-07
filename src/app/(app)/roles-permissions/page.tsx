@@ -8,6 +8,7 @@ import {
   CheckCircle2, UserPlus, Trash2, Users, Building2, Wrench, Package,
   TrendingUp, Wallet, Crown, Code2, LayoutGrid, SlidersHorizontal,
   Mail, UserCog, Plus, MapPin, KeyRound, MoreHorizontal, Power, Ban, Phone,
+  Sparkles,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -30,6 +31,10 @@ import {
 import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
 import type { TeamMember } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
+import {
+  FEATURE_REGISTRY, featuresByWorkspace,
+  type VisibilityMode, type FeatureEntry,
+} from "@/lib/feature-visibility";
 
 /* ─── Icon per role — keeps the role list scannable ──────────────────── */
 const ROLE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -53,11 +58,12 @@ const STATUS_LABEL: Record<TeamMember["status"], string> = {
   active: "Active", invited: "Invited", suspended: "Suspended",
 };
 
-type TabId = "roles" | "matrix" | "users";
+type TabId = "roles" | "matrix" | "users" | "visibility";
 const TABS: { id: TabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "roles", label: "Roles & Access", icon: ShieldCheck },
   { id: "matrix", label: "Permission Matrix", icon: SlidersHorizontal },
   { id: "users", label: "Users & Assignment", icon: Users },
+  { id: "visibility", label: "Feature Visibility", icon: Sparkles },
 ];
 
 /** Seed the editable matrix draft from the shared context (not the static
@@ -77,6 +83,8 @@ export default function RolesPermissionsPage() {
     isCustomRole, canDeleteRole, deleteRole, membersInRole,
     getRoleById, team, setMemberRole, deleteMember,
     resetPassword, setStaffStatus, toggleLogin, updateRoleWorkspaces,
+    featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk,
+    adminRoleId, demoRoleIds, toggleDemoRole, resetDemo,
   } = usePermissions();
 
   const [tab, setTab] = useState<TabId>("roles");
@@ -121,6 +129,12 @@ export default function RolesPermissionsPage() {
             <span className="text-foreground">{activeRole.label}</span>
           </>
         )}
+        {tab === "visibility" && (
+          <>
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
+            <span className="text-foreground">Feature Visibility</span>
+          </>
+        )}
       </nav>
 
       <PageHeader
@@ -132,7 +146,13 @@ export default function RolesPermissionsPage() {
       {/* Tab strip */}
       <div className="overflow-x-auto pb-1">
         <div className="inline-flex min-w-full items-center gap-1 rounded-full border border-border bg-muted p-1">
-          {TABS.map((t) => {
+          {TABS.filter((t) => {
+            // Feature Visibility tab only visible to platform_owner and master_shop_owner
+            if (t.id === "visibility") {
+              return adminRoleId === "platform_owner" || adminRoleId === "master_shop_owner";
+            }
+            return true;
+          }).map((t) => {
             const Icon = t.icon;
             const isActive = t.id === tab;
             return (
@@ -203,6 +223,19 @@ export default function RolesPermissionsPage() {
               resetPassword={resetPassword}
               setStaffStatus={setStaffStatus}
               toggleLogin={toggleLogin}
+            />
+          )}
+          {tab === "visibility" && (
+            <FeatureVisibilityTab
+              allRoles={allRoles}
+              featureVisibility={featureVisibility}
+              setFeatureVisibility={setFeatureVisibility}
+              setFeatureVisibilityBulk={setFeatureVisibilityBulk}
+              activeRoleId={activeRoleId}
+              setActiveRoleId={setActiveRoleId}
+              demoRoleIds={demoRoleIds}
+              toggleDemoRole={toggleDemoRole}
+              resetDemo={resetDemo}
             />
           )}
         </motion.div>
@@ -1289,6 +1322,374 @@ function UsersTab({
         member={removing}
         onConfirm={confirmRemove}
       />
+    </div>
+  );
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   TAB 4 — Feature Visibility
+   Control which modules/pages are visible, shown as "Coming Soon", or
+   completely hidden for each role. Only accessible to Platform Owner and
+   Master Shop Owner.
+   ───────────────────────────────────────────────────────────────────────── */
+
+const VISIBILITY_OPTIONS: { mode: VisibilityMode; label: string; emoji: string; color: string; bg: string }[] = [
+  { mode: "visible", label: "Visible", emoji: "✓", color: "text-emerald-700", bg: "bg-emerald-50 border-emerald-200 ring-emerald-200" },
+  { mode: "coming_soon", label: "Coming Soon", emoji: "🚀", color: "text-amber-700", bg: "bg-amber-50 border-amber-200 ring-amber-200" },
+  { mode: "hidden", label: "Hidden", emoji: "🔒", color: "text-zinc-500", bg: "bg-zinc-50 border-zinc-200 ring-zinc-200" },
+];
+
+function FeatureVisibilityTab({
+  allRoles, featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk,
+  activeRoleId, setActiveRoleId, demoRoleIds, toggleDemoRole, resetDemo,
+}: {
+  allRoles: RoleDef[];
+  featureVisibility: ReturnType<typeof usePermissions>["featureVisibility"];
+  setFeatureVisibility: ReturnType<typeof usePermissions>["setFeatureVisibility"];
+  setFeatureVisibilityBulk: ReturnType<typeof usePermissions>["setFeatureVisibilityBulk"];
+  activeRoleId: string;
+  setActiveRoleId: (id: string) => void;
+  demoRoleIds: string[];
+  toggleDemoRole: (roleId: string, enabled: boolean) => void;
+  resetDemo: () => void;
+}) {
+  const [query, setQuery] = useState("");
+  const [justSaved, setJustSaved] = useState(false);
+
+  const activeRole = allRoles.find((r) => r.id === activeRoleId) ?? allRoles[0];
+  const grouped = featuresByWorkspace();
+  const roleVisibility = featureVisibility[activeRoleId] ?? {};
+
+  // Don't allow modifying platform_owner visibility (they always see everything)
+  const isPlatformOwner = activeRoleId === "platform_owner";
+
+  function getMode(featureId: string): VisibilityMode {
+    return roleVisibility[featureId] ?? "visible";
+  }
+
+  function handleSetMode(featureId: string, mode: VisibilityMode) {
+    if (isPlatformOwner) return;
+    setFeatureVisibility(activeRoleId, featureId, mode);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1600);
+  }
+
+  function setAllInWorkspace(workspace: WorkspaceId, mode: VisibilityMode) {
+    if (isPlatformOwner) return;
+    const features = grouped[workspace];
+    const updates: Record<string, VisibilityMode> = {};
+    for (const f of features) updates[f.id] = mode;
+    setFeatureVisibilityBulk(activeRoleId, updates);
+    setJustSaved(true);
+    setTimeout(() => setJustSaved(false), 1600);
+  }
+
+  const filteredGrouped = useMemo(() => {
+    if (!query.trim()) return grouped;
+    const q = query.toLowerCase();
+    const result: Record<WorkspaceId, FeatureEntry[]> = { shop: [], leads: [], operations: [] };
+    for (const [ws, features] of Object.entries(grouped) as [WorkspaceId, FeatureEntry[]][]) {
+      result[ws] = features.filter((f) => f.label.toLowerCase().includes(q) || f.href.toLowerCase().includes(q));
+    }
+    return result;
+  }, [query, grouped]);
+
+  // Stats
+  const totalFeatures = FEATURE_REGISTRY.length;
+  const hiddenCount = Object.values(roleVisibility).filter((m) => m === "hidden").length;
+  const comingSoonCount = Object.values(roleVisibility).filter((m) => m === "coming_soon").length;
+  const visibleCount = totalFeatures - hiddenCount - comingSoonCount;
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-[13px] text-muted-foreground">
+            Control which features are visible, shown as &quot;Coming Soon&quot;, or completely hidden for each role.
+          </p>
+          <p className="mt-0.5 text-[11px] text-zinc-400">
+            Changes apply immediately to all users with the selected role.
+          </p>
+        </div>
+      </div>
+
+      {/* Saved confirmation */}
+      <motion.div
+        initial={false}
+        animate={{ opacity: justSaved ? 1 : 0, y: justSaved ? 0 : -6 }}
+        transition={{ duration: 0.2 }}
+        className={cn(
+          "flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2.5 text-[12.5px] font-medium text-emerald-700",
+          !justSaved && "pointer-events-none"
+        )}
+        style={{ display: justSaved ? "flex" : "none" }}
+      >
+        <CheckCircle2 className="h-4 w-4" />
+        Feature visibility updated. Changes are active immediately.
+      </motion.div>
+
+      {/* Role selector */}
+      <div className="overflow-x-auto pb-1">
+        <div className="inline-flex min-w-full items-center gap-1 rounded-full border border-border bg-muted p-1">
+          {allRoles.map((r) => (
+            <button
+              key={r.id}
+              onClick={() => setActiveRoleId(r.id)}
+              className={cn(
+                "relative whitespace-nowrap rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors",
+                r.id === activeRoleId ? "bg-[#4361EE] text-white shadow-[0_6px_20px_-8px_rgba(67,97,238,0.5)]" : "text-zinc-500 hover:text-zinc-800"
+              )}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_280px]">
+        {/* Feature visibility matrix */}
+        <div className="space-y-5">
+          {/* Search */}
+          <Input
+            iconLeft={<Search className="h-4 w-4" />}
+            placeholder="Search features..."
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            className="h-10 max-w-xs"
+          />
+
+          {isPlatformOwner && (
+            <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] font-medium text-amber-700">
+              <Info className="h-4 w-4 shrink-0" />
+              Platform Owner always has full access to every feature. Select another role to configure visibility.
+            </div>
+          )}
+
+          {/* Workspace groups */}
+          {(["shop", "leads", "operations"] as const).map((wsId) => {
+            const features = filteredGrouped[wsId];
+            if (features.length === 0) return null;
+            const ws = WORKSPACE_MAP[wsId];
+            const wsHidden = features.filter((f) => getMode(f.id) === "hidden").length;
+            const wsComingSoon = features.filter((f) => getMode(f.id) === "coming_soon").length;
+            const wsVisible = features.length - wsHidden - wsComingSoon;
+
+            return (
+              <motion.div
+                key={wsId}
+                initial={{ opacity: 0, y: 8 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25 }}
+                className="rounded-2xl border border-border bg-card shadow-card overflow-hidden"
+              >
+                {/* Workspace header */}
+                <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-4">
+                  <div className="flex items-center gap-3">
+                    <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[11px] font-bold", ws.bg, ws.color)}>
+                      {ws.short}
+                    </span>
+                    <div>
+                      <p className="text-[13.5px] font-semibold">{ws.label}</p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {features.length} features · {wsVisible} visible · {wsComingSoon} coming soon · {wsHidden} hidden
+                      </p>
+                    </div>
+                  </div>
+                  {!isPlatformOwner && (
+                    <div className="flex items-center gap-1.5">
+                      {VISIBILITY_OPTIONS.map((opt) => (
+                        <button
+                          key={opt.mode}
+                          onClick={() => setAllInWorkspace(wsId, opt.mode)}
+                          title={`Set all to ${opt.label}`}
+                          className={cn(
+                            "inline-flex items-center gap-1 rounded-full border px-2 py-1 text-[10px] font-semibold transition-colors hover:ring-1",
+                            opt.bg, opt.color
+                          )}
+                        >
+                          <span>{opt.emoji}</span>
+                          All
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Feature rows */}
+                <div className="divide-y divide-border">
+                  {features.map((feature, i) => {
+                    const mode = getMode(feature.id);
+                    return (
+                      <motion.div
+                        key={feature.id}
+                        initial={{ opacity: 0, y: 4 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        transition={{ delay: 0.015 * i }}
+                        className="flex items-center justify-between gap-3 px-5 py-3 transition-colors hover:bg-muted/30"
+                      >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-medium text-zinc-800">{feature.label}</p>
+                          <p className="truncate text-[11px] text-muted-foreground">{feature.href}</p>
+                        </div>
+                        {/* Visibility toggle buttons */}
+                        <div className="flex items-center gap-1">
+                          {VISIBILITY_OPTIONS.map((opt) => {
+                            const isActive = mode === opt.mode;
+                            return (
+                              <button
+                                key={opt.mode}
+                                onClick={() => handleSetMode(feature.id, opt.mode)}
+                                disabled={isPlatformOwner}
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold transition-all",
+                                  isActive
+                                    ? cn(opt.bg, opt.color, "ring-1", opt.mode === "visible" ? "ring-emerald-300" : opt.mode === "coming_soon" ? "ring-amber-300" : "ring-zinc-300")
+                                    : "border-border bg-card text-zinc-400 hover:text-zinc-600 hover:border-zinc-300",
+                                  isPlatformOwner && "cursor-not-allowed opacity-50"
+                                )}
+                              >
+                                <span className="text-[10px]">{opt.emoji}</span>
+                                {opt.label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </motion.div>
+                    );
+                  })}
+                </div>
+              </motion.div>
+            );
+          })}
+        </div>
+
+        {/* Summary sidebar */}
+        <div className="space-y-4 lg:sticky lg:top-[72px] lg:self-start">
+          {/* Role summary */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-9 w-9 place-items-center rounded-lg brand-gradient text-white shadow-glow">
+                <Sparkles className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-bold leading-tight">{activeRole.label}</p>
+                <p className="text-[11px] text-muted-foreground">Feature visibility config</p>
+              </div>
+            </div>
+
+            {/* Stats */}
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[12px] text-zinc-600">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                  Visible
+                </span>
+                <span className="text-[12px] font-semibold text-zinc-800">{visibleCount}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[12px] text-zinc-600">
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                  Coming Soon
+                </span>
+                <span className="text-[12px] font-semibold text-zinc-800">{comingSoonCount}</span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[12px] text-zinc-600">
+                  <span className="inline-block h-2 w-2 rounded-full bg-zinc-400" />
+                  Hidden
+                </span>
+                <span className="text-[12px] font-semibold text-zinc-800">{hiddenCount}</span>
+              </div>
+            </div>
+
+            {/* Progress bar */}
+            <div className="mt-4 flex h-2 w-full overflow-hidden rounded-full bg-muted">
+              <div className="bg-emerald-500 transition-all duration-300" style={{ width: `${(visibleCount / totalFeatures) * 100}%` }} />
+              <div className="bg-amber-400 transition-all duration-300" style={{ width: `${(comingSoonCount / totalFeatures) * 100}%` }} />
+              <div className="bg-zinc-300 transition-all duration-300" style={{ width: `${(hiddenCount / totalFeatures) * 100}%` }} />
+            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">{totalFeatures} total features</p>
+          </div>
+
+          {/* Info panel */}
+          <div className="rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
+            <p className="text-[13px] font-semibold text-[#3347D6]">How it works</p>
+            <div className="mt-2 space-y-2 text-[11px] leading-relaxed text-[#3347D6]/70">
+              <p><span className="font-semibold">✓ Visible</span> — Feature opens normally.</p>
+              <p><span className="font-semibold">🚀 Coming Soon</span> — Sidebar shows the item, but clicking it shows a branded &quot;Coming Soon&quot; page.</p>
+              <p><span className="font-semibold">🔒 Hidden</span> — Completely removed from sidebar and navigation.</p>
+            </div>
+          </div>
+
+          {/* Use cases */}
+          <div className="rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
+            <p className="text-[13px] font-semibold text-[#3347D6]">Use cases</p>
+            <ul className="mt-2 space-y-1 text-[11px] leading-relaxed text-[#3347D6]/70">
+              <li>• Demo accounts — show what&apos;s coming</li>
+              <li>• Trial accounts — limit feature access</li>
+              <li>• Beta features — controlled rollout</li>
+              <li>• Subscription tiers — plan-based access</li>
+            </ul>
+          </div>
+
+          {/* Demo Workspace */}
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+            <div className="flex items-center gap-2.5">
+              <span className="grid h-9 w-9 place-items-center rounded-lg bg-violet-100 text-violet-600">
+                <Eye className="h-4 w-4" />
+              </span>
+              <div>
+                <p className="text-sm font-bold leading-tight">Demo Workspace</p>
+                <p className="text-[11px] text-muted-foreground">Sandbox for demo accounts</p>
+              </div>
+            </div>
+            <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
+              Mark roles as &quot;Demo&quot; to give them full access with isolated data. Demo users share a sandbox that never touches production.
+            </p>
+
+            {/* Demo role toggles */}
+            <div className="mt-4 space-y-2">
+              {allRoles.filter((r) => r.id !== "platform_owner").map((r) => {
+                const isDemo = demoRoleIds.includes(r.id);
+                return (
+                  <label
+                    key={r.id}
+                    className={cn(
+                      "flex cursor-pointer items-center gap-2.5 rounded-xl border px-3 py-2.5 text-[12px] font-medium transition",
+                      isDemo ? "border-violet-300 bg-violet-50 text-violet-700" : "border-border hover:bg-muted text-zinc-600"
+                    )}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={isDemo}
+                      onChange={(e) => toggleDemoRole(r.id, e.target.checked)}
+                      className="h-3.5 w-3.5 rounded border-zinc-300 text-violet-600 focus:ring-violet-500"
+                    />
+                    <span className="flex-1 truncate">{r.label}</span>
+                    {isDemo && (
+                      <span className="inline-flex items-center rounded-full bg-violet-200 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-violet-700">
+                        Demo
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
+            </div>
+
+            {/* Reset demo data */}
+            {demoRoleIds.length > 0 && (
+              <button
+                onClick={resetDemo}
+                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                Reset Demo Data
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

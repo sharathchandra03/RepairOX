@@ -10,9 +10,12 @@ import { expandableNavGroups } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 import { PreviewBanner } from "@/components/common/preview-banner";
+import { DemoBanner } from "@/components/common/demo-banner";
 import { InternalChat } from "@/components/common/internal-chat";
 import { ReportContextProvider, workspaceToModule, moduleToWorkspace } from "@/lib/reports/report-context";
 import type { ReportModuleId } from "@/lib/reports/types";
+import { ComingSoonPage } from "@/components/common/coming-soon";
+import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visibility";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -36,10 +39,57 @@ function workspaceForPath(pathname: string): WorkspaceId | null {
   return null;
 }
 
+/** Route-level feature visibility gate. Intercepts direct navigation to
+ *  routes marked as "coming_soon" (shows the premium Coming Soon page inline)
+ *  or "hidden" (redirects to dashboard). Passes through for "visible". */
+function FeatureGate({ pathname, getVisibilityByHref, router, children }: {
+  pathname: string;
+  getVisibilityByHref: (href: string) => "visible" | "coming_soon" | "hidden";
+  router: ReturnType<typeof useRouter>;
+  children: React.ReactNode;
+}) {
+  // Skip gate for the coming-soon page itself, login, workspaces, and other meta routes
+  const skipPaths = ["/coming-soon", "/login", "/workspaces", "/roles-permissions"];
+  if (skipPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
+    return <>{children}</>;
+  }
+
+  // Find the best matching feature for this pathname.
+  // Try exact match first, then check if it's a sub-route of a known feature.
+  let visibility = getVisibilityByHref(pathname);
+
+  // If no exact match in the registry, check parent paths
+  if (visibility === "visible" && !FEATURE_BY_HREF[pathname]) {
+    // Walk up the path to find a parent that might be gated
+    const segments = pathname.split("/").filter(Boolean);
+    for (let i = segments.length - 1; i >= 1; i--) {
+      const parentPath = "/" + segments.slice(0, i).join("/");
+      if (FEATURE_BY_HREF[parentPath]) {
+        visibility = getVisibilityByHref(parentPath);
+        break;
+      }
+    }
+  }
+
+  if (visibility === "hidden") {
+    // Redirect to dashboard for hidden features
+    router.replace("/dashboard");
+    return <div className="h-[60vh]" />;
+  }
+
+  if (visibility === "coming_soon") {
+    // Show the Coming Soon page inline (no redirect needed)
+    const content = getComingSoonContentByHref(pathname);
+    return <ComingSoonPage content={content} />;
+  }
+
+  return <>{children}</>;
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState(false);
-  const { allowedWorkspaces: allowed, currentUser, authReady } = usePermissions();
+  const { allowedWorkspaces: allowed, currentUser, authReady, getVisibilityByHref } = usePermissions();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(allowed[0]?.id ?? "shop");
   const pathname = usePathname();
   const router = useRouter();
@@ -97,6 +147,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
         <div className="sticky top-0 z-20">
           <PreviewBanner />
+          <DemoBanner />
           <Topbar
             onMenu={() => setOpen(true)}
             activeWorkspace={activeWorkspace}
@@ -110,7 +161,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           className="min-w-0 flex-1 px-4 pt-2 pb-4 sm:px-6 lg:px-8"
         >
-          {children}
+          <FeatureGate pathname={pathname} getVisibilityByHref={getVisibilityByHref} router={router}>
+            {children}
+          </FeatureGate>
         </motion.main>
       </div>
       <InternalChat />

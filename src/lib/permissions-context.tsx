@@ -49,6 +49,25 @@ import {
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { rowToStaff, type StaffRow } from "@/lib/staff-map";
 import { setCurrentActor } from "@/lib/activity-log";
+import {
+  type StoreFeatureVisibility,
+  type VisibilityMode,
+  resolveVisibility,
+  resolveVisibilityByHref,
+} from "@/lib/feature-visibility";
+import {
+  isDemoRole,
+  getDemoRoleIds,
+  addDemoRole,
+  removeDemoRole,
+  setDemoRoleIds,
+  demoGetItem,
+  demoSetItem,
+  isDemoSeeded,
+  markDemoSeeded,
+  resetDemoData,
+} from "@/lib/demo-mode";
+import { getDemoAccessPayload, DEMO_TEAM } from "@/lib/demo-seed-data";
 
 export type GrantMap = Record<string, PermissionKey[] | "all">;
 
@@ -76,6 +95,7 @@ function nextEmployeeId(team: TeamMember[]): string {
 /* ── Local-mode persistence (only used when Supabase is NOT configured) ───── */
 const ACCESS_KEY = "repairox-access";
 const SESSION_KEY = "repairox-session";
+const FEATURE_VISIBILITY_KEY = "repairox-feature-visibility";
 
 interface PersistedAccess {
   grants: GrantMap;
@@ -114,6 +134,17 @@ function loadSessionEmail(): string | null {
   if (typeof window === "undefined") return null;
   try {
     return localStorage.getItem(SESSION_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function loadFeatureVisibility(): StoreFeatureVisibility | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(FEATURE_VISIBILITY_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw) as StoreFeatureVisibility;
   } catch {
     return null;
   }
@@ -214,6 +245,19 @@ interface PermissionsContextValue {
   previewRoleId: string | null;
   enterPreview: (roleId: string) => void;
   exitPreview: () => void;
+
+  /* ── Feature Visibility ── */
+  featureVisibility: StoreFeatureVisibility;
+  setFeatureVisibility: (roleId: string, featureId: string, mode: VisibilityMode) => void;
+  setFeatureVisibilityBulk: (roleId: string, updates: Record<string, VisibilityMode>) => void;
+  getVisibility: (featureId: string) => VisibilityMode;
+  getVisibilityByHref: (href: string) => VisibilityMode;
+
+  /* ── Demo Mode ── */
+  isDemoMode: boolean;
+  demoRoleIds: string[];
+  toggleDemoRole: (roleId: string, enabled: boolean) => void;
+  resetDemo: () => void;
 }
 
 const PermissionsContext = createContext<PermissionsContextValue | null>(null);
@@ -226,6 +270,8 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [previewRoleId, setPreviewRoleId] = useState<string | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [featureVisibility, setFeatureVisibilityState] = useState<StoreFeatureVisibility>({});
+  const [demoRoleIds, setDemoRoleIdsState] = useState<string[]>(getDemoRoleIds);
 
   /* ── Supabase read helpers ── */
   const refreshTeamFromDb = useCallback(async () => {
@@ -237,9 +283,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const loadAccessFromDb = useCallback(async () => {
     if (!supabase) return;
-    const [{ data: dbRoles }, { data: dbGrants }] = await Promise.all([
+    const [{ data: dbRoles }, { data: dbGrants }, { data: dbFv }] = await Promise.all([
       supabase.from("roles").select("*"),
       supabase.from("role_permissions").select("*"),
+      supabase.from("feature_visibility").select("*"),
     ]);
     if (!dbRoles || dbRoles.length === 0) return; // not seeded yet — keep static defaults
 
@@ -267,6 +314,16 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     setGrants({ ...initialGrants(), ...gmap });
     setCustomRoles(custom);
     setRemovedBuiltInRoles(removed);
+
+    // Feature visibility from DB: rows have role_id, feature_id, mode
+    if (dbFv && dbFv.length > 0) {
+      const fvMap: StoreFeatureVisibility = {};
+      for (const row of dbFv) {
+        if (!fvMap[row.role_id]) fvMap[row.role_id] = {};
+        fvMap[row.role_id][row.feature_id] = row.mode as VisibilityMode;
+      }
+      setFeatureVisibilityState(fvMap);
+    }
   }, []);
 
   /* ── Authed API helper (browser → server routes) ── */
@@ -297,6 +354,8 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         setRemovedBuiltInRoles(access.removedBuiltInRoles);
         setTeam(access.team);
       }
+      const fv = loadFeatureVisibility();
+      if (fv) setFeatureVisibilityState(fv);
       setCurrentUserEmail(loadSessionEmail());
       setHydrated(true);
       return;
@@ -340,6 +399,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     } catch { /* ignore */ }
   }, [currentUserEmail, hydrated]);
 
+  // Persist feature visibility in local mode.
+  useEffect(() => {
+    if (isSupabaseConfigured || !hydrated || typeof window === "undefined") return;
+    try {
+      localStorage.setItem(FEATURE_VISIBILITY_KEY, JSON.stringify(featureVisibility));
+    } catch { /* ignore */ }
+  }, [featureVisibility, hydrated]);
+
   const allRoles = useMemo(
     () => {
       const customIds = new Set(customRoles.map((r) => r.id));
@@ -382,6 +449,9 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const adminRoleId = currentUser?.roleId ?? CURRENT_USER.roleId;
   const activeRoleId = previewRoleId ?? adminRoleId;
+
+  /** True when the current user is in a demo-flagged role. */
+  const isDemoMode = useMemo(() => isDemoRole(adminRoleId), [adminRoleId, demoRoleIds]);
 
   const canDeleteRole = useCallback(
     (roleId: string) => roleId !== "platform_owner" && roleId !== adminRoleId,
@@ -677,6 +747,76 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const enterPreview = useCallback((roleId: string) => setPreviewRoleId(roleId), []);
   const exitPreview = useCallback(() => setPreviewRoleId(null), []);
 
+  /* ── Feature Visibility ── */
+  const setFeatureVisibility = useCallback((roleId: string, featureId: string, mode: VisibilityMode) => {
+    setFeatureVisibilityState((prev) => {
+      const roleMap = { ...(prev[roleId] ?? {}) };
+      if (mode === "visible") {
+        delete roleMap[featureId]; // Only store overrides; "visible" is the default
+      } else {
+        roleMap[featureId] = mode;
+      }
+      const next = { ...prev, [roleId]: roleMap };
+      // Clean up empty role maps
+      if (Object.keys(next[roleId]).length === 0) delete next[roleId];
+      return next;
+    });
+    if (isSupabaseConfigured) {
+      if (mode === "visible") {
+        apiFetch("/api/feature-visibility", { method: "DELETE", body: JSON.stringify({ roleId, featureId }) });
+      } else {
+        apiFetch("/api/feature-visibility", { method: "PUT", body: JSON.stringify({ roleId, featureId, mode }) });
+      }
+    }
+  }, [apiFetch]);
+
+  const setFeatureVisibilityBulk = useCallback((roleId: string, updates: Record<string, VisibilityMode>) => {
+    setFeatureVisibilityState((prev) => {
+      const roleMap = { ...(prev[roleId] ?? {}) };
+      for (const [featureId, mode] of Object.entries(updates)) {
+        if (mode === "visible") {
+          delete roleMap[featureId];
+        } else {
+          roleMap[featureId] = mode;
+        }
+      }
+      const next = { ...prev, [roleId]: roleMap };
+      if (Object.keys(next[roleId]).length === 0) delete next[roleId];
+      return next;
+    });
+    if (isSupabaseConfigured) {
+      apiFetch("/api/feature-visibility", { method: "PUT", body: JSON.stringify({ roleId, bulk: updates }) });
+    }
+  }, [apiFetch]);
+
+  /** Resolve visibility for the ACTIVE role (respects preview mode). */
+  const getVisibility = useCallback(
+    (featureId: string): VisibilityMode => resolveVisibility(featureVisibility, activeRoleId, featureId),
+    [featureVisibility, activeRoleId]
+  );
+
+  /** Resolve visibility by href for the ACTIVE role (respects preview mode). */
+  const getVisibilityByHref = useCallback(
+    (href: string): VisibilityMode => resolveVisibilityByHref(featureVisibility, activeRoleId, href),
+    [featureVisibility, activeRoleId]
+  );
+
+  /* ── Demo Mode controls ── */
+  const toggleDemoRole = useCallback((roleId: string, enabled: boolean) => {
+    if (enabled) {
+      addDemoRole(roleId);
+    } else {
+      removeDemoRole(roleId);
+    }
+    setDemoRoleIdsState(getDemoRoleIds());
+  }, []);
+
+  const resetDemo = useCallback(() => {
+    resetDemoData();
+    // Force a page reload to re-seed demo data
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
+
   const role = useMemo(
     () => getRoleById(activeRoleId) ?? allRoles[allRoles.length - 1],
     [getRoleById, activeRoleId, allRoles]
@@ -700,6 +840,8 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       authReady: hydrated, currentUser, login, logout, landingForRole,
       adminRoleId, activeRoleId, role, can, allowedWorkspaces,
       isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
+      featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
+      isDemoMode, demoRoleIds, toggleDemoRole, resetDemo,
     }),
     [
       grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
@@ -707,6 +849,8 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
       hydrated, currentUser, login, logout, landingForRole,
       adminRoleId, activeRoleId, role, can, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
+      featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
+      isDemoMode, demoRoleIds, toggleDemoRole, resetDemo,
     ]
   );
 
