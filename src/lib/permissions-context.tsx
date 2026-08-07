@@ -833,16 +833,20 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   );
 
   const value = useMemo<PermissionsContextValue>(
-    () => ({
-      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
-      team, membersInRole, getStaffById, setMemberRole, deleteMember,
-      addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
-      authReady: hydrated, currentUser, login, logout, landingForRole,
-      adminRoleId, activeRoleId, role, can, allowedWorkspaces,
-      isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
-      featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
-      isDemoMode, demoRoleIds, toggleDemoRole, resetDemo,
-    }),
+    () => {
+      // In demo mode, expose demo team instead of real staff
+      const exposedTeam = isDemoMode ? DEMO_TEAM : team;
+      return {
+        grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
+        team: exposedTeam, membersInRole: isDemoMode ? ((roleId: string) => DEMO_TEAM.filter((m) => m.roleId === roleId)) : membersInRole, getStaffById, setMemberRole, deleteMember,
+        addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
+        authReady: hydrated, currentUser, login, logout, landingForRole,
+        adminRoleId, activeRoleId, role, can, allowedWorkspaces,
+        isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
+        featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
+        isDemoMode, demoRoleIds, toggleDemoRole, resetDemo,
+      };
+    },
     [
       grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
       team, membersInRole, getStaffById, setMemberRole, deleteMember,

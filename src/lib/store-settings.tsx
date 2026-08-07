@@ -25,6 +25,7 @@ import {
   type ReactNode,
 } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { usePermissions } from "@/lib/permissions-context";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -263,12 +264,22 @@ function saveSettingsLocal(settings: StoreSettings) {
 /* ─── Provider ───────────────────────────────────────────────────────── */
 
 export function StoreSettingsProvider({ children }: { children: ReactNode }) {
+  const { isDemoMode, authReady } = usePermissions();
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
   const orgIdRef = useRef<string | null>(null);
 
-  // ── Supabase mode: load from DB + subscribe to realtime ──
+  // ── Load settings based on mode (waits for auth to be ready) ──
   useEffect(() => {
+    if (!authReady) return;
+
+    // Demo mode: always use clean defaults — never load from DB.
+    if (isDemoMode) {
+      setSettings({ ...DEFAULT_STORE_SETTINGS, storeName: "RepairOX Demo Store", email: "demo@repairox.in" });
+      setHydrated(true);
+      return;
+    }
+
     if (!isSupabaseConfigured || !supabase) {
       // Local fallback
       const saved = loadSettingsLocal();
@@ -345,11 +356,11 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
       active = false;
       authSub.subscription.unsubscribe();
     };
-  }, []);
+  }, [authReady, isDemoMode]);
 
   // ── Supabase Realtime subscription for organization_settings ──
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase) return;
+    if (!isSupabaseConfigured || !supabase || isDemoMode) return;
 
     const channel = supabase
       .channel("org-settings-changes")
@@ -370,20 +381,20 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
     return () => {
       supabase!.removeChannel(channel);
     };
-  }, []);
+  }, [isDemoMode]);
 
   // ── localStorage persistence (only when Supabase is NOT configured) ──
   useEffect(() => {
-    if (isSupabaseConfigured || !hydrated) return;
+    if ((isSupabaseConfigured && !isDemoMode) || !hydrated) return;
     saveSettingsLocal(settings);
-  }, [settings, hydrated]);
+  }, [settings, hydrated, isDemoMode]);
 
   // ── Update handler ──
   const updateSettings = useCallback((updates: Partial<StoreSettings>) => {
     setSettings((prev) => {
       const next = { ...prev, ...updates };
 
-      if (isSupabaseConfigured && supabase && orgIdRef.current) {
+      if (isSupabaseConfigured && supabase && orgIdRef.current && !isDemoMode) {
         // Write to DB. Uses the authenticated user's session (RLS-enforced:
         // only admins can write to organization_settings).
         const dbPayload = settingsToDbPayload(updates);
@@ -406,7 +417,7 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
 
   const resetSettings = useCallback(() => {
     setSettings(DEFAULT_STORE_SETTINGS);
-    if (isSupabaseConfigured && supabase && orgIdRef.current) {
+    if (isSupabaseConfigured && supabase && orgIdRef.current && !isDemoMode) {
       const dbPayload = settingsToDbPayload(DEFAULT_STORE_SETTINGS);
       supabase
         .from("organization_settings")
