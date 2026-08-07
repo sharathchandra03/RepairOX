@@ -724,6 +724,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       await refreshTeamFromDb();
       setCurrentUserEmail(account.email);
       setPreviewRoleId(null);
+      // Auto-reset demo data on every login for demo users
+      if (isDemoRole(account.roleId)) {
+        resetDemoData();
+      }
       return { ok: true, account, landingHref: computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
     }
 
@@ -738,6 +742,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     setTeam((prev) => prev.map((m) => (m.id === acc.id ? { ...m, lastLogin: now } : m)));
     setCurrentUserEmail(acc.email);
     setPreviewRoleId(null);
+    // Auto-reset demo data on every login for demo users
+    if (isDemoRole(acc.roleId)) {
+      resetDemoData();
+    }
     return { ok: true, account: { ...acc, lastLogin: now }, landingHref: computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
   }, [team, allowedWorkspacesForRole, refreshTeamFromDb]);
 
