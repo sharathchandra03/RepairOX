@@ -548,29 +548,14 @@ function saveToStorage(state: StoreState, storageKey?: string) {
 /* ─── Provider ───────────────────────────────────────────────────────── */
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const { isDemoMode } = usePermissions();
+  const { isDemoMode, authReady } = usePermissions();
   const resolvedKey = isDemoMode ? demoKey(STORAGE_KEY) : STORAGE_KEY;
 
-  const [state, setState] = useState<StoreState>(() => {
-    if (isSupabaseConfigured && !isDemoMode) {
-      // Start empty — data will be loaded from DB in useEffect.
-      return {
-        tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
-        team: [], inventory: [], stockMovements: [], customers: [],
-        companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [], hydrated: false, mode: "db",
-      };
-    }
-    const saved = loadFromStorage(resolvedKey);
-    if (saved) return saved;
-    return {
-      tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
-      orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
-      inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-      customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
-      companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
-      assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
-      hydrated: true, mode: "local",
-    };
+  const [state, setState] = useState<StoreState>({
+    tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
+    team: [], inventory: [], stockMovements: [], customers: [],
+    companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [],
+    hydrated: false, mode: "local",
   });
 
   const stateRef = useRef(state);
@@ -589,7 +574,50 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── DB Load + Realtime Subscriptions ── */
   useEffect(() => {
-    if (!isSupabaseConfigured || !supabase || isDemoMode) return;
+    // Wait until we know who the user is before deciding data source.
+    if (!authReady) return;
+
+    // Demo mode: load from demo localStorage (or seed fresh data).
+    if (isDemoMode) {
+      const saved = loadFromStorage(resolvedKey);
+      if (saved) {
+        setState(saved);
+      } else {
+        const fresh: StoreState = {
+          tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
+          orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
+          inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
+          customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+          companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
+          assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
+          hydrated: true, mode: "local",
+        };
+        setState(fresh);
+        saveToStorage(fresh, resolvedKey);
+      }
+      return; // No DB connection for demo.
+    }
+
+    // Non-demo, no Supabase: load from production localStorage.
+    if (!isSupabaseConfigured || !supabase) {
+      const saved = loadFromStorage(STORAGE_KEY);
+      if (saved) {
+        setState(saved);
+      } else {
+        setState({
+          tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
+          orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
+          inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
+          customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+          companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
+          assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
+          hydrated: true, mode: "local",
+        });
+      }
+      return;
+    }
+
+    // Production mode with Supabase: load from DB + subscribe to realtime.
     let active = true;
 
     (async () => {
@@ -762,34 +790,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       active = false;
       client.removeChannel(channel);
     };
-  }, [isDemoMode]);
+  }, [authReady, isDemoMode, resolvedKey]);
 
-  // Persist local-mode state to localStorage (only when NOT using Supabase).
+  // Persist local-mode state to localStorage.
   useEffect(() => {
-    if ((isSupabaseConfigured && !isDemoMode) || !state.hydrated) return;
-    saveToStorage(state, resolvedKey);
-  }, [state, resolvedKey, isDemoMode]);
-
-  // When demo mode activates (after hydration), switch to local seed data
-  // and disconnect from the database.
-  useEffect(() => {
-    if (!isDemoMode) return;
-    // Load from demo localStorage, or fall back to seed data
-    const saved = loadFromStorage(resolvedKey);
-    if (saved) {
-      setState(saved);
-    } else {
-      setState({
-        tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
-        orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
-        inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-        customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
-        companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
-        assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
-        hydrated: true, mode: "local",
-      });
+    if (!state.hydrated) return;
+    // In demo mode: always persist to demo key.
+    // In production without Supabase: persist to production key.
+    // In production with Supabase: don't persist (DB is authoritative).
+    if (isDemoMode) {
+      saveToStorage(state, resolvedKey);
+    } else if (!isSupabaseConfigured) {
+      saveToStorage(state, STORAGE_KEY);
     }
-  }, [isDemoMode, resolvedKey]);
+  }, [state, resolvedKey, isDemoMode]);
 
   /* ── Ticket actions (DB-first) ── */
   const addTicket = useCallback(async (ticket: Ticket) => {

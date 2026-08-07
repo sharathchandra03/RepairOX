@@ -1679,13 +1679,19 @@ function FeatureVisibilityTab({
 
             {/* Reset demo data */}
             {demoRoleIds.length > 0 && (
-              <button
-                onClick={resetDemo}
-                className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                Reset Demo Data
-              </button>
+              <>
+                <p className="mt-3 flex items-center gap-1 text-[10px] font-medium text-emerald-600">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Demo roles saved automatically
+                </p>
+                <button
+                  onClick={resetDemo}
+                  className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] font-semibold text-rose-700 transition hover:bg-rose-100"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  Reset Demo Data
+                </button>
+              </>
             )}
           </div>
         </div>
