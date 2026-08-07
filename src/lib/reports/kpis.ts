@@ -53,7 +53,7 @@ function computeCore(d: ReportDataset, range: DateRange, full: ReportDataset): C
   /* Tickets */
   const ticketCount = d.tickets.length;
   const ticketRevenue = d.tickets.reduce((s, t) => s + (t.amount || 0), 0);
-  const delivered = d.tickets.filter((t) => t.status === "completed" || t.status === "delivered").length;
+  const delivered = d.tickets.filter((t) => t.status === "repaired" || t.status === "repaired_collected" || t.status === "return_collected").length;
   const withTime = d.tickets.filter((t) => (t.resolutionMinutes ?? 0) > 0);
   const avgRepairTime = withTime.length
     ? withTime.reduce((s, t) => s + (t.resolutionMinutes || 0), 0) / withTime.length

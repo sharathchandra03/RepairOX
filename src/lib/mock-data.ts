@@ -2,29 +2,32 @@ import type { PermissionKey, WorkspaceId } from "@/lib/permissions";
 import { hashPassword, DEFAULT_SEED_PASSWORD, type SalaryType } from "@/lib/auth";
 
 export type TicketStatus =
-  | "received"
-  | "diagnosis"
-  | "repairing"
-  | "qc"
-  | "completed"
-  | "delivered";
+  | "in_progress"
+  | "waiting_approval"
+  | "waiting_parts"
+  | "repaired"
+  | "repaired_collected"
+  | "return"
+  | "return_collected";
 
 export const STATUS_LABEL: Record<TicketStatus, string> = {
-  received: "Received",
-  diagnosis: "Diagnosis",
-  repairing: "Repairing",
-  qc: "Quality Check",
-  completed: "Completed",
-  delivered: "Delivered",
+  in_progress: "In Progress",
+  waiting_approval: "Waiting for Approval",
+  waiting_parts: "Waiting for Parts",
+  repaired: "Repaired",
+  repaired_collected: "Repaired & Collected",
+  return: "Return",
+  return_collected: "Return & Collected",
 };
 
 export const STATUS_TONE: Record<TicketStatus, string> = {
-  received: "bg-info/10 text-info ring-info/20",
-  diagnosis: "bg-warning/10 text-amber-700 ring-warning/30",
-  repairing: "bg-indigo-50 text-indigo-700 ring-indigo-200",
-  qc: "bg-violet-50 text-violet-700 ring-violet-200",
-  completed: "bg-success/10 text-emerald-700 ring-success/30",
-  delivered: "bg-zinc-100 text-zinc-700 ring-zinc-200",
+  in_progress: "bg-info/10 text-info ring-info/20",
+  waiting_approval: "bg-warning/10 text-amber-700 ring-warning/30",
+  waiting_parts: "bg-orange-50 text-orange-700 ring-orange-200",
+  repaired: "bg-success/10 text-emerald-700 ring-success/30",
+  repaired_collected: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+  return: "bg-rose-50 text-rose-700 ring-rose-200",
+  return_collected: "bg-zinc-100 text-zinc-700 ring-zinc-200",
 };
 
 export type TicketPriority = "normal" | "high" | "critical";
@@ -119,7 +122,7 @@ export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRec
     estimate: 0,
     parts: [],
     qc: {},
-    status: "received",
+    status: "in_progress",
     ...overrides,
   };
 }
@@ -159,22 +162,24 @@ export function getTicketDevices(ticket: Ticket): DeviceRecord[] {
 /**
  * Derive overall ticket status from device statuses.
  * Rules:
- * - If all devices are "delivered" → delivered
- * - If all devices are "completed" or "delivered" → completed
- * - If any device is "repairing" → repairing
- * - If any device is "qc" → qc
- * - If any device is "diagnosis" → diagnosis
- * - Otherwise → received
+ * - If all devices are "return_collected" → return_collected
+ * - If all devices are "repaired_collected" or "return_collected" → repaired_collected
+ * - If any device is "return" → return
+ * - If any device is "repaired" → repaired
+ * - If any device is "waiting_parts" → waiting_parts
+ * - If any device is "waiting_approval" → waiting_approval
+ * - Otherwise → in_progress
  */
 export function deriveTicketStatus(devices: DeviceRecord[]): TicketStatus {
-  if (devices.length === 0) return "received";
+  if (devices.length === 0) return "in_progress";
   const statuses = devices.map((d) => d.status);
-  if (statuses.every((s) => s === "delivered")) return "delivered";
-  if (statuses.every((s) => s === "completed" || s === "delivered")) return "completed";
-  if (statuses.some((s) => s === "qc")) return "qc";
-  if (statuses.some((s) => s === "repairing")) return "repairing";
-  if (statuses.some((s) => s === "diagnosis")) return "diagnosis";
-  return "received";
+  if (statuses.every((s) => s === "return_collected")) return "return_collected";
+  if (statuses.every((s) => s === "repaired_collected" || s === "return_collected")) return "repaired_collected";
+  if (statuses.some((s) => s === "return")) return "return";
+  if (statuses.some((s) => s === "repaired")) return "repaired";
+  if (statuses.some((s) => s === "waiting_parts")) return "waiting_parts";
+  if (statuses.some((s) => s === "waiting_approval")) return "waiting_approval";
+  return "in_progress";
 }
 
 export type Ticket = {

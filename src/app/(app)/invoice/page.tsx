@@ -25,7 +25,7 @@ import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
-type InvColumnId = "id" | "reference" | "customer" | "date" | "status" | "paid" | "tax" | "total" | "actions";
+type InvColumnId = "id" | "reference" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
 
 type InvColumnDef = {
   id: InvColumnId;
@@ -40,6 +40,7 @@ const INV_ALL_COLUMNS: InvColumnDef[] = [
   { id: "customer", label: "Customer" },
   { id: "date", label: "Created" },
   { id: "status", label: "Status" },
+  { id: "category", label: "Category" },
   { id: "paid", label: "Paid", align: "right" },
   { id: "tax", label: "Tax", align: "right" },
   { id: "total", label: "Total", align: "right" },
@@ -525,18 +526,18 @@ function renderInvCell(
     );
     case "date": return <span className="text-[12px] text-muted-foreground whitespace-nowrap">{fmtDate(inv.createdAt)}</span>;
     case "status": return (
-      <div className="flex items-center gap-1.5 flex-wrap">
-        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
-          <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
-        </span>
-        <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset whitespace-nowrap ${
-          (inv.serviceCategory || "service") === "accessories"
-            ? "bg-violet-50 text-violet-700 ring-violet-200"
-            : "bg-sky-50 text-sky-700 ring-sky-200"
-        }`}>
-          {(inv.serviceCategory || "service") === "accessories" ? "Accessories" : "Service"}
-        </span>
-      </div>
+      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
+        <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
+      </span>
+    );
+    case "category": return (
+      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${
+        (inv.serviceCategory || "service") === "accessories"
+          ? "bg-violet-50 text-violet-700 ring-violet-200"
+          : "bg-sky-50 text-sky-700 ring-sky-200"
+      }`}>
+        {(inv.serviceCategory || "service") === "accessories" ? "Accessories" : "Service"}
+      </span>
     );
     case "paid": return <span className="tabular-nums text-[12px] font-medium">{formatINR(inv.paidAmount)}</span>;
     case "tax": return <span className="tabular-nums text-[12px] text-muted-foreground">{formatINR(inv.tax)}</span>;

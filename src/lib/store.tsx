@@ -113,7 +113,7 @@ function rowToTicket(r: any): Ticket {
     issue: r.issue ?? "",
     items: r.items ?? [],
     parts: r.parts ?? [],
-    status: r.status ?? "received",
+    status: r.status ?? "in_progress",
     priority: r.priority ?? "normal",
     technician: r.technician ?? "",
     createdAt: r.created_at ?? new Date().toISOString(),
@@ -807,7 +807,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       { key: "priority", label: "Priority" }, { key: "amount", label: "Amount", format: inr },
     ]);
     let action = "Ticket Updated"; let severity: ActivitySeverity = "info";
-    if ("status" in updates && updates.status !== prev?.status) { action = "Status Changed"; if (updates.status === "completed" || updates.status === "delivered") severity = "success"; }
+    if ("status" in updates && updates.status !== prev?.status) { action = "Status Changed"; if (updates.status === "repaired" || updates.status === "repaired_collected") severity = "success"; }
     else if ("technician" in updates && updates.technician !== prev?.technician) action = "Technician Changed";
     else if ("priority" in updates && updates.priority !== prev?.priority) { action = "Priority Changed"; severity = "warning"; }
     logActivity({ module: "Ticket", action, severity, entity: "Ticket", reference: id, description: `Updated ticket ${id}${prev ? ` (${prev.customer})` : ""}.`, changes });

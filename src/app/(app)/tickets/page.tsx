@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -44,11 +44,11 @@ type ColumnDef = {
 const ALL_COLUMNS: ColumnDef[] = [
   { id: "checkbox", label: "", width: "w-10", locked: true },
   { id: "ticket", label: "Ticket", width: "w-[72px]" },
-  { id: "customer", label: "Customer", width: "w-[22%]" },
-  { id: "device", label: "Device / Service", width: "w-[22%]" },
-  { id: "status", label: "Status", width: "w-[130px]" },
-  { id: "dueDate", label: "Due Date", width: "w-[110px]" },
-  { id: "created", label: "Created", width: "w-[135px]" },
+  { id: "customer", label: "Customer", width: "w-[20%]" },
+  { id: "device", label: "Device / Service", width: "w-[20%]" },
+  { id: "status", label: "Status", width: "w-[180px]" },
+  { id: "dueDate", label: "Due Date", width: "w-[120px]" },
+  { id: "created", label: "Created", width: "w-[140px]" },
   { id: "amount", label: "Amount", width: "w-[90px]", align: "right" },
   { id: "actions", label: "Actions", width: "w-[70px]", align: "right", locked: true },
 ];
@@ -60,12 +60,13 @@ const DEFAULT_ORDER: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
 
 const STATUS_FILTERS: { label: string; value: TicketStatus | "all" }[] = [
   { label: "All", value: "all" },
-  { label: "Received", value: "received" },
-  { label: "Diagnosis", value: "diagnosis" },
-  { label: "Repairing", value: "repairing" },
-  { label: "QC", value: "qc" },
-  { label: "Completed", value: "completed" },
-  { label: "Delivered", value: "delivered" },
+  { label: "In Progress", value: "in_progress" },
+  { label: "Waiting for Approval", value: "waiting_approval" },
+  { label: "Waiting for Parts", value: "waiting_parts" },
+  { label: "Repaired", value: "repaired" },
+  { label: "Repaired & Collected", value: "repaired_collected" },
+  { label: "Return", value: "return" },
+  { label: "Return & Collected", value: "return_collected" },
 ];
 
 const DATE_RANGES = [
@@ -80,12 +81,13 @@ const DATE_RANGES = [
 type DateRange = (typeof DATE_RANGES)[number]["value"];
 
 const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
-  { label: "Received", value: "received" },
-  { label: "Diagnosis", value: "diagnosis" },
-  { label: "Repairing", value: "repairing" },
-  { label: "Quality Check", value: "qc" },
-  { label: "Completed", value: "completed" },
-  { label: "Delivered", value: "delivered" },
+  { label: "In Progress", value: "in_progress" },
+  { label: "Waiting for Approval", value: "waiting_approval" },
+  { label: "Waiting for Parts", value: "waiting_parts" },
+  { label: "Repaired", value: "repaired" },
+  { label: "Repaired & Collected", value: "repaired_collected" },
+  { label: "Return", value: "return" },
+  { label: "Return & Collected", value: "return_collected" },
 ];
 
 const PRIORITY_OPTIONS = [
@@ -106,7 +108,7 @@ function getElapsedMins(createdAt: string): number {
 }
 
 function isOverdue(ticket: { dueDate?: string; createdAt: string; status: string }): boolean {
-  if (ticket.status === "completed" || ticket.status === "delivered") return false;
+  if (ticket.status === "repaired" || ticket.status === "repaired_collected" || ticket.status === "return_collected") return false;
   if (ticket.dueDate) {
     return Date.now() > new Date(ticket.dueDate).getTime();
   }
@@ -275,8 +277,8 @@ export default function TicketsPage() {
   /* Bulk status */
   const handleBulkStatusChange = useCallback((status: TicketStatus) => {
     bulkUpdateStatus(Array.from(selected), status);
-    // Deduct parts for tickets changing to completed
-    if (status === "completed") {
+    // Deduct parts for tickets changing to repaired
+    if (status === "repaired") {
       Array.from(selected).forEach((id) => {
         const t = tickets.find((tk) => tk.id === id);
         if (t?.parts?.some((p) => p.status === "planned")) {
@@ -287,6 +289,18 @@ export default function TicketsPage() {
     setSelected(new Set());
     setShowBulkStatus(false);
   }, [selected, bulkUpdateStatus, tickets, deductPartsForTicket]);
+
+  /* Action handler */
+  const handleInlineStatusChange = useCallback((ticketId: string, status: TicketStatus) => {
+    updateTicket(ticketId, { status });
+    // Deduct parts when repaired
+    if (status === "repaired") {
+      const t = tickets.find((tk) => tk.id === ticketId);
+      if (t?.parts?.some((p) => p.status === "planned")) {
+        deductPartsForTicket(ticketId);
+      }
+    }
+  }, [updateTicket, tickets, deductPartsForTicket]);
 
   /* Action handler */
   const handleAction = useCallback((action: TicketAction, ticket: Ticket) => {
@@ -620,7 +634,7 @@ export default function TicketsPage() {
                         col.id !== "device" && "align-middle",
                         col.align === "right" && "text-right"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange)}
                       </td>
                     ))}
                   </motion.tr>
@@ -761,6 +775,77 @@ export default function TicketsPage() {
   );
 }
 
+/* ─── Inline Status Dropdown ─────────────────────────────────────────── */
+
+function InlineStatusDropdown({ ticket, onStatusChange }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void }) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const handleOpen = () => {
+    if (!open && btnRef.current) {
+      const rect = btnRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const dropUp = spaceBelow < 300;
+      setPos({
+        top: dropUp ? rect.top : rect.bottom + 6,
+        left: rect.left,
+        dropUp,
+      });
+    }
+    setOpen(!open);
+  };
+
+  return (
+    <div className="relative" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        onClick={handleOpen}
+        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm ${STATUS_TONE[ticket.status]}`}
+      >
+        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+        {STATUS_LABEL[ticket.status]}
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+            <motion.div
+              initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
+              transition={{ duration: 0.15 }}
+              style={{
+                position: "fixed",
+                top: pos.dropUp ? undefined : pos.top,
+                bottom: pos.dropUp ? (window.innerHeight - pos.top + 6) : undefined,
+                left: pos.left,
+              }}
+              className="z-[70] w-[200px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <button
+                  key={s.value}
+                  onClick={() => { onStatusChange(ticket.id, s.value); setOpen(false); }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
+                    ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
+                  )}
+                >
+                  <span className={`h-2 w-2 rounded-full ring-1 ring-inset ${STATUS_TONE[s.value]}`} />
+                  {s.label}
+                  {ticket.status === s.value && <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>}
+                </button>
+              ))}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* ─── Cell Renderer ──────────────────────────────────────────────────── */
 
 function renderCell(
@@ -772,6 +857,7 @@ function renderCell(
   hasMultiItems: boolean | undefined,
   toggleOne: () => void,
   handleAction: (action: TicketAction, ticket: Ticket) => void,
+  onStatusChange: (ticketId: string, status: TicketStatus) => void,
 ) {
   switch (colId) {
     case "checkbox":
@@ -834,16 +920,7 @@ function renderCell(
       );
     case "status":
       return (
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${STATUS_TONE[t.status]}`}>
-            <span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}
-          </span>
-          {isWaiting && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-[#922B21] ring-1 ring-inset ring-red-200/60 whitespace-nowrap">
-              <Clock className="h-2.5 w-2.5" />{elapsed}m+
-            </span>
-          )}
-        </div>
+        <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} />
       );
     case "dueDate":
       return t.dueDate ? (

@@ -13,25 +13,23 @@ interface TicketsDonutProps {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  received: "#4361EE",
-  repairing: "#F59E0B",
-  completed: "#22C55E",
-  delivered: "#B3BFF6",
-  "quality-check": "#8B5CF6",
-  qc: "#8B5CF6",
-  "waiting-parts": "#EF4444",
-  cancelled: "#94A3B8",
+  in_progress: "#4361EE",
+  waiting_approval: "#F59E0B",
+  waiting_parts: "#EF4444",
+  repaired: "#22C55E",
+  repaired_collected: "#10B981",
+  return: "#F43F5E",
+  return_collected: "#94A3B8",
 };
 
 const STATUS_DISPLAY: Record<string, string> = {
-  received: "Received",
-  repairing: "In Progress",
-  completed: "Completed",
-  delivered: "Delivered",
-  "quality-check": "Quality Check",
-  qc: "Quality Check",
-  "waiting-parts": "Waiting for Parts",
-  cancelled: "Cancelled",
+  in_progress: "In Progress",
+  waiting_approval: "Waiting for Approval",
+  waiting_parts: "Waiting for Parts",
+  repaired: "Repaired",
+  repaired_collected: "Repaired & Collected",
+  return: "Return",
+  return_collected: "Return & Collected",
 };
 
 export function TicketsDonut({ tickets: ticketsProp }: TicketsDonutProps) {

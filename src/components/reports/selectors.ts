@@ -188,8 +188,8 @@ export function operationsHealth(full: ReportDataset, filters: ReportFilters): M
   const avgTimePrev = withTimePrev.length ? withTimePrev.reduce((s, t) => s + (t.resolutionMinutes || 0), 0) / withTimePrev.length : 0;
   const timeTrend = seriesByTime(withTimeCur, (t) => t.createdAt, (t) => t.resolutionMinutes || 0, granularity);
 
-  const deliveredCur = current.tickets.filter((t) => t.status === "completed" || t.status === "delivered").length;
-  const deliveredPrev = previous.tickets.filter((t) => t.status === "completed" || t.status === "delivered").length;
+  const deliveredCur = current.tickets.filter((t) => t.status === "repaired" || t.status === "repaired_collected" || t.status === "return_collected").length;
+  const deliveredPrev = previous.tickets.filter((t) => t.status === "repaired" || t.status === "repaired_collected" || t.status === "return_collected").length;
   const successCur = current.tickets.length ? (deliveredCur / current.tickets.length) * 100 : 0;
   const successPrev = previous.tickets.length ? (deliveredPrev / previous.tickets.length) * 100 : 0;
   const successTrend = ticketsTrend; // ticket volume shape doubles as an activity trend

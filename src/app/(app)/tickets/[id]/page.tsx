@@ -62,7 +62,7 @@ function generateTimeline(ticket: Ticket) {
     color: "text-emerald-600 bg-emerald-50 ring-emerald-200",
   });
 
-  if (ticket.status !== "received") {
+  if (ticket.status !== "in_progress") {
     events.push({
       id: idx++,
       type: "status",
@@ -145,8 +145,8 @@ export default function TicketDetailPage() {
       // Update all device statuses along with the ticket status
       const updatedDevices = ticket.devices?.map((d) => ({ ...d, status }));
       updateTicket(ticket.id, { status, devices: updatedDevices });
-      // Deduct inventory when ticket is completed
-      if (status === "completed") {
+      // Deduct inventory when ticket is repaired
+      if (status === "repaired") {
         const hasPlannedParts = ticket.devices
           ? ticket.devices.some((d) => d.parts.some((p) => p.status === "planned"))
           : ticket.parts?.some((p) => p.status === "planned");
@@ -427,7 +427,7 @@ export default function TicketDetailPage() {
               {ticket.dueDate && (
                 <div>
                   <p className="text-[11px] font-medium text-muted-foreground mb-0.5">Due Time</p>
-                  <p className={cn("text-sm font-semibold", Date.now() > new Date(ticket.dueDate).getTime() && ticket.status !== "completed" && ticket.status !== "delivered" ? "text-[#922B21]" : "text-[#922B21]/80")}>
+                  <p className={cn("text-sm font-semibold", Date.now() > new Date(ticket.dueDate).getTime() && ticket.status !== "repaired" && ticket.status !== "repaired_collected" && ticket.status !== "return_collected" ? "text-[#922B21]" : "text-[#922B21]/80")}>
                     {fmtDate(ticket.dueDate)}
                   </p>
                 </div>
@@ -617,7 +617,7 @@ export default function TicketDetailPage() {
               <DetailField label="Discount" value={formatINR(ticket.discount || 0)} />
               <DetailField label="Tax (18%)" value={formatINR(Math.round((ticket.amount - (ticket.discount || 0)) * 0.18))} />
               <DetailField label="Total" value={formatINR(Math.round((ticket.amount - (ticket.discount || 0)) * 1.18))} highlight />
-              <DetailField label="Payment State" value={ticket.status === "delivered" ? "Paid" : "Pending"} />
+              <DetailField label="Payment State" value={ticket.status === "repaired_collected" || ticket.status === "return_collected" ? "Paid" : "Pending"} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Related Invoice</p>
                 {linkedInvoice ? (
@@ -774,7 +774,7 @@ export default function TicketDetailPage() {
             <p className="text-sm font-bold mb-1">Change Status</p>
             <p className="text-[11px] text-muted-foreground mb-4">Ticket {ticket.id}</p>
             <div className="space-y-2">
-              {(["received", "diagnosis", "repairing", "qc", "completed", "delivered"] as TicketStatus[]).map((s) => (
+              {(["in_progress", "waiting_approval", "waiting_parts", "repaired", "repaired_collected", "return", "return_collected"] as TicketStatus[]).map((s) => (
                 <button key={s} onClick={() => handleStatusChange(s)}
                   className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", ticket.status === s ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[s]}`}>
@@ -898,9 +898,10 @@ export default function TicketDetailPage() {
             { label: "Normal", value: "normal" }, { label: "High", value: "high" }, { label: "Critical", value: "critical" },
           ]},
           { key: "status", label: "Status", type: "select", options: [
-            { label: "Received", value: "received" }, { label: "Diagnosis", value: "diagnosis" },
-            { label: "Repairing", value: "repairing" }, { label: "Quality Check", value: "qc" },
-            { label: "Completed", value: "completed" }, { label: "Delivered", value: "delivered" },
+            { label: "In Progress", value: "in_progress" }, { label: "Waiting for Approval", value: "waiting_approval" },
+            { label: "Waiting for Parts", value: "waiting_parts" }, { label: "Repaired", value: "repaired" },
+            { label: "Repaired & Collected", value: "repaired_collected" }, { label: "Return", value: "return" },
+            { label: "Return & Collected", value: "return_collected" },
           ]},
           { key: "resolutionMinutes", label: "Expected Resolution (minutes)", type: "number" },
         ]}

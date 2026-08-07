@@ -82,7 +82,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                       <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{dev.issue || "—"}</span></div>
                       <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{dev.technician || "Unassigned"}</span></div>
                       <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{dev.priority || "Normal"}</span></div>
-                      <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{dev.status || "Received"}</span></div>
+                      <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{dev.status || "In Progress"}</span></div>
                       <div><span className="text-gray-500">Estimate:</span> <span className="font-bold">{formatPrintCurrency(dev.estimate)}</span></div>
                     </div>
                     {/* Parts for this device */}

@@ -392,7 +392,7 @@ function NewTicketWizard() {
       estimate: Number(wd.job.estimate) || wd.parts.reduce((s, p) => s + p.total, 0) || 0,
       parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
       qc: wd.qc,
-      status: "received" as const,
+      status: "in_progress" as const,
     }));
 
     // Total amount across all devices
@@ -421,7 +421,7 @@ function NewTicketWizard() {
         service: wd.job.issue || "Repair",
       })),
       parts: allParts.length > 0 ? allParts.map((p) => ({ ...p, status: "planned" as const })) : undefined,
-      status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "received") : "received") as TicketStatus,
+      status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "in_progress") : "in_progress") as TicketStatus,
       priority: (primaryDevice.job.priority as any) || "normal",
       technician: primaryDevice.device.assignedTo || "Unassigned",
       createdAt,

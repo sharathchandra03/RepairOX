@@ -55,10 +55,10 @@ function isAssigned(ticket: Ticket): boolean {
 
 /* ── Helper: is ticket "received" (device physically at store) ── */
 function isReceived(ticket: Ticket): boolean {
-  // A ticket is considered "received" when its status is at least "received"
-  // and not yet delivered (meaning the device is physically at the shop or confirmed arrival)
-  const receivedStatuses = ["received", "diagnosis", "repairing", "qc", "completed"];
-  return receivedStatuses.includes(ticket.status);
+  // A ticket is considered "received" when its status indicates it's being worked on
+  // and not yet collected (meaning the device is physically at the shop)
+  const activeStatuses = ["in_progress", "waiting_approval", "waiting_parts", "repaired"];
+  return activeStatuses.includes(ticket.status);
 }
 
 /* ── Detail drawer ── */
