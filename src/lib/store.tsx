@@ -576,6 +576,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
+  // Ref for demo mode so callbacks can access the latest value
+  const isDemoRef = useRef(isDemoMode);
+  useEffect(() => { isDemoRef.current = isDemoMode; }, [isDemoMode]);
+
+  /** True when we should write to the database (Supabase configured AND not in demo mode). */
+  const shouldUseDb = useCallback(() => isSupabaseConfigured && !!supabase && !isDemoRef.current, []);
+  /** Non-null supabase client — only call after shouldUseDb() returns true. */
+  const db = supabase!;
+
   const inr = (v: unknown) => `₹${Number(v ?? 0).toLocaleString("en-IN")}`;
 
   /* ── DB Load + Realtime Subscriptions ── */
@@ -753,7 +762,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       active = false;
       client.removeChannel(channel);
     };
-  }, []);
+  }, [isDemoMode]);
 
   // Persist local-mode state to localStorage (only when NOT using Supabase).
   useEffect(() => {
@@ -761,10 +770,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     saveToStorage(state, resolvedKey);
   }, [state, resolvedKey, isDemoMode]);
 
+  // When demo mode activates (after hydration), switch to local seed data
+  // and disconnect from the database.
+  useEffect(() => {
+    if (!isDemoMode) return;
+    // Load from demo localStorage, or fall back to seed data
+    const saved = loadFromStorage(resolvedKey);
+    if (saved) {
+      setState(saved);
+    } else {
+      setState({
+        tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
+        orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
+        inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
+        customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+        companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
+        assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
+        hydrated: true, mode: "local",
+      });
+    }
+  }, [isDemoMode, resolvedKey]);
+
   /* ── Ticket actions (DB-first) ── */
   const addTicket = useCallback(async (ticket: Ticket) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("tickets").insert(ticketToRow(ticket)).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("tickets").insert(ticketToRow(ticket)).select("*").single();
       if (error || !data) { console.error("[store] addTicket failed:", error?.message); return; }
       const saved = rowToTicket(data);
       setState((s) => ({ ...s, tickets: [saved, ...s.tickets] }));
@@ -777,7 +807,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateTicket = useCallback(async (id: string, updates: Partial<Ticket>) => {
     const prev = stateRef.current.tickets.find((t) => t.id === id);
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;
       if ("phone" in updates) row.phone = updates.phone ?? null;
@@ -804,7 +834,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("company" in updates) row.company = updates.company ?? null;
       if ("customerId" in updates) row.customer_id = updates.customerId ?? null;
 
-      const { error } = await supabase.from("tickets").update(row).eq("id", id);
+      const { error } = await db.from("tickets").update(row).eq("id", id);
       if (error) { console.error("[store] updateTicket failed:", error.message); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === id ? { ...t, ...updates } : t)) }));
@@ -822,8 +852,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteTicket = useCallback(async (id: string) => {
     const prev = stateRef.current.tickets.find((t) => t.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("tickets").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("tickets").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (error) { console.error("[store] deleteTicket failed:", error.message); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.filter((t) => t.id !== id) }));
@@ -831,8 +861,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const bulkUpdateStatus = useCallback(async (ids: string[], status: TicketStatus) => {
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("tickets").update({ status }).in("id", ids);
+    if (shouldUseDb()) {
+      const { error } = await db.from("tickets").update({ status }).in("id", ids);
       if (error) { console.error("[store] bulkUpdateStatus failed:", error.message); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.map((t) => (ids.includes(t.id) ? { ...t, status } : t)) }));
@@ -842,7 +872,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── Invoice actions (DB-first) ── */
   const addInvoice = useCallback(async (invoice: Invoice): Promise<string> => {
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       // Single insert attempt. Retries once without the optional columns in case
       // an older DB is missing them.
       const attemptInsert = async (inv: Invoice) => {
@@ -895,7 +925,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateInvoice = useCallback(async (id: string, updates: Partial<Invoice>) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;
       if ("phone" in updates) row.phone = updates.phone ?? null;
@@ -916,13 +946,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("invoiceType" in updates) row.invoice_type = updates.invoiceType ?? "retail";
       if ("serviceCategory" in updates) row.service_category = updates.serviceCategory ?? "service";
       if ("paymentMode" in updates) row.payment_mode = updates.paymentMode ?? null;
-      const { error } = await supabase.from("invoices").update(row).eq("id", id);
+      const { error } = await db.from("invoices").update(row).eq("id", id);
       if (error) {
         // Retry without optional new columns that may not exist in DB yet
         delete row.service_category;
         delete row.payment_mode;
         if (Object.keys(row).length > 0) {
-          const { error: error2 } = await supabase.from("invoices").update(row).eq("id", id);
+          const { error: error2 } = await db.from("invoices").update(row).eq("id", id);
           if (error2) { console.error("[store] updateInvoice failed:", error2.message); }
         }
       }
@@ -939,8 +969,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteInvoice = useCallback(async (id: string) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("invoices").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("invoices").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (error) { console.error("[store] deleteInvoice failed:", error.message); return; }
     }
     setState((s) => ({ ...s, invoices: s.invoices.filter((inv) => inv.id !== id) }));
@@ -949,8 +979,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── Walk-In actions (DB-first) ── */
   const addWalkIn = useCallback(async (walkIn: WalkIn) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("walk_ins").insert(walkInToRow(walkIn)).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("walk_ins").insert(walkInToRow(walkIn)).select("*").single();
       if (error || !data) { console.error("[store] addWalkIn failed:", error?.message); return; }
       const saved = rowToWalkIn(data);
       setState((s) => ({ ...s, walkIns: [saved, ...s.walkIns] }));
@@ -963,7 +993,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateWalkIn = useCallback(async (id: string, updates: Partial<WalkIn>) => {
     const prev = stateRef.current.walkIns.find((w) => w.id === id);
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;
       if ("phone" in updates) row.phone = updates.phone ?? null;
@@ -976,7 +1006,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("businessValue" in updates) row.business_value = updates.businessValue ?? 0;
       if ("notes" in updates) row.notes = updates.notes ?? null;
       if ("reasons" in updates) row.reasons = updates.reasons ?? [];
-      const { error } = await supabase.from("walk_ins").update(row).eq("id", id);
+      const { error } = await db.from("walk_ins").update(row).eq("id", id);
       if (error) { console.error("[store] updateWalkIn failed:", error.message); return; }
     }
     setState((s) => ({ ...s, walkIns: s.walkIns.map((w) => (w.id === id ? { ...w, ...updates } : w)) }));
@@ -986,8 +1016,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteWalkIn = useCallback(async (id: string) => {
     const prev = stateRef.current.walkIns.find((w) => w.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("walk_ins").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("walk_ins").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (error) { console.error("[store] deleteWalkIn failed:", error.message); return; }
     }
     setState((s) => ({ ...s, walkIns: s.walkIns.filter((w) => w.id !== id) }));
@@ -1012,21 +1042,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     if (partsToDeduct.length === 0) return;
 
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       // Deduct from inventory in DB.
       for (const part of partsToDeduct) {
         if (!part.inventoryId) continue;
         const invItem = stateRef.current.inventory.find((i) => i.id === part.inventoryId);
         if (!invItem) continue;
-        await supabase.from("inventory_items").update({ current_stock: invItem.currentStock - part.qty }).eq("id", part.inventoryId);
+        await db.from("inventory_items").update({ current_stock: invItem.currentStock - part.qty }).eq("id", part.inventoryId);
       }
       // Mark parts as used on the ticket.
       const updatedDevices = preTicket.devices?.map((d) => ({ ...d, parts: d.parts.map((p) => ({ ...p, status: "used" as const })) }));
       const updatedParts = preTicket.parts?.map((p) => ({ ...p, status: "used" as const }));
-      await supabase.from("tickets").update({ parts: updatedParts ?? [], devices: updatedDevices ?? [] }).eq("id", ticketId);
+      await db.from("tickets").update({ parts: updatedParts ?? [], devices: updatedDevices ?? [] }).eq("id", ticketId);
       // Create stock movements.
       for (const [i, part] of partsToDeduct.entries()) {
-        await supabase.from("stock_movements").insert(stockMovementToRow({
+        await db.from("stock_movements").insert(stockMovementToRow({
           docNumber: `MOV-TC-${Date.now()}-${i}`, fromStore: "Main Store", toStore: `Ticket ${ticketId}`,
           items: part.qty, date: new Date().toLocaleDateString("en-IN"), user: preTicket.technician, type: "Outward", status: "completed",
         }));
@@ -1056,8 +1086,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addStockMovement = useCallback(async (movement: StockMovement) => {
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("stock_movements").insert(stockMovementToRow(movement));
+    if (shouldUseDb()) {
+      const { error } = await db.from("stock_movements").insert(stockMovementToRow(movement));
       if (error) { console.error("[store] addStockMovement failed:", error.message); return; }
     }
     setState((s) => ({ ...s, stockMovements: [movement, ...s.stockMovements] }));
@@ -1066,8 +1096,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addInventoryItem = useCallback(async (item: InventoryItem) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("inventory_items").insert(inventoryItemToRow(item)).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("inventory_items").insert(inventoryItemToRow(item)).select("*").single();
       if (error || !data) { console.error("[store] addInventoryItem failed:", error?.message); return; }
       const saved = rowToInventoryItem(data);
       setState((s) => ({ ...s, inventory: [saved, ...s.inventory] }));
@@ -1080,7 +1110,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateInventoryItem = useCallback(async (id: string, updates: Partial<InventoryItem>) => {
     const prev = stateRef.current.inventory.find((i) => i.id === id);
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("name" in updates) row.name = updates.name;
       if ("category" in updates) row.category = updates.category ?? null;
@@ -1104,7 +1134,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("reservedStock" in updates) row.reserved_stock = updates.reservedStock;
       if ("soldUnits" in updates) row.sold_units = updates.soldUnits;
       if ("purchasedUnits" in updates) row.purchased_units = updates.purchasedUnits;
-      const { error } = await supabase.from("inventory_items").update(row).eq("id", id);
+      const { error } = await db.from("inventory_items").update(row).eq("id", id);
       if (error) { console.error("[store] updateInventoryItem failed:", error.message); return; }
     }
     setState((s) => ({ ...s, inventory: s.inventory.map((i) => (i.id === id ? { ...i, ...updates } : i)) }));
@@ -1118,8 +1148,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteInventoryItem = useCallback(async (id: string) => {
     const prev = stateRef.current.inventory.find((i) => i.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("inventory_items").delete().eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("inventory_items").delete().eq("id", id);
       if (error) { console.error("[store] deleteInventoryItem failed:", error.message); return; }
     }
     setState((s) => ({ ...s, inventory: s.inventory.filter((i) => i.id !== id) }));
@@ -1128,8 +1158,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── Customer actions (DB-first) ── */
   const addCustomer = useCallback(async (customer: Customer) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("customers").insert(customerToRow(customer)).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("customers").insert(customerToRow(customer)).select("*").single();
       if (error || !data) { console.error("[store] addCustomer failed:", error?.message); return; }
       const saved = rowToCustomer(data);
       setState((s) => ({ ...s, customers: [saved, ...s.customers] }));
@@ -1142,7 +1172,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateCustomer = useCallback(async (id: string, updates: Partial<Customer>) => {
     const prev = stateRef.current.customers.find((c) => c.id === id);
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("firstName" in updates) row.first_name = updates.firstName ?? null;
       if ("lastName" in updates) row.last_name = updates.lastName ?? null;
@@ -1163,7 +1193,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("totalRepairs" in updates) row.total_repairs = updates.totalRepairs;
       if ("lifetimeValue" in updates) row.lifetime_value = updates.lifetimeValue;
       if ("lastVisit" in updates) row.last_visit = updates.lastVisit ?? null;
-      const { error } = await supabase.from("customers").update(row).eq("id", id);
+      const { error } = await db.from("customers").update(row).eq("id", id);
       if (error) { console.error("[store] updateCustomer failed:", error.message); return; }
     }
     setState((s) => ({ ...s, customers: s.customers.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c)) }));
@@ -1175,8 +1205,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteCustomer = useCallback(async (id: string) => {
     const prev = stateRef.current.customers.find((c) => c.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("customers").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("customers").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (error) { console.error("[store] deleteCustomer failed:", error.message); return; }
     }
     setState((s) => ({ ...s, customers: s.customers.filter((c) => c.id !== id) }));
@@ -1185,8 +1215,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── Company actions (DB-first) ── */
   const addCompany = useCallback(async (company: Company) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("companies").insert(companyToRow(company)).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("companies").insert(companyToRow(company)).select("*").single();
       if (error || !data) { console.error("[store] addCompany failed:", error?.message); return; }
       const saved = rowToCompany(data);
       setState((s) => ({ ...s, companies: [saved, ...s.companies] }));
@@ -1199,7 +1229,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateCompany = useCallback(async (id: string, updates: Partial<Company>) => {
     const prev = stateRef.current.companies.find((c) => c.id === id);
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("name" in updates) row.name = updates.name ?? null;
       if ("companyType" in updates) row.company_type = updates.companyType ?? null;
@@ -1222,7 +1252,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("businessDetails" in updates) row.business_details = updates.businessDetails;
       if ("socialLinks" in updates) row.social_links = updates.socialLinks;
       if ("notes" in updates) row.notes = updates.notes ?? null;
-      const { error } = await supabase.from("companies").update(row).eq("id", id);
+      const { error } = await db.from("companies").update(row).eq("id", id);
       if (error) { console.error("[store] updateCompany failed:", error.message); return; }
     }
     setState((s) => ({ ...s, companies: s.companies.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c)) }));
@@ -1234,8 +1264,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteCompany = useCallback(async (id: string) => {
     const prev = stateRef.current.companies.find((c) => c.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("companies").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("companies").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (error) { console.error("[store] deleteCompany failed:", error.message); return; }
     }
     setState((s) => ({ ...s, companies: s.companies.filter((c) => c.id !== id) }));
@@ -1244,8 +1274,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   /* ── Brand & Model actions (DB-first) ── */
   const addBrand = useCallback(async (brand: Brand) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("brands").insert({ id: brand.id, name: brand.name }).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("brands").insert({ id: brand.id, name: brand.name }).select("*").single();
       if (error || !data) { console.error("[store] addBrand failed:", error?.message); return; }
       const saved = rowToBrand(data);
       setState((s) => ({ ...s, brands: [...s.brands, saved] }));
@@ -1257,8 +1287,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const addDeviceModel = useCallback(async (model: DeviceModel) => {
-    if (isSupabaseConfigured && supabase) {
-      const { data, error } = await supabase.from("device_models").insert({ id: model.id, brand_id: model.brandId, name: model.name }).select("*").single();
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("device_models").insert({ id: model.id, brand_id: model.brandId, name: model.name }).select("*").single();
       if (error || !data) { console.error("[store] addDeviceModel failed:", error?.message); return; }
       const saved = rowToDeviceModel(data);
       setState((s) => ({ ...s, deviceModels: [...s.deviceModels, saved] }));
@@ -1274,10 +1304,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteBrand = useCallback(async (id: string) => {
     const prev = stateRef.current.brands.find((b) => b.id === id);
     const modelCount = stateRef.current.deviceModels.filter((m) => m.brandId === id).length;
-    if (isSupabaseConfigured && supabase) {
+    if (shouldUseDb()) {
       // Cascade: delete models first, then brand.
-      await supabase.from("device_models").delete().eq("brand_id", id);
-      const { error } = await supabase.from("brands").delete().eq("id", id);
+      await db.from("device_models").delete().eq("brand_id", id);
+      const { error } = await db.from("brands").delete().eq("id", id);
       if (error) { console.error("[store] deleteBrand failed:", error.message); return; }
     }
     setState((s) => ({ ...s, brands: s.brands.filter((b) => b.id !== id), deviceModels: s.deviceModels.filter((m) => m.brandId !== id) }));
@@ -1286,8 +1316,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const deleteDeviceModel = useCallback(async (id: string) => {
     const prev = stateRef.current.deviceModels.find((m) => m.id === id);
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("device_models").delete().eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("device_models").delete().eq("id", id);
       if (error) { console.error("[store] deleteDeviceModel failed:", error.message); return; }
     }
     setState((s) => ({ ...s, deviceModels: s.deviceModels.filter((m) => m.id !== id) }));
@@ -1306,8 +1336,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Optimistically add to state immediately so the UI reflects the change
     setState((s) => ({ ...s, assignedByOptions: [...s.assignedByOptions, option] }));
     logActivity({ module: "Ticket", action: "Assigned By Added", severity: "success", entity: "Assigned By", reference: option.name, description: `Added "${option.name}" to Assigned By master list.` });
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("assigned_by_options").insert({ id: option.id, name: option.name });
+    if (shouldUseDb()) {
+      const { error } = await db.from("assigned_by_options").insert({ id: option.id, name: option.name });
       if (error) { console.error("[store] addAssignedByOption sync failed:", error.message); }
     }
   }, []);
@@ -1318,8 +1348,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (exists) return;
     setState((s) => ({ ...s, assignedToOptions: [...s.assignedToOptions, option] }));
     logActivity({ module: "Ticket", action: "Assigned To Added", severity: "success", entity: "Assigned To", reference: option.name, description: `Added "${option.name}" to Assigned To master list.` });
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("assigned_to_options").insert({ id: option.id, name: option.name });
+    if (shouldUseDb()) {
+      const { error } = await db.from("assigned_to_options").insert({ id: option.id, name: option.name });
       if (error) { console.error("[store] addAssignedToOption sync failed:", error.message); }
     }
   }, []);
@@ -1328,8 +1358,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteAssignedByOption = useCallback(async (id: string) => {
     setState((s) => ({ ...s, assignedByOptions: s.assignedByOptions.filter((o) => o.id !== id) }));
     logActivity({ module: "Ticket", action: "Assigned By Removed", severity: "warning", entity: "Assigned By", reference: id, description: `Removed entry from Assigned By master list.` });
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("assigned_by_options").delete().eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("assigned_by_options").delete().eq("id", id);
       if (error) { console.error("[store] deleteAssignedByOption sync failed:", error.message); }
     }
   }, []);
@@ -1338,8 +1368,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteAssignedToOption = useCallback(async (id: string) => {
     setState((s) => ({ ...s, assignedToOptions: s.assignedToOptions.filter((o) => o.id !== id) }));
     logActivity({ module: "Ticket", action: "Assigned To Removed", severity: "warning", entity: "Assigned To", reference: id, description: `Removed entry from Assigned To master list.` });
-    if (isSupabaseConfigured && supabase) {
-      const { error } = await supabase.from("assigned_to_options").delete().eq("id", id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("assigned_to_options").delete().eq("id", id);
       if (error) { console.error("[store] deleteAssignedToOption sync failed:", error.message); }
     }
   }, []);
