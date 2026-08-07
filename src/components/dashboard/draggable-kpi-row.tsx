@@ -10,6 +10,7 @@ import {
   type DraggableStateSnapshot,
 } from "@hello-pangea/dnd";
 import { cn } from "@/lib/utils";
+import { useDashboardSettings } from "@/lib/dashboard-settings-context";
 
 /* ──────────────────────────────────────────────────────────────────────────
    DraggableKpiRow — A drag-and-drop container for the top KPI cards.
@@ -36,8 +37,11 @@ interface DraggableKpiRowProps {
 }
 
 export function DraggableKpiRow({ cards, onReorder }: DraggableKpiRowProps) {
+  const { reorderEnabled } = useDashboardSettings();
+
   const handleDragEnd = useCallback(
     (result: DropResult) => {
+      if (!reorderEnabled) return;
       if (!result.destination) return;
       if (result.source.index === result.destination.index) return;
 
@@ -47,7 +51,7 @@ export function DraggableKpiRow({ cards, onReorder }: DraggableKpiRowProps) {
 
       onReorder(reordered.map((c) => c.id));
     },
-    [cards, onReorder]
+    [cards, onReorder, reorderEnabled]
   );
 
   return (
@@ -60,7 +64,7 @@ export function DraggableKpiRow({ cards, onReorder }: DraggableKpiRowProps) {
             className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4"
           >
             {cards.map((card, index) => (
-              <Draggable key={card.id} draggableId={card.id} index={index}>
+              <Draggable key={card.id} draggableId={card.id} index={index} isDragDisabled={!reorderEnabled}>
                 {(provided: DraggableProvided, snapshot: DraggableStateSnapshot) => (
                   <div
                     ref={provided.innerRef}

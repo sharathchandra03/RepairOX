@@ -45,13 +45,24 @@ const DEFAULT_LAYOUTS: Record<string, LayoutItem[]> = {
 export { DEFAULT_LAYOUTS };
 
 export function DashboardGrid({ children, keys, savedLayouts, onLayoutPersist }: DashboardGridProps) {
-  const { resizeEnabled } = useDashboardSettings();
+  const { resizeEnabled, reorderEnabled } = useDashboardSettings();
   // Use saved layouts if available, otherwise defaults
   const activeLayouts = savedLayouts ?? DEFAULT_LAYOUTS;
   const [layouts, setLayouts] = useState<Record<string, LayoutItem[]>>(activeLayouts);
   const [width, setWidth] = useState(1200);
   const containerRef = useRef<HTMLDivElement>(null);
   const prevSavedRef = useRef(savedLayouts);
+
+  // Mark items as static when both editing modes are off
+  const effectiveLayouts = useMemo(() => {
+    const isLocked = !reorderEnabled && !resizeEnabled;
+    if (!isLocked) return layouts;
+    const locked: Record<string, LayoutItem[]> = {};
+    for (const [bp, items] of Object.entries(layouts)) {
+      locked[bp] = items.map((item) => ({ ...item, static: true }));
+    }
+    return locked;
+  }, [layouts, reorderEnabled, resizeEnabled]);
 
   // Only sync from savedLayouts when it actually changes (Supabase background update)
   useEffect(() => {
@@ -85,23 +96,26 @@ export function DashboardGrid({ children, keys, savedLayouts, onLayoutPersist }:
   );
 
   const handleLayoutChange = useCallback((_current: LayoutItem[], allLayouts: Record<string, LayoutItem[]>) => {
+    // Only persist layout changes when user has editing enabled
+    if (!reorderEnabled && !resizeEnabled) return;
     setLayouts(allLayouts);
     onLayoutPersist?.(allLayouts);
-  }, [onLayoutPersist]);
+  }, [onLayoutPersist, reorderEnabled, resizeEnabled]);
 
   return (
     <div ref={containerRef} className="w-full">
       {width > 0 && (
         <Responsive
+          key={`grid-${reorderEnabled}-${resizeEnabled}`}
           className="dashboard-grid"
-          layouts={layouts}
+          layouts={effectiveLayouts}
           breakpoints={{ lg: 1024, md: 768, sm: 0 }}
           cols={{ lg: 12, md: 12, sm: 12 }}
           rowHeight={60}
           width={width}
           margin={[16, 16]}
           containerPadding={[0, 0]}
-          isDraggable={resizeEnabled}
+          isDraggable={reorderEnabled}
           isResizable={resizeEnabled}
           onLayoutChange={handleLayoutChange}
           draggableHandle=".drag-handle"
