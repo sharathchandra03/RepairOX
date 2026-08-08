@@ -35,6 +35,7 @@ import {
   FEATURE_REGISTRY, featuresByWorkspace,
   type VisibilityMode, type FeatureEntry,
 } from "@/lib/feature-visibility";
+import { getDemoVisitCount } from "@/lib/demo-tracking";
 
 /* ─── Icon per role — keeps the role list scannable ──────────────────── */
 const ROLE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -1355,6 +1356,12 @@ function FeatureVisibilityTab({
 }) {
   const [query, setQuery] = useState("");
   const [justSaved, setJustSaved] = useState(false);
+  const [visitCount, setVisitCount] = useState<number | null>(null);
+
+  // Load demo visit count
+  useEffect(() => {
+    getDemoVisitCount().then(setVisitCount);
+  }, []);
 
   const activeRole = allRoles.find((r) => r.id === activeRoleId) ?? allRoles[0];
   const grouped = featuresByWorkspace();
@@ -1647,6 +1654,14 @@ function FeatureVisibilityTab({
             <p className="mt-3 text-[11px] leading-relaxed text-zinc-500">
               Mark roles as &quot;Demo&quot; to give them full access with isolated data. Demo users share a sandbox that never touches production.
             </p>
+
+            {/* Visit count */}
+            {visitCount !== null && visitCount > 0 && (
+              <div className="mt-3 flex items-center gap-2 rounded-lg bg-violet-50 px-3 py-2">
+                <span className="text-[18px] font-bold text-violet-700">{visitCount}</span>
+                <span className="text-[11px] text-violet-600">unique device{visitCount !== 1 ? "s" : ""} visited demo</span>
+              </div>
+            )}
 
             {/* Demo role toggles */}
             <div className="mt-4 space-y-2">

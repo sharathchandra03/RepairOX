@@ -68,6 +68,7 @@ import {
   resetDemoData,
 } from "@/lib/demo-mode";
 import { getDemoAccessPayload, DEMO_TEAM } from "@/lib/demo-seed-data";
+import { trackDemoVisit } from "@/lib/demo-tracking";
 
 export type GrantMap = Record<string, PermissionKey[] | "all">;
 
@@ -748,6 +749,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         resetDemoData();
         // Set flag so app-shell does a hard refresh after navigation completes
         if (typeof window !== "undefined") localStorage.setItem("repairox-demo-needs-reload", "1");
+        trackDemoVisit();
       }
       return { ok: true, account, landingHref: computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
     }
@@ -767,6 +769,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     if (isDemoRole(acc.roleId)) {
       resetDemoData();
       if (typeof window !== "undefined") localStorage.setItem("repairox-demo-needs-reload", "1");
+      trackDemoVisit();
     }
     return { ok: true, account: { ...acc, lastLogin: now }, landingHref: computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
   }, [team, allowedWorkspacesForRole, refreshTeamFromDb]);
