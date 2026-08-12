@@ -98,6 +98,8 @@ type WizardJobData = {
   jobType: string;
   estimate: string;
   warranty: string;
+  warrantyValue: string;
+  warrantyUnit: string;
   issue: string;
   priority: string;
   resolutionMinutes: string;
@@ -131,7 +133,7 @@ function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     device: { brand: "", model: "", imei: "", imeiType: "imei1", assignedBy: "", assignedTo: "", source: "", type: "" },
-    job: { jobType: "service", estimate: "", warranty: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
+    job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
     category,
@@ -203,6 +205,8 @@ function ticketToWizard(t: Ticket): WizardData {
         jobType: dr.jobType || "service",
         estimate: String(dr.estimate || 0),
         warranty: dr.warranty || "",
+        warrantyValue: dr.warrantyValue ? String(dr.warrantyValue) : "",
+        warrantyUnit: dr.warrantyUnit || "",
         issue: dr.issue || "",
         priority: dr.priority || "normal",
         resolutionMinutes: dr.resolutionMinutes ? String(dr.resolutionMinutes) : "",
@@ -247,6 +251,8 @@ function ticketToWizard(t: Ticket): WizardData {
       jobType: "service",
       estimate: String(t.amount || 0),
       warranty: "",
+      warrantyValue: "",
+      warrantyUnit: "",
       issue: t.issue,
       priority: t.priority || "normal",
       resolutionMinutes: t.resolutionMinutes ? String(t.resolutionMinutes) : "",
@@ -385,7 +391,11 @@ function NewTicketWizard() {
       description: wd.job.description,
       jobType: wd.job.jobType,
       priority: (wd.job.priority as any) || "normal",
-      warranty: wd.job.warranty,
+      warranty: wd.job.warrantyValue && wd.job.warrantyUnit
+        ? `${wd.job.warrantyValue} ${wd.job.warrantyUnit.charAt(0).toUpperCase() + wd.job.warrantyUnit.slice(1)}`
+        : wd.job.warranty || "",
+      warrantyValue: wd.job.warrantyValue ? Number(wd.job.warrantyValue) : undefined,
+      warrantyUnit: (wd.job.warrantyUnit || undefined) as "days" | "months" | "years" | undefined,
       resolutionMinutes: Number(wd.job.resolutionMinutes) || 59,
       accessories: wd.job.accessories,
       notes: wd.job.notes,
@@ -1404,11 +1414,35 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               ]} />
             </Field>
             <Field label="Warranty">
-              <RSelect value={j.warranty} onChange={(v) => set("warranty", v)} placeholder="Select warranty" options={[
-                { label: "In Warranty", value: "in-warranty" },
-                { label: "Out of Warranty", value: "out-warranty" },
-                { label: "Extended Warranty", value: "extended" },
-              ]} />
+              <div className="flex gap-1.5">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  value={j.warrantyValue}
+                  onChange={(e) => {
+                    const val = e.target.value.replace(/[^0-9]/g, "");
+                    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+                      i === activeIdx ? { ...dev, job: { ...dev.job, warrantyValue: val, warranty: val && dev.job.warrantyUnit ? `${val} ${dev.job.warrantyUnit.charAt(0).toUpperCase() + dev.job.warrantyUnit.slice(1)}` : "" } } : dev
+                    );
+                    setData({ ...data, devices: updatedDevices });
+                  }}
+                  placeholder="0"
+                  className="h-[34px] w-[72px] rounded-xl border border-gray-200 bg-white px-2.5 text-[13px] font-medium text-zinc-800 outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                />
+                <div className="flex-1">
+                  <RSelect value={j.warrantyUnit} onChange={(v) => {
+                    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+                      i === activeIdx ? { ...dev, job: { ...dev.job, warrantyUnit: v, warranty: dev.job.warrantyValue && v ? `${dev.job.warrantyValue} ${v.charAt(0).toUpperCase() + v.slice(1)}` : "" } } : dev
+                    );
+                    setData({ ...data, devices: updatedDevices });
+                  }} placeholder="Unit" options={[
+                    { label: "Days", value: "days" },
+                    { label: "Months", value: "months" },
+                    { label: "Years", value: "years" },
+                  ]} />
+                </div>
+              </div>
             </Field>
             <Field label="Expected Resolution Time">
               {customResLabel ? (

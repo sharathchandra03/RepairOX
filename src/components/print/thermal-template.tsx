@@ -136,6 +136,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                 {ticket.service && ticket.service !== ticket.issue && <Row label="Service" value={ticket.service} />}
                 <Row label="Technician" value={ticket.technician || "Unassigned"} />
                 <Row label="Priority" value={ticket.priority} />
+                {ticket.warranty && <Row label="Warranty" value={ticket.warranty} />}
                 <Row label="Status" value={ticket.status.charAt(0).toUpperCase() + ticket.status.slice(1)} bold />
                 <Row label="Source" value={ticket.source || "Walk-In"} />
                 {ticket.dueDate && <Row label="Due" value={formatPrintDateTime(ticket.dueDate)} />}

@@ -45,6 +45,7 @@ export type PrintTicketInfo = {
   priority: string;
   status: string;
   technician: string;
+  warranty: string;
   createdAt: string;
   dueDate: string;
   amount: number;
@@ -63,6 +64,7 @@ export type PrintDeviceInfo = {
   technician: string;
   priority: string;
   status: string;
+  warranty: string;
   parts: PrintLineItem[];
   estimate: number;
 };
@@ -193,6 +195,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     technician: dr.assignedTo,
     priority: dr.priority,
     status: dr.status,
+    warranty: dr.warranty || "",
     parts: dr.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.unitPrice, discount: 0, total: p.total })),
     estimate: dr.estimate,
   }));
@@ -208,6 +211,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     priority: ticket.priority,
     status: ticket.status,
     technician: ticket.technician,
+    warranty: ticketDevices[0]?.warranty || "",
     createdAt: ticket.createdAt,
     dueDate: ticket.dueDate || "",
     amount: ticket.amount,

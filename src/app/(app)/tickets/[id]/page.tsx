@@ -343,6 +343,7 @@ export default function TicketDetailPage() {
                     <DetailField label="Issue" value={dev.issue || ticket.issue} />
                     <DetailField label="Technician" value={dev.assignedTo || ticket.technician} />
                     <DetailField label="Accessories" value={dev.accessories || "—"} />
+                    {dev.warranty && <DetailField label="Warranty" value={dev.warranty} />}
                   </div>
                 );
               }
@@ -366,6 +367,7 @@ export default function TicketDetailPage() {
                         <DetailField label="Issue" value={dev.issue || "—"} />
                         <DetailField label="Technician" value={dev.assignedTo || "—"} />
                         <DetailField label="Estimate" value={formatINR(dev.estimate)} />
+                        {dev.warranty && <DetailField label="Warranty" value={dev.warranty} />}
                         {dev.accessories && <DetailField label="Accessories" value={dev.accessories} />}
                       </div>
                       {dev.parts.length > 0 && (

@@ -86,6 +86,10 @@ export type DeviceRecord = {
   jobType: string;
   priority: TicketPriority;
   warranty: string;
+  /** Structured warranty duration (new format). */
+  warrantyValue?: number;
+  /** Warranty duration unit: "days" | "months" | "years". */
+  warrantyUnit?: "days" | "months" | "years";
   resolutionMinutes: number;
   accessories: string;
   notes: string;
@@ -116,6 +120,8 @@ export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRec
     jobType: "service",
     priority: "normal",
     warranty: "",
+    warrantyValue: undefined,
+    warrantyUnit: undefined,
     resolutionMinutes: 59,
     accessories: "",
     notes: "",
@@ -125,6 +131,51 @@ export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRec
     status: "in_progress",
     ...overrides,
   };
+}
+
+/* ─── Warranty Helpers ─────────────────────────────────────────────── */
+
+export type WarrantyUnit = "days" | "months" | "years";
+
+/** Format structured warranty for display: "6 Months", "30 Days", "2 Years". */
+export function formatWarranty(value?: number, unit?: WarrantyUnit, fallbackStr?: string): string {
+  if (value && unit) {
+    const unitLabel = unit.charAt(0).toUpperCase() + unit.slice(1);
+    return `${value} ${unitLabel}`;
+  }
+  // Fallback to legacy string
+  if (fallbackStr) {
+    return parseWarrantyLabel(fallbackStr);
+  }
+  return "";
+}
+
+/** Convert a legacy warranty string to a display-friendly label. */
+function parseWarrantyLabel(str: string): string {
+  switch (str) {
+    case "in-warranty": return "In Warranty";
+    case "out-warranty": return "Out of Warranty";
+    case "extended": return "Extended Warranty";
+    default: return str;
+  }
+}
+
+/** Attempt to parse an old warranty string into value + unit (for migration).
+ *  e.g. "6 Months" → { value: 6, unit: "months" }
+ *  Returns null if parsing fails. */
+export function parseWarrantyString(str: string): { value: number; unit: WarrantyUnit } | null {
+  if (!str) return null;
+  const match = str.match(/^(\d+)\s*(days?|months?|years?)$/i);
+  if (match) {
+    const value = parseInt(match[1], 10);
+    let unit: WarrantyUnit = "months";
+    const raw = match[2].toLowerCase();
+    if (raw.startsWith("day")) unit = "days";
+    else if (raw.startsWith("month")) unit = "months";
+    else if (raw.startsWith("year")) unit = "years";
+    return { value, unit };
+  }
+  return null;
 }
 
 /**

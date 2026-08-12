@@ -84,6 +84,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                       <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{dev.priority || "Normal"}</span></div>
                       <div><span className="text-gray-500">Status:</span> <span className="font-medium capitalize">{dev.status || "In Progress"}</span></div>
                       <div><span className="text-gray-500">Estimate:</span> <span className="font-bold">{formatPrintCurrency(dev.estimate)}</span></div>
+                      {dev.warranty && <div><span className="text-gray-500">Warranty:</span> <span className="font-medium">{dev.warranty}</span></div>}
                     </div>
                     {/* Parts for this device */}
                     {dev.parts.length > 0 && (
@@ -126,6 +127,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                   <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{ticket.priority}</span></div>
                   <div><span className="text-gray-500">Status:</span> <span className="font-semibold capitalize">{ticket.status}</span></div>
                   <div><span className="text-gray-500">Source:</span> <span className="font-medium">{ticket.source}</span></div>
+                  {ticket.warranty && <div><span className="text-gray-500">Warranty:</span> <span className="font-medium">{ticket.warranty}</span></div>}
                   {ticket.dueDate && <div className="col-span-2"><span className="text-gray-500">Expected by:</span> <span className="font-medium">{formatPrintDateTime(ticket.dueDate)}</span></div>}
                 </div>
                 {/* Parts */}
