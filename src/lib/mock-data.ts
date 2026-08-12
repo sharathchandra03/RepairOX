@@ -73,7 +73,7 @@ export type DeviceRecord = {
   brand: string;
   model: string;
   imei: string;
-  imeiType: "imei1" | "imei2" | "serial";
+  imeiType: "imei" | "imei1" | "imei2" | "serial";
   category: string;
   type: string;
   /** Intake / assignment */
@@ -109,7 +109,7 @@ export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRec
     brand: "",
     model: "",
     imei: "",
-    imeiType: "imei1",
+    imeiType: "imei",
     category: "",
     type: "",
     source: "",
@@ -194,7 +194,7 @@ export function getTicketDevices(ticket: Ticket): DeviceRecord[] {
       brand: ticket.device || "",
       model: ticket.model || "",
       imei: ticket.items?.[0]?.serial || "",
-      imeiType: ticket.imeiType || "imei1",
+      imeiType: ticket.imeiType || "imei",
       category: ticket.device || "",
       source: ticket.source || "",
       assignedTo: ticket.technician || "",
@@ -256,7 +256,7 @@ export type Ticket = {
   address?: string;
   source?: string;
   discount?: number;
-  imeiType?: "imei1" | "imei2" | "serial";
+  imeiType?: "imei" | "imei1" | "imei2" | "serial";
   qcStatus?: "pending" | "pass" | "fail";
   customerId?: string;
   customerType?: "personal" | "business";
@@ -533,7 +533,7 @@ export type InvoiceDeviceRecord = {
   brand: string;
   model: string;
   imei: string;
-  imeiType: "imei1" | "imei2" | "serial";
+  imeiType: "imei" | "imei1" | "imei2" | "serial";
   /** Job details */
   issue: string;
   description: string;
@@ -557,7 +557,7 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
     brand: "",
     model: "",
     imei: "",
-    imeiType: "imei1",
+    imeiType: "imei",
     issue: "",
     description: "",
     jobType: "service",

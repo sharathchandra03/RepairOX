@@ -338,7 +338,7 @@ export default function TicketDetailPage() {
                     <DetailField label="Brand" value={dev.brand || ticket.device} />
                     <DetailField label="Model" value={dev.model || ticket.model} />
                     <DetailField label="Category" value={dev.category || dev.brand || ticket.device} />
-                    <DetailField label={dev.imeiType === "serial" ? "Serial No." : dev.imeiType === "imei2" ? "IMEI 2" : "IMEI 1"} value={dev.imei || "—"} />
+                    <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
                     <DetailField label="Source" value={dev.source || ticket.source || "—"} />
                     <DetailField label="Issue" value={dev.issue || ticket.issue} />
                     <DetailField label="Technician" value={dev.assignedTo || ticket.technician} />
@@ -363,7 +363,7 @@ export default function TicketDetailPage() {
                       <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
                         <DetailField label="Brand" value={dev.brand || "—"} />
                         <DetailField label="Model" value={dev.model || "—"} />
-                        <DetailField label={dev.imeiType === "serial" ? "Serial No." : dev.imeiType === "imei2" ? "IMEI 2" : "IMEI 1"} value={dev.imei || "—"} />
+                        <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
                         <DetailField label="Issue" value={dev.issue || "—"} />
                         <DetailField label="Technician" value={dev.assignedTo || "—"} />
                         <DetailField label="Estimate" value={formatINR(dev.estimate)} />
@@ -848,13 +848,13 @@ export default function TicketDetailPage() {
           device: ticket.device, model: ticket.model, issue: ticket.issue,
           service: ticket.service || "",
           imei: ticket.items?.[0]?.serial || "",
-          imeiType: ticket.imeiType || "imei1",
+          imeiType: ticket.imeiType || "imei",
         }}
         fields={[
           { key: "device", label: "Brand / Category", type: "text" },
           { key: "model", label: "Model", type: "text" },
           { key: "imeiType", label: "ID Type", type: "select", options: [
-            { label: "IMEI 1", value: "imei1" }, { label: "IMEI 2", value: "imei2" }, { label: "Serial No.", value: "serial" },
+            { label: "IMEI", value: "imei" }, { label: "Serial Number", value: "serial" },
           ]},
           { key: "imei", label: "IMEI / Serial Number", type: "text" },
           { key: "issue", label: "Issue / Fault", type: "text" },
@@ -864,7 +864,7 @@ export default function TicketDetailPage() {
           const items = v.imei ? [{ device: v.device, model: v.model, serial: v.imei, issue: v.issue, service: v.service || undefined }] : undefined;
           // Also update the devices[] array if it exists (single-device ticket)
           const updatedDevices = ticket.devices?.map((d, i) =>
-            i === 0 ? { ...d, brand: v.device, model: v.model, imei: v.imei, imeiType: (v.imeiType as "imei1" | "imei2" | "serial") || "imei1", issue: v.issue } : d
+            i === 0 ? { ...d, brand: v.device, model: v.model, imei: v.imei, imeiType: (v.imeiType as "imei" | "serial") || "imei", issue: v.issue } : d
           );
           updateTicket(ticket.id, {
             device: v.device, model: v.model, issue: v.issue,

@@ -12,7 +12,8 @@ export type FilterState = {
   customerName: string;
   invoiceId: string;
   invoiceStatus: string;
-  employee: string;
+  invoiceType: string;
+  category: string;
   dateFrom: string;
   dateTo: string;
   dynamicFilters: { id: string; value: string; pinned: boolean }[];
@@ -23,7 +24,8 @@ const DEFAULT_FILTER_STATE: FilterState = {
   customerName: "",
   invoiceId: "",
   invoiceStatus: "all",
-  employee: "",
+  invoiceType: "all",
+  category: "all",
   dateFrom: "",
   dateTo: "",
   dynamicFilters: [],
@@ -66,7 +68,7 @@ export function InvoiceFilters({
   useEffect(() => {
     onSearch({ ...state, invoiceId: quickDate, pinnedIds: state.invoiceId ? [state.invoiceId] : [] });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [quickDate, state.invoiceId, state.customerName, state.invoiceStatus, state.employee, state.dateFrom, state.dateTo]);
+  }, [quickDate, state.invoiceId, state.customerName, state.invoiceStatus, state.invoiceType, state.category, state.dateFrom, state.dateTo]);
 
   // Handle quick date selection — immediately filters
   const handleQuickDate = useCallback((value: QuickDateValue) => {
@@ -115,8 +117,8 @@ export function InvoiceFilters({
       {/* Separator */}
       <div className="border-t border-border" />
 
-      {/* Filter Controls Row — 4 fields + search button */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_auto] items-end gap-4">
+      {/* Filter Controls Row — 5 equal-width fields + search button */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_1fr_1fr_1fr_auto] items-end gap-3">
         {/* Invoice ID */}
         <div className="space-y-1.5">
           <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice ID</label>
@@ -159,18 +161,30 @@ export function InvoiceFilters({
           />
         </div>
 
-        {/* Employee */}
+        {/* Invoice Type */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Employee</label>
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice Type</label>
           <Select
-            value={state.employee}
-            onChange={(e: any) => setField("employee", e.target.value)}
+            value={state.invoiceType}
+            onChange={(e: any) => setField("invoiceType", e.target.value)}
             options={[
-              { label: "All Employees", value: "" },
-              { label: "Anjali R.", value: "Anjali R." },
-              { label: "Vikas", value: "Vikas" },
-              { label: "Pooja", value: "Pooja" },
-              { label: "Ravi", value: "Ravi" },
+              { label: "All Types", value: "all" },
+              { label: "Retail", value: "retail" },
+              { label: "Business", value: "business" },
+            ]}
+          />
+        </div>
+
+        {/* Category */}
+        <div className="space-y-1.5">
+          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</label>
+          <Select
+            value={state.category}
+            onChange={(e: any) => setField("category", e.target.value)}
+            options={[
+              { label: "All Categories", value: "all" },
+              { label: "Service", value: "service" },
+              { label: "Accessories", value: "accessories" },
             ]}
           />
         </div>

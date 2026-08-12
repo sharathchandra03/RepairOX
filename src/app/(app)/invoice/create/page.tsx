@@ -857,7 +857,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
               <div className="space-y-1">
                 <Label>Job Type</Label>
                 <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} options={[
-                  { label: "Service", value: "service" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" },
+                  { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
                 ]} />
               </div>
               <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" /></div>

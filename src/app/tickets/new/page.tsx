@@ -53,13 +53,13 @@ const PROCESSES = [
 ];
 
 const CATEGORIES = [
-  { id: "iphone", label: "iPhone", emoji: "📱" },
+  { id: "imac", label: "iMac", emoji: "�️" },
   { id: "macbook", label: "MacBook", emoji: "💻" },
-  { id: "ipad", label: "iPad", emoji: "📲" },
+  { id: "windows", label: "Windows", emoji: "�" },
+  { id: "iphone", label: "iPhone", emoji: "📱" },
+  { id: "android", label: "Android", emoji: "�" },
+  { id: "ipad", label: "iPad", emoji: "�" },
   { id: "iwatch", label: "iWatch", emoji: "⌚" },
-  { id: "imac", label: "iMac", emoji: "🖥️" },
-  { id: "android", label: "Android", emoji: "📱" },
-  { id: "windows", label: "Windows", emoji: "💻" },
   { id: "others", label: "Others", emoji: "🧩" },
 ];
 
@@ -132,7 +132,7 @@ type WizardDevice = {
 function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    device: { brand: "", model: "", imei: "", imeiType: "imei1", assignedBy: "", assignedTo: "", source: "", type: "" },
+    device: { brand: "", model: "", imei: "", imeiType: "imei", assignedBy: "", assignedTo: "", source: "", type: "" },
     job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
@@ -195,7 +195,7 @@ function ticketToWizard(t: Ticket): WizardData {
         brand: dr.brand || "",
         model: dr.model || "",
         imei: dr.imei || "",
-        imeiType: dr.imeiType || "imei1",
+        imeiType: dr.imeiType || "imei",
         assignedBy: dr.assignedBy || "",
         assignedTo: dr.assignedTo || "",
         source: dr.source || "",
@@ -241,7 +241,7 @@ function ticketToWizard(t: Ticket): WizardData {
       brand: t.device || "",
       model: t.model,
       imei: t.items?.[0]?.serial || "",
-      imeiType: t.imeiType || "imei1",
+      imeiType: t.imeiType || "imei",
       assignedBy: "",
       assignedTo: t.technician?.toLowerCase() || "",
       source: t.source || "",
@@ -381,7 +381,7 @@ function NewTicketWizard() {
       brand: wd.device.brand,
       model: wd.device.model,
       imei: wd.device.imei,
-      imeiType: (wd.device.imeiType as "imei1" | "imei2" | "serial") || "imei1",
+      imeiType: (wd.device.imeiType as "imei" | "serial") || "imei",
       category: wd.category || data.category || "",
       type: wd.device.type,
       source: wd.device.source,
@@ -442,7 +442,7 @@ function NewTicketWizard() {
         ? `${deviceRecords.length} device repair`
         : (primaryDevice.job.issue || "Repair"),
       source: primaryDevice.device.source || undefined,
-      imeiType: primaryDevice.device.imei ? (primaryDevice.device.imeiType as "imei1" | "imei2" | "serial") || "imei1" : undefined,
+      imeiType: primaryDevice.device.imei ? (primaryDevice.device.imeiType as "imei" | "serial") || "imei" : undefined,
       internalNotes: primaryDevice.job.notes || undefined,
       customerId: finalCustomerId || undefined,
       customerType: data.contactType as "personal" | "business",
@@ -810,7 +810,7 @@ function titleFor(step: number) {
     "Device Details",
     "Job Details",
     "Assign Items / Parts to Service",
-    "Search Contact",
+    "Contact Information",
     "Customer Information",
     "Quotation Summary",
     "Pre-Quality Check",
@@ -1143,15 +1143,45 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
 
             <div className="col-span-1">
               <Field label="ID Type">
-                <RSelect value={d.imeiType} onChange={(v) => set("imeiType", v)} options={[
-                  { label: "IMEI 1", value: "imei1" },
-                  { label: "IMEI 2", value: "imei2" },
-                  { label: "Serial No.", value: "serial" },
+                <RSelect value={d.imeiType} onChange={(v) => {
+                  const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+                    i === activeIdx ? { ...dev, device: { ...dev.device, imeiType: v, imei: "" } } : dev
+                  );
+                  setData({ ...data, devices: updatedDevices });
+                }} options={[
+                  { label: "IMEI", value: "imei" },
+                  { label: "Serial Number", value: "serial" },
                 ]} />
               </Field>
             </div>
             <div className="col-span-1">
-              <Field label="IMEI / Serial Number"><Input value={d.imei} onChange={(e: any) => set("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="h-[34px] font-mono" /></Field>
+              <Field label={d.imeiType === "serial" ? "Serial Number" : "IMEI Number"}>
+                <Input
+                  value={d.imei}
+                  onChange={(e: any) => {
+                    const val = e.target.value;
+                    if (d.imeiType === "serial") {
+                      // Alphanumeric only, max 15 characters
+                      const cleaned = val.replace(/[^a-zA-Z0-9]/g, "");
+                      if (cleaned.length <= 15) set("imei", cleaned);
+                    } else {
+                      // Numeric only, max 16 digits
+                      const cleaned = val.replace(/[^0-9]/g, "");
+                      if (cleaned.length <= 16) set("imei", cleaned);
+                    }
+                  }}
+                  placeholder={d.imeiType === "serial" ? "e.g. C39HJ2F0P1…" : "e.g. 3564930012…"}
+                  className="h-[34px] font-mono"
+                  maxLength={d.imeiType === "serial" ? 15 : 16}
+                  inputMode={d.imeiType === "serial" ? "text" : "numeric"}
+                />
+                {d.imei && d.imeiType !== "serial" && d.imei.length > 0 && d.imei.length < 16 && (
+                  <p className="mt-1 text-[11px] text-amber-600">IMEI must contain exactly 16 digits.</p>
+                )}
+                {d.imei && d.imeiType === "serial" && d.imei.length > 15 && (
+                  <p className="mt-1 text-[11px] text-amber-600">Serial Number cannot exceed 15 characters.</p>
+                )}
+              </Field>
             </div>
           </div>
         </div>
@@ -1211,9 +1241,11 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         <motion.button
           type="button"
           onClick={addNewDevice}
-          whileHover={{ scale: 1.02 }}
+          animate={{ boxShadow: ["0 0 8px rgba(67,97,238,0.12)", "0 0 14px rgba(67,97,238,0.25)", "0 0 8px rgba(67,97,238,0.12)"] }}
+          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
+          whileHover={{ scale: 1.03, y: -1 }}
           whileTap={{ scale: 0.97 }}
-          className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD]/30 px-3 py-2 text-[12px] font-semibold text-[#4361EE] transition-all hover:bg-[#EEF1FD] hover:border-[#4361EE] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+          className="inline-flex items-center gap-1.5 rounded-xl border border-dashed border-[#7B93F5] bg-[#EEF1FD]/50 px-3 py-2 text-[12px] font-semibold text-[#3351E0] transition-all hover:bg-[#E8ECFD] hover:border-[#4361EE] hover:shadow-[0_0_14px_rgba(67,97,238,0.28)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
           aria-label={`Add another device to this ticket (currently ${data.devices.length} device${data.devices.length > 1 ? "s" : ""})`}
         >
           <Plus className="h-4 w-4" />
@@ -1401,6 +1433,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
             <Field label="Job Type">
               <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
                 { label: "Service", value: "service" },
+                { label: "Accessories", value: "accessories" },
                 { label: "Warranty", value: "warranty" },
                 { label: "Estimate", value: "estimate" },
                 { label: "Buyback", value: "buyback" },
@@ -1436,7 +1469,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                       i === activeIdx ? { ...dev, job: { ...dev.job, warrantyUnit: v, warranty: dev.job.warrantyValue && v ? `${dev.job.warrantyValue} ${v.charAt(0).toUpperCase() + v.slice(1)}` : "" } } : dev
                     );
                     setData({ ...data, devices: updatedDevices });
-                  }} placeholder="Unit" options={[
+                  }} placeholder="Duration" options={[
                     { label: "Days", value: "days" },
                     { label: "Months", value: "months" },
                     { label: "Years", value: "years" },
@@ -1892,7 +1925,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
             onChange={(e: any) => { setQuery(e.target.value); setShowResults(true); }}
             onFocus={() => setShowResults(true)}
             placeholder="Search by name, SKU, or category…"
-            iconLeft={<Search className="h-4 w-4" />}
+            iconLeft={<Search className="h-4 w-4 text-[#4361EE] drop-shadow-[0_0_4px_rgba(67,97,238,0.45)]" />}
           />
         </Field>
 
@@ -2072,7 +2105,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
             value={q}
             onChange={(e: any) => { setQ(e.target.value); setSelectedId(null); }}
             placeholder="Search by name, phone, email, company or ID…"
-            iconLeft={<Search className="h-4 w-4" />}
+            iconLeft={<Search className="h-4 w-4 text-[#4361EE] drop-shadow-[0_0_4px_rgba(67,97,238,0.45)]" />}
             className="h-12"
           />
           <p className="mt-2 text-center text-xs text-muted-foreground">
@@ -2319,12 +2352,12 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
               <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
             </div>
           ))}
-          {/* Single device: always show estimate as Service Charges when present */}
+          {/* Single device: always show estimate as a line item when present */}
           {data.devices.length <= 1 && estimatesTotal > 0 && (
             <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
-              <div className="font-medium">{data.devices[0]?.job?.issue || "Service Charges"}</div>
+              <div className="font-medium">Estimate</div>
               <div className="text-center">1</div>
-              <div className="text-right tnum">{formatINR(estimatesTotal)}</div>
+              <div className="text-right tnum font-medium">{formatINR(estimatesTotal)}</div>
             </div>
           )}
           {/* Empty state */}
@@ -2345,6 +2378,8 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
             {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(subtotal)} />}
+            {data.devices.length <= 1 && estimatesTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
+            {data.devices.length <= 1 && partsTotal > 0 && <QRow k="Parts" v={formatINR(partsTotal)} />}
             {data.devices.length <= 1 && <QRow k="Sub-total" v={formatINR(subtotal)} />}
             {isBusiness && <QRow k={`GST (${gstRate}%)`} v={formatINR(tax)} />}
             <QRow k="Total" v={formatINR(total)} bold />
@@ -2674,7 +2709,8 @@ function UploadStep({ data, setData, onNext, isEdit }: any) {
         </div>
       </div>
       {!isEdit && (
-        <div className="mt-6 flex justify-end">
+        <div className="mt-6 flex gap-2 justify-end items-center">
+          <Button variant="outline" size="lg" className="h-11 text-[15px]" onClick={onNext}>Skip</Button>
           <Button size="lg" onClick={onNext}>Upload & Continue <ArrowRight className="h-4 w-4" /></Button>
         </div>
       )}

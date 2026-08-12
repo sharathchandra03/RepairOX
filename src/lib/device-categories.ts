@@ -28,25 +28,40 @@ export type DeviceCategoryItem = {
 /* ─── Defaults ───────────────────────────────────────────────────── */
 
 export const DEFAULT_CATEGORIES: DeviceCategoryItem[] = [
-  { id: "iphone", label: "iPhone" },
+  { id: "imac", label: "iMac" },
   { id: "macbook", label: "MacBook" },
+  { id: "windows", label: "Windows" },
+  { id: "iphone", label: "iPhone" },
+  { id: "android", label: "Android" },
   { id: "ipad", label: "iPad" },
   { id: "iwatch", label: "iWatch" },
-  { id: "imac", label: "iMac" },
-  { id: "android", label: "Android" },
-  { id: "windows", label: "Windows" },
   { id: "others", label: "Others" },
 ];
 
 const STORAGE_KEY = "repairox-device-categories";
 
+/** Canonical display order — categories are always sorted to match this. */
+const CANONICAL_ORDER = ["imac", "macbook", "windows", "iphone", "android", "ipad", "iwatch", "others"];
+
 /* ─── localStorage helpers (fallback) ────────────────────────────── */
+
+/** Sort categories to match the canonical display order, preserving images and data. */
+function applySortOrder(cats: DeviceCategoryItem[]): DeviceCategoryItem[] {
+  const idxMap = new Map(CANONICAL_ORDER.map((id, i) => [id, i]));
+  return [...cats].sort((a, b) => {
+    const ai = idxMap.get(a.id) ?? 999;
+    const bi = idxMap.get(b.id) ?? 999;
+    return ai - bi;
+  });
+}
 
 function loadFromLocalStorage(): DeviceCategoryItem[] {
   if (typeof window === "undefined") return DEFAULT_CATEGORIES;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : DEFAULT_CATEGORIES;
+    if (!raw) return DEFAULT_CATEGORIES;
+    const parsed: DeviceCategoryItem[] = JSON.parse(raw);
+    return applySortOrder(parsed);
   } catch {
     return DEFAULT_CATEGORIES;
   }
@@ -152,12 +167,12 @@ async function _loadDeviceCategoriesImpl(): Promise<DeviceCategoryItem[]> {
       return local;
     }
 
-    return data.map((r: any) => ({
+    return applySortOrder(data.map((r: any) => ({
       id: r.id,
       label: r.label ?? r.id,
       image: r.image_url ?? undefined,
       sort_order: r.sort_order ?? 0,
-    }));
+    })));
   } catch {
     return loadFromLocalStorage();
   }

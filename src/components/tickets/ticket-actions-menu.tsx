@@ -6,6 +6,7 @@ import type { Ticket } from "@/lib/mock-data";
 
 export type TicketAction =
   | "view"
+  | "print-preview"
   | "transfer"
   | "comment"
   | "checkout"
@@ -25,6 +26,15 @@ interface TicketActionsMenuProps {
 export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) {
   return (
     <div className="flex items-center justify-end gap-1">
+      {/* Print Preview button (Eye icon — opens print preview) */}
+      <button
+        onClick={() => onAction("print-preview", ticket)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        title="Print Preview"
+      >
+        <Eye className="h-3.5 w-3.5" />
+      </button>
+
       {/* Direct edit button */}
       <button
         onClick={() => onAction("edit", ticket)}

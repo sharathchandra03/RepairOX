@@ -23,6 +23,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
@@ -43,14 +44,14 @@ type ColumnDef = {
 
 const ALL_COLUMNS: ColumnDef[] = [
   { id: "checkbox", label: "", width: "w-10", locked: true },
-  { id: "ticket", label: "Ticket", width: "w-[72px]" },
-  { id: "customer", label: "Customer", width: "w-[20%]" },
-  { id: "device", label: "Device / Service", width: "w-[20%]" },
-  { id: "status", label: "Status", width: "w-[180px]", align: "center" },
-  { id: "dueDate", label: "Due Date", width: "w-[120px]" },
-  { id: "created", label: "Created", width: "w-[140px]" },
-  { id: "amount", label: "Amount", width: "w-[90px]", align: "right" },
-  { id: "actions", label: "Actions", width: "w-[90px]", align: "center", locked: true },
+  { id: "ticket", label: "Ticket", width: "w-[100px]" },
+  { id: "customer", label: "Customer", width: "w-[22%]" },
+  { id: "device", label: "Device / Service", width: "w-[18%]" },
+  { id: "status", label: "Status", width: "w-[170px]", align: "center" },
+  { id: "dueDate", label: "Due Date", width: "w-[100px]" },
+  { id: "created", label: "Created", width: "w-[110px]" },
+  { id: "amount", label: "Amount", width: "w-[80px]", align: "right" },
+  { id: "actions", label: "Actions", width: "w-[120px]", align: "center", locked: true },
 ];
 
 const DEFAULT_VISIBLE: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
@@ -149,6 +150,7 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
 export default function TicketsPage() {
   const router = useRouter();
   const { tickets, bulkUpdateStatus, deleteTicket, updateTicket, deductPartsForTicket } = useStore();
+  const { settings } = useStoreSettings();
   const {
     downloadTicket,
     startBulkTicketDownload,
@@ -306,6 +308,7 @@ export default function TicketsPage() {
   const handleAction = useCallback((action: TicketAction, ticket: Ticket) => {
     if (action === "view") { router.push(`/tickets/${ticket.id}`); return; }
     if (action === "edit") { router.push(`/tickets/${ticket.id}`); return; }
+    if (action === "print-preview") { router.push(`/print/ticket/${encodeURIComponent(ticket.id)}?format=a4`); return; }
     if (action === "download-pdf") { downloadTicket(ticket); return; }
     if (action === "invoice") {
       const p = new URLSearchParams();
@@ -586,13 +589,13 @@ export default function TicketsPage() {
       )}
 
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-card md:block">
+      <div className="hidden overflow-hidden rounded-2xl border-2 border-zinc-200 bg-card shadow-card md:block">
         <div className="overflow-x-auto">
           <table className="w-full text-sm table-fixed">
-            <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
+            <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 {activeColumns.map((col) => (
-                  <th key={col.id} className={cn("px-3 py-3", col.width, col.align === "right" && "text-right", col.align === "center" && "text-center")}>
+                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-5", col.id === "customer" && "pl-[58px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
                       <input
                         type="checkbox"
@@ -622,7 +625,7 @@ export default function TicketsPage() {
                     transition={{ delay: 0.015 * i }}
                     onClick={() => router.push(`/tickets/${t.id}`)}
                     className={cn(
-                      "group border-t border-border transition-colors align-top cursor-pointer",
+                      "group border-b border-zinc-200 transition-colors align-top cursor-pointer",
                       isWaiting && "bg-red-50/80",
                       isSelected && !isWaiting && "bg-indigo-50/40",
                       !isWaiting && !isSelected && "hover:bg-[#EEF1FD]/50"
@@ -631,11 +634,13 @@ export default function TicketsPage() {
                     {activeColumns.map((col) => (
                       <td key={col.id} className={cn(
                         "px-3 py-3",
+                        col.id === "status" && "pl-1 pr-5",
+                        col.id === "customer" && "pl-5",
                         col.id !== "device" && "align-middle",
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors)}
                       </td>
                     ))}
                   </motion.tr>
@@ -668,7 +673,14 @@ export default function TicketsPage() {
                     </div>
                   </div>
                 </div>
-                <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}>{STATUS_LABEL[t.status]}</span>
+                <span
+                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset"
+                  style={{
+                    backgroundColor: `${settings.statusColors[t.status] || "#71717A"}15`,
+                    color: settings.statusColors[t.status] || "#71717A",
+                    boxShadow: `inset 0 0 0 1px ${settings.statusColors[t.status] || "#71717A"}30`,
+                  }}
+                >{STATUS_LABEL[t.status]}</span>
               </div>
               <div className="mt-3 space-y-1">
                 {t.items && t.items.length > 0 ? (
@@ -778,7 +790,7 @@ export default function TicketsPage() {
 
 /* ─── Inline Status Dropdown ─────────────────────────────────────────── */
 
-function InlineStatusDropdown({ ticket, onStatusChange }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void }) {
+function InlineStatusDropdown({ ticket, onStatusChange, statusColors }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void; statusColors: Record<string, string> }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -797,14 +809,21 @@ function InlineStatusDropdown({ ticket, onStatusChange }: { ticket: Ticket; onSt
     setOpen(!open);
   };
 
+  const activeColor = statusColors[ticket.status] || "#71717A";
+
   return (
     <div className="relative" onClick={(e) => e.stopPropagation()}>
       <button
         ref={btnRef}
         onClick={handleOpen}
-        className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm ${STATUS_TONE[ticket.status]}`}
+        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm"
+        style={{
+          backgroundColor: `${activeColor}15`,
+          color: activeColor,
+          boxShadow: `inset 0 0 0 1px ${activeColor}30`,
+        }}
       >
-        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeColor }} />
         {STATUS_LABEL[ticket.status]}
         <ChevronDown className="h-3 w-3 opacity-60" />
       </button>
@@ -825,20 +844,23 @@ function InlineStatusDropdown({ ticket, onStatusChange }: { ticket: Ticket; onSt
               }}
               className="z-[70] w-[200px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
             >
-              {STATUS_OPTIONS.map((s) => (
-                <button
-                  key={s.value}
-                  onClick={() => { onStatusChange(ticket.id, s.value); setOpen(false); }}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
-                    ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
-                  )}
-                >
-                  <span className={`h-2 w-2 rounded-full ring-1 ring-inset ${STATUS_TONE[s.value]}`} />
-                  {s.label}
-                  {ticket.status === s.value && <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>}
-                </button>
-              ))}
+              {STATUS_OPTIONS.map((s) => {
+                const sColor = statusColors[s.value] || "#71717A";
+                return (
+                  <button
+                    key={s.value}
+                    onClick={() => { onStatusChange(ticket.id, s.value); setOpen(false); }}
+                    className={cn(
+                      "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
+                      ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
+                    )}
+                  >
+                    <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
+                    {s.label}
+                    {ticket.status === s.value && <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>}
+                  </button>
+                );
+              })}
             </motion.div>
           </>
         )}
@@ -859,6 +881,7 @@ function renderCell(
   toggleOne: () => void,
   handleAction: (action: TicketAction, ticket: Ticket) => void,
   onStatusChange: (ticketId: string, status: TicketStatus) => void,
+  statusColors: Record<string, string>,
 ) {
   switch (colId) {
     case "checkbox":
@@ -870,18 +893,24 @@ function renderCell(
       );
     case "ticket":
       return (
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 min-w-0">
+          {/* Status colour marker — unique per status, configurable from Settings */}
+          <span
+            className="h-5 w-[3px] shrink-0 rounded-full"
+            style={{ backgroundColor: statusColors[t.status] || "#71717A" }}
+            title={STATUS_LABEL[t.status]}
+          />
           {t.priority !== "normal" && (
             <span className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")} title={t.priority === "critical" ? "Critical" : "High Priority"} />
           )}
-          <span className="font-semibold text-foreground whitespace-nowrap">{t.id}</span>
+          <span className="font-semibold text-foreground truncate">{t.id}</span>
         </div>
       );
     case "customer":
       return (
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-3 min-w-0">
           <Avatar name={t.customer} size={30} />
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <p className="text-sm font-medium leading-tight truncate">{t.customer}</p>
             <p className="text-[11px] font-medium text-[#5B6FC0] truncate">{t.phone}</p>
             {t.company && <p className="text-[11px] text-muted-foreground truncate">{t.company}</p>}
@@ -890,38 +919,49 @@ function renderCell(
       );
     case "device":
       return (
-        <div className="space-y-1">
-          {t.items && t.items.length > 0 ? (
-            <>
-              {t.items.map((item, idx) => (
-                <div key={idx} className="flex items-start gap-2">
-                  <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-zinc-300" />
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium leading-tight truncate">{item.model}</p>
-                    <p className="text-[10px] text-muted-foreground truncate">
-                      {item.serial && <span className="font-mono">{item.serial}</span>}
-                      {item.serial && " · "}{item.issue}
+        <div className="flex py-0.5">
+          {/* Fixed-width marker area — content always starts after this */}
+          <div className="w-4 shrink-0 flex flex-col items-center pt-[7px] gap-3">
+            {t.items && t.items.length > 0 ? (
+              t.items.map((_, idx) => (
+                <span key={idx} className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+              ))
+            ) : (
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+            )}
+          </div>
+          {/* Content area — always starts at same position */}
+          <div className="min-w-0 flex-1 space-y-1.5">
+            {t.items && t.items.length > 0 ? (
+              <>
+                {t.items.map((item, idx) => (
+                  <div key={idx}>
+                    <p className="text-[13px] font-medium leading-snug truncate">{item.model}</p>
+                    <p className="text-[11px] text-muted-foreground leading-snug truncate">
+                      {item.serial && <span className="font-mono text-[10px]">{item.serial}</span>}
+                      {item.serial && item.issue ? " · " : ""}
+                      {item.issue}
                     </p>
                   </div>
-                </div>
-              ))}
-              {t.items.length > 1 && (
-                <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-inset ring-zinc-200">
-                  {t.items.length} items
-                </span>
-              )}
-            </>
-          ) : (
-            <>
-              <p className="text-sm font-medium leading-tight">{t.model}</p>
-              <p className="text-[11px] text-muted-foreground">{t.service || t.issue}</p>
-            </>
-          )}
+                ))}
+                {t.items.length > 1 && (
+                  <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-inset ring-zinc-200">
+                    {t.items.length} items
+                  </span>
+                )}
+              </>
+            ) : (
+              <div>
+                <p className="text-[13px] font-medium leading-snug truncate">{t.model}</p>
+                <p className="text-[11px] text-muted-foreground leading-snug truncate">{t.service || t.issue}</p>
+              </div>
+            )}
+          </div>
         </div>
       );
     case "status":
       return (
-        <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} />
+        <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} />
       );
     case "dueDate":
       return t.dueDate ? (

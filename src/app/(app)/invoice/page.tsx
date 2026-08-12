@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useSpring, useTransform, useMotionValue } from "framer-motion";
 import {
   Plus, Download, Search, Eye, Pencil, MoreHorizontal,
   Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
@@ -72,7 +72,7 @@ const DATE_RANGES = [
   { label: "30 Days", value: "30days" },
 ] as const;
 
-type DateRange = (typeof DATE_RANGES)[number]["value"];
+type DateRange = (typeof DATE_RANGES)[number]["value"] | "custom";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -84,7 +84,7 @@ function fmtDate(iso: string): string {
 
 function startOfDay(date: Date): Date { const d = new Date(date); d.setHours(0,0,0,0); return d; }
 
-function isInDateRange(createdAt: string, range: DateRange): boolean {
+function isInDateRange(createdAt: string, range: DateRange, customFrom?: string, customTo?: string): boolean {
   if (range === "all") return true;
   const created = new Date(createdAt).getTime();
   if (isNaN(created)) return true;
@@ -96,6 +96,12 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
     case "7days": return created >= todayStart - 7 * 86_400_000;
     case "14days": return created >= todayStart - 14 * 86_400_000;
     case "30days": return created >= todayStart - 30 * 86_400_000;
+    case "custom": {
+      if (!customFrom && !customTo) return true;
+      const from = customFrom ? startOfDay(new Date(customFrom)).getTime() : -Infinity;
+      const to = customTo ? startOfDay(new Date(customTo)).getTime() + 86_400_000 - 1 : Infinity;
+      return created >= from && created <= to;
+    }
     default: return true;
   }
 }
@@ -120,6 +126,8 @@ export default function InvoicePage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("all");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
 
@@ -143,28 +151,28 @@ export default function InvoicePage() {
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
-      const okDate = isInDateRange(inv.createdAt, dateRange);
+      const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
       const okQ = !q || `${inv.id} ${inv.reference} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
       return okStatus && okType && okCategory && okDate && okQ;
-    }), [invoices, statusFilter, typeFilter, categoryFilter, dateRange, q]);
+    }), [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q]);
 
   /* KPIs */
   const kpis = useMemo(() => {
-    const totalRevenue = invoices.reduce((s, i) => s + i.total, 0);
-    const paidAmount = invoices.reduce((s, i) => s + i.paidAmount, 0);
-    const pending = invoices.filter((i) => i.status === "sent" || i.status === "partial").reduce((s, i) => s + (i.total - i.paidAmount), 0);
-    const overdue = invoices.filter((i) => i.status === "overdue").reduce((s, i) => s + (i.total - i.paidAmount), 0);
-    const overdueCount = invoices.filter((i) => i.status === "overdue").length;
-    const draftCount = invoices.filter((i) => i.status === "draft").length;
-    const taxCollected = invoices.filter((i) => i.status === "paid").reduce((s, i) => s + i.tax, 0);
-    const totalInvoices = invoices.length;
+    const totalRevenue = list.reduce((s, i) => s + i.total, 0);
+    const paidAmount = list.reduce((s, i) => s + i.paidAmount, 0);
+    const pending = list.filter((i) => i.status === "sent" || i.status === "partial").reduce((s, i) => s + (i.total - i.paidAmount), 0);
+    const overdue = list.filter((i) => i.status === "overdue").reduce((s, i) => s + (i.total - i.paidAmount), 0);
+    const overdueCount = list.filter((i) => i.status === "overdue").length;
+    const draftCount = list.filter((i) => i.status === "draft").length;
+    const taxCollected = list.filter((i) => i.status === "paid").reduce((s, i) => s + i.tax, 0);
+    const totalInvoices = list.length;
     return { totalRevenue, paidAmount, pending, overdue, overdueCount, draftCount, taxCollected, totalInvoices };
-  }, [invoices]);
+  }, [list]);
 
-  /* Invoice status view — presentation only, derived from existing invoice data */
+  /* Invoice status view — presentation only, derived from filtered invoice data */
   const invoiceStatusView = useMemo(() => {
-    const countOf = (s: InvoiceStatus) => invoices.filter((i) => i.status === s).length;
-    const total = invoices.length;
+    const countOf = (s: InvoiceStatus) => list.filter((i) => i.status === s).length;
+    const total = list.length;
     const paidCount = countOf("paid");
     const rows = [
       { key: "overdue", label: "Overdue", count: countOf("overdue"), color: "rose" as const },
@@ -172,7 +180,7 @@ export default function InvoicePage() {
       { key: "sent", label: "Sent", count: countOf("sent"), color: "sky" as const },
     ];
     return { rows, total, completed: paidCount, pending: total - paidCount, denom: total || 1 };
-  }, [invoices]);
+  }, [list]);
 
   const handleDuplicate = useCallback((inv: Invoice) => {
     addInvoice({ ...inv, id: `INV-${Math.floor(1000 + Math.random() * 9000)}`, reference: `CORP-${Math.floor(1000 + Math.random() * 9000)}`, status: "draft", createdAt: new Date().toISOString(), paidAmount: 0 });
@@ -247,13 +255,13 @@ export default function InvoicePage() {
             <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Payment Overview</p>
           </div>
           <div className="grid grid-cols-2 gap-4">
-            <PaymentCard tone="emerald" icon={CreditCard} label="Collected" value={formatINR(kpis.paidAmount)}
+            <PaymentCard tone="emerald" icon={CreditCard} label="Collected" value={formatINR(kpis.paidAmount)} numericValue={kpis.paidAmount}
               sub={`${kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0}% of total`} />
-            <PaymentCard tone="rose" icon={AlertCircle} label="Outstanding" value={formatINR(kpis.pending + kpis.overdue)}
+            <PaymentCard tone="rose" icon={AlertCircle} label="Outstanding" value={formatINR(kpis.pending + kpis.overdue)} numericValue={kpis.pending + kpis.overdue}
               sub={`${kpis.overdueCount} overdue`} />
-            <PaymentCard tone="amber" icon={Receipt} label="Tax (GST)" value={formatINR(kpis.taxCollected)}
+            <PaymentCard tone="amber" icon={Receipt} label="Tax (GST)" value={formatINR(kpis.taxCollected)} numericValue={kpis.taxCollected}
               sub="on paid invoices" />
-            <PaymentCard tone="brand" icon={FileText} label="Avg Invoice" value={formatINR(kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0)}
+            <PaymentCard tone="brand" icon={FileText} label="Avg Invoice" value={formatINR(kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0)} numericValue={kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0}
               sub={`${kpis.totalInvoices} total`} />
           </div>
         </div>
@@ -263,19 +271,24 @@ export default function InvoicePage() {
       <InvoiceFilters
         onSearch={(filterState) => {
           setStatusFilter(filterState.invoiceStatus);
+          setTypeFilter(filterState.invoiceType);
+          setCategoryFilter(filterState.category);
           // Combine customer name and invoice ID into search query
           const searchParts = [filterState.customerName, filterState.pinnedIds?.[0] || ""].filter(Boolean);
           setQ(searchParts.join(" "));
           // filterState.invoiceId carries the quickDate value
-          const qd = filterState.invoiceId as DateRange | "custom" | "";
-          if (qd && qd !== "custom") {
-            setDateRange(qd as DateRange);
-          }
+          const qd = filterState.invoiceId as string;
           if (qd === "custom") {
-            setDateRange("all");
+            setDateRange("custom");
+            setCustomFrom(filterState.dateFrom);
+            setCustomTo(filterState.dateTo);
+          } else if (qd && qd !== "") {
+            setDateRange(qd as DateRange);
+            setCustomFrom("");
+            setCustomTo("");
           }
         }}
-        onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setCategoryFilter("all"); setDateRange("all"); setQ(""); }}
+        onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setCategoryFilter("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); setQ(""); }}
       />
 
       {/* Column Settings Panel */}
@@ -324,8 +337,8 @@ export default function InvoicePage() {
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
+            <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="w-10 px-3 py-3">
                   <input type="checkbox"
                     checked={list.length > 0 && list.every((inv) => selected.has(inv.id))}
@@ -429,7 +442,55 @@ const PAYMENT_TONES: Record<string, { card: string; label: string; value: string
   brand:   { card: "border-brand-200/70 bg-gradient-to-br from-brand-50 to-brand-100/40",         label: "text-brand-700",   value: "text-brand-700",   sub: "text-brand-600/80",   icon: "bg-white/70 text-brand-600 ring-brand-200",     spark: "text-brand-500" },
 };
 
-function KpiCard({ icon: Icon, label, value, subtext, tone }: { icon: any; label: string; value: string; subtext?: string; tone: string }) {
+/* ─── Animated Number Component ──────────────────────────────────────── */
+
+function AnimatedNumber({ value, formatFn }: { value: number; formatFn?: (n: number) => string }) {
+  const motionValue = useMotionValue(value);
+  const springValue = useSpring(motionValue, { stiffness: 80, damping: 18, mass: 0.6 });
+  const [display, setDisplay] = useState(() => (formatFn ? formatFn(value) : String(value)));
+  const prevValue = useRef(value);
+
+  useEffect(() => {
+    if (prevValue.current !== value) {
+      prevValue.current = value;
+      motionValue.set(value);
+    }
+  }, [value, motionValue]);
+
+  useEffect(() => {
+    const unsubscribe = springValue.on("change", (latest) => {
+      setDisplay(formatFn ? formatFn(Math.round(latest)) : String(Math.round(latest)));
+    });
+    return unsubscribe;
+  }, [springValue, formatFn]);
+
+  return <span>{display}</span>;
+}
+
+function AnimatedPercentage({ value }: { value: number }) {
+  const motionValue = useMotionValue(value);
+  const springValue = useSpring(motionValue, { stiffness: 80, damping: 18, mass: 0.6 });
+  const [display, setDisplay] = useState(`${value}%`);
+  const prevValue = useRef(value);
+
+  useEffect(() => {
+    if (prevValue.current !== value) {
+      prevValue.current = value;
+      motionValue.set(value);
+    }
+  }, [value, motionValue]);
+
+  useEffect(() => {
+    const unsubscribe = springValue.on("change", (latest) => {
+      setDisplay(`${Math.round(latest)}%`);
+    });
+    return unsubscribe;
+  }, [springValue]);
+
+  return <span>{display}</span>;
+}
+
+function KpiCard({ icon: Icon, label, value, numericValue, isCurrency, isPercent, subtext, tone }: { icon: any; label: string; value: string; numericValue?: number; isCurrency?: boolean; isPercent?: boolean; subtext?: string; tone: string }) {
   const t = KPI_TONES[tone] || KPI_TONES.indigo;
   return (
     <motion.div
@@ -446,7 +507,11 @@ function KpiCard({ icon: Icon, label, value, subtext, tone }: { icon: any; label
         <p className={cn("text-[10.5px] font-semibold uppercase tracking-wider", t.title)}>{label}</p>
       </div>
       <div className="mt-3">
-        <p className="font-display text-[22px] font-bold leading-none tracking-tight tabular-nums text-foreground">{value}</p>
+        <p className="font-display text-[22px] font-bold leading-none tracking-tight tabular-nums text-foreground">
+          {numericValue !== undefined ? (
+            isPercent ? <AnimatedPercentage value={numericValue} /> : <AnimatedNumber value={numericValue} formatFn={isCurrency ? formatINR : undefined} />
+          ) : value}
+        </p>
         {subtext && <p className="mt-1.5 text-[11px] font-medium text-muted-foreground">{subtext}</p>}
       </div>
     </motion.div>
@@ -459,7 +524,9 @@ function StatFooterItem({ label, value, sub, divider }: { label: string; value: 
   return (
     <div className={cn("px-4 py-3.5", divider && "border-l border-border/60")}>
       <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p className="mt-1 font-display text-xl font-bold leading-none tabular-nums text-foreground">{value}</p>
+      <p className="mt-1 font-display text-xl font-bold leading-none tabular-nums text-foreground">
+        <AnimatedNumber value={value} />
+      </p>
       <p className="mt-1 text-[10px] text-muted-foreground">{sub}</p>
     </div>
   );
@@ -467,7 +534,7 @@ function StatFooterItem({ label, value, sub, divider }: { label: string; value: 
 
 /* ─── Payment Overview card ──────────────────────────────────────────── */
 
-function PaymentCard({ tone, icon: Icon, label, value, sub }: { tone: string; icon: any; label: string; value: string; sub: string }) {
+function PaymentCard({ tone, icon: Icon, label, value, numericValue, sub }: { tone: string; icon: any; label: string; value: string; numericValue?: number; sub: string }) {
   const t = PAYMENT_TONES[tone] || PAYMENT_TONES.brand;
   return (
     <motion.div
@@ -481,7 +548,9 @@ function PaymentCard({ tone, icon: Icon, label, value, sub }: { tone: string; ic
           <Icon className="h-3.5 w-3.5" />
         </span>
       </div>
-      <p className={cn("mt-2 font-display text-2xl font-bold leading-none tabular-nums", t.value)}>{value}</p>
+      <p className={cn("mt-2 font-display text-2xl font-bold leading-none tabular-nums", t.value)}>
+        {numericValue !== undefined ? <AnimatedNumber value={numericValue} formatFn={formatINR} /> : value}
+      </p>
       <p className={cn("mt-1 text-[11px] font-medium", t.sub)}>{sub}</p>
       <div className={cn("pointer-events-none absolute inset-x-0 bottom-0 h-8", t.spark)}>
         <svg viewBox="0 0 120 32" preserveAspectRatio="none" className="h-full w-full">
@@ -659,19 +728,19 @@ function InvColumnSettingsPanel({
 
 const KPI_STORAGE_KEY = "repairox-invoice-kpi-order";
 
-type KpiDef = { id: string; icon: any; label: string; value: string; subtext?: string; tone: string };
+type KpiDef = { id: string; icon: any; label: string; value: string; numericValue: number; isCurrency?: boolean; isPercent?: boolean; subtext?: string; tone: string };
 
 function DraggableKpiGrid({ kpis }: { kpis: any }) {
   const rate = kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0;
   const allCards: KpiDef[] = [
-    { id: "revenue", icon: IndianRupee, label: "Total Revenue", value: formatINR(kpis.totalRevenue), subtext: `Across ${kpis.totalInvoices} invoice${kpis.totalInvoices !== 1 ? "s" : ""}`, tone: "indigo" },
-    { id: "invoices", icon: Receipt, label: "Total Invoices", value: String(kpis.totalInvoices), subtext: `${kpis.draftCount} in draft`, tone: "violet" },
-    { id: "paid", icon: CreditCard, label: "Paid Amount", value: formatINR(kpis.paidAmount), subtext: `${rate}% of revenue`, tone: "emerald" },
-    { id: "pending", icon: Clock, label: "Pending", value: formatINR(kpis.pending), subtext: "Awaiting collection", tone: "amber" },
-    { id: "overdue", icon: AlertCircle, label: "Overdue", value: formatINR(kpis.overdue), subtext: `${kpis.overdueCount} invoice${kpis.overdueCount !== 1 ? "s" : ""} overdue`, tone: "rose" },
-    { id: "drafts", icon: FileText, label: "Drafts", value: String(kpis.draftCount), subtext: kpis.draftCount === 0 ? "No draft invoices" : "Awaiting action", tone: "zinc" },
-    { id: "tax", icon: TrendingUp, label: "Tax Collected", value: formatINR(kpis.taxCollected), subtext: "On paid invoices", tone: "teal" },
-    { id: "rate", icon: BarChart3, label: "Collection Rate", value: `${rate}%`, subtext: `${formatINR(kpis.paidAmount)} collected`, tone: "indigo" },
+    { id: "revenue", icon: IndianRupee, label: "Total Revenue", value: formatINR(kpis.totalRevenue), numericValue: kpis.totalRevenue, isCurrency: true, subtext: `Across ${kpis.totalInvoices} invoice${kpis.totalInvoices !== 1 ? "s" : ""}`, tone: "indigo" },
+    { id: "invoices", icon: Receipt, label: "Total Invoices", value: String(kpis.totalInvoices), numericValue: kpis.totalInvoices, subtext: `${kpis.draftCount} in draft`, tone: "violet" },
+    { id: "paid", icon: CreditCard, label: "Paid Amount", value: formatINR(kpis.paidAmount), numericValue: kpis.paidAmount, isCurrency: true, subtext: `${rate}% of revenue`, tone: "emerald" },
+    { id: "pending", icon: Clock, label: "Pending", value: formatINR(kpis.pending), numericValue: kpis.pending, isCurrency: true, subtext: "Awaiting collection", tone: "amber" },
+    { id: "overdue", icon: AlertCircle, label: "Overdue", value: formatINR(kpis.overdue), numericValue: kpis.overdue, isCurrency: true, subtext: `${kpis.overdueCount} invoice${kpis.overdueCount !== 1 ? "s" : ""} overdue`, tone: "rose" },
+    { id: "drafts", icon: FileText, label: "Drafts", value: String(kpis.draftCount), numericValue: kpis.draftCount, subtext: kpis.draftCount === 0 ? "No draft invoices" : "Awaiting action", tone: "zinc" },
+    { id: "tax", icon: TrendingUp, label: "Tax Collected", value: formatINR(kpis.taxCollected), numericValue: kpis.taxCollected, isCurrency: true, subtext: "On paid invoices", tone: "teal" },
+    { id: "rate", icon: BarChart3, label: "Collection Rate", value: `${rate}%`, numericValue: rate, isPercent: true, subtext: `${formatINR(kpis.paidAmount)} collected`, tone: "indigo" },
   ];
 
   const defaultOrder = allCards.map((c) => c.id);
@@ -710,7 +779,7 @@ function DraggableKpiGrid({ kpis }: { kpis: any }) {
           onDragEnd={handleDragEnd}
           className={cn("h-full transition-all", dragId === card.id && "opacity-50 scale-95")}
         >
-          <KpiCard icon={card.icon} label={card.label} value={card.value} subtext={card.subtext} tone={card.tone} />
+          <KpiCard icon={card.icon} label={card.label} value={card.value} numericValue={card.numericValue} isCurrency={card.isCurrency} isPercent={card.isPercent} subtext={card.subtext} tone={card.tone} />
         </div>
       ))}
     </div>

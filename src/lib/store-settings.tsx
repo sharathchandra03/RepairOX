@@ -77,6 +77,9 @@ export type StoreSettings = {
   warrantyText: string;
   printFooter: string;
   printSlogan: string;
+
+  /* Ticket Status Colors — configurable from Settings → Tickets */
+  statusColors: Record<string, string>;
 };
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -138,6 +141,16 @@ WARRANTY IS VOID IF:
 - Receipt is not presented at time of claim.`,
   printFooter: "Thank you for choosing RepairOX!",
   printSlogan: "Your device, our expertise.",
+
+  statusColors: {
+    in_progress: "#3B82F6",
+    waiting_approval: "#F59E0B",
+    waiting_parts: "#F97316",
+    repaired: "#10B981",
+    repaired_collected: "#059669",
+    return: "#F43F5E",
+    return_collected: "#71717A",
+  },
 };
 
 /* ─── DB ↔ Client field mapping ──────────────────────────────────────── */
@@ -179,6 +192,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     warrantyText: (row.warranty_text as string) ?? DEFAULT_STORE_SETTINGS.warrantyText,
     printFooter: (row.print_footer as string) ?? DEFAULT_STORE_SETTINGS.printFooter,
     printSlogan: (row.print_slogan as string) ?? DEFAULT_STORE_SETTINGS.printSlogan,
+    statusColors: row.status_colors ? (typeof row.status_colors === "string" ? JSON.parse(row.status_colors as string) : row.status_colors as Record<string, string>) : DEFAULT_STORE_SETTINGS.statusColors,
   };
 }
 
@@ -219,6 +233,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     warrantyText: "warranty_text",
     printFooter: "print_footer",
     printSlogan: "print_slogan",
+    statusColors: "status_colors",
   };
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {
