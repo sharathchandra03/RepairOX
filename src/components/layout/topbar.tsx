@@ -1,14 +1,14 @@
 "use client";
 
 import {
-  Search, Bell, HelpCircle, MoreHorizontal, ChevronDown, Menu,
+  Bell, HelpCircle, MoreHorizontal, ChevronDown, Menu,
   ShoppingBag, Check, LayoutGrid, LogOut,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
-import { useState } from "react";
 import { cn } from "@/lib/utils";
+import { UniversalSearch } from "@/components/layout/universal-search";
 import { useRouter } from "next/navigation";
 import { navGroups } from "@/lib/mock-data";
 import {
@@ -26,7 +26,6 @@ export function Topbar({
   activeWorkspace: WorkspaceId;
   setActiveWorkspace: (id: WorkspaceId) => void;
 }) {
-  const [focused, setFocused] = useState(false);
   const router = useRouter();
   const meta = WORKSPACE_MAP[activeWorkspace];
   const { allowedWorkspaces: allowed, role, isPreviewing, currentUser, logout } = usePermissions();
@@ -109,26 +108,8 @@ export function Topbar({
           )}
         </div>
 
-        {/* Search pill */}
-        <div
-          className={cn(
-            "relative flex h-9 min-w-0 flex-1 max-w-[360px] items-center gap-2 rounded-full border px-3.5 transition-all duration-200",
-            focused
-              ? "border-[#4361EE]/40 bg-white shadow-[0_0_0_3px_rgba(67,97,238,0.12)]"
-              : "border-border bg-slate-100/80 hover:bg-slate-100"
-          )}
-        >
-          <Search className={cn("h-3.5 w-3.5 shrink-0 transition-colors", focused ? "text-[#4361EE]" : "text-zinc-400")} />
-          <input
-            placeholder="Search..."
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            className="h-full min-w-0 flex-1 border-0 bg-transparent text-[13px] text-zinc-800 placeholder:text-zinc-400 outline-none focus:outline-none focus:ring-0"
-          />
-          <kbd className="hidden shrink-0 items-center gap-0.5 rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-zinc-200 sm:inline-flex">
-            ⌘S
-          </kbd>
-        </div>
+        {/* Universal Search */}
+        <UniversalSearch />
 
         <div className="flex-1" />
 
