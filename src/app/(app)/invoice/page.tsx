@@ -8,7 +8,7 @@ import {
   Plus, Download, Search, Eye, Pencil, MoreHorizontal,
   Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
-  PieChart, Settings2, GripVertical, RefreshCw,
+  PieChart, Settings2, GripVertical, RefreshCw, ChevronUp,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -122,6 +122,8 @@ export default function InvoicePage() {
     canDownload,
   } = usePdfDownload();
 
+  const [dashboardExpanded, setDashboardExpanded] = useState(true);
+
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -197,74 +199,111 @@ export default function InvoicePage() {
         </>}
       />
 
-      {/* KPI Cards — Draggable */}
-      <DraggableKpiGrid kpis={kpis} />
+      {/* Dashboard — Collapsible Section */}
+      <div>
+        {/* Dashboard Header with Toggle */}
+        <div className="flex items-center justify-between mb-4">
+          <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Dashboard Overview</p>
+          <button
+            onClick={() => setDashboardExpanded((prev) => !prev)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-border/70 bg-card text-muted-foreground shadow-sm transition-all duration-200 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#4361EE]/30 active:scale-95"
+            aria-label={dashboardExpanded ? "Collapse dashboard" : "Expand dashboard"}
+          >
+            <motion.span
+              animate={{ rotate: dashboardExpanded ? 0 : 180 }}
+              transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+              className="inline-flex"
+            >
+              <ChevronUp className="h-4 w-4" />
+            </motion.span>
+          </button>
+        </div>
 
-      {/* Analytics — Invoice Status + Payment Overview */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-        {/* Invoice Status */}
-        <div className="rounded-[10px] border border-border/70 bg-card p-6 shadow-card">
-          <div className="mb-5 flex items-center gap-2.5">
-            <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
-              <PieChart className="h-3.5 w-3.5" />
-            </span>
-            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice Status</p>
-          </div>
+        {/* Collapsible Content — Framer Motion for buttery smooth animation */}
+        <motion.div
+          initial={false}
+          animate={{
+            height: dashboardExpanded ? "auto" : 0,
+            opacity: dashboardExpanded ? 1 : 0,
+          }}
+          transition={{
+            height: { duration: 0.35, ease: [0.4, 0, 0.2, 1] },
+            opacity: { duration: dashboardExpanded ? 0.3 : 0.15, ease: "easeInOut" },
+          }}
+          className="overflow-hidden"
+        >
+          <div className="space-y-6 pb-1">
+              {/* KPI Cards — Draggable */}
+              <DraggableKpiGrid kpis={kpis} />
 
-          <div className="space-y-4">
-            {invoiceStatusView.rows.map((row) => {
-              const pct = (row.count / invoiceStatusView.denom) * 100;
-              const c = STATUS_BAR_TONES[row.color];
-              return (
-                <div key={row.key} className="flex items-center gap-4">
-                  <div className="w-[68px] shrink-0">
-                    <div className="flex items-center gap-1.5">
-                      <span className={cn("h-2 w-2 rounded-full", c.dot)} />
-                      <span className="text-[13px] font-semibold text-foreground">{row.label}</span>
-                    </div>
-                    <p className="mt-0.5 pl-3.5 text-[11px] text-muted-foreground">{row.count} invoice{row.count !== 1 ? "s" : ""}</p>
+              {/* Analytics — Invoice Status + Payment Overview */}
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+                {/* Invoice Status */}
+                <div className="rounded-[10px] border border-border/70 bg-card p-6 shadow-card">
+                  <div className="mb-5 flex items-center gap-2.5">
+                    <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
+                      <PieChart className="h-3.5 w-3.5" />
+                    </span>
+                    <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice Status</p>
                   </div>
-                  <div className="relative h-2.5 flex-1 overflow-hidden rounded-[4px] bg-muted/70 shadow-[inset_0_1px_2px_rgba(20,30,80,0.07)]">
-                    <motion.div
-                      initial={{ width: 0 }}
-                      animate={{ width: `${pct}%` }}
-                      transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
-                      className={cn("h-full rounded-[4px] shadow-[0_1px_3px_-1px_rgba(20,30,80,0.4)]", c.bar)}
-                    />
+
+                  <div className="space-y-4">
+                    {invoiceStatusView.rows.map((row) => {
+                      const pct = (row.count / invoiceStatusView.denom) * 100;
+                      const c = STATUS_BAR_TONES[row.color];
+                      return (
+                        <div key={row.key} className="flex items-center gap-4">
+                          <div className="w-[68px] shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className={cn("h-2 w-2 rounded-full", c.dot)} />
+                              <span className="text-[13px] font-semibold text-foreground">{row.label}</span>
+                            </div>
+                            <p className="mt-0.5 pl-3.5 text-[11px] text-muted-foreground">{row.count} invoice{row.count !== 1 ? "s" : ""}</p>
+                          </div>
+                          <div className="relative h-2.5 flex-1 overflow-hidden rounded-[4px] bg-muted/70 shadow-[inset_0_1px_2px_rgba(20,30,80,0.07)]">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+                              className={cn("h-full rounded-[4px] shadow-[0_1px_3px_-1px_rgba(20,30,80,0.4)]", c.bar)}
+                            />
+                          </div>
+                          <span className="w-12 text-right text-[13px] font-bold tabular-nums text-foreground">{pct.toFixed(1)}%</span>
+                        </div>
+                      );
+                    })}
                   </div>
-                  <span className="w-12 text-right text-[13px] font-bold tabular-nums text-foreground">{pct.toFixed(1)}%</span>
+
+                  {/* Statistics footer */}
+                  <div className="mt-6 grid grid-cols-3 overflow-hidden rounded-[10px] border border-border/60 bg-muted/30">
+                    <StatFooterItem label="Total" value={invoiceStatusView.total} sub="Invoices" />
+                    <StatFooterItem label="Completed" value={invoiceStatusView.completed} sub="Invoices" divider />
+                    <StatFooterItem label="Pending" value={invoiceStatusView.pending} sub="Invoices" divider />
+                  </div>
                 </div>
-              );
-            })}
-          </div>
 
-          {/* Statistics footer */}
-          <div className="mt-6 grid grid-cols-3 overflow-hidden rounded-[10px] border border-border/60 bg-muted/30">
-            <StatFooterItem label="Total" value={invoiceStatusView.total} sub="Invoices" />
-            <StatFooterItem label="Completed" value={invoiceStatusView.completed} sub="Invoices" divider />
-            <StatFooterItem label="Pending" value={invoiceStatusView.pending} sub="Invoices" divider />
-          </div>
-        </div>
-
-        {/* Payment Overview */}
-        <div className="rounded-[10px] border border-border/70 bg-card p-6 shadow-card">
-          <div className="mb-5 flex items-center gap-2.5">
-            <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
-              <BarChart3 className="h-3.5 w-3.5" />
-            </span>
-            <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Payment Overview</p>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <PaymentCard tone="emerald" icon={CreditCard} label="Collected" value={formatINR(kpis.paidAmount)} numericValue={kpis.paidAmount}
-              sub={`${kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0}% of total`} />
-            <PaymentCard tone="rose" icon={AlertCircle} label="Outstanding" value={formatINR(kpis.pending + kpis.overdue)} numericValue={kpis.pending + kpis.overdue}
-              sub={`${kpis.overdueCount} overdue`} />
-            <PaymentCard tone="amber" icon={Receipt} label="Tax (GST)" value={formatINR(kpis.taxCollected)} numericValue={kpis.taxCollected}
-              sub="on paid invoices" />
-            <PaymentCard tone="brand" icon={FileText} label="Avg Invoice" value={formatINR(kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0)} numericValue={kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0}
-              sub={`${kpis.totalInvoices} total`} />
-          </div>
-        </div>
+                {/* Payment Overview */}
+                <div className="rounded-[10px] border border-border/70 bg-card p-6 shadow-card">
+                  <div className="mb-5 flex items-center gap-2.5">
+                    <span className="grid h-7 w-7 place-items-center rounded-[8px] bg-muted/70 text-muted-foreground">
+                      <BarChart3 className="h-3.5 w-3.5" />
+                    </span>
+                    <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Payment Overview</p>
+                  </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <PaymentCard tone="emerald" icon={CreditCard} label="Collected" value={formatINR(kpis.paidAmount)} numericValue={kpis.paidAmount}
+                      sub={`${kpis.totalRevenue > 0 ? Math.round((kpis.paidAmount / kpis.totalRevenue) * 100) : 0}% of total`} />
+                    <PaymentCard tone="rose" icon={AlertCircle} label="Outstanding" value={formatINR(kpis.pending + kpis.overdue)} numericValue={kpis.pending + kpis.overdue}
+                      sub={`${kpis.overdueCount} overdue`} />
+                    <PaymentCard tone="amber" icon={Receipt} label="Tax (GST)" value={formatINR(kpis.taxCollected)} numericValue={kpis.taxCollected}
+                      sub="on paid invoices" />
+                    <PaymentCard tone="brand" icon={FileText} label="Avg Invoice" value={formatINR(kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0)} numericValue={kpis.totalInvoices > 0 ? Math.round(kpis.totalRevenue / kpis.totalInvoices) : 0}
+                      sub={`${kpis.totalInvoices} total`} />
+                  </div>
+                </div>
+              </div>
+            </div>
+        </motion.div>
       </div>
 
       {/* Filter System */}
@@ -613,7 +652,7 @@ function renderInvCell(
     case "total": return <span className="font-semibold tabular-nums">{formatINR(inv.total)}</span>;
     case "actions": return (
       <div className="flex items-center justify-end gap-1">
-        <button onClick={onView} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="View"><Eye className="h-3.5 w-3.5" /></button>
+        <button onClick={onPrint} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="Preview"><Eye className="h-3.5 w-3.5" /></button>
         <button onClick={onEdit} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
         <Dropdown align="right" width="w-44" trigger={({ toggle }) => (
           <button onClick={toggle} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="More"><MoreHorizontal className="h-4 w-4" /></button>

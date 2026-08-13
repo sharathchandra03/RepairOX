@@ -148,8 +148,9 @@ type WizardData = {
   /** Index of the currently active/expanded device */
   activeDeviceIndex: number;
   contactType: "personal" | "business";
-  gstRate: number;
-  customGstRate?: boolean;
+  cgstRate: number;
+  igstRate: number;
+  customTaxRate?: boolean;
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
   files: string[];
@@ -166,7 +167,8 @@ const DEFAULT: WizardData = {
   devices: [createWizardDevice()],
   activeDeviceIndex: 0,
   contactType: "personal",
-  gstRate: 18,
+  cgstRate: 9,
+  igstRate: 9,
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
   files: [],
@@ -225,8 +227,9 @@ function ticketToWizard(t: Ticket): WizardData {
       category,
       devices,
       activeDeviceIndex: 0,
-      contactType: t.company ? "business" : "personal",
-      gstRate: 18,
+      contactType: t.customerType || (t.company ? "business" : "personal"),
+      cgstRate: t.cgstRate ?? 9,
+      igstRate: t.igstRate ?? 9,
       customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
       customerId: (t as any).customerId || null,
       files: [],
@@ -271,8 +274,9 @@ function ticketToWizard(t: Ticket): WizardData {
     category,
     devices: [singleDevice],
     activeDeviceIndex: 0,
-    contactType: t.company ? "business" : "personal",
-    gstRate: 18,
+    contactType: t.customerType || (t.company ? "business" : "personal"),
+    cgstRate: t.cgstRate ?? 9,
+    igstRate: t.igstRate ?? 9,
     customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     customerId: (t as any).customerId || null,
     files: [],
@@ -407,6 +411,12 @@ function NewTicketWizard() {
 
     // Total amount across all devices
     const totalAmount = deviceRecords.reduce((s, dr) => s + dr.estimate, 0);
+    // Tax computation: CGST + IGST on subtotal
+    const ticketCgstRate = data.cgstRate ?? 0;
+    const ticketIgstRate = data.igstRate ?? 0;
+    const ticketCgst = Math.round(totalAmount * (ticketCgstRate / 100));
+    const ticketIgst = Math.round(totalAmount * (ticketIgstRate / 100));
+    const ticketTotal = totalAmount + ticketCgst + ticketIgst;
 
     const ticketData: Ticket = {
       id: editId || genId(),
@@ -437,7 +447,7 @@ function NewTicketWizard() {
       createdAt,
       dueDate,
       resolutionMinutes: resMinutes,
-      amount: totalAmount,
+      amount: ticketTotal,
       service: deviceRecords.length > 1
         ? `${deviceRecords.length} device repair`
         : (primaryDevice.job.issue || "Repair"),
@@ -446,6 +456,10 @@ function NewTicketWizard() {
       internalNotes: primaryDevice.job.notes || undefined,
       customerId: finalCustomerId || undefined,
       customerType: data.contactType as "personal" | "business",
+      cgstRate: ticketCgstRate || undefined,
+      igstRate: ticketIgstRate || undefined,
+      cgst: ticketCgst || undefined,
+      igst: ticketIgst || undefined,
       // Multi-device data — always store for data consistency
       devices: deviceRecords,
     };
@@ -467,7 +481,7 @@ function NewTicketWizard() {
             totalTickets: cust.totalTickets + 1,
             totalRepairs: cust.totalRepairs + 1,
             lastVisit: new Date().toISOString(),
-            lifetimeValue: cust.lifetimeValue + totalAmount,
+            lifetimeValue: cust.lifetimeValue + ticketTotal,
           });
         }
       }
@@ -541,6 +555,7 @@ function NewTicketWizard() {
               value={data.process}
               onChange={(id) => {
                 if (id === "invoice") { router.push("/invoice/create"); return; }
+                if (id === "stock") { router.push("/inventory/add-item"); return; }
                 if (id === "walkin") { router.push("/walk-in"); return; }
                 setData({ ...data, process: id }); setTimeout(next, 180);
               }}
@@ -1050,11 +1065,11 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
       )}
 
     <div ref={formRef} className={FORM_CARD_COMPACT}>
-      <div className="grid grid-cols-1 gap-x-4 gap-y-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-x-4 gap-y-6 lg:grid-cols-2">
         {/* Left Column — Device Identity */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <SectionLabel icon={Package}>Device Identity</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2">
             {/* Brand Combobox */}
             <div className="relative">
               <Field label="Brand Name">
@@ -1187,9 +1202,9 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         </div>
 
         {/* Right Column — Intake */}
-        <div className="space-y-2">
+        <div className="space-y-3">
           <SectionLabel icon={ListPlus}>Intake Details</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2">
             <Field label="Type">
               <RSelect value={d.type} onChange={(v) => set("type", v)} placeholder="Select type" options={[
                 { label: "Walk-In", value: "walkin" },
@@ -1237,7 +1252,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
       </div>
 
       {/* + Add Device & Next */}
-      <div className="mt-4 flex items-center justify-between gap-3">
+      <div className="mt-6 flex items-center justify-between gap-3">
         <motion.button
           type="button"
           onClick={addNewDevice}
@@ -1663,7 +1678,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
 }
 
 const FORM_CARD = "rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 sm:p-8 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
-const FORM_CARD_COMPACT = "rounded-[16px] border border-[#E2E8F8]/80 bg-[#F7FAFF] px-5 py-3 sm:px-6 sm:py-3.5 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
+const FORM_CARD_COMPACT = "rounded-[16px] border border-[#E2E8F8]/80 bg-[#F7FAFF] px-5 py-7 sm:px-6 sm:py-8 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)]";
 
 /** Inline device tab switcher — shown above Job Details & Parts steps when multiple devices exist */
 function DeviceSwitcher({ data, setData }: { data: any; setData: (d: any) => void }) {
@@ -2298,18 +2313,27 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
   // Subtotal: estimate (service/labor charges) + parts (material costs) when both exist
   const subtotal = (estimatesTotal + partsTotal) || 0;
-  const isBusiness = data.contactType === "business";
-  const gstRate = data.gstRate || (data.customGstRate ? 0 : 18);
-  const tax = isBusiness ? Math.round(subtotal * (gstRate / 100)) : 0;
+
+  // Tax: CGST + IGST — available for BOTH Personal and Business
+  const cgstRate = data.cgstRate ?? 9;
+  const igstRate = data.igstRate ?? 9;
+  const cgstAmt = Math.round(subtotal * (cgstRate / 100));
+  const igstAmt = Math.round(subtotal * (igstRate / 100));
+  const tax = cgstAmt + igstAmt;
   const total = subtotal + tax;
 
-  // Local raw string state for custom GST input — allows full editing freedom
-  const [customGstRaw, setCustomGstRaw] = useState<string>(data.customGstRate ? (gstRate === 0 ? "" : String(gstRate)) : "");
-  const [customGstFocused, setCustomGstFocused] = useState(false);
+  // Custom tax mode: when true, CGST and IGST can differ
+  const isCustom = !!data.customTaxRate;
+
+  // Helper: set both rates to the same value (linked mode)
+  const setLinkedRate = (rate: number) => {
+    if (setData) setData({ ...data, cgstRate: rate, igstRate: rate, customTaxRate: false });
+  };
+
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
-        {/* Line Items Table */}
+        {/* Left Panel — Itemized Quote (no tax rows) */}
         <div className="rounded-2xl border border-border overflow-hidden">
           <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
@@ -2322,7 +2346,6 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
             const devTotal = devEstimate + devPartsTotal;
             return (
               <div key={d.id}>
-                {/* Device header */}
                 <div className="grid grid-cols-3 px-4 py-3 text-sm bg-background border-t border-border">
                   <div>
                     <span className="font-medium">{d.job.issue || "Repair"}</span>
@@ -2331,13 +2354,11 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                   <div className="text-center">1</div>
                   <div className="text-right tnum font-medium">{formatINR(devTotal)}</div>
                 </div>
-                {/* Device parts */}
                 {d.parts.map((p: any, pi: number) => (
                   <div key={pi} className="grid grid-cols-3 px-4 py-2 text-[13px] text-muted-foreground bg-muted/20 border-t border-border/50 pl-7">
                     <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
                   </div>
                 ))}
-                {/* Device estimate (service charges) */}
                 {devEstimate > 0 && (
                   <div className="grid grid-cols-3 px-4 py-2 text-[13px] text-muted-foreground bg-muted/20 border-t border-border/50 pl-7">
                     <div>Service Charges</div><div className="text-center">1</div><div className="text-right tnum">{formatINR(devEstimate)}</div>
@@ -2352,7 +2373,7 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
               <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
             </div>
           ))}
-          {/* Single device: always show estimate as a line item when present */}
+          {/* Single device: show estimate as a line item when present */}
           {data.devices.length <= 1 && estimatesTotal > 0 && (
             <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
               <div className="font-medium">Estimate</div>
@@ -2364,40 +2385,36 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
           {allParts.length === 0 && estimatesTotal === 0 && (
             <div className="p-6 text-center text-sm text-muted-foreground">No parts or estimate added.</div>
           )}
-          {/* GST row for business */}
-          {isBusiness && (
-            <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-muted/30">
-              <div className="font-medium">GST ({gstRate}%)</div><div className="text-center">—</div><div className="text-right tnum">{formatINR(tax)}</div>
-            </div>
-          )}
         </div>
 
-        {/* Right Summary Panel */}
+        {/* Right Panel — Tax + Total (single source of truth) */}
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
             {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(subtotal)} />}
-            {data.devices.length <= 1 && estimatesTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
+            {data.devices.length <= 1 && estimatesTotal > 0 && partsTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
             {data.devices.length <= 1 && partsTotal > 0 && <QRow k="Parts" v={formatINR(partsTotal)} />}
-            {data.devices.length <= 1 && <QRow k="Sub-total" v={formatINR(subtotal)} />}
-            {isBusiness && <QRow k={`GST (${gstRate}%)`} v={formatINR(tax)} />}
+            <QRow k="Sub-total" v={formatINR(subtotal)} />
+            {cgstAmt > 0 && <QRow k={`CGST (${cgstRate}%)`} v={formatINR(cgstAmt)} />}
+            {igstAmt > 0 && <QRow k={`IGST (${igstRate}%)`} v={formatINR(igstAmt)} />}
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
 
-          {/* GST Rate selector for Business */}
-          {isBusiness && setData && (
+          {/* Tax Rate Controls */}
+          {setData && (
             <div className="mt-4 pt-3 border-t border-border">
-              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">GST Rate</Label>
-              <div className="mt-1.5 flex items-center gap-1.5">
-                {[5, 12, 18].map((rate) => (
+              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Tax Rate</Label>
+              {/* Linked preset pills — sets BOTH CGST and IGST to the same rate */}
+              <div className="mt-2 flex items-center gap-1.5">
+                {[0, 2.5, 5, 9, 12].map((rate) => (
                   <button
                     key={rate}
                     type="button"
-                    onClick={() => setData({ ...data, gstRate: rate, customGstRate: false })}
+                    onClick={() => setLinkedRate(rate)}
                     className={cn(
-                      "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
-                      gstRate === rate && !data.customGstRate
+                      "flex-1 rounded-lg px-1.5 py-1.5 text-[11px] font-semibold transition-all text-center",
+                      cgstRate === rate && igstRate === rate && !isCustom
                         ? "bg-[#4361EE] text-white shadow-sm"
                         : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
                     )}
@@ -2407,10 +2424,10 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                 ))}
                 <button
                   type="button"
-                  onClick={() => setData({ ...data, customGstRate: true })}
+                  onClick={() => setData({ ...data, customTaxRate: true })}
                   className={cn(
-                    "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
-                    data.customGstRate
+                    "flex-1 rounded-lg px-1.5 py-1.5 text-[11px] font-semibold transition-all text-center",
+                    isCustom
                       ? "bg-[#4361EE] text-white shadow-sm"
                       : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
                   )}
@@ -2418,37 +2435,49 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                   Custom
                 </button>
               </div>
-              {data.customGstRate && (
-                <div className="mt-2 flex items-center gap-2">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={customGstFocused ? customGstRaw : (gstRate === 0 ? "" : String(gstRate))}
-                    onFocus={() => {
-                      setCustomGstFocused(true);
-                      setCustomGstRaw(gstRate === 0 ? "" : String(gstRate));
-                    }}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/[^0-9.]/g, "");
-                      setCustomGstRaw(raw);
-                      const v = parseFloat(raw);
-                      if (!isNaN(v) && v >= 0 && v <= 100) {
-                        setData({ ...data, gstRate: v, customGstRate: true });
-                      } else if (raw === "" || raw === ".") {
-                        setData({ ...data, gstRate: 0, customGstRate: true });
-                      }
-                    }}
-                    onBlur={() => {
-                      setCustomGstFocused(false);
-                      const v = parseFloat(customGstRaw);
-                      if (isNaN(v) || customGstRaw === "") {
-                        setData({ ...data, gstRate: 0, customGstRate: true });
-                      }
-                    }}
-                    placeholder="Rate"
-                    className="h-9 w-20 rounded-lg border border-border bg-card px-2.5 text-sm font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-                  />
-                  <span className="text-[12px] font-medium text-muted-foreground">%</span>
+
+              {/* Custom rate inputs — separate CGST / IGST */}
+              {isCustom && (
+                <div className="mt-3 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-muted-foreground w-11">CGST</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={String(cgstRate)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9.]/g, "");
+                        const v = parseFloat(raw);
+                        if (!isNaN(v) && v >= 0 && v <= 100) {
+                          setData({ ...data, cgstRate: v, igstRate: v, customTaxRate: true });
+                        } else if (raw === "" || raw === "0") {
+                          setData({ ...data, cgstRate: 0, igstRate: 0, customTaxRate: true });
+                        }
+                      }}
+                      className="h-8 w-20 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+                    />
+                    <span className="text-[11px] text-muted-foreground">%</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-[11px] font-medium text-muted-foreground w-11">IGST</span>
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={String(igstRate)}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9.]/g, "");
+                        const v = parseFloat(raw);
+                        if (!isNaN(v) && v >= 0 && v <= 100) {
+                          setData({ ...data, igstRate: v, cgstRate: v, customTaxRate: true });
+                        } else if (raw === "" || raw === "0") {
+                          setData({ ...data, igstRate: 0, cgstRate: 0, customTaxRate: true });
+                        }
+                      }}
+                      className="h-8 w-20 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+                    />
+                    <span className="text-[11px] text-muted-foreground">%</span>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">Both rates stay in sync. Change either to update both.</p>
                 </div>
               )}
             </div>

@@ -127,7 +127,7 @@ function searchTickets(tickets: Ticket[], query: string): TicketResult[] {
         amount: t.amount,
         dueDate: t.dueDate,
         imei: t.items?.[0]?.serial || t.devices?.[0]?.imei || undefined,
-        href: `/tickets?id=${t.id}`,
+        href: `/tickets/${t.id}`,
       });
     }
     if (results.length >= 20) break;
@@ -154,7 +154,7 @@ function searchInvoices(invoices: Invoice[], query: string): InvoiceResult[] {
         category: inv.serviceCategory,
         amount: inv.total,
         status: inv.status,
-        href: `/invoice?id=${inv.id}`,
+        href: `/invoice/${inv.id}`,
       });
     }
     if (results.length >= 20) break;

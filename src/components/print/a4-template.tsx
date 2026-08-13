@@ -2,6 +2,7 @@
 
 import type { PrintDocumentData } from "@/lib/print-utils";
 import { formatPrintCurrency, formatPrintDate, formatPrintTime, formatPrintDateTime } from "@/lib/print-utils";
+import { formatWarranty } from "@/lib/mock-data";
 
 /* ─── A4 Print Template ──────────────────────────────────────────────── */
 
@@ -197,7 +198,7 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                     {dev.issue && <div><span className="text-gray-500">Issue:</span> <span className="font-medium">{dev.issue}</span></div>}
                     {dev.technician && <div><span className="text-gray-500">Technician:</span> <span className="font-medium">{dev.technician}</span></div>}
                     {dev.priority && dev.priority !== "normal" && <div><span className="text-gray-500">Priority:</span> <span className="font-medium capitalize">{dev.priority}</span></div>}
-                    {dev.warranty && <div><span className="text-gray-500">Warranty:</span> <span className="font-medium">{dev.warranty}</span></div>}
+                    {(dev.warrantyValue || dev.warranty) && <div><span className="text-gray-500">Warranty:</span> <span className="font-medium">{formatWarranty(dev.warrantyValue, dev.warrantyUnit, dev.warranty)}</span></div>}
                   </div>
                   {/* Parts table */}
                   <table className="w-full text-[10px] border-collapse">
@@ -279,12 +280,25 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                   <span className="font-medium text-green-700">-{formatPrintCurrency(invoice.discount)}</span>
                 </div>
               )}
-              {invoice.tax > 0 && (
+              {invoice.cgst && invoice.cgst > 0 ? (
+                <>
+                  <div className="flex justify-between py-0.5">
+                    <span className="text-gray-600">CGST ({invoice.cgstRate || 9}%)</span>
+                    <span className="font-medium">{formatPrintCurrency(invoice.cgst)}</span>
+                  </div>
+                  {invoice.igst !== undefined && invoice.igst > 0 && (
+                    <div className="flex justify-between py-0.5">
+                      <span className="text-gray-600">IGST ({invoice.igstRate || 9}%)</span>
+                      <span className="font-medium">{formatPrintCurrency(invoice.igst)}</span>
+                    </div>
+                  )}
+                </>
+              ) : invoice.tax > 0 ? (
                 <div className="flex justify-between py-0.5">
                   <span className="text-gray-600">Tax (GST)</span>
                   <span className="font-medium">{formatPrintCurrency(invoice.tax)}</span>
                 </div>
-              )}
+              ) : null}
               <div className="flex justify-between py-1.5 border-t-2 border-gray-800 font-bold text-sm">
                 <span>Total</span>
                 <span>{formatPrintCurrency(invoice.total)}</span>

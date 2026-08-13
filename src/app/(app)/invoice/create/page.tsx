@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, Suspense } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -46,6 +46,8 @@ type InvoiceFormDevice = {
   jobType: string;
   priority: string;
   warranty: string;
+  warrantyValue: string;
+  warrantyUnit: string;
   technician: string;
   notes: string;
   parts: InvoiceLineItem[];
@@ -60,7 +62,7 @@ type InvoiceFormData = {
   devices: InvoiceFormDevice[];
   /** Index of the active device being edited */
   activeDeviceIndex: number;
-  pricing: { discount: number; taxRate: number; paymentMode: string };
+  pricing: { discount: number; cgstRate: number; igstRate: number; paymentMode: string };
   notes: { notes: string; terms: string; slogan: string; footer: string };
 };
 
@@ -76,6 +78,8 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
     jobType: "service",
     priority: "normal",
     warranty: "",
+    warrantyValue: "",
+    warrantyUnit: "",
     technician: "",
     notes: "",
     parts: [],
@@ -89,7 +93,7 @@ const DEFAULT_FORM: InvoiceFormData = {
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
-  pricing: { discount: 0, taxRate: 18, paymentMode: "" },
+  pricing: { discount: 0, cgstRate: 9, igstRate: 9, paymentMode: "" },
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
 
@@ -201,6 +205,8 @@ function InvoiceWizard() {
               jobType: dev.jobType || "service",
               priority: dev.priority || "normal",
               warranty: dev.warranty || "",
+              warrantyValue: dev.warrantyValue ? String(dev.warrantyValue) : "",
+              warrantyUnit: dev.warrantyUnit || "",
               technician: dev.technician || "",
               notes: dev.notes || "",
               parts,
@@ -242,6 +248,11 @@ function InvoiceWizard() {
         items: flatItems,
         devices: formDevices.length > 0 ? formDevices : prev.devices,
         activeDeviceIndex: 0,
+        pricing: {
+          ...prev.pricing,
+          cgstRate: searchParams.get("cgstRate") != null ? Number(searchParams.get("cgstRate")) : prev.pricing.cgstRate,
+          igstRate: searchParams.get("igstRate") != null ? Number(searchParams.get("igstRate")) : prev.pricing.igstRate,
+        },
       }));
     }
   }, [searchParams, editId]);
@@ -274,9 +285,11 @@ function InvoiceWizard() {
     const subtotal = allItems.reduce((s, item) => s + item.total, 0);
     const discount = form.pricing.discount;
     const taxable = subtotal - discount;
-    const tax = Math.round(taxable * (form.pricing.taxRate / 100));
+    const cgst = Math.round(taxable * (form.pricing.cgstRate / 100));
+    const igst = Math.round(taxable * (form.pricing.igstRate / 100));
+    const tax = cgst + igst;
     const total = taxable + tax;
-    return { subtotal, discount, tax, total };
+    return { subtotal, discount, cgst, igst, tax, total };
   }, [form.devices, form.items, form.pricing]);
 
   // Submit
@@ -294,6 +307,8 @@ function InvoiceWizard() {
       jobType: d.jobType,
       priority: d.priority,
       warranty: d.warranty,
+      warrantyValue: d.warrantyValue ? Number(d.warrantyValue) : undefined,
+      warrantyUnit: (d.warrantyUnit || undefined) as "days" | "months" | "years" | undefined,
       technician: d.technician,
       parts: d.parts,
       notes: d.notes,
@@ -319,6 +334,10 @@ function InvoiceWizard() {
       subtotal: totals.subtotal,
       discount: totals.discount,
       tax: totals.tax,
+      cgst: totals.cgst,
+      igst: totals.igst,
+      cgstRate: form.pricing.cgstRate,
+      igstRate: form.pricing.igstRate,
       total: totals.total,
       notes: form.notes.notes || undefined,
       terms: form.notes.terms || undefined,
@@ -514,6 +533,8 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
         jobType: d.jobType,
         priority: d.priority,
         warranty: d.warranty,
+        warrantyValue: d.warrantyValue ? String(d.warrantyValue) : "",
+        warrantyUnit: d.warrantyUnit || "",
         technician: d.technician,
         notes: d.notes,
         parts: d.parts,
@@ -526,7 +547,7 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
-    pricing: { discount: inv.discount, taxRate: inv.tax > 0 && inv.subtotal > 0 ? Math.round((inv.tax / (inv.subtotal - inv.discount)) * 100) : 18, paymentMode: inv.paymentMode || "" },
+    pricing: { discount: inv.discount, cgstRate: inv.cgstRate ?? 9, igstRate: inv.igstRate ?? 9, paymentMode: inv.paymentMode || "" },
     notes: { notes: inv.notes || "", terms: inv.terms || "", slogan: inv.slogan || "", footer: inv.footer || "" },
   };
 }
@@ -565,7 +586,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
   return (
     <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
       {/* Invoice Type — compact inline selector */}
-      <div className="border-b border-border px-6 py-4 sm:px-8">
+      <div className="border-b border-border px-6 py-5 sm:px-8">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Invoice Type</p>
         <div className="flex gap-2">
           <button type="button" onClick={() => setType("retail")}
@@ -588,9 +609,9 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
       </div>
 
       {/* Customer Info */}
-      <div className="px-6 py-5 sm:px-8">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-4">Customer Information</p>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+      <div className="px-6 py-8 sm:px-8">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-5">Customer Information</p>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           {/* Customer Name with inline search */}
           <div className="space-y-1 relative">
             <Label>Customer Name *</Label>
@@ -647,10 +668,10 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
   const d = form.details;
   const set = (k: keyof typeof d, v: string) => updateForm((f) => ({ ...f, details: { ...f.details, [k]: v } }));
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-10">
       <h2 className="font-display text-lg font-bold mb-1">Invoice Details</h2>
-      <p className="text-sm text-muted-foreground mb-6">Reference, dates, and assignment.</p>
-      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+      <p className="text-sm text-muted-foreground mb-8">Reference, dates, and assignment.</p>
+      <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <div className="space-y-1.5">
           <Label>Invoice Type *</Label>
           <Select value={d.invoiceType} onChange={(e: any) => set("invoiceType", e.target.value)} options={[
@@ -665,7 +686,7 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
         </div>
         <div className="space-y-1.5"><Label>Reference/Invoice Number</Label><Input value={d.reference} onChange={(e: any) => set("reference", e.target.value)} placeholder="CORP-1758" /></div>
         <div className="space-y-1.5"><Label>Due Date</Label><Input type="date" value={d.dueDate} onChange={(e: any) => set("dueDate", e.target.value)} /></div>
-        <div className="space-y-1.5"><Label>Employee</Label><Input value={d.employee} onChange={(e: any) => set("employee", e.target.value)} placeholder="Anjali R." /></div>
+        <div className="space-y-1.5"><Label>Created by</Label><Input value={d.employee} onChange={(e: any) => set("employee", e.target.value)} placeholder="Anjali R." /></div>
         <div className="space-y-1.5"><Label>Linked Ticket</Label><Input value={d.ticketId} onChange={(e: any) => set("ticketId", e.target.value)} placeholder="T-1837 (optional)" /></div>
       </div>
     </div>
@@ -686,14 +707,14 @@ function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryI
     : [];
 
   return (
-    <div className="rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD]/30 p-3">
-      <div className="flex items-center gap-2 mb-2">
-        <Search className="h-4 w-4 text-[#4361EE]" />
-        <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search inventory by name, SKU, or category…" autoFocus className="flex-1" />
-        <button type="button" onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted transition"><X className="h-4 w-4" /></button>
+    <div className="relative">
+      <div className="flex items-center gap-2 rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD]/30 p-2.5">
+        <Search className="h-4 w-4 text-[#4361EE] shrink-0" />
+        <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search inventory by name, SKU, or category…" autoFocus className="flex-1 h-9" />
+        <button type="button" onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted transition"><X className="h-4 w-4" /></button>
       </div>
       {results.length > 0 && (
-        <div className="max-h-[220px] overflow-y-auto rounded-lg border border-border bg-card">
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[260px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
           {results.map((item) => {
             const available = item.currentStock - (item.reservedStock || 0);
             return (
@@ -714,7 +735,9 @@ function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryI
         </div>
       )}
       {q.trim().length >= 2 && results.length === 0 && (
-        <p className="text-center text-sm text-muted-foreground py-3">No inventory items match "{q}"</p>
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-border bg-card shadow-xl">
+          <p className="text-center text-sm text-muted-foreground py-3">No inventory items match &ldquo;{q}&rdquo;</p>
+        </div>
       )}
     </div>
   );
@@ -726,6 +749,16 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
   const [showInventorySearch, setShowInventorySearch] = useState(false);
+  const inventorySearchRef = useRef<HTMLDivElement>(null);
+
+  // Smooth scroll to inventory search when it opens
+  useEffect(() => {
+    if (showInventorySearch && inventorySearchRef.current) {
+      setTimeout(() => {
+        inventorySearchRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 50);
+    }
+  }, [showInventorySearch]);
 
   const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
 
@@ -797,7 +830,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
   return (
     <div className="space-y-4">
       {/* Device Tabs */}
-      <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+      <div className="rounded-2xl border border-border bg-card shadow-card">
         <div className="border-b border-border px-6 py-3 sm:px-8">
           <div className="flex items-center justify-between mb-2">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
@@ -845,7 +878,28 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                 onBrandChange={(v) => setDeviceField("brand", v)}
                 onModelChange={(v) => setDeviceField("model", v)}
               />
-              <div className="space-y-1"><Label>IMEI / Serial</Label><Input value={activeDevice.imei} onChange={(e: any) => setDeviceField("imei", e.target.value)} placeholder="356xxxxxxxxxx" className="font-mono" /></div>
+              <div className="space-y-1">
+                <Label>{/[a-zA-Z]/.test(activeDevice.imei) ? "Serial Number" : "IMEI"}</Label>
+                <Input
+                  value={activeDevice.imei}
+                  onChange={(e: any) => {
+                    const raw = e.target.value;
+                    const hasAlpha = /[a-zA-Z]/.test(raw);
+                    const maxLen = hasAlpha ? 15 : 16;
+                    const val = raw.slice(0, maxLen);
+                    updateForm((f) => ({
+                      ...f,
+                      devices: f.devices.map((d, i) => i === activeIdx
+                        ? { ...d, imei: val, imeiType: hasAlpha ? "serial" : "imei" }
+                        : d
+                      ),
+                    }));
+                  }}
+                  placeholder={/[a-zA-Z]/.test(activeDevice.imei) ? "e.g. ABC123XYZ" : "356xxxxxxxxxx"}
+                  maxLength={/[a-zA-Z]/.test(activeDevice.imei) ? 15 : 16}
+                  className="h-11 font-mono"
+                />
+              </div>
             </div>
           </div>
 
@@ -853,14 +907,14 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Job Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" /></div>
+              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-11" /></div>
               <div className="space-y-1">
                 <Label>Job Type</Label>
                 <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} options={[
                   { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
                 ]} />
               </div>
-              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" /></div>
+              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" className="h-11" /></div>
               <div className="space-y-1">
                 <Label>Priority</Label>
                 <Select value={activeDevice.priority} onChange={(e: any) => setDeviceField("priority", e.target.value)} options={[
@@ -869,11 +923,44 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
               </div>
               <div className="space-y-1">
                 <Label>Warranty</Label>
-                <Select value={activeDevice.warranty} onChange={(e: any) => setDeviceField("warranty", e.target.value)} options={[
-                  { label: "None", value: "" }, { label: "In Warranty", value: "in-warranty" }, { label: "Out of Warranty", value: "out-warranty" },
-                ]} />
+                <div className="flex gap-1.5">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    value={activeDevice.warrantyValue}
+                    onChange={(e) => {
+                      const val = e.target.value.replace(/[^0-9]/g, "");
+                      updateForm((f) => ({
+                        ...f,
+                        devices: f.devices.map((d, i) => i === activeIdx
+                          ? { ...d, warrantyValue: val, warranty: val && d.warrantyUnit ? `${val} ${d.warrantyUnit.charAt(0).toUpperCase() + d.warrantyUnit.slice(1)}` : "" }
+                          : d
+                        ),
+                      }));
+                    }}
+                    placeholder="0"
+                    className="h-11 w-[72px] rounded-xl border border-border bg-card px-2.5 text-sm font-medium text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                  />
+                  <div className="flex-1">
+                    <Select value={activeDevice.warrantyUnit} onChange={(e: any) => {
+                      const unit = e.target.value;
+                      updateForm((f) => ({
+                        ...f,
+                        devices: f.devices.map((d, i) => i === activeIdx
+                          ? { ...d, warrantyUnit: unit, warranty: d.warrantyValue && unit ? `${d.warrantyValue} ${unit.charAt(0).toUpperCase() + unit.slice(1)}` : "" }
+                          : d
+                        ),
+                      }));
+                    }} placeholder="Duration" options={[
+                      { label: "Days", value: "days" },
+                      { label: "Months", value: "months" },
+                      { label: "Years", value: "years" },
+                    ]} />
+                  </div>
+                </div>
               </div>
-              <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" /></div>
+              <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-11" /></div>
             </div>
           </div>
 
@@ -889,7 +976,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
             {/* Inventory Search Dropdown */}
             {showInventorySearch && (
-              <div className="mb-3">
+              <div className="relative z-30 mb-3" ref={inventorySearchRef}>
                 <InventorySearchBox
                   onSelect={(item) => {
                     updateForm((f) => ({
@@ -952,14 +1039,21 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
 /* ─── Step 4: Pricing ────────────────────────────────────────────────── */
 
-function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; tax: number; total: number } }) {
+function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; cgst: number; igst: number; tax: number; total: number } }) {
   const p = form.pricing;
   const d = form.details;
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8 max-w-2xl mx-auto">
       <h2 className="font-display text-lg font-bold mb-1">Pricing & Payment</h2>
       <p className="text-sm text-muted-foreground mb-6">Discount, tax, payment mode, and status.</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+        <div className="space-y-1.5">
+          <Label>Status</Label>
+          <Select value={d.status} onChange={(e: any) => updateForm((f) => ({ ...f, details: { ...f.details, status: e.target.value } }))} options={[
+            { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" }, { label: "Paid", value: "paid" },
+            { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
+          ]} />
+        </div>
         <div className="space-y-1.5">
           <Label>Mode of Payment</Label>
           <Select value={p.paymentMode} onChange={(e: any) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, paymentMode: e.target.value } }))} options={[
@@ -973,22 +1067,28 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
             { label: "Other", value: "other" },
           ]} />
         </div>
-        <div className="space-y-1.5">
-          <Label>Status</Label>
-          <Select value={d.status} onChange={(e: any) => updateForm((f) => ({ ...f, details: { ...f.details, status: e.target.value } }))} options={[
-            { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" }, { label: "Paid", value: "paid" },
-            { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
-          ]} />
-        </div>
         <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} /></div>
-        <div className="space-y-1.5"><Label>Tax Rate (%)</Label><NumericInput value={p.taxRate} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, taxRate: v } }))} /></div>
+        <div className="space-y-1.5">
+          <Label>Tax</Label>
+          <div className="flex gap-2">
+            <div className="flex-1 relative">
+              <NumericInput value={p.cgstRate} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, cgstRate: Math.max(0, Math.min(100, v)) } }))} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground pointer-events-none">CGST %</span>
+            </div>
+            <div className="flex-1 relative">
+              <NumericInput value={p.igstRate} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, igstRate: Math.max(0, Math.min(100, v)) } }))} />
+              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground pointer-events-none">IGST %</span>
+            </div>
+          </div>
+        </div>
       </div>
       {/* Summary */}
       <div className="mt-6 rounded-xl border border-border bg-gradient-to-b from-indigo-50/40 to-white p-5">
         <div className="space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums font-medium">{formatINR(totals.subtotal)}</span></div>
           {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
-          <div className="flex justify-between"><span className="text-muted-foreground">Tax ({p.taxRate}%)</span><span className="tabular-nums">{formatINR(totals.tax)}</span></div>
+          {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({p.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
+          {totals.igst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IGST ({p.igstRate}%)</span><span className="tabular-nums">{formatINR(totals.igst)}</span></div>}
           <div className="flex justify-between border-t border-border pt-2 text-base font-bold"><span>Total</span><span className="tabular-nums brand-gradient-text">{formatINR(totals.total)}</span></div>
         </div>
       </div>
@@ -1017,7 +1117,7 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
 
 /* ─── Step 6: Review ─────────────────────────────────────────────────── */
 
-function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; tax: number; total: number }; onSubmit: () => void; isEdit: boolean }) {
+function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; cgst: number; igst: number; tax: number; total: number }; onSubmit: () => void; isEdit: boolean }) {
   const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
   return (
     <div className="space-y-4">
@@ -1124,7 +1224,8 @@ function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData;
           <div className="w-full max-w-xs rounded-xl border border-border p-4 space-y-1.5 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatINR(totals.subtotal)}</span></div>
             {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
-            <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span className="tabular-nums">{formatINR(totals.tax)}</span></div>
+            {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({form.pricing.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
+            {totals.igst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IGST ({form.pricing.igstRate}%)</span><span className="tabular-nums">{formatINR(totals.igst)}</span></div>}
             <div className="flex justify-between border-t border-border pt-2 font-bold"><span>Total</span><span className="tabular-nums">{formatINR(totals.total)}</span></div>
           </div>
         </div>

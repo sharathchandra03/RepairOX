@@ -180,6 +180,9 @@ export default function TicketDetailPage() {
     if (ticket.customerType) params.set("customerType", ticket.customerType);
     params.set("amount", String(ticket.amount));
     if (ticket.technician) params.set("employee", ticket.technician);
+    // Pass tax rates so invoice inherits ticket's CGST/IGST
+    if (ticket.cgstRate != null) params.set("cgstRate", String(ticket.cgstRate));
+    if (ticket.igstRate != null) params.set("igstRate", String(ticket.igstRate));
 
     // Pass full device structure as JSON for multi-device invoice support
     const invoiceDevices = devices.map((dev) => ({
@@ -615,10 +618,11 @@ export default function TicketDetailPage() {
             action={<SectionEditButton onClick={() => setActiveEditor("billing")} />}
           >
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-              <DetailField label="Amount" value={formatINR(ticket.amount)} />
+              <DetailField label="Subtotal" value={formatINR(ticket.amount - (ticket.cgst || 0) - (ticket.igst || 0))} />
               <DetailField label="Discount" value={formatINR(ticket.discount || 0)} />
-              <DetailField label="Tax (18%)" value={formatINR(Math.round((ticket.amount - (ticket.discount || 0)) * 0.18))} />
-              <DetailField label="Total" value={formatINR(Math.round((ticket.amount - (ticket.discount || 0)) * 1.18))} highlight />
+              {(ticket.cgst != null && ticket.cgst > 0) && <DetailField label={`CGST (${ticket.cgstRate ?? 0}%)`} value={formatINR(ticket.cgst)} />}
+              {(ticket.igst != null && ticket.igst > 0) && <DetailField label={`IGST (${ticket.igstRate ?? 0}%)`} value={formatINR(ticket.igst)} />}
+              <DetailField label="Total" value={formatINR(ticket.amount)} highlight />
               <DetailField label="Payment State" value={ticket.status === "repaired_collected" || ticket.status === "return_collected" ? "Paid" : "Pending"} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Related Invoice</p>

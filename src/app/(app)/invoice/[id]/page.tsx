@@ -185,8 +185,12 @@ export default function InvoiceDetailPage() {
     });
     const subtotal = updatedItems.reduce((s, it) => s + it.total, 0);
     const taxable = subtotal - invoice.discount;
-    const tax = Math.round(taxable * (invoice.subtotal > 0 ? invoice.tax / invoice.subtotal : 0.18));
-    updateInvoice(invoice.id, { items: updatedItems, subtotal, tax, total: taxable + tax });
+    const cgstRate = invoice.cgstRate ?? 9;
+    const igstRate = invoice.igstRate ?? 9;
+    const cgst = Math.round(taxable * (cgstRate / 100));
+    const igst = Math.round(taxable * (igstRate / 100));
+    const tax = cgst + igst;
+    updateInvoice(invoice.id, { items: updatedItems, subtotal, cgst, igst, tax, total: taxable + tax });
     setShowItemsDrawer(false);
   }, [invoice, itemsDraft, updateInvoice]);
 
@@ -464,7 +468,14 @@ export default function InvoiceDetailPage() {
               <div className="space-y-2 text-sm">
                 <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums font-medium">{formatINR(invoice.subtotal)}</span></div>
                 {invoice.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(invoice.discount)}</span></div>}
-                <div className="flex justify-between"><span className="text-muted-foreground">Tax (GST)</span><span className="tabular-nums">{formatINR(invoice.tax)}</span></div>
+                {invoice.cgst && invoice.cgst > 0 ? (
+                  <>
+                    <div className="flex justify-between"><span className="text-muted-foreground">CGST ({invoice.cgstRate || 9}%)</span><span className="tabular-nums">{formatINR(invoice.cgst)}</span></div>
+                    {invoice.igst !== undefined && invoice.igst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IGST ({invoice.igstRate || 9}%)</span><span className="tabular-nums">{formatINR(invoice.igst)}</span></div>}
+                  </>
+                ) : invoice.tax > 0 ? (
+                  <div className="flex justify-between"><span className="text-muted-foreground">Tax (GST)</span><span className="tabular-nums">{formatINR(invoice.tax)}</span></div>
+                ) : null}
                 <div className="flex justify-between border-t border-border pt-2 text-base font-bold"><span>Total</span><span className="tabular-nums text-[#4361EE]">{formatINR(invoice.total)}</span></div>
               </div>
             </div>
@@ -802,17 +813,20 @@ export default function InvoiceDetailPage() {
         subtitle={`Invoice ${invoice.id}`}
         icon={CreditCard}
         width="max-w-sm"
-        initialValues={{ subtotal: String(invoice.subtotal), discount: String(invoice.discount), tax: String(invoice.tax) }}
+        initialValues={{ subtotal: String(invoice.subtotal), discount: String(invoice.discount), cgst: String(invoice.cgst || 0), igst: String(invoice.igst || 0) }}
         fields={[
           { key: "subtotal", label: "Subtotal (₹)", type: "number" },
           { key: "discount", label: "Discount (₹)", type: "number" },
-          { key: "tax", label: "Tax / GST (₹)", type: "number" },
+          { key: "cgst", label: "CGST (₹)", type: "number" },
+          { key: "igst", label: "IGST (₹)", type: "number" },
         ]}
         onSave={(v) => {
           const subtotal = Number(v.subtotal) || 0;
           const discount = Number(v.discount) || 0;
-          const tax = Number(v.tax) || 0;
-          updateInvoice(invoice.id, { subtotal, discount, tax, total: subtotal - discount + tax });
+          const cgst = Number(v.cgst) || 0;
+          const igst = Number(v.igst) || 0;
+          const tax = cgst + igst;
+          updateInvoice(invoice.id, { subtotal, discount, cgst, igst, tax, total: subtotal - discount + tax });
           setActiveEditor(null);
         }}
       />

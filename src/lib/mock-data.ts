@@ -260,6 +260,14 @@ export type Ticket = {
   qcStatus?: "pending" | "pass" | "fail";
   customerId?: string;
   customerType?: "personal" | "business";
+  /** CGST rate percentage (stored on ticket for quotation/invoice inheritance). */
+  cgstRate?: number;
+  /** IGST rate percentage (stored on ticket for quotation/invoice inheritance). */
+  igstRate?: number;
+  /** Computed CGST amount. */
+  cgst?: number;
+  /** Computed IGST amount. */
+  igst?: number;
   /** Multi-device support — when present, each device has its own record */
   devices?: DeviceRecord[];
 };
@@ -540,6 +548,10 @@ export type InvoiceDeviceRecord = {
   jobType: string;
   priority: string;
   warranty: string;
+  /** Structured warranty duration value (matches ticket model). */
+  warrantyValue?: number;
+  /** Warranty duration unit: "days" | "months" | "years" (matches ticket model). */
+  warrantyUnit?: "days" | "months" | "years";
   /** Assignment */
   technician: string;
   /** Parts assigned to this device */
@@ -563,6 +575,8 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
     jobType: "service",
     priority: "normal",
     warranty: "",
+    warrantyValue: undefined,
+    warrantyUnit: undefined,
     technician: "",
     parts: [],
     notes: "",
@@ -615,6 +629,8 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
     jobType: dev.jobType,
     priority: dev.priority,
     warranty: dev.warranty,
+    warrantyValue: dev.warrantyValue,
+    warrantyUnit: dev.warrantyUnit,
     technician: dev.assignedTo,
     parts,
     notes: dev.notes,
@@ -660,6 +676,14 @@ export type Invoice = {
   subtotal: number;
   discount: number;
   tax: number;
+  /** CGST amount (Central GST). */
+  cgst?: number;
+  /** IGST amount (Integrated GST). */
+  igst?: number;
+  /** CGST rate percentage. */
+  cgstRate?: number;
+  /** IGST rate percentage. */
+  igstRate?: number;
   total: number;
   notes?: string;
   terms?: string;

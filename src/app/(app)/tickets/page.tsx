@@ -167,6 +167,7 @@ export default function TicketsPage() {
   const [dateRange, setDateRange] = useState<DateRange>("all");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [techFilter, setTechFilter] = useState<string>("all");
+  const [customerTypeFilter, setCustomerTypeFilter] = useState<string>("all");
   const [q, setQ] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
@@ -240,7 +241,19 @@ export default function TicketsPage() {
       options: DATE_RANGES.map((d) => ({ label: d.label, value: d.value })),
       onChange: (v: string) => setDateRange(v as DateRange),
     },
-  ], [priorityFilter, techFilter, statusFilter, dateRange, technicians]);
+    {
+      id: "customerType",
+      label: "Customer Type",
+      type: "select" as const,
+      value: customerTypeFilter,
+      options: [
+        { label: "All Types", value: "all" },
+        { label: "Personal / Retail", value: "personal" },
+        { label: "Business / GST", value: "business" },
+      ],
+      onChange: (v: string) => setCustomerTypeFilter(v),
+    },
+  ], [priorityFilter, techFilter, statusFilter, dateRange, customerTypeFilter, technicians]);
 
   // Filtered list
   const list = useMemo(
@@ -250,14 +263,15 @@ export default function TicketsPage() {
         const okDate = isInDateRange(t.createdAt, dateRange);
         const okPriority = priorityFilter === "all" || t.priority === priorityFilter;
         const okTech = techFilter === "all" || t.technician === techFilter;
+        const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
         const okQ =
           !q ||
           `${t.id} ${t.customer} ${t.model} ${t.issue} ${t.phone} ${t.items?.map((i) => `${i.model} ${i.serial} ${i.issue}`).join(" ") || ""}`
             .toLowerCase()
             .includes(q.toLowerCase());
-        return okStatus && okDate && okPriority && okTech && okQ;
+        return okStatus && okDate && okPriority && okTech && okCustomerType && okQ;
       }),
-    [tickets, statusFilter, dateRange, priorityFilter, techFilter, q]
+    [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q]
   );
 
   // Ordered & visible columns
@@ -321,6 +335,9 @@ export default function TicketsPage() {
       if (ticket.customerType) p.set("customerType", ticket.customerType);
       p.set("amount", String(ticket.amount));
       if (ticket.technician) p.set("employee", ticket.technician);
+      // Pass tax rates so invoice inherits ticket's CGST/IGST
+      if (ticket.cgstRate != null) p.set("cgstRate", String(ticket.cgstRate));
+      if (ticket.igstRate != null) p.set("igstRate", String(ticket.igstRate));
 
       // Pass full device structure for multi-device invoice support
       const devices = getTicketDevices(ticket);
@@ -400,7 +417,7 @@ export default function TicketsPage() {
           <>
             <Button variant="outline" size="md" className="rounded-full" onClick={() => setShowFilterPanel(!showFilterPanel)}>
               <Filter className="h-4 w-4" /> Filter
-              {(priorityFilter !== "all" || techFilter !== "all") && (
+              {(priorityFilter !== "all" || techFilter !== "all" || customerTypeFilter !== "all") && (
                 <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />
               )}
             </Button>
@@ -461,11 +478,11 @@ export default function TicketsPage() {
           >
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
-              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
+              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
                 Reset Filters
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
@@ -521,6 +538,28 @@ export default function TicketsPage() {
                   </button>
                 </div>
                 <Select value={dateRange} onChange={(e: any) => setDateRange(e.target.value)} options={DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))} />
+              </div>
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">Customer Type</label>
+                  <button
+                    onClick={() => togglePin("customerType")}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("customerType") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                    title={isPinned("customerType") ? "Unpin filter" : "Pin filter to header"}
+                  >
+                    {isPinned("customerType") ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    {isPinned("customerType") ? "Unpin" : "Pin"}
+                  </button>
+                </div>
+                <Select
+                  value={customerTypeFilter}
+                  onChange={(e: any) => setCustomerTypeFilter(e.target.value)}
+                  options={[
+                    { label: `All Types (${tickets.length})`, value: "all" },
+                    { label: `Personal / Retail (${tickets.filter((t) => t.customerType === "personal" || !t.customerType).length})`, value: "personal" },
+                    { label: `Business / GST (${tickets.filter((t) => t.customerType === "business").length})`, value: "business" },
+                  ]}
+                />
               </div>
             </div>
           </motion.div>

@@ -89,6 +89,10 @@ export type PrintInvoiceInfo = {
   subtotal: number;
   discount: number;
   tax: number;
+  cgst?: number;
+  igst?: number;
+  cgstRate?: number;
+  igstRate?: number;
   total: number;
   paidAmount: number;
   balance: number;
@@ -113,6 +117,8 @@ export type PrintInvoiceDeviceInfo = {
   jobType: string;
   priority: string;
   warranty: string;
+  warrantyValue?: number;
+  warrantyUnit?: "days" | "months" | "years";
   technician: string;
   notes: string;
   parts: PrintLineItem[];
@@ -243,6 +249,8 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
         jobType: d.jobType,
         priority: d.priority,
         warranty: d.warranty,
+        warrantyValue: d.warrantyValue,
+        warrantyUnit: d.warrantyUnit,
         technician: d.technician,
         notes: d.notes,
         parts: d.parts.map((p) => ({ name: p.name, description: p.description, qty: p.qty, price: p.price, discount: p.discount, total: p.total })),
@@ -261,6 +269,10 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     subtotal: invoice.subtotal,
     discount: invoice.discount,
     tax: invoice.tax,
+    cgst: invoice.cgst,
+    igst: invoice.igst,
+    cgstRate: invoice.cgstRate,
+    igstRate: invoice.igstRate,
     total: invoice.total,
     paidAmount: invoice.paidAmount,
     balance: invoice.total - invoice.paidAmount,
