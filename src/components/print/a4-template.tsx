@@ -46,6 +46,9 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
             <p><span className="font-semibold text-gray-700">No:</span> {docNumber}</p>
             <p><span className="font-semibold text-gray-700">Date:</span> {docDate}</p>
             <p><span className="font-semibold text-gray-700">Time:</span> {docTime}</p>
+            {isTicket && ticket?.customerType && (
+              <p><span className="font-semibold text-gray-700">Type:</span> <span className="font-bold">{ticket.customerType === "business" ? "Business" : "Retail"}</span></p>
+            )}
           </div>
         </div>
       </header>
@@ -62,6 +65,8 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
             {customer.phone && <div><p className="text-[9px] text-gray-400">Phone</p><p className="text-[10px] font-medium text-gray-800">{customer.phone}</p></div>}
             {customer.email && <div><p className="text-[9px] text-gray-400">Email</p><p className="text-[10px] font-medium text-gray-800">{customer.email}</p></div>}
             {customer.address && <div><p className="text-[9px] text-gray-400">Address</p><p className="text-[10px] font-medium text-gray-800 max-w-[200px]">{customer.address}</p></div>}
+            {isTicket && ticket?.gstNumber && <div><p className="text-[9px] text-gray-400">GSTIN</p><p className="text-[10px] font-medium font-mono text-gray-800">{ticket.gstNumber}</p></div>}
+            {isInvoice && invoice?.gstNumber && <div><p className="text-[9px] text-gray-400">GSTIN</p><p className="text-[10px] font-medium font-mono text-gray-800">{invoice.gstNumber}</p></div>}
           </div>
         </div>
 
@@ -280,16 +285,16 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
                   <span className="font-medium text-green-700">-{formatPrintCurrency(invoice.discount)}</span>
                 </div>
               )}
-              {invoice.cgst && invoice.cgst > 0 ? (
+              {invoice.sgst && invoice.sgst > 0 ? (
                 <>
                   <div className="flex justify-between py-0.5">
-                    <span className="text-gray-600">CGST ({invoice.cgstRate || 9}%)</span>
-                    <span className="font-medium">{formatPrintCurrency(invoice.cgst)}</span>
+                    <span className="text-gray-600">SGST ({invoice.sgstRate || 0}%)</span>
+                    <span className="font-medium">{formatPrintCurrency(invoice.sgst)}</span>
                   </div>
-                  {invoice.igst !== undefined && invoice.igst > 0 && (
+                  {invoice.cgst !== undefined && invoice.cgst > 0 && (
                     <div className="flex justify-between py-0.5">
-                      <span className="text-gray-600">IGST ({invoice.igstRate || 9}%)</span>
-                      <span className="font-medium">{formatPrintCurrency(invoice.igst)}</span>
+                      <span className="text-gray-600">CGST ({invoice.cgstRate || 0}%)</span>
+                      <span className="font-medium">{formatPrintCurrency(invoice.cgst)}</span>
                     </div>
                   )}
                 </>
@@ -318,6 +323,27 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
 
           {isTicket && ticket && (
             <div className="space-y-1">
+              {/* GST breakdown — only when GST > 0 */}
+              {(ticket.sgst || 0) + (ticket.cgst || 0) > 0 && (
+                <>
+                  <div className="flex justify-between py-0.5 text-[10px]">
+                    <span className="text-gray-600">Subtotal</span>
+                    <span className="font-medium">{formatPrintCurrency(ticket.amount - (ticket.sgst || 0) - (ticket.cgst || 0))}</span>
+                  </div>
+                  {(ticket.sgst || 0) > 0 && (
+                    <div className="flex justify-between py-0.5 text-[10px]">
+                      <span className="text-gray-600">SGST ({ticket.sgstRate || 0}%)</span>
+                      <span className="font-medium">{formatPrintCurrency(ticket.sgst || 0)}</span>
+                    </div>
+                  )}
+                  {(ticket.cgst || 0) > 0 && (
+                    <div className="flex justify-between py-0.5 text-[10px]">
+                      <span className="text-gray-600">CGST ({ticket.cgstRate || 0}%)</span>
+                      <span className="font-medium">{formatPrintCurrency(ticket.cgst || 0)}</span>
+                    </div>
+                  )}
+                </>
+              )}
               <div className="flex justify-between py-1.5 border-t-2 border-gray-800 font-bold text-sm">
                 <span>Total Amount</span>
                 <span>{formatPrintCurrency(ticket.amount)}</span>

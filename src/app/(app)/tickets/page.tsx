@@ -335,9 +335,9 @@ export default function TicketsPage() {
       if (ticket.customerType) p.set("customerType", ticket.customerType);
       p.set("amount", String(ticket.amount));
       if (ticket.technician) p.set("employee", ticket.technician);
-      // Pass tax rates so invoice inherits ticket's CGST/IGST
-      if (ticket.cgstRate != null) p.set("cgstRate", String(ticket.cgstRate));
-      if (ticket.igstRate != null) p.set("igstRate", String(ticket.igstRate));
+      // Pass GST rate and number so invoice inherits ticket's tax config
+      if (ticket.gstRate != null) p.set("gstRate", String(ticket.gstRate));
+      if (ticket.gstNumber) p.set("gstNumber", ticket.gstNumber);
 
       // Pass full device structure for multi-device invoice support
       const devices = getTicketDevices(ticket);

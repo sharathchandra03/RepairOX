@@ -148,9 +148,9 @@ type WizardData = {
   /** Index of the currently active/expanded device */
   activeDeviceIndex: number;
   contactType: "personal" | "business";
-  cgstRate: number;
-  igstRate: number;
-  customTaxRate?: boolean;
+  gstRate: number;
+  customGstRate?: boolean;
+  gstNumber: string;
   customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
   files: string[];
@@ -167,8 +167,8 @@ const DEFAULT: WizardData = {
   devices: [createWizardDevice()],
   activeDeviceIndex: 0,
   contactType: "personal",
-  cgstRate: 9,
-  igstRate: 9,
+  gstRate: 18,
+  gstNumber: "",
   customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
   files: [],
@@ -228,8 +228,8 @@ function ticketToWizard(t: Ticket): WizardData {
       devices,
       activeDeviceIndex: 0,
       contactType: t.customerType || (t.company ? "business" : "personal"),
-      cgstRate: t.cgstRate ?? 9,
-      igstRate: t.igstRate ?? 9,
+      gstRate: t.gstRate ?? 18,
+      gstNumber: t.gstNumber || "",
       customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
       customerId: (t as any).customerId || null,
       files: [],
@@ -275,8 +275,8 @@ function ticketToWizard(t: Ticket): WizardData {
     devices: [singleDevice],
     activeDeviceIndex: 0,
     contactType: t.customerType || (t.company ? "business" : "personal"),
-    cgstRate: t.cgstRate ?? 9,
-    igstRate: t.igstRate ?? 9,
+    gstRate: t.gstRate ?? 18,
+    gstNumber: t.gstNumber || "",
     customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     customerId: (t as any).customerId || null,
     files: [],
@@ -409,14 +409,26 @@ function NewTicketWizard() {
       status: "in_progress" as const,
     }));
 
-    // Total amount across all devices
-    const totalAmount = deviceRecords.reduce((s, dr) => s + dr.estimate, 0);
-    // Tax computation: CGST + IGST on subtotal
-    const ticketCgstRate = data.cgstRate ?? 0;
-    const ticketIgstRate = data.igstRate ?? 0;
-    const ticketCgst = Math.round(totalAmount * (ticketCgstRate / 100));
-    const ticketIgst = Math.round(totalAmount * (ticketIgstRate / 100));
-    const ticketTotal = totalAmount + ticketCgst + ticketIgst;
+    // Total amount across all devices (estimate + parts, matching quotation logic)
+    const totalAmount = deviceRecords.reduce((s, dr) => {
+      const partsTotal = dr.parts.reduce((ps: number, p: any) => ps + (p.total || 0), 0);
+      return s + dr.estimate + partsTotal;
+    }, 0);
+    // Avoid double-counting: if estimate already includes parts (fallback case), use just estimate
+    // The estimate field = Number(job.estimate) || partsTotal, so when job.estimate is set it's service-only
+    // We need: service estimate + parts total
+    const subtotal = data.devices.reduce((s: number, wd: any) => {
+      const est = Number(wd.job.estimate) || 0;
+      const parts = wd.parts.reduce((ps: number, p: any) => ps + (Number(p.total) || 0), 0);
+      return s + est + parts;
+    }, 0);
+    // Tax computation: single GST rate → split 50/50 into SGST + CGST
+    const ticketGstRate = data.gstRate ?? 0;
+    const ticketSgstRate = ticketGstRate / 2;
+    const ticketCgstRate = ticketGstRate / 2;
+    const ticketSgst = Math.round(subtotal * (ticketSgstRate / 100));
+    const ticketCgst = Math.round(subtotal * (ticketCgstRate / 100));
+    const ticketTotal = subtotal + ticketSgst + ticketCgst;
 
     const ticketData: Ticket = {
       id: editId || genId(),
@@ -456,10 +468,12 @@ function NewTicketWizard() {
       internalNotes: primaryDevice.job.notes || undefined,
       customerId: finalCustomerId || undefined,
       customerType: data.contactType as "personal" | "business",
+      gstNumber: data.gstNumber || undefined,
+      gstRate: ticketGstRate || undefined,
+      sgstRate: ticketSgstRate || undefined,
       cgstRate: ticketCgstRate || undefined,
-      igstRate: ticketIgstRate || undefined,
+      sgst: ticketSgst || undefined,
       cgst: ticketCgst || undefined,
-      igst: ticketIgst || undefined,
       // Multi-device data — always store for data consistency
       devices: deviceRecords,
     };
@@ -2086,6 +2100,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
       ...data,
       customerId: c.id,
       contactType: c.type,
+      gstNumber: c.gstNumber || "",
       customer: {
         first: c.firstName,
         last: c.lastName,
@@ -2210,6 +2225,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
           </motion.div>
         )}
 
+
         {/* Action Buttons */}
         <div className={cn("mt-6 flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:justify-center", isEdit && "hidden")}>
           <Button variant="outline" size="lg" onClick={() => { setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" } }); onNext(); }}>
@@ -2252,6 +2268,7 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
           mobile: c.phone.trim(),
           email: c.email.trim(),
           company: c.company.trim(),
+          gstNumber: data.gstNumber?.trim() || "",
           address: c.address.trim(),
           city: c.city.trim(),
           postalCode: c.postal.trim(),
@@ -2295,6 +2312,21 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
             <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} placeholder="Bengaluru" className="h-11" /></Field>
             <Field label="Postal Code"><Input value={c.postal} onChange={(e: any) => set("postal", e.target.value)} placeholder="560001" className="h-11" /></Field>
           </div>
+
+          {/* GST Number — only for Business customers */}
+          {data.contactType === "business" && (
+            <div className="space-y-1 mt-4">
+              <Field label="GST Number">
+                <Input
+                  value={data.gstNumber || ""}
+                  onChange={(e: any) => setData({ ...data, gstNumber: e.target.value.toUpperCase() })}
+                  placeholder="e.g. 29ABCDE1234F1Z5"
+                  className="h-11 font-mono tracking-wider uppercase"
+                  maxLength={15}
+                />
+              </Field>
+            </div>
+          )}
         </div>
       </div>
       {!isEdit && (
@@ -2311,34 +2343,32 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const allParts = data.devices.flatMap((d: WizardDevice) => d.parts);
   const partsTotal = allParts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
   const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
-  // Subtotal: estimate (service/labor charges) + parts (material costs) when both exist
   const subtotal = (estimatesTotal + partsTotal) || 0;
 
-  // Tax: CGST + IGST — available for BOTH Personal and Business
-  const cgstRate = data.cgstRate ?? 9;
-  const igstRate = data.igstRate ?? 9;
+  // Single GST rate → auto-split 50/50 into SGST + CGST
+  const gstRate = data.gstRate ?? 18;
+  const sgstRate = gstRate / 2;
+  const cgstRate = gstRate / 2;
+  const sgstAmt = Math.round(subtotal * (sgstRate / 100));
   const cgstAmt = Math.round(subtotal * (cgstRate / 100));
-  const igstAmt = Math.round(subtotal * (igstRate / 100));
-  const tax = cgstAmt + igstAmt;
+  const tax = sgstAmt + cgstAmt;
   const total = subtotal + tax;
 
-  // Custom tax mode: when true, CGST and IGST can differ
-  const isCustom = !!data.customTaxRate;
+  const isCustom = !!data.customGstRate;
 
-  // Helper: set both rates to the same value (linked mode)
-  const setLinkedRate = (rate: number) => {
-    if (setData) setData({ ...data, cgstRate: rate, igstRate: rate, customTaxRate: false });
-  };
+  // Local state for custom input editing
+  const [customRaw, setCustomRaw] = useState<string>(String(gstRate));
+  const [customFocused, setCustomFocused] = useState(false);
 
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
-        {/* Left Panel — Itemized Quote (no tax rows) */}
+        {/* Left Panel — Itemized Quote only */}
         <div className="rounded-2xl border border-border overflow-hidden">
           <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
             <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
           </div>
-          {/* Per-device estimates (multi-device) */}
+          {/* Multi-device */}
           {data.devices.length > 1 && data.devices.map((d: WizardDevice, idx: number) => {
             const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
             const devPartsTotal = d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
@@ -2367,13 +2397,13 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
               </div>
             );
           })}
-          {/* Single device: show parts */}
+          {/* Single device: parts */}
           {data.devices.length <= 1 && allParts.length > 0 && allParts.map((p: any, i: number) => (
             <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border odd:bg-background even:bg-muted/20">
               <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
             </div>
           ))}
-          {/* Single device: show estimate as a line item when present */}
+          {/* Single device: estimate */}
           {data.devices.length <= 1 && estimatesTotal > 0 && (
             <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
               <div className="font-medium">Estimate</div>
@@ -2381,13 +2411,13 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
               <div className="text-right tnum font-medium">{formatINR(estimatesTotal)}</div>
             </div>
           )}
-          {/* Empty state */}
+          {/* Empty */}
           {allParts.length === 0 && estimatesTotal === 0 && (
             <div className="p-6 text-center text-sm text-muted-foreground">No parts or estimate added.</div>
           )}
         </div>
 
-        {/* Right Panel — Tax + Total (single source of truth) */}
+        {/* Right Panel — Summary + Tax */}
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
@@ -2396,25 +2426,24 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
             {data.devices.length <= 1 && estimatesTotal > 0 && partsTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
             {data.devices.length <= 1 && partsTotal > 0 && <QRow k="Parts" v={formatINR(partsTotal)} />}
             <QRow k="Sub-total" v={formatINR(subtotal)} />
+            {sgstAmt > 0 && <QRow k={`SGST (${sgstRate}%)`} v={formatINR(sgstAmt)} />}
             {cgstAmt > 0 && <QRow k={`CGST (${cgstRate}%)`} v={formatINR(cgstAmt)} />}
-            {igstAmt > 0 && <QRow k={`IGST (${igstRate}%)`} v={formatINR(igstAmt)} />}
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
 
-          {/* Tax Rate Controls */}
+          {/* GST Rate Selector */}
           {setData && (
             <div className="mt-4 pt-3 border-t border-border">
-              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">Tax Rate</Label>
-              {/* Linked preset pills — sets BOTH CGST and IGST to the same rate */}
+              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">GST Rate</Label>
               <div className="mt-2 flex items-center gap-1.5">
-                {[0, 2.5, 5, 9, 12].map((rate) => (
+                {[0, 12, 18].map((rate) => (
                   <button
                     key={rate}
                     type="button"
-                    onClick={() => setLinkedRate(rate)}
+                    onClick={() => setData({ ...data, gstRate: rate, customGstRate: false })}
                     className={cn(
-                      "flex-1 rounded-lg px-1.5 py-1.5 text-[11px] font-semibold transition-all text-center",
-                      cgstRate === rate && igstRate === rate && !isCustom
+                      "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
+                      gstRate === rate && !isCustom
                         ? "bg-[#4361EE] text-white shadow-sm"
                         : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
                     )}
@@ -2424,9 +2453,9 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                 ))}
                 <button
                   type="button"
-                  onClick={() => setData({ ...data, customTaxRate: true })}
+                  onClick={() => { setData({ ...data, customGstRate: true }); setCustomRaw(String(gstRate)); }}
                   className={cn(
-                    "flex-1 rounded-lg px-1.5 py-1.5 text-[11px] font-semibold transition-all text-center",
+                    "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
                     isCustom
                       ? "bg-[#4361EE] text-white shadow-sm"
                       : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
@@ -2435,49 +2464,35 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                   Custom
                 </button>
               </div>
-
-              {/* Custom rate inputs — separate CGST / IGST */}
+              {/* Custom: single input for total GST % */}
               {isCustom && (
-                <div className="mt-3 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-muted-foreground w-11">CGST</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={String(cgstRate)}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, "");
-                        const v = parseFloat(raw);
-                        if (!isNaN(v) && v >= 0 && v <= 100) {
-                          setData({ ...data, cgstRate: v, igstRate: v, customTaxRate: true });
-                        } else if (raw === "" || raw === "0") {
-                          setData({ ...data, cgstRate: 0, igstRate: 0, customTaxRate: true });
-                        }
-                      }}
-                      className="h-8 w-20 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-                    />
-                    <span className="text-[11px] text-muted-foreground">%</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-[11px] font-medium text-muted-foreground w-11">IGST</span>
-                    <input
-                      type="text"
-                      inputMode="numeric"
-                      value={String(igstRate)}
-                      onChange={(e) => {
-                        const raw = e.target.value.replace(/[^0-9.]/g, "");
-                        const v = parseFloat(raw);
-                        if (!isNaN(v) && v >= 0 && v <= 100) {
-                          setData({ ...data, igstRate: v, cgstRate: v, customTaxRate: true });
-                        } else if (raw === "" || raw === "0") {
-                          setData({ ...data, igstRate: 0, cgstRate: 0, customTaxRate: true });
-                        }
-                      }}
-                      className="h-8 w-20 rounded-lg border border-border bg-card px-2.5 text-[12px] font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-                    />
-                    <span className="text-[11px] text-muted-foreground">%</span>
-                  </div>
-                  <p className="text-[10px] text-muted-foreground">Both rates stay in sync. Change either to update both.</p>
+                <div className="mt-2.5 flex items-center gap-2 flex-nowrap">
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={customFocused ? customRaw : String(gstRate)}
+                    onFocus={() => { setCustomFocused(true); setCustomRaw(String(gstRate)); }}
+                    onChange={(e) => {
+                      const raw = e.target.value.replace(/[^0-9.]/g, "");
+                      setCustomRaw(raw);
+                      const v = parseFloat(raw);
+                      if (!isNaN(v) && v >= 0 && v <= 100) {
+                        setData({ ...data, gstRate: v, customGstRate: true });
+                      } else if (raw === "" || raw === ".") {
+                        setData({ ...data, gstRate: 0, customGstRate: true });
+                      }
+                    }}
+                    onBlur={() => {
+                      setCustomFocused(false);
+                      const v = parseFloat(customRaw);
+                      if (isNaN(v) || customRaw === "") {
+                        setData({ ...data, gstRate: 0, customGstRate: true });
+                      }
+                    }}
+                    placeholder="Total GST %"
+                    className="h-9 w-20 shrink-0 rounded-lg border border-border bg-card px-2.5 text-sm font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+                  />
+                  <span className="text-[11px] text-muted-foreground whitespace-nowrap">% → SGST {sgstRate}% + CGST {cgstRate}%</span>
                 </div>
               )}
             </div>

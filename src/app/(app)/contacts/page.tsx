@@ -353,10 +353,12 @@ function CustomerFormModal({ customer, onClose, onSave }: {
               <Label>Company</Label>
               <Input value={form.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Company name" />
             </div>
-            <div className="space-y-1">
-              <Label>GST Number</Label>
-              <Input value={form.gstNumber} onChange={(e: any) => set("gstNumber", e.target.value)} placeholder="29AABCK1234F1ZP" />
-            </div>
+            {form.type === "business" && (
+              <div className="space-y-1">
+                <Label>GST Number</Label>
+                <Input value={form.gstNumber} onChange={(e: any) => set("gstNumber", e.target.value.toUpperCase())} placeholder="29AABCK1234F1ZP" className="font-mono tracking-wider uppercase" maxLength={15} />
+              </div>
+            )}
           </div>
 
           {/* Address */}

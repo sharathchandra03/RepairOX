@@ -54,7 +54,7 @@ type InvoiceFormDevice = {
 };
 
 type InvoiceFormData = {
-  customer: { name: string; phone: string; email: string; company: string };
+  customer: { name: string; phone: string; email: string; company: string; gstNumber: string };
   details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
@@ -62,7 +62,7 @@ type InvoiceFormData = {
   devices: InvoiceFormDevice[];
   /** Index of the active device being edited */
   activeDeviceIndex: number;
-  pricing: { discount: number; cgstRate: number; igstRate: number; paymentMode: string };
+  pricing: { discount: number; gstRate: number; paymentMode: string };
   notes: { notes: string; terms: string; slogan: string; footer: string };
 };
 
@@ -88,12 +88,12 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 }
 
 const DEFAULT_FORM: InvoiceFormData = {
-  customer: { name: "", phone: "", email: "", company: "" },
+  customer: { name: "", phone: "", email: "", company: "", gstNumber: "" },
   details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", invoiceType: "retail", serviceCategory: "service" },
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
-  pricing: { discount: 0, cgstRate: 9, igstRate: 9, paymentMode: "" },
+  pricing: { discount: 0, gstRate: 18, paymentMode: "" },
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
 
@@ -243,15 +243,14 @@ function InvoiceWizard() {
 
       setForm((prev) => ({
         ...prev,
-        customer: { name: customer, phone, email, company },
+        customer: { name: customer, phone, email, company, gstNumber: searchParams.get("gstNumber") || "" },
         details: { ...prev.details, ticketId: fromTicket, employee, status: "draft", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
         items: flatItems,
         devices: formDevices.length > 0 ? formDevices : prev.devices,
         activeDeviceIndex: 0,
         pricing: {
           ...prev.pricing,
-          cgstRate: searchParams.get("cgstRate") != null ? Number(searchParams.get("cgstRate")) : prev.pricing.cgstRate,
-          igstRate: searchParams.get("igstRate") != null ? Number(searchParams.get("igstRate")) : prev.pricing.igstRate,
+          gstRate: searchParams.get("gstRate") != null ? Number(searchParams.get("gstRate")) : prev.pricing.gstRate,
         },
       }));
     }
@@ -285,11 +284,14 @@ function InvoiceWizard() {
     const subtotal = allItems.reduce((s, item) => s + item.total, 0);
     const discount = form.pricing.discount;
     const taxable = subtotal - discount;
-    const cgst = Math.round(taxable * (form.pricing.cgstRate / 100));
-    const igst = Math.round(taxable * (form.pricing.igstRate / 100));
-    const tax = cgst + igst;
+    const gstRate = form.pricing.gstRate;
+    const sgstRate = gstRate / 2;
+    const cgstRate = gstRate / 2;
+    const sgst = Math.round(taxable * (sgstRate / 100));
+    const cgst = Math.round(taxable * (cgstRate / 100));
+    const tax = sgst + cgst;
     const total = taxable + tax;
-    return { subtotal, discount, cgst, igst, tax, total };
+    return { subtotal, discount, sgst, cgst, sgstRate, cgstRate, gstRate, tax, total };
   }, [form.devices, form.items, form.pricing]);
 
   // Submit
@@ -334,10 +336,11 @@ function InvoiceWizard() {
       subtotal: totals.subtotal,
       discount: totals.discount,
       tax: totals.tax,
+      gstRate: form.pricing.gstRate,
+      sgst: totals.sgst,
       cgst: totals.cgst,
-      igst: totals.igst,
-      cgstRate: form.pricing.cgstRate,
-      igstRate: form.pricing.igstRate,
+      sgstRate: totals.sgstRate,
+      cgstRate: totals.cgstRate,
       total: totals.total,
       notes: form.notes.notes || undefined,
       terms: form.notes.terms || undefined,
@@ -347,6 +350,7 @@ function InvoiceWizard() {
       ticketId: form.details.ticketId || undefined,
       paymentMode: form.pricing.paymentMode || undefined,
       serviceCategory: form.details.serviceCategory || "service",
+      gstNumber: form.customer.gstNumber || undefined,
       devices: invoiceDevices.length > 0 ? invoiceDevices : undefined,
     };
 
@@ -542,12 +546,12 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
     : [createFormDevice({ technician: inv.employee || "", parts: inv.items })];
 
   return {
-    customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "" },
+    customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "" },
     details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
-    pricing: { discount: inv.discount, cgstRate: inv.cgstRate ?? 9, igstRate: inv.igstRate ?? 9, paymentMode: inv.paymentMode || "" },
+    pricing: { discount: inv.discount, gstRate: inv.gstRate ?? 18, paymentMode: inv.paymentMode || "" },
     notes: { notes: inv.notes || "", terms: inv.terms || "", slogan: inv.slogan || "", footer: inv.footer || "" },
   };
 }
@@ -575,6 +579,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
         phone: cust.mobile,
         email: cust.email,
         company: cust.company,
+        gstNumber: cust.gstNumber || "",
       },
       details: {
         ...f.details,
@@ -656,6 +661,19 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div className="space-y-1"><Label>Phone</Label><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" /></div>
           <div className="space-y-1"><Label>Email</Label><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="customer@email.com" type="email" /></div>
           <div className="space-y-1"><Label>Company / Organization</Label><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></div>
+          {/* GST Number — only for Business invoices */}
+          {d.invoiceType === "business" && (
+            <div className="space-y-1">
+              <Label>GST Number</Label>
+              <Input
+                value={c.gstNumber}
+                onChange={(e: any) => set("gstNumber", e.target.value.toUpperCase())}
+                placeholder="e.g. 29ABCDE1234F1Z5"
+                className="font-mono tracking-wider uppercase"
+                maxLength={15}
+              />
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1039,9 +1057,12 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
 /* ─── Step 4: Pricing ────────────────────────────────────────────────── */
 
-function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; cgst: number; igst: number; tax: number; total: number } }) {
+function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number } }) {
   const p = form.pricing;
   const d = form.details;
+  const [customGst, setCustomGst] = useState(![0, 12, 18].includes(p.gstRate));
+  const [customRaw, setCustomRaw] = useState(String(p.gstRate));
+  const [customFocused, setCustomFocused] = useState(false);
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8 max-w-2xl mx-auto">
       <h2 className="font-display text-lg font-bold mb-1">Pricing & Payment</h2>
@@ -1069,17 +1090,60 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
         </div>
         <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} /></div>
         <div className="space-y-1.5">
-          <Label>Tax</Label>
-          <div className="flex gap-2">
-            <div className="flex-1 relative">
-              <NumericInput value={p.cgstRate} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, cgstRate: Math.max(0, Math.min(100, v)) } }))} />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground pointer-events-none">CGST %</span>
-            </div>
-            <div className="flex-1 relative">
-              <NumericInput value={p.igstRate} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, igstRate: Math.max(0, Math.min(100, v)) } }))} />
-              <span className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-medium text-muted-foreground pointer-events-none">IGST %</span>
-            </div>
+          <Label>GST Rate</Label>
+          <div className="flex items-center gap-1.5">
+            {[0, 12, 18].map((rate) => (
+              <button
+                key={rate}
+                type="button"
+                onClick={() => { updateForm((f) => ({ ...f, pricing: { ...f.pricing, gstRate: rate } })); setCustomGst(false); }}
+                className={cn(
+                  "flex-1 rounded-lg px-2 py-2 text-[12px] font-semibold transition-all text-center",
+                  p.gstRate === rate && !customGst
+                    ? "bg-[#4361EE] text-white shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                )}
+              >
+                {rate}%
+              </button>
+            ))}
+            <button
+              type="button"
+              onClick={() => { setCustomGst(true); setCustomRaw(String(p.gstRate)); }}
+              className={cn(
+                "flex-1 rounded-lg px-2 py-2 text-[12px] font-semibold transition-all text-center",
+                customGst
+                  ? "bg-[#4361EE] text-white shadow-sm"
+                  : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+              )}
+            >
+              Custom
+            </button>
           </div>
+          {customGst && (
+            <div className="mt-2 flex items-center gap-2">
+              <input
+                type="text"
+                inputMode="numeric"
+                value={customFocused ? customRaw : String(p.gstRate)}
+                onFocus={() => { setCustomFocused(true); setCustomRaw(String(p.gstRate)); }}
+                onChange={(e) => {
+                  const raw = e.target.value.replace(/[^0-9.]/g, "");
+                  setCustomRaw(raw);
+                  const v = parseFloat(raw);
+                  if (!isNaN(v) && v >= 0 && v <= 100) {
+                    updateForm((f) => ({ ...f, pricing: { ...f.pricing, gstRate: v } }));
+                  } else if (raw === "" || raw === ".") {
+                    updateForm((f) => ({ ...f, pricing: { ...f.pricing, gstRate: 0 } }));
+                  }
+                }}
+                onBlur={() => setCustomFocused(false)}
+                placeholder="Total GST %"
+                className="h-9 w-24 rounded-lg border border-border bg-card px-2.5 text-sm font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+              />
+              <span className="text-[11px] text-muted-foreground">% → SGST {totals.sgstRate}% + CGST {totals.cgstRate}%</span>
+            </div>
+          )}
         </div>
       </div>
       {/* Summary */}
@@ -1087,8 +1151,8 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
         <div className="space-y-2 text-sm">
           <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums font-medium">{formatINR(totals.subtotal)}</span></div>
           {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
-          {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({p.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
-          {totals.igst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IGST ({p.igstRate}%)</span><span className="tabular-nums">{formatINR(totals.igst)}</span></div>}
+          {totals.sgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div>}
+          {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({totals.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
           <div className="flex justify-between border-t border-border pt-2 text-base font-bold"><span>Total</span><span className="tabular-nums brand-gradient-text">{formatINR(totals.total)}</span></div>
         </div>
       </div>
@@ -1117,7 +1181,7 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
 
 /* ─── Step 6: Review ─────────────────────────────────────────────────── */
 
-function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; cgst: number; igst: number; tax: number; total: number }; onSubmit: () => void; isEdit: boolean }) {
+function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number }; onSubmit: () => void; isEdit: boolean }) {
   const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
   return (
     <div className="space-y-4">
@@ -1224,8 +1288,8 @@ function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData;
           <div className="w-full max-w-xs rounded-xl border border-border p-4 space-y-1.5 text-sm">
             <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatINR(totals.subtotal)}</span></div>
             {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
-            {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({form.pricing.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
-            {totals.igst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">IGST ({form.pricing.igstRate}%)</span><span className="tabular-nums">{formatINR(totals.igst)}</span></div>}
+            {totals.sgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div>}
+            {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({totals.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
             <div className="flex justify-between border-t border-border pt-2 font-bold"><span>Total</span><span className="tabular-nums">{formatINR(totals.total)}</span></div>
           </div>
         </div>

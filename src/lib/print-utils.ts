@@ -49,6 +49,13 @@ export type PrintTicketInfo = {
   createdAt: string;
   dueDate: string;
   amount: number;
+  customerType?: "personal" | "business";
+  gstNumber?: string;
+  gstRate?: number;
+  sgstRate?: number;
+  cgstRate?: number;
+  sgst?: number;
+  cgst?: number;
   parts: PrintLineItem[];
   /** Multi-device: individual device sections for print */
   devices?: PrintDeviceInfo[];
@@ -89,10 +96,12 @@ export type PrintInvoiceInfo = {
   subtotal: number;
   discount: number;
   tax: number;
+  gstRate?: number;
+  sgst?: number;
   cgst?: number;
-  igst?: number;
+  sgstRate?: number;
   cgstRate?: number;
-  igstRate?: number;
+  gstNumber?: string;
   total: number;
   paidAmount: number;
   balance: number;
@@ -221,6 +230,13 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     createdAt: ticket.createdAt,
     dueDate: ticket.dueDate || "",
     amount: ticket.amount,
+    customerType: ticket.customerType,
+    gstNumber: ticket.gstNumber,
+    gstRate: ticket.gstRate,
+    sgstRate: ticket.sgstRate,
+    cgstRate: ticket.cgstRate,
+    sgst: ticket.sgst,
+    cgst: ticket.cgst,
     parts: allParts,
     devices: printDevices.length > 0 ? printDevices : undefined,
   };
@@ -269,10 +285,12 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     subtotal: invoice.subtotal,
     discount: invoice.discount,
     tax: invoice.tax,
+    gstRate: invoice.gstRate,
+    sgst: invoice.sgst,
     cgst: invoice.cgst,
-    igst: invoice.igst,
+    sgstRate: invoice.sgstRate,
     cgstRate: invoice.cgstRate,
-    igstRate: invoice.igstRate,
+    gstNumber: invoice.gstNumber,
     total: invoice.total,
     paidAmount: invoice.paidAmount,
     balance: invoice.total - invoice.paidAmount,

@@ -260,14 +260,18 @@ export type Ticket = {
   qcStatus?: "pending" | "pass" | "fail";
   customerId?: string;
   customerType?: "personal" | "business";
-  /** CGST rate percentage (stored on ticket for quotation/invoice inheritance). */
+  /** GST Number for Business/GST tickets. */
+  gstNumber?: string;
+  /** Total GST rate percentage (e.g. 18 → splits into 9% SGST + 9% CGST). */
+  gstRate?: number;
+  /** SGST rate percentage (half of gstRate). */
+  sgstRate?: number;
+  /** CGST rate percentage (half of gstRate). */
   cgstRate?: number;
-  /** IGST rate percentage (stored on ticket for quotation/invoice inheritance). */
-  igstRate?: number;
+  /** Computed SGST amount. */
+  sgst?: number;
   /** Computed CGST amount. */
   cgst?: number;
-  /** Computed IGST amount. */
-  igst?: number;
   /** Multi-device support — when present, each device has its own record */
   devices?: DeviceRecord[];
 };
@@ -676,14 +680,22 @@ export type Invoice = {
   subtotal: number;
   discount: number;
   tax: number;
+  /** Total GST rate percentage. */
+  gstRate?: number;
+  /** SGST amount (State GST). */
+  sgst?: number;
   /** CGST amount (Central GST). */
   cgst?: number;
-  /** IGST amount (Integrated GST). */
-  igst?: number;
+  /** SGST rate percentage. */
+  sgstRate?: number;
   /** CGST rate percentage. */
   cgstRate?: number;
-  /** IGST rate percentage. */
+  /** @deprecated — kept for backward compat with old invoices. */
+  igst?: number;
+  /** @deprecated */
   igstRate?: number;
+  /** GST Number for Business invoices. */
+  gstNumber?: string;
   total: number;
   notes?: string;
   terms?: string;

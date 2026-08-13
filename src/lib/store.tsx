@@ -105,6 +105,11 @@ type Store = StoreState & StoreActions;
 /* ─── Row <-> App Model Mappers ──────────────────────────────────────── */
 
 function rowToTicket(r: any): Ticket {
+  // devices column stores both device records and metadata (customerType, GST fields)
+  const rawDevices = r.devices ?? {};
+  const isLegacyArray = Array.isArray(rawDevices);
+  const deviceRecords = isLegacyArray ? rawDevices : (rawDevices.records ?? []);
+  const meta = isLegacyArray ? {} : rawDevices;
   return {
     id: r.id,
     customer: r.customer ?? "",
@@ -131,7 +136,14 @@ function rowToTicket(r: any): Ticket {
     imeiType: r.imei_type ?? undefined,
     qcStatus: r.qc_status ?? undefined,
     customerId: r.customer_id ?? undefined,
-    devices: r.devices ?? undefined,
+    customerType: meta.customerType ?? undefined,
+    gstNumber: meta.gstNumber ?? undefined,
+    gstRate: meta.gstRate != null ? Number(meta.gstRate) : undefined,
+    sgstRate: meta.sgstRate != null ? Number(meta.sgstRate) : undefined,
+    cgstRate: meta.cgstRate != null ? Number(meta.cgstRate) : undefined,
+    sgst: meta.sgst != null ? Number(meta.sgst) : undefined,
+    cgst: meta.cgst != null ? Number(meta.cgst) : undefined,
+    devices: deviceRecords,
   };
 }
 
@@ -161,11 +173,25 @@ function ticketToRow(t: Ticket): Record<string, unknown> {
     imei_type: t.imeiType || null,
     qc_status: t.qcStatus || null,
     customer_id: t.customerId || null,
-    devices: t.devices ?? [],
+    devices: {
+      records: t.devices ?? [],
+      customerType: t.customerType || null,
+      gstNumber: t.gstNumber || null,
+      gstRate: t.gstRate ?? null,
+      sgstRate: t.sgstRate ?? null,
+      cgstRate: t.cgstRate ?? null,
+      sgst: t.sgst ?? null,
+      cgst: t.cgst ?? null,
+    },
   };
 }
 
 function rowToInvoice(r: any): Invoice {
+  // devices column stores both device records and metadata
+  const rawDevices = r.devices ?? {};
+  const isLegacyArray = Array.isArray(rawDevices);
+  const deviceRecords = isLegacyArray ? rawDevices : (rawDevices.records ?? []);
+  const meta = isLegacyArray ? {} : rawDevices;
   return {
     id: r.id,
     reference: r.reference ?? "",
@@ -187,10 +213,16 @@ function rowToInvoice(r: any): Invoice {
     footer: r.footer ?? "",
     employee: r.employee ?? "",
     ticketId: r.ticket_id ?? undefined,
-    paymentMode: r.payment_mode ?? undefined,
-    serviceCategory: r.service_category ?? "service",
+    paymentMode: meta.paymentMode ?? r.payment_mode ?? undefined,
+    serviceCategory: meta.serviceCategory ?? r.service_category ?? "service",
+    gstRate: meta.gstRate != null ? Number(meta.gstRate) : undefined,
+    sgstRate: meta.sgstRate != null ? Number(meta.sgstRate) : undefined,
+    cgstRate: meta.cgstRate != null ? Number(meta.cgstRate) : undefined,
+    sgst: meta.sgst != null ? Number(meta.sgst) : undefined,
+    cgst: meta.cgst != null ? Number(meta.cgst) : undefined,
+    gstNumber: meta.gstNumber ?? undefined,
     items: r.items ?? [],
-    devices: r.devices ?? [],
+    devices: deviceRecords,
     createdAt: r.created_at ?? new Date().toISOString(),
   };
 }
@@ -217,10 +249,18 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
     footer: inv.footer || null,
     employee: inv.employee || null,
     ticket_id: inv.ticketId || null,
-    payment_mode: inv.paymentMode || null,
-    service_category: inv.serviceCategory || "service",
     items: inv.items ?? [],
-    devices: inv.devices ?? [],
+    devices: {
+      records: inv.devices ?? [],
+      paymentMode: inv.paymentMode || null,
+      serviceCategory: inv.serviceCategory || "service",
+      gstRate: inv.gstRate ?? null,
+      sgstRate: inv.sgstRate ?? null,
+      cgstRate: inv.cgstRate ?? null,
+      sgst: inv.sgst ?? null,
+      cgst: inv.cgst ?? null,
+      gstNumber: inv.gstNumber || null,
+    },
   };
 }
 

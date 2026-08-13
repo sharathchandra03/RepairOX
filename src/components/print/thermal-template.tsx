@@ -264,16 +264,16 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                 <span>-{formatPrintCurrency(invoice.discount)}</span>
               </div>
             )}
-            {invoice.cgst && invoice.cgst > 0 ? (
+            {invoice.sgst && invoice.sgst > 0 ? (
               <>
                 <div className="flex justify-between">
-                  <span>CGST ({invoice.cgstRate || 9}%)</span>
-                  <span>{formatPrintCurrency(invoice.cgst)}</span>
+                  <span>SGST ({invoice.sgstRate || 0}%)</span>
+                  <span>{formatPrintCurrency(invoice.sgst)}</span>
                 </div>
-                {invoice.igst !== undefined && invoice.igst > 0 && (
+                {invoice.cgst !== undefined && invoice.cgst > 0 && (
                   <div className="flex justify-between">
-                    <span>IGST ({invoice.igstRate || 9}%)</span>
-                    <span>{formatPrintCurrency(invoice.igst)}</span>
+                    <span>CGST ({invoice.cgstRate || 0}%)</span>
+                    <span>{formatPrintCurrency(invoice.cgst)}</span>
                   </div>
                 )}
               </>

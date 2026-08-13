@@ -180,9 +180,9 @@ export default function TicketDetailPage() {
     if (ticket.customerType) params.set("customerType", ticket.customerType);
     params.set("amount", String(ticket.amount));
     if (ticket.technician) params.set("employee", ticket.technician);
-    // Pass tax rates so invoice inherits ticket's CGST/IGST
-    if (ticket.cgstRate != null) params.set("cgstRate", String(ticket.cgstRate));
-    if (ticket.igstRate != null) params.set("igstRate", String(ticket.igstRate));
+    // Pass GST rate and number so invoice inherits ticket's tax config
+    if (ticket.gstRate != null) params.set("gstRate", String(ticket.gstRate));
+    if (ticket.gstNumber) params.set("gstNumber", ticket.gstNumber);
 
     // Pass full device structure as JSON for multi-device invoice support
     const invoiceDevices = devices.map((dev) => ({
@@ -618,11 +618,12 @@ export default function TicketDetailPage() {
             action={<SectionEditButton onClick={() => setActiveEditor("billing")} />}
           >
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-              <DetailField label="Subtotal" value={formatINR(ticket.amount - (ticket.cgst || 0) - (ticket.igst || 0))} />
+              <DetailField label="Subtotal" value={formatINR(ticket.amount - (ticket.sgst || 0) - (ticket.cgst || 0))} />
               <DetailField label="Discount" value={formatINR(ticket.discount || 0)} />
+              {(ticket.sgst != null && ticket.sgst > 0) && <DetailField label={`SGST (${ticket.sgstRate ?? 0}%)`} value={formatINR(ticket.sgst)} />}
               {(ticket.cgst != null && ticket.cgst > 0) && <DetailField label={`CGST (${ticket.cgstRate ?? 0}%)`} value={formatINR(ticket.cgst)} />}
-              {(ticket.igst != null && ticket.igst > 0) && <DetailField label={`IGST (${ticket.igstRate ?? 0}%)`} value={formatINR(ticket.igst)} />}
               <DetailField label="Total" value={formatINR(ticket.amount)} highlight />
+              {ticket.gstNumber && <DetailField label="GST Number" value={ticket.gstNumber} />}
               <DetailField label="Payment State" value={ticket.status === "repaired_collected" || ticket.status === "return_collected" ? "Paid" : "Pending"} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Related Invoice</p>
