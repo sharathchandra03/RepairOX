@@ -27,7 +27,7 @@ import type { Ticket, TicketStatus } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
 import { searchBrands, searchModels, getModelsForBrand, createBrand, createDeviceModel, type Brand, type DeviceModel } from "@/lib/brand-model-data";
-import { getIssueLibrary, addIssueToLibrary, parseIssueString, serializeIssues } from "@/lib/issue-library";
+import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
 import { loadDeviceCategories } from "@/lib/device-categories";
@@ -297,7 +297,7 @@ function NewTicketWizard() {
   const editId = searchParams.get("edit");
   const fromPage = searchParams.get("from");
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : "/tickets";
-  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer } = useStore();
+  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands } = useStore();
 
   const [step, setStep] = useState(editId ? 3 : 1);
   const [data, setData] = useState<WizardData>(DEFAULT);
@@ -579,7 +579,18 @@ function NewTicketWizard() {
             <CategoryWheel
               value={data.category}
               onChange={(id) => {
-                const updatedDevices = data.devices.map((d, i) => i === data.activeDeviceIndex ? { ...d, category: id } : d);
+                // Auto-select Apple brand for Apple product categories
+                const APPLE_CATEGORIES = ["iphone", "macbook", "imac", "ipad", "iwatch"];
+                const isApple = APPLE_CATEGORIES.includes(id);
+                const appleBrandName = isApple ? (brands.find((b) => b.name === "Apple")?.name || "Apple") : "";
+                const updatedDevices = data.devices.map((d, i) => {
+                  if (i !== data.activeDeviceIndex) return d;
+                  // Set Apple brand for Apple categories, clear brand for others
+                  const device = isApple
+                    ? { ...d.device, brand: appleBrandName }
+                    : { ...d.device, brand: "" };
+                  return { ...d, category: id, device };
+                });
                 setData({ ...data, category: id, devices: updatedDevices });
               }}
               onNext={next}
@@ -942,11 +953,11 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   // Find selected brand id for filtering models
   const selectedBrand = brands.find((b) => b.name.toLowerCase() === (d.brand || brandQuery).toLowerCase().trim());
 
-  // Search results
-  const brandResults = searchBrands(brands, brandQuery);
-  const modelResults = selectedBrand
+  // Search results — sorted alphabetically
+  const brandResults = searchBrands(brands, brandQuery).sort((a, b) => a.name.localeCompare(b.name));
+  const modelResults = (selectedBrand
     ? (modelQuery.trim() ? searchModels(deviceModels, selectedBrand.id, modelQuery) : getModelsForBrand(deviceModels, selectedBrand.id))
-    : [];
+    : []).sort((a, b) => a.name.localeCompare(b.name));
 
   // Brand selection
   const handleBrandSelect = (b: Brand) => {
@@ -1245,7 +1256,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   setNewAssignedByName(name);
                   setShowNewAssignedBy(true);
                 }}
-                options={assignedByOptions.map((o) => ({ label: o.name, value: o.id }))}
+                options={assignedByOptions.map((o) => ({ label: o.name, value: o.name }))}
               />
             </Field>
             <Field label="Assigned To">
@@ -1258,7 +1269,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                   setNewAssignedToName(name);
                   setShowNewAssignedTo(true);
                 }}
-                options={assignedToOptions.map((o) => ({ label: o.name, value: o.id }))}
+                options={assignedToOptions.map((o) => ({ label: o.name, value: o.name }))}
               />
             </Field>
           </div>
@@ -1350,7 +1361,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               <Button size="sm" disabled={!newAssignedByName.trim()} onClick={() => {
                 const option = createAssignedByOption(newAssignedByName.trim());
                 addAssignedByOption(option);
-                set("assignedBy", option.id);
+                set("assignedBy", option.name);
                 setShowNewAssignedBy(false);
                 setNewAssignedByName("");
               }}>
@@ -1377,7 +1388,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               <Button size="sm" disabled={!newAssignedToName.trim()} onClick={() => {
                 const option = createAssignedToOption(newAssignedToName.trim());
                 addAssignedToOption(option);
-                set("assignedTo", option.id);
+                set("assignedTo", option.name);
                 setShowNewAssignedTo(false);
                 setNewAssignedToName("");
               }}>
@@ -1753,9 +1764,9 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 
 /* ── Issue Multi-Select with search, pills, and "create new" ── */
 function IssueSelector({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
+  const { issueLibrary, addIssueToStore } = useStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const [library, setLibrary] = useState<string[]>(() => getIssueLibrary());
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -1771,11 +1782,13 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  const filtered = library.filter(
-    (item) =>
-      !selected.some((s) => s.toLowerCase() === item.toLowerCase()) &&
-      item.toLowerCase().includes(query.trim().toLowerCase())
-  );
+  const filtered = issueLibrary
+    .filter(
+      (item) =>
+        !selected.some((s) => s.toLowerCase() === item.toLowerCase()) &&
+        item.toLowerCase().includes(query.trim().toLowerCase())
+    )
+    .sort((a, b) => a.localeCompare(b));
 
   const addIssue = (issue: string) => {
     const trimmed = issue.trim();
@@ -1783,9 +1796,8 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
     if (selected.some((s) => s.toLowerCase() === trimmed.toLowerCase())) return;
     const updated = [...selected, trimmed];
     onChange(serializeIssues(updated));
-    // Also persist to the library
-    const newLib = addIssueToLibrary(trimmed);
-    setLibrary(newLib);
+    // Persist to the global store
+    addIssueToStore(trimmed);
     setQuery("");
   };
 
@@ -1804,7 +1816,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
     }
   };
 
-  const showCreate = query.trim() && !library.some((i) => i.toLowerCase() === query.trim().toLowerCase());
+  const showCreate = query.trim() && !issueLibrary.some((i) => i.toLowerCase() === query.trim().toLowerCase());
 
   return (
     <div ref={containerRef} className="relative">

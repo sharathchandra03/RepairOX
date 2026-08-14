@@ -30,13 +30,12 @@ type CompletionScreenProps = {
   onView: () => void;
 };
 
-export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onView: _onView }: CompletionScreenProps) {
+export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onView }: CompletionScreenProps) {
   const router = useRouter();
   const [format, setFormat] = useState<PrintFormat>("a4");
 
   const label = type === "ticket" ? "Ticket" : "Invoice";
   const backLabel = type === "ticket" ? "tickets" : "invoices";
-  const viewPath = type === "ticket" ? `/tickets/${id}` : `/invoice/${id}`;
   const createPath = type === "ticket" ? "/tickets/new" : "/invoice/create";
 
   /** Build the print-preview URL for the currently selected format */
@@ -108,7 +107,7 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
         )}
 
         <div className="mt-6 flex items-center justify-center gap-6">
-          <button onClick={() => { window.location.href = viewPath; }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+          <button onClick={() => { onView(); }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
             <Eye className="h-3.5 w-3.5" /> View {label}
           </button>
           <button onClick={() => { window.location.href = createPath; }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">

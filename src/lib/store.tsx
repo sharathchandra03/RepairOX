@@ -39,6 +39,7 @@ import {
 import {
   SEED_ASSIGNED_TO_OPTIONS, type AssignedToOption,
 } from "@/lib/assigned-to-data";
+import { DEFAULT_ISSUES } from "@/lib/issue-library";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -60,6 +61,8 @@ interface StoreState {
   deviceModels: DeviceModel[];
   assignedByOptions: AssignedByOption[];
   assignedToOptions: AssignedToOption[];
+  /** Global issue library — issues saved from ticket forms appear here */
+  issueLibrary: string[];
   /** True once initial DB load completes (or localStorage is read). */
   hydrated: boolean;
   /** "db" when Supabase is active, "local" otherwise. */
@@ -97,6 +100,8 @@ interface StoreActions {
   addAssignedToOption: (option: AssignedToOption) => Promise<void>;
   deleteAssignedByOption: (id: string) => Promise<void>;
   deleteAssignedToOption: (id: string) => Promise<void>;
+  addIssueToStore: (issue: string) => void;
+  deleteIssueFromStore: (issue: string) => void;
   resetBrandsAndModels: () => void;
 }
 
@@ -573,6 +578,14 @@ function loadFromStorage(storageKey?: string): StoreState | null {
       deviceModels: saved.deviceModels ?? SEED_MODELS,
       assignedByOptions: saved.assignedByOptions ?? SEED_ASSIGNED_BY_OPTIONS,
       assignedToOptions: saved.assignedToOptions ?? SEED_ASSIGNED_TO_OPTIONS,
+      issueLibrary: saved.issueLibrary ?? (() => {
+        // Migrate from standalone localStorage key if it exists
+        try {
+          const legacy = localStorage.getItem("repairox-issue-library");
+          if (legacy) return JSON.parse(legacy);
+        } catch {}
+        return DEFAULT_ISSUES;
+      })(),
       hydrated: true,
       mode: "local" as const,
     };
@@ -595,6 +608,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
     team: [], inventory: [], stockMovements: [], customers: [],
     companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [],
+    issueLibrary: [],
     hydrated: false, mode: "local",
   });
 
@@ -626,6 +640,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
         companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
         assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
+        issueLibrary: DEFAULT_ISSUES,
         hydrated: true, mode: "local",
       };
       setState(fresh);
@@ -646,6 +661,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
           companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
           assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
+          issueLibrary: DEFAULT_ISSUES,
           hydrated: true, mode: "local",
         });
       }
@@ -698,6 +714,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         deviceModels: (models ?? []).map(rowToDeviceModel),
         assignedByOptions: (abOpts ?? []).map(rowToAssignedByOption),
         assignedToOptions: (atOpts ?? []).map(rowToAssignedToOption),
+        issueLibrary: DEFAULT_ISSUES,
         hydrated: true,
       }));
     })();
@@ -1423,6 +1440,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /* ── Issue Library actions ── */
+  const addIssueToStore = useCallback((issue: string) => {
+    const trimmed = issue.trim();
+    if (!trimmed) return;
+    setState((s) => {
+      const exists = s.issueLibrary.some((i) => i.toLowerCase() === trimmed.toLowerCase());
+      if (exists) return s;
+      return { ...s, issueLibrary: [...s.issueLibrary, trimmed] };
+    });
+  }, []);
+
+  const deleteIssueFromStore = useCallback((issue: string) => {
+    setState((s) => ({
+      ...s,
+      issueLibrary: s.issueLibrary.filter((i) => i.toLowerCase() !== issue.trim().toLowerCase()),
+    }));
+  }, []);
+
   const store: Store = {
     ...state,
     addTicket,
@@ -1455,6 +1490,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addAssignedToOption,
     deleteAssignedByOption,
     deleteAssignedToOption,
+    addIssueToStore,
+    deleteIssueFromStore,
     resetBrandsAndModels,
   };
 

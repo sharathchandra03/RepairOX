@@ -9,6 +9,13 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
   ({ className, iconLeft, iconRight, ...props }, ref) => {
+    const internalRef = React.useRef<HTMLInputElement>(null);
+    const combinedRef = (node: HTMLInputElement | null) => {
+      (internalRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
+      if (typeof ref === "function") ref(node);
+      else if (ref) (ref as React.MutableRefObject<HTMLInputElement | null>).current = node;
+    };
+
     return (
       <div className={cn("group relative flex items-center")}>
         {iconLeft && (
@@ -17,7 +24,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           </span>
         )}
         <input
-          ref={ref}
+          ref={combinedRef}
           className={cn(
             "flex h-[34px] w-full rounded-xl border border-border bg-card px-3 py-1.5 text-[13px] placeholder:text-muted-foreground transition-all duration-150",
             "hover:border-[#4361EE]/40",
@@ -29,7 +36,10 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           {...props}
         />
         {iconRight && (
-          <span className="absolute right-2.5 inline-flex h-4 w-4 items-center justify-center text-muted-foreground">
+          <span
+            className="absolute right-2.5 inline-flex h-4 w-4 items-center justify-center text-muted-foreground cursor-pointer"
+            onClick={() => internalRef.current?.focus()}
+          >
             {iconRight}
           </span>
         )}

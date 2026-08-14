@@ -14,7 +14,7 @@
 const STORAGE_KEY = "repairox-issue-library";
 
 /** Default issues that ship with the app. */
-const DEFAULT_ISSUES: string[] = [
+export const DEFAULT_ISSUES: string[] = [
   "Display Not Working",
   "Charging Issue",
   "Face ID",

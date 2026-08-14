@@ -190,6 +190,9 @@ export default function CategoriesSettingsPage() {
 
       {/* ─── Brands & Models Master ─── */}
       <BrandsModelsSection />
+
+      {/* ─── Issue Library ─── */}
+      <IssueLibrarySection />
     </div>
   );
 }
@@ -257,8 +260,8 @@ function BrandsModelsSection() {
           </p>
         </div>
         <div className="divide-y divide-border">
-          {brands.map((brand) => {
-            const models = deviceModels.filter((m) => m.brandId === brand.id);
+          {[...brands].sort((a, b) => a.name.localeCompare(b.name)).map((brand) => {
+            const models = deviceModels.filter((m) => m.brandId === brand.id).sort((a, b) => a.name.localeCompare(b.name));
             const isExpanded = expandedBrand === brand.id;
             return (
               <div key={brand.id}>
@@ -355,6 +358,84 @@ function BrandsModelsSection() {
         <Button variant="outline" size="md" onClick={resetBrandsAndModels}>
           <RotateCcw className="h-4 w-4" /> Reset Defaults
         </Button>
+      </div>
+    </>
+  );
+}
+
+/* ─── Issue Library Management ─────────────────────────────────────────── */
+
+function IssueLibrarySection() {
+  const { issueLibrary, addIssueToStore, deleteIssueFromStore } = useStore();
+  const [newIssue, setNewIssue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+
+  const handleAdd = () => {
+    if (!newIssue.trim()) return;
+    if (issueLibrary.some((i) => i.toLowerCase() === newIssue.trim().toLowerCase())) return;
+    addIssueToStore(newIssue.trim());
+    setNewIssue("");
+  };
+
+  const sortedIssues = [...issueLibrary].sort((a, b) => a.localeCompare(b));
+
+  return (
+    <>
+      <div className="mt-4 border-t border-border pt-6">
+        <h2 className="text-lg font-bold tracking-tight">Issue Library</h2>
+        <p className="mt-0.5 text-sm text-muted-foreground">Manage the issue options shown in the ticket creation form. New issues added from tickets also appear here.</p>
+      </div>
+
+      {/* Add New Issue */}
+      <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Add New Issue</p>
+        <div className="flex items-end gap-3">
+          <div className="flex-1 space-y-1">
+            <Label>Issue Name</Label>
+            <Input
+              value={newIssue}
+              onChange={(e: any) => setNewIssue(e.target.value)}
+              placeholder="e.g. Hinge Broken, SIM Tray Stuck"
+              onKeyDown={(e: any) => e.key === "Enter" && handleAdd()}
+            />
+          </div>
+          <Button size="md" onClick={handleAdd} disabled={!newIssue.trim()}>
+            <Plus className="h-4 w-4" /> Add
+          </Button>
+        </div>
+      </div>
+
+      {/* Issue List */}
+      <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+        <div className="px-5 py-3 border-b border-border">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            Issues ({issueLibrary.length})
+          </p>
+        </div>
+        <div className="divide-y divide-border max-h-[400px] overflow-y-auto">
+          {sortedIssues.map((issue) => (
+            <div key={issue} className="flex items-center justify-between px-5 py-2.5 hover:bg-muted/30 transition">
+              <span className="text-sm">{issue}</span>
+              {confirmDelete === issue ? (
+                <div className="flex items-center gap-1.5">
+                  <Button size="sm" variant="outline" onClick={() => setConfirmDelete(null)}>Cancel</Button>
+                  <Button size="sm" onClick={() => { deleteIssueFromStore(issue); setConfirmDelete(null); }} className="bg-rose-600 hover:bg-rose-700 text-white">Delete</Button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmDelete(issue)}
+                  className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:text-rose-500 hover:bg-rose-50 transition"
+                  title="Delete issue"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          ))}
+          {issueLibrary.length === 0 && (
+            <div className="px-5 py-8 text-center text-sm text-muted-foreground">No issues configured. Add one above.</div>
+          )}
+        </div>
       </div>
     </>
   );
