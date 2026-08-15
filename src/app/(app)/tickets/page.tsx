@@ -2,7 +2,7 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings2,
@@ -171,6 +171,32 @@ export default function TicketsPage() {
   const [q, setQ] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
 
+  // Universal Search filter — shows only a single record when navigated from search
+  const searchParams = useSearchParams();
+  const [searchFilterId, setSearchFilterId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = searchParams.get("search_id");
+    if (id) {
+      setSearchFilterId(id);
+      // Reset other filters so the single record is visible
+      setStatusFilter("all");
+      setDateRange("all");
+      setPriorityFilter("all");
+      setTechFilter("all");
+      setCustomerTypeFilter("all");
+      setQ("");
+    }
+  }, [searchParams]);
+
+  const clearSearchFilter = useCallback(() => {
+    setSearchFilterId(null);
+    // Remove search_id from URL without full navigation
+    const url = new URL(window.location.href);
+    url.searchParams.delete("search_id");
+    window.history.replaceState({}, "", url.pathname);
+  }, []);
+
   // Selection
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkStatus, setShowBulkStatus] = useState(false);
@@ -257,8 +283,12 @@ export default function TicketsPage() {
 
   // Filtered list
   const list = useMemo(
-    () =>
-      tickets.filter((t) => {
+    () => {
+      // When navigated from Universal Search, show only the exact record
+      if (searchFilterId) {
+        return tickets.filter((t) => t.id === searchFilterId);
+      }
+      return tickets.filter((t) => {
         const okStatus = statusFilter === "all" || t.status === statusFilter;
         const okDate = isInDateRange(t.createdAt, dateRange);
         const okPriority = priorityFilter === "all" || t.priority === priorityFilter;
@@ -270,8 +300,9 @@ export default function TicketsPage() {
             .toLowerCase()
             .includes(q.toLowerCase());
         return okStatus && okDate && okPriority && okTech && okCustomerType && okQ;
-      }),
-    [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q]
+      });
+    },
+    [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q, searchFilterId]
   );
 
   // Ordered & visible columns
@@ -624,6 +655,29 @@ export default function TicketsPage() {
             </button>
           ))}
           <button onClick={() => setShowBulkStatus(false)} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+        </motion.div>
+      )}
+
+      {/* Search Filter Banner — shown when navigated from Universal Search */}
+      {searchFilterId && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between rounded-xl border border-[#4361EE]/20 bg-[#4361EE]/5 px-4 py-3"
+        >
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4 text-[#4361EE]" />
+            <span className="text-sm font-medium text-[#4361EE]">
+              Showing search result: <span className="font-bold">{searchFilterId}</span>
+            </span>
+          </div>
+          <button
+            onClick={clearSearchFilter}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#4361EE]/10 px-3 py-1.5 text-xs font-semibold text-[#4361EE] transition hover:bg-[#4361EE]/20 active:scale-95"
+          >
+            <X className="h-3 w-3" />
+            Show All Tickets
+          </button>
         </motion.div>
       )}
 

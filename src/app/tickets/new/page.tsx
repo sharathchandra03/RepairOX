@@ -48,7 +48,7 @@ const PROCESSES = [
   { id: "invoice", label: "New Invoice", emoji: "🧾", desc: "Bill on the spot" },
   { id: "stock", label: "Add Stock", emoji: "📦", desc: "Inbound inventory" },
   { id: "walkin", label: "Walk-In", emoji: "🏪", desc: "Counter customer" },
-  { id: "estimate", label: "Estimate", emoji: "💵", desc: "Send a quote" },
+  { id: "estimate", label: "Repair Estimate", emoji: "💵", desc: "Send a quote" },
   { id: "warranty", label: "Warranty", emoji: "🛡️", desc: "Claim or check" },
 ];
 
@@ -422,13 +422,13 @@ function NewTicketWizard() {
       const parts = wd.parts.reduce((ps: number, p: any) => ps + (Number(p.total) || 0), 0);
       return s + est + parts;
     }, 0);
-    // Tax computation: single GST rate → split 50/50 into SGST + CGST
-    const ticketGstRate = data.gstRate ?? 0;
-    const ticketSgstRate = ticketGstRate / 2;
-    const ticketCgstRate = ticketGstRate / 2;
-    const ticketSgst = Math.round(subtotal * (ticketSgstRate / 100));
-    const ticketCgst = Math.round(subtotal * (ticketCgstRate / 100));
-    const ticketTotal = subtotal + ticketSgst + ticketCgst;
+    // Tax computation removed — ticket total is estimate + parts only (no GST)
+    const ticketGstRate = 0;
+    const ticketSgstRate = 0;
+    const ticketCgstRate = 0;
+    const ticketSgst = 0;
+    const ticketCgst = 0;
+    const ticketTotal = subtotal;
 
     const ticketData: Ticket = {
       id: editId || genId(),
@@ -534,7 +534,7 @@ function NewTicketWizard() {
         type="ticket"
         id={createdTicketId}
         onBack={() => router.push("/tickets")}
-        onView={() => router.push(`/tickets/${createdTicketId}`)}
+        onEdit={() => router.push(`/tickets/${createdTicketId}`)}
       />
     );
   }
@@ -694,7 +694,7 @@ const PROCESS_CARDS: {
   },
   {
     id: "estimate",
-    title: "Estimate",
+    title: "Repair Estimate",
     desc: "Send quote and estimated cost to your customer",
     icon: <IndianRupee className="h-6 w-6" />,
     gradient: "from-teal-400/80 to-teal-600/80",
@@ -713,11 +713,6 @@ const PROCESS_CARDS: {
 function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: string) => void }) {
   return (
     <div className="max-w-[660px] mx-auto">
-      {/* Decorative background elements */}
-      <div className="pointer-events-none absolute top-20 left-8 h-2 w-2 rounded-full bg-[#4361EE]/20 animate-pulse-dot" />
-      <div className="pointer-events-none absolute top-32 left-12 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15" />
-      <div className="pointer-events-none absolute top-24 right-16 h-1.5 w-1.5 rounded-full bg-[#4361EE]/15 animate-pulse-dot" style={{ animationDelay: "0.5s" }} />
-
       {/* Cards Grid */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {PROCESS_CARDS.map((card, i) => {
@@ -1475,7 +1470,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 { label: "Service", value: "service" },
                 { label: "Accessories", value: "accessories" },
                 { label: "Warranty", value: "warranty" },
-                { label: "Estimate", value: "estimate" },
+                { label: "Repair Estimate", value: "estimate" },
                 { label: "Buyback", value: "buyback" },
               ]} />
             </Field>
@@ -2357,20 +2352,8 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
   const subtotal = (estimatesTotal + partsTotal) || 0;
 
-  // Single GST rate → auto-split 50/50 into SGST + CGST
-  const gstRate = data.gstRate ?? 18;
-  const sgstRate = gstRate / 2;
-  const cgstRate = gstRate / 2;
-  const sgstAmt = Math.round(subtotal * (sgstRate / 100));
-  const cgstAmt = Math.round(subtotal * (cgstRate / 100));
-  const tax = sgstAmt + cgstAmt;
-  const total = subtotal + tax;
-
-  const isCustom = !!data.customGstRate;
-
-  // Local state for custom input editing
-  const [customRaw, setCustomRaw] = useState<string>(String(gstRate));
-  const [customFocused, setCustomFocused] = useState(false);
+  // GST/Tax removed from ticket quotation — total = subtotal (estimate + parts)
+  const total = subtotal;
 
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
@@ -2429,7 +2412,7 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
           )}
         </div>
 
-        {/* Right Panel — Summary + Tax */}
+        {/* Right Panel — Summary */}
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
@@ -2437,78 +2420,8 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
             {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(subtotal)} />}
             {data.devices.length <= 1 && estimatesTotal > 0 && partsTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
             {data.devices.length <= 1 && partsTotal > 0 && <QRow k="Parts" v={formatINR(partsTotal)} />}
-            <QRow k="Sub-total" v={formatINR(subtotal)} />
-            {sgstAmt > 0 && <QRow k={`SGST (${sgstRate}%)`} v={formatINR(sgstAmt)} />}
-            {cgstAmt > 0 && <QRow k={`CGST (${cgstRate}%)`} v={formatINR(cgstAmt)} />}
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
-
-          {/* GST Rate Selector */}
-          {setData && (
-            <div className="mt-4 pt-3 border-t border-border">
-              <Label className="text-[10px] uppercase tracking-wider text-muted-foreground">GST Rate</Label>
-              <div className="mt-2 flex items-center gap-1.5">
-                {[0, 12, 18].map((rate) => (
-                  <button
-                    key={rate}
-                    type="button"
-                    onClick={() => setData({ ...data, gstRate: rate, customGstRate: false })}
-                    className={cn(
-                      "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
-                      gstRate === rate && !isCustom
-                        ? "bg-[#4361EE] text-white shadow-sm"
-                        : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
-                    )}
-                  >
-                    {rate}%
-                  </button>
-                ))}
-                <button
-                  type="button"
-                  onClick={() => { setData({ ...data, customGstRate: true }); setCustomRaw(String(gstRate)); }}
-                  className={cn(
-                    "flex-1 rounded-lg px-2 py-1.5 text-[12px] font-semibold transition-all text-center",
-                    isCustom
-                      ? "bg-[#4361EE] text-white shadow-sm"
-                      : "bg-muted text-muted-foreground hover:bg-[#EEF1FD] hover:text-[#4361EE]"
-                  )}
-                >
-                  Custom
-                </button>
-              </div>
-              {/* Custom: single input for total GST % */}
-              {isCustom && (
-                <div className="mt-2.5 flex items-center gap-2 flex-nowrap">
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    value={customFocused ? customRaw : String(gstRate)}
-                    onFocus={() => { setCustomFocused(true); setCustomRaw(String(gstRate)); }}
-                    onChange={(e) => {
-                      const raw = e.target.value.replace(/[^0-9.]/g, "");
-                      setCustomRaw(raw);
-                      const v = parseFloat(raw);
-                      if (!isNaN(v) && v >= 0 && v <= 100) {
-                        setData({ ...data, gstRate: v, customGstRate: true });
-                      } else if (raw === "" || raw === ".") {
-                        setData({ ...data, gstRate: 0, customGstRate: true });
-                      }
-                    }}
-                    onBlur={() => {
-                      setCustomFocused(false);
-                      const v = parseFloat(customRaw);
-                      if (isNaN(v) || customRaw === "") {
-                        setData({ ...data, gstRate: 0, customGstRate: true });
-                      }
-                    }}
-                    placeholder="Total GST %"
-                    className="h-9 w-20 shrink-0 rounded-lg border border-border bg-card px-2.5 text-sm font-medium tabular-nums text-center focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-                  />
-                  <span className="text-[11px] text-muted-foreground whitespace-nowrap">% → SGST {sgstRate}% + CGST {cgstRate}%</span>
-                </div>
-              )}
-            </div>
-          )}
 
           {!isEdit && <Button size="lg" className="mt-4 w-full" onClick={onNext}>Approve Quote <ArrowRight className="h-4 w-4" /></Button>}
           <p className="mt-2 text-center text-[11px] text-muted-foreground">You'll confirm all details in the final step.</p>

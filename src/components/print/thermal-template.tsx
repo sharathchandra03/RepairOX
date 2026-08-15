@@ -59,6 +59,23 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
       <div className="text-center">
         <p className="text-[13px] font-bold tracking-wide uppercase">{data.printTitle}</p>
         <p className="text-[10px] font-semibold">#{docNumber}</p>
+        {/* Invoice Payment Status Badge */}
+        {isInvoice && invoice && (
+          <p
+            className="mt-1 text-[10px] font-bold uppercase tracking-wider"
+            style={
+              invoice.status === "paid"
+                ? { color: "#166534" }
+                : invoice.status === "overdue"
+                ? { color: "#991b1b" }
+                : invoice.status === "partial"
+                ? { color: "#92400e" }
+                : { color: "#92400e" }
+            }
+          >
+            {invoice.status === "paid" ? "● PAID" : invoice.status === "overdue" ? "● OVERDUE" : invoice.status === "partial" ? "● PARTIAL" : "● DUE"}
+          </p>
+        )}
       </div>
 
       <Divider />
@@ -182,7 +199,23 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
               <Row label="Reference" value={invoice.reference} />
               <Row label="Type" value={invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"} />
               <Row label="Category" value={(invoice.serviceCategory || "service").charAt(0).toUpperCase() + (invoice.serviceCategory || "service").slice(1)} />
-              <Row label="Status" value={invoice.status.charAt(0).toUpperCase() + invoice.status.slice(1)} bold />
+              <div className="flex justify-between gap-1 text-[9px] leading-[1.4]">
+                <span className="text-gray-600 shrink-0">Status:</span>
+                <span
+                  className="text-right font-bold"
+                  style={
+                    invoice.status === "paid"
+                      ? { color: "#166534" }
+                      : invoice.status === "overdue"
+                      ? { color: "#991b1b" }
+                      : invoice.status === "partial"
+                      ? { color: "#92400e" }
+                      : { color: "#92400e" }
+                  }
+                >
+                  {invoice.status === "paid" ? "Paid" : invoice.status === "overdue" ? "Overdue" : invoice.status === "partial" ? "Partial" : "Due"}
+                </span>
+              </div>
               <Row label="Due" value={formatPrintDate(invoice.dueDate)} />
               {invoice.paymentMode && <Row label="Payment" value={invoice.paymentMode.replace("_", " ")} />}
               {invoice.employee && <Row label="Employee" value={invoice.employee} />}

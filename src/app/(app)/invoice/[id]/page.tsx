@@ -138,14 +138,22 @@ export default function InvoiceDetailPage() {
 
   const saveStatus = useCallback(() => {
     if (!invoice) return;
-    const paid = Number(paidDraft) || 0;
-    // Auto-determine status based on payment
-    let finalStatus = statusDraft;
-    if (paid >= invoice.total) finalStatus = "paid";
-    else if (paid > 0 && paid < invoice.total) finalStatus = "partial";
-    else if (invoice.dueDate && Date.now() > new Date(invoice.dueDate).getTime() && paid < invoice.total) finalStatus = "overdue";
+    let paid = Number(paidDraft) || 0;
+    let finalStatus: InvoiceStatus = statusDraft;
 
-    const updates: Partial<typeof invoice> = { status: finalStatus, paidAmount: paid, paymentMode: paymentModeDraft || undefined };
+    // If user explicitly chose "paid", ensure paidAmount = total
+    if (statusDraft === "paid") {
+      paid = invoice.total;
+    }
+    // If user didn't change status from what was loaded, auto-derive from payment
+    else if (statusDraft === invoice.status) {
+      if (paid >= invoice.total) finalStatus = "paid";
+      else if (paid > 0 && paid < invoice.total) finalStatus = "partial";
+      else if (invoice.dueDate && Date.now() > new Date(invoice.dueDate).getTime() && paid < invoice.total) finalStatus = "overdue";
+    }
+    // If user explicitly chose a different status, respect it
+
+    const updates: Partial<Invoice> = { status: finalStatus, paidAmount: paid, paymentMode: paymentModeDraft || undefined };
     if (paymentNoteDraft.trim()) {
       updates.notes = [invoice.notes, `Payment Note: ${paymentNoteDraft.trim()}`].filter(Boolean).join("\n");
     }
@@ -342,10 +350,19 @@ export default function InvoiceDetailPage() {
               <DetailField label="Due Date" value={fmtDate(invoice.dueDate)} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Status</p>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  {INVOICE_STATUS_LABEL[invoice.status]}
-                </span>
+                <select
+                  value={invoice.status}
+                  onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center] ${INVOICE_STATUS_TONE[invoice.status]}`}
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
+                >
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="paid">Paid</option>
+                  <option value="partial">Partial</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
               </div>
             </div>
           </DetailSection>
@@ -497,10 +514,19 @@ export default function InvoiceDetailPage() {
               <DetailField label="Balance Due" value={formatINR(Math.max(balanceDue, 0))} highlight={balanceDue > 0} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Payment Status</p>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  {INVOICE_STATUS_LABEL[invoice.status]}
-                </span>
+                <select
+                  value={invoice.status}
+                  onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center] ${INVOICE_STATUS_TONE[invoice.status]}`}
+                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
+                >
+                  <option value="draft">Draft</option>
+                  <option value="sent">Sent</option>
+                  <option value="paid">Paid</option>
+                  <option value="partial">Partial</option>
+                  <option value="overdue">Overdue</option>
+                  <option value="cancelled">Cancelled</option>
+                </select>
               </div>
             </div>
           </DetailSection>

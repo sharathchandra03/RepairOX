@@ -227,7 +227,15 @@ export function UniversalSearch() {
 
   const navigateToResult = useCallback(
     (result: SearchResult) => {
-      router.push(result.href);
+      // For tickets and invoices, navigate to the list page with a search filter
+      // instead of opening the record detail page directly
+      if (result.type === "ticket") {
+        router.push(`/tickets?search_id=${encodeURIComponent(result.id)}`);
+      } else if (result.type === "invoice") {
+        router.push(`/invoice?search_id=${encodeURIComponent(result.id)}`);
+      } else {
+        router.push(result.href);
+      }
       setIsOpen(false);
       resetSearch();
     },

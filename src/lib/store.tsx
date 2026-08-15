@@ -991,6 +991,42 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateInvoice = useCallback(async (id: string, updates: Partial<Invoice>) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
+
+    // ── Status ↔ Payment synchronization ──
+    // Status is the single source of truth. When status changes, derive paidAmount.
+    // When paidAmount changes without explicit status, derive status.
+    if (prev) {
+      const incomingStatus = updates.status;
+      const incomingPaid = updates.paidAmount;
+      const currentTotal = updates.total ?? prev.total;
+      const currentPaid = prev.paidAmount;
+
+      if (incomingStatus !== undefined && incomingStatus !== prev.status) {
+        // Status changed explicitly — sync paidAmount to match
+        if (incomingStatus === "paid" && !("paidAmount" in updates)) {
+          updates.paidAmount = currentTotal;
+        } else if (incomingStatus === "draft" && !("paidAmount" in updates)) {
+          // Moving to draft: zero out paidAmount (unless caller explicitly set it)
+          updates.paidAmount = 0;
+        } else if (incomingStatus === "cancelled" && !("paidAmount" in updates)) {
+          updates.paidAmount = 0;
+        }
+        // "sent", "partial", "overdue" keep existing paidAmount (preserves partial payment data)
+      } else if (incomingPaid !== undefined && !("status" in updates)) {
+        // paidAmount changed without explicit status — auto-derive status
+        if (incomingPaid >= currentTotal) {
+          updates.status = "paid";
+        } else if (incomingPaid > 0 && incomingPaid < currentTotal) {
+          updates.status = "partial";
+        } else if (incomingPaid === 0 || (incomingPaid !== undefined && incomingPaid <= 0)) {
+          // If was paid/partial and now zeroed, revert to sent/draft
+          if (prev.status === "paid" || prev.status === "partial") {
+            updates.status = "sent";
+          }
+        }
+      }
+    }
+
     if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;

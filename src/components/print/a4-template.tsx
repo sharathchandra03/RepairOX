@@ -50,6 +50,25 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
               <p><span className="font-semibold text-gray-700">Type:</span> <span className="font-bold">{ticket.customerType === "business" ? "Business" : "Retail"}</span></p>
             )}
           </div>
+          {/* Invoice Payment Status Badge */}
+          {isInvoice && invoice && (
+            <div className="mt-3">
+              <span
+                className="inline-block rounded px-3 py-1 text-[11px] font-bold uppercase tracking-wider border"
+                style={
+                  invoice.status === "paid"
+                    ? { backgroundColor: "#dcfce7", color: "#166534", borderColor: "#86efac" }
+                    : invoice.status === "overdue"
+                    ? { backgroundColor: "#fef2f2", color: "#991b1b", borderColor: "#fca5a5" }
+                    : invoice.status === "partial"
+                    ? { backgroundColor: "#fffbeb", color: "#92400e", borderColor: "#fcd34d" }
+                    : { backgroundColor: "#fffbeb", color: "#92400e", borderColor: "#fcd34d" }
+                }
+              >
+                {invoice.status === "paid" ? "PAID" : invoice.status === "overdue" ? "OVERDUE" : invoice.status === "partial" ? "PARTIAL" : "DUE"}
+              </span>
+            </div>
+          )}
         </div>
       </header>
 
@@ -175,7 +194,12 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
               <div><span className="text-gray-500">Reference:</span> <span className="font-medium">{invoice.reference}</span></div>
               <div><span className="text-gray-500">Type:</span> <span className="font-medium capitalize">{invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"}</span></div>
               <div><span className="text-gray-500">Category:</span> <span className="font-medium capitalize">{invoice.serviceCategory || "service"}</span></div>
-              <div><span className="text-gray-500">Status:</span> <span className="font-semibold capitalize">{invoice.status}</span></div>
+              <div><span className="text-gray-500">Status:</span> <span className="font-semibold capitalize" style={
+                invoice.status === "paid" ? { color: "#166534" }
+                : invoice.status === "overdue" ? { color: "#991b1b" }
+                : invoice.status === "partial" ? { color: "#92400e" }
+                : { color: "#92400e" }
+              }>{invoice.status === "paid" ? "Paid" : invoice.status === "overdue" ? "Overdue" : invoice.status === "partial" ? "Partial" : "Due"}</span></div>
               <div><span className="text-gray-500">Due Date:</span> <span className="font-medium">{formatPrintDate(invoice.dueDate)}</span></div>
               {invoice.employee && <div><span className="text-gray-500">Salesperson:</span> <span className="font-medium">{invoice.employee}</span></div>}
               {invoice.paymentMode && <div><span className="text-gray-500">Payment:</span> <span className="font-medium capitalize">{invoice.paymentMode.replace("_", " ")}</span></div>}
@@ -323,27 +347,27 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
 
           {isTicket && ticket && (
             <div className="space-y-1">
-              {/* GST breakdown — only when GST > 0 */}
-              {(ticket.sgst || 0) + (ticket.cgst || 0) > 0 && (
-                <>
-                  <div className="flex justify-between py-0.5 text-[10px]">
-                    <span className="text-gray-600">Subtotal</span>
-                    <span className="font-medium">{formatPrintCurrency(ticket.amount - (ticket.sgst || 0) - (ticket.cgst || 0))}</span>
-                  </div>
-                  {(ticket.sgst || 0) > 0 && (
-                    <div className="flex justify-between py-0.5 text-[10px]">
-                      <span className="text-gray-600">SGST ({ticket.sgstRate || 0}%)</span>
-                      <span className="font-medium">{formatPrintCurrency(ticket.sgst || 0)}</span>
-                    </div>
-                  )}
-                  {(ticket.cgst || 0) > 0 && (
-                    <div className="flex justify-between py-0.5 text-[10px]">
-                      <span className="text-gray-600">CGST ({ticket.cgstRate || 0}%)</span>
-                      <span className="font-medium">{formatPrintCurrency(ticket.cgst || 0)}</span>
-                    </div>
-                  )}
-                </>
+              {/* Parts total — show when parts exist */}
+              {ticket.parts && ticket.parts.length > 0 && (
+                <div className="flex justify-between py-0.5 text-[10px]">
+                  <span className="text-gray-600">Parts</span>
+                  <span className="font-medium">{formatPrintCurrency(ticket.parts.reduce((s, p) => s + p.total, 0))}</span>
+                </div>
               )}
+              {/* Estimate — derived from total minus parts */}
+              {(() => {
+                const partsSum = ticket.parts ? ticket.parts.reduce((s, p) => s + p.total, 0) : 0;
+                const estimateAmt = ticket.amount - partsSum;
+                if (estimateAmt > 0) {
+                  return (
+                    <div className="flex justify-between py-0.5 text-[10px]">
+                      <span className="text-gray-600">Estimate</span>
+                      <span className="font-medium">{formatPrintCurrency(estimateAmt)}</span>
+                    </div>
+                  );
+                }
+                return null;
+              })()}
               <div className="flex justify-between py-1.5 border-t-2 border-gray-800 font-bold text-sm">
                 <span>Total Amount</span>
                 <span>{formatPrintCurrency(ticket.amount)}</span>

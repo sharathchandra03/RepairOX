@@ -2,13 +2,13 @@
 
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence, useSpring, useTransform, useMotionValue } from "framer-motion";
 import {
   Plus, Download, Search, Eye, Pencil, MoreHorizontal,
   Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
-  PieChart, Settings2, GripVertical, RefreshCw, ChevronUp,
+  PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, X,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -122,7 +122,7 @@ export default function InvoicePage() {
     canDownload,
   } = usePdfDownload();
 
-  const [dashboardExpanded, setDashboardExpanded] = useState(true);
+  const [dashboardExpanded, setDashboardExpanded] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
@@ -132,6 +132,33 @@ export default function InvoicePage() {
   const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
+
+  // Universal Search filter — shows only a single record when navigated from search
+  const searchParams = useSearchParams();
+  const [searchFilterId, setSearchFilterId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = searchParams.get("search_id");
+    if (id) {
+      setSearchFilterId(id);
+      // Reset other filters so the single record is visible
+      setStatusFilter("all");
+      setTypeFilter("all");
+      setCategoryFilter("all");
+      setDateRange("all");
+      setCustomFrom("");
+      setCustomTo("");
+      setQ("");
+    }
+  }, [searchParams]);
+
+  const clearSearchFilter = useCallback(() => {
+    setSearchFilterId(null);
+    // Remove search_id from URL without full navigation
+    const url = new URL(window.location.href);
+    url.searchParams.delete("search_id");
+    window.history.replaceState({}, "", url.pathname);
+  }, []);
 
   // Column settings
   const [invColumnOrder, setInvColumnOrder] = useState<InvColumnId[]>(INV_DEFAULT_ORDER);
@@ -148,15 +175,20 @@ export default function InvoicePage() {
     [invColumnOrder, invVisibleCols]
   );
 
-  const list = useMemo(() =>
-    invoices.filter((inv) => {
+  const list = useMemo(() => {
+    // When navigated from Universal Search, show only the exact record
+    if (searchFilterId) {
+      return invoices.filter((inv) => inv.id === searchFilterId);
+    }
+    return invoices.filter((inv) => {
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
       const okQ = !q || `${inv.id} ${inv.reference} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
       return okStatus && okType && okCategory && okDate && okQ;
-    }), [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q]);
+    });
+  }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId]);
 
   /* KPIs */
   const kpis = useMemo(() => {
@@ -369,6 +401,29 @@ export default function InvoicePage() {
             </>
           )}
           <button onClick={() => { setSelected(new Set()); setShowBulkStatus(false); }} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Clear</button>
+        </motion.div>
+      )}
+
+      {/* Search Filter Banner — shown when navigated from Universal Search */}
+      {searchFilterId && (
+        <motion.div
+          initial={{ opacity: 0, y: -8 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex items-center justify-between rounded-xl border border-[#4361EE]/20 bg-[#4361EE]/5 px-4 py-3"
+        >
+          <div className="flex items-center gap-2">
+            <Search className="h-4 w-4 text-[#4361EE]" />
+            <span className="text-sm font-medium text-[#4361EE]">
+              Showing search result: <span className="font-bold">{searchFilterId}</span>
+            </span>
+          </div>
+          <button
+            onClick={clearSearchFilter}
+            className="inline-flex items-center gap-1.5 rounded-full bg-[#4361EE]/10 px-3 py-1.5 text-xs font-semibold text-[#4361EE] transition hover:bg-[#4361EE]/20 active:scale-95"
+          >
+            <X className="h-3 w-3" />
+            Show All Invoices
+          </button>
         </motion.div>
       )}
 

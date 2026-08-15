@@ -36,6 +36,23 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
     return () => clearTimeout(timer);
   }, [autoAdvanceMs, onComplete]);
 
+  const isInvoice = type === "invoice";
+
+  // Color tokens — green for invoice, blue for ticket
+  const accentGradient = isInvoice
+    ? "linear-gradient(135deg, #16A34A 0%, #15803D 100%)"
+    : "linear-gradient(135deg, #4361EE 0%, #3A56D4 100%)";
+  const pulseColor1 = isInvoice ? "rgba(22, 163, 74, 0.08)" : "rgba(67, 97, 238, 0.08)";
+  const pulseColor2 = isInvoice ? "rgba(22, 163, 74, 0.05)" : "rgba(67, 97, 238, 0.05)";
+  const glowShadow = isInvoice
+    ? "0 0 40px rgba(22, 163, 74, 0.3), 0 8px 32px -8px rgba(22, 163, 74, 0.4)"
+    : "0 0 40px rgba(67, 97, 238, 0.3), 0 8px 32px -8px rgba(67, 97, 238, 0.4)";
+  const badgeDotColor = isInvoice ? "bg-[#16A34A]" : "bg-[#4361EE]";
+  const badgeTextColor = isInvoice ? "text-[#16A34A]" : "text-[#4361EE]";
+  const badgeBorderColor = isInvoice ? "border-[#BBF7D0]" : "border-[#E2E8F8]";
+  const badgeBgColor = isInvoice ? "bg-[#F0FDF4]" : "bg-[#F7FAFF]";
+  const progressBarColor = isInvoice ? "bg-[#16A34A]/40" : "bg-[#4361EE]/40";
+
   const title = type === "ticket" ? "Ticket Created" : "Invoice Created";
   const subtitle = type === "ticket"
     ? "Your repair ticket is now active and tracked."
@@ -73,7 +90,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
             {/* Outer pulse ring */}
             <motion.div
               className="absolute inset-0 rounded-full"
-              style={{ background: "rgba(67, 97, 238, 0.08)" }}
+              style={{ background: pulseColor1 }}
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: [0.8, 1.6, 1.8], opacity: [0, 0.6, 0] }}
               transition={{ duration: 1.4, delay: 0.3, ease: "easeOut" }}
@@ -82,7 +99,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
             {/* Second pulse */}
             <motion.div
               className="absolute inset-0 rounded-full"
-              style={{ background: "rgba(67, 97, 238, 0.05)" }}
+              style={{ background: pulseColor2 }}
               initial={{ scale: 0.8, opacity: 0 }}
               animate={{ scale: [0.8, 2.0, 2.4], opacity: [0, 0.4, 0] }}
               transition={{ duration: 1.6, delay: 0.5, ease: "easeOut" }}
@@ -91,7 +108,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
             {/* Main circle — success icon */}
             <motion.div
               className="relative grid h-[88px] w-[88px] place-items-center rounded-full"
-              style={{ background: "linear-gradient(135deg, #4361EE 0%, #3A56D4 100%)" }}
+              style={{ background: accentGradient }}
               initial={{ scale: 0, rotate: -45 }}
               animate={{ scale: 1, rotate: 0 }}
               transition={{
@@ -127,7 +144,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
               {/* Subtle inner glow */}
               <motion.div
                 className="absolute inset-0 rounded-full"
-                style={{ boxShadow: "0 0 40px rgba(67, 97, 238, 0.3), 0 8px 32px -8px rgba(67, 97, 238, 0.4)" }}
+                style={{ boxShadow: glowShadow }}
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
                 transition={{ delay: 0.3, duration: 0.6 }}
@@ -147,13 +164,13 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
 
           {/* ID Badge */}
           <motion.div
-            className="mt-3 inline-flex items-center gap-1.5 rounded-full border border-[#E2E8F8] bg-[#F7FAFF] px-4 py-1.5"
+            className={`mt-3 inline-flex items-center gap-1.5 rounded-full border ${badgeBorderColor} ${badgeBgColor} px-4 py-1.5`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.75, duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
           >
-            <span className="h-2 w-2 rounded-full bg-[#4361EE] animate-pulse" />
-            <span className="text-[13px] font-semibold text-[#4361EE] tracking-wide font-mono">
+            <span className={`h-2 w-2 rounded-full ${badgeDotColor} animate-pulse`} />
+            <span className={`text-[13px] font-semibold ${badgeTextColor} tracking-wide font-mono`}>
               {id}
             </span>
           </motion.div>
@@ -176,7 +193,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
             transition={{ delay: 1.0 }}
           >
             <motion.div
-              className="h-full rounded-full bg-[#4361EE]/40"
+              className={`h-full rounded-full ${progressBarColor}`}
               initial={{ width: "0%" }}
               animate={{ width: "100%" }}
               transition={{ duration: (autoAdvanceMs - 1000) / 1000, delay: 1.0, ease: "linear" }}

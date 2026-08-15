@@ -133,7 +133,7 @@ export function CategoryWheel({
   return (
     <div className="relative">
       {/* ---------- Wheel stage ---------- */}
-      <div className="relative h-[280px] overflow-hidden rounded-[28px] sm:h-[320px]">
+      <div className="relative h-[280px] overflow-hidden rounded-[28px] border border-[#B3BFF6]/60 sm:h-[320px]">
         {/* Brand wash background */}
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-200/50 via-indigo-100/30 to-violet-200/40" />
         {/* Wave grid */}
@@ -145,31 +145,6 @@ export function CategoryWheel({
             className="absolute left-1/2 top-1/2 h-[440px] w-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
             style={{ background: "radial-gradient(closest-side, rgba(79,70,229,0.45), rgba(99,102,241,0) 70%)" }}
           />
-        </div>
-
-        {/* Concentric rings around active item */}
-        <div className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
-          {[0, 1, 2, 3].map((i) => (
-            <motion.span
-              key={i}
-              className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-full border"
-              style={{
-                width: 200 + i * 70,
-                height: 200 + i * 70,
-                borderColor: "rgba(99,102,241,0.35)",
-              }}
-              animate={{
-                opacity: [0.55, 0.15, 0.55],
-                scale: [1, 1.04, 1],
-              }}
-              transition={{
-                duration: 2.6 + i * 0.4,
-                repeat: Infinity,
-                ease: "easeInOut",
-                delay: i * 0.2,
-              }}
-            />
-          ))}
         </div>
 
         {/* Wheel viewport - items absolutely positioned, animated transforms */}
@@ -271,14 +246,14 @@ export function CategoryWheel({
       </div>
 
       {/* ---------- Hero label ---------- */}
-      <div className="mt-2 text-center">
-        <AnimatePresence mode="wait">
+      <div className="mt-2 text-center h-9 flex items-center justify-center overflow-hidden">
+        <AnimatePresence mode="popLayout">
           <motion.p
             key={cur.id}
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.25 }}
+            initial={{ opacity: 0, filter: "blur(4px)", y: 12 }}
+            animate={{ opacity: 1, filter: "blur(0px)", y: 0 }}
+            exit={{ opacity: 0, filter: "blur(4px)", y: -12 }}
+            transition={{ duration: 0.3, ease: "easeOut" }}
             className="font-display text-2xl font-extrabold tracking-tight brand-gradient-text"
           >
             {cur.label}

@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { CheckCircle2, Printer, MessageCircle, Mail, Eye, Plus, Home, Tag } from "lucide-react";
+import { CheckCircle2, Printer, MessageCircle, Mail, Pencil, Plus, Home, Tag } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StoreLogo } from "@/components/ui/store-logo";
 import { cn } from "@/lib/utils";
@@ -26,11 +26,11 @@ type CompletionScreenProps = {
   isEdit?: boolean;
   /** Navigate to the list — ONLY called when the Back link is clicked */
   onBack: () => void;
-  /** Navigate to the document details page — ONLY called on View */
-  onView: () => void;
+  /** Navigate to the document edit page — ONLY called on Edit */
+  onEdit: () => void;
 };
 
-export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onView }: CompletionScreenProps) {
+export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onEdit }: CompletionScreenProps) {
   const router = useRouter();
   const [format, setFormat] = useState<PrintFormat>("a4");
 
@@ -107,8 +107,8 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
         )}
 
         <div className="mt-6 flex items-center justify-center gap-6">
-          <button onClick={() => { onView(); }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
-            <Eye className="h-3.5 w-3.5" /> View {label}
+          <button onClick={() => { onEdit(); }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+            <Pencil className="h-3.5 w-3.5" /> Edit {label}
           </button>
           <button onClick={() => { window.location.href = createPath; }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
             <Plus className="h-3.5 w-3.5" /> Create {label}

@@ -5,6 +5,7 @@ import { ArrowLeft, X, Check, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
+import { SilkBackground } from "@/components/ui/silk-background";
 
 export const TOTAL_STEPS = 11;
 export const STEP_LABELS = [
@@ -45,11 +46,18 @@ export function WizardShell({
   const pct = Math.round(((step - 1) / TOTAL_STEPS) * 100);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,30%,95%)] via-white to-[hsl(228,30%,95%)]">
-      {/* Decorative background — enhanced */}
-      <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-20 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_70%)]" />
-      <div className="pointer-events-none absolute -top-60 left-1/2 h-[520px] w-[900px] -translate-x-1/2 rounded-full bg-gradient-to-br from-[#B3BFF6]/25 to-[#4361EE]/10 blur-3xl" />
-      <div className="pointer-events-none absolute bottom-0 right-0 h-[300px] w-[400px] rounded-full bg-[#4361EE]/5 blur-3xl" />
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,30%,95%)] via-white to-[hsl(228,30%,95%)] dark:from-[hsl(226,22%,7%)] dark:via-[hsl(226,22%,9%)] dark:to-[hsl(226,22%,7%)]">
+      {/* Silk wave animated background */}
+      <SilkBackground
+        color="#4361EE"
+        backgroundColor="#EDF0FF"
+        opacity={0.12}
+        intensity={0.5}
+        speed={1}
+        scale={1}
+        noiseIntensity={0.3}
+        seed={5}
+      />
 
       {/* Top bar */}
       <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-4 sm:px-6">

@@ -331,7 +331,9 @@ function InvoiceWizard() {
       status: form.details.status,
       createdAt: isEdit ? (invoices.find((i) => i.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       dueDate: form.details.dueDate || new Date(Date.now() + 7 * 86_400_000).toISOString(),
-      paidAmount: isEdit ? (invoices.find((i) => i.id === editId)?.paidAmount || 0) : 0,
+      paidAmount: isEdit
+        ? (invoices.find((i) => i.id === editId)?.paidAmount || 0)
+        : (form.details.status === "paid" ? totals.total : 0),
       items: allItems,
       subtotal: totals.subtotal,
       discount: totals.discount,
@@ -394,7 +396,7 @@ function InvoiceWizard() {
         type="invoice"
         id={createdInvoiceId}
         onBack={() => router.push("/invoice")}
-        onView={() => router.push(`/invoice/${createdInvoiceId}`)}
+        onEdit={() => router.push(`/invoice/${createdInvoiceId}`)}
       />
     );
   }
@@ -407,7 +409,7 @@ function InvoiceWizard() {
 
       {/* Top bar */}
       <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
-        <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Back to invoices">
+        <button onClick={goBack} disabled={step === 1} className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
           <ArrowLeft className="h-4 w-4" />
         </button>
 
@@ -1088,7 +1090,7 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
             { label: "Other", value: "other" },
           ]} />
         </div>
-        <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} /></div>
+        <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} iconLeft={<span className="text-[13px]">₹</span>} /></div>
         <div className="space-y-1.5">
           <Label>GST Rate</Label>
           <div className="flex items-center gap-1.5">

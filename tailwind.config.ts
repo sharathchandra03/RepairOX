@@ -67,6 +67,11 @@ const config: Config = {
         "pulse-dot": "pulseDot 1.4s ease-in-out infinite",
         breathe: "breathe 3s ease-in-out infinite",
         "module-breathe": "module-breathe 3s ease-in-out infinite",
+        "gradient-first": "moveVertical 30s ease infinite",
+        "gradient-second": "moveInCircle 20s reverse infinite",
+        "gradient-third": "moveInCircle 40s linear infinite",
+        "gradient-fourth": "moveHorizontal 40s ease infinite",
+        "gradient-fifth": "moveInCircle 20s ease infinite",
       },
       backgroundImage: {
         "grid-faint":
