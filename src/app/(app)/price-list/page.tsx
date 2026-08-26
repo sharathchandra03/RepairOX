@@ -323,8 +323,10 @@ export default function PriceListPage() {
         </div>
         <div className="flex items-center gap-2">
           {/* Global search with live results (models · parts · SKU) */}
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <div className="relative group/search">
+            {/* Breathing glow layer behind the search bar */}
+            <div className="pointer-events-none absolute -inset-[3px] rounded-xl opacity-60 animate-search-breathe group-hover/search:[animation-play-state:paused] group-focus-within/search:[animation-play-state:paused]" />
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 z-10 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground/70 transition-colors duration-200 group-focus-within/search:text-[#4361EE]" />
             <input
               value={globalSearch}
               onChange={(e) => { setGlobalSearch(e.target.value); setSearchOpen(true); }}
@@ -335,12 +337,12 @@ export default function PriceListPage() {
                 if (e.key === "Enter" && globalResults.models[0]) jumpToModel(globalResults.models[0]);
               }}
               placeholder="Search model, part, or SKU..."
-              className="h-9 w-64 rounded-xl border border-border bg-card pl-9 pr-8 text-sm placeholder:text-muted-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+              className="relative h-10 w-80 rounded-xl border border-[#4361EE]/30 bg-card pl-10 pr-9 text-sm shadow-[0_1px_3px_0_rgba(67,97,238,0.06),0_1px_2px_-1px_rgba(20,30,80,0.04)] placeholder:text-muted-foreground/60 transition-all duration-200 hover:border-[#4361EE]/50 hover:shadow-[0_2px_8px_-2px_rgba(67,97,238,0.13)] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/20 focus:shadow-[0_0_0_3px_rgba(67,97,238,0.08),0_4px_12px_-4px_rgba(67,97,238,0.18)]"
             />
             {globalSearch && (
               <button
                 onMouseDown={(e) => { e.preventDefault(); setGlobalSearch(""); setSearchOpen(false); }}
-                className="absolute right-2.5 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted"
+                className="absolute right-3 top-1/2 grid h-5 w-5 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted transition-colors duration-150"
                 aria-label="Clear search"
               >
                 <X className="h-3.5 w-3.5" />
