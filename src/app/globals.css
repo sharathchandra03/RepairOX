@@ -471,20 +471,15 @@ html, body {
     padding: 12mm !important;
   }
 
-  /* Ticket Service Report manages its own inner padding + flush blue footer,
-     so the page root must NOT get extra padding (it would push the footer off
-     the page and change proportions vs the preview). */
+  /* Ticket / Invoice Service Report manages its own inner padding + flush blue
+     footer, so the page root must NOT get extra padding (it would push the
+     footer off the page and change proportions vs the preview). */
   .a4-page:not(.font-sans) {
     padding: 0 !important;
     display: block !important; /* flow content across pages instead of one flex column */
-    page: ticketpage; /* reserve top margin for the running header on every page */
-  }
-  .ticket-print-body {
-    /* clear the fixed running header on continuation pages */
-    padding-top: 4mm !important;
   }
 
-  /* ── Ticket multi-page pagination guards ──
+  /* ── Multi-page pagination guards ──
      Never split an atomic block across a page boundary. */
   .a4-page:not(.font-sans) tr,
   .a4-page:not(.font-sans) thead,
@@ -492,28 +487,6 @@ html, body {
     break-inside: avoid !important;
     page-break-inside: avoid !important;
   }
-
-  /* Compact running header repeated on continuation pages. It is positioned in
-     the reserved top page margin so every printed page stays identifiable
-     without changing the page-1 layout content. */
-  .ticket-print-runhead {
-    display: flex !important;
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    height: 8mm;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0 12mm;
-    background: #ffffff;
-    border-bottom: 1.5px solid #1F52D8;
-    font-size: 9px;
-    color: #0F1B3D;
-    z-index: 1000;
-  }
-  .ticket-print-runhead__brand { font-weight: 800; color: #1F52D8; }
-  .ticket-print-runhead__doc { font-weight: 700; }
 
   /* Thermal page settings */
   .thermal-page {
@@ -567,9 +540,4 @@ html, body {
   margin: 0;
 }
 
-/* Ticket Service Report pages reserve a small top margin so the fixed running
-   header (repeated on every printed page) has room and never overlaps body
-   content. Scoped to ticket prints only via the named page. */
-@page ticketpage {
-  margin: 8mm 0 0 0;
-}
+

@@ -199,8 +199,8 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
   const due = Math.max(grandTotal - totalPaid, 0);
 
   // GST column header text
-  const gstHeader = gstOn ? `CGST @${t.cgstRate ?? 0}%` : "TAX";
-  const priceHeader = `PRICE (INR)`;
+  const gstHeader = gstOn ? `CGST ${t.cgstRate ?? 0}%` : "TAX";
+  const priceHeader = `PRICE`;
 
   return (
     <div
@@ -220,18 +220,8 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
         flexDirection: "column",
       }}
     >
-      {/* Compact running header — hidden on screen and on page 1; shown by the
-          print stylesheet in the top page margin of continuation pages so each
-          page stays identifiable without altering the page-1 design. */}
-      <div className="ticket-print-runhead" aria-hidden style={{ display: "none" }}>
-        <span className="ticket-print-runhead__brand">{store.storeName}</span>
-        <span className="ticket-print-runhead__doc">
-          Service Report · {t.ticketId}
-        </span>
-      </div>
-
       {/* content wrapper with padding, footer sits flush at bottom */}
-      <div className="ticket-print-body" style={{ padding: "10mm 12mm 3mm", flex: 1 }}>
+      <div className="ticket-print-body" style={{ padding: "9mm 12mm 2mm", flex: 1 }}>
         {/* ══ HEADER ══ */}
         <header data-pdf-atomic style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, paddingBottom: 10, borderBottom: `2px solid ${BRAND.blue}` }}>
           {/* LEFT: store branding */}
@@ -317,13 +307,13 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
           <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 10 }}>
             <colgroup>
               <col style={{ width: "4%" }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "40%" }} />
-              <col style={{ width: "5%" }} />
-              <col style={{ width: "11%" }} />
-              <col style={{ width: "6%" }} />
+              <col style={{ width: "17%" }} />
+              <col style={{ width: "35%" }} />
               <col style={{ width: "6%" }} />
               <col style={{ width: "12%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "11%" }} />
             </colgroup>
             <thead>
               <tr style={{ backgroundColor: BRAND.blue, color: BRAND.white }}>
@@ -334,7 +324,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
                 <th style={thStyle("right")}>{priceHeader}</th>
                 <th style={thStyle("right")}>Disc.</th>
                 <th style={thStyle("right")}>{gstHeader}</th>
-                <th style={thStyle("right")}>Total (INR)</th>
+                <th style={thStyle("right")}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -487,7 +477,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
         ) : null}
 
         {/* ══ SIGNATURES ══ */}
-        <div data-pdf-atomic data-pdf-keep-with-next style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 12, marginBottom: 6, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
+        <div data-pdf-atomic data-pdf-keep-with-next style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 8, marginBottom: 5, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
           <div>
             <div style={{ borderBottom: `1px solid ${BRAND.slate}`, height: 20 }} />
             <div style={{ fontSize: 9, color: BRAND.slate, marginTop: 3 }}>Customer Confirmation</div>
@@ -514,14 +504,14 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
 function thStyle(align: "left" | "center" | "right"): React.CSSProperties {
   return {
     textAlign: align,
-    padding: "6px 7px",
-    fontSize: 8.5,
+    padding: "6px 5px",
+    fontSize: 8,
     fontWeight: 800,
-    letterSpacing: 0.3,
+    letterSpacing: 0.2,
     textTransform: "uppercase",
     borderRight: "1px solid rgba(255,255,255,0.18)",
-    wordBreak: "normal",
-    overflowWrap: "break-word",
+    whiteSpace: "nowrap",
+    overflow: "hidden",
   };
 }
 
@@ -534,7 +524,9 @@ function tdStyle(align: "left" | "center" | "right"): React.CSSProperties {
     color: BRAND.ink,
     borderTop: `1px solid ${BRAND.borderSoft}`,
     borderRight: `1px solid ${BRAND.borderSoft}`,
-    overflowWrap: "break-word",
+    // Numeric columns (right/center aligned) must never wrap mid-number.
+    whiteSpace: align === "left" ? "normal" : "nowrap",
+    overflowWrap: align === "left" ? "break-word" : "normal",
     wordBreak: "normal",
   };
 }
@@ -704,8 +696,8 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
     });
   }
 
-  const gstHeader = gstOn ? `CGST @${inv.cgstRate ?? 0}%` : "TAX";
-  const priceHeader = `PRICE (INR)`;
+  const gstHeader = gstOn ? `CGST ${inv.cgstRate ?? 0}%` : "TAX";
+  const priceHeader = `PRICE`;
 
   const invoiceTypeLabel =
     inv.serviceCategory === "accessories" ? "Accessories Invoice" : isBusiness ? "Tax Invoice" : "Retail Invoice";
@@ -728,15 +720,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
         flexDirection: "column",
       }}
     >
-      {/* Compact running header for continuation pages (print only). */}
-      <div className="ticket-print-runhead" aria-hidden style={{ display: "none" }}>
-        <span className="ticket-print-runhead__brand">{store.storeName}</span>
-        <span className="ticket-print-runhead__doc">
-          {printTitle} · {inv.invoiceId}
-        </span>
-      </div>
-
-      <div className="ticket-print-body" style={{ padding: "10mm 12mm 3mm", flex: 1 }}>
+      <div className="ticket-print-body" style={{ padding: "9mm 12mm 2mm", flex: 1 }}>
         {/* ══ HEADER ══ */}
         <header data-pdf-atomic style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, paddingBottom: 10, borderBottom: `2px solid ${BRAND.blue}` }}>
           {/* LEFT: store branding */}
@@ -792,7 +776,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
         </header>
 
         {/* ══ CUSTOMER + INVOICE INFO ══ */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10, marginTop: 9 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10, marginTop: 7 }}>
           {/* CUSTOMER DETAILS */}
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
             <SectionHead title="Customer Details" />
@@ -825,17 +809,17 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
         </div>
 
         {/* ══ ITEM / SERVICE TABLE ══ */}
-        <div style={{ marginTop: 9, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
+        <div style={{ marginTop: 7, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 10 }}>
             <colgroup>
               <col style={{ width: "4%" }} />
-              <col style={{ width: "22%" }} />
-              <col style={{ width: "40%" }} />
-              <col style={{ width: "5%" }} />
-              <col style={{ width: "11%" }} />
-              <col style={{ width: "6%" }} />
+              <col style={{ width: "17%" }} />
+              <col style={{ width: "35%" }} />
               <col style={{ width: "6%" }} />
               <col style={{ width: "12%" }} />
+              <col style={{ width: "8%" }} />
+              <col style={{ width: "7%" }} />
+              <col style={{ width: "11%" }} />
             </colgroup>
             <thead>
               <tr style={{ backgroundColor: BRAND.blue, color: BRAND.white }}>
@@ -846,7 +830,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
                 <th style={thStyle("right")}>{priceHeader}</th>
                 <th style={thStyle("right")}>Disc.</th>
                 <th style={thStyle("right")}>{gstHeader}</th>
-                <th style={thStyle("right")}>Total (INR)</th>
+                <th style={thStyle("right")}>Total</th>
               </tr>
             </thead>
             <tbody>
@@ -889,7 +873,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
         </div>
 
         {/* ══ PAYMENT DETAILS + PRICE BREAKDOWN (side-by-side) ══ */}
-        <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 10, marginTop: 9, alignItems: "stretch", ...NO_BREAK }}>
+        <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 10, marginTop: 7, alignItems: "stretch", ...NO_BREAK }}>
           {/* LEFT: payment / supporting info */}
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <SectionHead title="Payment Details" />
@@ -966,7 +950,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
 
         {/* ══ TERMS & CONDITIONS ══ (invoice-specific terms take precedence) */}
         {inv.terms || data.termsAndConditions ? (
-          <div data-pdf-atomic style={{ marginTop: 8, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
+          <div data-pdf-atomic style={{ marginTop: 7, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
             <SectionHead title="Terms & Conditions" />
             <div style={{ padding: "5px 12px" }}>
               <TwoColList text={inv.terms || data.termsAndConditions} />
@@ -985,7 +969,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
         ) : null}
 
         {/* ══ SIGNATURES ══ */}
-        <div data-pdf-atomic data-pdf-keep-with-next style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 12, marginBottom: 6, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
+        <div data-pdf-atomic data-pdf-keep-with-next style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 40, marginTop: 8, marginBottom: 5, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
           <div>
             <div style={{ borderBottom: `1px solid ${BRAND.slate}`, height: 20 }} />
             <div style={{ fontSize: 9, color: BRAND.slate, marginTop: 3 }}>Customer Confirmation</div>
