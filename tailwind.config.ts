@@ -60,6 +60,10 @@ const config: Config = {
         breathe: { "0%,100%": { opacity: "0.4", transform: "scale(1)" }, "50%": { opacity: "0.8", transform: "scale(1.04)" } },
         "module-breathe": { "0%,100%": { boxShadow: "0 0 0 0 rgba(67,97,238,0.0), 0 0 0 0 rgba(67,97,238,0.0)" }, "50%": { boxShadow: "0 0 12px 2px rgba(67,97,238,0.15), 0 0 4px 1px rgba(67,97,238,0.10)" } },
         "search-breathe": { "0%,100%": { boxShadow: "0 0 8px 2px rgba(67,97,238,0.0)" }, "50%": { boxShadow: "0 0 14px 4px rgba(67,97,238,0.18)" } },
+        "search-intro": {
+          "0%": { boxShadow: "0 0 24px 9px rgba(67,97,238,0.34)" },
+          "100%": { boxShadow: "0 0 8px 2px rgba(67,97,238,0.0)" },
+        },
       },
       animation: {
         "fade-in": "fade-in 240ms ease-out both",
@@ -69,6 +73,7 @@ const config: Config = {
         breathe: "breathe 3s ease-in-out infinite",
         "module-breathe": "module-breathe 3s ease-in-out infinite",
         "search-breathe": "search-breathe 4s ease-in-out infinite",
+        "search-spotlight": "search-intro 1.6s ease-out 1 both, search-breathe 4s ease-in-out 1.6s infinite",
         "gradient-first": "moveVertical 30s ease infinite",
         "gradient-second": "moveInCircle 20s reverse infinite",
         "gradient-third": "moveInCircle 40s linear infinite",

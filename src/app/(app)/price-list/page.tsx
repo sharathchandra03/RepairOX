@@ -40,6 +40,14 @@ const PANEL_WIDTH = 460;
 const SPRING = { type: "spring", stiffness: 320, damping: 34, mass: 0.7 } as const;
 const HOVER_DELAY_OUT = 380;
 
+/* ─── Rotating search hints (fade only, no layout shift) ─────────── */
+const SEARCH_HINTS = [
+  "Search model, part, or SKU...",
+  "Search iPhone 15 Pro...",
+  "Search battery...",
+  "Search SKU...",
+] as const;
+
 /* ─── Main Page Component ────────────────────────────────────────── */
 export default function PriceListPage() {
   const { categories, brands, models, parts: allParts, importRows, importSmartModels } = useCatalog();
@@ -54,6 +62,9 @@ export default function PriceListPage() {
   const [partSearch, setPartSearch] = useState("");
   const [globalSearch, setGlobalSearch] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
+  // Rotating placeholder hint (fade transition only, no layout shift)
+  const [hintIndex, setHintIndex] = useState(0);
+  const [hintVisible, setHintVisible] = useState(true);
   const [importNotice, setImportNotice] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   // Smart (wide-sheet) import flow
@@ -80,6 +91,22 @@ export default function PriceListPage() {
     () => models.find((m) => m.id === selectedModelId) ?? null,
     [models, selectedModelId]
   );
+
+  // Rotate the placeholder hint on a slow cycle, pausing while the user types.
+  // Fades out, swaps text, fades back in — the input layout never shifts.
+  useEffect(() => {
+    if (globalSearch) return; // don't rotate while there's a query
+    const CYCLE_MS = 3600;
+    const FADE_MS = 400;
+    const id = setInterval(() => {
+      setHintVisible(false);
+      setTimeout(() => {
+        setHintIndex((i) => (i + 1) % SEARCH_HINTS.length);
+        setHintVisible(true);
+      }, FADE_MS);
+    }, CYCLE_MS);
+    return () => clearInterval(id);
+  }, [globalSearch]);
 
   // Enter focus mode after model selection
   useEffect(() => {
@@ -324,9 +351,19 @@ export default function PriceListPage() {
         <div className="flex items-center gap-2">
           {/* Global search with live results (models · parts · SKU) */}
           <div className="relative group/search">
-            {/* Breathing glow layer behind the search bar */}
-            <div className="pointer-events-none absolute -inset-[3px] rounded-xl opacity-60 animate-search-breathe group-hover/search:[animation-play-state:paused] group-focus-within/search:[animation-play-state:paused]" />
+            {/* Spotlight glow — stronger on first load, settles into a subtle idle breathe */}
+            <div className="pointer-events-none absolute -inset-[3px] rounded-xl animate-search-spotlight group-hover/search:[animation-play-state:paused] group-focus-within/search:[animation-play-state:paused]" />
             <Search className="pointer-events-none absolute left-3.5 top-1/2 z-10 h-[18px] w-[18px] -translate-y-1/2 text-muted-foreground/70 transition-colors duration-200 group-focus-within/search:text-[#4361EE]" />
+            {/* Rotating placeholder hint — fades only, never shifts layout. Hidden once the user types. */}
+            {!globalSearch && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-10 top-1/2 z-10 -translate-y-1/2 truncate pr-9 text-sm font-bold text-muted-foreground/70 transition-opacity duration-[400ms] ease-in-out"
+                style={{ opacity: hintVisible ? 1 : 0, maxWidth: "calc(100% - 3.5rem)" }}
+              >
+                {SEARCH_HINTS[hintIndex]}
+              </span>
+            )}
             <input
               value={globalSearch}
               onChange={(e) => { setGlobalSearch(e.target.value); setSearchOpen(true); }}
@@ -336,8 +373,9 @@ export default function PriceListPage() {
                 if (e.key === "Escape") { setGlobalSearch(""); setSearchOpen(false); }
                 if (e.key === "Enter" && globalResults.models[0]) jumpToModel(globalResults.models[0]);
               }}
-              placeholder="Search model, part, or SKU..."
-              className="relative h-10 w-80 rounded-xl border border-[#4361EE]/30 bg-card pl-10 pr-9 text-sm shadow-[0_1px_3px_0_rgba(67,97,238,0.06),0_1px_2px_-1px_rgba(20,30,80,0.04)] placeholder:text-muted-foreground/60 transition-all duration-200 hover:border-[#4361EE]/50 hover:shadow-[0_2px_8px_-2px_rgba(67,97,238,0.13)] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/20 focus:shadow-[0_0_0_3px_rgba(67,97,238,0.08),0_4px_12px_-4px_rgba(67,97,238,0.18)]"
+              aria-label="Search model, part, or SKU"
+              placeholder={SEARCH_HINTS[hintIndex]}
+              className="relative h-10 w-80 rounded-xl border-2 border-[#4361EE]/40 bg-card pl-10 pr-9 text-sm shadow-[0_1px_3px_0_rgba(67,97,238,0.06),0_1px_2px_-1px_rgba(20,30,80,0.04)] placeholder:text-transparent transition-all duration-200 hover:border-[#4361EE]/60 hover:shadow-[0_2px_8px_-2px_rgba(67,97,238,0.16)] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/20 focus:shadow-[0_0_0_3px_rgba(67,97,238,0.1),0_4px_14px_-4px_rgba(67,97,238,0.22)]"
             />
             {globalSearch && (
               <button
