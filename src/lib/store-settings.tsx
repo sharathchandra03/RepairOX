@@ -51,6 +51,8 @@ export type StoreSettings = {
 
   /* Store Details */
   registrationNumber: string;
+  /** HSN/SAC code shown on GST/tax documents. Optional — only printed when set. */
+  hsnCode: string;
   language: string;
   timeZone: string;
   timeFormat: "12h" | "24h";
@@ -100,6 +102,7 @@ export const DEFAULT_STORE_SETTINGS: StoreSettings = {
   country: "India",
 
   registrationNumber: "29AABCU9603R1ZP",
+  hsnCode: "",
   language: "English",
   timeZone: "Asia/Kolkata",
   timeFormat: "12h",
@@ -172,6 +175,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     postCode: (row.postal_code as string) ?? DEFAULT_STORE_SETTINGS.postCode,
     country: (row.country as string) ?? DEFAULT_STORE_SETTINGS.country,
     registrationNumber: (row.registration_number as string) ?? DEFAULT_STORE_SETTINGS.registrationNumber,
+    hsnCode: (row.hsn_code as string) ?? DEFAULT_STORE_SETTINGS.hsnCode,
     language: (row.language as string) ?? DEFAULT_STORE_SETTINGS.language,
     timeZone: (row.timezone as string) ?? DEFAULT_STORE_SETTINGS.timeZone,
     timeFormat: (row.time_format as "12h" | "24h") ?? DEFAULT_STORE_SETTINGS.timeFormat,
@@ -213,6 +217,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     postCode: "postal_code",
     country: "country",
     registrationNumber: "registration_number",
+    hsnCode: "hsn_code",
     language: "language",
     timeZone: "timezone",
     timeFormat: "time_format",

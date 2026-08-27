@@ -23,6 +23,7 @@ export type PrintStoreInfo = {
   postCode: string;
   country: string;
   registrationNumber: string;
+  hsnCode: string;
   fullAddress: string;
 };
 
@@ -74,6 +75,10 @@ export type PrintDeviceInfo = {
   warranty: string;
   parts: PrintLineItem[];
   estimate: number;
+  /** User accessories handed in with the device (optional). */
+  accessories?: string;
+  /** Free-text notes for the device (optional). */
+  notes?: string;
 };
 
 export type PrintLineItem = {
@@ -165,6 +170,7 @@ export function buildStoreInfo(settings: StoreSettings): PrintStoreInfo {
     postCode: settings.postCode,
     country: settings.country,
     registrationNumber: settings.registrationNumber,
+    hsnCode: settings.hsnCode || "",
     fullAddress: parts.join(", "),
   };
 }
@@ -213,6 +219,8 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     warranty: dr.warranty || "",
     parts: dr.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.unitPrice, discount: 0, total: p.total })),
     estimate: dr.estimate,
+    accessories: dr.accessories || "",
+    notes: dr.notes || "",
   }));
 
   return {

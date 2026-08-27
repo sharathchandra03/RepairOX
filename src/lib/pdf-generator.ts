@@ -88,37 +88,41 @@ const PDF_OVERRIDE_CSS = `
   .pdf-capture-root .a4-page {
     width: ${A4_WIDTH_PX}px !important;
     min-height: auto !important;
-    padding: 56px !important;
     margin: 0 !important;
     box-shadow: none !important;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
     -webkit-font-smoothing: antialiased !important;
   }
+  /* ── Invoice (Tailwind) layout — keep legacy html2canvas fixes, scoped away
+        from the new ticket service-report which uses inline styles. ── */
+  .pdf-capture-root .a4-page.font-sans {
+    padding: 56px !important;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+  }
   /* Force grid children to use flex with explicit gap — prevents label:value merging */
-  .pdf-capture-root .a4-page .grid > div {
+  .pdf-capture-root .a4-page.font-sans .grid > div {
     display: flex !important;
     flex-wrap: wrap !important;
     align-items: baseline !important;
     column-gap: 5px !important;
   }
   /* Make each span inside grid items an inline-block to prevent text collapsing */
-  .pdf-capture-root .a4-page .grid > div > span {
+  .pdf-capture-root .a4-page.font-sans .grid > div > span {
     display: inline-block !important;
     flex-shrink: 0 !important;
   }
   /* Header document info: ensure spacing between label and value */
-  .pdf-capture-root .a4-page .space-y-0\\.5 > p {
+  .pdf-capture-root .a4-page.font-sans .space-y-0\\.5 > p {
     display: flex !important;
     align-items: baseline !important;
     gap: 4px !important;
   }
   /* Customer info flex wrap spacing */
-  .pdf-capture-root .a4-page .flex.flex-wrap {
+  .pdf-capture-root .a4-page.font-sans .flex.flex-wrap {
     gap: 24px 32px !important;
   }
-  /* Ensure table cells have proper padding and no text overlap */
-  .pdf-capture-root .a4-page table th,
-  .pdf-capture-root .a4-page table td {
+  /* Ensure invoice table cells have proper padding and no text overlap */
+  .pdf-capture-root .a4-page.font-sans table th,
+  .pdf-capture-root .a4-page.font-sans table td {
     padding-left: 8px !important;
     padding-right: 8px !important;
   }
@@ -179,13 +183,26 @@ export async function generatePdfFromData(data: PrintDocumentData): Promise<Blob
     await new Promise((r) => setTimeout(r, 500));
 
     // Capture with html2canvas
+    const scale = 2;
     const canvas = await html2canvas(pageEl, {
-      scale: 2,
+      scale,
       useCORS: true,
       allowTaint: true,
       backgroundColor: "#ffffff",
       logging: false,
     });
+
+    // Collect the vertical boundaries (in canvas pixels) of every atomic block
+    // so multi-page slicing never cuts through a row/card/section. We record the
+    // BOTTOM edge of each atomic element relative to the page element — these are
+    // the only safe places to end a page.
+    const pageTop = pageEl.getBoundingClientRect().top;
+    const atomicBottoms: number[] = [];
+    pageEl.querySelectorAll<HTMLElement>("[data-pdf-atomic]").forEach((el) => {
+      const r = el.getBoundingClientRect();
+      atomicBottoms.push((r.bottom - pageTop) * scale);
+    });
+    atomicBottoms.sort((a, b) => a - b);
 
     // Re-hide immediately after capture
     container.style.clip = "rect(0, 0, 0, 0)";
@@ -215,17 +232,35 @@ export async function generatePdfFromData(data: PrintDocumentData): Promise<Blob
         imgHeight
       );
     } else {
-      // Multi-page
-      const pageCount = Math.ceil(imgHeight / pdfHeight);
-      for (let i = 0; i < pageCount; i++) {
-        if (i > 0) pdf.addPage();
+      // Multi-page — slice at safe boundaries so no atomic block is cut in half.
+      // Max canvas pixels that fit on one PDF page:
+      const pageHeightPx = (pdfHeight / pdfWidth) * canvas.width;
 
-        const sourceY = (i * pdfHeight / imgHeight) * canvas.height;
-        const sourceHeight = (pdfHeight / imgHeight) * canvas.height;
+      let sourceY = 0;
+      let guard = 0;
+      while (sourceY < canvas.height - 1 && guard < 60) {
+        guard++;
+        const isFirst = sourceY === 0;
+        if (!isFirst) pdf.addPage();
+
+        // Ideal full-page cut point:
+        const idealCut = Math.min(sourceY + pageHeightPx, canvas.height);
+
+        // Snap the cut UP to the bottom of the last atomic block that still fits
+        // on this page. If a single block is taller than a full page (rare), we
+        // fall back to the ideal cut so we make forward progress.
+        let cut = idealCut;
+        if (idealCut < canvas.height) {
+          const candidates = atomicBottoms.filter((b) => b > sourceY + 4 && b <= idealCut);
+          if (candidates.length > 0) {
+            cut = candidates[candidates.length - 1];
+          }
+        }
+        const sliceHeightPx = Math.max(1, Math.round(cut - sourceY));
 
         const pageCanvas = document.createElement("canvas");
         pageCanvas.width = canvas.width;
-        pageCanvas.height = Math.min(sourceHeight, canvas.height - sourceY);
+        pageCanvas.height = sliceHeightPx;
         const ctx = pageCanvas.getContext("2d");
         if (ctx) {
           ctx.fillStyle = "#ffffff";
@@ -233,21 +268,23 @@ export async function generatePdfFromData(data: PrintDocumentData): Promise<Blob
           ctx.drawImage(
             canvas,
             0, sourceY,
-            canvas.width, pageCanvas.height,
+            canvas.width, sliceHeightPx,
             0, 0,
-            pageCanvas.width, pageCanvas.height
+            pageCanvas.width, sliceHeightPx
           );
         }
 
-        const sliceHeight = (pageCanvas.height / canvas.width) * pdfWidth;
+        const sliceHeightMm = (sliceHeightPx / canvas.width) * pdfWidth;
         pdf.addImage(
           pageCanvas.toDataURL("image/jpeg", 0.95),
           "JPEG",
           0,
           0,
           pdfWidth,
-          Math.min(sliceHeight, pdfHeight)
+          Math.min(sliceHeightMm, pdfHeight)
         );
+
+        sourceY = cut;
       }
     }
 
