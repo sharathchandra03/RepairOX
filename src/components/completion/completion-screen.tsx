@@ -1,13 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import { CheckCircle2, Printer, MessageCircle, Mail, Pencil, Plus, Home, Tag } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
+import { CheckCircle2, Printer, MessageCircle, Mail, Pencil, Plus, Home, Tag, Eye, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StoreLogo } from "@/components/ui/store-logo";
 import { cn } from "@/lib/utils";
-import { getTicketPrintUrl, getInvoicePrintUrl, type PrintFormat } from "@/lib/print-utils";
+import {
+  getTicketPrintUrl,
+  getInvoicePrintUrl,
+  buildTicketPrintData,
+  buildInvoicePrintData,
+  type PrintFormat,
+  type PrintDocumentData,
+} from "@/lib/print-utils";
+import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
+import { A4Template } from "@/components/print/a4-template";
+import { ThermalTemplate } from "@/components/print/thermal-template";
+import { LabelTemplate } from "@/components/print/label-template";
 
 /* ─── Shared Completion Screen ───────────────────────────────────────── */
 /*
@@ -32,9 +44,33 @@ type CompletionScreenProps = {
 
 export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onEdit }: CompletionScreenProps) {
   const router = useRouter();
+  const { tickets, invoices } = useStore();
+  const { settings } = useStoreSettings();
   const [format, setFormat] = useState<PrintFormat>("a4");
+  // Read-only preview overlay. Kept as local state so the success screen
+  // (and all its actions) stay mounted underneath and are restored on close.
+  const [showView, setShowView] = useState(false);
 
   const label = type === "ticket" ? "Ticket" : "Invoice";
+
+  /*
+   * Build the print data for the read-only View preview from the in-memory
+   * store record. This reuses the exact same print-data builders and templates
+   * as the Print flow (no duplicated logic), but reads the record that was just
+   * created directly from the store — so it always resolves, unlike a fresh
+   * page load that may not have re-hydrated the new record yet.
+   */
+  const viewData: PrintDocumentData | null = useMemo(() => {
+    if (type === "ticket") {
+      const ticket = tickets.find((t) => t.id === id || t.ticketNo === id);
+      return ticket ? buildTicketPrintData(settings, ticket) : null;
+    }
+    const invoice = invoices.find((i) => i.id === id);
+    return invoice ? buildInvoicePrintData(settings, invoice) : null;
+  }, [type, id, tickets, invoices, settings]);
+
+  // Invoices don't support the "label" format — fall back to A4 for the preview.
+  const viewFormat: PrintFormat = type === "invoice" && format === "label" ? "a4" : format;
   const backLabel = type === "ticket" ? "tickets" : "invoices";
   const createPath = type === "ticket" ? "/tickets/new" : "/invoice/create";
 
@@ -106,18 +142,69 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
           </>
         )}
 
-        <div className="mt-6 flex items-center justify-center gap-6">
+        {/* Bottom action navigation — Dashboard | View | Edit | Create */}
+        {/* Bottom action navigation — Dashboard | View | Edit | Create */}
+        <div className="mt-6 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
+          <button onClick={() => router.push("/dashboard")} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+            <Home className="h-4 w-4" /> Dashboard
+          </button>
+          <button onClick={() => setShowView(true)} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+            <Eye className="h-4 w-4" /> View {label}
+          </button>
           <button onClick={() => { onEdit(); }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
-            <Pencil className="h-3.5 w-3.5" /> Edit {label}
+            <Pencil className="h-4 w-4" /> Edit {label}
           </button>
           <button onClick={() => { window.location.href = createPath; }} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
-            <Plus className="h-3.5 w-3.5" /> Create {label}
-          </button>
-          <button onClick={() => router.push("/dashboard")} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
-            <Home className="h-3.5 w-3.5" /> Dashboard
+            <Plus className="h-4 w-4" /> Create {label}
           </button>
         </div>
       </div>
+
+      {/* ── Read-only View preview overlay ── */}
+      <AnimatePresence>
+        {showView && (
+          <motion.div
+            className="fixed inset-0 z-[120] flex flex-col bg-black/60 backdrop-blur-sm"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            {/* Close button — returns to the success screen, preserving its state */}
+            <button
+              onClick={() => setShowView(false)}
+              aria-label="Close preview"
+              className="fixed right-4 top-4 z-10 grid h-10 w-10 place-items-center rounded-full bg-white text-gray-700 shadow-lg ring-1 ring-black/5 transition hover:bg-gray-100"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            {/* Scrollable read-only preview — reuses the actual print template */}
+            <motion.div
+              key="view-preview"
+              className="flex-1 overflow-auto py-10"
+              initial={{ y: 16, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 16, opacity: 0 }}
+              transition={{ duration: 0.25, ease: [0.22, 1, 0.36, 1] }}
+            >
+              <div className="mx-auto w-fit">
+                {viewData ? (
+                  <>
+                    {viewFormat === "a4" && <A4Template data={viewData} />}
+                    {viewFormat === "thermal" && <ThermalTemplate data={viewData} />}
+                    {viewFormat === "label" && <LabelTemplate data={viewData} />}
+                  </>
+                ) : (
+                  <div className="rounded-2xl bg-white px-8 py-12 text-center text-sm text-gray-500 shadow-lg">
+                    Preview is not available for this {label.toLowerCase()}.
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

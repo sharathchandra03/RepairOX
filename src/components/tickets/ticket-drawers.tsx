@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-data";
-import { STATUS_LABEL, STATUS_TONE, getTicketDevices } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, getTicketDevices, getTicketType } from "@/lib/mock-data";
 import { formatINR } from "@/lib/utils";
 import { getTicketPrintUrl, type PrintFormat } from "@/lib/print-utils";
 
@@ -22,7 +22,7 @@ export function ViewTicketDrawer({ open, onClose, ticket }: { open: boolean; onC
       <div className="divide-y divide-border">
         <div className="pb-4">
           <div className="flex items-center gap-3">
-            <Avatar name={ticket.customer} size={40} />
+            <Avatar name={ticket.customer} size={40} ticketType={getTicketType(ticket)} />
             <div>
               <p className="font-semibold">{ticket.customer}</p>
               <p className="text-xs text-muted-foreground">{ticket.phone}</p>

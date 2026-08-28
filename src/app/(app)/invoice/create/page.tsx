@@ -14,8 +14,9 @@ import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
 import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
-import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord } from "@/lib/mock-data";
+import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
+import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, type Customer } from "@/lib/customer-data";
@@ -55,7 +56,7 @@ type InvoiceFormDevice = {
 
 type InvoiceFormData = {
   customer: { name: string; phone: string; email: string; company: string; gstNumber: string };
-  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
+  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
   /** Multi-device entries */
@@ -89,7 +90,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", email: "", company: "", gstNumber: "" },
-  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", invoiceType: "retail", serviceCategory: "service" },
+  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service" },
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
@@ -244,7 +245,7 @@ function InvoiceWizard() {
       setForm((prev) => ({
         ...prev,
         customer: { name: customer, phone, email, company, gstNumber: searchParams.get("gstNumber") || "" },
-        details: { ...prev.details, ticketId: fromTicket, employee, status: "draft", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
+        details: { ...prev.details, ticketId: fromTicket, employee, status: "draft", repairStatus: "repaired_collected", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
         items: flatItems,
         devices: formDevices.length > 0 ? formDevices : prev.devices,
         activeDeviceIndex: 0,
@@ -350,6 +351,7 @@ function InvoiceWizard() {
       footer: form.notes.footer || undefined,
       employee: form.details.employee || undefined,
       ticketId: form.details.ticketId || undefined,
+      repairStatus: form.details.repairStatus,
       paymentMode: form.pricing.paymentMode || undefined,
       serviceCategory: form.details.serviceCategory || "service",
       gstNumber: form.customer.gstNumber || undefined,
@@ -549,7 +551,7 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
 
   return {
     customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "" },
-    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
+    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
@@ -591,7 +593,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card shadow-card overflow-hidden">
+    <div className="rounded-2xl border border-border bg-card shadow-card">
       {/* Invoice Type — compact inline selector */}
       <div className="border-b border-border px-6 py-5 sm:px-8">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Invoice Type</p>
@@ -1091,6 +1093,13 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
           ]} />
         </div>
         <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} iconLeft={<span className="text-[13px]">₹</span>} /></div>
+        <div className="space-y-1.5">
+          <Label>Repair Status</Label>
+          <StatusPillSelect
+            value={d.repairStatus}
+            onChange={(v) => updateForm((f) => ({ ...f, details: { ...f.details, repairStatus: v } }))}
+          />
+        </div>
         <div className="space-y-1.5">
           <Label>GST Rate</Label>
           <div className="flex items-center gap-1.5">

@@ -70,7 +70,9 @@ interface StoreState {
 }
 
 interface StoreActions {
-  addTicket: (ticket: Ticket) => Promise<void>;
+  addTicket: (ticket: Ticket) => Promise<string>;
+  pinTicket: (id: string, pinned: boolean) => Promise<void>;
+  pinInvoice: (id: string, pinned: boolean) => Promise<void>;
   updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
   deleteTicket: (id: string) => Promise<void>;
   bulkUpdateStatus: (ids: string[], status: TicketStatus) => Promise<void>;
@@ -149,12 +151,15 @@ function rowToTicket(r: any): Ticket {
     sgst: meta.sgst != null ? Number(meta.sgst) : undefined,
     cgst: meta.cgst != null ? Number(meta.cgst) : undefined,
     devices: deviceRecords,
+    pinnedAt: r.pinned_at ?? undefined,
+    ticketNo: r.ticket_no ?? undefined,
   };
 }
 
 function ticketToRow(t: Ticket): Record<string, unknown> {
   return {
     id: t.id,
+    ticket_no: t.ticketNo ?? null,
     customer: t.customer || null,
     phone: t.phone || null,
     company: t.company || null,
@@ -178,6 +183,7 @@ function ticketToRow(t: Ticket): Record<string, unknown> {
     imei_type: t.imeiType || null,
     qc_status: t.qcStatus || null,
     customer_id: t.customerId || null,
+    pinned_at: t.pinnedAt ?? null,
     devices: {
       records: t.devices ?? [],
       customerType: t.customerType || null,
@@ -218,6 +224,7 @@ function rowToInvoice(r: any): Invoice {
     footer: r.footer ?? "",
     employee: r.employee ?? "",
     ticketId: r.ticket_id ?? undefined,
+    repairStatus: meta.repairStatus ?? undefined,
     paymentMode: meta.paymentMode ?? r.payment_mode ?? undefined,
     serviceCategory: meta.serviceCategory ?? r.service_category ?? "service",
     gstRate: meta.gstRate != null ? Number(meta.gstRate) : undefined,
@@ -229,6 +236,7 @@ function rowToInvoice(r: any): Invoice {
     items: r.items ?? [],
     devices: deviceRecords,
     createdAt: r.created_at ?? new Date().toISOString(),
+    pinnedAt: r.pinned_at ?? undefined,
   };
 }
 
@@ -254,9 +262,11 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
     footer: inv.footer || null,
     employee: inv.employee || null,
     ticket_id: inv.ticketId || null,
+    pinned_at: inv.pinnedAt ?? null,
     items: inv.items ?? [],
     devices: {
       records: inv.devices ?? [],
+      repairStatus: inv.repairStatus ?? null,
       paymentMode: inv.paymentMode || null,
       serviceCategory: inv.serviceCategory || "service",
       gstRate: inv.gstRate ?? null,
@@ -273,6 +283,12 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
 function isDuplicateKeyError(err: { code?: string; message?: string } | null): boolean {
   if (!err) return false;
   return err.code === "23505" || /duplicate key|already exists/i.test(err.message ?? "");
+}
+
+/** True when a Supabase error is about an unknown column (schema not yet migrated). */
+function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === "42703" || /column .* does not exist|could not find the .* column/i.test(err.message ?? "");
 }
 
 /**
@@ -292,6 +308,79 @@ async function nextInvoiceIdFromDb(type: string): Promise<string> {
     }, 0);
   }
   return `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
+}
+
+/** Format a ticket sequence number as `T-001` (zero-padded to at least 3 digits,
+ *  growing automatically past T-999). */
+function formatTicketNo(n: number): string {
+  return `T-${String(n).padStart(3, "0")}`;
+}
+
+/** Extract the numeric part of a `T-<digits>` value, or 0 if it doesn't match. */
+function ticketSeq(value: string | null | undefined): number {
+  const match = String(value ?? "").match(/^T-(\d+)$/);
+  return match ? parseInt(match[1], 10) : 0;
+}
+
+/**
+ * Compute the next sequential ticket NUMBER (display value) straight from the DB.
+ * The next number is always `highest LIVE ticket_no + 1`.
+ *
+ * IMPORTANT: only the `ticket_no` column of non-deleted tickets is considered —
+ * NOT the primary-key `id`. Historically `id` held a random 4-digit value
+ * (e.g. T-9900), so folding `id` into this calculation poisoned the sequence and
+ * produced numbers like T-9901. Deleted rows carry `ticket_no = null` and their
+ * numbers are reclaimed by resequenceTicketNumbers(), so excluding them keeps the
+ * next number aligned with the visible T-001…T-NNN run. Falls back to a
+ * best-effort value only when Supabase is unavailable.
+ */
+export async function nextTicketIdFromDb(): Promise<string> {
+  let maxNum = 0;
+  if (supabase) {
+    const { data } = await supabase
+      .from("tickets")
+      .select("ticket_no")
+      .is("deleted_at", null);
+    maxNum = (data ?? []).reduce((max: number, r: { ticket_no?: string }) => {
+      return Math.max(max, ticketSeq(r.ticket_no));
+    }, 0);
+  }
+  return formatTicketNo(maxNum + 1);
+}
+
+/**
+ * One-time (idempotent) resequencing of every LIVE ticket's display number based
+ * on original creation order: oldest → T-001, next → T-002, … Persists the new
+ * `ticket_no` values to the DB WITHOUT touching the primary key `id` (so all
+ * invoice / walk-in relationships stay intact). Only rows whose number actually
+ * changes are written. Returns a map of id → ticketNo so callers can patch local
+ * state. Safe to run on every load: once everything is sequenced it writes
+ * nothing and returns the existing mapping.
+ */
+async function resequenceTicketNumbers(): Promise<Record<string, string>> {
+  const mapping: Record<string, string> = {};
+  if (!supabase) return mapping;
+  const { data, error } = await supabase
+    .from("tickets")
+    .select("id, ticket_no, created_at")
+    .is("deleted_at", null)
+    .order("created_at", { ascending: true });
+  if (error || !data) return mapping;
+
+  const updates: { id: string; ticket_no: string }[] = [];
+  data.forEach((row: { id: string; ticket_no?: string; created_at?: string }, idx) => {
+    const desired = formatTicketNo(idx + 1);
+    mapping[row.id] = desired;
+    if (row.ticket_no !== desired) updates.push({ id: row.id, ticket_no: desired });
+  });
+
+  // Persist only the rows that changed. Done sequentially to avoid a transient
+  // unique-index collision if two rows swap numbers.
+  for (const u of updates) {
+    const { error: upErr } = await supabase.from("tickets").update({ ticket_no: u.ticket_no }).eq("id", u.id);
+    if (upErr) console.error("[store] resequenceTicketNumbers failed for", u.id, upErr.message);
+  }
+  return mapping;
 }
 
 function rowToWalkIn(r: any): WalkIn {
@@ -615,6 +704,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const stateRef = useRef(state);
   useEffect(() => { stateRef.current = state; }, [state]);
 
+  // Guards the Ticket ↔ Invoice status sync from re-triggering itself. When a
+  // sync writes the counterpart record's status, that record's id is parked here
+  // so its own update handler skips propagating the change back.
+  const syncingIdsRef = useRef<Set<string>>(new Set());
+
   // Ref for demo mode so callbacks can access the latest value
   const isDemoRef = useRef(isDemoMode);
   useEffect(() => { isDemoRef.current = isDemoMode; }, [isDemoMode]);
@@ -717,6 +811,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         issueLibrary: DEFAULT_ISSUES,
         hydrated: true,
       }));
+
+      // Resequence all existing tickets to T-001, T-002 … by original creation
+      // order (idempotent) and patch the display numbers into local state.
+      const ticketNoMap = await resequenceTicketNumbers();
+      if (active && Object.keys(ticketNoMap).length > 0) {
+        setState((s) => ({
+          ...s,
+          tickets: s.tickets.map((t) =>
+            ticketNoMap[t.id] ? { ...t, ticketNo: ticketNoMap[t.id] } : t
+          ),
+        }));
+      }
     })();
 
     // Realtime subscriptions for all business tables.
@@ -858,17 +964,79 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, [state, resolvedKey, isDemoMode]);
 
   /* ── Ticket actions (DB-first) ── */
-  const addTicket = useCallback(async (ticket: Ticket) => {
+  const addTicket = useCallback(async (ticket: Ticket): Promise<string> => {
     if (shouldUseDb()) {
-      const { data, error } = await db.from("tickets").insert(ticketToRow(ticket)).select("*").single();
-      if (error || !data) { console.error("[store] addTicket failed:", error?.message); return; }
-      const saved = rowToTicket(data);
+      // The display number (`ticket_no`) is the highest LIVE ticket_no + 1.
+      // On first insert the primary key `id` is set to the same value so a fresh
+      // DB reads cleanly (T-001, T-002 …). resequencing later only ever rewrites
+      // ticket_no, never id, so FK relationships stay intact.
+      const seq = await nextTicketIdFromDb();
+      let current: Ticket = { ...ticket, id: seq, ticketNo: seq };
+      const insertTicket = async (t: Ticket) => {
+        const row = ticketToRow(t);
+        let r = await db.from("tickets").insert(row).select("*").single();
+        // Older DB without the ticket_no column: retry without it so ticket
+        // creation still works before the migration is applied.
+        if (r.error && isUndefinedColumnError(r.error)) {
+          const fallback = { ...row };
+          delete fallback.ticket_no;
+          r = await db.from("tickets").insert(fallback).select("*").single();
+        }
+        return r;
+      };
+      let res = await insertTicket(current);
+      // On a primary-key collision (e.g. an existing legacy/random id already
+      // owns T-NNN), keep the sequential ticket_no but give the row a distinct,
+      // random id so the display sequence is never skipped.
+      let guard = 0;
+      while (res.error && isDuplicateKeyError(res.error) && guard < 5) {
+        guard += 1;
+        const uniqueId = `T-${Math.floor(1000 + Math.random() * 9000)}`;
+        current = { ...current, id: uniqueId };
+        res = await insertTicket(current);
+      }
+      if (res.error || !res.data) {
+        console.error("[store] addTicket failed:", res.error?.message);
+        // Keep locally so the user doesn't lose their work mid-session.
+        setState((s) => ({ ...s, tickets: [current, ...s.tickets] }));
+        logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: current.ticketNo || current.id, description: `Created a new repair ticket for ${current.model || current.device} (${current.customer}).`, meta: { Device: current.device, Technician: current.technician || "Unassigned", Amount: inr(current.amount) } });
+        return current.id;
+      }
+      const saved = rowToTicket(res.data);
       setState((s) => ({ ...s, tickets: [saved, ...s.tickets] }));
-      logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: saved.id, description: `Created a new repair ticket for ${saved.model || saved.device} (${saved.customer}).`, meta: { Device: saved.device, Technician: saved.technician || "Unassigned", Amount: inr(saved.amount) } });
-      return;
+      logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: saved.ticketNo || saved.id, description: `Created a new repair ticket for ${saved.model || saved.device} (${saved.customer}).`, meta: { Device: saved.device, Technician: saved.technician || "Unassigned", Amount: inr(saved.amount) } });
+      return saved.id;
     }
-    setState((s) => ({ ...s, tickets: [ticket, ...s.tickets] }));
-    logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: ticket.id, description: `Created a new repair ticket for ${ticket.model || ticket.device} (${ticket.customer}).`, meta: { Device: ticket.device, Technician: ticket.technician || "Unassigned", Amount: inr(ticket.amount) } });
+    // Local/demo mode: derive the next sequential number from in-memory tickets.
+    const localMax = stateRef.current.tickets.reduce((max, t) => {
+      return Math.max(max, ticketSeq(t.ticketNo), ticketSeq(t.id));
+    }, 0);
+    const localSeq = formatTicketNo(localMax + 1);
+    const localTicket: Ticket = { ...ticket, id: localSeq, ticketNo: localSeq };
+    setState((s) => ({ ...s, tickets: [localTicket, ...s.tickets] }));
+    logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: localTicket.ticketNo || localTicket.id, description: `Created a new repair ticket for ${localTicket.model || localTicket.device} (${localTicket.customer}).`, meta: { Device: localTicket.device, Technician: localTicket.technician || "Unassigned", Amount: inr(localTicket.amount) } });
+    return localTicket.id;
+  }, []);
+
+  const pinTicket = useCallback(async (id: string, pinned: boolean) => {
+    const pinnedAt = pinned ? new Date().toISOString() : undefined;
+    // Optimistic local update first, so pinning reflects instantly and still
+    // works even if the DB column/write is momentarily unavailable.
+    setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === id ? { ...t, pinnedAt } : t)) }));
+    if (shouldUseDb()) {
+      const { error } = await db.from("tickets").update({ pinned_at: pinnedAt ?? null }).eq("id", id);
+      if (error) console.error("[store] pinTicket failed:", error.message);
+    }
+  }, []);
+
+  const pinInvoice = useCallback(async (id: string, pinned: boolean) => {
+    const pinnedAt = pinned ? new Date().toISOString() : undefined;
+    // Optimistic local update first (see pinTicket).
+    setState((s) => ({ ...s, invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, pinnedAt } : inv)) }));
+    if (shouldUseDb()) {
+      const { error } = await db.from("invoices").update({ pinned_at: pinnedAt ?? null }).eq("id", id);
+      if (error) console.error("[store] pinInvoice failed:", error.message);
+    }
   }, []);
 
   const updateTicket = useCallback(async (id: string, updates: Partial<Ticket>) => {
@@ -904,6 +1072,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (error) { console.error("[store] updateTicket failed:", error.message); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === id ? { ...t, ...updates } : t)) }));
+
+    // ── Ticket → Invoice status sync ──
+    // Tickets and Invoices share ONE status system (TicketStatus). When a ticket
+    // status changes, mirror it onto every linked invoice's repairStatus so both
+    // records always show the same saved status. Guarded against re-triggering
+    // the reverse (invoice → ticket) sync.
+    if ("status" in updates && updates.status !== prev?.status && !syncingIdsRef.current.has(id)) {
+      const nextStatus = updates.status as TicketStatus;
+      const linkedInvoices = stateRef.current.invoices.filter((inv) => inv.ticketId === id && inv.repairStatus !== nextStatus);
+      for (const inv of linkedInvoices) {
+        syncingIdsRef.current.add(inv.id);
+        try {
+          if (shouldUseDb()) {
+            const devicesJson = invoiceToRow({ ...inv, repairStatus: nextStatus }).devices;
+            const { error } = await db.from("invoices").update({ devices: devicesJson }).eq("id", inv.id);
+            if (error) console.error("[store] ticket→invoice sync failed:", error.message);
+          }
+          setState((s) => ({ ...s, invoices: s.invoices.map((i) => (i.id === inv.id ? { ...i, repairStatus: nextStatus } : i)) }));
+        } finally {
+          syncingIdsRef.current.delete(inv.id);
+        }
+      }
+    }
+
     const statusFmt = (v: unknown) => STATUS_LABEL[v as TicketStatus] ?? String(v ?? "—");
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "status", label: "Status", format: statusFmt }, { key: "technician", label: "Technician" },
@@ -932,6 +1124,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (error) { console.error("[store] bulkUpdateStatus failed:", error.message); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.map((t) => (ids.includes(t.id) ? { ...t, status } : t)) }));
+
+    // Mirror the bulk ticket status change onto each linked invoice's repairStatus
+    // so both records stay synchronized (shared status system).
+    const linkedInvoices = stateRef.current.invoices.filter((inv) => inv.ticketId && ids.includes(inv.ticketId) && inv.repairStatus !== status);
+    for (const inv of linkedInvoices) {
+      if (shouldUseDb()) {
+        const devicesJson = invoiceToRow({ ...inv, repairStatus: status }).devices;
+        const { error } = await db.from("invoices").update({ devices: devicesJson }).eq("id", inv.id);
+        if (error) console.error("[store] bulk ticket→invoice sync failed:", error.message);
+      }
+    }
+    if (linkedInvoices.length > 0) {
+      const syncedIds = new Set(linkedInvoices.map((i) => i.id));
+      setState((s) => ({ ...s, invoices: s.invoices.map((i) => (syncedIds.has(i.id) ? { ...i, repairStatus: status } : i)) }));
+    }
+
     const label = STATUS_LABEL[status] ?? status;
     logActivity({ module: "Ticket", action: "Status Changed", severity: "info", entity: "Ticket", reference: ids.length === 1 ? ids[0] : `${ids.length} tickets`, description: `Bulk updated ${ids.length} ticket${ids.length !== 1 ? "s" : ""} to ${label}.`, changes: [{ field: "Status", to: label }] });
   }, []);
@@ -1048,6 +1256,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("invoiceType" in updates) row.invoice_type = updates.invoiceType ?? "retail";
       if ("serviceCategory" in updates) row.service_category = updates.serviceCategory ?? "service";
       if ("paymentMode" in updates) row.payment_mode = updates.paymentMode ?? null;
+      // repairStatus / paymentMode / serviceCategory live in the `devices` meta
+      // jsonb. When any of them change, re-serialize the whole devices column so
+      // the value is actually persisted (survives reload / logout).
+      if (prev && ("repairStatus" in updates || "paymentMode" in updates || "serviceCategory" in updates || "devices" in updates)) {
+        row.devices = (invoiceToRow({ ...prev, ...updates } as Invoice).devices);
+      }
       const { error } = await db.from("invoices").update(row).eq("id", id);
       if (error) {
         // Retry without optional new columns that may not exist in DB yet
@@ -1060,6 +1274,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
     setState((s) => ({ ...s, invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)) }));
+
+    // ── Invoice → Ticket status sync ──
+    // The invoice's repairStatus shares the SAME status system as tickets. When
+    // it changes, immediately update the linked ticket's status to match so both
+    // stay synchronized (and persisted). Guarded against re-triggering the
+    // reverse (ticket → invoice) sync.
+    if ("repairStatus" in updates && updates.repairStatus !== prev?.repairStatus && !syncingIdsRef.current.has(id)) {
+      const ticketId = updates.ticketId ?? prev?.ticketId;
+      const nextStatus = updates.repairStatus as TicketStatus;
+      const ticket = ticketId ? stateRef.current.tickets.find((t) => t.id === ticketId) : undefined;
+      if (ticket && ticket.status !== nextStatus) {
+        syncingIdsRef.current.add(ticket.id);
+        try {
+          if (shouldUseDb()) {
+            const { error } = await db.from("tickets").update({ status: nextStatus }).eq("id", ticket.id);
+            if (error) console.error("[store] invoice→ticket sync failed:", error.message);
+          }
+          const syncedDevices = ticket.devices?.map((d) => ({ ...d, status: nextStatus }));
+          setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === ticket.id ? { ...t, status: nextStatus, ...(syncedDevices ? { devices: syncedDevices } : {}) } : t)) }));
+        } finally {
+          syncingIdsRef.current.delete(ticket.id);
+        }
+      }
+    }
+
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "status", label: "Status" }, { key: "paidAmount", label: "Paid", format: inr }, { key: "total", label: "Total", format: inr },
     ]);
@@ -1500,6 +1739,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateTicket,
     deleteTicket,
     bulkUpdateStatus,
+    pinTicket,
+    pinInvoice,
     addInvoice,
     updateInvoice,
     deleteInvoice,

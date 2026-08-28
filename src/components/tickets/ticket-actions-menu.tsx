@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown } from "lucide-react";
+import { Eye, ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown, Pin, PinOff } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import type { Ticket } from "@/lib/mock-data";
 
@@ -16,6 +16,7 @@ export type TicketAction =
   | "edit"
   | "delete"
   | "priority"
+  | "pin"
   | "invoice";
 
 interface TicketActionsMenuProps {
@@ -24,8 +25,22 @@ interface TicketActionsMenuProps {
 }
 
 export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) {
+  const isPinned = !!ticket.pinnedAt;
   return (
     <div className="flex items-center justify-end gap-1">
+      {/* Pin / Unpin — RepairOX violet accent (distinct from red/blue/green/amber) */}
+      <button
+        onClick={() => onAction("pin", ticket)}
+        className={
+          isPinned
+            ? "inline-flex h-7 w-7 items-center justify-center rounded-lg text-[#7C5CFC] bg-[#7C5CFC]/10 transition hover:bg-[#7C5CFC]/20"
+            : "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#7C5CFC]/10 hover:text-[#7C5CFC]"
+        }
+        title={isPinned ? "Unpin ticket" : "Pin ticket"}
+      >
+        {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+      </button>
+
       {/* Print Preview button (Eye icon — opens print preview) */}
       <button
         onClick={() => onAction("print-preview", ticket)}
@@ -86,6 +101,9 @@ export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) 
             </MenuItem>
             <MenuItem icon={AlertTriangle} onClick={() => { onAction("priority", ticket); close(); }}>
               Change Priority
+            </MenuItem>
+            <MenuItem icon={ticket.pinnedAt ? PinOff : Pin} onClick={() => { onAction("pin", ticket); close(); }}>
+              {ticket.pinnedAt ? "Unpin from top" : "Pin to top"}
             </MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onAction("delete", ticket); close(); }}>

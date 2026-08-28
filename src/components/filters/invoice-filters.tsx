@@ -57,7 +57,8 @@ export function InvoiceFilters({
   extraActions?: ReactNode;
 }) {
   const [state, setState] = useState<FilterState>(DEFAULT_FILTER_STATE);
-  const [quickDate, setQuickDate] = useState<QuickDateValue>("all");
+  // Default the invoice date filter to Today (not All) on open.
+  const [quickDate, setQuickDate] = useState<QuickDateValue>("today");
 
   // Set field helper
   const setField = useCallback((key: keyof FilterState, value: any) => {

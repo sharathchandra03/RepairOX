@@ -224,7 +224,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
   }));
 
   return {
-    ticketId: ticket.id,
+    ticketId: ticket.ticketNo ?? ticket.id,
     device: ticket.device,
     model: ticket.model,
     serial: ticket.items?.[0]?.serial || "",

@@ -17,6 +17,7 @@ import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { Drawer } from "@/components/ui/drawer";
+import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import {
@@ -56,7 +57,7 @@ function generateTimeline(ticket: Ticket) {
     id: idx++,
     type: "created",
     title: "Ticket Created",
-    description: `Ticket ${ticket.id} created for ${ticket.customer}`,
+    description: `Ticket ${ticket.ticketNo ?? ticket.id} created for ${ticket.customer}`,
     time: ticket.createdAt,
     icon: CheckCircle2,
     color: "text-emerald-600 bg-emerald-50 ring-emerald-200",
@@ -239,7 +240,7 @@ export default function TicketDetailPage() {
             </Link>
             <div>
               <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="font-display text-[26px] font-extrabold tracking-tight">{ticket.id}</h1>
+                <h1 className="font-display text-[26px] font-extrabold tracking-tight">{ticket.ticketNo ?? ticket.id}</h1>
                 <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
                   <span className="h-1.5 w-1.5 rounded-full bg-current" />
                   {STATUS_LABEL[ticket.status]}
@@ -404,7 +405,7 @@ export default function TicketDetailPage() {
             action={<SectionEditButton onClick={() => setActiveEditor("job")} />}
           >
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-              <DetailField label="Ticket ID" value={ticket.id} />
+              <DetailField label="Ticket ID" value={ticket.ticketNo ?? ticket.id} />
               <DetailField label="Source" value={ticket.source || "Walk-in"} />
               <DetailField label="Service" value={ticket.service || ticket.issue} />
               <DetailField label="Issue" value={ticket.issue} />
@@ -675,18 +676,20 @@ export default function TicketDetailPage() {
                   <p className="text-[11px] text-muted-foreground">Modify ticket details</p>
                 </div>
               </button>
-              <button
-                onClick={() => setShowStatusMenu(true)}
-                className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
-              >
-                <span className="grid h-9 w-9 place-items-center rounded-lg bg-violet-100 text-violet-700">
-                  <CircleDot className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold">Change Status</p>
-                  <p className="text-[11px] text-muted-foreground">Update ticket progress</p>
+              <div className="rounded-xl border border-border px-4 py-3">
+                <div className="mb-2 flex items-baseline gap-2">
+                  <p className="text-[11px] font-medium text-muted-foreground">Repair Status</p>
+                  {linkedInvoice && (
+                    <p className="text-[10px] text-muted-foreground">
+                      —&nbsp; Synced with invoice {linkedInvoice.id}
+                    </p>
+                  )}
                 </div>
-              </button>
+                <StatusPillSelect
+                  value={ticket.status}
+                  onChange={(v: TicketStatus) => handleStatusChange(v)}
+                />
+              </div>
               <button
                 onClick={() => router.push(`/print/ticket/${ticket.id}?format=a4`)}
                 className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"

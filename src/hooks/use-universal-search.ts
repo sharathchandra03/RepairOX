@@ -20,6 +20,8 @@ export const SEARCH_SCOPES: { id: SearchScope; label: string }[] = [
 export type TicketResult = {
   type: "ticket";
   id: string;
+  /** Human-readable ticket number for display; `id` stays the routing key. */
+  displayId?: string;
   customer: string;
   phone: string;
   device: string;
@@ -112,12 +114,13 @@ function searchTickets(tickets: Ticket[], query: string): TicketResult[] {
     // Build a searchable string from all relevant fields
     const imei = t.items?.map((i) => i.serial || "").join(" ") || "";
     const deviceInfo = t.devices?.map((d) => `${d.brand} ${d.model} ${d.imei} ${d.issue}`).join(" ") || "";
-    const searchable = `${t.id} ${t.customer} ${t.phone} ${t.device} ${t.model} ${t.issue} ${imei} ${deviceInfo} ${t.status} ${t.service || ""}`.toLowerCase();
+    const searchable = `${t.ticketNo || ""} ${t.id} ${t.customer} ${t.phone} ${t.device} ${t.model} ${t.issue} ${imei} ${deviceInfo} ${t.status} ${t.service || ""}`.toLowerCase();
 
     if (searchable.includes(q)) {
       results.push({
         type: "ticket",
         id: t.id,
+        displayId: t.ticketNo ?? t.id,
         customer: t.customer,
         phone: t.phone,
         device: t.device,

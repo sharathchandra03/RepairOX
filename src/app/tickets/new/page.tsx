@@ -285,6 +285,9 @@ function ticketToWizard(t: Ticket): WizardData {
 }
 
 /* ---------------- Helper: generate ticket ID ---------------- */
+// Placeholder id only. The real, sequential ticket number (T-001, T-002, …) is
+// assigned by the store's addTicket from the database on save, so this value is
+// never persisted for new tickets — it just satisfies the type before save.
 function genId(): string {
   return `T-${Math.floor(1000 + Math.random() * 9000)}`;
 }
@@ -350,7 +353,7 @@ function NewTicketWizard() {
     }
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
     const primaryDevice = data.devices[0];
     const allParts = data.devices.flatMap((d) => d.parts);
@@ -486,7 +489,9 @@ function NewTicketWizard() {
         router.push(`/tickets/${editId}`);
       }, 800);
     } else {
-      addTicket(ticketData);
+      // addTicket assigns the real sequential ticket number (T-001, …) from the
+      // DB and returns it. Use that id everywhere downstream.
+      const newId = await addTicket(ticketData);
       // Update customer stats (totalTickets, lastVisit)
       if (finalCustomerId) {
         const cust = customers.find((c) => c.id === finalCustomerId);
@@ -508,7 +513,7 @@ function NewTicketWizard() {
           }
         });
       }
-      setCreatedTicketId(ticketData.id);
+      setCreatedTicketId(newId || ticketData.id);
       setShowSuccessAnimation(true);
     }
   };
@@ -546,7 +551,7 @@ function NewTicketWizard() {
         onBack={back}
         onClose={isEdit ? () => attemptNav(`/tickets/${editId}`) : undefined}
         closeHref={isEdit ? undefined : closeTarget}
-        title={isEdit ? `Edit Ticket ${editId}` : titleFor(step)}
+        title={isEdit ? `Edit Ticket ${tickets.find((t) => t.id === editId)?.ticketNo ?? editId}` : titleFor(step)}
         subtitle={isEdit ? "Update ticket details below." : subtitleFor(step)}
         isEdit={isEdit}
         footer={isEdit ? (

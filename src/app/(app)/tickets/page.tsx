@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings2,
   GripVertical, Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
-  Pin, PinOff,
+  Pin, PinOff, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -21,7 +21,8 @@ import {
   CheckoutDrawer, EmailReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices } from "@/lib/mock-data";
+import { Pagination } from "@/components/ui/pagination";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
@@ -43,15 +44,15 @@ type ColumnDef = {
 };
 
 const ALL_COLUMNS: ColumnDef[] = [
-  { id: "checkbox", label: "", width: "w-10", locked: true },
-  { id: "ticket", label: "Ticket", width: "w-[100px]" },
-  { id: "customer", label: "Customer", width: "w-[22%]" },
-  { id: "device", label: "Device / Service", width: "w-[18%]" },
-  { id: "status", label: "Status", width: "w-[170px]", align: "center" },
+  { id: "checkbox", label: "", width: "w-9", locked: true },
+  { id: "ticket", label: "Ticket", width: "w-[112px]" },
+  { id: "customer", label: "Customer", width: "w-[33%]" },
+  { id: "device", label: "Device / Service", width: "w-[33%]" },
+  { id: "status", label: "Status", width: "w-[184px]", align: "left" },
   { id: "dueDate", label: "Due Date", width: "w-[100px]" },
-  { id: "created", label: "Created", width: "w-[110px]" },
-  { id: "amount", label: "Amount", width: "w-[80px]", align: "right" },
-  { id: "actions", label: "Actions", width: "w-[120px]", align: "center", locked: true },
+  { id: "created", label: "Created", width: "w-[100px]" },
+  { id: "amount", label: "Amount", width: "w-[92px]", align: "right" },
+  { id: "actions", label: "Actions", width: "w-[108px]", align: "center", locked: true },
 ];
 
 const DEFAULT_VISIBLE: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
@@ -99,6 +100,9 @@ const PRIORITY_OPTIONS = [
 ];
 
 const WAITING_THRESHOLD_MINS = 40;
+
+/** Rows shown per page in the ticket table. */
+const PAGE_SIZE = 20;
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -149,7 +153,7 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
 
 export default function TicketsPage() {
   const router = useRouter();
-  const { tickets, bulkUpdateStatus, deleteTicket, updateTicket, deductPartsForTicket } = useStore();
+  const { tickets, invoices, bulkUpdateStatus, deleteTicket, updateTicket, deductPartsForTicket, pinTicket } = useStore();
   const { settings } = useStoreSettings();
   const {
     downloadTicket,
@@ -164,12 +168,13 @@ export default function TicketsPage() {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [dateRange, setDateRange] = useState<DateRange>("all");
+  const [dateRange, setDateRange] = useState<DateRange>("today");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [techFilter, setTechFilter] = useState<string>("all");
   const [customerTypeFilter, setCustomerTypeFilter] = useState<string>("all");
   const [q, setQ] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
+  const [page, setPage] = useState(1);
 
   // Universal Search filter — shows only a single record when navigated from search
   const searchParams = useSearchParams();
@@ -281,14 +286,23 @@ export default function TicketsPage() {
     },
   ], [priorityFilter, techFilter, statusFilter, dateRange, customerTypeFilter, technicians]);
 
-  // Filtered list
+  // Set of ticket IDs that have at least one invoice generated from them.
+  // Derived from the actual DB-backed invoice relationship (invoice.ticketId),
+  // so it stays correct across reload, login, search, filter, edit and view.
+  const ticketsWithInvoice = useMemo(
+    () => new Set(invoices.map((inv) => inv.ticketId).filter(Boolean) as string[]),
+    [invoices]
+  );
+
+  // Filtered list — pinned records float to the top while preserving the
+  // existing order within each group (pinned + normal).
   const list = useMemo(
     () => {
       // When navigated from Universal Search, show only the exact record
       if (searchFilterId) {
         return tickets.filter((t) => t.id === searchFilterId);
       }
-      return tickets.filter((t) => {
+      const filtered = tickets.filter((t) => {
         const okStatus = statusFilter === "all" || t.status === statusFilter;
         const okDate = isInDateRange(t.createdAt, dateRange);
         const okPriority = priorityFilter === "all" || t.priority === priorityFilter;
@@ -296,13 +310,33 @@ export default function TicketsPage() {
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
         const okQ =
           !q ||
-          `${t.id} ${t.customer} ${t.model} ${t.issue} ${t.phone} ${t.items?.map((i) => `${i.model} ${i.serial} ${i.issue}`).join(" ") || ""}`
+          `${t.ticketNo ?? ""} ${t.id} ${t.customer} ${t.model} ${t.issue} ${t.phone} ${t.items?.map((i) => `${i.model} ${i.serial} ${i.issue}`).join(" ") || ""}`
             .toLowerCase()
             .includes(q.toLowerCase());
         return okStatus && okDate && okPriority && okTech && okCustomerType && okQ;
       });
+      // Stable partition: pinned first, then normal — order within each group
+      // is the original table order (createdAt-desc from the store).
+      const pinned = filtered.filter((t) => t.pinnedAt);
+      const normal = filtered.filter((t) => !t.pinnedAt);
+      return [...pinned, ...normal];
     },
     [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q, searchFilterId]
+  );
+
+  // Reset to the first page whenever the filtered result set changes so
+  // pagination always reflects the current filters/search.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q, searchFilterId]);
+
+  // Pagination — pinned records already float to the top of `list`, so slicing
+  // here keeps pinned rows at the top of page 1 while respecting page size.
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => list.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [list, currentPage]
   );
 
   // Ordered & visible columns
@@ -406,9 +440,13 @@ export default function TicketsPage() {
       setPriorityTarget(ticket);
       return;
     }
+    if (action === "pin") {
+      pinTicket(ticket.id, !ticket.pinnedAt);
+      return;
+    }
     setActiveTicket(ticket);
     setActiveDrawer(action);
-  }, [router, deleteTicket, downloadTicket]);
+  }, [router, deleteTicket, downloadTicket, pinTicket]);
 
   const closeDrawer = useCallback(() => { setActiveDrawer(null); setActiveTicket(null); }, []);
 
@@ -668,7 +706,7 @@ export default function TicketsPage() {
           <div className="flex items-center gap-2">
             <Search className="h-4 w-4 text-[#4361EE]" />
             <span className="text-sm font-medium text-[#4361EE]">
-              Showing search result: <span className="font-bold">{searchFilterId}</span>
+              Showing search result: <span className="font-bold">{tickets.find((t) => t.id === searchFilterId)?.ticketNo ?? searchFilterId}</span>
             </span>
           </div>
           <button
@@ -688,7 +726,7 @@ export default function TicketsPage() {
             <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 {activeColumns.map((col) => (
-                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-5", col.id === "customer" && "pl-[58px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
+                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-5", col.id === "amount" && "pr-6", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
                       <input
                         type="checkbox"
@@ -704,7 +742,7 @@ export default function TicketsPage() {
               </tr>
             </thead>
             <tbody>
-              {list.map((t, i) => {
+              {paged.map((t, i) => {
                 const elapsed = getElapsedMins(t.createdAt);
                 const isWaiting = isOverdue(t);
                 const isSelected = selected.has(t.id);
@@ -718,7 +756,7 @@ export default function TicketsPage() {
                     transition={{ delay: 0.015 * i }}
                     onClick={() => router.push(`/tickets/${t.id}`)}
                     className={cn(
-                      "group border-b border-zinc-200 transition-colors align-top cursor-pointer",
+                      "group border-b border-zinc-200 transition-colors align-middle cursor-pointer",
                       isWaiting && "bg-red-50/80",
                       isSelected && !isWaiting && "bg-indigo-50/40",
                       !isWaiting && !isSelected && "hover:bg-[#EEF1FD]/50"
@@ -726,14 +764,14 @@ export default function TicketsPage() {
                   >
                     {activeColumns.map((col) => (
                       <td key={col.id} className={cn(
-                        "px-3 py-3",
+                        "px-3 py-3 align-middle",
                         col.id === "status" && "pl-1 pr-5",
-                        col.id === "customer" && "pl-5",
-                        col.id !== "device" && "align-middle",
+                        col.id === "customer" && "pl-0",
+                        col.id === "amount" && "pr-6",
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id))}
                       </td>
                     ))}
                   </motion.tr>
@@ -747,7 +785,7 @@ export default function TicketsPage() {
 
       {/* Mobile cards */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
-        {list.map((t, i) => {
+        {paged.map((t, i) => {
           const elapsed = getElapsedMins(t.createdAt);
           const isWaiting = isOverdue(t);
           const isSelected = selected.has(t.id);
@@ -759,10 +797,19 @@ export default function TicketsPage() {
                 <div className="flex items-start gap-3">
                   <input type="checkbox" checked={isSelected} onChange={() => toggleOne(t.id)} className="mt-1 h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
                   <div className="flex items-center gap-2">
-                    <Avatar name={t.customer} size={32} />
+                    <Avatar name={t.customer} size={32} ticketType={getTicketType(t)} />
                     <div>
                       <p className="text-sm font-semibold">{t.customer}</p>
-                      <p className="text-[11px] text-muted-foreground">{t.id} · <span className="font-medium text-[#5B6FC0]">{t.phone}</span></p>
+                      <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                        {t.pinnedAt && <Pin className="h-3 w-3 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
+                        <span>{t.ticketNo ?? t.id}</span>
+                        {ticketsWithInvoice.has(t.id) && (
+                          <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-emerald-100 text-emerald-600 ring-1 ring-inset ring-emerald-200" title="Invoice generated" aria-label="Invoice generated">
+                            <Check className="h-2 w-2" strokeWidth={3} />
+                          </span>
+                        )}
+                        <span>· <span className="font-medium text-[#5B6FC0]">{t.phone}</span></span>
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -802,10 +849,15 @@ export default function TicketsPage() {
         {list.length === 0 && <EmptyRow />}
       </div>
 
-      {/* Pagination info */}
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
-        <span>Showing {list.length} of {tickets.length} ticket{tickets.length !== 1 ? "s" : ""}</span>
-      </div>
+      {/* Pagination — 20 rows per page; pinned rows stay at the top of page 1 */}
+      <Pagination
+        page={currentPage}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={list.length}
+        pageSize={PAGE_SIZE}
+        itemLabel="ticket"
+      />
 
       {/* Drawers */}
       <TransferTicketDrawer open={activeDrawer === "transfer"} onClose={closeDrawer} ticket={activeTicket} />
@@ -824,7 +876,7 @@ export default function TicketsPage() {
             setSelected((prev) => { const n = new Set(prev); n.delete(deleteTarget.id); return n; });
           }
         }}
-        title={`Delete ticket ${deleteTarget?.id || ""}?`}
+        title={`Delete ticket ${deleteTarget?.ticketNo ?? deleteTarget?.id ?? ""}?`}
         description="This action cannot be undone. The ticket and all associated data will be permanently removed."
         confirmLabel="Delete Ticket"
         cancelLabel="Cancel"
@@ -852,7 +904,7 @@ export default function TicketsPage() {
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <p className="text-sm font-bold mb-1">Change Priority</p>
-            <p className="text-[11px] text-muted-foreground mb-4">Ticket {priorityTarget.id}</p>
+            <p className="text-[11px] text-muted-foreground mb-4">Ticket {priorityTarget.ticketNo ?? priorityTarget.id}</p>
             <div className="space-y-2">
               {(["normal", "high", "critical"] as TicketPriority[]).map((p) => (
                 <button key={p} onClick={() => { updateTicket(priorityTarget.id, { priority: p }); setPriorityTarget(null); }}
@@ -905,7 +957,7 @@ function InlineStatusDropdown({ ticket, onStatusChange, statusColors }: { ticket
   const activeColor = statusColors[ticket.status] || "#71717A";
 
   return (
-    <div className="relative" onClick={(e) => e.stopPropagation()}>
+    <div className="relative flex justify-start" onClick={(e) => e.stopPropagation()}>
       <button
         ref={btnRef}
         onClick={handleOpen}
@@ -975,6 +1027,7 @@ function renderCell(
   handleAction: (action: TicketAction, ticket: Ticket) => void,
   onStatusChange: (ticketId: string, status: TicketStatus) => void,
   statusColors: Record<string, string>,
+  hasInvoice: boolean,
 ) {
   switch (colId) {
     case "checkbox":
@@ -982,27 +1035,33 @@ function renderCell(
         <input type="checkbox" checked={isSelected} onChange={toggleOne}
           onClick={(e) => e.stopPropagation()}
           className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
-          aria-label={`Select ticket ${t.id}`} />
+          aria-label={`Select ticket ${t.ticketNo ?? t.id}`} />
       );
     case "ticket":
       return (
         <div className="flex items-center gap-1.5 min-w-0">
-          {/* Status colour marker — unique per status, configurable from Settings */}
-          <span
-            className="h-5 w-[3px] shrink-0 rounded-full"
-            style={{ backgroundColor: statusColors[t.status] || "#71717A" }}
-            title={STATUS_LABEL[t.status]}
-          />
-          {t.priority !== "normal" && (
-            <span className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")} title={t.priority === "critical" ? "Critical" : "High Priority"} />
+          {/* Pin indicator — subtle violet dot when the ticket is pinned. */}
+          {t.pinnedAt && (
+            <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />
           )}
-          <span className="font-semibold text-foreground truncate">{t.id}</span>
+          <span className="font-semibold text-foreground whitespace-nowrap">{t.ticketNo ?? t.id}</span>
+          {/* Invoice-generated indicator — subtle green circular check.
+              Reserved space via shrink-0 so it never pushes the id. */}
+          {hasInvoice && (
+            <span
+              className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-600 ring-1 ring-inset ring-emerald-200"
+              title="Invoice generated"
+              aria-label="Invoice generated"
+            >
+              <Check className="h-2.5 w-2.5" strokeWidth={3} />
+            </span>
+          )}
         </div>
       );
     case "customer":
       return (
         <div className="flex items-center gap-3 min-w-0">
-          <Avatar name={t.customer} size={30} />
+          <Avatar name={t.customer} size={30} ticketType={getTicketType(t)} />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium leading-tight truncate">{t.customer}</p>
             <p className="text-[11px] font-medium text-[#5B6FC0] truncate">{t.phone}</p>
@@ -1013,15 +1072,27 @@ function renderCell(
     case "device":
       return (
         <div className="flex py-0.5">
-          {/* Fixed-width marker area — content always starts after this */}
+          {/* Fixed-width marker area — content always starts after this, whether
+              or not a critical/high priority dot is present. */}
           <div className="w-4 shrink-0 flex flex-col items-center pt-[7px] gap-3">
-            {t.items && t.items.length > 0 ? (
-              t.items.map((_, idx) => (
-                <span key={idx} className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
-              ))
+            {t.priority !== "normal" ? (
+              /* Critical (red) / High (amber) indicator — replaces the first
+                 device marker dot so the Device/Service text keeps the same
+                 X-position. Same size & meaning as before. */
+              <span
+                className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")}
+                title={t.priority === "critical" ? "Critical" : "High Priority"}
+              />
+            ) : t.items && t.items.length > 0 ? (
+              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
             ) : (
               <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
             )}
+            {/* Remaining device markers (skip the first, which is handled above). */}
+            {t.items && t.items.length > 1 &&
+              t.items.slice(1).map((_, idx) => (
+                <span key={idx} className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+              ))}
           </div>
           {/* Content area — always starts at same position */}
           <div className="min-w-0 flex-1 space-y-1.5">

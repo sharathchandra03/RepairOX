@@ -9,6 +9,7 @@ import {
   Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
   PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, X,
+  Pin, PinOff,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -16,9 +17,10 @@ import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Pagination } from "@/components/ui/pagination";
 import { useStore } from "@/lib/store";
 import { InvoiceFilters, type FilterState } from "@/components/filters/invoice-filters";
-import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
+import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
 import { formatINR, cn } from "@/lib/utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
@@ -74,6 +76,9 @@ const DATE_RANGES = [
 
 type DateRange = (typeof DATE_RANGES)[number]["value"] | "custom";
 
+/** Rows shown per page in the invoice table. */
+const PAGE_SIZE = 20;
+
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
 function fmtDate(iso: string): string {
@@ -110,7 +115,14 @@ function isInDateRange(createdAt: string, range: DateRange, customFrom?: string,
 
 export default function InvoicePage() {
   const router = useRouter();
-  const { invoices, deleteInvoice, addInvoice, updateInvoice } = useStore();
+  const { invoices, tickets, deleteInvoice, addInvoice, updateInvoice, pinInvoice } = useStore();
+  // Map ticket id → saved ticket Type (Walk-In/Pick-Up/On-Site) so invoices can
+  // show the same WK/PD/OS avatar as their linked ticket. Never inferred.
+  const ticketTypeById = useMemo(() => {
+    const m = new Map<string, ReturnType<typeof getTicketType>>();
+    for (const t of tickets) m.set(t.id, getTicketType(t));
+    return m;
+  }, [tickets]);
   const {
     downloadInvoice,
     startBulkInvoiceDownload,
@@ -127,10 +139,11 @@ export default function InvoicePage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
-  const [dateRange, setDateRange] = useState<DateRange>("all");
+  const [dateRange, setDateRange] = useState<DateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
+  const [page, setPage] = useState(1);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
 
   // Universal Search filter — shows only a single record when navigated from search
@@ -180,7 +193,7 @@ export default function InvoicePage() {
     if (searchFilterId) {
       return invoices.filter((inv) => inv.id === searchFilterId);
     }
-    return invoices.filter((inv) => {
+    const filtered = invoices.filter((inv) => {
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
@@ -188,7 +201,24 @@ export default function InvoicePage() {
       const okQ = !q || `${inv.id} ${inv.reference} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
       return okStatus && okType && okCategory && okDate && okQ;
     });
+    // Pinned invoices float to the top; order within each group is preserved.
+    const pinned = filtered.filter((inv) => inv.pinnedAt);
+    const normal = filtered.filter((inv) => !inv.pinnedAt);
+    return [...pinned, ...normal];
   }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId]);
+
+  // Reset to page 1 whenever the filtered result set changes.
+  useEffect(() => {
+    setPage(1);
+  }, [statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId]);
+
+  // Pagination — pinned invoices already sit at the top of `list`.
+  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => list.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [list, currentPage]
+  );
 
   /* KPIs */
   const kpis = useMemo(() => {
@@ -435,9 +465,9 @@ export default function InvoicePage() {
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="w-10 px-3 py-3">
                   <input type="checkbox"
-                    checked={list.length > 0 && list.every((inv) => selected.has(inv.id))}
-                    ref={(el) => { if (el) el.indeterminate = list.some((inv) => selected.has(inv.id)) && !list.every((inv) => selected.has(inv.id)); }}
-                    onChange={() => { if (list.every((inv) => selected.has(inv.id))) setSelected(new Set()); else setSelected(new Set(list.map((inv) => inv.id))); }}
+                    checked={paged.length > 0 && paged.every((inv) => selected.has(inv.id))}
+                    ref={(el) => { if (el) el.indeterminate = paged.some((inv) => selected.has(inv.id)) && !paged.every((inv) => selected.has(inv.id)); }}
+                    onChange={() => { if (paged.every((inv) => selected.has(inv.id))) setSelected(new Set()); else setSelected(new Set(paged.map((inv) => inv.id))); }}
                     className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
                   />
                 </th>
@@ -447,7 +477,7 @@ export default function InvoicePage() {
               </tr>
             </thead>
             <tbody>
-              {list.map((inv, i) => (
+              {paged.map((inv, i) => (
                 <motion.tr key={inv.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 * i }}
                   onClick={() => router.push(`/invoice/${inv.id}`)}
                   className={cn("group cursor-pointer border-t border-border transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
@@ -460,7 +490,7 @@ export default function InvoicePage() {
                   </td>
                   {activeInvCols.map((col) => (
                     <td key={col.id} className={cn("py-3.5 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
-                      {renderInvCell(col.id, inv, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv))}
+                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt))}
                     </td>
                   ))}
                 </motion.tr>
@@ -475,9 +505,16 @@ export default function InvoicePage() {
             <p className="text-sm text-muted-foreground">Try adjusting filters or create a new invoice.</p>
           </div>
         )}
-        {/* Footer */}
-        <div className="flex items-center justify-between border-t border-border px-5 py-3">
-          <p className="text-xs text-muted-foreground">Showing {list.length} of {invoices.length}</p>
+        {/* Footer — 20 rows per page; pinned invoices stay at the top of page 1 */}
+        <div className="border-t border-border px-5 py-3">
+          <Pagination
+            page={currentPage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            totalItems={list.length}
+            pageSize={PAGE_SIZE}
+            itemLabel="invoice"
+          />
         </div>
       </div>
 
@@ -664,23 +701,28 @@ function PaymentCard({ tone, icon: Icon, label, value, numericValue, sub }: { to
 function renderInvCell(
   colId: InvColumnId,
   inv: Invoice,
+  ticketType: ReturnType<typeof getTicketType>,
   onView: () => void,
   onEdit: () => void,
   onDuplicate: () => void,
   onDelete: () => void,
   onPrint: () => void,
   onDownloadPdf: () => void,
+  onPin: () => void,
 ) {
   switch (colId) {
     case "id": return (
-      <span className={cn("font-semibold whitespace-nowrap cursor-default", INVOICE_ID_COLOR[inv.status] || "text-foreground")} title={`Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}>
-        {inv.id}
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+        {inv.pinnedAt && <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
+        <span className={cn("font-semibold cursor-default", INVOICE_ID_COLOR[inv.status] || "text-foreground")} title={`Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}>
+          {inv.id}
+        </span>
       </span>
     );
     case "reference": return <span className="text-muted-foreground whitespace-nowrap text-[12px]">{inv.reference}</span>;
     case "customer": return (
       <div className="flex items-center gap-2.5">
-        <Avatar name={inv.customer} size={28} />
+        <Avatar name={inv.customer} size={28} ticketType={ticketType} />
         <div className="min-w-0">
           <p className="text-[13px] font-medium truncate leading-tight">{inv.customer}</p>
           {inv.company && <p className="text-[11px] text-muted-foreground truncate">{inv.company}</p>}
@@ -707,6 +749,17 @@ function renderInvCell(
     case "total": return <span className="font-semibold tabular-nums">{formatINR(inv.total)}</span>;
     case "actions": return (
       <div className="flex items-center justify-end gap-1">
+        <button
+          onClick={onPin}
+          className={
+            inv.pinnedAt
+              ? "inline-flex h-7 w-7 items-center justify-center rounded-lg text-[#7C5CFC] bg-[#7C5CFC]/10 transition hover:bg-[#7C5CFC]/20"
+              : "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#7C5CFC]/10 hover:text-[#7C5CFC]"
+          }
+          title={inv.pinnedAt ? "Unpin invoice" : "Pin invoice"}
+        >
+          {inv.pinnedAt ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        </button>
         <button onClick={onPrint} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="Preview"><Eye className="h-3.5 w-3.5" /></button>
         <button onClick={onEdit} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
         <Dropdown align="right" width="w-44" trigger={({ toggle }) => (
@@ -719,6 +772,7 @@ function renderInvCell(
             <MenuItem icon={Printer} onClick={() => { onPrint(); close(); }}>Print</MenuItem>
             <MenuItem icon={FileDown} onClick={() => { onDownloadPdf(); close(); }}>Download PDF</MenuItem>
             <MenuItem icon={Mail} onClick={close}>Email Invoice</MenuItem>
+            <MenuItem icon={inv.pinnedAt ? PinOff : Pin} onClick={() => { onPin(); close(); }}>{inv.pinnedAt ? "Unpin from top" : "Pin to top"}</MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
           </>)}

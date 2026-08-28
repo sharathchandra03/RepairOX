@@ -19,7 +19,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { useState, useMemo, useRef, useCallback } from "react";
-import { STATUS_LABEL, STATUS_TONE } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, getTicketType } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
@@ -496,7 +496,7 @@ export default function Dashboard() {
             <ul className="space-y-1">
               {filteredTickets.slice(0, 20).map((tx, i) => (
                 <motion.li key={tx.id} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.04 * i }} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-[#EEF1FD]/50 transition">
-                  <Avatar name={tx.customer} size={30} />
+                  <Avatar name={tx.customer} size={30} ticketType={getTicketType(tx)} />
                   <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold leading-tight">{tx.customer}</p><p className="text-[11px] text-muted-foreground">{tx.model}</p></div>
                   <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">{formatINR(tx.amount)}</span>
                 </motion.li>
@@ -536,8 +536,8 @@ export default function Dashboard() {
             <tbody>
               {filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "repaired" && t.status !== "repaired_collected" && t.status !== "return_collected").sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).slice(0, 5).map((t, i) => (
                 <motion.tr key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * i }} className="group border-t border-border transition hover:bg-[#EEF1FD]/50">
-                  <td className="px-5 py-3 whitespace-nowrap font-medium">{t.id}</td>
-                  <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
+                  <td className="px-5 py-3 whitespace-nowrap font-medium">{t.ticketNo ?? t.id}</td>
+                  <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} ticketType={getTicketType(t)} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
                   <td className="py-3 whitespace-nowrap text-muted-foreground">{t.model}</td>
                   <td className="py-3"><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>{t.priority === "critical" ? "Critical" : "High"}</span></td>
                   <td className="py-3"><span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}</span></td>

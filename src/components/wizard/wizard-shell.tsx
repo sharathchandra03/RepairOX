@@ -5,7 +5,6 @@ import { ArrowLeft, X, Check, Sparkles } from "lucide-react";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
-import { SilkBackground } from "@/components/ui/silk-background";
 
 export const TOTAL_STEPS = 11;
 export const STEP_LABELS = [
@@ -46,18 +45,16 @@ export function WizardShell({
   const pct = Math.round(((step - 1) / TOTAL_STEPS) * 100);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,30%,95%)] via-white to-[hsl(228,30%,95%)] dark:from-[hsl(226,22%,7%)] dark:via-[hsl(226,22%,9%)] dark:to-[hsl(226,22%,7%)]">
-      {/* Silk wave animated background */}
-      <SilkBackground
-        color="#4361EE"
-        backgroundColor="#EDF0FF"
-        opacity={0.12}
-        intensity={0.5}
-        speed={1}
-        scale={1}
-        noiseIntensity={0.3}
-        seed={5}
-      />
+    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,44%,97%)] via-white to-[hsl(228,44%,97%)] dark:from-[hsl(226,22%,7%)] dark:via-[hsl(226,22%,9%)] dark:to-[hsl(226,22%,7%)]">
+      {/* Subtle blue-themed static background */}
+      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
+        {/* Soft blue glow — top left */}
+        <div className="absolute -top-32 -left-24 h-[28rem] w-[28rem] rounded-full bg-[#4361EE]/10 blur-[120px] dark:bg-[#4361EE]/15" />
+        {/* Soft blue glow — bottom right */}
+        <div className="absolute -bottom-40 -right-32 h-[32rem] w-[32rem] rounded-full bg-[#6C8BFF]/10 blur-[130px] dark:bg-[#4361EE]/10" />
+        {/* Faint grid/tint overlay */}
+        <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_0%,rgba(67,97,238,0.05),transparent)]" />
+      </div>
 
       {/* Top bar */}
       <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-4 sm:px-6">

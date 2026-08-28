@@ -20,8 +20,9 @@ import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL,
-  type Invoice, type InvoiceStatus, getInvoiceDevices,
+  type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
 } from "@/lib/mock-data";
+import { StatusPillSelect } from "@/components/ui/status-pill-select";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -364,6 +365,22 @@ export default function InvoiceDetailPage() {
                   <option value="cancelled">Cancelled</option>
                 </select>
               </div>
+              {/* Repair Status — shares the ticket status system. Changing it keeps
+                  the linked ticket in sync (handled by the store's updateInvoice). */}
+              {invoice.ticketId && (
+                <div className="sm:col-span-2">
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">Repair Status</p>
+                  <StatusPillSelect
+                    value={invoice.repairStatus ?? "in_progress"}
+                    onChange={(v: TicketStatus) => updateInvoice(invoice.id, { repairStatus: v })}
+                  />
+                  {linkedTicket && (
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Synced with ticket {linkedTicket.ticketNo ?? linkedTicket.id}
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
           </DetailSection>
 
@@ -578,7 +595,7 @@ export default function InvoiceDetailPage() {
                     <TicketIcon className="h-4 w-4" />
                   </span>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-semibold">{linkedTicket.id} &middot; {linkedTicket.model}</p>
+                    <p className="text-sm font-semibold">{linkedTicket.ticketNo ?? linkedTicket.id} &middot; {linkedTicket.model}</p>
                     <p className="text-[11px] text-muted-foreground">{linkedTicket.issue}</p>
                   </div>
                   <ArrowLeft className="h-4 w-4 rotate-180 text-muted-foreground" />
@@ -632,6 +649,25 @@ export default function InvoiceDetailPage() {
                   <p className="text-[11px] text-muted-foreground">A4 / Thermal formats</p>
                 </div>
               </button>
+
+              {/* Repair Status — shares the ticket status system. Changing it keeps
+                  the linked ticket in sync (handled by the store's updateInvoice). */}
+              {invoice.ticketId && (
+                <div className="rounded-xl border border-border px-4 py-3">
+                  <div className="mb-2 flex items-baseline gap-2">
+                    <p className="text-[11px] font-medium text-muted-foreground">Repair Status</p>
+                    {linkedTicket && (
+                      <p className="text-[10px] text-muted-foreground">
+        —&nbsp; Synced with ticket {linkedTicket.ticketNo ?? linkedTicket.id}
+                      </p>
+                    )}
+                  </div>
+                  <StatusPillSelect
+                    value={invoice.repairStatus ?? "in_progress"}
+                    onChange={(v: TicketStatus) => updateInvoice(invoice.id, { repairStatus: v })}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

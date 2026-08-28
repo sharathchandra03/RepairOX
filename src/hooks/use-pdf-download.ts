@@ -107,7 +107,7 @@ export function usePdfDownload(): UsePdfDownloadReturn {
     setIsDownloading(true);
     try {
       const printData = buildTicketPrintData(settings, ticket);
-      const filename = getTicketPdfFilename(ticket.id);
+      const filename = getTicketPdfFilename(ticket.ticketNo ?? ticket.id);
       await downloadSinglePdf(printData, filename);
 
       // Audit log
@@ -154,7 +154,7 @@ export function usePdfDownload(): UsePdfDownloadReturn {
 
     const items = selectedTickets.map((t) => ({
       data: buildTicketPrintData(settings, t),
-      filename: getTicketPdfFilename(t.id),
+      filename: getTicketPdfFilename(t.ticketNo ?? t.id),
       id: t.id,
     }));
 

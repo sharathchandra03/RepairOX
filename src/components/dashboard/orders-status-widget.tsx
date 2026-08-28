@@ -130,7 +130,7 @@ function OrderTypeDetailDrawer({
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
                       <span className="font-mono text-[11px] font-medium text-muted-foreground">
-                        {ticket.id}
+                        {ticket.ticketNo ?? ticket.id}
                       </span>
                       {ticket.priority !== "normal" && (
                         <span className={cn(

@@ -663,6 +663,21 @@ create table if not exists public.invoices (
   deleted_at      timestamptz
 );
 
+-- ── Pin state (per record, org-scoped via the row itself) ────────────────────
+--   A non-null pinned_at marks the record as pinned; pinned rows sort to the top
+--   of their table. Stored in the DB so it survives reload / logout / other
+--   sessions and stays consistent across devices for the same organization.
+alter table public.tickets  add column if not exists pinned_at timestamptz;
+alter table public.invoices add column if not exists pinned_at timestamptz;
+
+-- ── Human-readable ticket number (separate from the stable primary key) ──────
+--   `id` remains the immutable database record id (and FK target for invoices /
+--   walk-ins). `ticket_no` holds the display number (T-001, T-002, …) which is
+--   resequenced by original creation order and continues sequentially for new
+--   tickets. Kept nullable; the app backfills it on load.
+alter table public.tickets add column if not exists ticket_no text;
+create index if not exists tickets_ticket_no_idx on public.tickets(organization_id, ticket_no);
+
 -- ── Walk-ins ─────────────────────────────────────────────────────────────────
 create table if not exists public.walk_ins (
   id              text primary key,

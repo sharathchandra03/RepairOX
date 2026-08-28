@@ -210,6 +210,41 @@ export function getTicketDevices(ticket: Ticket): DeviceRecord[] {
   ];
 }
 
+/* ─── Ticket Type (Intake channel) Helpers ───────────────────────────── */
+
+/** The intake channel of a ticket, saved on DeviceRecord.type during creation. */
+export type TicketType = "walkin" | "pickup" | "onsite";
+
+/** Short avatar code shown for each intake type: Walk-In → WK, Pick-Up → PD, On-Site → OS. */
+export const TICKET_TYPE_CODE: Record<TicketType, string> = {
+  walkin: "WK",
+  pickup: "PD",
+  onsite: "OS",
+};
+
+/** Human-readable label per intake type. */
+export const TICKET_TYPE_LABEL: Record<TicketType, string> = {
+  walkin: "Walk-In",
+  pickup: "Pick-Up",
+  onsite: "On-Site",
+};
+
+/**
+ * Resolve the SAVED intake Type of a ticket (Walk-In / Pick-Up / On-Site).
+ * Reads the first device's `type` value — never inferred from customer data.
+ * Returns null when no type has been saved (e.g. legacy tickets), so callers
+ * can fall back to the existing avatar behaviour.
+ */
+export function getTicketType(ticket: Ticket): TicketType | null {
+  const devices = getTicketDevices(ticket);
+  for (const d of devices) {
+    if (d.type === "walkin" || d.type === "pickup" || d.type === "onsite") {
+      return d.type;
+    }
+  }
+  return null;
+}
+
 /**
  * Derive overall ticket status from device statuses.
  * Rules:
@@ -274,6 +309,12 @@ export type Ticket = {
   cgst?: number;
   /** Multi-device support — when present, each device has its own record */
   devices?: DeviceRecord[];
+  /** DB-backed pin marker. Non-null → pinned to the top of the table. */
+  pinnedAt?: string;
+  /** Human-readable ticket number (e.g. "T-001"). Separate from `id`, which is
+   *  the stable database primary key. Displayed everywhere the ticket number is
+   *  shown; falls back to `id` when not yet assigned. */
+  ticketNo?: string;
 };
 
 /** Helper: generate a createdAt timestamp N minutes ago from now */
@@ -703,12 +744,21 @@ export type Invoice = {
   footer?: string;
   employee?: string;
   ticketId?: string;
+  /**
+   * Repair/work status — shares the SAME status system as Tickets
+   * (see TicketStatus / STATUS_LABEL / STATUS_TONE). This is distinct from the
+   * financial `status` field (draft/sent/paid…) which drives payment logic,
+   * print templates and reports. Kept in sync with the linked ticket's status.
+   */
+  repairStatus?: TicketStatus;
   /** Mode of payment (cash, upi, card, etc.) */
   paymentMode?: string;
   /** Service category — "service" or "accessories" */
   serviceCategory?: "service" | "accessories";
   /** Multi-device support — when present, each device has its own parts/job/technician */
   devices?: InvoiceDeviceRecord[];
+  /** DB-backed pin marker. Non-null → pinned to the top of the table. */
+  pinnedAt?: string;
 };
 
 function daysAgo(days: number): string {
