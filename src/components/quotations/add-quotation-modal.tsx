@@ -1052,7 +1052,7 @@ function SectionBilling({ form, set }: {
                   onClick={() => { const v = !form.sameAsBilling; set("sameAsBilling", v); if (v) set("shippingAddr", form.billing); }}
                   className={cn("relative h-5 w-9 rounded-full transition", form.sameAsBilling ? "bg-[#4361EE]" : "bg-zinc-300")}
                 >
-                  <span className={cn("absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", form.sameAsBilling ? "left-[18px]" : "left-0.5")} />
+                  <span className={cn("keep-light absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all", form.sameAsBilling ? "left-[18px]" : "left-0.5")} />
                 </button>
                 Same as billing
               </label>

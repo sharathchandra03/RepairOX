@@ -49,25 +49,55 @@
   --radius: 16px;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   RepairOX Dark Theme
+   A professional deep charcoal/navy palette (NOT pure black). Card and popover
+   surfaces sit slightly lighter than the app background to preserve hierarchy
+   without heavy shadows. The RepairOX royal blue is retained as the primary
+   accent. Text uses soft white / muted cool gray / darker disabled gray.
+   These tokens map to the same Tailwind utilities used by the light theme, so
+   every token-based component adapts automatically.
+   ───────────────────────────────────────────────────────────────────────── */
 .dark {
-  --background: 226 22% 7%;
-  --foreground: 210 20% 96%;
-  --muted: 226 18% 12%;
-  --muted-foreground: 224 10% 65%;
-  --card: 226 22% 9%;
-  --card-foreground: 210 20% 96%;
-  --popover: 226 22% 9%;
-  --popover-foreground: 210 20% 96%;
-  --border: 226 16% 18%;
-  --ring: 235 72% 65%;
-  --primary: 235 75% 62%;
+  /* Base surfaces — deep charcoal-navy, layered for depth */
+  --background: 224 28% 8%;        /* app canvas — deepest */
+  --foreground: 210 24% 94%;       /* primary text — soft white */
+
+  --muted: 223 20% 15%;            /* subtle fills, table headers, hovers */
+  --muted-foreground: 220 12% 62%; /* secondary text — muted cool gray */
+
+  --card: 223 24% 11%;             /* cards/panels — a step above background */
+  --card-foreground: 210 24% 94%;
+
+  --popover: 223 26% 13%;          /* menus/dropdowns — a step above cards */
+  --popover-foreground: 210 24% 94%;
+
+  --border: 223 16% 20%;           /* soft, low-contrast gray/blue borders */
+  --ring: 231 85% 66%;             /* focus ring — bright RepairOX blue */
+
+  /* Primary — keep the RepairOX royal blue, brightened slightly for contrast */
+  --primary: 231 80% 62%;
   --primary-foreground: 0 0% 100%;
-  --secondary: 226 18% 14%;
-  --secondary-foreground: 210 20% 96%;
-  --accent: 235 60% 20%;
-  --accent-foreground: 235 90% 86%;
-  --destructive: 0 72% 55%;
+
+  --secondary: 223 20% 17%;
+  --secondary-foreground: 210 24% 94%;
+
+  /* Accent — deep translucent-feeling blue tint for selected/hover */
+  --accent: 231 45% 22%;
+  --accent-foreground: 231 90% 88%;
+
+  /* Semantic colours — same meanings, brightened for dark backgrounds */
+  --destructive: 0 68% 58%;
   --destructive-foreground: 0 0% 100%;
+
+  --success: 152 55% 48%;
+  --success-foreground: 152 40% 10%;
+
+  --warning: 38 90% 58%;
+  --warning-foreground: 30 40% 10%;
+
+  --info: 210 85% 60%;
+  --info-foreground: 210 40% 10%;
 }
 
 * {
@@ -85,6 +115,38 @@ body {
 ::selection {
   background: hsl(231 80% 57% / 0.15);
   color: hsl(231 80% 42%);
+}
+.dark ::selection {
+  background: hsl(231 85% 66% / 0.28);
+  color: hsl(231 90% 88%);
+}
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Theme transition — a short, colour-only crossfade when switching themes.
+   Layout is never animated (only colour/border/fill properties). The
+   `.theme-transition` class is added to <html> by the theme provider for a
+   brief window around the toggle, then removed to avoid interfering with
+   component-level transitions. Respects prefers-reduced-motion.
+   ───────────────────────────────────────────────────────────────────────── */
+.theme-transition,
+.theme-transition *,
+.theme-transition *::before,
+.theme-transition *::after {
+  transition:
+    background-color 220ms ease,
+    border-color 220ms ease,
+    color 220ms ease,
+    fill 220ms ease,
+    stroke 220ms ease !important;
+  transition-delay: 0ms !important;
+}
+@media (prefers-reduced-motion: reduce) {
+  .theme-transition,
+  .theme-transition *,
+  .theme-transition *::before,
+  .theme-transition *::after {
+    transition: none !important;
+  }
 }
 
 /* Premium scrollbars */
@@ -156,6 +218,21 @@ body {
   background: hsl(var(--background) / 0.72);
   border: 1px solid hsl(var(--border));
 }
+
+/* Dark-mode surface shadows: the light theme's blue-tinted shadows vanish on
+   dark, so replace them with deeper black shadows + a faint top highlight to
+   keep cards separated from the background. */
+.dark .surface {
+  box-shadow:
+    0 1px 2px 0 rgba(0, 0, 0, 0.4),
+    0 2px 10px -2px rgba(0, 0, 0, 0.45),
+    0 12px 32px -12px rgba(0, 0, 0, 0.55);
+}
+.dark .card-clean {
+  box-shadow:
+    0 1px 2px 0 rgba(0, 0, 0, 0.4),
+    0 2px 10px -4px rgba(0, 0, 0, 0.4);
+}
 .text-gradient {
   background: linear-gradient(
     180deg,
@@ -176,10 +253,300 @@ body {
   color: transparent;
 }
 
+/* ═════════════════════════════════════════════════════════════════════════
+   CENTRALIZED DARK-THEME REMAPS
+   ─────────────────────────────────────────────────────────────────────────
+   Most of the CRM is already built on design tokens (bg-card, border-border,
+   text-muted-foreground, …) and adapts to `.dark` for free. The rules below
+   remap the recurring HARDCODED light-only Tailwind utilities that would
+   otherwise stay light. They are grouped by concern and use the same semantic
+   dark tokens so hierarchy is preserved (background ≠ card ≠ input ≠ hover ≠
+   border). This keeps dark styling centralized instead of scattering
+   dark: overrides across hundreds of components.
+
+   EXCLUSIONS (never darkened):
+     • Print surfaces: .a4-page, .thermal-page, .label-page, .print-area,
+       .print-page-wrapper (and everything inside them).
+     • Elements explicitly opted out with the `.keep-light` helper.
+   Because dark surfaces adjust brightness (they are not simple inversions),
+   we shift card/popover surfaces a little lighter than the app background.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* Scope guard: skip anything inside a print surface. Implemented by resetting
+   these utilities back to their literal colours within print containers. */
+
+/* ── Neutral surfaces → dark card / muted ──────────────────────────────── */
+.dark .bg-white:not(.keep-light) {
+  background-color: hsl(var(--card));
+}
+/* Keep the sliding knob of toggle switches white on its coloured track. */
+.dark [role="switch"] .bg-white {
+  background-color: #ffffff;
+}
+.dark .bg-zinc-50:not(.keep-light),
+.dark .bg-zinc-100:not(.keep-light),
+.dark .bg-slate-50:not(.keep-light),
+.dark .bg-slate-100:not(.keep-light),
+.dark .bg-gray-50:not(.keep-light),
+.dark .bg-gray-100:not(.keep-light),
+.dark .bg-neutral-50:not(.keep-light),
+.dark .bg-neutral-100:not(.keep-light) {
+  background-color: hsl(var(--muted));
+}
+/* Mid-gray fills (switch off-tracks, dividers, subtle chips) → secondary */
+.dark .bg-zinc-200:not(.keep-light),
+.dark .bg-zinc-300:not(.keep-light),
+.dark .bg-slate-200:not(.keep-light),
+.dark .bg-gray-200:not(.keep-light) {
+  background-color: hsl(var(--secondary));
+}
+
+/* ── Neutral text → foreground / muted-foreground ──────────────────────── */
+.dark .text-zinc-900:not(.keep-light),
+.dark .text-zinc-800:not(.keep-light),
+.dark .text-slate-900:not(.keep-light),
+.dark .text-slate-800:not(.keep-light),
+.dark .text-gray-900:not(.keep-light),
+.dark .text-gray-800:not(.keep-light),
+.dark .text-neutral-900:not(.keep-light) {
+  color: hsl(var(--foreground));
+}
+.dark .text-zinc-700:not(.keep-light),
+.dark .text-zinc-600:not(.keep-light),
+.dark .text-zinc-500:not(.keep-light),
+.dark .text-slate-700:not(.keep-light),
+.dark .text-slate-600:not(.keep-light),
+.dark .text-slate-500:not(.keep-light),
+.dark .text-gray-700:not(.keep-light),
+.dark .text-gray-600:not(.keep-light),
+.dark .text-gray-500:not(.keep-light),
+.dark .text-neutral-600:not(.keep-light) {
+  color: hsl(var(--muted-foreground));
+}
+/* Disabled / faint text → darker muted gray */
+.dark .text-zinc-400:not(.keep-light),
+.dark .text-zinc-300:not(.keep-light),
+.dark .text-slate-400:not(.keep-light),
+.dark .text-gray-400:not(.keep-light) {
+  color: hsl(220 10% 46%);
+}
+/* Placeholder text → subdued but readable */
+.dark .placeholder\:text-zinc-400:not(.keep-light)::placeholder,
+.dark .placeholder\:text-zinc-500:not(.keep-light)::placeholder,
+.dark .placeholder\:text-slate-400:not(.keep-light)::placeholder,
+.dark .placeholder\:text-gray-400:not(.keep-light)::placeholder {
+  color: hsl(220 10% 52%);
+}
+
+/* ── Neutral borders / rings → token border ────────────────────────────── */
+.dark .border-zinc-100:not(.keep-light),
+.dark .border-zinc-200:not(.keep-light),
+.dark .border-zinc-300:not(.keep-light),
+.dark .border-slate-100:not(.keep-light),
+.dark .border-slate-200:not(.keep-light),
+.dark .border-gray-100:not(.keep-light),
+.dark .border-gray-200:not(.keep-light),
+.dark .border-gray-300:not(.keep-light) {
+  border-color: hsl(var(--border));
+}
+.dark .ring-zinc-100:not(.keep-light),
+.dark .ring-zinc-200:not(.keep-light),
+.dark .ring-slate-200:not(.keep-light),
+.dark .ring-gray-200:not(.keep-light) {
+  --tw-ring-color: hsl(var(--border));
+}
+
+/* ── Neutral hover states ──────────────────────────────────────────────── */
+.dark .hover\:bg-zinc-50:hover:not(.keep-light),
+.dark .hover\:bg-zinc-100:hover:not(.keep-light),
+.dark .hover\:bg-slate-50:hover:not(.keep-light),
+.dark .hover\:bg-slate-100:hover:not(.keep-light),
+.dark .hover\:bg-gray-50:hover:not(.keep-light),
+.dark .hover\:bg-gray-100:hover:not(.keep-light),
+.dark .hover\:bg-white:hover:not(.keep-light) {
+  background-color: hsl(var(--muted));
+}
+.dark .hover\:text-zinc-900:hover:not(.keep-light),
+.dark .hover\:text-slate-900:hover:not(.keep-light),
+.dark .hover\:text-gray-900:hover:not(.keep-light) {
+  color: hsl(var(--foreground));
+}
+.dark .hover\:text-zinc-700:hover:not(.keep-light),
+.dark .hover\:text-zinc-600:hover:not(.keep-light),
+.dark .hover\:text-slate-700:hover:not(.keep-light) {
+  color: hsl(var(--muted-foreground));
+}
+.dark .hover\:border-zinc-300:hover:not(.keep-light),
+.dark .hover\:border-zinc-400:hover:not(.keep-light) {
+  border-color: hsl(var(--border));
+}
+/* group-hover neutral states (sidebar icons, modal step markers, subnavs) */
+.dark .group:hover .group-hover\:text-zinc-700:not(.keep-light),
+.dark .group:hover .group-hover\:text-zinc-600:not(.keep-light),
+.dark .group:hover .group-hover\:text-slate-700:not(.keep-light),
+.dark .group:hover .group-hover\:text-slate-900:not(.keep-light) {
+  color: hsl(var(--foreground));
+}
+.dark .group:hover .group-hover\:bg-zinc-50:not(.keep-light),
+.dark .group:hover .group-hover\:bg-zinc-100:not(.keep-light) {
+  background-color: hsl(var(--muted));
+}
+
+/* ── Brand light-blue tints (#EEF1FD / #FAFBFF / #F5F7FF / #EEF2FF) used for
+      selected/hover states → a controlled translucent brand blue on dark.
+      The solid RepairOX blue (#4361EE) and gradients are intentionally left
+      untouched so primary buttons/accents stay on-brand. ────────────────── */
+.dark .bg-\[\#EEF1FD\]:not(.keep-light),
+.dark .bg-\[\#EEF2FF\]:not(.keep-light),
+.dark .bg-\[\#F5F7FF\]:not(.keep-light),
+.dark .bg-\[\#FAFBFF\]:not(.keep-light) {
+  background-color: hsl(231 45% 20%);
+}
+/* Translucent variants like bg-[#EEF1FD]/50 or /60 (selected table rows) */
+.dark [class*="bg-\[\#EEF1FD\]\/"]:not(.keep-light),
+.dark [class*="bg-\[\#4361EE\]\/5"]:not(.keep-light),
+.dark [class*="bg-\[\#4361EE\]\/8"]:not(.keep-light) {
+  background-color: hsl(231 45% 20% / 0.55);
+}
+.dark .border-\[\#B3BFF6\]:not(.keep-light),
+.dark [class*="border-\[\#B3BFF6\]\/"]:not(.keep-light) {
+  border-color: hsl(231 30% 34%);
+}
+.dark .text-\[\#3347D6\]:not(.keep-light),
+.dark .text-\[\#3B54E8\]:not(.keep-light) {
+  color: hsl(231 90% 78%);
+}
+
+/* ── Semantic status pill tints ────────────────────────────────────────────
+      Preserve meaning (paid→green, overdue→red, in-progress→blue, waiting→
+      amber/orange, success→green) but dim the pale -50/-100 fills into subtle
+      translucent dark chips and brighten the -600/-700/-800 text so pills stay
+      readable on dark surfaces. ─────────────────────────────────────────── */
+/* Fills */
+.dark .bg-emerald-50:not(.keep-light),
+.dark .bg-emerald-100:not(.keep-light),
+.dark .bg-green-50:not(.keep-light),
+.dark .bg-green-100:not(.keep-light) { background-color: hsl(152 45% 16%); }
+.dark .bg-amber-50:not(.keep-light),
+.dark .bg-amber-100:not(.keep-light),
+.dark .bg-yellow-50:not(.keep-light),
+.dark .bg-orange-50:not(.keep-light),
+.dark .bg-orange-100:not(.keep-light) { background-color: hsl(36 55% 16%); }
+.dark .bg-rose-50:not(.keep-light),
+.dark .bg-rose-100:not(.keep-light),
+.dark .bg-red-50:not(.keep-light),
+.dark .bg-red-100:not(.keep-light) { background-color: hsl(0 50% 18%); }
+.dark .bg-sky-50:not(.keep-light),
+.dark .bg-sky-100:not(.keep-light),
+.dark .bg-blue-50:not(.keep-light),
+.dark .bg-blue-100:not(.keep-light) { background-color: hsl(210 55% 18%); }
+.dark .bg-indigo-50:not(.keep-light),
+.dark .bg-indigo-100:not(.keep-light),
+.dark .bg-violet-50:not(.keep-light),
+.dark .bg-violet-100:not(.keep-light),
+.dark .bg-purple-50:not(.keep-light) { background-color: hsl(250 45% 20%); }
+.dark .bg-pink-50:not(.keep-light),
+.dark .bg-pink-100:not(.keep-light),
+.dark .bg-fuchsia-50:not(.keep-light) { background-color: hsl(322 45% 20%); }
+.dark .bg-teal-50:not(.keep-light),
+.dark .bg-cyan-50:not(.keep-light) { background-color: hsl(180 45% 15%); }
+
+/* Text */
+.dark .text-emerald-800:not(.keep-light),
+.dark .text-emerald-700:not(.keep-light),
+.dark .text-emerald-600:not(.keep-light),
+.dark .text-green-700:not(.keep-light),
+.dark .text-green-600:not(.keep-light) { color: hsl(152 60% 62%); }
+.dark .text-amber-800:not(.keep-light),
+.dark .text-amber-700:not(.keep-light),
+.dark .text-amber-600:not(.keep-light),
+.dark .text-yellow-700:not(.keep-light),
+.dark .text-orange-700:not(.keep-light),
+.dark .text-orange-600:not(.keep-light) { color: hsl(38 92% 64%); }
+.dark .text-rose-700:not(.keep-light),
+.dark .text-rose-600:not(.keep-light),
+.dark .text-rose-500:not(.keep-light),
+.dark .text-red-700:not(.keep-light),
+.dark .text-red-600:not(.keep-light),
+.dark .text-red-500:not(.keep-light) { color: hsl(0 80% 72%); }
+.dark .text-sky-700:not(.keep-light),
+.dark .text-sky-600:not(.keep-light),
+.dark .text-blue-700:not(.keep-light),
+.dark .text-blue-600:not(.keep-light) { color: hsl(210 90% 70%); }
+.dark .text-indigo-700:not(.keep-light),
+.dark .text-indigo-600:not(.keep-light),
+.dark .text-violet-700:not(.keep-light),
+.dark .text-violet-600:not(.keep-light),
+.dark .text-purple-700:not(.keep-light) { color: hsl(250 85% 78%); }
+.dark .text-pink-700:not(.keep-light),
+.dark .text-pink-600:not(.keep-light) { color: hsl(322 85% 76%); }
+.dark .text-teal-700:not(.keep-light),
+.dark .text-cyan-700:not(.keep-light) { color: hsl(180 70% 60%); }
+
+/* Rings on status pills → dim, tinted to match their fill */
+.dark .ring-emerald-200:not(.keep-light),
+.dark .ring-emerald-300:not(.keep-light),
+.dark .ring-green-200:not(.keep-light) { --tw-ring-color: hsl(152 45% 30%); }
+.dark .ring-amber-200:not(.keep-light),
+.dark .ring-orange-200:not(.keep-light) { --tw-ring-color: hsl(36 55% 32%); }
+.dark .ring-rose-200:not(.keep-light),
+.dark .ring-red-200:not(.keep-light) { --tw-ring-color: hsl(0 50% 34%); }
+.dark .ring-sky-200:not(.keep-light),
+.dark .ring-blue-200:not(.keep-light) { --tw-ring-color: hsl(210 55% 34%); }
+.dark .ring-indigo-200:not(.keep-light),
+.dark .ring-violet-200:not(.keep-light) { --tw-ring-color: hsl(250 45% 36%); }
+
+/* Colored status borders */
+.dark .border-emerald-200:not(.keep-light) { border-color: hsl(152 45% 30%); }
+.dark .border-amber-200:not(.keep-light) { border-color: hsl(36 55% 32%); }
+.dark .border-rose-200:not(.keep-light),
+.dark .border-red-200:not(.keep-light) { border-color: hsl(0 50% 34%); }
+.dark .border-sky-200:not(.keep-light),
+.dark .border-blue-200:not(.keep-light) { border-color: hsl(210 55% 34%); }
+
+/* ── Print surfaces MUST stay light even in dark mode ──────────────────────
+      Re-assert literal light values inside print containers so the dark remaps
+      above never bleed into printed/preview documents. ──────────────────── */
+.dark .a4-page,
+.dark .thermal-page,
+.dark .label-page,
+.dark .print-area,
+.dark .print-page-wrapper {
+  color: #111827;
+}
+.dark .print-page-wrapper .bg-white,
+.dark .a4-page .bg-white,
+.dark .thermal-page.bg-white,
+.dark .label-page.bg-white,
+.dark .print-area .bg-white,
+.dark .a4-page.bg-white,
+.dark .print-area .bg-card {
+  background-color: #ffffff;
+}
+.dark .print-page-wrapper .hover\:bg-gray-50:hover { background-color: #f9fafb; }
+.dark .a4-page .text-black,
+.dark .thermal-page.text-black,
+.dark .label-page.text-black,
+.dark .print-area .text-black,
+.dark .print-page-wrapper .text-black { color: #000000; }
+.dark .print-page-wrapper .text-gray-600,
+.dark .a4-page .text-gray-500,
+.dark .label-page .text-gray-500,
+.dark .print-area .text-gray-500,
+.dark .print-page-wrapper .text-gray-500 { color: #6b7280; }
+.dark .print-page-wrapper .border-gray-200,
+.dark .a4-page .border-gray-300,
+.dark .label-page .border-gray-300,
+.dark .print-area .border-gray-300,
+.dark .print-page-wrapper .border-gray-300 { border-color: #e5e7eb; }
+
 /* Decorative grid background for marketing surfaces */
 .bg-dot {
   background-image: radial-gradient(hsl(228 20% 82%) 1px, transparent 1px);
   background-size: 18px 18px;
+}
+.dark .bg-dot {
+  background-image: radial-gradient(hsl(223 16% 26%) 1px, transparent 1px);
 }
 
 /* Skeleton shimmer */
