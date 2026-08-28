@@ -21,6 +21,7 @@ import {
   CheckoutDrawer, EmailReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
 import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
@@ -175,6 +176,10 @@ export default function TicketsPage() {
   const [q, setQ] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [page, setPage] = useState(1);
+
+  // Device-details overlay — opened from the Device / Service cell chevron.
+  // Holds the ticket whose full device/issue details are being inspected.
+  const [deviceDetailsTicket, setDeviceDetailsTicket] = useState<Ticket | null>(null);
 
   // Universal Search filter — shows only a single record when navigated from search
   const searchParams = useSearchParams();
@@ -771,7 +776,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id))}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id), setDeviceDetailsTicket)}
                       </td>
                     ))}
                   </motion.tr>
@@ -822,20 +827,28 @@ export default function TicketsPage() {
                   }}
                 >{STATUS_LABEL[t.status]}</span>
               </div>
-              <div className="mt-3 space-y-1">
-                {t.items && t.items.length > 0 ? (
-                  t.items.map((item, idx) => (
-                    <div key={idx} className="flex items-center gap-2 text-xs">
-                      <span className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
-                      <span className="font-medium">{item.model}</span>
-                      {item.serial && <span className="text-muted-foreground">({item.serial})</span>}
-                    </div>
-                  ))
-                ) : (
-                  <p className="text-sm font-medium">{t.model}</p>
-                )}
-                <p className="text-xs text-muted-foreground">{t.service || t.issue}</p>
-              </div>
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); setDeviceDetailsTicket(t); }}
+                className="mt-3 flex w-full items-start justify-between gap-2 rounded-lg text-left transition hover:bg-indigo-50/50"
+                aria-label="View device and service details"
+              >
+                <div className="min-w-0 flex-1 space-y-1">
+                  {t.items && t.items.length > 0 ? (
+                    t.items.map((item, idx) => (
+                      <div key={idx} className="flex items-center gap-2 text-xs">
+                        <span className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
+                        <span className="font-medium">{item.model}</span>
+                        {item.serial && <span className="text-muted-foreground">({item.serial})</span>}
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm font-medium">{t.model}</p>
+                  )}
+                  <p className="text-xs text-muted-foreground">{t.service || t.issue}</p>
+                </div>
+                <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
+              </button>
               <div className="mt-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <span className="font-semibold tabular-nums text-sm">{formatINR(t.amount)}</span>
@@ -928,6 +941,13 @@ export default function TicketsPage() {
         onDownload={executeBulkDownload}
         progress={bulkProgress}
         onRetryFailed={retryFailed}
+      />
+
+      {/* Device / Service details overlay — opened from the Device column chevron. */}
+      <DeviceDetailsOverlay
+        ticket={deviceDetailsTicket}
+        open={!!deviceDetailsTicket}
+        onClose={() => setDeviceDetailsTicket(null)}
       />
     </div>
   );
@@ -1028,6 +1048,7 @@ function renderCell(
   onStatusChange: (ticketId: string, status: TicketStatus) => void,
   statusColors: Record<string, string>,
   hasInvoice: boolean,
+  onOpenDeviceDetails: (ticket: Ticket) => void,
 ) {
   switch (colId) {
     case "checkbox":
@@ -1071,7 +1092,16 @@ function renderCell(
       );
     case "device":
       return (
-        <div className="flex py-0.5">
+        <div
+          className="group/device relative flex py-0.5 cursor-pointer"
+          role="button"
+          tabIndex={0}
+          aria-label="View device and service details"
+          onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onOpenDeviceDetails(t); }
+          }}
+        >
           {/* Fixed-width marker area — content always starts after this, whether
               or not a critical/high priority dot is present. */}
           <div className="w-4 shrink-0 flex flex-col items-center pt-[7px] gap-3">
@@ -1094,8 +1124,10 @@ function renderCell(
                 <span key={idx} className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
               ))}
           </div>
-          {/* Content area — always starts at same position */}
-          <div className="min-w-0 flex-1 space-y-1.5">
+          {/* Content area — always starts at same position. Reserve right
+              padding (pr-7) so the truncated text never runs under the
+              absolutely-positioned expand chevron. */}
+          <div className="min-w-0 flex-1 space-y-1.5 pr-7">
             {t.items && t.items.length > 0 ? (
               <>
                 {t.items.map((item, idx) => (
@@ -1121,6 +1153,17 @@ function renderCell(
               </div>
             )}
           </div>
+          {/* Expand chevron — opens the device-details overlay. Absolutely
+              positioned in the cell's right gutter so it never changes the
+              row height, cell width, or pushes the existing text. */}
+          <button
+            type="button"
+            aria-label="View device and service details"
+            onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
+            className="absolute right-0 top-1/2 -translate-y-1/2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-400 opacity-70 transition hover:bg-indigo-50 hover:text-[#4361EE] group-hover/device:opacity-100"
+          >
+            <ChevronDown className="h-4 w-4" />
+          </button>
         </div>
       );
     case "status":
