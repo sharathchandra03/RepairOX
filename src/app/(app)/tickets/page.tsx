@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings2,
   GripVertical, Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
-  Pin, PinOff, Check,
+  Pin, PinOff, Check, Ban,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -23,7 +23,8 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType } from "@/lib/mock-data";
+import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
@@ -100,10 +101,19 @@ const PRIORITY_OPTIONS = [
   { label: "Critical", value: "critical" },
 ];
 
+/** Ticket intake Type filter options — mirrors the WK/PD/OS avatar Types. */
+const TYPE_OPTIONS = [
+  { label: "All Types", value: "all" },
+  { label: TICKET_TYPE_LABEL.walkin, value: "walkin" },
+  { label: TICKET_TYPE_LABEL.pickup, value: "pickup" },
+  { label: TICKET_TYPE_LABEL.onsite, value: "onsite" },
+];
+
 const WAITING_THRESHOLD_MINS = 40;
 
-/** Rows shown per page in the ticket table. */
-const PAGE_SIZE = 20;
+/** Default rows shown per page in the ticket table (user-selectable 10/20/50/100). */
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -173,9 +183,13 @@ export default function TicketsPage() {
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [techFilter, setTechFilter] = useState<string>("all");
   const [customerTypeFilter, setCustomerTypeFilter] = useState<string>("all");
+  // Ticket intake Type filter (Walk-In / Pick-Up / On-Site). Reads the saved
+  // ticket Type via getTicketType — the same source as the WK/PD/OS avatar.
+  const [typeFilter, setTypeFilter] = useState<string>("all");
   const [q, setQ] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
 
   // Device-details overlay — opened from the Device / Service cell chevron.
   // Holds the ticket whose full device/issue details are being inspected.
@@ -195,6 +209,7 @@ export default function TicketsPage() {
       setPriorityFilter("all");
       setTechFilter("all");
       setCustomerTypeFilter("all");
+      setTypeFilter("all");
       setQ("");
     }
   }, [searchParams]);
@@ -289,7 +304,15 @@ export default function TicketsPage() {
       ],
       onChange: (v: string) => setCustomerTypeFilter(v),
     },
-  ], [priorityFilter, techFilter, statusFilter, dateRange, customerTypeFilter, technicians]);
+    {
+      id: "type",
+      label: "Type",
+      type: "select" as const,
+      value: typeFilter,
+      options: TYPE_OPTIONS,
+      onChange: (v: string) => setTypeFilter(v),
+    },
+  ], [priorityFilter, techFilter, statusFilter, dateRange, customerTypeFilter, typeFilter, technicians]);
 
   // Set of ticket IDs that have at least one invoice generated from them.
   // Derived from the actual DB-backed invoice relationship (invoice.ticketId),
@@ -313,12 +336,13 @@ export default function TicketsPage() {
         const okPriority = priorityFilter === "all" || t.priority === priorityFilter;
         const okTech = techFilter === "all" || t.technician === techFilter;
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
+        const okType = typeFilter === "all" || getTicketType(t) === typeFilter;
         const okQ =
           !q ||
           `${t.ticketNo ?? ""} ${t.id} ${t.customer} ${t.model} ${t.issue} ${t.phone} ${t.items?.map((i) => `${i.model} ${i.serial} ${i.issue}`).join(" ") || ""}`
             .toLowerCase()
             .includes(q.toLowerCase());
-        return okStatus && okDate && okPriority && okTech && okCustomerType && okQ;
+        return okStatus && okDate && okPriority && okTech && okCustomerType && okType && okQ;
       });
       // Stable partition: pinned first, then normal — order within each group
       // is the original table order (createdAt-desc from the store).
@@ -326,23 +350,30 @@ export default function TicketsPage() {
       const normal = filtered.filter((t) => !t.pinnedAt);
       return [...pinned, ...normal];
     },
-    [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q, searchFilterId]
+    [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
   );
 
   // Reset to the first page whenever the filtered result set changes so
   // pagination always reflects the current filters/search.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, q, searchFilterId]);
+  }, [statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]);
 
   // Pagination — pinned records already float to the top of `list`, so slicing
   // here keeps pinned rows at the top of page 1 while respecting page size.
-  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const paged = useMemo(
-    () => list.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [list, currentPage]
+    () => list.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [list, currentPage, pageSize]
   );
+
+  // Changing the page size resets to page 1 so the user starts at the top of
+  // the recalculated result set.
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    setPage(1);
+  }, []);
 
   // Ordered & visible columns
   const activeColumns = useMemo(
@@ -491,7 +522,7 @@ export default function TicketsPage() {
           <>
             <Button variant="outline" size="md" className="rounded-full" onClick={() => setShowFilterPanel(!showFilterPanel)}>
               <Filter className="h-4 w-4" /> Filter
-              {(priorityFilter !== "all" || techFilter !== "all" || customerTypeFilter !== "all") && (
+              {(priorityFilter !== "all" || techFilter !== "all" || customerTypeFilter !== "all" || typeFilter !== "all") && (
                 <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />
               )}
             </Button>
@@ -552,11 +583,11 @@ export default function TicketsPage() {
           >
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
-              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
+              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
                 Reset Filters
               </button>
             </div>
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
                   <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
@@ -632,6 +663,32 @@ export default function TicketsPage() {
                     { label: `All Types (${tickets.length})`, value: "all" },
                     { label: `Personal / Retail (${tickets.filter((t) => t.customerType === "personal" || !t.customerType).length})`, value: "personal" },
                     { label: `Business / GST (${tickets.filter((t) => t.customerType === "business").length})`, value: "business" },
+                  ]}
+                />
+              </div>
+              {/* Type (intake channel) — Walk-In / Pick-Up / On-Site. Selecting
+                  "Walk-In" shows only Walk-In tickets. Reads getTicketType, the
+                  same saved value as the WK/PD/OS avatar (no duplicate system). */}
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <label className="text-[11px] font-medium text-muted-foreground">Type</label>
+                  <button
+                    onClick={() => togglePin("type")}
+                    className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("type") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
+                    title={isPinned("type") ? "Unpin filter" : "Pin filter to header"}
+                  >
+                    {isPinned("type") ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+                    {isPinned("type") ? "Unpin" : "Pin"}
+                  </button>
+                </div>
+                <Select
+                  value={typeFilter}
+                  onChange={(e: any) => setTypeFilter(e.target.value)}
+                  options={[
+                    { label: `All Types (${tickets.length})`, value: "all" },
+                    { label: `${TICKET_TYPE_LABEL.walkin} (${tickets.filter((t) => getTicketType(t) === "walkin").length})`, value: "walkin" },
+                    { label: `${TICKET_TYPE_LABEL.pickup} (${tickets.filter((t) => getTicketType(t) === "pickup").length})`, value: "pickup" },
+                    { label: `${TICKET_TYPE_LABEL.onsite} (${tickets.filter((t) => getTicketType(t) === "onsite").length})`, value: "onsite" },
                   ]}
                 />
               </div>
@@ -731,7 +788,7 @@ export default function TicketsPage() {
             <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 {activeColumns.map((col) => (
-                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-5", col.id === "amount" && "pr-6", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
+                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-5", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
                       <input
                         type="checkbox"
@@ -761,7 +818,11 @@ export default function TicketsPage() {
                     transition={{ delay: 0.015 * i }}
                     onClick={() => router.push(`/tickets/${t.id}`)}
                     className={cn(
-                      "group border-b border-zinc-200 transition-colors align-middle cursor-pointer",
+                      // Uniform minimum row height so every row is the same size
+                      // and the 3-line Device/Service content (name / issue /
+                      // IMEI-Serial) has comfortable vertical room. Height only —
+                      // column and table widths are untouched.
+                      "group h-[76px] border-b border-zinc-200 transition-colors align-middle cursor-pointer",
                       isWaiting && "bg-red-50/80",
                       isSelected && !isWaiting && "bg-indigo-50/40",
                       !isWaiting && !isSelected && "hover:bg-[#EEF1FD]/50"
@@ -769,9 +830,12 @@ export default function TicketsPage() {
                   >
                     {activeColumns.map((col) => (
                       <td key={col.id} className={cn(
-                        "px-3 py-3 align-middle",
+                        // Slightly more vertical breathing room; content stays
+                        // vertically centered via align-middle.
+                        "px-3 py-4 align-middle",
                         col.id === "status" && "pl-1 pr-5",
                         col.id === "customer" && "pl-0",
+                        col.id === "device" && "pl-0",
                         col.id === "amount" && "pr-6",
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
@@ -802,7 +866,7 @@ export default function TicketsPage() {
                 <div className="flex items-start gap-3">
                   <input type="checkbox" checked={isSelected} onChange={() => toggleOne(t.id)} className="mt-1 h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
                   <div className="flex items-center gap-2">
-                    <Avatar name={t.customer} size={32} ticketType={getTicketType(t)} />
+                    <Avatar name={t.customer} size={32} ticketType={getTicketType(t) ?? "na"} />
                     <div>
                       <p className="text-sm font-semibold">{t.customer}</p>
                       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -833,20 +897,33 @@ export default function TicketsPage() {
                 className="mt-3 flex w-full items-start justify-between gap-2 rounded-lg text-left transition hover:bg-indigo-50/50"
                 aria-label="View device and service details"
               >
-                <div className="min-w-0 flex-1 space-y-1">
-                  {t.items && t.items.length > 0 ? (
-                    t.items.map((item, idx) => (
-                      <div key={idx} className="flex items-center gap-2 text-xs">
-                        <span className="h-1.5 w-1.5 rounded-full bg-zinc-300" />
-                        <span className="font-medium">{item.model}</span>
-                        {item.serial && <span className="text-muted-foreground">({item.serial})</span>}
-                      </div>
-                    ))
-                  ) : (
-                    <p className="text-sm font-medium">{t.model}</p>
-                  )}
-                  <p className="text-xs text-muted-foreground">{t.service || t.issue}</p>
-                </div>
+                {(() => {
+                  // Mirror the table cell: first device's name / issue / IMEI-Serial
+                  // + "+N more devices". Reads real saved device records.
+                  const devices = getTicketDevices(t);
+                  const first = devices[0];
+                  const extraCount = Math.max(0, devices.length - 1);
+                  const deviceName = [first?.brand, first?.model].filter(Boolean).join(" ") || t.model || "Unknown Device";
+                  const issueText = (first ? parseIssueString(first.issue).join(", ") : "") || first?.description || t.service || t.issue || "";
+                  const idLabel = first?.imeiType === "serial" ? "Serial" : "IMEI";
+                  const idValue = first?.imei || t.items?.[0]?.serial || "";
+                  return (
+                    <div className="min-w-0 flex-1 leading-tight">
+                      <p className="text-sm font-semibold truncate">{deviceName}</p>
+                      {issueText && <p className="mt-0.5 text-xs text-muted-foreground truncate">{issueText}</p>}
+                      {idValue && (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground truncate">
+                          <span className="font-medium">{idLabel}:</span> <span className="font-mono">{idValue}</span>
+                        </p>
+                      )}
+                      {extraCount > 0 && (
+                        <span className="mt-1 inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-[#4361EE] ring-1 ring-inset ring-indigo-200">
+                          + {extraCount} more device{extraCount > 1 ? "s" : ""}
+                        </span>
+                      )}
+                    </div>
+                  );
+                })()}
                 <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400" />
               </button>
               <div className="mt-3 flex items-center justify-between">
@@ -862,13 +939,16 @@ export default function TicketsPage() {
         {list.length === 0 && <EmptyRow />}
       </div>
 
-      {/* Pagination — 20 rows per page; pinned rows stay at the top of page 1 */}
+      {/* Pagination — user-selectable page size (10/20/50/100); pinned rows stay
+          at the top of page 1. LEFT: size selector + count, RIGHT: page numbers. */}
       <Pagination
         page={currentPage}
         totalPages={totalPages}
         onPageChange={setPage}
         totalItems={list.length}
-        pageSize={PAGE_SIZE}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
+        onPageSizeChange={handlePageSizeChange}
         itemLabel="ticket"
       />
 
@@ -955,7 +1035,7 @@ export default function TicketsPage() {
 
 /* ─── Inline Status Dropdown ─────────────────────────────────────────── */
 
-function InlineStatusDropdown({ ticket, onStatusChange, statusColors }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void; statusColors: Record<string, string> }) {
+function InlineStatusDropdown({ ticket, onStatusChange, statusColors, hasInvoice }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void; statusColors: Record<string, string>; hasInvoice: boolean }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -1011,18 +1091,30 @@ function InlineStatusDropdown({ ticket, onStatusChange, statusColors }: { ticket
             >
               {STATUS_OPTIONS.map((s) => {
                 const sColor = statusColors[s.value] || "#71717A";
+                // "Repaired & Collected" stays visible but is unavailable until
+                // an invoice exists for this ticket. The rule is also enforced in
+                // the store so it can't be bypassed from any other path.
+                const isBlocked = s.value === "repaired_collected" && !hasInvoice && ticket.status !== "repaired_collected";
                 return (
                   <button
                     key={s.value}
-                    onClick={() => { onStatusChange(ticket.id, s.value); setOpen(false); }}
+                    disabled={isBlocked}
+                    title={isBlocked ? "Create an invoice before selecting Repaired & Collected" : undefined}
+                    onClick={() => { if (isBlocked) return; onStatusChange(ticket.id, s.value); setOpen(false); }}
                     className={cn(
                       "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
-                      ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
+                      isBlocked
+                        ? "cursor-not-allowed opacity-45"
+                        : ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
                     )}
                   >
                     <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
                     {s.label}
-                    {ticket.status === s.value && <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>}
+                    {isBlocked ? (
+                      <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable — needs invoice" />
+                    ) : ticket.status === s.value ? (
+                      <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>
+                    ) : null}
                   </button>
                 );
               })}
@@ -1082,7 +1174,7 @@ function renderCell(
     case "customer":
       return (
         <div className="flex items-center gap-3 min-w-0">
-          <Avatar name={t.customer} size={30} ticketType={getTicketType(t)} />
+          <Avatar name={t.customer} size={30} ticketType={getTicketType(t) ?? "na"} />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium leading-tight truncate">{t.customer}</p>
             <p className="text-[11px] font-medium text-[#5B6FC0] truncate">{t.phone}</p>
@@ -1090,10 +1182,21 @@ function renderCell(
           </div>
         </div>
       );
-    case "device":
+    case "device": {
+      // Always surface the FIRST device's basic details at a glance:
+      //   Device Name · Issue · IMEI/Serial. Reads the real saved device
+      //   records (getTicketDevices) — same source the overlay uses — so it
+      //   never falls back to "Apple + 1 more" style summaries.
+      const devices = getTicketDevices(t);
+      const first = devices[0];
+      const extraCount = Math.max(0, devices.length - 1);
+      const deviceName = [first?.brand, first?.model].filter(Boolean).join(" ") || t.model || "Unknown Device";
+      const issueText = (first ? parseIssueString(first.issue).join(", ") : "") || first?.description || t.service || t.issue || "";
+      const idLabel = first?.imeiType === "serial" ? "Serial" : "IMEI";
+      const idValue = first?.imei || t.items?.[0]?.serial || "";
       return (
         <div
-          className="group/device relative flex py-0.5 cursor-pointer"
+          className="group/device relative flex items-start gap-1 py-0.5 cursor-pointer"
           role="button"
           tabIndex={0}
           aria-label="View device and service details"
@@ -1102,9 +1205,10 @@ function renderCell(
             if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onOpenDeviceDetails(t); }
           }}
         >
-          {/* Fixed-width marker area — content always starts after this, whether
-              or not a critical/high priority dot is present. */}
-          <div className="w-4 shrink-0 flex flex-col items-center pt-[7px] gap-3">
+          {/* Fixed-width marker area — aligned with the first line's cap height so
+              the dot sits neatly beside the device name. Content always starts
+              after this whether or not a priority dot is present. */}
+          <div className="w-3 shrink-0 flex flex-col items-center pt-[6px]">
             {t.priority !== "normal" ? (
               /* Critical (red) / High (amber) indicator — replaces the first
                  device marker dot so the Device/Service text keeps the same
@@ -1113,44 +1217,30 @@ function renderCell(
                 className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")}
                 title={t.priority === "critical" ? "Critical" : "High Priority"}
               />
-            ) : t.items && t.items.length > 0 ? (
-              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
             ) : (
               <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
             )}
-            {/* Remaining device markers (skip the first, which is handled above). */}
-            {t.items && t.items.length > 1 &&
-              t.items.slice(1).map((_, idx) => (
-                <span key={idx} className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
-              ))}
           </div>
-          {/* Content area — always starts at same position. Reserve right
-              padding (pr-7) so the truncated text never runs under the
-              absolutely-positioned expand chevron. */}
-          <div className="min-w-0 flex-1 space-y-1.5 pr-7">
-            {t.items && t.items.length > 0 ? (
-              <>
-                {t.items.map((item, idx) => (
-                  <div key={idx}>
-                    <p className="text-[13px] font-medium leading-snug truncate">{item.model}</p>
-                    <p className="text-[11px] text-muted-foreground leading-snug truncate">
-                      {item.serial && <span className="font-mono text-[10px]">{item.serial}</span>}
-                      {item.serial && item.issue ? " · " : ""}
-                      {item.issue}
-                    </p>
-                  </div>
-                ))}
-                {t.items.length > 1 && (
-                  <span className="inline-flex items-center rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600 ring-1 ring-inset ring-zinc-200">
-                    {t.items.length} items
-                  </span>
-                )}
-              </>
-            ) : (
-              <div>
-                <p className="text-[13px] font-medium leading-snug truncate">{t.model}</p>
-                <p className="text-[11px] text-muted-foreground leading-snug truncate">{t.service || t.issue}</p>
-              </div>
+          {/* Content area — stacks Device Name / Issue / IMEI-Serial with clear,
+              even vertical rhythm so the three lines don't feel clumsy. Reserve
+              right padding (pr-7) so truncated text never runs under the
+              absolutely-positioned expand chevron. Long values truncate here;
+              the full value lives in the detail overlay. */}
+          <div className="min-w-0 flex-1 pr-7 space-y-[3px]">
+            <p className="text-[14px] font-semibold leading-snug text-foreground truncate">{deviceName}</p>
+            {issueText && (
+              <p className="text-[12px] leading-snug text-zinc-600 truncate">{issueText}</p>
+            )}
+            {idValue && (
+              <p className="text-[12px] leading-snug text-zinc-700 truncate">
+                <span className="font-semibold">{idLabel}:</span>{" "}
+                <span className="font-mono tracking-tight">{idValue}</span>
+              </p>
+            )}
+            {extraCount > 0 && (
+              <span className="mt-0.5 inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-[#4361EE] ring-1 ring-inset ring-indigo-200">
+                + {extraCount} more device{extraCount > 1 ? "s" : ""}
+              </span>
             )}
           </div>
           {/* Expand chevron — opens the device-details overlay. Absolutely
@@ -1166,9 +1256,10 @@ function renderCell(
           </button>
         </div>
       );
+    }
     case "status":
       return (
-        <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} />
+        <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={hasInvoice} />
       );
     case "dueDate":
       return t.dueDate ? (

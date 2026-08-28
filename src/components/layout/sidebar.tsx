@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
+import { ThinScroll } from "@/components/layout/thin-scroll";
 import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
@@ -337,7 +338,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
       <WorkspaceSwitcher active={activeWorkspace} collapsed={collapsed} onChange={handleWorkspaceChange} allowed={allowedWorkspaces} />
 
       {/* Grouped nav — scrollable middle zone, filtered live by the active role's permissions */}
-      <nav className="flex-1 overflow-y-auto px-3 pb-2">
+      <ThinScroll className="px-3 pb-2">
         {groups.map((group) => {
           const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href));
           // For ADMINISTRATION group, also render expandable groups
@@ -379,7 +380,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
             </div>
           );
         })}
-      </nav>
+      </ThinScroll>
 
 
     </aside>
@@ -445,7 +446,7 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
             <WorkspaceSwitcher active={activeWorkspace} collapsed={false} onChange={handleWorkspaceChange} allowed={allowed} />
 
             {/* Nav */}
-            <nav className="flex-1 overflow-y-auto px-3 pb-4">
+            <ThinScroll className="px-3 pb-4">
               {groups.map((group) => {
                 const items = group.items.map((href) => itemMap[href]).filter(visibleItem).filter((item) => featureVisible(item.href));
                 const isAdminGroup = group.label === "ADMINISTRATION";
@@ -482,7 +483,7 @@ export function MobileSidebar({ open, setOpen, activeWorkspace, setActiveWorkspa
                   </div>
                 );
               })}
-            </nav>
+            </ThinScroll>
           </motion.aside>
         </>
       )}

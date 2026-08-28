@@ -15,6 +15,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logActivity, buildChanges, type ActivitySeverity } from "./activity-log";
+import { toast } from "@/components/ui/toaster";
 import { usePermissions } from "@/lib/permissions-context";
 import { demoKey } from "@/lib/demo-mode";
 import {
@@ -285,10 +286,49 @@ function isDuplicateKeyError(err: { code?: string; message?: string } | null): b
   return err.code === "23505" || /duplicate key|already exists/i.test(err.message ?? "");
 }
 
-/** True when a Supabase error is about an unknown column (schema not yet migrated). */
+/** True when a Supabase error is about an unknown column (schema not yet migrated).
+ *  Covers Postgres 42703 and PostgREST's PGRST204 ("Could not find the 'X'
+ *  column ... in the schema cache"). */
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
   if (!err) return false;
-  return err.code === "42703" || /column .* does not exist|could not find the .* column/i.test(err.message ?? "");
+  return (
+    err.code === "42703" ||
+    err.code === "PGRST204" ||
+    /column .* does not exist|could not find the .* column/i.test(err.message ?? "")
+  );
+}
+
+/** Extract the offending column name from an undefined-column error message,
+ *  e.g. "Could not find the 'pinned_at' column ..." → "pinned_at". Returns null
+ *  when it can't be determined. */
+function extractMissingColumn(err: { message?: string } | null): string | null {
+  const m = err?.message ?? "";
+  const q = m.match(/'([^']+)'\s+column/i) || m.match(/column\s+"?([a-z_]+)"?/i);
+  return q ? q[1] : null;
+}
+
+/** Return a shallow copy of a row object with the given keys removed. */
+function omitKeys(row: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const out = { ...row };
+  for (const k of keys) delete out[k];
+  return out;
+}
+
+/**
+ * True when a Supabase error indicates the request was rejected by Row-Level
+ * Security or an expired/absent auth session — i.e. the write ran without a
+ * valid logged-in identity. Postgres raises 42501 (insufficient privilege) for
+ * RLS `with check` failures; PostgREST surfaces JWT problems with a "JWT"
+ * message or HTTP 401. These are RECOVERABLE by re-authenticating, so we tell
+ * the user to sign in again rather than showing a generic "try again".
+ */
+function isAuthOrRlsError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return (
+    err.code === "42501" ||
+    err.code === "PGRST301" ||
+    /row-level security|violates row-level security|jwt (expired|invalid)|not authenticated|permission denied/i.test(err.message ?? "")
+  );
 }
 
 /**
@@ -314,6 +354,18 @@ async function nextInvoiceIdFromDb(type: string): Promise<string> {
  *  growing automatically past T-999). */
 function formatTicketNo(n: number): string {
   return `T-${String(n).padStart(3, "0")}`;
+}
+
+/**
+ * Generate a unique primary-key `id` for a new ticket. This is deliberately NOT
+ * in the `T-<seq>` display namespace so it can never collide with a sequential
+ * `ticket_no` (live or soft-deleted). Uses a time component plus randomness to
+ * make collisions effectively impossible. Format: `TK-<base36 time>-<rand>`.
+ */
+function genUniqueTicketId(): string {
+  const time = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `TK-${time}-${rand}`;
 }
 
 /** Extract the numeric part of a `T-<digits>` value, or 0 if it doesn't match. */
@@ -966,37 +1018,51 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ── Ticket actions (DB-first) ── */
   const addTicket = useCallback(async (ticket: Ticket): Promise<string> => {
     if (shouldUseDb()) {
-      // The display number (`ticket_no`) is the highest LIVE ticket_no + 1.
-      // On first insert the primary key `id` is set to the same value so a fresh
-      // DB reads cleanly (T-001, T-002 …). resequencing later only ever rewrites
-      // ticket_no, never id, so FK relationships stay intact.
+      // The DISPLAY number (`ticket_no`) is the highest LIVE ticket_no + 1
+      // (e.g. T-001, T-002 …). The PRIMARY KEY `id` is ALWAYS a fresh unique
+      // value, decoupled from the display number.
+      //
+      // Why they must NOT be the same: soft-deleted tickets keep their PK `id`
+      // but their number is no longer counted by nextTicketIdFromDb(). If `id`
+      // reused the sequential value, the generator would eventually hand back a
+      // number whose `id` is still occupied by a hidden deleted row, causing a
+      // primary-key duplicate (23505) on insert — the ticket would then fail to
+      // persist and vanish on reload. A random/unique id sidesteps this while
+      // ticket_no still shows the clean sequence, and resequencing only ever
+      // rewrites ticket_no (never id) so FK relationships stay intact.
       const seq = await nextTicketIdFromDb();
-      let current: Ticket = { ...ticket, id: seq, ticketNo: seq };
+      let current: Ticket = { ...ticket, id: genUniqueTicketId(), ticketNo: seq };
       const insertTicket = async (t: Ticket) => {
-        const row = ticketToRow(t);
+        let row = ticketToRow(t);
         let r = await db.from("tickets").insert(row).select("*").single();
-        // Older DB without the ticket_no column: retry without it so ticket
-        // creation still works before the migration is applied.
-        if (r.error && isUndefinedColumnError(r.error)) {
-          const fallback = { ...row };
-          delete fallback.ticket_no;
-          r = await db.from("tickets").insert(fallback).select("*").single();
+        // Schema-drift self-heal: drop whichever optional column the DB reports
+        // as missing (e.g. ticket_no or pinned_at before the migration is
+        // applied) and retry, so ticket creation still works.
+        let heal = 0;
+        while (r.error && isUndefinedColumnError(r.error) && heal < 6) {
+          heal += 1;
+          const col = extractMissingColumn(r.error);
+          const drop = col ? [col] : ["ticket_no", "pinned_at"];
+          row = omitKeys(row, drop);
+          r = await db.from("tickets").insert(row).select("*").single();
         }
         return r;
       };
       let res = await insertTicket(current);
-      // On a primary-key collision (e.g. an existing legacy/random id already
-      // owns T-NNN), keep the sequential ticket_no but give the row a distinct,
-      // random id so the display sequence is never skipped.
+      // Safety net: on the rare chance the generated id still collides, retry
+      // with a fresh unique id (ticket_no stays the same so the display
+      // sequence is never skipped).
       let guard = 0;
       while (res.error && isDuplicateKeyError(res.error) && guard < 5) {
         guard += 1;
-        const uniqueId = `T-${Math.floor(1000 + Math.random() * 9000)}`;
-        current = { ...current, id: uniqueId };
+        current = { ...current, id: genUniqueTicketId() };
         res = await insertTicket(current);
       }
       if (res.error || !res.data) {
-        console.error("[store] addTicket failed:", res.error?.message);
+        console.error("[store] addTicket failed:", res.error?.code, res.error?.message, res.error);
+        toast.error("Ticket not saved", {
+          description: `DB error [${res.error?.code ?? "?"}]: ${res.error?.message ?? "unknown"}`,
+        });
         // Keep locally so the user doesn't lose their work mid-session.
         setState((s) => ({ ...s, tickets: [current, ...s.tickets] }));
         logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: current.ticketNo || current.id, description: `Created a new repair ticket for ${current.model || current.device} (${current.customer}).`, meta: { Device: current.device, Technician: current.technician || "Unassigned", Amount: inr(current.amount) } });
@@ -1012,7 +1078,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return Math.max(max, ticketSeq(t.ticketNo), ticketSeq(t.id));
     }, 0);
     const localSeq = formatTicketNo(localMax + 1);
-    const localTicket: Ticket = { ...ticket, id: localSeq, ticketNo: localSeq };
+    const localTicket: Ticket = { ...ticket, id: genUniqueTicketId(), ticketNo: localSeq };
     setState((s) => ({ ...s, tickets: [localTicket, ...s.tickets] }));
     logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: localTicket.ticketNo || localTicket.id, description: `Created a new repair ticket for ${localTicket.model || localTicket.device} (${localTicket.customer}).`, meta: { Device: localTicket.device, Technician: localTicket.technician || "Unassigned", Amount: inr(localTicket.amount) } });
     return localTicket.id;
@@ -1041,6 +1107,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateTicket = useCallback(async (id: string, updates: Partial<Ticket>) => {
     const prev = stateRef.current.tickets.find((t) => t.id === id);
+
+    // ── Business rule: block "Repaired & Collected" without an invoice ──
+    // A ticket may only move to repaired_collected once an invoice exists for
+    // it. Enforced HERE (the single write path) so it can't be bypassed via any
+    // UI. The only legitimate way to reach repaired_collected without a manual
+    // action is the invoice→ticket sync, which parks the ticket id in
+    // syncingIdsRef — so that path is explicitly allowed.
+    if (
+      updates.status === "repaired_collected" &&
+      prev?.status !== "repaired_collected" &&
+      !syncingIdsRef.current.has(id)
+    ) {
+      const hasInvoice = stateRef.current.invoices.some((inv) => inv.ticketId === id);
+      if (!hasInvoice) {
+        toast.error("Create an invoice first", {
+          description: "A ticket can only be marked \u201cRepaired & Collected\u201d after an invoice has been generated for it.",
+        });
+        return;
+      }
+    }
+
     if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;
@@ -1068,8 +1155,29 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("company" in updates) row.company = updates.company ?? null;
       if ("customerId" in updates) row.customer_id = updates.customerId ?? null;
 
-      const { error } = await db.from("tickets").update(row).eq("id", id);
-      if (error) { console.error("[store] updateTicket failed:", error.message); return; }
+      let currentRow = row;
+      let { error } = await db.from("tickets").update(currentRow).eq("id", id);
+
+      // Schema-drift resilience: if the write fails because the DB is missing an
+      // optional column (e.g. pinned_at / ticket_no before the migration is
+      // applied), drop that specific column and retry rather than discarding the
+      // user's change. Loops for a few distinct missing columns.
+      let heal = 0;
+      while (error && isUndefinedColumnError(error) && Object.keys(currentRow).length > 0 && heal < 6) {
+        heal += 1;
+        const col = extractMissingColumn(error);
+        currentRow = omitKeys(currentRow, col ? [col] : ["pinned_at", "ticket_no", "qc_status"]);
+        if (Object.keys(currentRow).length === 0) break;
+        const retry = await db.from("tickets").update(currentRow).eq("id", id);
+        error = retry.error;
+        if (!error) console.warn("[store] updateTicket: retried without missing column(s) (schema drift).");
+      }
+
+      if (error) {
+        console.error("[store] updateTicket failed:", error.code, error.message, error);
+        toast.error("Changes not saved", { description: `DB error [${error.code ?? "?"}]: ${error.message ?? "unknown"}` });
+        return;
+      }
     }
     setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === id ? { ...t, ...updates } : t)) }));
 
@@ -1112,16 +1220,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const prev = stateRef.current.tickets.find((t) => t.id === id);
     if (shouldUseDb()) {
       const { error } = await db.from("tickets").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      if (error) { console.error("[store] deleteTicket failed:", error.message); return; }
+      if (error) { console.error("[store] deleteTicket failed:", error.message); toast.error("Ticket not deleted", { description: "We couldn't delete this ticket in the database. Please try again." }); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.filter((t) => t.id !== id) }));
     logActivity({ module: "Ticket", action: "Ticket Deleted", severity: "critical", entity: "Ticket", reference: id, description: prev ? `Deleted ticket for ${prev.model || prev.device} (${prev.customer}).` : `Deleted ticket ${id}.`, meta: prev ? { Status: STATUS_LABEL[prev.status] ?? prev.status, Amount: inr(prev.amount) } : undefined });
   }, []);
 
-  const bulkUpdateStatus = useCallback(async (ids: string[], status: TicketStatus) => {
+  const bulkUpdateStatus = useCallback(async (idsInput: string[], status: TicketStatus) => {
+    let ids = idsInput;
+    // ── Business rule: block bulk "Repaired & Collected" without an invoice ──
+    // Only tickets that already have a generated invoice may move to
+    // repaired_collected. Skip the rest and inform the user so the rule can't be
+    // bypassed via the bulk-status UI.
+    if (status === "repaired_collected") {
+      const withInvoice = new Set(stateRef.current.invoices.map((inv) => inv.ticketId).filter(Boolean) as string[]);
+      const allowed = ids.filter((id) => withInvoice.has(id));
+      const blockedCount = ids.length - allowed.length;
+      if (blockedCount > 0) {
+        toast.error(
+          blockedCount === ids.length ? "Create an invoice first" : `${blockedCount} ticket${blockedCount > 1 ? "s" : ""} skipped`,
+          { description: "Only tickets with a generated invoice can be marked \u201cRepaired & Collected\u201d." }
+        );
+      }
+      ids = allowed;
+      if (ids.length === 0) return;
+    }
     if (shouldUseDb()) {
       const { error } = await db.from("tickets").update({ status }).in("id", ids);
-      if (error) { console.error("[store] bulkUpdateStatus failed:", error.message); return; }
+      if (error) { console.error("[store] bulkUpdateStatus failed:", error.message); toast.error("Status not updated", { description: "We couldn't update the selected tickets in the database. Please try again." }); return; }
     }
     setState((s) => ({ ...s, tickets: s.tickets.map((t) => (ids.includes(t.id) ? { ...t, status } : t)) }));
 
@@ -1144,18 +1270,85 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Ticket", action: "Status Changed", severity: "info", entity: "Ticket", reference: ids.length === 1 ? ids[0] : `${ids.length} tickets`, description: `Bulk updated ${ids.length} ticket${ids.length !== 1 ? "s" : ""} to ${label}.`, changes: [{ field: "Status", to: label }] });
   }, []);
 
+  /**
+   * Push an invoice's repairStatus onto its linked ticket so BOTH records share
+   * the same persisted status. Tickets and Invoices use ONE status system
+   * (TicketStatus). Guarded by syncingIdsRef so it never triggers the reverse
+   * (ticket → invoice) sync. Safe no-op when there's no linked ticket, no
+   * repairStatus, or the ticket already matches. Used by both invoice creation
+   * (so the DEFAULT "Repaired & Collected" propagates even when the user never
+   * touches the status) and manual invoice status edits.
+   */
+  const syncTicketStatusFromInvoice = useCallback(async (ticketId: string | undefined, repairStatus: TicketStatus | undefined) => {
+    if (!ticketId || !repairStatus) return;
+    if (syncingIdsRef.current.has(ticketId)) return;
+    const ticket = stateRef.current.tickets.find((t) => t.id === ticketId);
+    if (!ticket || ticket.status === repairStatus) return;
+    syncingIdsRef.current.add(ticket.id);
+    try {
+      if (shouldUseDb()) {
+        const { error } = await db.from("tickets").update({ status: repairStatus }).eq("id", ticket.id);
+        if (error) console.error("[store] invoice→ticket status sync failed:", error.message);
+      }
+      const syncedDevices = ticket.devices?.map((d) => ({ ...d, status: repairStatus }));
+      setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === ticket.id ? { ...t, status: repairStatus, ...(syncedDevices ? { devices: syncedDevices } : {}) } : t)) }));
+    } finally {
+      syncingIdsRef.current.delete(ticket.id);
+    }
+  }, []);
+
+  /**
+   * Resolve an invoice's `ticketId` to a REAL tickets primary key before it is
+   * written. The invoices.ticket_id column is a foreign key to tickets.id, so a
+   * value that isn't an actual id makes the whole insert fail (FK violation
+   * 23503) and the invoice is lost.
+   *
+   * After ticket-number resequencing, the display number (`ticket_no`, e.g.
+   * T-040) diverged from the stable primary key (`id`, e.g. T-2556 / TK-…). If a
+   * ticket NUMBER slips into ticketId (e.g. typed into the "Linked Ticket"
+   * field), translate it to the owning ticket's real id. If it matches neither
+   * a real id nor a known ticket number, drop the link (null) so the invoice
+   * still saves rather than being rejected by the FK.
+   */
+  const resolveTicketId = useCallback((rawId: string | undefined): string | undefined => {
+    if (!rawId) return undefined;
+    const tickets = stateRef.current.tickets;
+    // Already a real primary key → keep as-is.
+    if (tickets.some((t) => t.id === rawId)) return rawId;
+    // Looks like a display number (T-040) → map to the owning ticket's real id.
+    const byNo = tickets.find((t) => t.ticketNo === rawId);
+    if (byNo) return byNo.id;
+    // Unknown reference — don't risk an FK violation; save the invoice unlinked.
+    console.warn(`[store] invoice ticketId "${rawId}" is not a known ticket id/number — saving invoice without a ticket link.`);
+    return undefined;
+  }, []);
+
   /* ── Invoice actions (DB-first) ── */
-  const addInvoice = useCallback(async (invoice: Invoice): Promise<string> => {
+  const addInvoice = useCallback(async (invoiceInput: Invoice): Promise<string> => {
+    // Normalize the ticket link so a ticket NUMBER (or stale reference) can never
+    // trigger a foreign-key violation that discards the invoice.
+    const invoice: Invoice = { ...invoiceInput, ticketId: resolveTicketId(invoiceInput.ticketId) };
     if (shouldUseDb()) {
       // Single insert attempt. Retries once without the optional columns in case
       // an older DB is missing them.
       const attemptInsert = async (inv: Invoice) => {
-        const row = invoiceToRow(inv);
+        let row = invoiceToRow(inv);
         let res = await supabase!.from("invoices").insert(row).select("*").single();
-        if (res.error && !isDuplicateKeyError(res.error)) {
-          const fallbackRow = { ...row };
-          delete fallbackRow.service_category;
-          delete fallbackRow.payment_mode;
+        // Schema-drift self-heal: if the DB is missing an optional column (e.g.
+        // `pinned_at` before the migration is applied), drop that column and
+        // retry so the invoice still saves instead of being lost. Loops for up
+        // to a few distinct missing columns.
+        let heal = 0;
+        while (res.error && isUndefinedColumnError(res.error) && heal < 6) {
+          heal += 1;
+          const col = extractMissingColumn(res.error);
+          const drop = col ? [col] : ["pinned_at", "service_category", "payment_mode"];
+          row = omitKeys(row, drop);
+          res = await supabase!.from("invoices").insert(row).select("*").single();
+        }
+        // Legacy fallback for the older service_category/payment_mode columns.
+        if (res.error && !isDuplicateKeyError(res.error) && !isUndefinedColumnError(res.error)) {
+          const fallbackRow = omitKeys(row, ["service_category", "payment_mode"]);
           res = await supabase!.from("invoices").insert(fallbackRow).select("*").single();
         }
         return res;
@@ -1176,11 +1369,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
 
       if (res.error || !res.data) {
-        console.error("[store] addInvoice failed:", res.error?.message);
+        console.error("[store] addInvoice failed:", res.error?.code, res.error?.message, res.error);
+        toast.error("Invoice not saved", {
+          description: `DB error [${res.error?.code ?? "?"}]: ${res.error?.message ?? "unknown"}`,
+        });
         // Last resort: keep locally so the user doesn't lose their work. (Won't
         // survive a reload, but avoids data loss mid-session.)
         setState((s) => ({ ...s, invoices: [current, ...s.invoices] }));
         logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: current.reference || current.id, description: `Generated invoice for ${current.customer}.`, meta: { Total: inr(current.total) } });
+        // Sync the (possibly default) repairStatus onto the linked ticket.
+        await syncTicketStatusFromInvoice(current.ticketId, current.repairStatus);
         return current.id;
       }
 
@@ -1190,15 +1388,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       saved.paymentMode = current.paymentMode;
       setState((s) => ({ ...s, invoices: [saved, ...s.invoices] }));
       logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved.reference || saved.id, description: `Generated invoice for ${saved.customer}.`, meta: { Total: inr(saved.total) } });
+      // CRITICAL: propagate the invoice's repairStatus (defaults to
+      // "Repaired & Collected") back to the originating ticket immediately, even
+      // when the user never manually changed the invoice status.
+      await syncTicketStatusFromInvoice(saved.ticketId, saved.repairStatus);
       return saved.id;
     }
     setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
     logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
+    await syncTicketStatusFromInvoice(invoice.ticketId, invoice.repairStatus);
     return invoice.id;
-  }, []);
+  }, [syncTicketStatusFromInvoice, resolveTicketId]);
 
   const updateInvoice = useCallback(async (id: string, updates: Partial<Invoice>) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
+
+    // Normalize any incoming ticket link to a real ticket id (or null) so an
+    // edited "Linked Ticket" value can't cause an FK violation on save.
+    if ("ticketId" in updates) {
+      updates = { ...updates, ticketId: resolveTicketId(updates.ticketId) };
+    }
 
     // ── Status ↔ Payment synchronization ──
     // Status is the single source of truth. When status changes, derive paidAmount.
@@ -1262,15 +1471,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (prev && ("repairStatus" in updates || "paymentMode" in updates || "serviceCategory" in updates || "devices" in updates)) {
         row.devices = (invoiceToRow({ ...prev, ...updates } as Invoice).devices);
       }
-      const { error } = await db.from("invoices").update(row).eq("id", id);
+      let currentRow = row;
+      let { error } = await db.from("invoices").update(currentRow).eq("id", id);
+      // Schema-drift self-heal: drop whichever optional column the DB reports as
+      // missing (pinned_at / service_category / payment_mode …) and retry so the
+      // invoice update still persists.
+      let heal = 0;
+      while (error && isUndefinedColumnError(error) && Object.keys(currentRow).length > 0 && heal < 6) {
+        heal += 1;
+        const col = extractMissingColumn(error);
+        currentRow = omitKeys(currentRow, col ? [col] : ["pinned_at", "service_category", "payment_mode"]);
+        if (Object.keys(currentRow).length === 0) break;
+        const retry = await db.from("invoices").update(currentRow).eq("id", id);
+        error = retry.error;
+      }
       if (error) {
-        // Retry without optional new columns that may not exist in DB yet
-        delete row.service_category;
-        delete row.payment_mode;
-        if (Object.keys(row).length > 0) {
-          const { error: error2 } = await db.from("invoices").update(row).eq("id", id);
-          if (error2) { console.error("[store] updateInvoice failed:", error2.message); }
-        }
+        console.error("[store] updateInvoice failed:", error.code, error.message);
+        toast.error("Changes not saved", { description: `DB error [${error.code ?? "?"}]: ${error.message ?? "unknown"}` });
       }
     }
     setState((s) => ({ ...s, invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)) }));
@@ -1306,13 +1523,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (("paidAmount" in updates && (updates.paidAmount ?? 0) > (prev?.paidAmount ?? 0)) || updates.status === "paid") { action = "Payment Added"; severity = "success"; }
     else if (updates.status === "cancelled") { action = "Cancelled"; severity = "critical"; }
     logActivity({ module: "Invoice", action, severity, entity: "Invoice", reference: prev?.reference || id, description: `Updated invoice ${prev?.reference || id} (${prev?.customer ?? ""}).`, changes });
-  }, []);
+  }, [resolveTicketId]);
 
   const deleteInvoice = useCallback(async (id: string) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
     if (shouldUseDb()) {
       const { error } = await db.from("invoices").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      if (error) { console.error("[store] deleteInvoice failed:", error.message); return; }
+      if (error) { console.error("[store] deleteInvoice failed:", error.message); toast.error("Invoice not deleted", { description: "We couldn't delete this invoice in the database. Please try again." }); return; }
     }
     setState((s) => ({ ...s, invoices: s.invoices.filter((inv) => inv.id !== id) }));
     logActivity({ module: "Invoice", action: "Invoice Deleted", severity: "critical", entity: "Invoice", reference: prev?.reference || id, description: prev ? `Deleted invoice ${prev.reference} for ${prev.customer}.` : `Deleted invoice ${id}.`, meta: prev ? { Total: inr(prev.total) } : undefined });

@@ -52,6 +52,9 @@ function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }
 export default function Dashboard() {
   const [sortBy, setSortBy] = useState<"newest" | "oldest" | "amount_high" | "amount_low">("newest");
   const [filterBy, setFilterBy] = useState<"all" | "in_progress" | "waiting_approval" | "waiting_parts" | "repaired" | "repaired_collected" | "return" | "return_collected">("all");
+  // Always default to "Today" on every login/visit. The Critical Tasks card
+  // reads the full store (see criticalTickets) so priority changes still show
+  // there regardless of this range; the range only scopes time-based sections.
   const [dateRange, setDateRange] = useState<"today" | "yesterday" | "this_month" | "this_year" | "all" | "custom">("today");
   const [customRange, setCustomRange] = useState<DateRange>({ start: null, end: null });
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -173,6 +176,33 @@ export default function Dashboard() {
     });
     return list;
   }, [tickets, filterBy, dateRange, customRange, sortBy]);
+
+  // Critical / high-priority tickets shown in the "Critical Tasks" card.
+  // Priority is time-independent — a high/critical ticket needs attention no
+  // matter when it was created — so this list reads the FULL store (not the
+  // date-filtered list). This makes a priority change from anywhere (Quick
+  // Actions, row menu, edit) reflect on the dashboard immediately. Only open
+  // statuses are shown (collected/repaired tickets are done).
+  const criticalTickets = useMemo(
+    () =>
+      tickets
+        .filter(
+          (t) =>
+            (t.priority === "critical" || t.priority === "high") &&
+            // Only hide tickets that are fully closed/collected — any other
+            // open ticket that becomes high/critical must appear here so the
+            // priority change is always reflected.
+            t.status !== "repaired_collected" &&
+            t.status !== "return_collected"
+        )
+        // Critical first, then most-recent so a just-flagged ticket surfaces at
+        // the top of its group and is always visible in the list below.
+        .sort((a, b) => {
+          if (a.priority !== b.priority) return a.priority === "critical" ? -1 : 1;
+          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        }),
+    [tickets]
+  );
 
   // Compute live KPIs from real data
   const now = useMemo(() => new Date(), []);
@@ -534,7 +564,7 @@ export default function Dashboard() {
           <table className="w-full min-w-[760px] text-sm">
             <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[90px] px-5 py-2.5">Ticket</th><th className="py-2.5">Customer</th><th className="py-2.5">Device</th><th className="py-2.5 w-[80px]">Priority</th><th className="w-[140px] py-2.5">Status</th><th className="w-[100px] py-2.5">Waiting</th><th className="w-[100px] py-2.5 pr-5 text-right">Amount</th></tr></thead>
             <tbody>
-              {filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "repaired" && t.status !== "repaired_collected" && t.status !== "return_collected").sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()).slice(0, 5).map((t, i) => (
+              {criticalTickets.slice(0, 8).map((t, i) => (
                 <motion.tr key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * i }} className="group border-t border-border transition hover:bg-[#EEF1FD]/50">
                   <td className="px-5 py-3 whitespace-nowrap font-medium">{t.ticketNo ?? t.id}</td>
                   <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} ticketType={getTicketType(t)} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
@@ -549,7 +579,7 @@ export default function Dashboard() {
           </table>
         </div>
         <div className="flex items-center justify-between border-t border-border p-4">
-          <p className="text-xs text-muted-foreground">Showing {Math.min(5, filteredTickets.filter((t) => (t.priority === "critical" || t.priority === "high") && t.status !== "repaired" && t.status !== "repaired_collected" && t.status !== "return_collected").length)} critical/high priority</p>
+          <p className="text-xs text-muted-foreground">Showing {Math.min(8, criticalTickets.length)} of {criticalTickets.length} critical/high priority</p>
           <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">View all tickets <ArrowRight className="h-3.5 w-3.5" /></Link>
         </div>
       </div>

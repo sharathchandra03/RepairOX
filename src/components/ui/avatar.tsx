@@ -2,18 +2,15 @@ import { cn, initials } from "@/lib/utils";
 import { TICKET_TYPE_CODE, type TicketType } from "@/lib/mock-data";
 
 /**
- * Subtle, professional pastel palette per ticket intake type.
- * Kept low-intensity so the WK / PD / OS code stays easy on the eyes while
- * remaining readable and instantly distinguishable at a glance.
- *   Walk-In (WK) → light lavender/purple
- *   Pick-Up (PD) → light blue
- *   On-Site (OS) → light mint/teal
+ * Two-colour identity/type avatar language shared across Tickets and Invoices.
+ * There are intentionally ONLY two colours — no purple/green/teal variants:
+ *   • Type PROVIDED (Walk-In / Pick-Up / On-Site) → the SAME dark blue used by
+ *     the customer/name avatar (brand indigo #4361EE), white code text so
+ *     WK / PD / OS stays clearly readable.
+ *   • Type NOT PROVIDED (N/A) → the existing light-blue (sky) treatment.
  */
-const TICKET_TYPE_AVATAR_STYLE: Record<TicketType, string> = {
-  walkin: "bg-violet-100 text-violet-700",
-  pickup: "bg-sky-100 text-sky-700",
-  onsite: "bg-teal-100 text-teal-700",
-};
+const TICKET_TYPE_AVATAR_PROVIDED = "bg-[#4361EE] text-white";
+const TICKET_TYPE_AVATAR_NONE = "bg-sky-100 text-sky-700";
 
 export function Avatar({
   name,
@@ -30,12 +27,14 @@ export function Avatar({
   className?: string;
   tone?: "brand" | "muted";
   /**
-   * Saved ticket intake Type (Walk-In / Pick-Up / On-Site). When provided, the
-   * avatar shows the type code (WK / PD / OS) with a subtle per-type color
-   * instead of the customer initials. When null/undefined (e.g. legacy tickets
-   * with no saved type), the avatar falls back to the existing initials style.
+   * Saved ticket intake Type (Walk-In / Pick-Up / On-Site). Controls the
+   * two-colour type avatar shared across Tickets and Invoices:
+   *   • A real type (walkin/pickup/onsite) → dark-blue avatar showing WK/PD/OS.
+   *   • "na" → light-blue avatar showing "N/A" (type not provided). Callers that
+   *     want the type avatar but have no saved type pass `getTicketType(t) ?? "na"`.
+   *   • undefined → not a type-avatar context; falls back to customer initials.
    */
-  ticketType?: TicketType | null;
+  ticketType?: TicketType | "na" | null;
 }) {
   if (src) {
     return (
@@ -54,20 +53,23 @@ export function Avatar({
     );
   }
 
-  // Ticket-type indicator: replace the initials with the WK / PD / OS code and
-  // apply the subtle type color. Falls back to initials when no type is saved.
-  if (ticketType) {
+  // Ticket-type indicator: replace the initials with the WK / PD / OS code (or
+  // N/A) using the shared two-colour language. Only rendered when the caller
+  // opts into the type avatar by passing `ticketType` (including "na").
+  if (ticketType != null) {
+    const isProvided = ticketType !== "na";
+    const code = isProvided ? TICKET_TYPE_CODE[ticketType] : "N/A";
     return (
       <div
         className={cn(
           "inline-flex shrink-0 items-center justify-center rounded-full font-semibold tracking-wide select-none ring-2 ring-white shadow-sm",
-          TICKET_TYPE_AVATAR_STYLE[ticketType],
+          isProvided ? TICKET_TYPE_AVATAR_PROVIDED : TICKET_TYPE_AVATAR_NONE,
           className
         )}
-        style={{ width: size, height: size, fontSize: size * 0.36 }}
-        aria-label={name}
+        style={{ width: size, height: size, fontSize: size * (isProvided ? 0.36 : 0.3) }}
+        aria-label={isProvided ? `${name} — ${TICKET_TYPE_CODE[ticketType]}` : `${name} — type not provided`}
       >
-        {TICKET_TYPE_CODE[ticketType]}
+        {code}
       </div>
     );
   }

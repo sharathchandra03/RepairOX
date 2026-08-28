@@ -75,37 +75,51 @@ export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) 
       >
         {(close) => (
           <>
+            {/* Ordered so the most important actions appear first. Same actions
+                and behaviour as before — only the order changed. */}
+            {/* 1. View */}
             <MenuItem icon={Eye} onClick={() => { onAction("view", ticket); close(); }}>
               View
             </MenuItem>
-            <MenuItem icon={ArrowRightLeft} onClick={() => { onAction("transfer", ticket); close(); }}>
-              Transfer Ticket
-            </MenuItem>
-            <MenuItem icon={MessageSquarePlus} onClick={() => { onAction("comment", ticket); close(); }}>
-              View / Add Comment
-            </MenuItem>
-            <MenuItem icon={CreditCard} onClick={() => { onAction("checkout", ticket); close(); }}>
-              Checkout
-            </MenuItem>
-            <MenuItem icon={Mail} onClick={() => { onAction("email-receipt", ticket); close(); }}>
-              Email Receipt
-            </MenuItem>
+            {/* 2. Push to Invoice — completed/disabled state preserved by caller;
+                   no duplicate invoice action is created. */}
             <MenuItem icon={Receipt} onClick={() => { onAction("invoice", ticket); close(); }}>
               Push to Invoice
             </MenuItem>
-            <MenuItem icon={Printer} onClick={() => { onAction("print", ticket); close(); }}>
-              Print
-            </MenuItem>
-            <MenuItem icon={FileDown} onClick={() => { onAction("download-pdf", ticket); close(); }}>
-              Download PDF
-            </MenuItem>
+            {/* 3. Change Priority */}
             <MenuItem icon={AlertTriangle} onClick={() => { onAction("priority", ticket); close(); }}>
               Change Priority
             </MenuItem>
+            {/* 4. Print */}
+            <MenuItem icon={Printer} onClick={() => { onAction("print", ticket); close(); }}>
+              Print
+            </MenuItem>
+            {/* 5. View / Add Comment */}
+            <MenuItem icon={MessageSquarePlus} onClick={() => { onAction("comment", ticket); close(); }}>
+              View / Add Comment
+            </MenuItem>
+            {/* 6. Checkout */}
+            <MenuItem icon={CreditCard} onClick={() => { onAction("checkout", ticket); close(); }}>
+              Checkout
+            </MenuItem>
+            {/* 7. Email Receipt */}
+            <MenuItem icon={Mail} onClick={() => { onAction("email-receipt", ticket); close(); }}>
+              Email Receipt
+            </MenuItem>
+            {/* 8. Transfer Ticket */}
+            <MenuItem icon={ArrowRightLeft} onClick={() => { onAction("transfer", ticket); close(); }}>
+              Transfer Ticket
+            </MenuItem>
+            {/* 9. Download PDF */}
+            <MenuItem icon={FileDown} onClick={() => { onAction("download-pdf", ticket); close(); }}>
+              Download PDF
+            </MenuItem>
+            {/* 10. Pin to top */}
             <MenuItem icon={ticket.pinnedAt ? PinOff : Pin} onClick={() => { onAction("pin", ticket); close(); }}>
               {ticket.pinnedAt ? "Unpin from top" : "Pin to top"}
             </MenuItem>
             <div className="my-1 border-t border-border" />
+            {/* 11. Delete Ticket */}
             <MenuItem icon={Trash2} danger onClick={() => { onAction("delete", ticket); close(); }}>
               Delete Ticket
             </MenuItem>

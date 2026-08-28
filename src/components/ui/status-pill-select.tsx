@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Ban } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { STATUS_LABEL, STATUS_TONE, type TicketStatus } from "@/lib/mock-data";
 
@@ -64,12 +65,23 @@ export function StatusPillSelect({
   onChange,
   disabled,
   className,
+  blockedStatuses,
+  blockedReason,
 }: {
   value: TicketStatus;
   onChange: (value: TicketStatus) => void;
   disabled?: boolean;
   className?: string;
+  /**
+   * Statuses that are visible but NOT selectable (e.g. "Repaired & Collected"
+   * before an invoice exists). Rendered with a no-entry/disabled treatment and
+   * a tooltip so the user understands WHY they can't pick it.
+   */
+  blockedStatuses?: TicketStatus[];
+  /** Tooltip shown on blocked options. */
+  blockedReason?: string;
 }) {
+  const blocked = new Set(blockedStatuses ?? []);
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
 
@@ -109,21 +121,28 @@ export function StatusPillSelect({
         <div className="absolute left-0 top-full z-50 mt-1 max-h-72 w-full min-w-[220px] overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
           {TICKET_STATUS_ORDER.map((s) => {
             const isSelected = s === value;
+            const isBlocked = blocked.has(s);
             return (
               <button
                 key={s}
                 type="button"
+                disabled={isBlocked}
+                title={isBlocked ? blockedReason : undefined}
                 onClick={() => {
+                  if (isBlocked) return;
                   onChange(s);
                   setOpen(false);
                 }}
                 className={cn(
                   "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
-                  isSelected ? "bg-[#EEF1FD]/70" : "hover:bg-[#EEF1FD]/60"
+                  isBlocked
+                    ? "cursor-not-allowed opacity-45"
+                    : isSelected ? "bg-[#EEF1FD]/70" : "hover:bg-[#EEF1FD]/60"
                 )}
               >
                 <span className={cn("text-[#4361EE]", isSelected ? "opacity-100" : "opacity-0")}>✓</span>
                 <StatusPill status={s} />
+                {isBlocked && <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable" />}
               </button>
             );
           })}

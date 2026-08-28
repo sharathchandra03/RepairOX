@@ -8,7 +8,7 @@ import {
   ArrowRightLeft, MessageSquarePlus, FileText, Clock, Check,
   User, Smartphone, Wrench, CreditCard, AlertTriangle,
   CheckCircle2, Phone, Mail, Building2, MapPin, Shield,
-  Package, Hash, Calendar, Tag, CircleDot, Receipt,
+  Package, Hash, Calendar, Tag, CircleDot, Receipt, Ban,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -688,6 +688,8 @@ export default function TicketDetailPage() {
                 <StatusPillSelect
                   value={ticket.status}
                   onChange={(v: TicketStatus) => handleStatusChange(v)}
+                  blockedStatuses={!linkedInvoice && ticket.status !== "repaired_collected" ? ["repaired_collected"] : undefined}
+                  blockedReason="Create an invoice before selecting Repaired & Collected"
                 />
               </div>
               <button
@@ -784,16 +786,27 @@ export default function TicketDetailPage() {
             <p className="text-sm font-bold mb-1">Change Status</p>
             <p className="text-[11px] text-muted-foreground mb-4">Ticket {ticket.id}</p>
             <div className="space-y-2">
-              {(["in_progress", "repaired", "repaired_collected", "waiting_approval", "waiting_parts", "return", "return_collected"] as TicketStatus[]).map((s) => (
-                <button key={s} onClick={() => handleStatusChange(s)}
-                  className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", ticket.status === s ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[s]}`}>
-                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                    {STATUS_LABEL[s]}
-                  </span>
-                  {ticket.status === s && <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span>}
-                </button>
-              ))}
+              {(["in_progress", "repaired", "repaired_collected", "waiting_approval", "waiting_parts", "return", "return_collected"] as TicketStatus[]).map((s) => {
+                // Keep "Repaired & Collected" visible but unavailable until an
+                // invoice exists (rule also enforced in the store).
+                const isBlocked = s === "repaired_collected" && !linkedInvoice && ticket.status !== "repaired_collected";
+                return (
+                  <button key={s} disabled={isBlocked}
+                    title={isBlocked ? "Create an invoice before selecting Repaired & Collected" : undefined}
+                    onClick={() => { if (isBlocked) return; handleStatusChange(s); }}
+                    className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", isBlocked ? "cursor-not-allowed opacity-45 border-border" : ticket.status === s ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
+                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[s]}`}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      {STATUS_LABEL[s]}
+                    </span>
+                    {isBlocked ? (
+                      <Ban className="ml-auto h-4 w-4 text-rose-400" aria-label="Unavailable — needs invoice" />
+                    ) : ticket.status === s ? (
+                      <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span>
+                    ) : null}
+                  </button>
+                );
+              })}
             </div>
           </motion.div>
         </div>
@@ -909,7 +922,14 @@ export default function TicketDetailPage() {
           ]},
           { key: "status", label: "Status", type: "select", options: [
             { label: "In Progress", value: "in_progress" }, { label: "Repaired", value: "repaired" },
-            { label: "Repaired & Collected", value: "repaired_collected" }, { label: "Waiting for Approval", value: "waiting_approval" },
+            // "Repaired & Collected" is only offered once an invoice exists (or
+            // the ticket is already in that status). The store enforces the same
+            // rule so it can't be bypassed here either — this just hides the
+            // choice up front so the user understands it isn't available yet.
+            ...(linkedInvoice || ticket.status === "repaired_collected"
+              ? [{ label: "Repaired & Collected", value: "repaired_collected" }]
+              : []),
+            { label: "Waiting for Approval", value: "waiting_approval" },
             { label: "Waiting for Parts", value: "waiting_parts" }, { label: "Returned", value: "return" },
             { label: "Returned & Collected", value: "return_collected" },
           ]},

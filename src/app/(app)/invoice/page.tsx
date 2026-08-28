@@ -76,8 +76,9 @@ const DATE_RANGES = [
 
 type DateRange = (typeof DATE_RANGES)[number]["value"] | "custom";
 
-/** Rows shown per page in the invoice table. */
-const PAGE_SIZE = 20;
+/** Default rows shown per page in the invoice table (user-selectable 10/20/50/100). */
+const DEFAULT_PAGE_SIZE = 20;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -144,6 +145,7 @@ export default function InvoicePage() {
   const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
   const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
 
   // Universal Search filter — shows only a single record when navigated from search
@@ -213,12 +215,18 @@ export default function InvoicePage() {
   }, [statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId]);
 
   // Pagination — pinned invoices already sit at the top of `list`.
-  const totalPages = Math.max(1, Math.ceil(list.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const paged = useMemo(
-    () => list.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [list, currentPage]
+    () => list.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [list, currentPage, pageSize]
   );
+
+  // Changing page size resets to page 1 on the recalculated result set.
+  const handlePageSizeChange = useCallback((size: number) => {
+    setPageSize(size);
+    setPage(1);
+  }, []);
 
   /* KPIs */
   const kpis = useMemo(() => {
@@ -505,14 +513,17 @@ export default function InvoicePage() {
             <p className="text-sm text-muted-foreground">Try adjusting filters or create a new invoice.</p>
           </div>
         )}
-        {/* Footer — 20 rows per page; pinned invoices stay at the top of page 1 */}
+        {/* Footer — user-selectable page size (10/20/50/100); pinned invoices
+            stay at the top of page 1. LEFT: size selector + count, RIGHT: pages. */}
         <div className="border-t border-border px-5 py-3">
           <Pagination
             page={currentPage}
             totalPages={totalPages}
             onPageChange={setPage}
             totalItems={list.length}
-            pageSize={PAGE_SIZE}
+            pageSize={pageSize}
+            pageSizeOptions={PAGE_SIZE_OPTIONS}
+            onPageSizeChange={handlePageSizeChange}
             itemLabel="invoice"
           />
         </div>
@@ -722,7 +733,7 @@ function renderInvCell(
     case "reference": return <span className="text-muted-foreground whitespace-nowrap text-[12px]">{inv.reference}</span>;
     case "customer": return (
       <div className="flex items-center gap-2.5">
-        <Avatar name={inv.customer} size={28} ticketType={ticketType} />
+        <Avatar name={inv.customer} size={28} ticketType={ticketType ?? "na"} />
         <div className="min-w-0">
           <p className="text-[13px] font-medium truncate leading-tight">{inv.customer}</p>
           {inv.company && <p className="text-[11px] text-muted-foreground truncate">{inv.company}</p>}
