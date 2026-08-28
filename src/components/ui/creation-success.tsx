@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { CelebrationBurst } from "./celebration-burst";
+import { useStore } from "@/lib/store";
 
 /* ─── Creation Success Animation ─────────────────────────────────────── */
 /*
@@ -26,6 +27,16 @@ type CreationSuccessProps = {
 
 export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: CreationSuccessProps) {
   const [phase, setPhase] = useState<"animate" | "done">("animate");
+  const { tickets } = useStore();
+
+  // For tickets, show the human-readable display number (T-041) instead of the
+  // internal primary key (TK-…). The `id` prop stays the real record id for any
+  // downstream navigation; this only affects what the badge shows. Falls back to
+  // the id if the ticket/number isn't resolved yet.
+  const displayId =
+    type === "ticket"
+      ? (tickets.find((t) => t.id === id)?.ticketNo ?? id)
+      : id;
 
   // Auto-advance after the animation plays
   useEffect(() => {
@@ -171,7 +182,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
           >
             <span className={`h-2 w-2 rounded-full ${badgeDotColor} animate-pulse`} />
             <span className={`text-[13px] font-semibold ${badgeTextColor} tracking-wide font-mono`}>
-              {id}
+              {displayId}
             </span>
           </motion.div>
 

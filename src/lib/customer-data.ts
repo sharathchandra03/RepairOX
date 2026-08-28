@@ -125,20 +125,40 @@ export function searchCustomers(customers: Customer[], query: string): Customer[
   // Normalize mobile for comparison (strip spaces, dashes, parens)
   const qMobile = q.replace(/[\s\-\(\)\+]/g, "");
 
-  return customers.filter((c) => {
-    // By Customer ID
-    if (c.id.toLowerCase().includes(q)) return true;
-    // By full name
-    if (c.fullName.toLowerCase().includes(q)) return true;
-    // By mobile (normalized)
+  /**
+   * Relevance rank for a customer against the query (lower = better):
+   *   0  full name STARTS WITH the query        ("ak" → "Akhilesh")
+   *   1  a WORD in the name starts with query    ("ak" → "Ravi Akhilesh")
+   *   2  company starts with the query
+   *   3  matched only by phone / email / id
+   *   4  substring match somewhere in the name   ("ak" → "Manoj Garnayak")
+   *  -1  no match at all (filtered out)
+   * Within the same rank, results are ordered alphabetically by name.
+   */
+  const rankOf = (c: Customer): number => {
+    const name = c.fullName.toLowerCase();
+    const company = (c.company ?? "").toLowerCase();
     const cMobile = c.mobile.replace(/[\s\-\(\)\+]/g, "");
-    if (qMobile.length >= 3 && cMobile.includes(qMobile)) return true;
-    // By email
-    if (c.email && c.email.toLowerCase().includes(q)) return true;
-    // By company
-    if (c.company && c.company.toLowerCase().includes(q)) return true;
-    return false;
-  });
+    const phoneMatch = qMobile.length >= 3 && cMobile.includes(qMobile);
+    const emailMatch = !!c.email && c.email.toLowerCase().includes(q);
+    const idMatch = c.id.toLowerCase().includes(q);
+
+    if (name.startsWith(q)) return 0;
+    if (name.split(/\s+/).some((word) => word.startsWith(q))) return 1;
+    if (company.startsWith(q)) return 2;
+    if (phoneMatch || emailMatch || idMatch) return 3;
+    if (name.includes(q) || company.includes(q)) return 4;
+    return -1;
+  };
+
+  return customers
+    .map((c) => ({ c, rank: rankOf(c) }))
+    .filter((x) => x.rank >= 0)
+    .sort((a, b) => {
+      if (a.rank !== b.rank) return a.rank - b.rank;              // better matches first
+      return a.c.fullName.localeCompare(b.c.fullName);            // then alphabetical
+    })
+    .map((x) => x.c);
 }
 
 /* ─── Seed Data ──────────────────────────────────────────────────── */

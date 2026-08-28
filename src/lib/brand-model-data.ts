@@ -44,10 +44,16 @@ export function createDeviceModel(brandId: string, name: string): DeviceModel {
 
 /* ─── Search helpers ─────────────────────────────────────────────── */
 
+/** Case-insensitive, natural-order name comparator (so "iPhone 2" < "iPhone 10"). */
+function byName(a: { name: string }, b: { name: string }): number {
+  return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+}
+
 export function searchBrands(brands: Brand[], query: string): Brand[] {
   const q = query.trim().toLowerCase();
-  if (!q) return brands;
-  return brands.filter((b) => b.name.toLowerCase().includes(q));
+  const list = q ? brands.filter((b) => b.name.toLowerCase().includes(q)) : brands;
+  // Always alphabetical.
+  return [...list].sort(byName);
 }
 
 export function searchModels(models: DeviceModel[], brandId: string | null, query: string): DeviceModel[] {
@@ -58,11 +64,12 @@ export function searchModels(models: DeviceModel[], brandId: string | null, quer
   if (q) {
     filtered = filtered.filter((m) => m.name.toLowerCase().includes(q));
   }
-  return filtered;
+  // Always alphabetical (numeric-aware so model numbers order naturally).
+  return [...filtered].sort(byName);
 }
 
 export function getModelsForBrand(models: DeviceModel[], brandId: string): DeviceModel[] {
-  return models.filter((m) => m.brandId === brandId);
+  return [...models.filter((m) => m.brandId === brandId)].sort(byName);
 }
 
 /* ─── Seed Data ──────────────────────────────────────────────────── */

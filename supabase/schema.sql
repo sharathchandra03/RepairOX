@@ -777,6 +777,27 @@ create table if not exists public.device_models (
   created_at      timestamptz not null default now()
 );
 
+-- ── Assigned By / Assigned To master lists ───────────────────────────────────
+--   Ticket-intake people (front desk) and technicians. Same shape as brands so
+--   they participate in RLS, realtime, and the generic per-module policies.
+create table if not exists public.assigned_by_options (
+  id              text primary key,
+  organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
+  branch_id       uuid references public.branches(id) on delete set null,
+  name            text not null,
+  created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
+  created_at      timestamptz not null default now()
+);
+
+create table if not exists public.assigned_to_options (
+  id              text primary key,
+  organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
+  branch_id       uuid references public.branches(id) on delete set null,
+  name            text not null,
+  created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
+  created_at      timestamptz not null default now()
+);
+
 -- ── Price list ───────────────────────────────────────────────────────────────
 create table if not exists public.price_list_categories (
   id              text primary key,
@@ -1052,6 +1073,8 @@ begin
       ('stock_movements',        'Inventory'),
       ('brands',                 'Price List'),
       ('device_models',          'Price List'),
+      ('assigned_by_options',    'Ticket'),
+      ('assigned_to_options',    'Ticket'),
       ('price_list_categories',  'Price List'),
       ('price_list_brands',      'Price List'),
       ('price_list_models',      'Price List'),
@@ -1098,6 +1121,8 @@ alter table public.inventory_items        enable row level security;
 alter table public.stock_movements        enable row level security;
 alter table public.brands                 enable row level security;
 alter table public.device_models          enable row level security;
+alter table public.assigned_by_options    enable row level security;
+alter table public.assigned_to_options    enable row level security;
 alter table public.price_list_categories  enable row level security;
 alter table public.price_list_brands      enable row level security;
 alter table public.price_list_models      enable row level security;
@@ -1319,6 +1344,8 @@ begin
       ('stock_movements',  array['manage_inventory','transfer_inventory','manage_repair_jobs'],                                       array['manage_inventory','transfer_inventory','manage_repair_jobs']),
       ('brands',           array['manage_repair_jobs','manage_sales','manage_inventory','view_only','manage_settings'],               array['manage_repair_jobs','manage_sales','manage_inventory','manage_settings']),
       ('device_models',    array['manage_repair_jobs','manage_sales','manage_inventory','view_only','manage_settings'],               array['manage_repair_jobs','manage_sales','manage_inventory','manage_settings']),
+      ('assigned_by_options', array['manage_repair_jobs','update_repair_status','view_only','assign_technicians','manage_settings'], array['manage_repair_jobs','assign_technicians','manage_settings']),
+      ('assigned_to_options', array['manage_repair_jobs','update_repair_status','view_only','assign_technicians','manage_settings'], array['manage_repair_jobs','assign_technicians','manage_settings']),
       ('price_list_categories', array['manage_sales','manage_repair_jobs','view_only','manage_settings'],                             array['manage_sales','manage_repair_jobs','manage_settings']),
       ('price_list_brands',     array['manage_sales','manage_repair_jobs','view_only','manage_settings'],                             array['manage_sales','manage_repair_jobs','manage_settings']),
       ('price_list_models',     array['manage_sales','manage_repair_jobs','view_only','manage_settings'],                             array['manage_sales','manage_repair_jobs','manage_settings']),
@@ -1434,7 +1461,7 @@ declare
   tables text[] := array[
     'organizations','branches','staff','audit_log',
     'customers','tickets','invoices','walk_ins','inventory_items','stock_movements',
-    'brands','device_models',
+    'brands','device_models','assigned_by_options','assigned_to_options',
     'price_list_categories','price_list_brands','price_list_models','price_list_parts',
     'expenses','expense_categories','daily_sessions','ledger_transactions','ledger_entries',
     'payroll_runs','salary_advances','tasks',
@@ -1483,7 +1510,7 @@ declare
   tables text[] := array[
     'organizations','branches','staff','audit_log',
     'customers','tickets','invoices','walk_ins','inventory_items','stock_movements',
-    'brands','device_models',
+    'brands','device_models','assigned_by_options','assigned_to_options',
     'price_list_categories','price_list_brands','price_list_models','price_list_parts',
     'expenses','expense_categories','daily_sessions','ledger_transactions','ledger_entries',
     'payroll_runs','salary_advances','tasks',

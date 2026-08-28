@@ -217,6 +217,30 @@ body {
   }
 }
 
+/* Sidebar collapse arrow — subtle continuous forward-and-return nudge */
+@keyframes arrow-nudge-left {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(-2px); }
+}
+@keyframes arrow-nudge-right {
+  0%, 100% { transform: translateX(0); }
+  50% { transform: translateX(2px); }
+}
+.arrow-nudge-left {
+  animation: arrow-nudge-left 1.8s ease-in-out infinite;
+  will-change: transform;
+}
+.arrow-nudge-right {
+  animation: arrow-nudge-right 1.8s ease-in-out infinite;
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .arrow-nudge-left,
+  .arrow-nudge-right {
+    animation: none;
+  }
+}
+
 /* ─── Aceternity-style Gradient Animation Keyframes ────────────────── */
 @keyframes moveVertical {
   0% {

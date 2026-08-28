@@ -323,14 +323,18 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
         </Link>
         <motion.button
           onClick={() => setCollapsed(!collapsed)}
-          animate={{ scale: [1, 1.12, 1] }}
-          transition={{ duration: 2.4, repeat: Infinity, ease: "easeInOut" }}
-          whileHover={{ scale: 1.15 }}
+          whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.95 }}
-          className="group grid h-7 w-7 shrink-0 place-items-center rounded-lg border border-[#4361EE]/30 bg-card text-[#4361EE] transition-colors hover:border-[#4361EE]/60 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+          className="group relative grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white transition-transform"
           aria-label="Toggle sidebar"
         >
-          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
+          {/* Soft blue outer glow, matching the POS button */}
+          <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
+          {collapsed ? (
+            <ChevronRight className="relative z-10 h-3.5 w-3.5 arrow-nudge-right" />
+          ) : (
+            <ChevronLeft className="relative z-10 h-3.5 w-3.5 arrow-nudge-left" />
+          )}
         </motion.button>
       </div>
 

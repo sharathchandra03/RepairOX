@@ -1896,7 +1896,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Ticket", action: "Assigned By Added", severity: "success", entity: "Assigned By", reference: option.name, description: `Added "${option.name}" to Assigned By master list.` });
     if (shouldUseDb()) {
       const { error } = await db.from("assigned_by_options").insert({ id: option.id, name: option.name });
-      if (error) { console.error("[store] addAssignedByOption sync failed:", error.message); }
+      if (error) {
+        console.error("[store] addAssignedByOption sync failed:", error.code, error.message);
+        toast.error("Not saved to database", { description: `Assigned By couldn't be saved (DB [${error.code ?? "?"}]). It will disappear on reload until the DB is migrated.` });
+      }
     }
   }, []);
 
@@ -1908,7 +1911,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Ticket", action: "Assigned To Added", severity: "success", entity: "Assigned To", reference: option.name, description: `Added "${option.name}" to Assigned To master list.` });
     if (shouldUseDb()) {
       const { error } = await db.from("assigned_to_options").insert({ id: option.id, name: option.name });
-      if (error) { console.error("[store] addAssignedToOption sync failed:", error.message); }
+      if (error) {
+        console.error("[store] addAssignedToOption sync failed:", error.code, error.message);
+        toast.error("Not saved to database", { description: `Assigned To couldn't be saved (DB [${error.code ?? "?"}]). It will disappear on reload until the DB is migrated.` });
+      }
     }
   }, []);
 
