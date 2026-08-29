@@ -95,7 +95,7 @@ const DEFAULT_FORM: InvoiceFormData = {
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
-  pricing: { discount: 0, gstRate: 18, paymentMode: "" },
+  pricing: { discount: 0, gstRate: 0, paymentMode: "" },
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
 
@@ -543,7 +543,7 @@ function InvoiceWizard() {
       {/* Bottom nav */}
       {step < 7 && (
         <div className="sticky bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-2px_8px_-2px_rgba(0,0,0,0.06)]">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-end px-4 py-4 sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-end px-4 py-2.5 sm:px-6 lg:px-8">
             {step < 6 ? (
               <Button size="md" onClick={goNext} className="mr-[3px]">
                 Next <ArrowRight className="h-4 w-4" />
@@ -897,7 +897,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
   const deviceSubtotal = activeDevice.parts.reduce((s, p) => s + p.total, 0);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-4">
+    <div className="mx-auto max-w-[893px] space-y-4">
       {/* Device Tabs */}
       <div className="rounded-2xl border border-border bg-card shadow-card">
         <div className="border-b border-border px-6 py-2.5 sm:px-8">
@@ -936,7 +936,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
         </div>
 
         {/* Active Device Form */}
-        <div className="px-6 py-4 sm:px-8 space-y-4">
+        <div className="px-6 pt-[13px] pb-4 sm:px-8 space-y-4">
           {/* Device Details */}
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Device Details</p>

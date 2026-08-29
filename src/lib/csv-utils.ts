@@ -203,7 +203,10 @@ export function toCSV(headers: string[], rows: (string | number | undefined)[][]
 /** Trigger a client-side download of CSV text. */
 export function downloadCSV(filename: string, csv: string) {
   if (typeof window === "undefined") return;
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  // Prepend a UTF-8 BOM so Excel detects the encoding and opens the sheet
+  // left-to-right with correct characters (without it Excel may guess the
+  // locale/direction and render columns reversed / RTL).
+  const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

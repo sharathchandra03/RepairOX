@@ -53,7 +53,7 @@ export function WizardShell({
           onClick={onBack}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-zinc-700 shadow-card transition hover:bg-muted hover:border-[#B3BFF6]"
+          className="grid h-10 w-10 place-items-center rounded-2xl border border-black/25 bg-card text-zinc-700 shadow-card transition hover:bg-muted hover:border-[#B3BFF6]"
           aria-label="Back"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -79,7 +79,7 @@ export function WizardShell({
         {onClose ? (
           <button
             onClick={onClose}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-black/25 bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -87,7 +87,7 @@ export function WizardShell({
         ) : (
           <Link
             href={closeHref || "/tickets"}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-border bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-black/25 bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

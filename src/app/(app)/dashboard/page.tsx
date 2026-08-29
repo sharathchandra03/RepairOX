@@ -1,11 +1,12 @@
   "use client";
 
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, ArrowRight, MoreHorizontal, ArrowDownToLine,
-  ChevronUp, ChevronDown,
+  ChevronUp, ChevronDown, Inbox,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
@@ -15,13 +16,15 @@ import { TodoWidget } from "@/components/dashboard/todo-widget";
 import { OrdersStatusWidget } from "@/components/dashboard/orders-status-widget";
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { useState, useMemo, useRef, useCallback } from "react";
-import { STATUS_LABEL, STATUS_TONE, getTicketType } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, getTicketType, TICKET_TYPE_LABEL } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
+import { toCSV, downloadCSV } from "@/lib/csv-utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
 import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
 import { useDashboardOrder } from "@/lib/use-dashboard-order";
@@ -33,6 +36,27 @@ import { useActivityCollapse } from "@/lib/use-activity-collapse";
 /* ── Device breakdown — computed from store data in component ── */
 
 /* ── Transaction feed data — derived from store in component ── */
+
+/* ── Critical Tasks card filter options (mirror the Tickets page) ── */
+const CT_PRIORITY_OPTIONS = [
+  { label: "Critical + High", value: "all" },
+  { label: "Critical", value: "critical" },
+  { label: "High", value: "high" },
+];
+const CT_STATUS_OPTIONS = [
+  { label: "All Statuses", value: "all" },
+  { label: "In Progress", value: "in_progress" },
+  { label: "Waiting for Approval", value: "waiting_approval" },
+  { label: "Waiting for Parts", value: "waiting_parts" },
+  { label: "Repaired", value: "repaired" },
+  { label: "Returned", value: "return" },
+];
+const CT_TYPE_OPTIONS = [
+  { label: "All Types", value: "all" },
+  { label: TICKET_TYPE_LABEL.walkin, value: "walkin" },
+  { label: TICKET_TYPE_LABEL.pickup, value: "pickup" },
+  { label: TICKET_TYPE_LABEL.onsite, value: "onsite" },
+];
 
 /* ── Card header with ... menu ── */
 function CardHeader({ title, badge }: { title: string; badge?: React.ReactNode }) {
@@ -59,6 +83,14 @@ export default function Dashboard() {
   const [customRange, setCustomRange] = useState<DateRange>({ start: null, end: null });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const { tickets, invoices, inventory } = useStore();
+  const router = useRouter();
+  // Critical Tasks card — local filters (Filter button). These narrow the
+  // critical/high list further; the global date range above still scopes it.
+  const [showCriticalFilter, setShowCriticalFilter] = useState(false);
+  const [ctPriority, setCtPriority] = useState<"all" | "critical" | "high">("all");
+  const [ctStatus, setCtStatus] = useState<string>("all");
+  const [ctType, setCtType] = useState<string>("all");
+  const [ctTech, setCtTech] = useState<string>("all");
   const activities = useActivityLog();
   const [selectedActivity, setSelectedActivity] = useState<ActivityEntry | null>(null);
   const { cardOrder, reorder: reorderKpi } = useDashboardOrder();
@@ -177,32 +209,115 @@ export default function Dashboard() {
     return list;
   }, [tickets, filterBy, dateRange, customRange, sortBy]);
 
+  // Unique technicians (from real ticket data) for the Critical Tasks filter.
+  const criticalTechnicians = useMemo(() => {
+    const set = new Set(tickets.map((t) => t.technician).filter(Boolean));
+    return Array.from(set).sort();
+  }, [tickets]);
+
   // Critical / high-priority tickets shown in the "Critical Tasks" card.
-  // Priority is time-independent — a high/critical ticket needs attention no
-  // matter when it was created — so this list reads the FULL store (not the
-  // date-filtered list). This makes a priority change from anywhere (Quick
-  // Actions, row menu, edit) reflect on the dashboard immediately. Only open
-  // statuses are shown (collected/repaired tickets are done).
-  const criticalTickets = useMemo(
-    () =>
-      tickets
-        .filter(
-          (t) =>
-            (t.priority === "critical" || t.priority === "high") &&
-            // Only hide tickets that are fully closed/collected — any other
-            // open ticket that becomes high/critical must appear here so the
-            // priority change is always reflected.
-            t.status !== "repaired_collected" &&
-            t.status !== "return_collected"
-        )
-        // Critical first, then most-recent so a just-flagged ticket surfaces at
-        // the top of its group and is always visible in the list below.
-        .sort((a, b) => {
-          if (a.priority !== b.priority) return a.priority === "critical" ? -1 : 1;
-          return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
-        }),
-    [tickets]
-  );
+  //
+  // Single source of truth = the store `tickets`. The list stays in sync with:
+  //   • the GLOBAL dashboard date range (Today / Yesterday / This Month / …)
+  //     — same date window applied to filteredTickets, so switching the range
+  //     immediately re-scopes this card too.
+  //   • the card's own Filter panel (priority / status / type / technician).
+  // Base rule: only Critical or High priority, and never fully closed/collected
+  // tickets. Any ticket whose priority/status changes anywhere in the app flows
+  // straight back in because this is a useMemo keyed on `tickets`.
+  const criticalTickets = useMemo(() => {
+    const now = new Date();
+    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
+    const ts = todayStart.getTime();
+    const inDateRange = (createdAt: string) => {
+      const created = new Date(createdAt).getTime();
+      if (isNaN(created)) return true;
+      switch (dateRange) {
+        case "today": return created >= ts;
+        case "yesterday": return created >= ts - 86_400_000 && created < ts;
+        case "this_month": return created >= new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+        case "this_year": return created >= new Date(now.getFullYear(), 0, 1).getTime();
+        case "all": return true;
+        case "custom": {
+          if (!customRange.start || !customRange.end) return true;
+          const s = new Date(customRange.start); s.setHours(0, 0, 0, 0);
+          const e = new Date(customRange.end); e.setHours(23, 59, 59, 999);
+          return created >= s.getTime() && created <= e.getTime();
+        }
+        default: return true;
+      }
+    };
+
+    return tickets
+      .filter((t) => {
+        // Base: critical/high only, exclude fully closed/collected.
+        const isCriticalHigh = t.priority === "critical" || t.priority === "high";
+        if (!isCriticalHigh) return false;
+        if (t.status === "repaired_collected" || t.status === "return_collected") return false;
+        // Global dashboard date range.
+        if (!inDateRange(t.createdAt)) return false;
+        // Card filters.
+        if (ctPriority !== "all" && t.priority !== ctPriority) return false;
+        if (ctStatus !== "all" && t.status !== ctStatus) return false;
+        if (ctType !== "all" && getTicketType(t) !== ctType) return false;
+        if (ctTech !== "all" && t.technician !== ctTech) return false;
+        return true;
+      })
+      // Critical first, then most-recent so a just-flagged ticket surfaces at
+      // the top of its group and is always visible in the list below.
+      .sort((a, b) => {
+        if (a.priority !== b.priority) return a.priority === "critical" ? -1 : 1;
+        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+      });
+  }, [tickets, dateRange, customRange, ctPriority, ctStatus, ctType, ctTech]);
+
+  const criticalFilterActive = ctPriority !== "all" || ctStatus !== "all" || ctType !== "all" || ctTech !== "all";
+
+  // Export ONLY the currently-visible critical/high rows (respects global date
+  // range + card filters). Reuses the shared csv-utils infrastructure.
+  const exportCriticalTasks = useCallback(() => {
+    const headers = [
+      "Ticket ID", "Customer", "Ticket Type", "Device", "Priority",
+      "Status", "Due Date", "Created", "Amount",
+    ];
+    const typeLabel = (t: (typeof criticalTickets)[number]) => {
+      const type = getTicketType(t);
+      return type ? TICKET_TYPE_LABEL[type] : "";
+    };
+    const fmt = (iso?: string) => {
+      if (!iso) return "";
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+    };
+    const rows = criticalTickets.map((t) => [
+      t.ticketNo ?? t.id,
+      t.customer,
+      typeLabel(t),
+      t.model,
+      t.priority === "critical" ? "Critical" : "High",
+      STATUS_LABEL[t.status],
+      fmt(t.dueDate),
+      fmt(t.createdAt),
+      t.amount,
+    ]);
+    const stamp = new Date().toISOString().slice(0, 10);
+    downloadCSV(`critical-tasks-${stamp}`, toCSV(headers, rows));
+  }, [criticalTickets]);
+  // Export button is temporarily disabled in the UI; keep the handler referenced
+  // so the logic is preserved and lint doesn't flag it as unused.
+  void exportCriticalTasks;
+
+  // "View all tickets" deep-links to the Tickets page carrying the active
+  // priority/status context so the list opens pre-filtered.
+  const viewAllHref = useMemo(() => {
+    const params = new URLSearchParams();
+    if (ctPriority !== "all") params.set("priority", ctPriority);
+    if (ctStatus !== "all") params.set("status", ctStatus);
+    if (ctType !== "all") params.set("type", ctType);
+    if (ctTech !== "all") params.set("tech", ctTech);
+    const qs = params.toString();
+    return qs ? `/tickets?${qs}` : "/tickets";
+  }, [ctPriority, ctStatus, ctType, ctTech]);
 
   // Compute live KPIs from real data
   const now = useMemo(() => new Date(), []);
@@ -408,9 +523,9 @@ export default function Dashboard() {
         actions={
           <Can permission="manage_repair_jobs">
             <Link href="/tickets/new?from=dashboard">
-              <button className="relative inline-flex items-center gap-2 rounded-full h-11 px-6 bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white font-semibold text-[14px] shadow-lg shadow-[#4361EE]/25 transition-all duration-300 hover:scale-[1.05] hover:shadow-xl hover:shadow-[#4361EE]/30 active:scale-[0.97]">
-                {/* Breathing glow ring */}
-                <span className="absolute -inset-[2px] rounded-full bg-gradient-to-r from-[#4361EE]/40 to-[#6366F1]/40 animate-[breathe_3s_ease-in-out_infinite] blur-[6px]" />
+              <button className="group relative inline-flex items-center gap-2 rounded-full h-11 px-6 bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white font-semibold text-[14px] transition-all duration-300 hover:scale-[1.05] active:scale-[0.97]">
+                {/* Thin glowing breathing border — matches the POS button and sidebar collapse toggle */}
+                <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
                 <Plus className="h-4 w-4 relative z-10" />
                 <span className="relative z-10">Add New</span>
               </button>
@@ -556,31 +671,121 @@ export default function Dashboard() {
         <div className="flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6">
           <div><p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Critical Tasks</p><h3 className="font-display mt-0.5 text-base font-bold">Critical & high-priority tickets to resolve</h3></div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" className="gap-1.5 rounded-full"><Filter className="h-3.5 w-3.5" /> Filter</Button>
-            <Can permission="export_reports"><Button variant="primary" size="sm" className="gap-1.5 rounded-full"><Download className="h-3.5 w-3.5" /> Export</Button></Can>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5 rounded-full"
+              onClick={() => setShowCriticalFilter((v) => !v)}
+              aria-expanded={showCriticalFilter}
+            >
+              <Filter className="h-3.5 w-3.5" /> Filter
+              {criticalFilterActive && <span className="ml-0.5 h-2 w-2 rounded-full bg-[#4361EE]" />}
+            </Button>
+            <Can permission="export_reports">
+              {/* Export temporarily disabled — logic preserved in exportCriticalTasks.
+                  To re-enable: restore onClick={exportCriticalTasks} and disabled={criticalTickets.length === 0}. */}
+              <Button
+                variant="primary"
+                size="sm"
+                className="gap-1.5 rounded-full"
+                disabled
+              >
+                <Download className="h-3.5 w-3.5" /> Export
+              </Button>
+            </Can>
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[90px] px-5 py-2.5">Ticket</th><th className="py-2.5">Customer</th><th className="py-2.5">Device</th><th className="py-2.5 w-[80px]">Priority</th><th className="w-[140px] py-2.5">Status</th><th className="w-[100px] py-2.5">Waiting</th><th className="w-[100px] py-2.5 pr-5 text-right">Amount</th></tr></thead>
-            <tbody>
-              {criticalTickets.slice(0, 8).map((t, i) => (
-                <motion.tr key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.04 * i }} className="group border-t border-border transition hover:bg-[#EEF1FD]/50">
-                  <td className="px-5 py-3 whitespace-nowrap font-medium">{t.ticketNo ?? t.id}</td>
-                  <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} ticketType={getTicketType(t)} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
-                  <td className="py-3 whitespace-nowrap text-muted-foreground">{t.model}</td>
-                  <td className="py-3"><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>{t.priority === "critical" ? "Critical" : "High"}</span></td>
-                  <td className="py-3"><span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}</span></td>
-                  <td className="py-3 text-[12px] text-muted-foreground whitespace-nowrap">{(() => { const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000); if (mins < 60) return `${mins}m`; if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`; return `${Math.floor(mins/1440)}d`; })()}</td>
-                  <td className="py-3 pr-5 text-right font-semibold tnum whitespace-nowrap">{formatINR(t.amount)}</td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+
+        {/* Filter panel — reuses the RepairOX Select style from the Tickets page.
+            No overflow-hidden here: the Select dropdowns render as absolutely
+            positioned children and must be allowed to overflow the panel. */}
+        <AnimatePresence initial={false}>
+          {showCriticalFilter && (
+            <motion.div
+              initial={{ opacity: 0, y: -6 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -6 }}
+              transition={{ duration: 0.18 }}
+              className="border-t border-border"
+            >
+              <div className="p-5 sm:px-6">
+                <div className="mb-3 flex items-center justify-between">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Filter Critical Tasks</p>
+                  <button
+                    onClick={() => { setCtPriority("all"); setCtStatus("all"); setCtType("all"); setCtTech("all"); }}
+                    className="text-[11px] font-medium text-[#4361EE] hover:underline"
+                  >
+                    Reset Filters
+                  </button>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
+                    <Select value={ctPriority} onChange={(e) => setCtPriority(e.target.value as "all" | "critical" | "high")} options={CT_PRIORITY_OPTIONS} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Status</label>
+                    <Select value={ctStatus} onChange={(e) => setCtStatus(e.target.value)} options={CT_STATUS_OPTIONS} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Ticket Type</label>
+                    <Select value={ctType} onChange={(e) => setCtType(e.target.value)} options={CT_TYPE_OPTIONS} />
+                  </div>
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-medium text-muted-foreground">Technician</label>
+                    <Select value={ctTech} onChange={(e) => setCtTech(e.target.value)} options={[{ label: "All Technicians", value: "all" }, ...criticalTechnicians.map((t) => ({ label: t, value: t }))]} />
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {criticalTickets.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]">
+              <Inbox className="h-6 w-6" />
+            </div>
+            <p className="text-sm font-semibold">No critical or high-priority tickets</p>
+            <p className="max-w-xs text-xs text-muted-foreground">
+              {criticalFilterActive || dateRange !== "all"
+                ? "Nothing matches the current dashboard and card filters. Try widening the date range or resetting the filters."
+                : "You're all caught up — no urgent tickets need attention right now."}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[90px] px-5 py-2.5">Ticket</th><th className="py-2.5">Customer</th><th className="py-2.5">Device</th><th className="py-2.5 w-[80px]">Priority</th><th className="w-[140px] py-2.5">Status</th><th className="w-[100px] py-2.5">Waiting</th><th className="w-[100px] py-2.5 pr-5 text-right">Amount</th></tr></thead>
+              <tbody>
+                {criticalTickets.slice(0, 8).map((t, i) => (
+                  <motion.tr
+                    key={t.id}
+                    initial={{ opacity: 0, y: 6 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: 0.04 * i }}
+                    onClick={() => router.push(`/tickets/${t.id}`)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(`/tickets/${t.id}`); } }}
+                    className="group cursor-pointer border-t border-border transition hover:bg-[#EEF1FD]/50 focus:bg-[#EEF1FD]/50 focus:outline-none"
+                  >
+                    <td className="px-5 py-3 whitespace-nowrap font-medium">{t.ticketNo ?? t.id}</td>
+                    <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} ticketType={getTicketType(t)} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
+                    <td className="py-3 whitespace-nowrap text-muted-foreground">{t.model}</td>
+                    <td className="py-3"><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>{t.priority === "critical" ? "Critical" : "High"}</span></td>
+                    <td className="py-3"><span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}</span></td>
+                    <td className="py-3 text-[12px] text-muted-foreground whitespace-nowrap">{(() => { const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000); if (mins < 60) return `${mins}m`; if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`; return `${Math.floor(mins/1440)}d`; })()}</td>
+                    <td className="py-3 pr-5 text-right font-semibold tnum whitespace-nowrap">{formatINR(t.amount)}</td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         <div className="flex items-center justify-between border-t border-border p-4">
           <p className="text-xs text-muted-foreground">Showing {Math.min(8, criticalTickets.length)} of {criticalTickets.length} critical/high priority</p>
-          <Link href="/tickets" className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">View all tickets <ArrowRight className="h-3.5 w-3.5" /></Link>
+          <Link href={viewAllHref} className="inline-flex items-center gap-1 text-sm font-semibold text-[#4361EE] hover:underline">View all tickets <ArrowRight className="h-3.5 w-3.5" /></Link>
         </div>
       </div>
 

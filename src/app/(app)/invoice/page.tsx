@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Pagination } from "@/components/ui/pagination";
@@ -508,9 +509,9 @@ export default function InvoicePage() {
         </div>
         {list.length === 0 && (
           <div className="flex flex-col items-center gap-2 p-12 text-center">
-            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground">🧾</div>
-            <p className="font-semibold">No invoices found</p>
-            <p className="text-sm text-muted-foreground">Try adjusting filters or create a new invoice.</p>
+            <EmptyStateCharacter variant="invoice" />
+            <p className="font-semibold">No invoices yet today</p>
+            <p className="text-sm text-muted-foreground">No invoices have been created today.</p>
           </div>
         )}
         {/* Footer — user-selectable page size (10/20/50/100); pinned invoices

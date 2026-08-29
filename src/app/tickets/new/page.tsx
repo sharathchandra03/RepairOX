@@ -742,13 +742,14 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
                 "backdrop-blur-sm",
                 // Thin light-black border + thin black shadow to differentiate boxes
                 "border-black/15 shadow-[0_1px_3px_rgba(0,0,0,0.16),0_2px_6px_-2px_rgba(0,0,0,0.12)]",
-                // Hover: light blue background + stronger shadow + blue border
-                "hover:bg-[#EEF2FF] hover:shadow-[0_12px_40px_-8px_rgba(67,97,238,0.22),0_4px_16px_-2px_rgba(0,0,0,0.14)]",
-                "hover:border-[#4361EE]/60",
+                // Hover: soft cool-white surface — a hair above pure white with a faint
+                // blue tint so it reads as a gentle highlight without clashing with the bg
+                "hover:bg-[#F7F9FF] hover:shadow-[0_16px_44px_-10px_rgba(67,97,238,0.38),0_6px_18px_-4px_rgba(0,0,0,0.16)]",
+                "hover:border-[#4361EE]",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40 focus-visible:ring-offset-2",
                 // Selected vs default
                 isSelected
-                  ? "bg-[#EEF2FF] border-[#4361EE] shadow-[0_0_0_1px_rgba(67,97,238,0.15),0_12px_32px_-6px_rgba(67,97,238,0.22)] ring-1 ring-[#4361EE]/20"
+                  ? "bg-[#F7F9FF] border-[#4361EE] shadow-[0_0_0_1px_rgba(67,97,238,0.25),0_14px_34px_-6px_rgba(67,97,238,0.3)] ring-1 ring-[#4361EE]/30"
                   : "bg-white border-black/15 dark:border-zinc-700/60"
               )}
               aria-label={`Create ${card.title}`}

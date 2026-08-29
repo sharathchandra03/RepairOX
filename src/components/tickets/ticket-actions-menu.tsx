@@ -2,6 +2,7 @@
 
 import { Eye, ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown, Pin, PinOff } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
+import { PushToInvoiceIcon } from "@/components/tickets/push-to-invoice-icon";
 import type { Ticket } from "@/lib/mock-data";
 
 export type TicketAction =
@@ -22,13 +23,47 @@ export type TicketAction =
 interface TicketActionsMenuProps {
   ticket: Ticket;
   onAction: (action: TicketAction, ticket: Ticket) => void;
+  /** True when this ticket already has a linked invoice (invoice.ticketId === ticket.id). */
+  hasInvoice?: boolean;
 }
 
-export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) {
+export function TicketActionsMenu({ ticket, onAction, hasInvoice = false }: TicketActionsMenuProps) {
   const isPinned = !!ticket.pinnedAt;
   return (
     <div className="flex items-center justify-end gap-2">
-      {/* Pin / Unpin — RepairOX violet accent (distinct from red/blue/green/amber) */}
+      {/* 1. Push to Invoice — first quick action. Uses the existing "invoice"
+             flow via onAction. Once an invoice exists it reflects that state
+             (disabled + green check) so no duplicate invoice is created. */}
+      {hasInvoice ? (
+        <span
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 cursor-default"
+          title="Invoice already generated"
+          aria-label="Invoice already generated"
+        >
+          {/* Same Push to Invoice icon, tinted green to signal the invoice
+              already exists. Black glyph keeps the ₹/arrow clearly visible. */}
+          <PushToInvoiceIcon className="h-3.5 w-3.5 text-foreground" />
+        </span>
+      ) : (
+        <button
+          onClick={() => onAction("invoice", ticket)}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+          title="Push to Invoice"
+        >
+          <PushToInvoiceIcon className="h-3.5 w-3.5" />
+        </button>
+      )}
+
+      {/* 2. View — opens the ticket (print preview). */}
+      <button
+        onClick={() => onAction("print-preview", ticket)}
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        title="Print Preview"
+      >
+        <Eye className="h-3.5 w-3.5" />
+      </button>
+
+      {/* 3. Pin / Unpin — RepairOX violet accent (distinct from red/blue/green/amber) */}
       <button
         onClick={() => onAction("pin", ticket)}
         className={
@@ -41,25 +76,7 @@ export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) 
         {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
       </button>
 
-      {/* Print Preview button (Eye icon — opens print preview) */}
-      <button
-        onClick={() => onAction("print-preview", ticket)}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
-        title="Print Preview"
-      >
-        <Eye className="h-3.5 w-3.5" />
-      </button>
-
-      {/* Direct edit button */}
-      <button
-        onClick={() => onAction("edit", ticket)}
-        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50"
-        title="Edit ticket"
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </button>
-
-      {/* More options dropdown */}
+      {/* 4. More options dropdown — Edit still lives here (unchanged). */}
       <Dropdown
         align="right"
         width="w-48"
@@ -81,12 +98,17 @@ export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) 
             <MenuItem icon={Eye} onClick={() => { onAction("view", ticket); close(); }}>
               View
             </MenuItem>
-            {/* 2. Push to Invoice — completed/disabled state preserved by caller;
+            {/* 2. Edit — full Edit functionality kept here after the pencil quick
+                   action was replaced by Push to Invoice. */}
+            <MenuItem icon={Pencil} onClick={() => { onAction("edit", ticket); close(); }}>
+              Edit
+            </MenuItem>
+            {/* 3. Push to Invoice — completed/disabled state preserved by caller;
                    no duplicate invoice action is created. */}
             <MenuItem icon={Receipt} onClick={() => { onAction("invoice", ticket); close(); }}>
               Push to Invoice
             </MenuItem>
-            {/* 3. Change Priority */}
+            {/* 4. Change Priority */}
             <MenuItem icon={AlertTriangle} onClick={() => { onAction("priority", ticket); close(); }}>
               Change Priority
             </MenuItem>

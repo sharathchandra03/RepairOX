@@ -15,6 +15,7 @@ import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
+import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
 import {
   TransferTicketDrawer, CommentDrawer,
@@ -211,6 +212,22 @@ export default function TicketsPage() {
       setCustomerTypeFilter("all");
       setTypeFilter("all");
       setQ("");
+      return;
+    }
+    // Deep-link filter context (e.g. from the Dashboard "Critical Tasks" card:
+    // /tickets?priority=critical). Only apply params that are actually present
+    // so direct visits keep their defaults.
+    const priority = searchParams.get("priority");
+    const status = searchParams.get("status");
+    const type = searchParams.get("type");
+    const tech = searchParams.get("tech");
+    if (priority || status || type || tech) {
+      if (priority) setPriorityFilter(priority);
+      if (status) setStatusFilter(status);
+      if (type) setTypeFilter(type);
+      if (tech) setTechFilter(tech);
+      // Show the full matching set regardless of when tickets were created.
+      setDateRange("all");
     }
   }, [searchParams]);
 
@@ -241,6 +258,9 @@ export default function TicketsPage() {
 
   // Priority change
   const [priorityTarget, setPriorityTarget] = useState<Ticket | null>(null);
+
+  // Push to Invoice confirmation
+  const [pushInvoiceTarget, setPushInvoiceTarget] = useState<Ticket | null>(null);
 
   // Tick for time-based highlights
   const [, setTick] = useState(0);
@@ -426,6 +446,30 @@ export default function TicketsPage() {
     if (action === "print-preview") { router.push(`/print/ticket/${encodeURIComponent(ticket.id)}?format=a4`); return; }
     if (action === "download-pdf") { downloadTicket(ticket); return; }
     if (action === "invoice") {
+      // Show a confirmation before pushing to invoice. The actual navigation
+      // (existing flow) runs on confirm via pushTicketToInvoice.
+      setPushInvoiceTarget(ticket);
+      return;
+    }
+    if (action === "delete") {
+      setDeleteTarget(ticket);
+      return;
+    }
+    if (action === "priority") {
+      setPriorityTarget(ticket);
+      return;
+    }
+    if (action === "pin") {
+      pinTicket(ticket.id, !ticket.pinnedAt);
+      return;
+    }
+    setActiveTicket(ticket);
+    setActiveDrawer(action);
+  }, [router, deleteTicket, downloadTicket, pinTicket]);
+
+  // Existing Push to Invoice flow — unchanged data-preservation logic, extracted
+  // so it can run after the confirmation dialog is accepted.
+  const pushTicketToInvoice = useCallback((ticket: Ticket) => {
       const p = new URLSearchParams();
       p.set("fromTicket", ticket.id);
       p.set("customer", ticket.customer);
@@ -466,23 +510,7 @@ export default function TicketsPage() {
       if (devices[0]?.imei) p.set("serial", devices[0].imei);
 
       router.push(`/invoice/create?${p.toString()}`);
-      return;
-    }
-    if (action === "delete") {
-      setDeleteTarget(ticket);
-      return;
-    }
-    if (action === "priority") {
-      setPriorityTarget(ticket);
-      return;
-    }
-    if (action === "pin") {
-      pinTicket(ticket.id, !ticket.pinnedAt);
-      return;
-    }
-    setActiveTicket(ticket);
-    setActiveDrawer(action);
-  }, [router, deleteTicket, downloadTicket, pinTicket]);
+  }, [router]);
 
   const closeDrawer = useCallback(() => { setActiveDrawer(null); setActiveTicket(null); }, []);
 
@@ -931,7 +959,7 @@ export default function TicketsPage() {
                   <span className="font-semibold tabular-nums text-sm">{formatINR(t.amount)}</span>
                   {isWaiting && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-[#922B21] ring-1 ring-inset ring-red-200/60"><Clock className="h-2.5 w-2.5" />{elapsed}m+</span>}
                 </div>
-                <TicketActionsMenu ticket={t} onAction={handleAction} />
+                <TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={ticketsWithInvoice.has(t.id)} />
               </div>
             </motion.div>
           );
@@ -958,6 +986,22 @@ export default function TicketsPage() {
       <CheckoutDrawer open={activeDrawer === "checkout"} onClose={closeDrawer} ticket={activeTicket} />
       <EmailReceiptDrawer open={activeDrawer === "email-receipt"} onClose={closeDrawer} ticket={activeTicket} />
       <PrintDrawer open={activeDrawer === "print"} onClose={closeDrawer} ticket={activeTicket} />
+
+      {/* Push to Invoice Confirmation — non-destructive. On confirm it runs the
+          existing push-to-invoice flow (pushTicketToInvoice); on cancel it just
+          closes with no changes. */}
+      <ConfirmDialog
+        open={!!pushInvoiceTarget}
+        onClose={() => setPushInvoiceTarget(null)}
+        onConfirm={() => {
+          if (pushInvoiceTarget) pushTicketToInvoice(pushInvoiceTarget);
+        }}
+        title="Push this ticket to invoice?"
+        description="Are you sure you want to create an invoice from this ticket?"
+        confirmLabel="Yes, Push to Invoice"
+        cancelLabel="Cancel"
+        danger={false}
+      />
 
       {/* Delete Confirmation */}
       <ConfirmDialog
@@ -1309,7 +1353,7 @@ function renderCell(
     case "amount":
       return <span className="font-semibold tabular-nums whitespace-nowrap">{formatINR(t.amount)}</span>;
     case "actions":
-      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} /></div>;
+      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={hasInvoice} /></div>;
     default:
       return null;
   }
@@ -1318,9 +1362,9 @@ function renderCell(
 function EmptyRow() {
   return (
     <div className="flex flex-col items-center gap-2 p-12 text-center">
-      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground">🔍</div>
-      <p className="font-semibold">No tickets match your filters</p>
-      <p className="text-sm text-muted-foreground">Try a different status, date range, or clear your search.</p>
+      <EmptyStateCharacter variant="ticket" />
+      <p className="font-semibold">No tickets yet today</p>
+      <p className="text-sm text-muted-foreground">No repair tickets have been created today.</p>
     </div>
   );
 }

@@ -133,19 +133,17 @@ export function CategoryWheel({
   return (
     <div className="relative">
       {/* ---------- Wheel stage ---------- */}
-      <div className="relative h-[280px] overflow-hidden rounded-[28px] border border-[#B3BFF6]/60 sm:h-[320px]">
+      <div className="relative h-[280px] overflow-hidden rounded-[28px] border border-[#8FA2F0] sm:h-[320px]">
         {/* Brand wash background */}
         <div className="absolute inset-0 bg-gradient-to-br from-indigo-200/50 via-indigo-100/30 to-violet-200/40" />
         {/* Wave grid */}
         <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-30 [mask-image:radial-gradient(ellipse_at_center,black_40%,transparent_75%)]" />
 
-        {/* Radial brand glow behind centre */}
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute left-1/2 top-1/2 h-[440px] w-[640px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl"
-            style={{ background: "radial-gradient(closest-side, rgba(79,70,229,0.45), rgba(99,102,241,0) 70%)" }}
-          />
-        </div>
+        {/* Brand glow — spread evenly across the stage instead of a centre blob */}
+        <div
+          className="pointer-events-none absolute inset-0"
+          style={{ background: "linear-gradient(120deg, rgba(99,102,241,0.13) 0%, rgba(79,70,229,0.16) 45%, rgba(139,92,246,0.13) 100%)" }}
+        />
 
         {/* Wheel viewport - items absolutely positioned, animated transforms */}
         <div className="absolute inset-0 grid place-items-center [perspective:1100px]">
@@ -231,7 +229,7 @@ export function CategoryWheel({
           onClick={goPrev}
           disabled={active === 0}
           aria-label="Previous"
-          className="absolute left-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-zinc-700 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] ring-1 ring-zinc-200 backdrop-blur transition hover:bg-white disabled:opacity-40"
+          className="absolute left-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-zinc-700 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] ring-1 ring-black/25 backdrop-blur transition hover:bg-white disabled:opacity-40"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -239,7 +237,7 @@ export function CategoryWheel({
           onClick={goFwd}
           disabled={active === CATS.length - 1}
           aria-label="Next"
-          className="absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-zinc-700 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] ring-1 ring-zinc-200 backdrop-blur transition hover:bg-white disabled:opacity-40"
+          className="absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-zinc-700 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] ring-1 ring-black/25 backdrop-blur transition hover:bg-white disabled:opacity-40"
         >
           <ChevronRight className="h-5 w-5" />
         </button>
