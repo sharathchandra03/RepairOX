@@ -451,24 +451,27 @@ function InvoiceWizard() {
   }
 
   return (
-    <div className="relative flex flex-col min-h-full bg-gradient-to-b from-[hsl(228,30%,96%)] via-white to-[hsl(228,30%,96%)]">
-      {/* Background */}
+    <div className="relative -mx-4 -mt-2 -mb-4 flex min-h-[calc(100%+1.5rem)] flex-col bg-[hsl(var(--background))] sm:-mx-6 lg:-mx-8">
+      {/* Background — continuous RepairOX workspace canvas */}
       <div className="pointer-events-none absolute inset-0 bg-grid-faint opacity-15 [mask-image:radial-gradient(ellipse_at_top,black_30%,transparent_70%)]" />
       <div className="pointer-events-none absolute -top-40 left-1/2 h-[400px] w-[700px] -translate-x-1/2 rounded-full bg-gradient-to-br from-[#B3BFF6]/20 to-[#4361EE]/8 blur-3xl" />
 
       {/* Top bar */}
-      <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
-        <button onClick={goBack} disabled={step === 1} className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
-          <ArrowLeft className="h-4 w-4" />
+      <div className="relative mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
+        <div className="flex-1" />
+
+        {/* Back + Breadcrumb — centered group */}
+        <button onClick={goBack} disabled={step === 1} className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
+          <ArrowLeft className="h-5 w-5" />
         </button>
 
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-xs text-muted-foreground">
+        <nav className="flex items-center gap-2 text-sm text-muted-foreground">
           <button onClick={() => attemptNav("/dashboard")} className="hover:text-foreground transition">Dashboard</button>
           <span>/</span>
           <button onClick={() => attemptNav("/invoice")} className="hover:text-foreground transition">Invoices</button>
           <span>/</span>
-          <span className="text-foreground font-medium">{isEdit ? `Edit ${editId}` : "Create Invoice"}</span>
+          <span className="text-foreground font-semibold">{isEdit ? `Edit ${editId}` : "Create Invoice"}</span>
         </nav>
 
         <div className="flex-1" />
@@ -482,7 +485,7 @@ function InvoiceWizard() {
       </div>
 
       {/* Stepper */}
-      <div className="relative mx-auto max-w-6xl px-4 pt-2 pb-2 sm:px-6 lg:px-8">
+      <div className="relative mx-auto w-full max-w-6xl px-4 pt-2 pb-2 sm:px-6 lg:px-8">
         <div className="hidden md:flex items-center justify-between">
           {STEPS.slice(0, 6).map((s, i) => {
             const done = step > s.id;
@@ -524,7 +527,7 @@ function InvoiceWizard() {
       </div>
 
       {/* Step Content */}
-      <div className="relative mx-auto max-w-6xl px-4 pt-4 pb-6 sm:px-6 lg:px-8 flex-1 min-h-0 overflow-y-auto">
+      <div className="relative mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6 lg:px-8">
         <AnimatePresence mode="wait">
           <motion.div key={step} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
             {step === 1 && <StepCustomer form={form} updateForm={updateForm} />}
@@ -540,7 +543,7 @@ function InvoiceWizard() {
       {/* Bottom nav */}
       {step < 7 && (
         <div className="sticky bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-2px_8px_-2px_rgba(0,0,0,0.06)]">
-          <div className="mx-auto flex max-w-6xl items-center justify-end px-4 py-4 sm:px-6 lg:px-8">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-end px-4 py-4 sm:px-6 lg:px-8">
             {step < 6 ? (
               <Button size="md" onClick={goNext} className="mr-[3px]">
                 Next <ArrowRight className="h-4 w-4" />
@@ -637,7 +640,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card shadow-card">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card shadow-card">
       {/* Invoice Type — compact inline selector */}
       <div className="border-b border-border px-6 py-5 sm:px-8">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Invoice Type</p>
@@ -734,7 +737,7 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
   const d = form.details;
   const set = (k: keyof typeof d, v: string) => updateForm((f) => ({ ...f, details: { ...f.details, [k]: v } }));
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-10">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-card sm:p-10">
       <h2 className="font-display text-lg font-bold mb-1">Invoice Details</h2>
       <p className="text-sm text-muted-foreground mb-8">Reference, dates, and assignment.</p>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -894,7 +897,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
   const deviceSubtotal = activeDevice.parts.reduce((s, p) => s + p.total, 0);
 
   return (
-    <div className="space-y-4">
+    <div className="mx-auto max-w-4xl space-y-4">
       {/* Device Tabs */}
       <div className="rounded-2xl border border-border bg-card shadow-card">
         <div className="border-b border-border px-6 py-2.5 sm:px-8">
@@ -1221,7 +1224,7 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
   const n = form.notes;
   const set = (k: keyof typeof n, v: string) => updateForm((f) => ({ ...f, notes: { ...f.notes, [k]: v } }));
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
       <h2 className="font-display text-lg font-bold mb-1">Notes & Terms</h2>
       <p className="text-sm text-muted-foreground mb-6">Add any notes, warranty terms, or branding.</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -1240,7 +1243,7 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
   const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
   const statusLabel = (form.details.status || "draft").replace(/\b\w/g, (c) => c.toUpperCase());
   return (
-    <div className="mx-auto w-full max-w-6xl">
+    <div className="mx-auto w-full max-w-4xl">
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         {/* Header band */}
         <div className="flex items-center justify-between gap-3 border-b border-border bg-gradient-to-r from-[#4361EE]/[0.06] to-transparent px-6 py-3 sm:px-8">
