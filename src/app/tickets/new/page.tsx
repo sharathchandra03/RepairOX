@@ -740,15 +740,16 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
                 "group relative flex flex-col items-center text-center rounded-2xl border p-3 sm:p-4 cursor-pointer",
                 "transition-[background,border-color,box-shadow] duration-[350ms] ease-[cubic-bezier(0.32,0.72,0,1)]",
                 "backdrop-blur-sm",
-                "shadow-[0_1px_3px_rgba(20,30,80,0.04),0_4px_12px_-4px_rgba(20,30,80,0.06)]",
+                // Thin light-black border + thin black shadow to differentiate boxes
+                "border-black/15 shadow-[0_1px_3px_rgba(0,0,0,0.16),0_2px_6px_-2px_rgba(0,0,0,0.12)]",
                 // Hover: light blue background + stronger shadow + blue border
-                "hover:bg-[#EEF2FF] hover:shadow-[0_12px_40px_-8px_rgba(67,97,238,0.22),0_4px_16px_-2px_rgba(20,30,80,0.08)]",
+                "hover:bg-[#EEF2FF] hover:shadow-[0_12px_40px_-8px_rgba(67,97,238,0.22),0_4px_16px_-2px_rgba(0,0,0,0.14)]",
                 "hover:border-[#4361EE]/60",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40 focus-visible:ring-offset-2",
                 // Selected vs default
                 isSelected
                   ? "bg-[#EEF2FF] border-[#4361EE] shadow-[0_0_0_1px_rgba(67,97,238,0.15),0_12px_32px_-6px_rgba(67,97,238,0.22)] ring-1 ring-[#4361EE]/20"
-                  : "bg-white/80 border-white/60 dark:border-zinc-700/60"
+                  : "bg-white border-black/15 dark:border-zinc-700/60"
               )}
               aria-label={`Create ${card.title}`}
             >

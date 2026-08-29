@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
 import { useStore } from "@/lib/store";
+import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
@@ -140,6 +141,9 @@ function InvoiceWizard() {
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [showCompletion, setShowCompletion] = useState(false);
   const [createdInvoiceId, setCreatedInvoiceId] = useState("");
+  // Tracks the id of a draft persisted from this flow, so repeated Save Draft
+  // clicks update the same record instead of creating duplicates.
+  const [draftId, setDraftId] = useState<string | null>(null);
 
   // Pre-fill when editing
   useEffect(() => {
@@ -295,8 +299,10 @@ function InvoiceWizard() {
     return { subtotal, discount, sgst, cgst, sgstRate, cgstRate, gstRate, tax, total };
   }, [form.devices, form.items, form.pricing]);
 
-  // Submit
-  const handleSubmit = useCallback(async () => {
+  // Build a full Invoice record from the current form. An optional status
+  // override lets callers (e.g. Save Draft) force a specific status without
+  // touching the rest of the invoice-building logic.
+  const buildInvoice = useCallback((statusOverride?: InvoiceStatus): Invoice => {
     // Build invoice device records for storage
     const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
     const invoiceDevices: InvoiceDeviceRecord[] = hasDevices ? form.devices.map((d) => ({
@@ -322,19 +328,19 @@ function InvoiceWizard() {
     const allItems = hasDevices ? form.devices.flatMap((d) => d.parts) : form.items;
 
     const invoice: Invoice = {
-      id: editId || genInvoiceId(form.details.invoiceType as InvoiceType, invoices),
+      id: editId || draftId || genInvoiceId(form.details.invoiceType as InvoiceType, invoices),
       reference: form.details.reference || `CORP-${Math.floor(1000 + Math.random() * 9000)}`,
       invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
       phone: form.customer.phone,
       email: form.customer.email || undefined,
       company: form.customer.company || undefined,
-      status: form.details.status,
+      status: statusOverride ?? form.details.status,
       createdAt: isEdit ? (invoices.find((i) => i.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       dueDate: form.details.dueDate || new Date(Date.now() + 7 * 86_400_000).toISOString(),
       paidAmount: isEdit
         ? (invoices.find((i) => i.id === editId)?.paidAmount || 0)
-        : (form.details.status === "paid" ? totals.total : 0),
+        : ((statusOverride ?? form.details.status) === "paid" ? totals.total : 0),
       items: allItems,
       subtotal: totals.subtotal,
       discount: totals.discount,
@@ -358,6 +364,13 @@ function InvoiceWizard() {
       devices: invoiceDevices.length > 0 ? invoiceDevices : undefined,
     };
 
+    return invoice;
+  }, [form, totals, editId, isEdit, invoices, draftId]);
+
+  // Submit (finalize / save)
+  const handleSubmit = useCallback(async () => {
+    const invoice = buildInvoice();
+
     setDirty(false);
     if (isEdit) {
       updateInvoice(editId!, invoice);
@@ -371,7 +384,41 @@ function InvoiceWizard() {
       setCreatedInvoiceId(savedId || invoice.id);
       setShowSuccessAnimation(true);
     }
-  }, [form, totals, editId, isEdit, invoices, addInvoice, updateInvoice, router]);
+  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router]);
+
+  // Save Draft — persist current form to the DB with status "draft" without
+  // finalizing the invoice or leaving the flow. Re-uses the same invoice store
+  // logic as a normal save. Subsequent saves update the same draft record.
+  const [savingDraft, setSavingDraft] = useState(false);
+  const handleSaveDraft = useCallback(async () => {
+    if (savingDraft) return;
+    setSavingDraft(true);
+    try {
+      const invoice = buildInvoice("draft");
+
+      if (isEdit) {
+        // Editing an existing invoice: update it in place, keeping user in flow.
+        await updateInvoice(editId!, invoice);
+        setDirty(false);
+        toast.success("Draft saved", { description: `Invoice ${invoice.id} saved as draft.` });
+      } else if (draftId) {
+        // Already saved this draft once — update the same record.
+        await updateInvoice(draftId, { ...invoice, id: draftId });
+        setDirty(false);
+        toast.success("Draft saved", { description: `Invoice ${draftId} updated.` });
+      } else {
+        // First draft save for a new invoice — create the record.
+        const savedId = await addInvoice(invoice);
+        if (savedId) {
+          setDraftId(savedId);
+          setDirty(false);
+          toast.success("Draft saved", { description: `Invoice ${savedId} saved as draft.` });
+        }
+      }
+    } finally {
+      setSavingDraft(false);
+    }
+  }, [savingDraft, buildInvoice, isEdit, editId, draftId, addInvoice, updateInvoice]);
 
   // Step navigation
   const goNext = () => setStep((s) => Math.min(s + 1, 6));
@@ -417,7 +464,7 @@ function InvoiceWizard() {
 
         {/* Breadcrumb */}
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          <button onClick={() => attemptNav("/dashboard")} className="hover:text-foreground transition">Home</button>
+          <button onClick={() => attemptNav("/dashboard")} className="hover:text-foreground transition">Dashboard</button>
           <span>/</span>
           <button onClick={() => attemptNav("/invoice")} className="hover:text-foreground transition">Invoices</button>
           <span>/</span>
@@ -426,8 +473,8 @@ function InvoiceWizard() {
 
         <div className="flex-1" />
 
-        <Button variant="outline" size="sm" onClick={() => { setDirty(false); router.push("/invoice"); }}>
-          <Save className="h-3.5 w-3.5" /> Save Draft
+        <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={savingDraft}>
+          <Save className="h-3.5 w-3.5" /> {savingDraft ? "Saving…" : "Save Draft"}
         </Button>
         <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Close">
           <X className="h-4 w-4" />
@@ -485,7 +532,7 @@ function InvoiceWizard() {
             {step === 3 && <StepProducts form={form} updateForm={updateForm} />}
             {step === 4 && <StepPricing form={form} updateForm={updateForm} totals={totals} />}
             {step === 5 && <StepNotes form={form} updateForm={updateForm} />}
-            {step === 6 && <StepReview form={form} totals={totals} onSubmit={handleSubmit} isEdit={isEdit} />}
+            {step === 6 && <StepReview form={form} totals={totals} isEdit={isEdit} />}
           </motion.div>
         </AnimatePresence>
       </div>
@@ -493,16 +540,13 @@ function InvoiceWizard() {
       {/* Bottom nav */}
       {step < 7 && (
         <div className="sticky bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-2px_8px_-2px_rgba(0,0,0,0.06)]">
-          <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-4 sm:px-6 lg:px-8">
-            <Button variant="outline" size="md" onClick={goBack} disabled={step === 1}>
-              <ArrowLeft className="h-4 w-4" /> Previous
-            </Button>
+          <div className="mx-auto flex max-w-6xl items-center justify-end px-4 py-4 sm:px-6 lg:px-8">
             {step < 6 ? (
-              <Button size="md" onClick={goNext}>
+              <Button size="md" onClick={goNext} className="mr-[3px]">
                 Next <ArrowRight className="h-4 w-4" />
               </Button>
             ) : (
-              <Button size="md" onClick={handleSubmit}>
+              <Button size="md" onClick={handleSubmit} className="mr-[3px]">
                 <Save className="h-4 w-4" /> {isEdit ? "Save Invoice" : "Create Invoice"}
               </Button>
             )}
@@ -853,13 +897,11 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
     <div className="space-y-4">
       {/* Device Tabs */}
       <div className="rounded-2xl border border-border bg-card shadow-card">
-        <div className="border-b border-border px-6 py-3 sm:px-8">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
-            <Button size="sm" onClick={addDevice}><Plus className="h-3.5 w-3.5" /> Add Device</Button>
-          </div>
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
-            {form.devices.map((dev, idx) => {
+        <div className="border-b border-border px-6 py-2.5 sm:px-8">
+          <div className="flex items-center gap-3">
+            <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
+            <div className="flex flex-1 items-center gap-1.5 overflow-x-auto">
+              {form.devices.map((dev, idx) => {
               const label = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
               const isActive = idx === activeIdx;
               return (
@@ -885,14 +927,16 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                 </div>
               );
             })}
+            </div>
+            <Button size="sm" className="shrink-0" onClick={addDevice}><Plus className="h-3.5 w-3.5" /> Add Device</Button>
           </div>
         </div>
 
         {/* Active Device Form */}
-        <div className="px-6 py-5 sm:px-8 space-y-5">
+        <div className="px-6 py-4 sm:px-8 space-y-4">
           {/* Device Details */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Device Details</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Device Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <DeviceBrandModelSelector
                 brand={activeDevice.brand}
@@ -927,7 +971,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
           {/* Job Details */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Job Details</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Job Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
               <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-11" /></div>
               <div className="space-y-1">
@@ -988,7 +1032,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
           {/* Parts for this device */}
           <div>
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Parts & Services</p>
               <div className="flex gap-1.5">
                 <Button size="sm" variant="outline" onClick={() => setShowInventorySearch(true)}><Search className="h-3.5 w-3.5" /> Search Item</Button>
@@ -1192,124 +1236,166 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
 
 /* ─── Step 6: Review ─────────────────────────────────────────────────── */
 
-function StepReview({ form, totals, onSubmit, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number }; onSubmit: () => void; isEdit: boolean }) {
+function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number }; isEdit: boolean }) {
   const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
+  const statusLabel = (form.details.status || "draft").replace(/\b\w/g, (c) => c.toUpperCase());
   return (
-    <div className="space-y-4">
-      <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
-        <h2 className="font-display text-lg font-bold mb-4">Review Invoice</h2>
-        <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-          {/* Customer summary */}
-          <div className="rounded-xl border border-border p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Customer</p>
-            <p className="font-semibold">{form.customer.name || "—"}</p>
-            <p className="text-xs text-muted-foreground">{form.customer.phone}</p>
-            {form.customer.company && <p className="text-xs text-muted-foreground">{form.customer.company}</p>}
-          </div>
-          {/* Details summary */}
-          <div className="rounded-xl border border-border p-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Details</p>
-            <p className="text-sm"><span className="text-muted-foreground">Ref:</span> {form.details.reference || "Auto-generated"}</p>
-            <p className="text-sm"><span className="text-muted-foreground">Due:</span> {form.details.dueDate || "7 days from now"}</p>
-            <p className="text-sm"><span className="text-muted-foreground">Status:</span> {form.details.status}</p>
-          </div>
-        </div>
-
-        {/* Devices Breakdown */}
-        {hasDevices && (
-          <div className="mt-4 space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
-            {form.devices.map((dev, idx) => {
-              const devLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
-              const devTotal = dev.parts.reduce((s, p) => s + p.total, 0);
-              return (
-                <div key={dev.id} className="rounded-xl border border-border overflow-hidden">
-                  <div className="flex items-center justify-between bg-muted/40 px-4 py-2">
-                    <div className="flex items-center gap-2">
-                      <span className="grid h-5 w-5 place-items-center rounded bg-[#4361EE] text-[9px] font-bold text-white">{idx + 1}</span>
-                      <span className="text-sm font-semibold">{devLabel}</span>
-                      {dev.imei && <span className="text-[10px] text-muted-foreground font-mono ml-2">{dev.imei}</span>}
-                    </div>
-                    <span className="text-sm font-bold tabular-nums">{formatINR(devTotal)}</span>
-                  </div>
-                  {dev.issue && (
-                    <div className="px-4 py-1.5 text-[11px] text-muted-foreground border-b border-border bg-muted/20">
-                      <span className="font-medium">Issue:</span> {dev.issue} {dev.technician && <> · <span className="font-medium">Tech:</span> {dev.technician}</>}
-                    </div>
-                  )}
-                  <table className="w-full text-sm">
-                    <thead className="bg-muted/30">
-                      <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                        <th className="px-3 py-1.5 text-left">Item</th>
-                        <th className="py-1.5 text-center w-14">Qty</th>
-                        <th className="py-1.5 text-right w-20">Price</th>
-                        <th className="py-1.5 text-right w-20 pr-3">Total</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {dev.parts.map((item) => (
-                        <tr key={item.id} className="border-t border-border">
-                          <td className="px-3 py-1.5 font-medium">{item.name || "Unnamed"}</td>
-                          <td className="py-1.5 text-center tabular-nums">{item.qty}</td>
-                          <td className="py-1.5 text-right tabular-nums">{formatINR(item.price)}</td>
-                          <td className="py-1.5 text-right tabular-nums font-medium pr-3">{formatINR(item.total)}</td>
-                        </tr>
-                      ))}
-                      {dev.parts.length === 0 && <tr><td colSpan={4} className="px-3 py-3 text-center text-muted-foreground text-xs">No parts</td></tr>}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })}
-          </div>
-        )}
-
-        {/* Legacy flat items (no devices) */}
-        {!hasDevices && (
-          <div className="mt-4">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Line Items ({form.items.length})</p>
-            <div className="rounded-xl border border-border overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/60">
-                  <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                    <th className="px-3 py-2 text-left">Item</th>
-                    <th className="py-2 text-center w-14">Qty</th>
-                    <th className="py-2 text-right w-20">Price</th>
-                    <th className="py-2 text-right w-20 pr-3">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {form.items.map((item) => (
-                    <tr key={item.id} className="border-t border-border">
-                      <td className="px-3 py-2 font-medium">{item.name || "Unnamed item"}</td>
-                      <td className="py-2 text-center tabular-nums">{item.qty}</td>
-                      <td className="py-2 text-right tabular-nums">{formatINR(item.price)}</td>
-                      <td className="py-2 text-right tabular-nums pr-3 font-medium">{formatINR(item.total)}</td>
-                    </tr>
-                  ))}
-                  {form.items.length === 0 && <tr><td colSpan={4} className="px-3 py-4 text-center text-muted-foreground">No items</td></tr>}
-                </tbody>
-              </table>
+    <div className="mx-auto w-full max-w-6xl">
+      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+        {/* Header band */}
+        <div className="flex items-center justify-between gap-3 border-b border-border bg-gradient-to-r from-[#4361EE]/[0.06] to-transparent px-6 py-3 sm:px-8">
+          <div className="flex items-center gap-2.5">
+            <span className="grid h-8 w-8 place-items-center rounded-xl bg-[#4361EE]/10 text-[#4361EE]"><ClipboardCheck className="h-4 w-4" /></span>
+            <div>
+              <h2 className="font-display text-base font-bold leading-tight">Review Invoice</h2>
+              <p className="text-[11px] text-muted-foreground">Confirm the details before {isEdit ? "saving" : "creating"}.</p>
             </div>
           </div>
-        )}
-
-        {/* Totals */}
-        <div className="mt-4 flex justify-end">
-          <div className="w-full max-w-xs rounded-xl border border-border p-4 space-y-1.5 text-sm">
-            <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatINR(totals.subtotal)}</span></div>
-            {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
-            {totals.sgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div>}
-            {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({totals.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
-            <div className="flex justify-between border-t border-border pt-2 font-bold"><span>Total</span><span className="tabular-nums">{formatINR(totals.total)}</span></div>
-          </div>
+          <span className="shrink-0 rounded-full bg-[#4361EE]/10 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">{statusLabel}</span>
         </div>
-      </div>
 
-      <div className="flex justify-end">
-        <Button size="lg" onClick={onSubmit}>
-          <Save className="h-4 w-4" /> {isEdit ? "Save Invoice" : "Create Invoice"}
-        </Button>
+        {/* Two-column body — sections are paired row-by-row so the two boxes
+            on each row share the same height. Short boxes distribute their
+            content to fill the matched height. */}
+        <div className="grid grid-cols-1 items-stretch gap-x-6 gap-y-5 p-6 sm:p-8 lg:grid-cols-2 lg:auto-rows-fr">
+          {/* Row 1 — Customer / Line Items (or Devices) */}
+          <section className="flex flex-col">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
+            <div className="flex flex-1 flex-col justify-center rounded-xl border border-border bg-muted/20 p-4">
+              <p className="text-sm font-semibold leading-tight">{form.customer.name || "Walk-in Customer"}</p>
+              <div className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                {form.customer.phone && <p>{form.customer.phone}</p>}
+                {form.customer.email && <p>{form.customer.email}</p>}
+                {form.customer.company && <p>{form.customer.company}</p>}
+                {!form.customer.phone && !form.customer.email && !form.customer.company && <p className="italic">No contact details</p>}
+              </div>
+            </div>
+          </section>
+
+          {hasDevices ? (
+            <section className="flex flex-col">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
+              <div className="flex flex-1 flex-col gap-3">
+                {form.devices.map((dev, idx) => {
+                  const devLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+                  const devTotal = dev.parts.reduce((s, p) => s + p.total, 0);
+                  return (
+                    <div key={dev.id} className="overflow-hidden rounded-xl border border-border">
+                      <div className="flex items-center justify-between bg-muted/40 px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="grid h-5 w-5 place-items-center rounded bg-[#4361EE] text-[9px] font-bold text-white">{idx + 1}</span>
+                          <span className="text-sm font-semibold">{devLabel}</span>
+                          {dev.imei && <span className="ml-2 font-mono text-[10px] text-muted-foreground">{dev.imei}</span>}
+                        </div>
+                        <span className="text-sm font-bold tabular-nums">{formatINR(devTotal)}</span>
+                      </div>
+                      {dev.issue && (
+                        <div className="border-b border-border bg-muted/20 px-4 py-1.5 text-[11px] text-muted-foreground">
+                          <span className="font-medium">Issue:</span> {dev.issue} {dev.technician && <> · <span className="font-medium">Tech:</span> {dev.technician}</>}
+                        </div>
+                      )}
+                      <table className="w-full text-sm">
+                        <thead className="bg-muted/30">
+                          <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            <th className="px-4 py-1.5 text-left">Item</th>
+                            <th className="w-14 py-1.5 text-center">Qty</th>
+                            <th className="w-20 py-1.5 text-right">Price</th>
+                            <th className="w-20 py-1.5 pr-4 text-right">Total</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {dev.parts.map((item) => (
+                            <tr key={item.id} className="border-t border-border">
+                              <td className="px-4 py-1.5 font-medium">{item.name || "Unnamed"}</td>
+                              <td className="py-1.5 text-center tabular-nums">{item.qty}</td>
+                              <td className="py-1.5 text-right tabular-nums">{formatINR(item.price)}</td>
+                              <td className="py-1.5 pr-4 text-right font-medium tabular-nums">{formatINR(item.total)}</td>
+                            </tr>
+                          ))}
+                          {dev.parts.length === 0 && <tr><td colSpan={4} className="px-4 py-3 text-center text-xs text-muted-foreground">No parts</td></tr>}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          ) : (
+            <section className="flex flex-col">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Line Items ({form.items.length})</p>
+              <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-border">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted/40">
+                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                      <th className="px-4 py-2 text-left">Item</th>
+                      <th className="w-14 py-2 text-center">Qty</th>
+                      <th className="w-20 py-2 text-right">Price</th>
+                      <th className="w-20 py-2 pr-4 text-right">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {form.items.map((item) => (
+                      <tr key={item.id} className="border-t border-border">
+                        <td className="px-4 py-2 font-medium">{item.name || "Unnamed item"}</td>
+                        <td className="py-2 text-center tabular-nums">{item.qty}</td>
+                        <td className="py-2 text-right tabular-nums">{formatINR(item.price)}</td>
+                        <td className="py-2 pr-4 text-right font-medium tabular-nums">{formatINR(item.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {form.items.length === 0 && (
+                  <div className="flex flex-1 items-center justify-center py-6 text-sm text-muted-foreground">No items</div>
+                )}
+              </div>
+            </section>
+          )}
+
+          {/* Row 2 — Details / Summary. Rows stay grouped at the top; the blue
+              Total bar sits directly under the line items at a natural size. */}
+          <section className="flex flex-col">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Details</p>
+            <div className="flex flex-1 flex-col rounded-xl border border-border bg-muted/20 p-4 text-[13px]">
+              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Reference</span><span className="font-medium">{form.details.reference || "Auto-generated"}</span></div>
+              <div className="h-px bg-border/50" />
+              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Due Date</span><span className="font-medium">{form.details.dueDate || "7 days from now"}</span></div>
+              <div className="h-px bg-border/50" />
+              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Status</span><span className="rounded-md bg-[#4361EE]/10 px-2 py-0.5 text-xs font-semibold text-[#4361EE]">{statusLabel}</span></div>
+            </div>
+          </section>
+
+          <section className="flex flex-col">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
+            <div className="flex flex-1 flex-col rounded-xl border border-border bg-muted/20 p-4 text-[13px]">
+              <div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatINR(totals.subtotal)}</span></div>
+              {totals.discount > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div></>}
+              {totals.sgst > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div></>}
+              {totals.cgst > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">CGST ({totals.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div></>}
+              <div className="mt-3 flex items-center justify-between rounded-lg bg-[#4361EE]/10 px-3.5 py-2.5">
+                <span className="text-sm font-semibold text-foreground">Total</span>
+                <span className="font-display text-base font-bold tabular-nums text-[#4361EE]">{formatINR(totals.total)}</span>
+              </div>
+            </div>
+          </section>
+
+          {/* Notes / payment — spans full width below the paired rows */}
+          {(form.pricing.paymentMode || form.notes.notes) && (
+            <section className="flex flex-col lg:col-span-2">
+              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Notes</p>
+              <div className="rounded-xl border border-border bg-muted/20 p-4 text-sm">
+                {form.pricing.paymentMode && (
+                  <div className={form.notes.notes ? "mb-2 border-b border-border/60 pb-2" : undefined}>
+                    <p className="text-xs text-muted-foreground">Payment Mode</p>
+                    <p className="font-medium capitalize">{form.pricing.paymentMode}</p>
+                  </div>
+                )}
+                {form.notes.notes && (
+                  <p className="whitespace-pre-line text-xs leading-relaxed text-muted-foreground">{form.notes.notes}</p>
+                )}
+              </div>
+            </section>
+          )}
+        </div>
       </div>
     </div>
   );

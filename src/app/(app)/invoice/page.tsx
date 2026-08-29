@@ -480,7 +480,7 @@ export default function InvoicePage() {
                   />
                 </th>
                 {activeInvCols.map((col) => (
-                  <th key={col.id} className={cn("py-3 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")}>{col.label}</th>
+                  <th key={col.id} className={cn("py-3 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-[55px]", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right")}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -490,14 +490,14 @@ export default function InvoicePage() {
                   onClick={() => router.push(`/invoice/${inv.id}`)}
                   className={cn("group cursor-pointer border-t border-border transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
                 >
-                  <td className="w-10 px-3 py-3.5" onClick={(e) => e.stopPropagation()}>
+                  <td className="w-10 px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(inv.id)}
                       onChange={() => setSelected((prev) => { const n = new Set(prev); n.has(inv.id) ? n.delete(inv.id) : n.add(inv.id); return n; })}
                       className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-3.5 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
                       {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt))}
                     </td>
                   ))}
@@ -730,24 +730,24 @@ function renderInvCell(
         </span>
       </span>
     );
-    case "reference": return <span className="text-muted-foreground whitespace-nowrap text-[12px]">{inv.reference}</span>;
+    case "reference": return <span className="text-muted-foreground whitespace-nowrap text-[13px] leading-snug">{inv.reference}</span>;
     case "customer": return (
-      <div className="flex items-center gap-2.5">
-        <Avatar name={inv.customer} size={28} ticketType={ticketType ?? "na"} />
+      <div className="flex items-center gap-3">
+        <Avatar name={inv.customer} size={30} ticketType={ticketType ?? "na"} />
         <div className="min-w-0">
-          <p className="text-[13px] font-medium truncate leading-tight">{inv.customer}</p>
-          {inv.company && <p className="text-[11px] text-muted-foreground truncate">{inv.company}</p>}
+          <p className="text-sm font-medium truncate leading-snug">{inv.customer}</p>
+          {inv.company && <p className="text-[12px] text-muted-foreground truncate leading-snug">{inv.company}</p>}
         </div>
       </div>
     );
-    case "date": return <span className="text-[12px] text-muted-foreground whitespace-nowrap">{fmtDate(inv.createdAt)}</span>;
+    case "date": return <span className="text-[13px] text-muted-foreground whitespace-nowrap leading-snug">{fmtDate(inv.createdAt)}</span>;
     case "status": return (
-      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
+      <span className={`ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
         <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
       </span>
     );
     case "category": return (
-      <span className={`inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${
+      <span className={`ml-[7px] inline-flex items-center rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${
         (inv.serviceCategory || "service") === "accessories"
           ? "bg-violet-50 text-violet-700 ring-violet-200"
           : "bg-sky-50 text-sky-700 ring-sky-200"
@@ -755,8 +755,8 @@ function renderInvCell(
         {(inv.serviceCategory || "service") === "accessories" ? "Accessories" : "Service"}
       </span>
     );
-    case "paid": return <span className="tabular-nums text-[12px] font-medium">{formatINR(inv.paidAmount)}</span>;
-    case "tax": return <span className="tabular-nums text-[12px] text-muted-foreground">{formatINR(inv.tax)}</span>;
+    case "paid": return <span className="tabular-nums text-[13px] font-medium leading-snug">{formatINR(inv.paidAmount)}</span>;
+    case "tax": return <span className="tabular-nums text-[13px] text-muted-foreground leading-snug">{formatINR(inv.tax)}</span>;
     case "total": return <span className="font-semibold tabular-nums">{formatINR(inv.total)}</span>;
     case "actions": return (
       <div className="flex items-center justify-end gap-1">
@@ -764,17 +764,17 @@ function renderInvCell(
           onClick={onPin}
           className={
             inv.pinnedAt
-              ? "inline-flex h-7 w-7 items-center justify-center rounded-lg text-[#7C5CFC] bg-[#7C5CFC]/10 transition hover:bg-[#7C5CFC]/20"
-              : "inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#7C5CFC]/10 hover:text-[#7C5CFC]"
+              ? "inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#7C5CFC] bg-[#7C5CFC]/10 transition hover:bg-[#7C5CFC]/20"
+              : "inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#7C5CFC]/10 hover:text-[#7C5CFC]"
           }
           title={inv.pinnedAt ? "Unpin invoice" : "Pin invoice"}
         >
-          {inv.pinnedAt ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+          {inv.pinnedAt ? <PinOff className="h-4 w-4" /> : <Pin className="h-4 w-4" />}
         </button>
-        <button onClick={onPrint} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="Preview"><Eye className="h-3.5 w-3.5" /></button>
-        <button onClick={onEdit} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50" title="Edit"><Pencil className="h-3.5 w-3.5" /></button>
+        <button onClick={onPrint} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="Preview"><Eye className="h-4 w-4" /></button>
+        <button onClick={onEdit} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-emerald-600 transition hover:bg-emerald-50" title="Edit"><Pencil className="h-4 w-4" /></button>
         <Dropdown align="right" width="w-44" trigger={({ toggle }) => (
-          <button onClick={toggle} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="More"><MoreHorizontal className="h-4 w-4" /></button>
+          <button onClick={toggle} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="More"><MoreHorizontal className="h-4 w-4" /></button>
         )}>
           {(close) => (<>
             <MenuItem icon={Eye} onClick={() => { onView(); close(); }}>View</MenuItem>

@@ -788,7 +788,7 @@ export default function TicketsPage() {
             <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 {activeColumns.map((col) => (
-                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-5", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
+                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
                       <input
                         type="checkbox"
@@ -873,7 +873,7 @@ export default function TicketsPage() {
                         {t.pinnedAt && <Pin className="h-3 w-3 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
                         <span>{t.ticketNo ?? t.id}</span>
                         {ticketsWithInvoice.has(t.id) && (
-                          <span className="grid h-3.5 w-3.5 place-items-center rounded-full bg-emerald-100 text-emerald-600 ring-1 ring-inset ring-emerald-200" title="Invoice generated" aria-label="Invoice generated">
+                          <span className="grid h-3.5 w-3.5 place-items-center rounded-full text-white" style={{ background: "linear-gradient(135deg, #16A34A 0%, #15803D 100%)" }} title="Invoice generated" aria-label="Invoice generated">
                             <Check className="h-2 w-2" strokeWidth={3} />
                           </span>
                         )}
@@ -1038,7 +1038,20 @@ export default function TicketsPage() {
 function InlineStatusDropdown({ ticket, onStatusChange, statusColors, hasInvoice }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void; statusColors: Record<string, string>; hasInvoice: boolean }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
+  const [hoveredBlocked, setHoveredBlocked] = useState<TicketStatus | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
+  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Themed tooltip appears quickly (0.3s) instead of the native ~1.5s browser delay.
+  const showTooltip = (s: TicketStatus) => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    tooltipTimer.current = setTimeout(() => setHoveredBlocked(s), 300);
+  };
+  const hideTooltip = () => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    setHoveredBlocked(null);
+  };
+  useEffect(() => () => { if (tooltipTimer.current) clearTimeout(tooltipTimer.current); }, []);
 
   const handleOpen = () => {
     if (!open && btnRef.current) {
@@ -1096,26 +1109,43 @@ function InlineStatusDropdown({ ticket, onStatusChange, statusColors, hasInvoice
                 // the store so it can't be bypassed from any other path.
                 const isBlocked = s.value === "repaired_collected" && !hasInvoice && ticket.status !== "repaired_collected";
                 return (
-                  <button
+                  <div
                     key={s.value}
-                    disabled={isBlocked}
-                    title={isBlocked ? "Create an invoice before selecting Repaired & Collected" : undefined}
-                    onClick={() => { if (isBlocked) return; onStatusChange(ticket.id, s.value); setOpen(false); }}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
-                      isBlocked
-                        ? "cursor-not-allowed opacity-45"
-                        : ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
-                    )}
+                    className="relative"
+                    onMouseEnter={() => isBlocked && showTooltip(s.value)}
+                    onMouseLeave={() => isBlocked && hideTooltip()}
                   >
-                    <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
-                    {s.label}
-                    {isBlocked ? (
-                      <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable — needs invoice" />
-                    ) : ticket.status === s.value ? (
-                      <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>
-                    ) : null}
-                  </button>
+                    <button
+                      disabled={isBlocked}
+                      onClick={() => { if (isBlocked) return; onStatusChange(ticket.id, s.value); setOpen(false); }}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
+                        isBlocked
+                          ? "cursor-not-allowed opacity-45"
+                          : ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
+                      )}
+                    >
+                      <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
+                      {s.label}
+                      {isBlocked ? (
+                        <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable — needs invoice" />
+                      ) : ticket.status === s.value ? (
+                        <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>
+                      ) : null}
+                    </button>
+                    {isBlocked && hoveredBlocked === s.value && (
+                      <div
+                        role="tooltip"
+                        className="pointer-events-none absolute left-full top-1/2 z-[80] ml-2 w-max max-w-[210px] -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+                      >
+                        <div className="relative flex items-center gap-2 rounded-xl border border-[#4361EE]/20 bg-card px-3 py-2 text-[11px] font-medium leading-snug text-foreground shadow-lg ring-1 ring-black/[0.02]">
+                          <Ban className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                          <span>Create an invoice before selecting Repaired &amp; Collected</span>
+                          <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-b border-l border-[#4361EE]/20 bg-card" />
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </motion.div>
@@ -1162,7 +1192,8 @@ function renderCell(
               Reserved space via shrink-0 so it never pushes the id. */}
           {hasInvoice && (
             <span
-              className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-emerald-100 text-emerald-600 ring-1 ring-inset ring-emerald-200"
+              className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-white"
+              style={{ background: "linear-gradient(135deg, #16A34A 0%, #15803D 100%)" }}
               title="Invoice generated"
               aria-label="Invoice generated"
             >

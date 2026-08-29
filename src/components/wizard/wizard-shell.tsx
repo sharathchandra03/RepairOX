@@ -45,16 +45,7 @@ export function WizardShell({
   const pct = Math.round(((step - 1) / TOTAL_STEPS) * 100);
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-[hsl(228,44%,97%)] via-white to-[hsl(228,44%,97%)] dark:from-[hsl(226,22%,7%)] dark:via-[hsl(226,22%,9%)] dark:to-[hsl(226,22%,7%)]">
-      {/* Subtle blue-themed static background */}
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 overflow-hidden">
-        {/* Soft blue glow — top left */}
-        <div className="absolute -top-32 -left-24 h-[28rem] w-[28rem] rounded-full bg-[#4361EE]/10 blur-[120px] dark:bg-[#4361EE]/15" />
-        {/* Soft blue glow — bottom right */}
-        <div className="absolute -bottom-40 -right-32 h-[32rem] w-[32rem] rounded-full bg-[#6C8BFF]/10 blur-[130px] dark:bg-[#4361EE]/10" />
-        {/* Faint grid/tint overlay */}
-        <div className="absolute inset-0 bg-[radial-gradient(60%_50%_at_50%_0%,rgba(67,97,238,0.05),transparent)]" />
-      </div>
+    <div className="relative min-h-screen overflow-hidden bg-[#E6EBFA] dark:bg-[hsl(226,22%,8%)]">
 
       {/* Top bar */}
       <div className="relative mx-auto flex max-w-6xl items-center gap-3 px-4 py-4 sm:px-6">
@@ -134,15 +125,15 @@ export function WizardShell({
                     animate={active ? { scale: [1, 1.15, 1] } : {}}
                     transition={{ duration: 0.3 }}
                     className={cn(
-                      "grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold transition",
+                      "grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold transition ring-1 ring-black/40",
                       done ? "bg-emerald-500 text-white"
                         : active ? "brand-gradient text-white shadow-glow"
-                        : "bg-muted text-muted-foreground ring-1 ring-border"
+                        : "bg-white text-zinc-800"
                     )}
                   >
                     {done ? <Check className="h-3 w-3" /> : idx}
                   </motion.span>
-                  <span className={cn("truncate text-center font-medium", active ? "text-foreground" : "text-muted-foreground")}>
+                  <span className={cn("truncate text-center font-medium", active ? "text-foreground" : "text-zinc-700")}>
                     {label}
                   </span>
                 </li>

@@ -83,7 +83,25 @@ export function StatusPillSelect({
 }) {
   const blocked = new Set(blockedStatuses ?? []);
   const [open, setOpen] = React.useState(false);
+  const [hoveredBlocked, setHoveredBlocked] = React.useState<TicketStatus | null>(null);
   const ref = React.useRef<HTMLDivElement>(null);
+  const tooltipTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showTooltip = (s: TicketStatus) => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    // Themed tooltip appears quickly (0.3s) instead of the native ~1.5s delay.
+    tooltipTimer.current = setTimeout(() => setHoveredBlocked(s), 300);
+  };
+  const hideTooltip = () => {
+    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    setHoveredBlocked(null);
+  };
+
+  React.useEffect(() => {
+    return () => {
+      if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
+    };
+  }, []);
 
   React.useEffect(() => {
     if (!open) return;
@@ -118,32 +136,49 @@ export function StatusPillSelect({
         </span>
       </button>
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 max-h-72 w-full min-w-[220px] overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
+        <div className="absolute left-0 top-full z-50 mt-1 w-full min-w-[220px] overflow-visible rounded-xl border border-border bg-card p-1 shadow-lg">
           {TICKET_STATUS_ORDER.map((s) => {
             const isSelected = s === value;
             const isBlocked = blocked.has(s);
             return (
-              <button
+              <div
                 key={s}
-                type="button"
-                disabled={isBlocked}
-                title={isBlocked ? blockedReason : undefined}
-                onClick={() => {
-                  if (isBlocked) return;
-                  onChange(s);
-                  setOpen(false);
-                }}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
-                  isBlocked
-                    ? "cursor-not-allowed opacity-45"
-                    : isSelected ? "bg-[#EEF1FD]/70" : "hover:bg-[#EEF1FD]/60"
-                )}
+                className="relative"
+                onMouseEnter={() => isBlocked && showTooltip(s)}
+                onMouseLeave={() => isBlocked && hideTooltip()}
               >
-                <span className={cn("text-[#4361EE]", isSelected ? "opacity-100" : "opacity-0")}>✓</span>
-                <StatusPill status={s} />
-                {isBlocked && <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable" />}
-              </button>
+                <button
+                  type="button"
+                  disabled={isBlocked}
+                  onClick={() => {
+                    if (isBlocked) return;
+                    onChange(s);
+                    setOpen(false);
+                  }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors",
+                    isBlocked
+                      ? "cursor-not-allowed opacity-45"
+                      : isSelected ? "bg-[#EEF1FD]/70" : "hover:bg-[#EEF1FD]/60"
+                  )}
+                >
+                  <span className={cn("text-[#4361EE]", isSelected ? "opacity-100" : "opacity-0")}>✓</span>
+                  <StatusPill status={s} />
+                  {isBlocked && <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable" />}
+                </button>
+                {isBlocked && blockedReason && hoveredBlocked === s && (
+                  <div
+                    role="tooltip"
+                    className="pointer-events-none absolute right-full top-1/2 z-[60] mr-2 w-max max-w-[220px] -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
+                  >
+                    <div className="relative flex items-center gap-2 rounded-xl border border-[#4361EE]/20 bg-card px-3 py-2 text-xs font-medium leading-snug text-foreground shadow-lg ring-1 ring-black/[0.02]">
+                      <Ban className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                      <span>{blockedReason}</span>
+                      <span className="absolute -right-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-r border-t border-[#4361EE]/20 bg-card" />
+                    </div>
+                  </div>
+                )}
+              </div>
             );
           })}
         </div>

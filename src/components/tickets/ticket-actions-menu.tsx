@@ -27,7 +27,7 @@ interface TicketActionsMenuProps {
 export function TicketActionsMenu({ ticket, onAction }: TicketActionsMenuProps) {
   const isPinned = !!ticket.pinnedAt;
   return (
-    <div className="flex items-center justify-end gap-1">
+    <div className="flex items-center justify-end gap-2">
       {/* Pin / Unpin — RepairOX violet accent (distinct from red/blue/green/amber) */}
       <button
         onClick={() => onAction("pin", ticket)}

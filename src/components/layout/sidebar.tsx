@@ -325,15 +325,23 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
           onClick={() => setCollapsed(!collapsed)}
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.95 }}
-          className="group relative grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white transition-transform"
+          className="group relative grid h-[28.2px] w-[28.2px] shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white transition-transform"
           aria-label="Toggle sidebar"
         >
           {/* Soft blue outer glow, matching the POS button */}
           <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
+          {/* Double chevron — a second arrow sits just inside the first and
+              shares the same nudge animation for a cohesive "collapse" cue. */}
           {collapsed ? (
-            <ChevronRight className="relative z-10 h-3.5 w-3.5 arrow-nudge-right" />
+            <span className="relative z-10 flex items-center -space-x-2 arrow-nudge-right">
+              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-3.5 w-3.5" />
+            </span>
           ) : (
-            <ChevronLeft className="relative z-10 h-3.5 w-3.5 arrow-nudge-left" />
+            <span className="relative z-10 flex items-center -space-x-2 arrow-nudge-left">
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </span>
           )}
         </motion.button>
       </div>
