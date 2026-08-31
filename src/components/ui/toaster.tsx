@@ -15,6 +15,9 @@ import { CheckCircle2, AlertTriangle, X, Info } from "lucide-react";
 
 export type ToastVariant = "success" | "error" | "info";
 
+/** Optional call-to-action rendered inside the toast (e.g. "View Lead"). */
+export type ToastAction = { label: string; onClick: () => void };
+
 export type ToastMessage = {
   id: string;
   variant: ToastVariant;
@@ -22,32 +25,33 @@ export type ToastMessage = {
   description?: string;
   /** Auto-dismiss delay in ms. Errors linger longer so they aren't missed. */
   duration: number;
+  /** Optional action button shown at the bottom of the toast. */
+  action?: ToastAction;
 };
 
 type Listener = (toast: ToastMessage) => void;
 
 const listeners = new Set<Listener>();
 
-function emit(
-  variant: ToastVariant,
-  title: string,
-  opts?: { description?: string; duration?: number }
-) {
+type ToastOpts = { description?: string; duration?: number; action?: ToastAction };
+
+function emit(variant: ToastVariant, title: string, opts?: ToastOpts) {
   const message: ToastMessage = {
     id: `toast-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     variant,
     title,
     description: opts?.description,
     duration: opts?.duration ?? (variant === "error" ? 6000 : 3000),
+    action: opts?.action,
   };
   listeners.forEach((l) => l(message));
 }
 
 /** Fire toasts from anywhere (components or plain modules like the store). */
 export const toast = {
-  success: (title: string, opts?: { description?: string; duration?: number }) => emit("success", title, opts),
-  error: (title: string, opts?: { description?: string; duration?: number }) => emit("error", title, opts),
-  info: (title: string, opts?: { description?: string; duration?: number }) => emit("info", title, opts),
+  success: (title: string, opts?: ToastOpts) => emit("success", title, opts),
+  error: (title: string, opts?: ToastOpts) => emit("error", title, opts),
+  info: (title: string, opts?: ToastOpts) => emit("info", title, opts),
 };
 
 const VARIANT_STYLES: Record<ToastVariant, { ring: string; icon: string; Icon: typeof CheckCircle2 }> = {
@@ -97,6 +101,14 @@ export function Toaster() {
                 <p className="text-[13px] font-semibold leading-snug text-foreground">{t.title}</p>
                 {t.description && (
                   <p className="mt-0.5 text-[12px] leading-snug text-muted-foreground">{t.description}</p>
+                )}
+                {t.action && (
+                  <button
+                    onClick={() => { t.action!.onClick(); dismiss(t.id); }}
+                    className="mt-2 inline-flex items-center rounded-lg bg-[#4361EE] px-2.5 py-1 text-[12px] font-semibold text-white transition hover:brightness-105"
+                  >
+                    {t.action.label}
+                  </button>
                 )}
               </div>
               <button

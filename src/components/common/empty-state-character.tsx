@@ -16,7 +16,13 @@ import { motion, useReducedMotion, type Variants } from "framer-motion";
  * Because the motion runs on mount, it replays whenever the empty state is
  * newly mounted — page enter, refresh, or filters returning zero results —
  * but not on ordinary re-renders.
- * Respects prefers-reduced-motion (renders the static resting state).
+ *
+ * The entrance plays consistently across platforms (macOS/Windows). Note that
+ * Windows commonly reports `prefers-reduced-motion: reduce` when system-wide
+ * "Animation effects" are turned off — so instead of dropping to a fully static
+ * image there (which made the animation look broken on Windows), we degrade to
+ * a quick, gentle fade/scale entrance and skip the wobble. The motion is
+ * transform/opacity only, short, and non-flashing.
  *
  * All animation is transform/opacity only (GPU-friendly, no layout shift).
  * Scope: purely visual. No layout, filtering, or data logic lives here.
@@ -64,6 +70,18 @@ const settleWobble: Variants = {
   },
 };
 
+/* Reduced-motion fallback: a quick, gentle fade + slight scale — enough for the
+   illustration to feel alive on machines that disable UI animations (common on
+   Windows), without the springy bounce or the side-to-side wobble. */
+const gentleFadeIn: Variants = {
+  hidden: { opacity: 0, scale: 0.94 },
+  shown: {
+    opacity: 1,
+    scale: 1,
+    transition: { duration: 0.4, ease: "easeOut" },
+  },
+};
+
 export function EmptyStateCharacter({ variant }: { variant: Variant }) {
   const reduce = useReducedMotion();
   const asset = ASSETS[variant];
@@ -75,13 +93,17 @@ export function EmptyStateCharacter({ variant }: { variant: Variant }) {
       key={variant}
       className="relative flex items-center justify-center"
       style={{ width, height: DISPLAY_HEIGHT }}
-      variants={popIn}
-      initial={reduce ? "shown" : "hidden"}
+      // Always play an entrance. Under reduced motion we swap the springy pop-in
+      // for a gentle fade so Windows (which often reports reduced motion) still
+      // animates instead of showing a dead static image.
+      variants={reduce ? gentleFadeIn : popIn}
+      initial="hidden"
       animate="shown"
       aria-hidden="true"
     >
       <motion.div
         className="h-full w-full origin-bottom"
+        // Wobble only when full motion is allowed; skipped under reduced motion.
         variants={reduce ? undefined : settleWobble}
         initial={reduce ? false : "hidden"}
         animate="shown"

@@ -28,6 +28,7 @@ export function WizardShell({
   children,
   onBack,
   onClose,
+  onStepClick,
   closeHref,
   isEdit,
   footer,
@@ -38,6 +39,8 @@ export function WizardShell({
   children: React.ReactNode;
   onBack?: () => void;
   onClose?: () => void;
+  /** Jump directly to a step (1-based). When provided, the step indicator becomes clickable. */
+  onStepClick?: (step: number) => void;
   closeHref?: string;
   isEdit?: boolean;
   footer?: React.ReactNode;
@@ -118,24 +121,43 @@ export function WizardShell({
               const idx = i + 1;
               const done = idx < step;
               const active = idx === step;
+              const clickable = !!onStepClick;
               return (
                 <li key={label} className="flex flex-col items-center gap-1">
-                  <motion.span
+                  <motion.button
+                    type="button"
+                    onClick={clickable ? () => onStepClick!(idx) : undefined}
+                    disabled={!clickable}
                     initial={false}
                     animate={active ? { scale: [1, 1.15, 1] } : {}}
+                    whileHover={clickable ? { scale: 1.12 } : undefined}
+                    whileTap={clickable ? { scale: 0.94 } : undefined}
                     transition={{ duration: 0.3 }}
+                    aria-label={`Go to step ${idx}: ${label}`}
+                    aria-current={active ? "step" : undefined}
                     className={cn(
                       "grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold transition ring-1 ring-black/40",
                       done ? "bg-emerald-500 text-white"
                         : active ? "brand-gradient text-white shadow-glow"
-                        : "bg-white text-zinc-800"
+                        : "bg-white text-zinc-800",
+                      clickable ? "cursor-pointer" : "cursor-default"
                     )}
                   >
                     {done ? <Check className="h-3 w-3" /> : idx}
-                  </motion.span>
-                  <span className={cn("truncate text-center font-medium", active ? "text-foreground" : "text-zinc-700")}>
-                    {label}
-                  </span>
+                  </motion.button>
+                  {clickable ? (
+                    <button
+                      type="button"
+                      onClick={() => onStepClick!(idx)}
+                      className={cn("truncate text-center font-medium transition hover:text-foreground", active ? "text-foreground" : "text-zinc-700")}
+                    >
+                      {label}
+                    </button>
+                  ) : (
+                    <span className={cn("truncate text-center font-medium", active ? "text-foreground" : "text-zinc-700")}>
+                      {label}
+                    </span>
+                  )}
                 </li>
               );
             })}

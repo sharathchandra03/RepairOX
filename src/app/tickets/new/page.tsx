@@ -343,6 +343,11 @@ function NewTicketWizard() {
       setStep((s) => Math.max(1, s - 1));
     }
   };
+  // Direct step navigation from the progress indicator. The whole flow shares a
+  // single `data` state, so jumping between steps never loses or resets any
+  // entered value. No per-step validation is enforced on navigation — required
+  // fields are only checked at the final Create action (ConfirmationStep).
+  const goToStep = (target: number) => setStep(Math.min(Math.max(1, target), 11));
 
   const attemptNav = (path: string) => {
     if (isEdit && dirty) {
@@ -549,6 +554,7 @@ function NewTicketWizard() {
       <WizardShell
         step={step}
         onBack={back}
+        onStepClick={goToStep}
         onClose={isEdit ? () => attemptNav(`/tickets/${editId}`) : undefined}
         closeHref={isEdit ? undefined : closeTarget}
         title={isEdit ? `Edit Ticket ${tickets.find((t) => t.id === editId)?.ticketNo ?? editId}` : titleFor(step)}

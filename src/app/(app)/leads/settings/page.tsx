@@ -1,166 +1,206 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { Plus, GripVertical, X, Save, Palette, Zap, Globe } from "lucide-react";
+import {
+  Plus, X, Check, Pencil, EyeOff, Eye, ArrowUp, ArrowDown, Lock, Users, ListChecks, Trash2,
+} from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input, Label } from "@/components/ui/input";
+import { Input } from "@/components/ui/input";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { toast } from "@/components/ui/toaster";
+import { usePermissions } from "@/lib/permissions-context";
+import { useLeads } from "@/lib/leads-context";
+import { LEAD_DROPDOWN_FIELDS, type LeadFieldDef, type LeadOption } from "@/lib/leads-data";
 import { cn } from "@/lib/utils";
 
-/* ── Default config ── */
-const DEFAULT_STAGES = [
-  { id: "new", label: "New", color: "bg-sky-500" },
-  { id: "contacted", label: "Contacted", color: "bg-violet-500" },
-  { id: "qualified", label: "Qualified", color: "bg-indigo-500" },
-  { id: "proposal", label: "Proposal Sent", color: "bg-amber-500" },
-  { id: "follow_up", label: "Follow Up", color: "bg-orange-500" },
-  { id: "won", label: "Won", color: "bg-emerald-500" },
-  { id: "lost", label: "Lost", color: "bg-zinc-400" },
-];
-
-const DEFAULT_SOURCES = [
-  { id: "google", label: "Google Ads" },
-  { id: "meta", label: "Meta Ads" },
-  { id: "youtube", label: "YouTube" },
-  { id: "walkin", label: "Walk-In" },
-  { id: "reference", label: "Reference" },
-  { id: "website", label: "Website Form" },
-];
-
-const SCORING_RULES = [
-  { condition: "Lead responds within 1 hour", points: "+15" },
-  { condition: "Budget confirmed above ₹50K", points: "+20" },
-  { condition: "Source is Reference", points: "+10" },
-  { condition: "No response in 72 hours", points: "-10" },
-  { condition: "Meeting scheduled", points: "+12" },
-  { condition: "Quotation accepted", points: "+25" },
-];
-
 export default function LeadsSettingsPage() {
-  const [stages, setStages] = useState(DEFAULT_STAGES);
-  const [sources, setSources] = useState(DEFAULT_SOURCES);
+  const { can } = usePermissions();
+  const canManage = can("manage_settings");
 
   return (
     <div className="space-y-6">
       <PageHeader
         eyebrow="Sales"
         title="Lead Settings"
-        subtitle="Configure pipeline stages, lead sources, and scoring rules."
-        actions={
-          <Button size="sm" className="rounded-full gap-1.5">
-            <Save className="h-3.5 w-3.5" /> Save Changes
-          </Button>
-        }
+        subtitle="Manage the dropdown values sales agents pick from when capturing leads. Changes apply to new leads instantly — existing leads keep their saved values."
       />
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-
-        {/* Pipeline Stages */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-          <div className="flex items-center gap-2 mb-4">
-            <Palette className="h-4 w-4 text-[#4361EE]" />
-            <h3 className="font-display text-base font-bold">Pipeline Stages</h3>
-          </div>
-          <p className="text-[12px] text-muted-foreground mb-4">
-            Define the stages leads move through. Drag to reorder.
-          </p>
-          <div className="space-y-2">
-            {stages.map((stage, i) => (
-              <motion.div
-                key={stage.id}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.03 * i }}
-                className="flex items-center gap-2 rounded-xl border border-border bg-background p-3"
-              >
-                <GripVertical className="h-4 w-4 shrink-0 text-zinc-300 cursor-grab" />
-                <span className={cn("h-3 w-3 shrink-0 rounded-full", stage.color)} />
-                <Input defaultValue={stage.label} className="h-8 flex-1 text-sm" />
-                <button
-                  onClick={() => setStages(stages.filter((s) => s.id !== stage.id))}
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </motion.div>
-            ))}
-          </div>
-          <button className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-2.5 text-[12px] font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-700">
-            <Plus className="h-3.5 w-3.5" /> Add stage
-          </button>
+      {!canManage && (
+        <div className="flex items-center gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-amber-800">
+          <Lock className="h-4 w-4 shrink-0" />
+          <p className="text-[13px]">You can view lead options, but only Admin/Owner roles (Manage Settings) can change them.</p>
         </div>
+      )}
 
-        {/* Lead Sources */}
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-          <div className="flex items-center gap-2 mb-4">
-            <Globe className="h-4 w-4 text-[#4361EE]" />
-            <h3 className="font-display text-base font-bold">Lead Sources</h3>
-          </div>
-          <p className="text-[12px] text-muted-foreground mb-4">
-            Channels where leads are captured from.
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+        {LEAD_DROPDOWN_FIELDS.map((field) => (
+          <FieldCard key={field.key} field={field} canManage={canManage} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FieldCard({ field, canManage }: { field: LeadFieldDef; canManage: boolean }) {
+  const { options, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption } = useLeads();
+  const { team } = usePermissions();
+  const [adding, setAdding] = useState("");
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState<{ option: LeadOption; usage: number } | null>(null);
+
+  const rows = useMemo(
+    () => options.filter((o) => o.field === field.key).sort((a, b) => a.sortOrder - b.sortOrder),
+    [options, field.key],
+  );
+
+  const staffNames = useMemo(() => team.map((m) => m.name).filter(Boolean), [team]);
+
+  const move = (id: string, dir: -1 | 1) => {
+    const ids = rows.map((r) => r.id);
+    const idx = ids.indexOf(id);
+    const swap = idx + dir;
+    if (swap < 0 || swap >= ids.length) return;
+    [ids[idx], ids[swap]] = [ids[swap], ids[idx]];
+    void reorderOptions(field.key, ids);
+  };
+
+  const handleAdd = () => {
+    if (!adding.trim()) return;
+    void addOption(field.key, adding);
+    setAdding("");
+  };
+
+  const saveEdit = () => {
+    if (editingId) void updateOption(editingId, editValue);
+    setEditingId(null);
+    setEditValue("");
+  };
+
+  const requestDelete = (opt: LeadOption) => {
+    setConfirmDelete({ option: opt, usage: countLeadsUsingOption(field.key, opt.value) });
+  };
+  const handleConfirmDelete = () => {
+    if (!confirmDelete) return;
+    const { option, usage } = confirmDelete;
+    // Safety: never permanently delete a value still used by existing leads —
+    // archive it instead so historical leads keep their saved value.
+    if (usage > 0) {
+      void setOptionActive(option.id, false);
+      toast.info("Archived instead of deleted", { description: `"${option.value}" is used by ${usage} lead${usage !== 1 ? "s" : ""}, so it was archived to protect historical data.` });
+    } else {
+      void deleteOption(option.id);
+      toast.success("Option deleted", { description: `"${option.value}" was removed.` });
+    }
+    setConfirmDelete(null);
+  };
+
+  return (
+    <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+      <div className="mb-1 flex items-center gap-2">
+        <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+          {field.usesStaff ? <Users className="h-3.5 w-3.5" /> : <ListChecks className="h-3.5 w-3.5" />}
+        </span>
+        <h3 className="font-display text-base font-bold">{field.label}</h3>
+        <span className="ml-auto rounded-full bg-muted px-2 py-0.5 text-[10px] font-semibold text-muted-foreground">{rows.filter((r) => r.active).length} active</span>
+      </div>
+      <p className="mb-4 text-[12px] text-muted-foreground">{field.hint}</p>
+
+      {field.usesStaff && (
+        <div className="mb-3 rounded-xl border border-dashed border-border bg-muted/30 p-3">
+          <p className="text-[11px] font-medium text-muted-foreground">
+            Also includes your live staff{staffNames.length ? `: ${staffNames.slice(0, 4).join(", ")}${staffNames.length > 4 ? "…" : ""}` : ""}. Add custom names below.
           </p>
-          <div className="space-y-2">
-            {sources.map((source, i) => (
-              <motion.div
-                key={source.id}
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.03 * i }}
-                className="flex items-center gap-2 rounded-xl border border-border bg-background p-3"
-              >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-zinc-100 text-[10px] font-bold text-zinc-500">
-                  {i + 1}
-                </span>
-                <Input defaultValue={source.label} className="h-8 flex-1 text-sm" />
-                <button
-                  onClick={() => setSources(sources.filter((s) => s.id !== source.id))}
-                  className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition"
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-              </motion.div>
-            ))}
-          </div>
-          <button className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-2.5 text-[12px] font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-700">
-            <Plus className="h-3.5 w-3.5" /> Add source
-          </button>
         </div>
+      )}
+
+      <div className="space-y-2">
+        {rows.length === 0 && !field.usesStaff && (
+          <p className="rounded-xl border border-dashed border-border py-4 text-center text-[12px] text-muted-foreground">No options yet.</p>
+        )}
+        {rows.map((opt, i) => (
+          <motion.div
+            key={opt.id}
+            initial={{ opacity: 0, y: 3 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(0.02 * i, 0.2) }}
+            className={cn("flex items-center gap-2 rounded-xl border p-2 pl-3", opt.active ? "border-border bg-background" : "border-dashed border-zinc-200 bg-zinc-50 opacity-70")}
+          >
+            {/* Reorder */}
+            {canManage && (
+              <div className="flex flex-col">
+                <button onClick={() => move(opt.id, -1)} disabled={i === 0} className="text-zinc-300 hover:text-zinc-600 disabled:opacity-30"><ArrowUp className="h-3 w-3" /></button>
+                <button onClick={() => move(opt.id, 1)} disabled={i === rows.length - 1} className="text-zinc-300 hover:text-zinc-600 disabled:opacity-30"><ArrowDown className="h-3 w-3" /></button>
+              </div>
+            )}
+
+            {editingId === opt.id ? (
+              <>
+                <Input value={editValue} onChange={(e: any) => setEditValue(e.target.value)} onKeyDown={(e: any) => e.key === "Enter" && saveEdit()} className="h-8 flex-1 text-[13px]" autoFocus />
+                <button onClick={saveEdit} className="grid h-7 w-7 place-items-center rounded-lg text-emerald-600 hover:bg-emerald-50"><Check className="h-3.5 w-3.5" /></button>
+                <button onClick={() => { setEditingId(null); setEditValue(""); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-muted"><X className="h-3.5 w-3.5" /></button>
+              </>
+            ) : (
+              <>
+                <span className={cn("flex-1 truncate text-[13px] font-medium", !opt.active && "text-zinc-400 line-through")}>{opt.value}</span>
+                {!opt.active && <span className="rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-semibold text-zinc-500">Archived</span>}
+                {canManage && (
+                  <>
+                    <button onClick={() => { setEditingId(opt.id); setEditValue(opt.value); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-muted hover:text-zinc-700" title="Rename"><Pencil className="h-3.5 w-3.5" /></button>
+                    <button
+                      onClick={() => setOptionActive(opt.id, !opt.active)}
+                      className={cn("grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-muted", opt.active ? "hover:text-amber-600" : "hover:text-emerald-600")}
+                      title={opt.active ? "Archive (hide from new leads)" : "Restore"}
+                    >
+                      {opt.active ? <EyeOff className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />}
+                    </button>
+                    <button
+                      onClick={() => requestDelete(opt)}
+                      className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-rose-50 hover:text-rose-600"
+                      title="Delete"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </>
+                )}
+              </>
+            )}
+          </motion.div>
+        ))}
       </div>
 
-      {/* Scoring Rules */}
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-        <div className="flex items-center gap-2 mb-4">
-          <Zap className="h-4 w-4 text-[#4361EE]" />
-          <h3 className="font-display text-base font-bold">Lead Scoring Rules</h3>
+      {canManage ? (
+        <div className="mt-3 flex items-center gap-2">
+          <Input
+            value={adding}
+            onChange={(e: any) => setAdding(e.target.value)}
+            onKeyDown={(e: any) => e.key === "Enter" && handleAdd()}
+            placeholder={`Add ${field.label.toLowerCase()}…`}
+            className="h-9 flex-1 text-[13px]"
+          />
+          <Button size="sm" className="gap-1" onClick={handleAdd} disabled={!adding.trim()}><Plus className="h-3.5 w-3.5" /> Add</Button>
         </div>
-        <p className="text-[12px] text-muted-foreground mb-4">
-          Automatic scoring adjustments based on lead behavior and attributes.
-        </p>
-        <div className="overflow-hidden rounded-xl border border-border">
-          <div className="grid grid-cols-[1fr_80px] bg-muted/60 px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <div>Condition</div>
-            <div className="text-right">Points</div>
-          </div>
-          {SCORING_RULES.map((rule, i) => (
-            <motion.div
-              key={i}
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ delay: 0.03 * i }}
-              className="grid grid-cols-[1fr_80px] items-center border-t border-border px-4 py-3 text-sm"
-            >
-              <span className="text-zinc-700">{rule.condition}</span>
-              <span className={cn("text-right font-semibold tnum", rule.points.startsWith("+") ? "text-emerald-600" : "text-rose-600")}>
-                {rule.points}
-              </span>
-            </motion.div>
-          ))}
+      ) : (
+        <div className="mt-3 flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-border py-2 text-[12px] text-muted-foreground">
+          <Lock className="h-3.5 w-3.5" /> Read-only
         </div>
-        <button className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-2.5 text-[12px] font-medium text-zinc-500 transition hover:border-zinc-400 hover:text-zinc-700">
-          <Plus className="h-3.5 w-3.5" /> Add scoring rule
-        </button>
-      </div>
+      )}
+
+      <ConfirmDialog
+        open={!!confirmDelete}
+        onClose={() => setConfirmDelete(null)}
+        onConfirm={handleConfirmDelete}
+        title={confirmDelete && confirmDelete.usage > 0 ? "Archive this option?" : "Delete this option?"}
+        description={
+          confirmDelete
+            ? confirmDelete.usage > 0
+              ? `"${confirmDelete.option.value}" is used by ${confirmDelete.usage} existing lead${confirmDelete.usage !== 1 ? "s" : ""}. To protect that data it will be archived (hidden from new leads) instead of deleted.`
+              : `"${confirmDelete.option.value}" isn't used by any lead and will be permanently removed.`
+            : ""
+        }
+        confirmLabel={confirmDelete && confirmDelete.usage > 0 ? "Archive" : "Delete"}
+        danger={!confirmDelete || confirmDelete.usage === 0}
+      />
     </div>
   );
 }

@@ -423,8 +423,11 @@ function InvoiceWizard() {
   // Step navigation
   const goNext = () => setStep((s) => Math.min(s + 1, 6));
   const goBack = () => setStep((s) => Math.max(s - 1, 1));
-  const goToStep = (s: number) => { if (s <= step || s <= maxReached) setStep(s); };
-  const maxReached = step;
+  // Direct step navigation — jump to ANY step from the stepper. The whole flow
+  // shares a single `form` state (updateForm), so switching steps never loses
+  // or resets entered values. Validation is only enforced at the final Create
+  // action, not while navigating between steps.
+  const goToStep = (s: number) => { if (s >= 1 && s <= 6) setStep(s); };
 
   if (showSuccessAnimation && !isEdit) {
     return (
@@ -495,8 +498,7 @@ function InvoiceWizard() {
               <button
                 key={s.id}
                 onClick={() => goToStep(s.id)}
-                disabled={s.id > maxReached + 1}
-                className={cn("flex items-center gap-2 group", s.id > maxReached + 1 && "opacity-40 cursor-not-allowed")}
+                className={cn("flex items-center gap-2 group cursor-pointer")}
               >
                 <motion.span
                   initial={false}

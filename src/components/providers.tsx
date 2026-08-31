@@ -5,6 +5,7 @@ import { PermissionsProvider } from "@/lib/permissions-context";
 import { ThemeProvider } from "@/lib/theme-context";
 import { StoreProvider } from "@/lib/store";
 import { StoreSettingsProvider } from "@/lib/store-settings";
+import { LeadsProvider } from "@/lib/leads-context";
 import { CatalogProvider } from "@/lib/catalog-context";
 import { AccountingProvider } from "@/lib/accounting-service";
 import { Toaster } from "@/components/ui/toaster";
@@ -19,7 +20,9 @@ export function Providers({ children }: { children: ReactNode }) {
         <StoreProvider>
           <StoreSettingsProvider>
             <CatalogProvider>
-              <AccountingProvider>{children}</AccountingProvider>
+              <AccountingProvider>
+                <LeadsProvider>{children}</LeadsProvider>
+              </AccountingProvider>
             </CatalogProvider>
           </StoreSettingsProvider>
         </StoreProvider>

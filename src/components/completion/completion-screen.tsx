@@ -3,7 +3,7 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, Printer, MessageCircle, Mail, Pencil, Plus, Home, Tag, Eye, X } from "lucide-react";
+import { Printer, MessageCircle, Mail, Pencil, Plus, LayoutDashboard, ListChecks, Tag, Eye, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StoreLogo } from "@/components/ui/store-logo";
 import { cn } from "@/lib/utils";
@@ -73,6 +73,11 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
   const viewFormat: PrintFormat = type === "invoice" && format === "label" ? "a4" : format;
   const backLabel = type === "ticket" ? "tickets" : "invoices";
   const createPath = type === "ticket" ? "/tickets/new" : "/invoice/create";
+  // Full-width primary action → the shop/billing dashboard (single dashboard
+  // route serves both ticket and invoice flows in this workspace).
+  const dashboardPath = "/dashboard";
+  // Bottom-nav "Manage" → the relevant table/list for this record type.
+  const managePath = type === "ticket" ? "/tickets" : "/invoice";
 
   /** Build the print-preview URL for the currently selected format */
   const previewUrl = (auto: boolean) => {
@@ -107,7 +112,7 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
 
         {!isEdit && (
           <>
-            <div className={cn("mt-8 grid grid-cols-1 gap-3", type === "ticket" ? "sm:grid-cols-3" : "sm:grid-cols-2 max-w-md")}>
+            <div className={cn("mt-8 grid w-full grid-cols-1 gap-3", type === "ticket" ? "max-w-md sm:grid-cols-3" : "max-w-md sm:grid-cols-2")}>
               {[
                 { id: "a4", label: "A4 Receipt", desc: "Best for filing & email", icon: Printer },
                 { id: "thermal", label: "Thermal Receipt", desc: "Quick counter print", icon: Printer },
@@ -121,7 +126,11 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
                     whileHover={{ y: -2 }}
                     onClick={() => setFormat(p.id as PrintFormat)}
                     className={cn(
-                      "relative cursor-pointer rounded-2xl border bg-card p-4 text-left shadow-card transition-all duration-200",
+                      "relative cursor-pointer rounded-2xl border bg-card text-left shadow-card transition-all duration-200",
+                      // Invoice has only two format cards — give them a touch more
+                      // breathing room so the pair reads as an intentional, balanced
+                      // row rather than a layout that's missing a third card.
+                      type === "invoice" ? "p-5" : "p-4",
                       active
                         ? "border-indigo-300 ring-2 ring-indigo-200/70 shadow-[0_0_16px_-4px_rgba(67,97,238,0.25)]"
                         : "border-border hover:border-[#4361EE]/50 hover:shadow-[0_0_12px_-4px_rgba(67,97,238,0.15)] hover:ring-1 hover:ring-[#4361EE]/20"
@@ -135,18 +144,18 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
               })}
             </div>
             <div className="mt-6 flex w-full max-w-md flex-col gap-2 sm:flex-row">
-              <Button variant="outline" size="lg" className="flex-1" onClick={handleWhatsApp}><MessageCircle className="h-4 w-4 text-emerald-600" /> Share on WhatsApp</Button>
-              <Button variant="outline" size="lg" className="flex-1" onClick={handleEmail}><Mail className="h-4 w-4 text-indigo-600" /> Share on Email</Button>
+              <Button variant="outline" size="lg" className="flex-1 basis-0 px-2" onClick={handleWhatsApp}><MessageCircle className="h-4 w-4 shrink-0 text-emerald-600" /> WhatsApp</Button>
+              <Button variant="outline" size="lg" className="flex-1 basis-0 px-2" onClick={handleEmail}><Mail className="h-4 w-4 shrink-0 text-indigo-600" /> Email</Button>
+              <Button variant="outline" size="lg" className="flex-1 basis-0 px-2" onClick={handlePrint}><Printer className="h-4 w-4 shrink-0 text-brand-700" /> Print</Button>
             </div>
-            <Button size="xl" className="mt-3 w-full max-w-md" onClick={handlePrint}><Printer className="h-4 w-4" /> Print {label}</Button>
+            <Button size="xl" className="mt-3 w-full max-w-md" onClick={() => router.push(dashboardPath)}><LayoutDashboard className="h-4 w-4" /> Dashboard</Button>
           </>
         )}
 
-        {/* Bottom action navigation — Dashboard | View | Edit | Create */}
-        {/* Bottom action navigation — Dashboard | View | Edit | Create */}
+        {/* Bottom action navigation — Manage | View | Edit | Create */}
         <div className="mt-6 flex flex-wrap items-center justify-center gap-x-8 gap-y-3">
-          <button onClick={() => router.push("/dashboard")} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
-            <Home className="h-4 w-4" /> Dashboard
+          <button onClick={() => router.push(managePath)} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
+            <ListChecks className="h-4 w-4" /> Manage
           </button>
           <button onClick={() => setShowView(true)} className="inline-flex items-center gap-1.5 text-sm font-medium text-brand-700 transition-colors duration-200 hover:text-brand-800">
             <Eye className="h-4 w-4" /> View {label}

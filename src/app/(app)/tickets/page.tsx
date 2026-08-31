@@ -931,7 +931,10 @@ export default function TicketsPage() {
                   const devices = getTicketDevices(t);
                   const first = devices[0];
                   const extraCount = Math.max(0, devices.length - 1);
-                  const deviceName = [first?.brand, first?.model].filter(Boolean).join(" ") || t.model || "Unknown Device";
+                  // Model-first identity: show ONLY the model when present, else
+                  // the brand, else "Unknown Device". Underlying brand/model data
+                  // is unchanged — this is a display rule only.
+                  const deviceName = first?.model || first?.brand || t.model || "Unknown Device";
                   const issueText = (first ? parseIssueString(first.issue).join(", ") : "") || first?.description || t.service || t.issue || "";
                   const idLabel = first?.imeiType === "serial" ? "Serial" : "IMEI";
                   const idValue = first?.imei || t.items?.[0]?.serial || "";
@@ -1265,7 +1268,10 @@ function renderCell(
       const devices = getTicketDevices(t);
       const first = devices[0];
       const extraCount = Math.max(0, devices.length - 1);
-      const deviceName = [first?.brand, first?.model].filter(Boolean).join(" ") || t.model || "Unknown Device";
+      // Model-first identity: show ONLY the model when present, else the brand,
+      // else "Unknown Device". e.g. { brand: "Apple", model: "iPhone 12" } →
+      // "iPhone 12". Underlying brand/model data is unchanged — display only.
+      const deviceName = first?.model || first?.brand || t.model || "Unknown Device";
       const issueText = (first ? parseIssueString(first.issue).join(", ") : "") || first?.description || t.service || t.issue || "";
       const idLabel = first?.imeiType === "serial" ? "Serial" : "IMEI";
       const idValue = first?.imei || t.items?.[0]?.serial || "";

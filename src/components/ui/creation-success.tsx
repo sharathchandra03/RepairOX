@@ -25,7 +25,7 @@ type CreationSuccessProps = {
   autoAdvanceMs?: number;
 };
 
-export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: CreationSuccessProps) {
+export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 1800 }: CreationSuccessProps) {
   const [phase, setPhase] = useState<"animate" | "done">("animate");
   const { tickets } = useStore();
 
@@ -207,7 +207,7 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 3500 }: 
               className={`h-full rounded-full ${progressBarColor}`}
               initial={{ width: "0%" }}
               animate={{ width: "100%" }}
-              transition={{ duration: (autoAdvanceMs - 1000) / 1000, delay: 1.0, ease: "linear" }}
+              transition={{ duration: Math.max(0.4, (autoAdvanceMs - 500) / 1000), delay: 0.5, ease: "linear" }}
             />
           </motion.div>
         </div>
