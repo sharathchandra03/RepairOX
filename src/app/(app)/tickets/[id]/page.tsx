@@ -172,6 +172,9 @@ export default function TicketDetailPage() {
     // Encode ticket data as query params for the invoice create page
     const params = new URLSearchParams();
     params.set("fromTicket", ticket.id);
+    // Pass the human-readable ticket number so the invoice's locked "Linked
+    // Ticket" field can display T-045 immediately (the stored link stays the id).
+    if (ticket.ticketNo) params.set("ticketNo", ticket.ticketNo);
     params.set("customer", ticket.customer);
     params.set("phone", ticket.phone);
     if (ticket.email) params.set("email", ticket.email);

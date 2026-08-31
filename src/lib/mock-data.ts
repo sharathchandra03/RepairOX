@@ -706,7 +706,10 @@ export function getInvoiceDevices(invoice: Invoice): InvoiceDeviceRecord[] {
 
 export type Invoice = {
   id: string;
-  reference: string;
+  /** @deprecated Legacy CORP-XXXX reference number. No longer generated or shown.
+   *  Kept optional only so existing DB rows with a `reference` value still map
+   *  cleanly. The meaningful relationship is now `ticketId` (Linked Ticket). */
+  reference?: string;
   invoiceType: InvoiceType;
   customer: string;
   phone: string;

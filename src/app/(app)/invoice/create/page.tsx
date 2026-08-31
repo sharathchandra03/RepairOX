@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
-  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search,
+  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
@@ -57,7 +57,7 @@ type InvoiceFormDevice = {
 
 type InvoiceFormData = {
   customer: { name: string; phone: string; email: string; company: string; gstNumber: string };
-  details: { reference: string; dueDate: string; employee: string; ticketId: string; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
+  details: { dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
   /** Multi-device entries */
@@ -91,7 +91,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", email: "", company: "", gstNumber: "" },
-  details: { reference: "", dueDate: "", employee: "", ticketId: "", status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service" },
+  details: { dueDate: "", employee: "", ticketId: "", ticketNo: "", ticketLocked: false, status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service" },
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
@@ -129,8 +129,19 @@ function InvoiceWizard() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
-  const { invoices, addInvoice, updateInvoice } = useStore();
+  const { invoices, tickets, addInvoice, updateInvoice } = useStore();
   const isEdit = !!editId;
+
+  // Resolve a ticket's stable primary key (stored in Invoice.ticketId) to its
+  // human-readable number (T-045) for display. Also supports the reverse lookup
+  // when a ticket number is what we have.
+  const ticketNoForId = useCallback((ticketId?: string): string => {
+    if (!ticketId) return "";
+    const byId = tickets.find((t) => t.id === ticketId);
+    if (byId) return byId.ticketNo ?? byId.id;
+    const byNo = tickets.find((t) => t.ticketNo === ticketId);
+    return byNo?.ticketNo ?? ticketId;
+  }, [tickets]);
 
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<InvoiceFormData>(DEFAULT_FORM);
@@ -150,10 +161,10 @@ function InvoiceWizard() {
     if (editId) {
       const existing = invoices.find((i) => i.id === editId);
       if (existing) {
-        setForm(invoiceToForm(existing));
+        setForm(invoiceToForm(existing, ticketNoForId(existing.ticketId)));
       }
     }
-  }, [editId, invoices]);
+  }, [editId, invoices, ticketNoForId]);
 
   // Pre-fill from ticket (Push to Invoice)
   useEffect(() => {
@@ -249,7 +260,7 @@ function InvoiceWizard() {
       setForm((prev) => ({
         ...prev,
         customer: { name: customer, phone, email, company, gstNumber: searchParams.get("gstNumber") || "" },
-        details: { ...prev.details, ticketId: fromTicket, employee, status: "draft", repairStatus: "repaired_collected", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
+        details: { ...prev.details, ticketId: fromTicket, ticketNo: ticketNoForId(fromTicket) || (searchParams.get("ticketNo") || fromTicket), ticketLocked: true, employee, status: "draft", repairStatus: "repaired_collected", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
         items: flatItems,
         devices: formDevices.length > 0 ? formDevices : prev.devices,
         activeDeviceIndex: 0,
@@ -259,7 +270,7 @@ function InvoiceWizard() {
         },
       }));
     }
-  }, [searchParams, editId]);
+  }, [searchParams, editId, ticketNoForId]);
 
   // Track dirty state
   const updateForm = useCallback((updater: (prev: InvoiceFormData) => InvoiceFormData) => {
@@ -329,7 +340,6 @@ function InvoiceWizard() {
 
     const invoice: Invoice = {
       id: editId || draftId || genInvoiceId(form.details.invoiceType as InvoiceType, invoices),
-      reference: form.details.reference || `CORP-${Math.floor(1000 + Math.random() * 9000)}`,
       invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
       phone: form.customer.phone,
@@ -529,7 +539,7 @@ function InvoiceWizard() {
       </div>
 
       {/* Step Content */}
-      <div className="relative mx-auto w-full max-w-6xl flex-1 min-h-0 overflow-y-auto px-4 pt-4 pb-6 sm:px-6 lg:px-8">
+      <div className="relative mx-auto w-full max-w-6xl px-4 pt-4 pb-4 sm:px-6 lg:px-8">
         <AnimatePresence mode="wait">
           <motion.div key={step} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
             {step === 1 && <StepCustomer form={form} updateForm={updateForm} />}
@@ -542,16 +552,16 @@ function InvoiceWizard() {
         </AnimatePresence>
       </div>
 
-      {/* Bottom nav */}
+      {/* Bottom nav — sits naturally below the form, sharing the page background */}
       {step < 7 && (
-        <div className="sticky bottom-0 z-30 border-t border-border bg-card/95 backdrop-blur-md shadow-[0_-2px_8px_-2px_rgba(0,0,0,0.06)]">
-          <div className="mx-auto flex w-full max-w-6xl items-center justify-end px-4 py-2.5 sm:px-6 lg:px-8">
+        <div className="relative bg-[#EFF0F6]">
+          <div className="mx-auto flex w-full max-w-6xl items-center justify-end px-4 pt-2 pb-6 sm:px-6 lg:px-8">
             {step < 6 ? (
-              <Button size="md" onClick={goNext} className="mr-[3px]">
+              <Button size="md" onClick={goNext} className="mr-[145px]">
                 Next <ArrowRight className="h-4 w-4" />
               </Button>
             ) : (
-              <Button size="md" onClick={handleSubmit} className="mr-[3px]">
+              <Button size="md" onClick={handleSubmit} className="mr-[145px]">
                 <Save className="h-4 w-4" /> {isEdit ? "Save Invoice" : "Create Invoice"}
               </Button>
             )}
@@ -576,7 +586,7 @@ function InvoiceWizard() {
 
 /* ─── Helper: Invoice to Form ────────────────────────────────────────── */
 
-function invoiceToForm(inv: Invoice): InvoiceFormData {
+function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
   // Restore devices if available, otherwise create a single device from flat items
   const devices: InvoiceFormDevice[] = inv.devices && inv.devices.length > 0
     ? inv.devices.map((d) => createFormDevice({
@@ -600,7 +610,7 @@ function invoiceToForm(inv: Invoice): InvoiceFormData {
 
   return {
     customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "" },
-    details: { reference: inv.reference, dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
+    details: { dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
@@ -741,7 +751,7 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
   return (
     <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-card sm:p-10">
       <h2 className="font-display text-lg font-bold mb-1">Invoice Details</h2>
-      <p className="text-sm text-muted-foreground mb-8">Reference, dates, and assignment.</p>
+      <p className="text-sm text-muted-foreground mb-8">Linked ticket, dates, and assignment.</p>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
         <div className="space-y-1.5">
           <Label>Invoice Type *</Label>
@@ -755,11 +765,106 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
             { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" },
           ]} />
         </div>
-        <div className="space-y-1.5"><Label>Reference/Invoice Number</Label><Input value={d.reference} onChange={(e: any) => set("reference", e.target.value)} placeholder="CORP-1758" /></div>
+        {/* Linked Ticket — occupies the previous Reference slot (same position,
+            width and styling). Locked/read-only when the invoice originated from
+            a "Push to Invoice" action; a searchable picker otherwise. */}
+        <div className="space-y-1.5"><Label>Linked Ticket</Label><LinkedTicketField form={form} updateForm={updateForm} /></div>
         <div className="space-y-1.5"><Label>Due Date</Label><Input type="date" value={d.dueDate} onChange={(e: any) => set("dueDate", e.target.value)} /></div>
         <div className="space-y-1.5"><Label>Created by</Label><Input value={d.employee} onChange={(e: any) => set("employee", e.target.value)} placeholder="Anjali R." /></div>
-        <div className="space-y-1.5"><Label>Linked Ticket</Label><Input value={d.ticketId} onChange={(e: any) => set("ticketId", e.target.value)} placeholder="T-1837 (optional)" /></div>
       </div>
+    </div>
+  );
+}
+
+/* ─── Linked Ticket Field ────────────────────────────────────────────
+   - Locked read-only display when the invoice was created from a ticket push
+     (relationship already established → cannot be changed here).
+   - Searchable picker for standalone invoices: optional, blank when unset.
+   Stores the ticket's stable primary key in details.ticketId (FK-safe) and its
+   display number in details.ticketNo. */
+function LinkedTicketField({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
+  const { tickets } = useStore();
+  const d = form.details;
+  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+
+  const results = q.trim().length >= 1
+    ? tickets.filter((t) => {
+        const query = q.toLowerCase();
+        return (
+          (t.ticketNo || "").toLowerCase().includes(query) ||
+          t.id.toLowerCase().includes(query) ||
+          (t.customer || "").toLowerCase().includes(query) ||
+          (t.phone || "").toLowerCase().includes(query)
+        );
+      }).slice(0, 8)
+    : [];
+
+  const selectTicket = (id: string, ticketNo: string) => {
+    updateForm((f) => ({ ...f, details: { ...f.details, ticketId: id, ticketNo } }));
+    setOpen(false);
+    setQ("");
+  };
+
+  const clearTicket = () => {
+    updateForm((f) => ({ ...f, details: { ...f.details, ticketId: "", ticketNo: "" } }));
+  };
+
+  // Locked: relationship established via Push-to-Invoice — read-only.
+  if (d.ticketLocked && d.ticketId) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/50 px-3 py-2.5">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]"><Link2 className="h-3.5 w-3.5" /></span>
+        <span className="flex-1 text-sm font-medium tabular-nums">{d.ticketNo || d.ticketId}</span>
+        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200"><Check className="h-3 w-3" /> Linked</span>
+      </div>
+    );
+  }
+
+  // Selected (standalone) — show the chosen ticket with a clear button.
+  if (d.ticketId) {
+    return (
+      <div className="flex items-center gap-2 rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD]/40 px-3 py-2.5">
+        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]"><Link2 className="h-3.5 w-3.5" /></span>
+        <span className="flex-1 text-sm font-medium tabular-nums">{d.ticketNo || d.ticketId}</span>
+        <button type="button" onClick={clearTicket} className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted" aria-label="Remove linked ticket"><X className="h-3.5 w-3.5" /></button>
+      </div>
+    );
+  }
+
+  // Unlinked — optional searchable picker.
+  return (
+    <div className="relative">
+      <Input
+        value={q}
+        onChange={(e: any) => { setQ(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        placeholder="Search a ticket to link (optional)"
+        iconLeft={<Search className="h-3.5 w-3.5" />}
+      />
+      {open && results.length > 0 && (
+        <div className="absolute left-0 right-0 top-full z-40 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+          {results.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => selectTicket(t.id, t.ticketNo ?? t.id)}
+              className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition border-b border-border last:border-0 hover:bg-indigo-50/50"
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE] text-[10px] font-bold tabular-nums">{(t.ticketNo ?? t.id).replace(/^T-?/i, "").slice(0, 3) || "T"}</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium truncate">{t.ticketNo ?? t.id}</p>
+                <p className="text-[10px] text-muted-foreground truncate">{t.customer}{t.device ? ` · ${t.device}` : ""}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+      {open && q.trim().length >= 1 && results.length === 0 && (
+        <div className="absolute left-0 right-0 top-full z-40 mt-1 rounded-xl border border-border bg-card shadow-lg">
+          <p className="text-center text-sm text-muted-foreground py-3">No tickets match &ldquo;{q}&rdquo;</p>
+        </div>
+      )}
     </div>
   );
 }
@@ -1361,7 +1466,7 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
           <section className="flex flex-col">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Details</p>
             <div className="flex flex-1 flex-col rounded-xl border border-border bg-muted/20 p-4 text-[13px]">
-              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Reference</span><span className="font-medium">{form.details.reference || "Auto-generated"}</span></div>
+              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Linked Ticket</span><span className="font-medium">{form.details.ticketNo || form.details.ticketId || "—"}</span></div>
               <div className="h-px bg-border/50" />
               <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Due Date</span><span className="font-medium">{form.details.dueDate || "7 days from now"}</span></div>
               <div className="h-px bg-border/50" />

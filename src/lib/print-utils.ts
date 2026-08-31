@@ -92,7 +92,6 @@ export type PrintLineItem = {
 
 export type PrintInvoiceInfo = {
   invoiceId: string;
-  reference: string;
   invoiceType: string;
   status: string;
   createdAt: string;
@@ -114,7 +113,10 @@ export type PrintInvoiceInfo = {
   terms: string;
   footer: string;
   employee: string;
+  /** Stable primary key of the linked ticket (empty when none). */
   ticketId: string;
+  /** Human-readable linked ticket number for display (T-045). */
+  linkedTicketNo?: string;
   paymentMode?: string;
   /** Service category — "service" or "accessories" */
   serviceCategory?: string;
@@ -250,7 +252,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
   };
 }
 
-export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
+export function buildInvoiceInfo(invoice: Invoice, linkedTicketNo?: string): PrintInvoiceInfo {
   const items: PrintLineItem[] = invoice.items.map((item) => ({
     name: item.name,
     description: item.description,
@@ -284,7 +286,6 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
 
   return {
     invoiceId: invoice.id,
-    reference: invoice.reference,
     invoiceType: invoice.invoiceType,
     status: invoice.status,
     createdAt: invoice.createdAt,
@@ -307,6 +308,7 @@ export function buildInvoiceInfo(invoice: Invoice): PrintInvoiceInfo {
     footer: invoice.footer || "",
     employee: invoice.employee || "",
     ticketId: invoice.ticketId || "",
+    linkedTicketNo: linkedTicketNo || undefined,
     paymentMode: invoice.paymentMode || undefined,
     serviceCategory: invoice.serviceCategory || "service",
     devices: printDevices,
@@ -336,6 +338,7 @@ export function buildTicketPrintData(
 export function buildInvoicePrintData(
   settings: StoreSettings,
   invoice: Invoice,
+  linkedTicketNo?: string,
 ): PrintDocumentData {
   const now = new Date();
   // Determine print title based on invoice type + service category
@@ -350,7 +353,7 @@ export function buildInvoicePrintData(
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromInvoice(invoice),
-    invoice: buildInvoiceInfo(invoice),
+    invoice: buildInvoiceInfo(invoice, linkedTicketNo),
     printTitle: title,
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
     printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),

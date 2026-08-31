@@ -119,8 +119,13 @@ function InvoiceResultRow({ result, query, isActive }: { result: InvoiceResult; 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
           <span className="text-[13px] font-semibold text-zinc-900">
-            <Highlight text={result.reference || result.id} query={query} />
+            <Highlight text={result.id} query={query} />
           </span>
+          {result.linkedTicketNo && (
+            <span className="inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-indigo-600 ring-1 ring-inset ring-indigo-200">
+              <Highlight text={result.linkedTicketNo} query={query} />
+            </span>
+          )}
           <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", statusTone)}>
             {statusLabel}
           </span>

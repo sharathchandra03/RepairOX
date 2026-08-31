@@ -28,18 +28,18 @@ import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
-type InvColumnId = "id" | "reference" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
+type InvColumnId = "id" | "ticket" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
 
 type InvColumnDef = {
   id: InvColumnId;
   label: string;
-  align?: "left" | "right";
+  align?: "left" | "right" | "center";
   locked?: boolean;
 };
 
 const INV_ALL_COLUMNS: InvColumnDef[] = [
   { id: "id", label: "ID" },
-  { id: "reference", label: "Reference" },
+  { id: "ticket", label: "Ticket", align: "center" },
   { id: "customer", label: "Customer" },
   { id: "date", label: "Created" },
   { id: "status", label: "Status" },
@@ -125,6 +125,13 @@ export default function InvoicePage() {
     for (const t of tickets) m.set(t.id, getTicketType(t));
     return m;
   }, [tickets]);
+  // Map an invoice's stored ticketId (the ticket's stable primary key) → its
+  // human-readable ticket number (T-045) for display in the TICKET column.
+  const ticketNoById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const t of tickets) m.set(t.id, t.ticketNo ?? t.id);
+    return m;
+  }, [tickets]);
   const {
     downloadInvoice,
     startBulkInvoiceDownload,
@@ -201,14 +208,15 @@ export default function InvoicePage() {
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
-      const okQ = !q || `${inv.id} ${inv.reference} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
+      const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
+      const okQ = !q || `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
       return okStatus && okType && okCategory && okDate && okQ;
     });
     // Pinned invoices float to the top; order within each group is preserved.
     const pinned = filtered.filter((inv) => inv.pinnedAt);
     const normal = filtered.filter((inv) => !inv.pinnedAt);
     return [...pinned, ...normal];
-  }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId]);
+  }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId, ticketNoById]);
 
   // Reset to page 1 whenever the filtered result set changes.
   useEffect(() => {
@@ -256,7 +264,7 @@ export default function InvoicePage() {
   }, [list]);
 
   const handleDuplicate = useCallback((inv: Invoice) => {
-    addInvoice({ ...inv, id: `INV-${Math.floor(1000 + Math.random() * 9000)}`, reference: `CORP-${Math.floor(1000 + Math.random() * 9000)}`, status: "draft", createdAt: new Date().toISOString(), paidAmount: 0 });
+    addInvoice({ ...inv, id: `INV-${Math.floor(1000 + Math.random() * 9000)}`, status: "draft", createdAt: new Date().toISOString(), paidAmount: 0 });
   }, [addInvoice]);
 
   return (
@@ -481,7 +489,7 @@ export default function InvoicePage() {
                   />
                 </th>
                 {activeInvCols.map((col) => (
-                  <th key={col.id} className={cn("py-3 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-[55px]", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right")}>{col.label}</th>
+                  <th key={col.id} className={cn("py-3 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-[55px]", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -498,8 +506,8 @@ export default function InvoicePage() {
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
-                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt))}
+                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), inv.ticketId ? ticketNoById.get(inv.ticketId) : undefined, inv.ticketId ? () => router.push(`/tickets/${inv.ticketId}`) : undefined)}
                     </td>
                   ))}
                 </motion.tr>
@@ -721,6 +729,8 @@ function renderInvCell(
   onPrint: () => void,
   onDownloadPdf: () => void,
   onPin: () => void,
+  linkedTicketNo?: string,
+  onOpenTicket?: () => void,
 ) {
   switch (colId) {
     case "id": return (
@@ -731,7 +741,18 @@ function renderInvCell(
         </span>
       </span>
     );
-    case "reference": return <span className="text-muted-foreground whitespace-nowrap text-[13px] leading-snug">{inv.reference}</span>;
+    case "ticket": return inv.ticketId ? (
+      <button
+        type="button"
+        onClick={(e) => { e.stopPropagation(); onOpenTicket?.(); }}
+        className="whitespace-nowrap text-[13px] font-medium leading-snug text-[#4361EE] transition hover:underline"
+        title="View linked ticket"
+      >
+        {linkedTicketNo || inv.ticketId}
+      </button>
+    ) : (
+      <span className="text-muted-foreground whitespace-nowrap text-[13px] leading-snug">—</span>
+    );
     case "customer": return (
       <div className="flex items-center gap-3">
         <Avatar name={inv.customer} size={30} ticketType={ticketType ?? "na"} />

@@ -66,7 +66,9 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
       return ticket ? buildTicketPrintData(settings, ticket) : null;
     }
     const invoice = invoices.find((i) => i.id === id);
-    return invoice ? buildInvoicePrintData(settings, invoice) : null;
+    if (!invoice) return null;
+    const lt = invoice.ticketId ? tickets.find((t) => t.id === invoice.ticketId) : undefined;
+    return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId);
   }, [type, id, tickets, invoices, settings]);
 
   // Invoices don't support the "label" format — fall back to A4 for the preview.

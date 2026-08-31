@@ -75,12 +75,20 @@ export function usePdfDownload(): UsePdfDownloadReturn {
   // Permission check: print_documents OR print_invoice covers download
   const canDownload = can("print_documents") || can("print_invoice") || can("view_invoice") || can("view_ticket");
 
+  // Resolve an invoice's linked ticket (stored as the ticket's primary key) to
+  // its human-readable number (T-045) for the print/PDF output.
+  const linkedTicketNoFor = useCallback((ticketId?: string): string | undefined => {
+    if (!ticketId) return undefined;
+    const t = tickets.find((tk) => tk.id === ticketId);
+    return t?.ticketNo ?? t?.id ?? ticketId;
+  }, [tickets]);
+
   /* ─── Single Invoice Download ─── */
   const downloadInvoice = useCallback(async (invoice: Invoice) => {
     if (!canDownload) return;
     setIsDownloading(true);
     try {
-      const printData = buildInvoicePrintData(settings, invoice);
+      const printData = buildInvoicePrintData(settings, invoice, linkedTicketNoFor(invoice.ticketId));
       const filename = getInvoicePdfFilename(invoice.id, invoice.invoiceType, invoice.serviceCategory);
       await downloadSinglePdf(printData, filename);
 
@@ -99,7 +107,7 @@ export function usePdfDownload(): UsePdfDownloadReturn {
     } finally {
       setIsDownloading(false);
     }
-  }, [settings, canDownload]);
+  }, [settings, canDownload, linkedTicketNoFor]);
 
   /* ─── Single Ticket Download ─── */
   const downloadTicket = useCallback(async (ticket: Ticket) => {
@@ -134,7 +142,7 @@ export function usePdfDownload(): UsePdfDownloadReturn {
     if (selectedInvoices.length === 0) return;
 
     const items = selectedInvoices.map((inv) => ({
-      data: buildInvoicePrintData(settings, inv),
+      data: buildInvoicePrintData(settings, inv, linkedTicketNoFor(inv.ticketId)),
       filename: getInvoicePdfFilename(inv.id, inv.invoiceType, inv.serviceCategory),
       id: inv.id,
     }));
@@ -144,7 +152,7 @@ export function usePdfDownload(): UsePdfDownloadReturn {
     setBulkCount(items.length);
     setBulkProgress(null);
     setBulkDialogOpen(true);
-  }, [invoices, settings, canDownload]);
+  }, [invoices, settings, canDownload, linkedTicketNoFor]);
 
   /* ─── Bulk Ticket Download (open dialog) ─── */
   const startBulkTicketDownload = useCallback((ticketIds: string[]) => {

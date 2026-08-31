@@ -37,7 +37,8 @@ export type TicketResult = {
 export type InvoiceResult = {
   type: "invoice";
   id: string;
-  reference: string;
+  /** Human-readable linked ticket number (T-045), or empty when unlinked. */
+  linkedTicketNo: string;
   customer: string;
   phone: string;
   invoiceType: string;
@@ -139,18 +140,23 @@ function searchTickets(tickets: Ticket[], query: string): TicketResult[] {
   return results;
 }
 
-function searchInvoices(invoices: Invoice[], query: string): InvoiceResult[] {
+function searchInvoices(invoices: Invoice[], query: string, tickets: Ticket[]): InvoiceResult[] {
   const q = query.toLowerCase();
   const results: InvoiceResult[] = [];
+  // Resolve an invoice's linked ticket (stored as the ticket's primary key) to
+  // its human-readable number (T-045) for search + display.
+  const ticketNoById = new Map<string, string>();
+  for (const t of tickets) ticketNoById.set(t.id, t.ticketNo ?? t.id);
 
   for (const inv of invoices) {
-    const searchable = `${inv.id} ${inv.reference} ${inv.customer} ${inv.phone} ${inv.invoiceType} ${inv.serviceCategory || ""} ${inv.status} ${inv.total}`.toLowerCase();
+    const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
+    const searchable = `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.phone} ${inv.invoiceType} ${inv.serviceCategory || ""} ${inv.status} ${inv.total}`.toLowerCase();
 
     if (searchable.includes(q)) {
       results.push({
         type: "invoice",
         id: inv.id,
-        reference: inv.reference,
+        linkedTicketNo,
         customer: inv.customer,
         phone: inv.phone,
         invoiceType: inv.invoiceType,
@@ -226,7 +232,7 @@ export function useUniversalSearch() {
       case "tickets":
         return searchTickets(tickets, debouncedQuery);
       case "invoices":
-        return searchInvoices(invoices, debouncedQuery);
+        return searchInvoices(invoices, debouncedQuery, tickets);
       case "settings":
         return searchSettings(debouncedQuery);
       default:

@@ -40,7 +40,7 @@ function fmtDateShort(iso: string): string {
 
 /* ─── Activity History (derived) ─────────────────────────────────────── */
 
-function generateActivity(invoice: Invoice) {
+function generateActivity(invoice: Invoice, linkedTicketNo?: string) {
   const events: { id: number; title: string; description: string; time: string; icon: any; color: string }[] = [];
   let idx = 0;
 
@@ -57,7 +57,7 @@ function generateActivity(invoice: Invoice) {
     events.push({
       id: idx++,
       title: "Linked to Ticket",
-      description: `Connected to repair ticket ${invoice.ticketId}`,
+      description: `Connected to repair ticket ${linkedTicketNo ?? invoice.ticketId}`,
       time: new Date(new Date(invoice.createdAt).getTime() + 2 * 60_000).toISOString(),
       icon: TicketIcon,
       color: "text-indigo-600 bg-indigo-50 ring-indigo-200",
@@ -106,7 +106,7 @@ export default function InvoiceDetailPage() {
 
   const invoice = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
   const linkedTicket = useMemo(() => tickets.find((t) => t.id === invoice?.ticketId), [tickets, invoice]);
-  const activity = useMemo(() => (invoice ? generateActivity(invoice) : []), [invoice]);
+  const activity = useMemo(() => (invoice ? generateActivity(invoice, linkedTicket?.ticketNo ?? invoice.ticketId) : []), [invoice, linkedTicket]);
 
   const [showDelete, setShowDelete] = useState(false);
   const [showStatusDrawer, setShowStatusDrawer] = useState(false);
@@ -252,7 +252,9 @@ export default function InvoiceDetailPage() {
                 </span>
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
-                <span className="font-medium text-foreground">{invoice.customer}</span> &middot; {invoice.reference} &middot; Created {getElapsedLabel(invoice.createdAt)}
+                <span className="font-medium text-foreground">{invoice.customer}</span>
+                {invoice.ticketId && <> &middot; Ticket {linkedTicket?.ticketNo ?? invoice.ticketId}</>}
+                {" "}&middot; Created {getElapsedLabel(invoice.createdAt)}
               </p>
             </div>
           </div>
@@ -344,7 +346,21 @@ export default function InvoiceDetailPage() {
             }
           >
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-              <DetailField label="Reference / PO" value={invoice.reference} />
+              <div>
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Linked Ticket</p>
+                {invoice.ticketId ? (
+                  <button
+                    type="button"
+                    onClick={() => router.push(`/tickets/${invoice.ticketId}`)}
+                    className="inline-flex items-center gap-1 text-sm font-medium text-[#4361EE] transition hover:underline"
+                    title="View linked ticket"
+                  >
+                    <TicketIcon className="h-3.5 w-3.5" /> {linkedTicket?.ticketNo ?? invoice.ticketId}
+                  </button>
+                ) : (
+                  <p className="text-sm font-medium text-foreground">—</p>
+                )}
+              </div>
               <DetailField label="Invoice Type" value={INVOICE_TYPE_LABEL[invoice.invoiceType]} />
               <DetailField label="Employee" value={invoice.employee || "—"} />
               <DetailField label="Created" value={fmtDate(invoice.createdAt)} />
@@ -839,13 +855,12 @@ export default function InvoiceDetailPage() {
         icon={Tag}
         width="max-w-md"
         initialValues={{
-          reference: invoice.reference, employee: invoice.employee || "",
+          employee: invoice.employee || "",
           dueDate: invoice.dueDate?.slice(0, 10) || "",
           invoiceType: invoice.invoiceType,
           status: invoice.status,
         }}
         fields={[
-          { key: "reference", label: "Reference/Invoice Number", type: "text" },
           { key: "invoiceType", label: "Invoice Type", type: "select", options: [
             { label: "Retail Invoice", value: "retail" }, { label: "Business Invoice", value: "business" },
           ]},
@@ -858,7 +873,6 @@ export default function InvoiceDetailPage() {
         ]}
         onSave={(v) => {
           updateInvoice(invoice.id, {
-            reference: v.reference,
             invoiceType: v.invoiceType as any,
             employee: v.employee || undefined,
             dueDate: v.dueDate ? new Date(v.dueDate).toISOString() : invoice.dueDate,

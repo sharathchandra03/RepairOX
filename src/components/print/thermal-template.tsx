@@ -196,7 +196,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
           <div className="mb-1">
             <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">Invoice Details</p>
             <div className="space-y-0.5">
-              <Row label="Reference" value={invoice.reference} />
+              {invoice.ticketId && <Row label="Ticket" value={invoice.linkedTicketNo || invoice.ticketId} />}
               <Row label="Type" value={invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"} />
               <Row label="Category" value={(invoice.serviceCategory || "service").charAt(0).toUpperCase() + (invoice.serviceCategory || "service").slice(1)} />
               <div className="flex justify-between gap-1 text-[9px] leading-[1.4]">
@@ -219,7 +219,6 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
               <Row label="Due" value={formatPrintDate(invoice.dueDate)} />
               {invoice.paymentMode && <Row label="Payment" value={invoice.paymentMode.replace("_", " ")} />}
               {invoice.employee && <Row label="Employee" value={invoice.employee} />}
-              {invoice.ticketId && <Row label="Ticket" value={invoice.ticketId} />}
             </div>
           </div>
 

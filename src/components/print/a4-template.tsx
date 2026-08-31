@@ -802,8 +802,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
               <Field label="Status" value={statusInfo.label} />
               {inv.paymentMode ? <Field label="Payment Mode" value={inv.paymentMode.replace(/_/g, " ")} /> : null}
               {inv.employee ? <Field label="Salesperson" value={inv.employee} /> : null}
-              {inv.reference ? <Field label="Reference / PO" value={inv.reference} /> : null}
-              {inv.ticketId ? <Field label="Ticket Number" value={inv.ticketId} /> : null}
+              {inv.ticketId ? <Field label="Ticket Number" value={inv.linkedTicketNo || inv.ticketId} /> : null}
             </div>
           </div>
         </div>

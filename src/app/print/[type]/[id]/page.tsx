@@ -103,7 +103,8 @@ export default function PrintPreviewPage() {
     } else {
       const invoice = invoices.find((i) => i.id === docId);
       if (!invoice) return null;
-      return buildInvoicePrintData(settings, invoice);
+      const lt = invoice.ticketId ? tickets.find((t) => t.id === invoice.ticketId) : undefined;
+      return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId);
     }
   }, [mounted, hydrated, isTicket, docId, tickets, invoices, settings]);
 
