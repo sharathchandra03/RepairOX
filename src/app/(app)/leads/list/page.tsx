@@ -266,15 +266,15 @@ export default function LeadsListPage() {
           <thead className="bg-[#EEF1FD]">
             <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
               <th className="px-4 py-3">Lead</th>
-              <th className="py-3">Date</th>
-              <th className="py-3">Source</th>
-              <th className="py-3">Owner</th>
-              <th className="py-3">Device</th>
-              <th className="py-3">Category</th>
-              <th className="py-3">Status</th>
-              <th className="py-3">Priority</th>
-              <th className="py-3">Follow-up</th>
-              <th className="py-3 pr-4 text-right">Actions</th>
+              <th className="px-3 py-3">Date</th>
+              <th className="px-3 py-3">Source</th>
+              <th className="px-3 py-3">Owner</th>
+              <th className="px-3 py-3">Device</th>
+              <th className="px-3 py-3">Category</th>
+              <th className="px-3 py-3">Status</th>
+              <th className="px-3 py-3">Priority</th>
+              <th className="px-3 py-3">Follow-up</th>
+              <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -301,17 +301,17 @@ export default function LeadsListPage() {
                     </div>
                   </div>
                 </td>
-                <td className="py-3"><span className="text-[12px] text-zinc-600">{lead.date || "—"}</span></td>
-                <td className="py-3"><span className="text-zinc-700">{lead.source || "—"}</span></td>
-                <td className="py-3">
+                <td className="px-3 py-3"><span className="text-[12px] text-zinc-600">{lead.date || "—"}</span></td>
+                <td className="px-3 py-3"><span className="text-zinc-700">{lead.source || "—"}</span></td>
+                <td className="px-3 py-3">
                   {canAssign ? <AssignMenu lead={lead} /> : <AssignBadge lead={lead} />}
                 </td>
-                <td className="py-3"><span className="text-zinc-700">{lead.device || "—"}</span></td>
-                <td className="py-3"><span className="text-zinc-600">{lead.leadCategory || "—"}</span></td>
-                <td className="py-3">{lead.status ? <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
-                <td className="py-3">{lead.priority ? <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
-                <td className="py-3"><FollowUpCell lead={lead} /></td>
-                <td className="py-3 pr-4">
+                <td className="px-3 py-3"><span className="text-zinc-700">{lead.device || "—"}</span></td>
+                <td className="px-3 py-3"><span className="text-zinc-600">{lead.leadCategory || "—"}</span></td>
+                <td className="px-3 py-3">{lead.status ? <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td className="px-3 py-3">{lead.priority ? <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td className="px-3 py-3"><FollowUpCell lead={lead} /></td>
+                <td className="px-4 py-3">
                   <LeadActionsMenu lead={lead} onAction={handleAction} />
                 </td>
               </motion.tr>

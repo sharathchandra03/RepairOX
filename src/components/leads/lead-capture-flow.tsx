@@ -15,7 +15,7 @@
    "Add Lead" and "Edit Lead" — one structured form, no duplicate systems.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
@@ -50,6 +50,11 @@ function ConfigurableSelect({
   const { optionsFor } = useLeads();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number }>({ left: 0, width: 0 });
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const values = useMemo(() => {
     const configured = optionsFor(field).map((o) => o.value);
@@ -63,11 +68,46 @@ function ConfigurableSelect({
     ? values.filter((v) => v.toLowerCase().includes(query.trim().toLowerCase()))
     : values;
 
+  // Position the portal panel from the trigger's rect; flip up when there's not
+  // enough room below so long lists never get clipped by the modal edge.
+  const place = () => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < 280 && r.top > spaceBelow;
+    setPos(openUp
+      ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + 4 }
+      : { left: r.left, width: r.width, top: r.bottom + 4 });
+  };
+
+  const toggle = () => {
+    if (!open) { place(); scrollTriggerIntoView(triggerRef.current); }
+    setOpen((o) => !o);
+  };
+  const close = () => { setOpen(false); setQuery(""); };
+
+  // Keep the panel glued to the trigger while the modal body scrolls/resizes.
+  useEffect(() => {
+    if (!open) return;
+    const onReflow = (e: Event) => {
+      if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
+      place();
+    };
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
+    return () => {
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
+    };
+  }, [open]);
+
   return (
-    <div className="relative">
+    <>
       <button
+        ref={triggerRef}
         type="button"
-        onClick={() => setOpen((o) => !o)}
+        onClick={toggle}
         className={cn(
           "flex h-[38px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all",
           open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-border hover:border-[#4361EE]/40",
@@ -76,10 +116,14 @@ function ConfigurableSelect({
         <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value || placeholder || "Select…"}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
-      {open && (
+      {mounted && open && createPortal(
         <>
-          <div className="fixed inset-0 z-[10000]" onClick={() => { setOpen(false); setQuery(""); }} />
-          <div className="absolute left-0 top-full z-[10001] mt-1 w-full overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+          <div className="fixed inset-0 z-[10040]" onClick={close} />
+          <div
+            ref={panelRef}
+            style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
+            className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
+          >
             {values.length > 6 && (
               <div className="flex items-center gap-2 border-b border-border px-2.5 py-2">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
@@ -94,7 +138,7 @@ function ConfigurableSelect({
             )}
             <div className="max-h-56 overflow-y-auto p-1">
               {value && (
-                <button type="button" onClick={() => { onChange(""); setOpen(false); setQuery(""); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-muted">
+                <button type="button" onClick={() => { onChange(""); close(); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-muted">
                   <X className="h-3 w-3" /> Clear
                 </button>
               )}
@@ -103,7 +147,7 @@ function ConfigurableSelect({
                 <button
                   key={v}
                   type="button"
-                  onClick={() => { onChange(v); setOpen(false); setQuery(""); }}
+                  onClick={() => { onChange(v); close(); }}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
                     v === value ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : "hover:bg-[#EEF1FD]/60",
@@ -115,10 +159,20 @@ function ConfigurableSelect({
               ))}
             </div>
           </div>
-        </>
+        </>,
+        document.body,
       )}
-    </div>
+    </>
   );
+}
+
+/** Gently scroll the modal body so the just-focused control is comfortably in
+ *  view (used when a dropdown near the bottom is opened). */
+function scrollTriggerIntoView(el: HTMLElement | null) {
+  if (!el) return;
+  requestAnimationFrame(() => {
+    el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  });
 }
 
 /* ─── Field primitives ────────────────────────────────────────────────── */
@@ -153,11 +207,7 @@ const STAGES = [
 /* Subtle horizontal slide + fade for step transitions. `custom` is the
    direction (+1 forward / -1 back): the entering step comes from the side we're
    moving toward, the exiting step leaves the opposite way. No bounce/spring. */
-const STEP_VARIANTS = {
-  enter: (dir: number) => ({ opacity: 0, x: dir >= 0 ? 28 : -28 }),
-  center: { opacity: 1, x: 0 },
-  exit: (dir: number) => ({ opacity: 0, x: dir >= 0 ? -28 : 28 }),
-};
+const STEP_TRANSITION = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const };
 
 /* ─── Main flow ───────────────────────────────────────────────────────── */
 
@@ -186,7 +236,17 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   // Direction of the last step change: +1 = forward (Continue), -1 = back.
   // Drives the horizontal slide so Back returns content from the opposite side.
   const [dir, setDir] = useState(1);
-  const goToStage = (next: number) => { setDir(next >= stage ? 1 : -1); setStage(next); };
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const goToStage = (next: number) => {
+    if (next === stage) return;
+    setDir(next >= stage ? 1 : -1);
+    setStage(next);
+  };
+  // Each time the step changes, snap the body back to the top so the new step
+  // always starts from its first field (no carried-over scroll position).
+  useLayoutEffect(() => {
+    if (bodyRef.current) bodyRef.current.scrollTo({ top: 0 });
+  }, [stage]);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
   const [draft, setDraft] = useState<LeadDraft>(() => {
@@ -280,17 +340,24 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         {/* Body — the panel stays fixed; only this inner step content transitions.
             overflow-hidden on the wrapper clips the horizontal slide so there's
             no layout shift while the next/previous step moves in. */}
-        <div className="relative flex-1 overflow-y-auto overflow-x-hidden p-5">
-          <AnimatePresence mode="wait" custom={dir} initial={false}>
-            <motion.div
-              key={stage}
-              custom={dir}
-              variants={STEP_VARIANTS}
-              initial="enter"
-              animate="center"
-              exit="exit"
-              transition={{ duration: 0.24, ease: [0.4, 0, 0.2, 1] }}
-            >
+        <div
+          ref={bodyRef}
+          onFocus={(e) => {
+            // When a field is focused (tab or click), keep it comfortably in view.
+            const t = e.target as HTMLElement;
+            if (t.matches("input, textarea, select")) scrollTriggerIntoView(t);
+          }}
+          className="relative flex-1 overflow-y-auto overflow-x-hidden p-5"
+        >
+          {/* Only the active step is mounted; it animates IN on mount (fade +
+              small directional slide). No exit/AnimatePresence, so the panel
+              height simply follows the new content — no wait-gap or snap. */}
+          <motion.div
+            key={stage}
+            initial={{ opacity: 0, x: dir >= 0 ? 20 : -20 }}
+            animate={{ opacity: 1, x: 0 }}
+            transition={STEP_TRANSITION}
+          >
               {stage === 1 && (
                 <div className="space-y-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Contact & Source</p>
@@ -393,8 +460,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   </Field>
                 </div>
               )}
-            </motion.div>
-          </AnimatePresence>
+          </motion.div>
         </div>
 
         {/* Footer */}

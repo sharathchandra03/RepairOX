@@ -196,11 +196,11 @@ export function followUpState(followUpDate: string): FollowUpState {
 export function followUpTone(state: FollowUpState): { chip: string; rowTint: string; text: string } {
   switch (state) {
     case "overdue":
-      return { chip: "bg-red-50 text-[#922B21] ring-red-300", rowTint: "bg-red-50/80", text: "text-[#922B21] font-semibold" };
+      return { chip: "bg-red-100 text-[#B42318] ring-red-300", rowTint: "bg-red-100/90", text: "text-[#B42318] font-semibold" };
     case "today":
-      return { chip: "bg-red-50 text-[#922B21] ring-red-200/70", rowTint: "bg-red-50/50", text: "text-[#922B21] font-semibold" };
+      return { chip: "bg-red-100 text-[#B42318] ring-red-300", rowTint: "bg-red-100/70", text: "text-[#B42318] font-semibold" };
     case "upcoming":
-      return { chip: "bg-red-50/60 text-[#922B21]/80 ring-red-200/50", rowTint: "bg-red-50/25", text: "text-[#922B21]/70" };
+      return { chip: "bg-red-50 text-[#C0392B] ring-red-200", rowTint: "bg-red-100/60", text: "text-[#C0392B]" };
     default:
       return { chip: "bg-zinc-50 text-zinc-500 ring-zinc-200", rowTint: "", text: "text-muted-foreground" };
   }
