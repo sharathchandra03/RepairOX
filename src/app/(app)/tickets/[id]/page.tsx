@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -25,6 +25,7 @@ import {
   type Ticket, type TicketStatus, type TicketPriority, type DeviceRecord,
   getTicketDevices,
 } from "@/lib/mock-data";
+import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -122,6 +123,10 @@ export default function TicketDetailPage() {
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
 
+  // Warm the device-category cache so categoryLabel() resolves ids to labels
+  // synchronously in the render paths below.
+  useEffect(() => { loadDeviceCategories().catch(() => {}); }, []);
+
   const ticket = useMemo(() => tickets.find((t) => t.id === ticketId), [tickets, ticketId]);
   const linkedInvoice = useMemo(() => invoices.find((inv) => inv.ticketId === ticketId), [invoices, ticketId]);
   const timeline = useMemo(() => ticket ? generateTimeline(ticket) : [], [ticket]);
@@ -190,8 +195,13 @@ export default function TicketDetailPage() {
 
     // Pass full device structure as JSON for multi-device invoice support
     const invoiceDevices = devices.map((dev) => ({
+      category: dev.category || (dev as any).categoryId || "",
       brand: dev.brand,
       model: dev.model,
+      // Carry the durable Category → Brand → Model ids so the invoice inherits
+      // the exact relationship instead of re-inferring from text.
+      brandId: (dev as any).brandId || undefined,
+      modelId: (dev as any).modelId || undefined,
       imei: dev.imei,
       imeiType: dev.imeiType,
       issue: dev.issue || dev.description,
@@ -344,7 +354,7 @@ export default function TicketDetailPage() {
                   <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
                     <DetailField label="Brand" value={dev.brand || ticket.device} />
                     <DetailField label="Model" value={dev.model || ticket.model} />
-                    <DetailField label="Category" value={dev.category || dev.brand || ticket.device} />
+                    <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : (dev.brand || ticket.device)} />
                     <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
                     <DetailField label="Source" value={dev.source || ticket.source || "—"} />
                     <DetailField label="Issue" value={dev.issue || ticket.issue} />
@@ -368,6 +378,7 @@ export default function TicketDetailPage() {
                         </span>
                       </div>
                       <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
+                        <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : "—"} />
                         <DetailField label="Brand" value={dev.brand || "—"} />
                         <DetailField label="Model" value={dev.model || "—"} />
                         <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />

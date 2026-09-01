@@ -29,6 +29,7 @@ import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
@@ -79,8 +80,10 @@ const DATE_RANGES = [
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
   { label: "7 Days", value: "7days" },
-  { label: "14 Days", value: "14days" },
-  { label: "30 Days", value: "30days" },
+  { label: "1 Month", value: "1month" },
+  { label: "Last Month", value: "lastmonth" },
+  { label: "1 Year", value: "1year" },
+  { label: "Custom", value: "custom" },
 ] as const;
 
 type DateRange = (typeof DATE_RANGES)[number]["value"];
@@ -145,7 +148,7 @@ function startOfDay(date: Date): Date {
   return d;
 }
 
-function isInDateRange(createdAt: string, range: DateRange): boolean {
+function isInDateRange(createdAt: string, range: DateRange, customFrom?: string, customTo?: string): boolean {
   if (range === "all") return true;
   const created = new Date(createdAt).getTime();
   if (isNaN(created)) return true;
@@ -155,8 +158,27 @@ function isInDateRange(createdAt: string, range: DateRange): boolean {
     case "today": return created >= todayStart;
     case "yesterday": return created >= todayStart - 86_400_000 && created < todayStart;
     case "7days": return created >= todayStart - 7 * 86_400_000;
-    case "14days": return created >= todayStart - 14 * 86_400_000;
-    case "30days": return created >= todayStart - 30 * 86_400_000;
+    case "1month": {
+      // Last 1 month (rolling) relative to today.
+      const from = new Date(now); from.setMonth(from.getMonth() - 1);
+      return created >= startOfDay(from).getTime();
+    }
+    case "lastmonth": {
+      // Previous calendar month, e.g. if today is in Sep → all of August.
+      const start = startOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)).getTime();
+      const end = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime(); // first of this month
+      return created >= start && created < end;
+    }
+    case "1year": {
+      const from = new Date(now); from.setFullYear(from.getFullYear() - 1);
+      return created >= startOfDay(from).getTime();
+    }
+    case "custom": {
+      if (!customFrom && !customTo) return true;
+      const from = customFrom ? startOfDay(new Date(customFrom)).getTime() : -Infinity;
+      const to = customTo ? startOfDay(new Date(customTo)).getTime() + 86_400_000 - 1 : Infinity;
+      return created >= from && created <= to;
+    }
     default: return true;
   }
 }
@@ -181,6 +203,8 @@ export default function TicketsPage() {
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("today");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [priorityFilter, setPriorityFilter] = useState<string>("all");
   const [techFilter, setTechFilter] = useState<string>("all");
   const [customerTypeFilter, setCustomerTypeFilter] = useState<string>("all");
@@ -207,6 +231,8 @@ export default function TicketsPage() {
       // Reset other filters so the single record is visible
       setStatusFilter("all");
       setDateRange("all");
+      setCustomFrom("");
+      setCustomTo("");
       setPriorityFilter("all");
       setTechFilter("all");
       setCustomerTypeFilter("all");
@@ -352,7 +378,7 @@ export default function TicketsPage() {
       }
       const filtered = tickets.filter((t) => {
         const okStatus = statusFilter === "all" || t.status === statusFilter;
-        const okDate = isInDateRange(t.createdAt, dateRange);
+        const okDate = isInDateRange(t.createdAt, dateRange, customFrom, customTo);
         const okPriority = priorityFilter === "all" || t.priority === priorityFilter;
         const okTech = techFilter === "all" || t.technician === techFilter;
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
@@ -370,14 +396,14 @@ export default function TicketsPage() {
       const normal = filtered.filter((t) => !t.pinnedAt);
       return [...pinned, ...normal];
     },
-    [tickets, statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
+    [tickets, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
   );
 
   // Reset to the first page whenever the filtered result set changes so
   // pagination always reflects the current filters/search.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, dateRange, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]);
+  }, [statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]);
 
   // Pagination — pinned records already float to the top of `list`, so slicing
   // here keeps pinned rows at the top of page 1 while respecting page size.
@@ -487,8 +513,12 @@ export default function TicketsPage() {
       // Pass full device structure for multi-device invoice support
       const devices = getTicketDevices(ticket);
       const invoiceDevices = devices.map((dev) => ({
+        category: dev.category || (dev as any).categoryId || "",
         brand: dev.brand,
         model: dev.model,
+        // Carry the durable Category → Brand → Model ids into the invoice.
+        brandId: (dev as any).brandId || undefined,
+        modelId: (dev as any).modelId || undefined,
         imei: dev.imei,
         imeiType: dev.imeiType,
         issue: dev.issue || dev.description,
@@ -573,14 +603,14 @@ export default function TicketsPage() {
         }
       />
 
-      {/* Date Range Buttons */}
-      <div className="flex flex-wrap items-center gap-2">
+      {/* Date Range Buttons — shared 8-option strip (scrollable on narrow screens) */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {DATE_RANGES.map((dr) => (
           <button
             key={dr.value}
             onClick={() => setDateRange(dr.value)}
             className={cn(
-              "rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all",
+              "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
               dateRange === dr.value
                 ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
                 : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground"
@@ -590,6 +620,15 @@ export default function TicketsPage() {
           </button>
         ))}
       </div>
+
+      {/* Custom Date Range — reuses the same Date Range picker pattern as Invoice */}
+      <DateRangePicker
+        open={dateRange === "custom"}
+        from={customFrom}
+        to={customTo}
+        onFromChange={(v) => { setCustomFrom(v); setDateRange("custom"); }}
+        onToChange={(v) => { setCustomTo(v); setDateRange("custom"); }}
+      />
 
       {/* Pinned Filters Bar */}
       <PinnedFilterBar
@@ -611,7 +650,7 @@ export default function TicketsPage() {
           >
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
-              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
+              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); setStatusFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
                 Reset Filters
               </button>
             </div>
@@ -749,6 +788,7 @@ export default function TicketsPage() {
           onChange={setStatusFilter}
           options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
           size="sm"
+          className="[&>button]:px-3"
         />
         <div className="flex items-center gap-3">
           {someSelected && (

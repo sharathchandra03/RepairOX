@@ -26,11 +26,11 @@ import { cn, formatINR } from "@/lib/utils";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
-import { searchBrands, searchModels, getModelsForBrand, createBrand, createDeviceModel, type Brand, type DeviceModel } from "@/lib/brand-model-data";
+import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
-import { loadDeviceCategories } from "@/lib/device-categories";
+import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
 export default function NewTicketPage() {
@@ -86,6 +86,11 @@ const QC_GROUPS = [
 type WizardDeviceData = {
   brand: string;
   model: string;
+  /** DB relationship ids for the Category → Brand → Model hierarchy. Text
+   *  (brand/model) is still kept for backward-compat + display; the ids are
+   *  the durable link so the same selection survives edit/view/invoice. */
+  brandId?: string;
+  modelId?: string;
   imei: string;
   imeiType: string;
   assignedBy: string;
@@ -132,7 +137,7 @@ type WizardDevice = {
 function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-    device: { brand: "", model: "", imei: "", imeiType: "imei", assignedBy: "", assignedTo: "", source: "", type: "" },
+    device: { brand: "", model: "", brandId: undefined, modelId: undefined, imei: "", imeiType: "imei", assignedBy: "", assignedTo: "", source: "", type: "" },
     job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
@@ -196,6 +201,10 @@ function ticketToWizard(t: Ticket): WizardData {
       device: {
         brand: dr.brand || "",
         model: dr.model || "",
+        // Restore the durable relationship ids so the dependent dropdowns
+        // re-link correctly on edit (falls back to name-match when absent).
+        brandId: (dr as any).brandId || undefined,
+        modelId: (dr as any).modelId || undefined,
         imei: dr.imei || "",
         imeiType: dr.imeiType || "imei",
         assignedBy: dr.assignedBy || "",
@@ -388,13 +397,22 @@ function NewTicketWizard() {
     }
 
     // Build DeviceRecord[] for multi-device storage
-    const deviceRecords: import("@/lib/mock-data").DeviceRecord[] = data.devices.map((wd) => ({
+    const deviceRecords: import("@/lib/mock-data").DeviceRecord[] = data.devices.map((wd, i) => ({
       id: wd.id,
       brand: wd.device.brand,
       model: wd.device.model,
+      // Durable Category → Brand → Model relationship ids. Text (brand/model)
+      // is kept alongside for display + backward-compat.
+      brandId: wd.device.brandId || undefined,
+      modelId: wd.device.modelId || undefined,
       imei: wd.device.imei,
       imeiType: (wd.device.imeiType as "imei" | "serial") || "imei",
-      category: wd.category || data.category || "",
+      // Category is a per-device property. Each device stores its OWN selection.
+      // Only the primary device (index 0) may fall back to the wheel's global
+      // value for backward-compat; additional devices never inherit it, so
+      // Device 2's category can never be overwritten by Device 1's.
+      category: wd.category || (i === 0 ? data.category : "") || "",
+      categoryId: wd.category || (i === 0 ? data.category : "") || undefined,
       type: wd.device.type,
       source: wd.device.source,
       assignedBy: wd.device.assignedBy,
@@ -892,6 +910,18 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   // Ref for auto-scrolling to the active form
   const formRef = useRef<HTMLDivElement>(null);
 
+  // Category options (master data — reused from Settings → Device Categories)
+  const [categoryOptions, setCategoryOptions] = useState<{ id: string; label: string }[]>(
+    () => getCachedCategories()?.map((c) => ({ id: c.id, label: c.label })) ?? []
+  );
+  useEffect(() => {
+    let alive = true;
+    loadDeviceCategories().then((cats) => {
+      if (alive) setCategoryOptions(cats.map((c) => ({ id: c.id, label: c.label })));
+    });
+    return () => { alive = false; };
+  }, []);
+
   // Update a field on the active device
   const set = (k: string, v: string) => {
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
@@ -900,9 +930,54 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
     setData({ ...data, devices: updatedDevices });
   };
 
+  // Patch multiple fields on the active device's `device` object at once
+  // (used when a single interaction must update several linked fields, e.g.
+  // typing a brand also clears the resolved brandId + dependent model).
+  const setInDevice = (patch: Partial<WizardDeviceData>) => {
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, device: { ...dev.device, ...patch } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
+
+  // Update the category on the ACTIVE device only. Also keeps the top-level
+  // data.category in sync when editing the primary device (so the wheel and
+  // legacy fallbacks stay consistent), but never touches other devices —
+  // changing Device 1's category leaves Device 2's untouched and vice-versa.
+  const setDeviceCategory = (id: string) => {
+    const prevId = data.devices[activeIdx]?.category || "";
+    const categoryChanged = prevId !== id;
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) => {
+      if (i !== activeIdx) return dev;
+      // When the category changes, reset Brand and Model on THIS device so the
+      // dependent dropdowns can't keep stale values from a different category
+      // (e.g. switching Mobile → Laptop must clear an iPhone brand/model).
+      // Other devices are never touched.
+      const device = categoryChanged
+        ? { ...dev.device, brand: "", brandId: undefined, model: "", modelId: undefined }
+        : dev.device;
+      return { ...dev, category: id, device };
+    });
+    setData({
+      ...data,
+      devices: updatedDevices,
+      ...(activeIdx === 0 ? { category: id } : {}),
+    });
+    // Clear the local combobox query strings for the active device.
+    if (categoryChanged) {
+      setBrandQuery("");
+      setModelQuery("");
+      setBrandOpen(false);
+      setModelOpen(false);
+    }
+  };
+
   // Add a new device
   const addNewDevice = () => {
-    const newDevice = createWizardDevice(data.category);
+    // A new device starts with NO category so the user explicitly picks its
+    // own via the per-device Category selector below. It must never silently
+    // inherit the previous/active device's category.
+    const newDevice = createWizardDevice();
     setData({
       ...data,
       devices: [...data.devices, newDevice],
@@ -958,20 +1033,44 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
     setModelQuery(activeDevice.device.model || "");
   }, [activeIdx]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Find selected brand id for filtering models
-  const selectedBrand = brands.find((b) => b.name.toLowerCase() === (d.brand || brandQuery).toLowerCase().trim());
+  // Active device's category id (drives the Category → Brand → Model filter).
+  const activeCategoryId = activeDevice.category || "";
 
-  // Search results — sorted alphabetically
-  const brandResults = searchBrands(brands, brandQuery).sort((a, b) => a.name.localeCompare(b.name));
+  // Resolve the selected brand. Prefer the stored brandId (durable link), then
+  // fall back to a name match SCOPED to the active category (so "Apple" under
+  // "Mobile" resolves to the Mobile-Apple brand, not a Laptop-Apple), then a
+  // global name match for legacy/global brands.
+  const selectedBrand = (() => {
+    // Prefer the durable brandId (works even for archived/legacy records so
+    // historical tickets keep resolving on edit).
+    if (d.brandId) {
+      const byId = brands.find((b) => b.id === d.brandId);
+      if (byId) return byId;
+    }
+    // Otherwise resolve STRICTLY within the active category — never fall
+    // through to a same-named brand in a different category.
+    const nameKey = (d.brand || brandQuery).toLowerCase().trim();
+    if (!nameKey || !activeCategoryId) return undefined;
+    return findBrandInCategory(brands, activeCategoryId, nameKey);
+  })();
+
+  // Brand results are STRICTLY scoped to the active category. With no category
+  // selected there are no brand suggestions (the field is disabled anyway).
+  const brandResults = searchBrandsInCategory(brands, activeCategoryId, brandQuery)
+    .sort((a, b) => a.name.localeCompare(b.name));
+
   const modelResults = (selectedBrand
     ? (modelQuery.trim() ? searchModels(deviceModels, selectedBrand.id, modelQuery) : getModelsForBrand(deviceModels, selectedBrand.id))
     : []).sort((a, b) => a.name.localeCompare(b.name));
 
-  // Brand selection
+  // Brand selection — records the brandId and resets model when the brand
+  // actually changes (dependent-dropdown reset requirement).
   const handleBrandSelect = (b: Brand) => {
-    const shouldClearModel = d.brand.toLowerCase() !== b.name.toLowerCase();
+    const shouldClearModel = d.brandId !== b.id || d.brand.toLowerCase() !== b.name.toLowerCase();
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-      i === activeIdx ? { ...dev, device: { ...dev.device, brand: b.name, ...(shouldClearModel ? { model: "" } : {}) } } : dev
+      i === activeIdx
+        ? { ...dev, device: { ...dev.device, brand: b.name, brandId: b.id, ...(shouldClearModel ? { model: "", modelId: undefined } : {}) } }
+        : dev
     );
     setData({ ...data, devices: updatedDevices });
     setBrandQuery(b.name);
@@ -979,13 +1078,13 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
     if (shouldClearModel) setModelQuery("");
   };
 
-  // Save new brand
+  // Save new brand — created under the active category so it appears there.
   const handleSaveNewBrand = () => {
     if (!newBrandName.trim()) return;
-    const brand = createBrand(newBrandName.trim());
+    const brand = createBrand(newBrandName.trim(), activeCategoryId || undefined);
     addBrand(brand);
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-      i === activeIdx ? { ...dev, device: { ...dev.device, brand: brand.name, model: "" } } : dev
+      i === activeIdx ? { ...dev, device: { ...dev.device, brand: brand.name, brandId: brand.id, model: "", modelId: undefined } } : dev
     );
     setData({ ...data, devices: updatedDevices });
     setBrandQuery(brand.name);
@@ -995,11 +1094,21 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
     setBrandOpen(false);
   };
 
-  // Model selection
+  // Model selection — records modelId (and backfills brand id/name if missing).
   const handleModelSelect = (m: DeviceModel) => {
     const brandForModel = brands.find((br: Brand) => br.id === m.brandId);
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-      i === activeIdx ? { ...dev, device: { ...dev.device, model: m.name, ...(brandForModel && !d.brand ? { brand: brandForModel.name } : {}) } } : dev
+      i === activeIdx
+        ? {
+            ...dev,
+            device: {
+              ...dev.device,
+              model: m.name,
+              modelId: m.id,
+              ...(brandForModel && !d.brand ? { brand: brandForModel.name, brandId: brandForModel.id } : {}),
+            },
+          }
+        : dev
     );
     setData({ ...data, devices: updatedDevices });
     setModelQuery(m.name);
@@ -1010,10 +1119,10 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   // Save new model
   const handleSaveNewModel = () => {
     if (!newModelName.trim() || !selectedBrand) return;
-    const model = createDeviceModel(selectedBrand.id, newModelName.trim());
+    const model = createDeviceModel(selectedBrand.id, newModelName.trim(), activeCategoryId || selectedBrand.categoryId);
     addDeviceModel(model);
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-      i === activeIdx ? { ...dev, device: { ...dev.device, model: model.name } } : dev
+      i === activeIdx ? { ...dev, device: { ...dev.device, model: model.name, modelId: model.id } } : dev
     );
     setData({ ...data, devices: updatedDevices });
     setModelQuery(model.name);
@@ -1031,7 +1140,8 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
             if (idx === activeIdx) return null;
             const brandModel = [dev.device.brand, dev.device.model].filter(Boolean).join(" ");
             const summary = brandModel || "Untitled Device";
-            const issue = dev.job.issue || dev.job.description || "";
+            const catLabel = dev.category ? categoryLabel(dev.category) : "";
+            const issue = [catLabel && `Category: ${catLabel}`, dev.job.issue || dev.job.description || ""].filter(Boolean).join(" · ");
             const imeiSnippet = dev.device.imei ? `${dev.device.imeiType === "serial" ? "SN" : "IMEI"}: …${dev.device.imei.slice(-4)}` : "";
             const hasMinInfo = !!(dev.device.brand && dev.device.model);
             return (
@@ -1103,34 +1213,58 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         <div className="space-y-3">
           <SectionLabel icon={Package}>Device Identity</SectionLabel>
           <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2">
-            {/* Brand Combobox */}
+            {/* Per-device Category — reuses the Settings-backed category master.
+                Writes only to the active device so each device keeps its own.
+                Flows sequentially in the identity grid: Category → Brand →
+                Model → ID Type → IMEI, all sharing one consistent field width. */}
+            <div className="sm:col-span-1">
+              <Field label={data.devices.length > 1 ? `Category — Device ${activeIdx + 1}` : "Category"}>
+                <RSelect
+                  value={activeDevice.category || ""}
+                  onChange={(v) => setDeviceCategory(v)}
+                  placeholder="Select category…"
+                  searchable
+                  options={categoryOptions.map((c) => ({ label: c.label, value: c.id }))}
+                />
+              </Field>
+            </div>
+            {/* Brand Combobox — scoped to the active device's category */}
             <div className="relative">
               <Field label="Brand Name">
                 <Input
                   value={brandQuery}
                   onChange={(e: any) => {
                     setBrandQuery(e.target.value);
-                    set("brand", e.target.value);
+                    // Free-typing invalidates the resolved brand id and any
+                    // previously selected model (dependent-dropdown reset).
+                    setInDevice({ brand: e.target.value, brandId: undefined, model: "", modelId: undefined });
+                    setModelQuery("");
                     setBrandOpen(true);
                   }}
                   onFocus={() => setBrandOpen(true)}
-                  placeholder="Search brand…"
+                  disabled={!activeCategoryId}
+                  placeholder={activeCategoryId ? "Search brand…" : "Select category first…"}
                   className="h-[34px]"
                   iconLeft={<Search className="h-3.5 w-3.5" />}
                   iconRight={<ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-200", brandOpen && "rotate-180")} />}
                 />
               </Field>
-              {brandOpen && (
+              {brandOpen && activeCategoryId && (
                 <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
                   {brandResults.slice(0, 10).map((b) => (
                     <button key={b.id} type="button" onClick={() => handleBrandSelect(b)}
                       className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#EEF1FD]/60",
-                        d.brand.toLowerCase() === b.name.toLowerCase() && "bg-[#EEF1FD] font-medium text-[#4361EE]"
+                        (d.brandId === b.id || d.brand.toLowerCase() === b.name.toLowerCase()) && "bg-[#EEF1FD] font-medium text-[#4361EE]"
                       )}>
-                      <Check className={cn("h-3.5 w-3.5 shrink-0", d.brand.toLowerCase() === b.name.toLowerCase() ? "text-[#4361EE]" : "opacity-0")} strokeWidth={3} />
+                      <Check className={cn("h-3.5 w-3.5 shrink-0", (d.brandId === b.id || d.brand.toLowerCase() === b.name.toLowerCase()) ? "text-[#4361EE]" : "opacity-0")} strokeWidth={3} />
                       <span>{b.name}</span>
                     </button>
                   ))}
+                  {brandResults.length === 0 && !brandQuery.trim() && (
+                    <p className="px-3 py-2 text-[12px] text-muted-foreground">
+                      No brands configured for this category yet. Type a name to add one.
+                    </p>
+                  )}
                   {brandResults.length === 0 && brandQuery.trim() && (
                     <p className="px-3 py-2 text-[12px] text-muted-foreground">No brands match &quot;{brandQuery}&quot;</p>
                   )}
@@ -1144,46 +1278,46 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               {brandOpen && <div className="fixed inset-0 z-20" onClick={() => setBrandOpen(false)} />}
             </div>
 
-            {/* Model Combobox */}
+            {/* Model Combobox — disabled until a valid brand is selected */}
             <div className="relative">
               <Field label="Model">
                 <Input
                   value={modelQuery}
                   onChange={(e: any) => {
                     setModelQuery(e.target.value);
-                    set("model", e.target.value);
+                    // Free-typing a model invalidates the resolved modelId.
+                    setInDevice({ model: e.target.value, modelId: undefined });
                     setModelOpen(true);
                   }}
-                  onFocus={() => setModelOpen(true)}
+                  onFocus={() => { if (selectedBrand) setModelOpen(true); }}
+                  disabled={!selectedBrand}
                   placeholder={selectedBrand ? `Search ${selectedBrand.name} models…` : "Select brand first…"}
                   className="h-[34px]"
                   iconLeft={<Search className="h-3.5 w-3.5" />}
                   iconRight={<ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform duration-200", modelOpen && "rotate-180")} />}
                 />
               </Field>
-              {modelOpen && (
+              {modelOpen && selectedBrand && (
                 <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
                   {modelResults.slice(0, 12).map((m) => (
                     <button key={m.id} type="button" onClick={() => handleModelSelect(m)}
                       className={cn("flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#EEF1FD]/60",
-                        d.model.toLowerCase() === m.name.toLowerCase() && "bg-[#EEF1FD] font-medium text-[#4361EE]"
+                        (d.modelId === m.id || d.model.toLowerCase() === m.name.toLowerCase()) && "bg-[#EEF1FD] font-medium text-[#4361EE]"
                       )}>
-                      <Check className={cn("h-3.5 w-3.5 shrink-0", d.model.toLowerCase() === m.name.toLowerCase() ? "text-[#4361EE]" : "opacity-0")} strokeWidth={3} />
+                      <Check className={cn("h-3.5 w-3.5 shrink-0", (d.modelId === m.id || d.model.toLowerCase() === m.name.toLowerCase()) ? "text-[#4361EE]" : "opacity-0")} strokeWidth={3} />
                       <span>{m.name}</span>
                     </button>
                   ))}
+                  {modelResults.length === 0 && !modelQuery.trim() && (
+                    <p className="px-3 py-2 text-[12px] text-muted-foreground">No models configured for this brand.</p>
+                  )}
                   {modelResults.length === 0 && modelQuery.trim() && (
                     <p className="px-3 py-2 text-[12px] text-muted-foreground">No models match &quot;{modelQuery}&quot;</p>
                   )}
-                  {selectedBrand && (
-                    <button type="button" onClick={() => { setNewModelName(modelQuery); setShowNewModel(true); setModelOpen(false); }}
-                      className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors">
-                      <Plus className="h-3.5 w-3.5" /> Add New Model
-                    </button>
-                  )}
-                  {!selectedBrand && (
-                    <p className="px-3 py-2 text-[11px] text-muted-foreground italic">Select a brand first to add a new model.</p>
-                  )}
+                  <button type="button" onClick={() => { setNewModelName(modelQuery); setShowNewModel(true); setModelOpen(false); }}
+                    className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors">
+                    <Plus className="h-3.5 w-3.5" /> Add New Model
+                  </button>
                 </div>
               )}
               {modelOpen && <div className="fixed inset-0 z-20" onClick={() => setModelOpen(false)} />}

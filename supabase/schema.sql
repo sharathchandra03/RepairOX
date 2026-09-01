@@ -763,19 +763,33 @@ create table if not exists public.brands (
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id       uuid references public.branches(id) on delete set null,
   name            text not null,
+  -- Device-category this brand belongs to (device_categories.id, e.g. "iphone").
+  -- NULL = legacy/global brand shown under every category.
+  category_id     text,
+  archived        boolean not null default false,
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
   created_at      timestamptz not null default now()
 );
+-- Backfill for existing installs (safe to re-run).
+alter table public.brands add column if not exists category_id text;
+alter table public.brands add column if not exists archived boolean not null default false;
+create index if not exists brands_org_category_idx on public.brands(organization_id, category_id);
 
 create table if not exists public.device_models (
   id              text primary key,
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id       uuid references public.branches(id) on delete set null,
   brand_id        text references public.brands(id) on delete cascade,
+  -- Same category as the model's brand (strict category-scoping).
+  category_id     text,
   name            text not null,
+  archived        boolean not null default false,
   created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
   created_at      timestamptz not null default now()
 );
+alter table public.device_models add column if not exists category_id text;
+alter table public.device_models add column if not exists archived boolean not null default false;
+create index if not exists device_models_org_cat_brand_idx on public.device_models(organization_id, category_id, brand_id);
 
 -- ── Assigned By / Assigned To master lists ───────────────────────────────────
 --   Ticket-intake people (front desk) and technicians. Same shape as brands so

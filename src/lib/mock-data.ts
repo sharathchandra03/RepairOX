@@ -72,6 +72,13 @@ export type DeviceRecord = {
   /** Device identity */
   brand: string;
   model: string;
+  /** Durable Category → Brand → Model relationship ids (Settings-backed
+   *  master). Optional so legacy records without them keep working — the
+   *  text `brand`/`model`/`category` remain the display source of truth and
+   *  the ids are used to re-link dropdowns on edit/view/invoice. */
+  brandId?: string;
+  modelId?: string;
+  categoryId?: string;
   imei: string;
   imeiType: "imei" | "imei1" | "imei2" | "serial";
   category: string;
@@ -108,6 +115,9 @@ export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRec
     id: `DEV-${Math.floor(1000 + Math.random() * 9000)}`,
     brand: "",
     model: "",
+    brandId: undefined,
+    modelId: undefined,
+    categoryId: undefined,
     imei: "",
     imeiType: "imei",
     category: "",
@@ -358,7 +368,7 @@ export const navItems: NavItem[] = [
   { href: "/contacts",         label: "Accounts",      icon: "BookUser", permission: "manage_customers" },
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
-  { href: "/walk-in",          label: "Walk-In",       icon: "Store", permission: "use_pos" },
+  { href: "/walk-in",          label: "Walk-In",       icon: "WalkIn", permission: "use_pos" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "IndianRupee", permission: "manage_payments" },
 
@@ -585,8 +595,16 @@ export type InvoiceDeviceRecord = {
   /** Device identity */
   brand: string;
   model: string;
+  /** Durable Category → Brand → Model relationship ids, inherited from the
+   *  linked ticket device (not re-inferred from text). Optional for legacy. */
+  brandId?: string;
+  modelId?: string;
   imei: string;
   imeiType: "imei" | "imei1" | "imei2" | "serial";
+  /** Device category (references the Settings-backed category master by id).
+   *  Carried over from the linked ticket device, or selected directly on
+   *  invoices created from scratch. Blank when unknown (legacy records). */
+  category?: string;
   /** Job details */
   issue: string;
   description: string;
@@ -613,8 +631,11 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
     id: `IDEV-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     brand: "",
     model: "",
+    brandId: undefined,
+    modelId: undefined,
     imei: "",
     imeiType: "imei",
+    category: "",
     issue: "",
     description: "",
     jobType: "service",
@@ -667,8 +688,13 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
     id: `IDEV-${dev.id}`,
     brand: dev.brand,
     model: dev.model,
+    // Inherit the durable relationship ids from the ticket device — do NOT
+    // re-infer brand/model from the device name text.
+    brandId: dev.brandId,
+    modelId: dev.modelId,
     imei: dev.imei,
     imeiType: dev.imeiType,
+    category: dev.category || dev.categoryId || "",
     issue: dev.issue || dev.description,
     description: dev.description,
     jobType: dev.jobType,

@@ -17,6 +17,7 @@ import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
+import { loadDeviceCategories, getCachedCategories } from "@/lib/device-categories";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
@@ -39,8 +40,13 @@ const STEPS = [
 /** A device entry within the invoice form */
 type InvoiceFormDevice = {
   id: string;
+  category: string;
   brand: string;
   model: string;
+  /** Durable Category → Brand → Model relationship ids (inherited from the
+   *  ticket device when pushed to invoice; not re-inferred from text). */
+  brandId?: string;
+  modelId?: string;
   imei: string;
   imeiType: string;
   issue: string;
@@ -71,8 +77,11 @@ type InvoiceFormData = {
 function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDevice {
   return {
     id: `ifd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    category: "",
     brand: "",
     model: "",
+    brandId: undefined,
+    modelId: undefined,
     imei: "",
     imeiType: "imei1",
     issue: "",
@@ -212,8 +221,11 @@ function InvoiceWizard() {
             }
 
             return createFormDevice({
+              category: dev.category || "",
               brand: dev.brand || "",
               model: dev.model || "",
+              brandId: dev.brandId || undefined,
+              modelId: dev.modelId || undefined,
               imei: dev.imei || "",
               imeiType: dev.imeiType || "imei1",
               issue: dev.issue || "",
@@ -318,8 +330,11 @@ function InvoiceWizard() {
     const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
     const invoiceDevices: InvoiceDeviceRecord[] = hasDevices ? form.devices.map((d) => ({
       id: d.id,
+      category: d.category || "",
       brand: d.brand,
       model: d.model,
+      brandId: d.brandId || undefined,
+      modelId: d.modelId || undefined,
       imei: d.imei,
       imeiType: d.imeiType as "imei1" | "imei2" | "serial",
       issue: d.issue,
@@ -591,8 +606,11 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
   const devices: InvoiceFormDevice[] = inv.devices && inv.devices.length > 0
     ? inv.devices.map((d) => createFormDevice({
         id: d.id,
+        category: d.category || "",
         brand: d.brand,
         model: d.model,
+        brandId: (d as any).brandId || undefined,
+        modelId: (d as any).modelId || undefined,
         imei: d.imei,
         imeiType: d.imeiType,
         issue: d.issue,
@@ -924,6 +942,18 @@ function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryI
 function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
+
+  // Category options — reuse the same Settings-backed master used everywhere.
+  const [categoryOptions, setCategoryOptions] = useState<{ id: string; label: string }[]>(
+    () => getCachedCategories()?.map((c) => ({ id: c.id, label: c.label })) ?? []
+  );
+  useEffect(() => {
+    let alive = true;
+    loadDeviceCategories().then((cats) => {
+      if (alive) setCategoryOptions(cats.map((c) => ({ id: c.id, label: c.label })));
+    });
+    return () => { alive = false; };
+  }, []);
   const [showInventorySearch, setShowInventorySearch] = useState(false);
   const inventorySearchRef = useRef<HTMLDivElement>(null);
 
@@ -955,10 +985,18 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
     });
   };
 
-  const setDeviceField = (key: string, value: string) => {
+  const setDeviceField = (key: string, value: string | undefined) => {
     updateForm((f) => ({
       ...f,
-      devices: f.devices.map((d, i) => i === activeIdx ? { ...d, [key]: value } : d),
+      devices: f.devices.map((d, i) => {
+        if (i !== activeIdx) return d;
+        // Changing category resets the dependent brand/model (+ their ids) on
+        // THIS device only, so stale values can't survive a category switch.
+        if (key === "category" && (d.category || "") !== (value || "")) {
+          return { ...d, category: value as string, brand: "", brandId: undefined, model: "", modelId: undefined };
+        }
+        return { ...d, [key]: value };
+      }),
     }));
   };
 
@@ -1048,11 +1086,24 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Device Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+              <div className="space-y-1">
+                <Label>Category</Label>
+                <Select
+                  value={activeDevice.category || ""}
+                  onChange={(e: any) => setDeviceField("category", e.target.value)}
+                  options={[{ label: "Select category…", value: "" }, ...categoryOptions.map((c) => ({ label: c.label, value: c.id }))]}
+                />
+              </div>
               <DeviceBrandModelSelector
                 brand={activeDevice.brand}
                 model={activeDevice.model}
+                categoryId={activeDevice.category || ""}
+                brandId={activeDevice.brandId}
+                modelId={activeDevice.modelId}
                 onBrandChange={(v) => setDeviceField("brand", v)}
                 onModelChange={(v) => setDeviceField("model", v)}
+                onBrandIdChange={(v) => setDeviceField("brandId", v)}
+                onModelIdChange={(v) => setDeviceField("modelId", v)}
               />
               <div className="space-y-1">
                 <Label>{/[a-zA-Z]/.test(activeDevice.imei) ? "Serial Number" : "IMEI"}</Label>
@@ -1367,7 +1418,7 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
         {/* Two-column body — sections are paired row-by-row so the two boxes
             on each row share the same height. Short boxes distribute their
             content to fill the matched height. */}
-        <div className="grid grid-cols-1 items-stretch gap-x-6 gap-y-5 p-6 sm:p-8 lg:grid-cols-2 lg:auto-rows-fr">
+        <div className="grid grid-cols-1 items-stretch gap-x-6 gap-y-5 p-6 sm:p-8 lg:grid-cols-2">
           {/* Row 1 — Customer / Line Items (or Devices) */}
           <section className="flex flex-col">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>

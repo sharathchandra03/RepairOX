@@ -32,8 +32,14 @@ import { seedCustomers as SEED_CUSTOMERS, type Customer } from "@/lib/customer-d
 import { seedCompanies as SEED_COMPANIES, type Company } from "@/lib/company-data";
 import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
+  migrateLegacyBrands,
   type Brand, type DeviceModel,
 } from "@/lib/brand-model-data";
+import { loadDeviceCategories, DEFAULT_CATEGORIES } from "@/lib/device-categories";
+
+/** Default device-category ids — used as a fallback bucket set for the
+ *  synchronous localStorage legacy-brand migration. */
+const DEFAULT_CATEGORY_IDS = DEFAULT_CATEGORIES.map((c) => c.id);
 import {
   SEED_ASSIGNED_BY_OPTIONS, type AssignedByOption,
 } from "@/lib/assigned-by-data";
@@ -96,7 +102,9 @@ interface StoreActions {
   updateCompany: (id: string, updates: Partial<Company>) => Promise<void>;
   deleteCompany: (id: string) => Promise<void>;
   addBrand: (brand: Brand) => Promise<void>;
+  updateBrand: (id: string, updates: Partial<Brand>) => Promise<void>;
   addDeviceModel: (model: DeviceModel) => Promise<void>;
+  updateDeviceModel: (id: string, updates: Partial<DeviceModel>) => Promise<void>;
   deleteBrand: (id: string) => Promise<void>;
   deleteDeviceModel: (id: string) => Promise<void>;
   addAssignedByOption: (option: AssignedByOption) => Promise<void>;
@@ -680,11 +688,24 @@ function companyToRow(c: Company): Record<string, unknown> {
 }
 
 function rowToBrand(r: any): Brand {
-  return { id: r.id, name: r.name ?? "", createdAt: r.created_at ?? new Date().toISOString() };
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    categoryId: r.category_id ?? undefined,
+    archived: r.archived ?? false,
+    createdAt: r.created_at ?? new Date().toISOString(),
+  };
 }
 
 function rowToDeviceModel(r: any): DeviceModel {
-  return { id: r.id, brandId: r.brand_id ?? "", name: r.name ?? "", createdAt: r.created_at ?? new Date().toISOString() };
+  return {
+    id: r.id,
+    brandId: r.brand_id ?? "",
+    categoryId: r.category_id ?? undefined,
+    name: r.name ?? "",
+    archived: r.archived ?? false,
+    createdAt: r.created_at ?? new Date().toISOString(),
+  };
 }
 
 function rowToAssignedByOption(r: any): AssignedByOption {
@@ -715,8 +736,14 @@ function loadFromStorage(storageKey?: string): StoreState | null {
       stockMovements: saved.stockMovements ?? SEED_MOVEMENTS,
       customers: saved.customers ?? SEED_CUSTOMERS,
       companies: saved.companies ?? SEED_COMPANIES,
-      brands: saved.brands ?? SEED_BRANDS,
-      deviceModels: saved.deviceModels ?? SEED_MODELS,
+      ...(() => {
+        // Migrate any legacy category-less brands stored locally into strict
+        // per-category records (idempotent). Falls back to seeds when absent.
+        const b0: Brand[] = saved.brands ?? SEED_BRANDS;
+        const m0: DeviceModel[] = saved.deviceModels ?? SEED_MODELS;
+        const res = migrateLegacyBrands(b0, m0, DEFAULT_CATEGORY_IDS);
+        return { brands: res.brands, deviceModels: res.models };
+      })(),
       assignedByOptions: saved.assignedByOptions ?? SEED_ASSIGNED_BY_OPTIONS,
       assignedToOptions: saved.assignedToOptions ?? SEED_ASSIGNED_TO_OPTIONS,
       issueLibrary: saved.issueLibrary ?? (() => {
@@ -874,6 +901,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             ticketNoMap[t.id] ? { ...t, ticketNo: ticketNoMap[t.id] } : t
           ),
         }));
+      }
+
+      // One-time migration of legacy "global" (category-less) brands into strict
+      // per-category records. Idempotent + non-destructive: originals are
+      // archived (never deleted) so historical tickets/invoices keep resolving.
+      try {
+        const loadedBrands = (brds ?? []).map(rowToBrand);
+        const loadedModels = (models ?? []).map(rowToDeviceModel);
+        const cats = await loadDeviceCategories().catch(() => []);
+        const catIds = cats.map((c) => c.id);
+        const result = migrateLegacyBrands(loadedBrands, loadedModels, catIds);
+        if (active && result.changed) {
+          setState((s) => ({ ...s, brands: result.brands, deviceModels: result.models }));
+          // Persist to DB (best-effort; local state already reflects the change).
+          for (const nb of result.newBrands) {
+            await db.from("brands").insert({ id: nb.id, name: nb.name, category_id: nb.categoryId ?? null }).then((r) => {
+              if (r.error) console.warn("[store] legacy migration: insert brand failed", r.error.message);
+            });
+          }
+          for (const um of result.updatedModels) {
+            await db.from("device_models").update({ brand_id: um.brandId, category_id: um.categoryId ?? null }).eq("id", um.id).then((r) => {
+              if (r.error) console.warn("[store] legacy migration: repoint model failed", r.error.message);
+            });
+          }
+          for (const aid of result.archivedBrandIds) {
+            await db.from("brands").update({ archived: true }).eq("id", aid).then((r) => {
+              if (r.error) console.warn("[store] legacy migration: archive brand failed", r.error.message);
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[store] legacy brand migration skipped:", e);
       }
     })();
 
@@ -1833,10 +1892,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ── Brand & Model actions (DB-first) ── */
   const addBrand = useCallback(async (brand: Brand) => {
     if (shouldUseDb()) {
-      const { data, error } = await db.from("brands").insert({ id: brand.id, name: brand.name }).select("*").single();
-      if (error || !data) { console.error("[store] addBrand failed:", error?.message); return; }
-      const saved = rowToBrand(data);
-      setState((s) => ({ ...s, brands: [...s.brands, saved] }));
+      // Try with the category_id column (Category → Brand → Model hierarchy).
+      // If the migration hasn't been applied yet, retry without it so brand
+      // creation never hard-fails on an older schema.
+      let saved: Brand | null = null;
+      const full = await db
+        .from("brands")
+        .insert({ id: brand.id, name: brand.name, category_id: brand.categoryId ?? null })
+        .select("*")
+        .single();
+      if (!full.error && full.data) {
+        saved = rowToBrand(full.data);
+      } else {
+        const fallback = await db.from("brands").insert({ id: brand.id, name: brand.name }).select("*").single();
+        if (fallback.error || !fallback.data) { console.error("[store] addBrand failed:", fallback.error?.message ?? full.error?.message); return; }
+        // Preserve the intended categoryId locally even if the column is missing.
+        saved = { ...rowToBrand(fallback.data), categoryId: brand.categoryId };
+      }
+      setState((s) => ({ ...s, brands: [...s.brands, saved!] }));
       logActivity({ module: "Price List", action: "Brand Added", severity: "success", entity: "Brand", reference: saved.name, description: `Added device brand ${saved.name}.` });
       return;
     }
@@ -1844,19 +1917,76 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Price List", action: "Brand Added", severity: "success", entity: "Brand", reference: brand.name, description: `Added device brand ${brand.name}.` });
   }, []);
 
-  const addDeviceModel = useCallback(async (model: DeviceModel) => {
+  const updateBrand = useCallback(async (id: string, updates: Partial<Brand>) => {
+    // Optimistic local update first so UI stays responsive.
+    setState((s) => ({ ...s, brands: s.brands.map((b) => (b.id === id ? { ...b, ...updates } : b)) }));
     if (shouldUseDb()) {
-      const { data, error } = await db.from("device_models").insert({ id: model.id, brand_id: model.brandId, name: model.name }).select("*").single();
-      if (error || !data) { console.error("[store] addDeviceModel failed:", error?.message); return; }
-      const saved = rowToDeviceModel(data);
-      setState((s) => ({ ...s, deviceModels: [...s.deviceModels, saved] }));
-      const brand = stateRef.current.brands.find((b) => b.id === model.brandId);
-      logActivity({ module: "Price List", action: "Model Added", severity: "success", entity: "Device Model", reference: saved.name, description: `Added model ${saved.name}${brand ? ` under ${brand.name}` : ""}.` });
+      const patch: Record<string, any> = {};
+      if (updates.name !== undefined) patch.name = updates.name;
+      if (updates.categoryId !== undefined) patch.category_id = updates.categoryId ?? null;
+      if (updates.archived !== undefined) patch.archived = updates.archived;
+      if (Object.keys(patch).length === 0) return;
+      const { error } = await db.from("brands").update(patch).eq("id", id);
+      if (error) {
+        // Column may not exist on older schema — retry with just the name.
+        if (patch.name !== undefined) {
+          await db.from("brands").update({ name: patch.name }).eq("id", id).then((r) => {
+            if (r.error) console.error("[store] updateBrand failed:", r.error.message);
+          });
+        } else {
+          console.error("[store] updateBrand failed:", error.message);
+        }
+      }
+    }
+  }, []);
+
+  const addDeviceModel = useCallback(async (model: DeviceModel) => {
+    // Ensure the model carries its brand's category so it is a self-describing
+    // category-scoped record even when the caller didn't pass one.
+    const brandForCat = stateRef.current.brands.find((b) => b.id === model.brandId);
+    const categoryId = model.categoryId ?? brandForCat?.categoryId ?? undefined;
+    const model2: DeviceModel = { ...model, categoryId };
+    if (shouldUseDb()) {
+      // Try with category_id; retry without it on an older schema.
+      let saved: DeviceModel | null = null;
+      const full = await db.from("device_models").insert({ id: model2.id, brand_id: model2.brandId, name: model2.name, category_id: categoryId ?? null }).select("*").single();
+      if (!full.error && full.data) {
+        saved = rowToDeviceModel(full.data);
+      } else {
+        const fallback = await db.from("device_models").insert({ id: model2.id, brand_id: model2.brandId, name: model2.name }).select("*").single();
+        if (fallback.error || !fallback.data) { console.error("[store] addDeviceModel failed:", fallback.error?.message ?? full.error?.message); return; }
+        saved = { ...rowToDeviceModel(fallback.data), categoryId };
+      }
+      setState((s) => ({ ...s, deviceModels: [...s.deviceModels, saved!] }));
+      logActivity({ module: "Price List", action: "Model Added", severity: "success", entity: "Device Model", reference: saved.name, description: `Added model ${saved.name}${brandForCat ? ` under ${brandForCat.name}` : ""}.` });
       return;
     }
-    const brand = stateRef.current.brands.find((b) => b.id === model.brandId);
-    setState((s) => ({ ...s, deviceModels: [...s.deviceModels, model] }));
-    logActivity({ module: "Price List", action: "Model Added", severity: "success", entity: "Device Model", reference: model.name, description: `Added model ${model.name}${brand ? ` under ${brand.name}` : ""}.` });
+    setState((s) => ({ ...s, deviceModels: [...s.deviceModels, model2] }));
+    logActivity({ module: "Price List", action: "Model Added", severity: "success", entity: "Device Model", reference: model2.name, description: `Added model ${model2.name}${brandForCat ? ` under ${brandForCat.name}` : ""}.` });
+  }, []);
+
+  const updateDeviceModel = useCallback(async (id: string, updates: Partial<DeviceModel>) => {
+    setState((s) => ({ ...s, deviceModels: s.deviceModels.map((m) => (m.id === id ? { ...m, ...updates } : m)) }));
+    if (shouldUseDb()) {
+      const patch: Record<string, any> = {};
+      if (updates.name !== undefined) patch.name = updates.name;
+      if (updates.brandId !== undefined) patch.brand_id = updates.brandId;
+      if (updates.categoryId !== undefined) patch.category_id = updates.categoryId ?? null;
+      if (updates.archived !== undefined) patch.archived = updates.archived;
+      if (Object.keys(patch).length === 0) return;
+      const { error } = await db.from("device_models").update(patch).eq("id", id);
+      if (error) {
+        // `archived`/`category_id` columns may be missing on older schema — retry with the rest.
+        const { archived, category_id, ...rest } = patch;
+        if (Object.keys(rest).length > 0) {
+          await db.from("device_models").update(rest).eq("id", id).then((r) => {
+            if (r.error) console.error("[store] updateDeviceModel failed:", r.error.message);
+          });
+        } else {
+          console.error("[store] updateDeviceModel failed:", error.message);
+        }
+      }
+    }
   }, []);
 
   const deleteBrand = useCallback(async (id: string) => {
@@ -1983,7 +2113,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateCompany,
     deleteCompany,
     addBrand,
+    updateBrand,
     addDeviceModel,
+    updateDeviceModel,
     deleteBrand,
     deleteDeviceModel,
     addAssignedByOption,

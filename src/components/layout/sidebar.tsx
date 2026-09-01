@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
+import { WalkInIcon } from "@/components/ui/icon-walk-in";
 import { ThinScroll } from "@/components/layout/thin-scroll";
 import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
@@ -26,6 +27,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Wrench, ClipboardCheck, Truck, Receipt, Activity,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
   IndianRupee, ReceiptIndianRupee,
+  WalkIn: WalkInIcon,
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
@@ -57,7 +59,7 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
         title={collapsed ? item.label : undefined}
         className={cn(
           "group relative flex items-center rounded-xl text-sm font-medium transition-colors",
-          collapsed ? "justify-center px-0 py-2.5 mx-1" : "gap-3 px-3 py-2.5",
+          collapsed ? "mx-auto w-10 justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5",
           active ? "text-white" : comingSoon ? "text-slate-400 hover:bg-slate-50 hover:text-slate-600" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
         )}
       >
@@ -116,7 +118,7 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
           title={group.label}
           onClick={() => setExpanded(!expanded)}
           className={cn(
-            "group relative flex w-full items-center justify-center rounded-xl py-2.5 mx-1 text-sm font-medium transition-colors",
+            "group relative mx-auto flex w-10 items-center justify-center rounded-xl py-2.5 text-sm font-medium transition-colors",
             childActive ? "text-[#4361EE]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
           )}
         >
@@ -225,25 +227,31 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
       operations: Truck,
     };
     return (
-      <div className="mx-auto mb-3 flex flex-col items-center gap-1 px-1">
-        {allowed.map((w) => {
-          const Icon = WORKSPACE_ICONS[w.id];
-          return (
-            <button
-              key={w.id}
-              title={w.label}
-              onClick={() => onChange(w.id)}
-              className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-lg transition",
-                active === w.id
-                  ? "bg-[#4361EE] text-white"
-                  : "bg-muted text-zinc-500 hover:bg-slate-100"
-              )}
-            >
-              <Icon className="h-4 w-4" />
-            </button>
-          );
-        })}
+      <div className="mb-3 flex flex-col items-center px-2">
+        {/* Module selector — grouped into one compact capsule so it reads as a
+            distinct control, separate from the section navigation below. */}
+        <div className="flex flex-col items-center gap-1 rounded-2xl border border-[#4361EE]/12 bg-[#4361EE]/[0.04] p-1">
+          {allowed.map((w) => {
+            const Icon = WORKSPACE_ICONS[w.id];
+            return (
+              <button
+                key={w.id}
+                title={w.label}
+                onClick={() => onChange(w.id)}
+                className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-lg transition",
+                  active === w.id
+                    ? "bg-[#4361EE] text-white"
+                    : "text-zinc-500 hover:bg-white hover:text-zinc-700"
+                )}
+              >
+                <Icon className="h-4 w-4" />
+              </button>
+            );
+          })}
+        </div>
+        {/* Subtle divider — communicates the shift from modules to navigation. */}
+        <div className="mt-3 h-px w-8 rounded-full bg-border" />
       </div>
     );
   }

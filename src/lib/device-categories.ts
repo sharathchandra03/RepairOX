@@ -238,3 +238,31 @@ async function seedCategories(orgId: string, cats: DeviceCategoryItem[]) {
   }));
   await supabase.from("device_categories").insert(rows);
 }
+
+/* ─── Label Resolution ───────────────────────────────────────────── */
+
+/**
+ * Resolve a category id (e.g. "iphone") to its human-readable label
+ * (e.g. "iPhone"). Uses the in-memory cache of the Settings-backed master
+ * list when available, then the built-in defaults. Falls back to a
+ * title-cased version of the id — or the value unchanged — so historical
+ * values for renamed/removed categories still display safely.
+ *
+ * This is synchronous by design so it can be used directly in render paths
+ * (print templates, detail views). Callers that need fresh data should call
+ * `loadDeviceCategories()` first to warm the cache.
+ */
+export function categoryLabel(idOrLabel: string): string {
+  if (!idOrLabel) return "";
+  const lookup = (list: DeviceCategoryItem[] | null): string | undefined => {
+    if (!list) return undefined;
+    const hit = list.find((c) => c.id === idOrLabel || c.label === idOrLabel);
+    return hit?.label;
+  };
+  const fromCache = lookup(_cache);
+  if (fromCache) return fromCache;
+  const fromDefaults = lookup(DEFAULT_CATEGORIES);
+  if (fromDefaults) return fromDefaults;
+  // Unknown / historical value — return as-is (already a label, or a custom id).
+  return idOrLabel;
+}

@@ -22,6 +22,8 @@ import {
   getModelsForBrand,
   createBrand,
   createDeviceModel,
+  searchBrandsInCategory,
+  findBrandInCategory,
   type Brand,
   type DeviceModel,
 } from "@/lib/brand-model-data";
@@ -33,6 +35,18 @@ export interface DeviceBrandModelSelectorProps {
   model: string;
   onBrandChange: (value: string) => void;
   onModelChange: (value: string) => void;
+  /**
+   * Optional Category → Brand → Model scoping. When `categoryId` is provided
+   * the brand list is STRICTLY filtered to that device category (no global or
+   * cross-category brands) and the brand field is disabled until a category
+   * exists. When omitted the selector behaves as an unscoped picker (all brands).
+   */
+  categoryId?: string;
+  /** Durable relationship ids — pass these to persist the exact selection. */
+  brandId?: string;
+  modelId?: string;
+  onBrandIdChange?: (value: string | undefined) => void;
+  onModelIdChange?: (value: string | undefined) => void;
   /** Optional: additional class on the wrapper fragment container */
   className?: string;
 }
@@ -44,6 +58,11 @@ export function DeviceBrandModelSelector({
   model,
   onBrandChange,
   onModelChange,
+  categoryId,
+  brandId,
+  modelId,
+  onBrandIdChange,
+  onModelIdChange,
 }: DeviceBrandModelSelectorProps) {
   const { brands, deviceModels, addBrand, addDeviceModel } = useStore();
 
@@ -68,38 +87,60 @@ export function DeviceBrandModelSelector({
     setModelQuery(model || "");
   }, [model]);
 
-  // Find selected brand for filtering models
-  const selectedBrand = brands.find(
-    (b) => b.name.toLowerCase() === (brand || brandQuery).toLowerCase().trim()
-  );
+  // Whether category scoping is active for this instance.
+  const scoped = !!categoryId;
 
-  // Search results
-  const brandResults = searchBrands(brands, brandQuery);
+  // Resolve selected brand: prefer the durable brandId (resolves historical
+  // records by id even if archived). Otherwise resolve STRICTLY within the
+  // active category — never fall through to a same-named brand elsewhere.
+  const selectedBrand = (() => {
+    if (brandId) {
+      const byId = brands.find((b) => b.id === brandId);
+      if (byId) return byId;
+    }
+    const nameKey = (brand || brandQuery).toLowerCase().trim();
+    if (!nameKey) return undefined;
+    if (scoped) {
+      return findBrandInCategory(brands, categoryId, nameKey);
+    }
+    return brands.find((b) => b.name.toLowerCase() === nameKey);
+  })();
+
+  // Search results — category-scoped when a category is provided.
+  const brandResults = scoped
+    ? searchBrandsInCategory(brands, categoryId, brandQuery)
+    : searchBrands(brands, brandQuery);
   const modelResults = selectedBrand
     ? modelQuery.trim()
       ? searchModels(deviceModels, selectedBrand.id, modelQuery)
       : getModelsForBrand(deviceModels, selectedBrand.id)
     : [];
 
+  const brandDisabled = scoped && !categoryId;
+
   // Brand selection
   const handleBrandSelect = (b: Brand) => {
-    const shouldClearModel = brand.toLowerCase() !== b.name.toLowerCase();
+    const shouldClearModel = brandId !== b.id || brand.toLowerCase() !== b.name.toLowerCase();
     onBrandChange(b.name);
+    onBrandIdChange?.(b.id);
     setBrandQuery(b.name);
     setBrandOpen(false);
     if (shouldClearModel) {
       onModelChange("");
+      onModelIdChange?.(undefined);
       setModelQuery("");
     }
   };
 
-  // Save new brand
+  // Save new brand — created under the active category when scoped.
   const handleSaveNewBrand = () => {
     if (!newBrandName.trim()) return;
-    const newBrand = createBrand(newBrandName.trim());
+    const newBrand = createBrand(newBrandName.trim(), scoped ? categoryId : undefined);
     addBrand(newBrand);
     onBrandChange(newBrand.name);
+    onBrandIdChange?.(newBrand.id);
     onModelChange("");
+    onModelIdChange?.(undefined);
     setBrandQuery(newBrand.name);
     setModelQuery("");
     setShowNewBrand(false);
@@ -111,11 +152,13 @@ export function DeviceBrandModelSelector({
   const handleModelSelect = (m: DeviceModel) => {
     const brandForModel = brands.find((br) => br.id === m.brandId);
     onModelChange(m.name);
+    onModelIdChange?.(m.id);
     setModelQuery(m.name);
     setModelOpen(false);
     // Auto-fill brand if not yet set
     if (brandForModel && !brand) {
       onBrandChange(brandForModel.name);
+      onBrandIdChange?.(brandForModel.id);
       setBrandQuery(brandForModel.name);
     }
   };
@@ -123,9 +166,10 @@ export function DeviceBrandModelSelector({
   // Save new model
   const handleSaveNewModel = () => {
     if (!newModelName.trim() || !selectedBrand) return;
-    const newModel = createDeviceModel(selectedBrand.id, newModelName.trim());
+    const newModel = createDeviceModel(selectedBrand.id, newModelName.trim(), categoryId || selectedBrand.categoryId);
     addDeviceModel(newModel);
     onModelChange(newModel.name);
+    onModelIdChange?.(newModel.id);
     setModelQuery(newModel.name);
     setShowNewModel(false);
     setNewModelName("");
@@ -142,38 +186,46 @@ export function DeviceBrandModelSelector({
           onChange={(e: any) => {
             setBrandQuery(e.target.value);
             onBrandChange(e.target.value);
+            // Free-typing invalidates the resolved ids + dependent model.
+            onBrandIdChange?.(undefined);
+            onModelChange("");
+            onModelIdChange?.(undefined);
+            setModelQuery("");
             setBrandOpen(true);
           }}
-          onFocus={() => setBrandOpen(true)}
-          placeholder="Search brand..."
+          onFocus={() => { if (!brandDisabled) setBrandOpen(true); }}
+          disabled={brandDisabled}
+          placeholder={brandDisabled ? "Select category first..." : "Search brand..."}
           className="h-11"
           iconLeft={<Search className="h-4 w-4" />}
         />
-        {brandOpen && (
+        {brandOpen && !brandDisabled && (
           <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-            {brandResults.slice(0, 10).map((b) => (
+            {brandResults.slice(0, 10).map((b) => {
+              const isSel = brandId === b.id || brand.toLowerCase() === b.name.toLowerCase();
+              return (
               <button
                 key={b.id}
                 type="button"
                 onClick={() => handleBrandSelect(b)}
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#EEF1FD]/60",
-                  brand.toLowerCase() === b.name.toLowerCase() &&
-                    "bg-[#EEF1FD] font-medium text-[#4361EE]"
+                  isSel && "bg-[#EEF1FD] font-medium text-[#4361EE]"
                 )}
               >
                 <Check
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    brand.toLowerCase() === b.name.toLowerCase()
-                      ? "text-[#4361EE]"
-                      : "opacity-0"
-                  )}
+                  className={cn("h-3.5 w-3.5 shrink-0", isSel ? "text-[#4361EE]" : "opacity-0")}
                   strokeWidth={3}
                 />
                 <span>{b.name}</span>
               </button>
-            ))}
+              );
+            })}
+            {brandResults.length === 0 && !brandQuery.trim() && scoped && (
+              <p className="px-3 py-2 text-[12px] text-muted-foreground">
+                No brands configured for this category yet. Type a name to add one.
+              </p>
+            )}
             {brandResults.length === 0 && brandQuery.trim() && (
               <p className="px-3 py-2 text-[12px] text-muted-foreground">
                 No brands match &quot;{brandQuery}&quot;
@@ -209,9 +261,11 @@ export function DeviceBrandModelSelector({
           onChange={(e: any) => {
             setModelQuery(e.target.value);
             onModelChange(e.target.value);
+            onModelIdChange?.(undefined);
             setModelOpen(true);
           }}
-          onFocus={() => setModelOpen(true)}
+          onFocus={() => { if (selectedBrand) setModelOpen(true); }}
+          disabled={!selectedBrand}
           placeholder={
             selectedBrand
               ? `Search ${selectedBrand.name} models...`
@@ -220,54 +274,49 @@ export function DeviceBrandModelSelector({
           className="h-11"
           iconLeft={<Search className="h-4 w-4" />}
         />
-        {modelOpen && (
+        {modelOpen && selectedBrand && (
           <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-            {modelResults.slice(0, 12).map((m) => (
+            {modelResults.slice(0, 12).map((m) => {
+              const isSel = modelId === m.id || model.toLowerCase() === m.name.toLowerCase();
+              return (
               <button
                 key={m.id}
                 type="button"
                 onClick={() => handleModelSelect(m)}
                 className={cn(
                   "flex w-full items-center gap-2 px-3 py-2 text-left text-[13px] transition-colors hover:bg-[#EEF1FD]/60",
-                  model.toLowerCase() === m.name.toLowerCase() &&
-                    "bg-[#EEF1FD] font-medium text-[#4361EE]"
+                  isSel && "bg-[#EEF1FD] font-medium text-[#4361EE]"
                 )}
               >
                 <Check
-                  className={cn(
-                    "h-3.5 w-3.5 shrink-0",
-                    model.toLowerCase() === m.name.toLowerCase()
-                      ? "text-[#4361EE]"
-                      : "opacity-0"
-                  )}
+                  className={cn("h-3.5 w-3.5 shrink-0", isSel ? "text-[#4361EE]" : "opacity-0")}
                   strokeWidth={3}
                 />
                 <span>{m.name}</span>
               </button>
-            ))}
+              );
+            })}
+            {modelResults.length === 0 && !modelQuery.trim() && (
+              <p className="px-3 py-2 text-[12px] text-muted-foreground">
+                No models configured for this brand.
+              </p>
+            )}
             {modelResults.length === 0 && modelQuery.trim() && (
               <p className="px-3 py-2 text-[12px] text-muted-foreground">
                 No models match &quot;{modelQuery}&quot;
               </p>
             )}
-            {selectedBrand && (
-              <button
-                type="button"
-                onClick={() => {
-                  setNewModelName(modelQuery);
-                  setShowNewModel(true);
-                  setModelOpen(false);
-                }}
-                className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5" /> Add New Model
-              </button>
-            )}
-            {!selectedBrand && (
-              <p className="px-3 py-2 text-[11px] text-muted-foreground italic">
-                Select a brand first to add a new model.
-              </p>
-            )}
+            <button
+              type="button"
+              onClick={() => {
+                setNewModelName(modelQuery);
+                setShowNewModel(true);
+                setModelOpen(false);
+              }}
+              className="flex w-full items-center gap-2 border-t border-border px-3 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors"
+            >
+              <Plus className="h-3.5 w-3.5" /> Add New Model
+            </button>
           </div>
         )}
         {modelOpen && (

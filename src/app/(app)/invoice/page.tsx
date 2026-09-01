@@ -9,7 +9,7 @@ import {
   Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
   PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, X,
-  Pin, PinOff,
+  Pin, PinOff, Filter,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,9 @@ import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Pagination } from "@/components/ui/pagination";
 import { useStore } from "@/lib/store";
-import { InvoiceFilters, type FilterState } from "@/components/filters/invoice-filters";
+import { InvoiceFilters } from "@/components/filters/invoice-filters";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
 import { formatINR, cn } from "@/lib/utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
@@ -71,11 +73,13 @@ const DATE_RANGES = [
   { label: "Today", value: "today" },
   { label: "Yesterday", value: "yesterday" },
   { label: "7 Days", value: "7days" },
-  { label: "14 Days", value: "14days" },
-  { label: "30 Days", value: "30days" },
+  { label: "1 Month", value: "1month" },
+  { label: "Last Month", value: "lastmonth" },
+  { label: "1 Year", value: "1year" },
+  { label: "Custom", value: "custom" },
 ] as const;
 
-type DateRange = (typeof DATE_RANGES)[number]["value"] | "custom";
+type DateRange = (typeof DATE_RANGES)[number]["value"];
 
 /** Default rows shown per page in the invoice table (user-selectable 10/20/50/100). */
 const DEFAULT_PAGE_SIZE = 20;
@@ -101,8 +105,21 @@ function isInDateRange(createdAt: string, range: DateRange, customFrom?: string,
     case "today": return created >= todayStart;
     case "yesterday": return created >= todayStart - 86_400_000 && created < todayStart;
     case "7days": return created >= todayStart - 7 * 86_400_000;
-    case "14days": return created >= todayStart - 14 * 86_400_000;
-    case "30days": return created >= todayStart - 30 * 86_400_000;
+    case "1month": {
+      // Last 1 month (rolling) relative to today.
+      const from = new Date(now); from.setMonth(from.getMonth() - 1);
+      return created >= startOfDay(from).getTime();
+    }
+    case "lastmonth": {
+      // Previous calendar month (not the last 30 days).
+      const start = startOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)).getTime();
+      const end = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime();
+      return created >= start && created < end;
+    }
+    case "1year": {
+      const from = new Date(now); from.setFullYear(from.getFullYear() - 1);
+      return created >= startOfDay(from).getTime();
+    }
     case "custom": {
       if (!customFrom && !customTo) return true;
       const from = customFrom ? startOfDay(new Date(customFrom)).getTime() : -Infinity;
@@ -152,6 +169,12 @@ export default function InvoicePage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
+  // Advanced filter panel — hidden by default, toggled by the Filter button.
+  const [showFilterPanel, setShowFilterPanel] = useState(false);
+  // Advanced-panel unified live search across Invoice ID + Customer Name.
+  const [panelSearch, setPanelSearch] = useState("");
+  // True when any filter differs from the defaults (Date=Today, Status=All).
+  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || panelSearch !== "";
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
@@ -172,6 +195,7 @@ export default function InvoicePage() {
       setCustomFrom("");
       setCustomTo("");
       setQ("");
+      setPanelSearch("");
     }
   }, [searchParams]);
 
@@ -209,19 +233,22 @@ export default function InvoicePage() {
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
       const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
-      const okQ = !q || `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase().includes(q.toLowerCase());
-      return okStatus && okType && okCategory && okDate && okQ;
+      const haystack = `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase();
+      const okQ = !q || haystack.includes(q.toLowerCase());
+      // Unified panel search matches across Invoice ID + Customer (+ company).
+      const okPanelSearch = !panelSearch || `${inv.id} ${inv.customer} ${inv.company || ""}`.toLowerCase().includes(panelSearch.toLowerCase());
+      return okStatus && okType && okCategory && okDate && okQ && okPanelSearch;
     });
     // Pinned invoices float to the top; order within each group is preserved.
     const pinned = filtered.filter((inv) => inv.pinnedAt);
     const normal = filtered.filter((inv) => !inv.pinnedAt);
     return [...pinned, ...normal];
-  }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId, ticketNoById]);
+  }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
 
   // Reset to page 1 whenever the filtered result set changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, searchFilterId]);
+  }, [statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
 
   // Pagination — pinned invoices already sit at the top of `list`.
   const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
@@ -272,9 +299,13 @@ export default function InvoicePage() {
       {/* Header */}
       <PageHeader eyebrow="Billing" title="Invoices" subtitle="Issue, track and reconcile invoices — GST-ready."
         actions={<>
-          <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-[10px]"><Download className="h-4 w-4" /> Export</Button></Can>
-          <Can permission="manage_invoices"><Link href="/invoice/settings"><Button variant="outline" size="md" className="rounded-[10px]"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
-          <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-[10px]"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
+          <Button variant="outline" size="md" className="rounded-full" onClick={() => setShowFilterPanel((v) => !v)}>
+            <Filter className="h-4 w-4" /> Filter
+            {advancedActive && <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />}
+          </Button>
+          <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button></Can>
+          <Can permission="manage_invoices"><Link href="/invoice/settings"><Button variant="outline" size="md" className="rounded-full"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
+          <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
         </>}
       />
 
@@ -385,29 +416,86 @@ export default function InvoicePage() {
         </motion.div>
       </div>
 
-      {/* Filter System */}
-      <InvoiceFilters
-        onSearch={(filterState) => {
-          setStatusFilter(filterState.invoiceStatus);
-          setTypeFilter(filterState.invoiceType);
-          setCategoryFilter(filterState.category);
-          // Combine customer name and invoice ID into search query
-          const searchParts = [filterState.customerName, filterState.pinnedIds?.[0] || ""].filter(Boolean);
-          setQ(searchParts.join(" "));
-          // filterState.invoiceId carries the quickDate value
-          const qd = filterState.invoiceId as string;
-          if (qd === "custom") {
-            setDateRange("custom");
-            setCustomFrom(filterState.dateFrom);
-            setCustomTo(filterState.dateTo);
-          } else if (qd && qd !== "") {
-            setDateRange(qd as DateRange);
-            setCustomFrom("");
-            setCustomTo("");
-          }
-        }}
-        onReset={() => { setStatusFilter("all"); setTypeFilter("all"); setCategoryFilter("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); setQ(""); }}
+      {/* Filter System — shared architecture: Date strip → Status strip → Advanced panel */}
+      {/* The date strip defines the width; the status strip stretches to match it
+          exactly so its right edge aligns with the "Custom" pill. */}
+      <div className="w-fit max-w-full space-y-5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {/* Date Range Strip (always visible) — 8 options */}
+        <div className="flex items-center gap-2">
+          {DATE_RANGES.map((dr) => (
+            <button
+              key={dr.value}
+              onClick={() => setDateRange(dr.value)}
+              className={cn(
+                "shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all",
+                dateRange === dr.value
+                  ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
+                  : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground"
+              )}
+            >
+              {dr.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Invoice Status Strip (always visible) — stretches to the date strip's
+            width (right edge aligns with "Custom") while keeping the same pill
+            thickness/padding as the Tickets status strip. */}
+        <SegmentedTabs
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
+          size="sm"
+          className="flex w-full [&>button]:flex-1 [&>button]:px-3"
+        />
+      </div>
+
+      {/* Custom Date Range — reuses the shared Date Range picker (same as Tickets) */}
+      <DateRangePicker
+        open={dateRange === "custom"}
+        from={customFrom}
+        to={customTo}
+        onFromChange={(v) => { setCustomFrom(v); setDateRange("custom"); }}
+        onToChange={(v) => { setCustomTo(v); setDateRange("custom"); }}
       />
+
+      {/* Advanced Filter Panel — hidden by default, toggled by the Filter button.
+          Filter state persists when the panel is closed (state lives on the page). */}
+      <AnimatePresence>
+        {showFilterPanel && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.25, ease: [0.4, 0, 0.2, 1] }}
+            style={{ transformOrigin: "top" }}
+            className="overflow-hidden"
+          >
+            <InvoiceFilters
+              search={panelSearch}
+              invoiceStatus={statusFilter}
+              invoiceType={typeFilter}
+              category={categoryFilter}
+              onChange={(patch) => {
+                if (patch.search !== undefined) setPanelSearch(patch.search);
+                if (patch.invoiceStatus !== undefined) setStatusFilter(patch.invoiceStatus);
+                if (patch.invoiceType !== undefined) setTypeFilter(patch.invoiceType);
+                if (patch.category !== undefined) setCategoryFilter(patch.category);
+              }}
+              onReset={() => {
+                setStatusFilter("all");
+                setTypeFilter("all");
+                setCategoryFilter("all");
+                setPanelSearch("");
+                setDateRange("today");
+                setCustomFrom("");
+                setCustomTo("");
+                setQ("");
+              }}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Column Settings Panel */}
       <AnimatePresence>
