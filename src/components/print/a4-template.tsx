@@ -108,6 +108,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
             brand: t.device || "",
             model: t.model || "",
             serial: t.serial || "",
+            serialLabel: t.serialLabel || "IMEI / Serial",
             issue: t.issue || "",
             service: t.service || "",
             technician: t.technician || "",
@@ -149,7 +150,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
     const descLines: Row["descLines"] = [];
     if (dev.brand) descLines.push({ label: "Brand", value: dev.brand });
     if (dev.model) descLines.push({ label: "Model", value: dev.model });
-    if (dev.serial) descLines.push({ label: "IMEI / Serial", value: dev.serial });
+    if (dev.serial) descLines.push({ label: dev.serialLabel || "IMEI / Serial", value: dev.serial });
     if (dev.issue) descLines.push({ label: "Issue", value: dev.issue });
     if (dev.service && dev.service !== dev.issue) descLines.push({ label: "Service", value: dev.service });
     if (dev.technician) descLines.push({ label: "Technician", value: dev.technician });
@@ -400,7 +401,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
                 {devices.map((dev, di) => {
                   const name = [dev.brand, dev.model].filter(Boolean).join(" ") || "Device";
                   const bits = [
-                    dev.serial ? `IMEI ${dev.serial}` : "",
+                    dev.serial ? `${dev.serialLabel || "IMEI"} ${dev.serial}` : "",
                     dev.status ? String(dev.status).replace(/_/g, " ") : "",
                     dev.warranty ? formatWarranty(undefined, undefined, dev.warranty) : "",
                   ].filter(Boolean);
@@ -673,7 +674,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
       const descLines: Row["descLines"] = [];
       if (dev.brand) descLines.push({ label: "Brand", value: dev.brand });
       if (dev.model) descLines.push({ label: "Model", value: dev.model });
-      if (dev.serial) descLines.push({ label: "IMEI / Serial", value: dev.serial });
+      if (dev.serial) descLines.push({ label: dev.serialLabel || "IMEI / Serial", value: dev.serial });
       if (dev.issue) descLines.push({ label: "Issue", value: dev.issue });
       if (dev.jobType) descLines.push({ label: "Job", value: dev.jobType });
       if (dev.technician) descLines.push({ label: "Technician", value: dev.technician });
@@ -901,7 +902,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
                   {inv.devices.map((dev, di) => {
                     const name = [dev.brand, dev.model].filter(Boolean).join(" ") || "Device";
                     const bits = [
-                      dev.serial ? `IMEI ${dev.serial}` : "",
+                      dev.serial ? `${dev.serialLabel || "IMEI"} ${dev.serial}` : "",
                       dev.warrantyValue || dev.warranty ? formatWarranty(dev.warrantyValue, dev.warrantyUnit, dev.warranty) : "",
                     ].filter(Boolean);
                     return (

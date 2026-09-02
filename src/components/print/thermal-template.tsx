@@ -114,7 +114,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                   {/* Device identity */}
                   <div className="space-y-0.5 mb-1">
                     <Row label="Device" value={`${dev.brand} ${dev.model}`} bold />
-                    {dev.serial && <Row label="IMEI/SN" value={dev.serial} />}
+                    {dev.serial && <Row label={dev.serialLabel || "IMEI/SN"} value={dev.serial} />}
                   </div>
                   {/* Job details */}
                   <div className="space-y-0.5 mb-1">
@@ -146,7 +146,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
               <p className="text-[9px] font-bold uppercase tracking-wide mb-1">Device & Service</p>
               <div className="space-y-0.5 mb-1">
                 <Row label="Device" value={`${ticket.device} ${ticket.model}`} bold />
-                {ticket.serial && <Row label="IMEI/SN" value={ticket.serial} />}
+                {ticket.serial && <Row label={ticket.serialLabel || "IMEI/SN"} value={ticket.serial} />}
               </div>
               <div className="space-y-0.5 mb-1">
                 <Row label="Issue" value={ticket.issue} />
@@ -235,7 +235,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                   </p>
                   <div className="space-y-0.5 mb-1">
                     <Row label="Device" value={`${dev.brand} ${dev.model}`} bold />
-                    {dev.serial && <Row label="IMEI/SN" value={dev.serial} />}
+                    {dev.serial && <Row label={dev.serialLabel || "IMEI/SN"} value={dev.serial} />}
                   </div>
                   <div className="space-y-0.5 mb-1">
                     <Row label="Issue" value={dev.issue || "Service"} />

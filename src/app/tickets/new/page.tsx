@@ -31,6 +31,7 @@ import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
+import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
 export default function NewTicketPage() {
@@ -206,7 +207,10 @@ function ticketToWizard(t: Ticket): WizardData {
         brandId: (dr as any).brandId || undefined,
         modelId: (dr as any).modelId || undefined,
         imei: dr.imei || "",
-        imeiType: dr.imeiType || "imei",
+        // Normalise legacy imei1/imei2 (or a serial saved without a type) to
+        // the two supported types so the single identifier field restores the
+        // correct live label on edit.
+        imeiType: normalizeIdentifierType(dr.imeiType, dr.imei),
         assignedBy: dr.assignedBy || "",
         assignedTo: dr.assignedTo || "",
         source: dr.source || "",
@@ -253,7 +257,7 @@ function ticketToWizard(t: Ticket): WizardData {
       brand: t.device || "",
       model: t.model,
       imei: t.items?.[0]?.serial || "",
-      imeiType: t.imeiType || "imei",
+      imeiType: normalizeIdentifierType(t.imeiType, t.items?.[0]?.serial),
       assignedBy: "",
       assignedTo: t.technician?.toLowerCase() || "",
       source: t.source || "",
@@ -406,7 +410,11 @@ function NewTicketWizard() {
       brandId: wd.device.brandId || undefined,
       modelId: wd.device.modelId || undefined,
       imei: wd.device.imei,
-      imeiType: (wd.device.imeiType as "imei" | "serial") || "imei",
+      // Persist identifierType derived from the value so the stored type can
+      // never disagree with the entered identifier (single source of truth).
+      imeiType: wd.device.imei
+        ? resolveIdentifierType(wd.device.imei)
+        : ((wd.device.imeiType as "imei" | "serial") || "imei"),
       // Category is a per-device property. Each device stores its OWN selection.
       // Only the primary device (index 0) may fall back to the wheel's global
       // value for backward-compat; additional devices never inherit it, so
@@ -490,7 +498,7 @@ function NewTicketWizard() {
         ? `${deviceRecords.length} device repair`
         : (primaryDevice.job.issue || "Repair"),
       source: primaryDevice.device.source || undefined,
-      imeiType: primaryDevice.device.imei ? (primaryDevice.device.imeiType as "imei" | "serial") || "imei" : undefined,
+      imeiType: primaryDevice.device.imei ? resolveIdentifierType(primaryDevice.device.imei) : undefined,
       internalNotes: primaryDevice.job.notes || undefined,
       customerId: finalCustomerId || undefined,
       customerType: data.contactType as "personal" | "business",
@@ -910,6 +918,12 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   // Ref for auto-scrolling to the active form
   const formRef = useRef<HTMLDivElement>(null);
 
+  // Tracks whether the identifier field has been blurred so the subtle
+  // validation message only appears on blur/submit — never while typing.
+  // Reset when switching the active device so each device validates on its own.
+  const [identifierTouched, setIdentifierTouched] = useState(false);
+  useEffect(() => { setIdentifierTouched(false); }, [activeIdx]);
+
   // Category options (master data — reused from Settings → Device Categories)
   const [categoryOptions, setCategoryOptions] = useState<{ id: string; label: string }[]>(
     () => getCachedCategories()?.map((c) => ({ id: c.id, label: c.label })) ?? []
@@ -1323,47 +1337,52 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               {modelOpen && <div className="fixed inset-0 z-20" onClick={() => setModelOpen(false)} />}
             </div>
 
+            {/* Single intelligent identifier field — replaces the old ID Type
+                dropdown + IMEI Number input. The user types ONE value and the
+                system detects whether it is an IMEI or a Serial Number. The
+                detected type is persisted as imeiType, the value as imei
+                (identifierType / identifierValue in the data contract). */}
             <div className="col-span-1">
-              <Field label="ID Type">
-                <RSelect value={d.imeiType} onChange={(v) => {
-                  const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-                    i === activeIdx ? { ...dev, device: { ...dev.device, imeiType: v, imei: "" } } : dev
-                  );
-                  setData({ ...data, devices: updatedDevices });
-                }} options={[
-                  { label: "IMEI", value: "imei" },
-                  { label: "Serial Number", value: "serial" },
-                ]} />
-              </Field>
-            </div>
-            <div className="col-span-1">
-              <Field label={d.imeiType === "serial" ? "Serial Number" : "IMEI Number"}>
-                <Input
-                  value={d.imei}
-                  onChange={(e: any) => {
-                    const val = e.target.value;
-                    if (d.imeiType === "serial") {
-                      // Alphanumeric only, max 15 characters
-                      const cleaned = val.replace(/[^a-zA-Z0-9]/g, "");
-                      if (cleaned.length <= 15) set("imei", cleaned);
-                    } else {
-                      // Numeric only, max 16 digits
-                      const cleaned = val.replace(/[^0-9]/g, "");
-                      if (cleaned.length <= 16) set("imei", cleaned);
-                    }
-                  }}
-                  placeholder={d.imeiType === "serial" ? "e.g. C39HJ2F0P1…" : "e.g. 3564930012…"}
-                  className="h-[34px] font-mono"
-                  maxLength={d.imeiType === "serial" ? 15 : 16}
-                  inputMode={d.imeiType === "serial" ? "text" : "numeric"}
-                />
-                {d.imei && d.imeiType !== "serial" && d.imei.length > 0 && d.imei.length < 16 && (
-                  <p className="mt-1 text-[11px] text-amber-600">IMEI must contain exactly 16 digits.</p>
-                )}
-                {d.imei && d.imeiType === "serial" && d.imei.length > 15 && (
-                  <p className="mt-1 text-[11px] text-amber-600">Serial Number cannot exceed 15 characters.</p>
-                )}
-              </Field>
+              {(() => {
+                const detection = detectIdentifier(d.imei);
+                // Neutral label until confidently classified; then live-updates
+                // to "IMEI Number" or "Serial Number" as the user types.
+                const label = detection.label;
+                // Subtle validation only after the user leaves the field or on
+                // submit — never while they are still typing.
+                const showError = identifierTouched && d.imei.length > 0 && !detection.valid;
+                return (
+                  <Field label={label}>
+                    <Input
+                      value={d.imei}
+                      onChange={(e: any) => {
+                        // Sanitize + auto-recalculate the type on every change so
+                        // detection stays reversible (delete → neutral, replace →
+                        // recalculated). Never keep a stale previously-detected type.
+                        const cleaned = sanitizeIdentifierInput(e.target.value);
+                        const nextType = resolveIdentifierType(cleaned);
+                        const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+                          i === activeIdx
+                            ? { ...dev, device: { ...dev.device, imei: cleaned, imeiType: nextType } }
+                            : dev
+                        );
+                        setData({ ...data, devices: updatedDevices });
+                      }}
+                      onBlur={() => setIdentifierTouched(true)}
+                      placeholder={IDENTIFIER_PLACEHOLDER}
+                      className="h-[34px]"
+                      maxLength={16}
+                      inputMode="text"
+                      autoComplete="off"
+                    />
+                    {showError && (
+                      <p className="mt-1 text-[11px] text-amber-600">
+                        Enter a valid IMEI (16 digits) or Serial Number (letters &amp; numbers).
+                      </p>
+                    )}
+                  </Field>
+                );
+              })()}
             </div>
           </div>
         </div>

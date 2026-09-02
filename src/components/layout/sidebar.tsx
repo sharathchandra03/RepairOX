@@ -230,7 +230,7 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
       <div className="mb-3 flex flex-col items-center px-2">
         {/* Module selector — grouped into one compact capsule so it reads as a
             distinct control, separate from the section navigation below. */}
-        <div className="flex flex-col items-center gap-1 rounded-2xl border border-[#4361EE]/12 bg-[#4361EE]/[0.04] p-1">
+        <div className="flex flex-col items-center gap-1 rounded-2xl border-2 border-[#4361EE]/25 bg-[#4361EE]/[0.04] p-1">
           {allowed.map((w) => {
             const Icon = WORKSPACE_ICONS[w.id];
             return (
@@ -250,8 +250,8 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
             );
           })}
         </div>
-        {/* Subtle divider — communicates the shift from modules to navigation. */}
-        <div className="mt-3 h-px w-8 rounded-full bg-border" />
+        {/* Divider — communicates the shift from modules to navigation. */}
+        <div className="mt-3 h-0.5 w-8 rounded-full bg-slate-300" />
       </div>
     );
   }

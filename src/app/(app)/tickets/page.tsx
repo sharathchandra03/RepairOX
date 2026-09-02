@@ -866,6 +866,10 @@ export default function TicketsPage() {
                         className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
                         aria-label="Select all tickets"
                       />
+                    ) : col.id === "status" ? (
+                      // Nudge ONLY the Status heading text 4px left, without
+                      // affecting the cell width or the body cells beneath it.
+                      <span className="inline-block -translate-x-[11px]">{col.label}</span>
                     ) : col.label}
                   </th>
                 ))}

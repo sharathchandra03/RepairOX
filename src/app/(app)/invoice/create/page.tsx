@@ -18,6 +18,7 @@ import { cn, formatINR } from "@/lib/utils";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
 import { loadDeviceCategories, getCachedCategories } from "@/lib/device-categories";
+import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, identifierDisplayLabel, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
@@ -1105,26 +1106,28 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                 onBrandIdChange={(v) => setDeviceField("brandId", v)}
                 onModelIdChange={(v) => setDeviceField("modelId", v)}
               />
+              {/* Single intelligent identifier field — auto-detects IMEI vs
+                  Serial from the value. When pushed from a ticket the type is
+                  copied (never re-inferred); editing the value recalculates it. */}
               <div className="space-y-1">
-                <Label>{/[a-zA-Z]/.test(activeDevice.imei) ? "Serial Number" : "IMEI"}</Label>
+                <Label>{detectIdentifier(activeDevice.imei).label}</Label>
                 <Input
                   value={activeDevice.imei}
                   onChange={(e: any) => {
-                    const raw = e.target.value;
-                    const hasAlpha = /[a-zA-Z]/.test(raw);
-                    const maxLen = hasAlpha ? 15 : 16;
-                    const val = raw.slice(0, maxLen);
+                    const val = sanitizeIdentifierInput(e.target.value);
+                    const nextType = resolveIdentifierType(val);
                     updateForm((f) => ({
                       ...f,
                       devices: f.devices.map((d, i) => i === activeIdx
-                        ? { ...d, imei: val, imeiType: hasAlpha ? "serial" : "imei" }
+                        ? { ...d, imei: val, imeiType: nextType }
                         : d
                       ),
                     }));
                   }}
-                  placeholder={/[a-zA-Z]/.test(activeDevice.imei) ? "e.g. ABC123XYZ" : "356xxxxxxxxxx"}
-                  maxLength={/[a-zA-Z]/.test(activeDevice.imei) ? 15 : 16}
+                  placeholder={IDENTIFIER_PLACEHOLDER}
+                  maxLength={16}
                   className="h-11 font-mono"
+                  autoComplete="off"
                 />
               </div>
             </div>
@@ -1446,7 +1449,7 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
                         <div className="flex items-center gap-2">
                           <span className="grid h-5 w-5 place-items-center rounded bg-[#4361EE] text-[9px] font-bold text-white">{idx + 1}</span>
                           <span className="text-sm font-semibold">{devLabel}</span>
-                          {dev.imei && <span className="ml-2 font-mono text-[10px] text-muted-foreground">{dev.imei}</span>}
+                          {dev.imei && <span className="ml-2 font-mono text-[10px] text-muted-foreground"><span className="font-semibold">{identifierDisplayLabel(dev.imeiType, dev.imei)}:</span> {dev.imei}</span>}
                         </div>
                         <span className="text-sm font-bold tabular-nums">{formatINR(devTotal)}</span>
                       </div>

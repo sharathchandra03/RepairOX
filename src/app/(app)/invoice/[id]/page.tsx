@@ -18,6 +18,7 @@ import { Textarea, Select, NumericInput } from "@/components/ui/input";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { useStore } from "@/lib/store";
 import { formatINR, cn } from "@/lib/utils";
+import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL,
   type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
@@ -422,7 +423,11 @@ export default function InvoiceDetailPage() {
                           <span className="grid h-6 w-6 place-items-center rounded-lg bg-[#4361EE] text-[10px] font-bold text-white">{idx + 1}</span>
                           <div>
                             <p className="text-sm font-semibold">{devLabel}</p>
-                            {dev.imei && <p className="text-[10px] text-muted-foreground font-mono">{dev.imei}</p>}
+                            {dev.imei && (
+                              <p className="text-[10px] text-muted-foreground font-mono">
+                                <span className="font-semibold not-italic">{identifierDisplayLabel(dev.imeiType, dev.imei)}:</span> {dev.imei}
+                              </p>
+                            )}
                           </div>
                         </div>
                         <span className="text-sm font-bold tabular-nums">{formatINR(dev.subtotal)}</span>

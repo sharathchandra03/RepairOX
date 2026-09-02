@@ -1,6 +1,7 @@
 import type { StoreSettings } from "@/lib/store-settings";
 import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
 import { getTicketDevices, getInvoiceDevices } from "@/lib/mock-data";
+import { identifierDisplayLabel } from "@/lib/identifier-detection";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
@@ -40,6 +41,9 @@ export type PrintTicketInfo = {
   device: string;
   model: string;
   serial: string;
+  /** Type-aware label for the identifier ("IMEI" or "Serial") — travels with
+   *  the value so print never mislabels a serial as IMEI or vice-versa. */
+  serialLabel: string;
   issue: string;
   service: string;
   source: string;
@@ -67,6 +71,8 @@ export type PrintDeviceInfo = {
   brand: string;
   model: string;
   serial: string;
+  /** Type-aware identifier label ("IMEI" | "Serial"). */
+  serialLabel: string;
   issue: string;
   service: string;
   technician: string;
@@ -129,6 +135,8 @@ export type PrintInvoiceDeviceInfo = {
   brand: string;
   model: string;
   serial: string;
+  /** Type-aware identifier label ("IMEI" | "Serial"). */
+  serialLabel: string;
   issue: string;
   jobType: string;
   priority: string;
@@ -213,6 +221,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     brand: dr.brand,
     model: dr.model,
     serial: dr.imei,
+    serialLabel: identifierDisplayLabel(dr.imeiType, dr.imei),
     issue: dr.issue || dr.description,
     service: dr.issue,
     technician: dr.assignedTo,
@@ -230,6 +239,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     device: ticket.device,
     model: ticket.model,
     serial: ticket.items?.[0]?.serial || "",
+    serialLabel: identifierDisplayLabel(ticket.imeiType, ticket.items?.[0]?.serial),
     issue: ticket.issue,
     service: ticket.service || "",
     source: ticket.source || "Walk-In",
@@ -271,6 +281,7 @@ export function buildInvoiceInfo(invoice: Invoice, linkedTicketNo?: string): Pri
         brand: d.brand,
         model: d.model,
         serial: d.imei,
+        serialLabel: identifierDisplayLabel(d.imeiType, d.imei),
         issue: d.issue,
         jobType: d.jobType,
         priority: d.priority,
