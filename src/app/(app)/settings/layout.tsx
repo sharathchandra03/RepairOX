@@ -1,11 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import { SettingsNav } from "@/components/settings/settings-nav";
 import { Menu, X } from "lucide-react";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const pathname = usePathname();
+  // Roles & Permissions is a full-width, multi-panel module — give it room to
+  // breathe instead of the narrow forms container used by other settings pages.
+  const isWide = pathname.startsWith("/settings/roles-permissions");
 
   return (
     <div className="flex -mx-4 -mt-2 -mb-4 sm:-mx-6 lg:-mx-8" style={{ height: "calc(100vh - 56px)" }}>
@@ -41,7 +46,7 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
 
       {/* Right content area — scrolls independently */}
       <main className="flex-1 min-w-0 overflow-y-auto">
-        <div className="max-w-4xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <div className={`${isWide ? "max-w-none" : "max-w-4xl"} mx-auto px-4 py-6 sm:px-6 lg:px-8`}>
           {children}
         </div>
       </main>

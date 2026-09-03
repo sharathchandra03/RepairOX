@@ -111,12 +111,38 @@ create table if not exists public.organization_settings (
   print_footer         text default 'Thank you for choosing RepairOX!',
   print_slogan         text default 'Your device, our expertise.',
 
+  -- Custom print templates for future document types (quotation, estimate…)
+  -- Each inherits the store master-default print text unless it overrides.
+  custom_print_templates jsonb,
+
+  -- Ticket Terms & Notes (Settings → Tickets → Terms & Notes)
+  -- Independent from Store Information; seeded from store print columns on
+  -- migration for existing orgs (see scripts/invoice-settings-columns.sql).
+  ticket_terms         text,
+  ticket_warranty_text text,
+  ticket_footer        text,
+
   -- Invoice & Ticket Display
   invoice_show_logo    boolean not null default true,
   invoice_show_gst     boolean not null default true,
   invoice_show_terms   boolean not null default true,
   ticket_show_logo     boolean not null default true,
   ticket_show_warranty boolean not null default true,
+
+  -- Ticket status pill colours (Settings → Tickets)
+  status_colors        jsonb,
+  hsn_code             text default '',
+
+  -- Invoice configuration (Settings → Invoice) — single source of truth
+  invoice_status_colors jsonb,
+  invoice_numbering      jsonb,
+  invoice_defaults       jsonb,
+  invoice_gst_rates      jsonb,
+  invoice_payment_modes  jsonb,
+  invoice_terms          text,
+  invoice_footer         text,
+  invoice_slogan         text,
+  invoice_warranty_text  text,
 
   -- Audit
   updated_by          uuid references public.staff(id) on delete set null,

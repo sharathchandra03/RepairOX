@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select, Label } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
@@ -256,22 +257,7 @@ export default function WalkInPage() {
         </div>
         {list.length === 0 && (
           <div className="flex flex-col items-center gap-2 p-12 text-center">
-            <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground">
-              <motion.span
-                className="text-2xl inline-block origin-[70%_80%]"
-                initial={{ rotate: 0 }}
-                animate={{
-                  rotate: [0, 20, -10, 20, -10, 0],
-                }}
-                transition={{
-                  duration: 2,
-                  ease: "easeInOut",
-                  times: [0, 0.2, 0.4, 0.6, 0.8, 1],
-                }}
-              >
-                👋
-              </motion.span>
-            </div>
+            <EmptyStateCharacter variant="walkin" />
             <p className="font-semibold">No walk-ins found</p>
             <p className="text-sm text-muted-foreground">Try adjusting your filters or create a new walk-in.</p>
           </div>

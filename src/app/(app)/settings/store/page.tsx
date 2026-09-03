@@ -2,9 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import {
-  Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X, Printer,
+  Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X,
 } from "lucide-react";
-import { Input, Label, Textarea, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
@@ -160,23 +160,8 @@ export default function StoreSettingsPage() {
         </div>
       </SettingsSection>
 
-      {/* Printing Defaults */}
-      <SettingsSection title="Printing Defaults" description="Templates, terms and warranty for printed documents" icon={Printer}>
-        <div className="grid grid-cols-1 gap-4">
-          <Field label="Print Footer" span>
-            <Input value={draft.printFooter} onChange={(e) => set("printFooter", e.target.value)} placeholder="Thank you message" />
-          </Field>
-          <Field label="Print Slogan" span>
-            <Input value={draft.printSlogan} onChange={(e) => set("printSlogan", e.target.value)} placeholder="Short brand tagline" />
-          </Field>
-          <Field label="Terms & Conditions" span>
-            <Textarea value={draft.termsAndConditions} onChange={(e) => set("termsAndConditions", e.target.value)} rows={4} className="min-h-0 font-mono text-xs" />
-          </Field>
-          <Field label="Warranty Text" span>
-            <Textarea value={draft.warrantyText} onChange={(e) => set("warrantyText", e.target.value)} rows={5} className="min-h-0 font-mono text-xs" />
-          </Field>
-        </div>
-      </SettingsSection>
+      {/* Printing configuration lives under Store → Printing (a single place for
+          Store, Ticket and Invoice print terms). */}
     </SettingsPage>
   );
 }

@@ -20,7 +20,9 @@ import {
   STATUS_LABEL, STATUS_TONE,
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE,
   INVOICE_TYPE_LABEL,
+  invoiceStatusPillStyle,
 } from "@/lib/mock-data";
+import { useStoreSettings } from "@/lib/store-settings";
 
 /* ─── Scope Icon Map ─────────────────────────────────────────────────── */
 
@@ -104,7 +106,9 @@ function TicketResultRow({ result, query, isActive }: { result: TicketResult; qu
 }
 
 function InvoiceResultRow({ result, query, isActive }: { result: InvoiceResult; query: string; isActive: boolean }) {
+  const { settings } = useStoreSettings();
   const statusLabel = INVOICE_STATUS_LABEL[result.status] ?? result.status;
+  const statusHex = settings.invoiceStatusColors[result.status];
   const statusTone = INVOICE_STATUS_TONE[result.status] ?? "bg-zinc-100 text-zinc-600 ring-zinc-200";
   const typeLabel = INVOICE_TYPE_LABEL[result.invoiceType as keyof typeof INVOICE_TYPE_LABEL] ?? result.invoiceType;
 
@@ -126,7 +130,10 @@ function InvoiceResultRow({ result, query, isActive }: { result: InvoiceResult; 
               <Highlight text={result.linkedTicketNo} query={query} />
             </span>
           )}
-          <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", statusTone)}>
+          <span
+            className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium", !statusHex && `ring-1 ring-inset ${statusTone}`)}
+            style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
+          >
             {statusLabel}
           </span>
         </div>

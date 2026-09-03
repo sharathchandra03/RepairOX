@@ -17,6 +17,7 @@ import type { ReportModuleId } from "@/lib/reports/types";
 import { ComingSoonPage } from "@/components/common/coming-soon";
 import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visibility";
 import { resetDemoData } from "@/lib/demo-mode";
+import { useSessionTracker } from "@/lib/use-session-tracker";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -50,7 +51,7 @@ function FeatureGate({ pathname, getVisibilityByHref, router, children }: {
   children: React.ReactNode;
 }) {
   // Skip gate for the coming-soon page itself, login, workspaces, and other meta routes
-  const skipPaths = ["/coming-soon", "/login", "/workspaces", "/roles-permissions"];
+  const skipPaths = ["/coming-soon", "/login", "/workspaces", "/roles-permissions", "/settings/roles-permissions"];
   if (skipPaths.some((p) => pathname === p || pathname.startsWith(p + "/"))) {
     return <>{children}</>;
   }
@@ -94,6 +95,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(allowed[0]?.id ?? "shop");
   const pathname = usePathname();
   const router = useRouter();
+
+  // Record this device as a real, revocable session (Settings → Active Sessions)
+  // and heartbeat its last-activity while the app is open. No effect in local mode.
+  useSessionTracker();
 
   // Route guard — once the session is restored, bounce anyone who isn't
   // signed in back to the login screen. Access is centrally controlled.

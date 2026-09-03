@@ -17,10 +17,11 @@ import { Drawer } from "@/components/ui/drawer";
 import { Textarea, Select, NumericInput } from "@/components/ui/input";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import {
-  INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL,
+  INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL, invoiceStatusPillStyle,
   type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
 } from "@/lib/mock-data";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
@@ -37,6 +38,15 @@ function fmtDateShort(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleDateString("en-IN", { dateStyle: "medium" });
+}
+
+/** Friendly label for a payment mode; custom modes are title-cased. */
+const PAYMENT_MODE_LABELS: Record<string, string> = {
+  cash: "Cash", upi: "UPI", bank_transfer: "Bank Transfer", card: "Card",
+  cheque: "Cheque", wallet: "Wallet", other: "Other",
+};
+function paymentModeLabel(mode: string): string {
+  return PAYMENT_MODE_LABELS[mode] ?? mode.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /* ─── Activity History (derived) ─────────────────────────────────────── */
@@ -103,9 +113,11 @@ export default function InvoiceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { invoices, tickets, deleteInvoice, updateInvoice } = useStore();
+  const { settings } = useStoreSettings();
   const invoiceId = params.id as string;
 
   const invoice = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
+  const statusHex = invoice ? settings.invoiceStatusColors[invoice.status] : undefined;
   const linkedTicket = useMemo(() => tickets.find((t) => t.id === invoice?.ticketId), [tickets, invoice]);
   const activity = useMemo(() => (invoice ? generateActivity(invoice, linkedTicket?.ticketNo ?? invoice.ticketId) : []), [invoice, linkedTicket]);
 
@@ -235,8 +247,11 @@ export default function InvoiceDetailPage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-display text-[26px] font-extrabold tracking-tight">{invoice.id}</h1>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                <span
+                  className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
+                  style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
+                >
+                  <span className="h-1.5 w-1.5 rounded-full" style={statusHex ? { backgroundColor: statusHex } : undefined} />
                   {INVOICE_STATUS_LABEL[invoice.status]}
                 </span>
                 <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
@@ -371,8 +386,8 @@ export default function InvoiceDetailPage() {
                 <select
                   value={invoice.status}
                   onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center] ${INVOICE_STATUS_TONE[invoice.status]}`}
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
+                  className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center]", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
+                  style={{ ...(statusHex ? invoiceStatusPillStyle(statusHex) : {}), backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
                 >
                   <option value="draft">Draft</option>
                   <option value="sent">Sent</option>
@@ -555,8 +570,8 @@ export default function InvoiceDetailPage() {
                 <select
                   value={invoice.status}
                   onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center] ${INVOICE_STATUS_TONE[invoice.status]}`}
-                  style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
+                  className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center]", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
+                  style={{ ...(statusHex ? invoiceStatusPillStyle(statusHex) : {}), backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
                 >
                   <option value="draft">Draft</option>
                   <option value="sent">Sent</option>
@@ -760,13 +775,7 @@ export default function InvoiceDetailPage() {
               onChange={(e: any) => setPaymentModeDraft(e.target.value)}
               options={[
                 { label: "Select mode…", value: "" },
-                { label: "Cash", value: "cash" },
-                { label: "UPI", value: "upi" },
-                { label: "Bank Transfer", value: "bank_transfer" },
-                { label: "Card", value: "card" },
-                { label: "Cheque", value: "cheque" },
-                { label: "Wallet", value: "wallet" },
-                { label: "Other", value: "other" },
+                ...settings.invoicePaymentModes.map((m) => ({ label: paymentModeLabel(m), value: m })),
               ]}
             />
           </div>

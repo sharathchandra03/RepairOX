@@ -67,7 +67,7 @@ export default function EmployeeDirectoryPage() {
         subtitle="Every staff member — profile, role, branch, login access and salary, all in one place."
         actions={
           <Can permission={["manage_users", "assign_technicians"]}>
-            <Link href="/roles-permissions/add-user">
+            <Link href="/settings/roles-permissions/add-user">
               <Button size="md"><Plus className="h-4 w-4" /> Add staff</Button>
             </Link>
           </Can>
@@ -186,7 +186,7 @@ export default function EmployeeDirectoryPage() {
                         <span className="text-[11px] font-normal text-muted-foreground"> · {SALARY_TYPE_LABEL[emp.salaryType ?? "monthly"]}</span>
                       </p>
                       <Can permission="manage_users">
-                        <Link href="/roles-permissions">
+                        <Link href="/settings/roles-permissions">
                           <Button size="sm" variant="outline"><ShieldCheck className="h-3.5 w-3.5" /> Manage access</Button>
                         </Link>
                       </Can>

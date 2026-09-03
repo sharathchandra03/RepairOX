@@ -23,7 +23,8 @@ import { useStore } from "@/lib/store";
 import { InvoiceFilters } from "@/components/filters/invoice-filters";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { SegmentedTabs } from "@/components/ui/tabs";
-import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
+import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, invoiceStatusPillStyle, invoiceIdColorStyle, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
+import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
@@ -135,6 +136,8 @@ function isInDateRange(createdAt: string, range: DateRange, customFrom?: string,
 export default function InvoicePage() {
   const router = useRouter();
   const { invoices, tickets, deleteInvoice, addInvoice, updateInvoice, pinInvoice } = useStore();
+  const { settings } = useStoreSettings();
+  const invoiceStatusColors = settings.invoiceStatusColors;
   // Map ticket id → saved ticket Type (Walk-In/Pick-Up/On-Site) so invoices can
   // show the same WK/PD/OS avatar as their linked ticket. Never inferred.
   const ticketTypeById = useMemo(() => {
@@ -304,7 +307,7 @@ export default function InvoicePage() {
             {advancedActive && <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />}
           </Button>
           <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button></Can>
-          <Can permission="manage_invoices"><Link href="/invoice/settings"><Button variant="outline" size="md" className="rounded-full"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
+          <Can permission="manage_invoices"><Link href="/settings/invoice/general"><Button variant="outline" size="md" className="rounded-full"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
           <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
         </>}
       />
@@ -527,12 +530,16 @@ export default function InvoicePage() {
           </Button>
           {showBulkStatus && (
             <>
-              {(["draft","sent","paid","partial","overdue","cancelled"] as InvoiceStatus[]).map((s) => (
-                <button key={s} onClick={() => { selected.forEach((id) => updateInvoice(id, { status: s })); setSelected(new Set()); setShowBulkStatus(false); }}
-                  className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium ring-1 ring-inset transition hover:scale-105 ${INVOICE_STATUS_TONE[s]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[s]}
-                </button>
-              ))}
+              {(["draft","sent","paid","partial","overdue","cancelled"] as InvoiceStatus[]).map((s) => {
+                const hex = invoiceStatusColors[s];
+                return (
+                  <button key={s} onClick={() => { selected.forEach((id) => updateInvoice(id, { status: s })); setSelected(new Set()); setShowBulkStatus(false); }}
+                    className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-medium transition hover:scale-105", !hex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[s]}`)}
+                    style={hex ? invoiceStatusPillStyle(hex) : undefined}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[s]}
+                  </button>
+                );
+              })}
             </>
           )}
           <button onClick={() => { setSelected(new Set()); setShowBulkStatus(false); }} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Clear</button>
@@ -595,7 +602,7 @@ export default function InvoicePage() {
                   </td>
                   {activeInvCols.map((col) => (
                     <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
-                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), inv.ticketId ? ticketNoById.get(inv.ticketId) : undefined, inv.ticketId ? () => router.push(`/tickets/${inv.ticketId}`) : undefined)}
+                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), inv.ticketId ? ticketNoById.get(inv.ticketId) : undefined, inv.ticketId ? () => router.push(`/tickets/${inv.ticketId}`) : undefined, invoiceStatusColors)}
                     </td>
                   ))}
                 </motion.tr>
@@ -819,12 +826,18 @@ function renderInvCell(
   onPin: () => void,
   linkedTicketNo?: string,
   onOpenTicket?: () => void,
+  statusColors?: Record<string, string>,
 ) {
+  const statusHex = statusColors?.[inv.status];
   switch (colId) {
     case "id": return (
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
         {inv.pinnedAt && <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
-        <span className={cn("font-semibold cursor-default", INVOICE_ID_COLOR[inv.status] || "text-foreground")} title={`Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}>
+        <span
+          className={cn("font-semibold cursor-default", !statusHex && (INVOICE_ID_COLOR[inv.status] || "text-foreground"))}
+          style={statusHex ? invoiceIdColorStyle(statusHex) : undefined}
+          title={`Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}
+        >
           {inv.id}
         </span>
       </span>
@@ -851,7 +864,14 @@ function renderInvCell(
       </div>
     );
     case "date": return <span className="text-[13px] text-muted-foreground whitespace-nowrap leading-snug">{fmtDate(inv.createdAt)}</span>;
-    case "status": return (
+    case "status": return statusHex ? (
+      <span
+        className="ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap"
+        style={invoiceStatusPillStyle(statusHex)}
+      >
+        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusHex }} />{INVOICE_STATUS_LABEL[inv.status]}
+      </span>
+    ) : (
       <span className={`ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
         <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
       </span>

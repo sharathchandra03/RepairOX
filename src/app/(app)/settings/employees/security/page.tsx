@@ -10,7 +10,7 @@ export default function EmployeeSecurityRedirectPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/roles-permissions");
+    router.replace("/settings/roles-permissions");
   }, [router]);
 
   return (

@@ -48,9 +48,23 @@ const Ctx = createContext<CatalogSelection | null>(null);
  * starts clean with no category/brand/model preselected. This avoids the page
  * always reopening the last (or a forced default) selection.
  */
-export function CatalogSelectionProvider({ children }: { children: ReactNode }) {
+const VALID_TABS: CatalogTabId[] = ["categories", "brands", "models", "parts", "import"];
+
+export function CatalogSelectionProvider({
+  children,
+  initialTab,
+}: {
+  children: ReactNode;
+  /** Optional starting tab (e.g. from a `?tab=` deep link). */
+  initialTab?: string | null;
+}) {
+  const startTab: CatalogTabId =
+    initialTab && VALID_TABS.includes(initialTab as CatalogTabId)
+      ? (initialTab as CatalogTabId)
+      : "categories";
+
   const [state, setState] = useState<SelectionState>({
-    tab: "categories", categoryId: null, brandId: null, modelId: null,
+    tab: startTab, categoryId: null, brandId: null, modelId: null,
   });
 
   const setTab = useCallback((tab: CatalogTabId) => setState((s) => ({ ...s, tab })), []);

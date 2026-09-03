@@ -29,6 +29,54 @@ import { usePermissions } from "@/lib/permissions-context";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
+/** Per-series invoice numbering config (Retail and Business are independent). */
+export type InvoiceNumberingConfig = {
+  prefix: string;
+  /** The number a fresh sequence starts from when no invoices exist yet. */
+  startNumber: number;
+  /** Zero-padding width for the numeric portion. */
+  digits: number;
+};
+
+/**
+ * A user-defined print template for future document types (quotation, estimate,
+ * delivery note, gate pass, etc.). Each template can either INHERIT the store
+ * master default terms/warranty/footer/slogan, or override any of them with its
+ * own text. Blank override fields fall back to the master default at print time
+ * (see resolveCustomTemplate in print-utils).
+ *
+ * Ticket and Invoice remain first-class, independent scopes and are NOT part of
+ * this list — this is purely the extensible mechanism for NEW document types.
+ */
+export type CustomPrintTemplate = {
+  /** Stable id (used as the key when a document type is wired to a template). */
+  id: string;
+  /** Human-readable name shown in Settings and pickers (e.g. "Quotation"). */
+  name: string;
+  /** Optional machine key a future document type can match on (e.g. "quotation"). */
+  slug: string;
+  /** When true, blank fields below inherit the store master default. */
+  inheritFromStore: boolean;
+  /** Override text — blank means "use master default" when inheritFromStore. */
+  terms: string;
+  warrantyText: string;
+  footer: string;
+  slogan: string;
+};
+
+/** Invoice defaults applied to NEW invoices only. Never rewrites history. */
+export type InvoiceDefaults = {
+  invoiceType: "retail" | "business";
+  serviceCategory: "service" | "accessories";
+  status: string;
+  /** Empty string means "no default — prompt the user". */
+  paymentMode: string;
+  /** Days added to the created date to compute the default due date. */
+  dueDateDays: number;
+  /** Default total GST rate (%) pre-selected on new invoices. */
+  gstRate: number;
+};
+
 export type StoreSettings = {
   /* Basic Information */
   logo: string;
@@ -74,14 +122,64 @@ export type StoreSettings = {
   refundPolicy: string;
   screenTimeout: number;
 
-  /* Print Settings */
+  /* Print Settings — STORE-level defaults.
+   * NOTE: As of the Terms & Notes separation, these are NO LONGER the source of
+   * truth for Ticket or Invoice documents. Tickets read `ticket*` fields and
+   * invoices read their own persisted terms + `invoiceWarrantyText`. These
+   * store fields remain for genuine store-level printing surfaces. */
   termsAndConditions: string;
   warrantyText: string;
   printFooter: string;
   printSlogan: string;
 
+  /* ── Custom print templates (extensible master-default consumers) ──
+   * User-defined templates for future document types. Each inherits from the
+   * store master default (the fields above) unless it overrides a field.
+   * Tickets & invoices are NOT here — they have their own independent scopes. */
+  customPrintTemplates: CustomPrintTemplate[];
+
+  /* ── Ticket Terms & Notes (Settings → Tickets → Terms & Notes) ──
+   * Independent, ticket-scoped source of truth for Ticket documents.
+   * Seeded from the store print defaults on first migration so existing
+   * ticket print output is preserved, then owned by Ticket Settings. */
+  ticketTerms: string;
+  ticketWarrantyText: string;
+  ticketFooter: string;
+
   /* Ticket Status Colors — configurable from Settings → Tickets */
   statusColors: Record<string, string>;
+
+  /* Default status applied to NEW tickets (Settings → Tickets → Workflow).
+   * Affects future tickets only; existing tickets are never rewritten. */
+  ticketDefaultStatus: string;
+  /* Default resolution time (minutes) for new tickets when none is entered.
+   * Historically hardcoded to 59. */
+  ticketDefaultResolutionMinutes: number;
+
+  /* ── Invoice configuration (single source of truth for Settings → Invoice) ── */
+
+  /** Invoice status pill colours (hex), keyed by InvoiceStatus. */
+  invoiceStatusColors: Record<string, string>;
+  /** Independent Retail & Business numbering series. */
+  invoiceNumbering: {
+    retail: InvoiceNumberingConfig;
+    business: InvoiceNumberingConfig;
+  };
+  /** Defaults applied to newly-created invoices (never touches existing ones). */
+  invoiceDefaults: InvoiceDefaults;
+  /** Selectable GST rate presets (%) offered in the invoice pricing step. */
+  invoiceGstRates: number[];
+  /** Ordered list of selectable payment modes. */
+  invoicePaymentModes: string[];
+  /** Default Terms & Conditions text seeded onto new invoices. */
+  invoiceTerms: string;
+  /** Default footer text seeded onto new invoices. */
+  invoiceFooter: string;
+  /** Default slogan text seeded onto new invoices. */
+  invoiceSlogan: string;
+  /** Invoice warranty block text — independent of Store Information.
+   *  Shown on invoice A4/thermal prints. */
+  invoiceWarrantyText: string;
 };
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -145,6 +243,34 @@ WARRANTY IS VOID IF:
   printFooter: "Thank you for choosing RepairOX!",
   printSlogan: "Your device, our expertise.",
 
+  /* No custom templates by default — added on demand from Store → Printing. */
+  customPrintTemplates: [],
+
+  /* Ticket Terms & Notes defaults — mirror the store print defaults so that,
+   * for a fresh install, ticket documents look identical to the previous
+   * store-inherited behaviour. From here on these are ticket-owned. */
+  ticketTerms: `1. All repairs carry a limited warranty as specified on this document.
+2. Devices not collected within 30 days of completion may be recycled or disposed.
+3. We are not responsible for data loss during repair. Please backup before handing over.
+4. Original parts are used unless otherwise agreed upon with the customer.
+5. Payment is due upon completion unless a credit arrangement exists.`,
+  ticketWarrantyText: `WARRANTY COVERAGE:
+- Screen repairs: 30 days from date of service
+- Battery replacement: 90 days from date of service
+- Board-level repairs: 15 days from date of service
+- Software/data services: No warranty
+
+CLAIM PROCEDURE:
+- Present this receipt along with the device at our service center.
+- Warranty covers the specific repair performed, not pre-existing issues.
+- Physical/liquid damage after repair voids the warranty.
+
+WARRANTY IS VOID IF:
+- Device shows signs of tampering by unauthorized personnel.
+- Physical damage or liquid ingress occurred after the repair.
+- Receipt is not presented at time of claim.`,
+  ticketFooter: "Thank you for choosing RepairOX!",
+
   statusColors: {
     in_progress: "#3B82F6",
     waiting_approval: "#F59E0B",
@@ -154,6 +280,48 @@ WARRANTY IS VOID IF:
     return: "#F43F5E",
     return_collected: "#71717A",
   },
+  ticketDefaultStatus: "in_progress",
+  ticketDefaultResolutionMinutes: 59,
+
+  /* Invoice configuration defaults — preserve the current hardcoded behaviour. */
+  invoiceStatusColors: {
+    draft: "#71717A",
+    sent: "#3B82F6",
+    paid: "#10B981",
+    partial: "#F59E0B",
+    overdue: "#F43F5E",
+    cancelled: "#A1A1AA",
+  },
+  invoiceNumbering: {
+    // 3 digits matches the existing INV001 / INVG001 series — do NOT widen this
+    // without intent, so historical numbers keep formatting.
+    retail: { prefix: "INV", startNumber: 1, digits: 3 },
+    business: { prefix: "INVG", startNumber: 1, digits: 3 },
+  },
+  invoiceDefaults: {
+    invoiceType: "retail",
+    serviceCategory: "service",
+    status: "draft",
+    paymentMode: "",
+    dueDateDays: 7,
+    gstRate: 0,
+  },
+  invoiceGstRates: [0, 12, 18],
+  invoicePaymentModes: ["cash", "upi", "bank_transfer", "card", "cheque", "wallet", "other"],
+  invoiceTerms:
+    "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.",
+  invoiceFooter: "THANK YOU FOR CHOOSING FIX IND",
+  invoiceSlogan: "",
+  invoiceWarrantyText: `WARRANTY COVERAGE:
+- Screen repairs: 30 days from date of service
+- Battery replacement: 90 days from date of service
+- Board-level repairs: 15 days from date of service
+- Software/data services: No warranty
+
+CLAIM PROCEDURE:
+- Present this invoice along with the device at our service center.
+- Warranty covers the specific repair performed, not pre-existing issues.
+- Physical/liquid damage after repair voids the warranty.`,
 };
 
 /* ─── DB ↔ Client field mapping ──────────────────────────────────────── */
@@ -196,8 +364,65 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     warrantyText: (row.warranty_text as string) ?? DEFAULT_STORE_SETTINGS.warrantyText,
     printFooter: (row.print_footer as string) ?? DEFAULT_STORE_SETTINGS.printFooter,
     printSlogan: (row.print_slogan as string) ?? DEFAULT_STORE_SETTINGS.printSlogan,
+    // Custom print templates (extensible; empty array when unset).
+    customPrintTemplates: parseJsonColumn(row.custom_print_templates, DEFAULT_STORE_SETTINGS.customPrintTemplates),
+    // ── Ticket Terms & Notes ──
+    // Migration: when the ticket-specific column is absent (older rows), fall
+    // back to the existing STORE value so ticket print keeps its prior text.
+    // Once saved from Settings → Tickets → Terms & Notes, the ticket column
+    // wins and the two become fully independent.
+    ticketTerms: (row.ticket_terms as string) ?? (row.terms_and_conditions as string) ?? DEFAULT_STORE_SETTINGS.ticketTerms,
+    ticketWarrantyText: (row.ticket_warranty_text as string) ?? (row.warranty_text as string) ?? DEFAULT_STORE_SETTINGS.ticketWarrantyText,
+    ticketFooter: (row.ticket_footer as string) ?? (row.print_footer as string) ?? DEFAULT_STORE_SETTINGS.ticketFooter,
     statusColors: row.status_colors ? (typeof row.status_colors === "string" ? JSON.parse(row.status_colors as string) : row.status_colors as Record<string, string>) : DEFAULT_STORE_SETTINGS.statusColors,
+    ticketDefaultStatus: (row.ticket_default_status as string) ?? DEFAULT_STORE_SETTINGS.ticketDefaultStatus,
+    ticketDefaultResolutionMinutes: Number(row.ticket_default_resolution_minutes ?? DEFAULT_STORE_SETTINGS.ticketDefaultResolutionMinutes),
+    invoiceStatusColors: parseJsonColumn(row.invoice_status_colors, DEFAULT_STORE_SETTINGS.invoiceStatusColors),
+    invoiceNumbering: parseJsonColumn(row.invoice_numbering, DEFAULT_STORE_SETTINGS.invoiceNumbering),
+    invoiceDefaults: parseJsonColumn(row.invoice_defaults, DEFAULT_STORE_SETTINGS.invoiceDefaults),
+    invoiceGstRates: parseJsonColumn(row.invoice_gst_rates, DEFAULT_STORE_SETTINGS.invoiceGstRates),
+    invoicePaymentModes: parseJsonColumn(row.invoice_payment_modes, DEFAULT_STORE_SETTINGS.invoicePaymentModes),
+    invoiceTerms: (row.invoice_terms as string) ?? DEFAULT_STORE_SETTINGS.invoiceTerms,
+    invoiceFooter: (row.invoice_footer as string) ?? DEFAULT_STORE_SETTINGS.invoiceFooter,
+    invoiceSlogan: (row.invoice_slogan as string) ?? DEFAULT_STORE_SETTINGS.invoiceSlogan,
+    // Invoice warranty is independent of Store Information. Older rows without
+    // the column fall back to the built-in default (NOT the store value) so
+    // invoices never silently inherit store terms once this feature ships.
+    invoiceWarrantyText: (row.invoice_warranty_text as string) ?? DEFAULT_STORE_SETTINGS.invoiceWarrantyText,
   };
+}
+
+/** Parse a JSON column that may arrive as a string, an object, or be absent.
+ *  Falls back to the provided default so missing columns never break hydration.
+ *  Arrays are used as-is; plain objects are shallow-merged over the fallback so
+ *  newly-added keys always have a sensible value. */
+function parseJsonColumn<T>(value: unknown, fallback: T): T {
+  if (value == null) return fallback;
+  try {
+    const parsed = typeof value === "string" ? JSON.parse(value) : value;
+    if (parsed == null) return fallback;
+    // Array fields: only accept an actual array, else keep the default so
+    // consumers that call .map()/.length never receive a malformed object.
+    if (Array.isArray(fallback)) return (Array.isArray(parsed) ? parsed : fallback) as T;
+    if (Array.isArray(parsed)) return fallback;
+    if (typeof parsed === "object") {
+      // Deep-merge one level so a partially-stored nested object (e.g.
+      // invoice_numbering.retail missing `digits`) still inherits every default.
+      const out: Record<string, unknown> = { ...(fallback as Record<string, unknown>) };
+      for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
+        const fv = (fallback as Record<string, unknown>)[k];
+        if (fv && typeof fv === "object" && !Array.isArray(fv) && v && typeof v === "object" && !Array.isArray(v)) {
+          out[k] = { ...(fv as object), ...(v as object) };
+        } else {
+          out[k] = v;
+        }
+      }
+      return out as T;
+    }
+  } catch {
+    /* malformed — fall through to default */
+  }
+  return fallback;
 }
 
 // Maps client camelCase partial → DB snake_case columns for upsert.
@@ -238,7 +463,22 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     warrantyText: "warranty_text",
     printFooter: "print_footer",
     printSlogan: "print_slogan",
+    customPrintTemplates: "custom_print_templates",
+    ticketTerms: "ticket_terms",
+    ticketWarrantyText: "ticket_warranty_text",
+    ticketFooter: "ticket_footer",
     statusColors: "status_colors",
+    ticketDefaultStatus: "ticket_default_status",
+    ticketDefaultResolutionMinutes: "ticket_default_resolution_minutes",
+    invoiceStatusColors: "invoice_status_colors",
+    invoiceNumbering: "invoice_numbering",
+    invoiceDefaults: "invoice_defaults",
+    invoiceGstRates: "invoice_gst_rates",
+    invoicePaymentModes: "invoice_payment_modes",
+    invoiceTerms: "invoice_terms",
+    invoiceFooter: "invoice_footer",
+    invoiceSlogan: "invoice_slogan",
+    invoiceWarrantyText: "invoice_warranty_text",
   };
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {

@@ -346,16 +346,43 @@ function isAuthOrRlsError(err: { code?: string; message?: string } | null): bool
  * an id that still belongs to a soft-deleted row and collide on insert.
  */
 async function nextInvoiceIdFromDb(type: string): Promise<string> {
-  const prefix = type === "business" ? "INVG" : "INV";
+  // Series numbering config lives in Settings → Invoice (organization_settings).
+  // Fall back to the legacy INV/INVG · 3-digit defaults when unavailable so the
+  // collision-recovery path always produces a valid id.
+  let prefix = type === "business" ? "INVG" : "INV";
+  let digits = 3;
+  let startNumber = 1;
   let maxNum = 0;
   if (supabase) {
+    try {
+      const { data: settingsRows } = await supabase
+        .from("organization_settings")
+        .select("invoice_numbering")
+        .limit(1);
+      const raw = settingsRows?.[0]?.invoice_numbering as unknown;
+      const numbering = raw
+        ? (typeof raw === "string" ? JSON.parse(raw) : raw)
+        : null;
+      const series = numbering?.[type === "business" ? "business" : "retail"];
+      if (series) {
+        if (series.prefix?.trim()) prefix = series.prefix.trim();
+        if (series.digits > 0) digits = series.digits;
+        if (series.startNumber > 0) startNumber = series.startNumber;
+      }
+    } catch {
+      /* keep legacy defaults */
+    }
+
     const { data } = await supabase.from("invoices").select("id").eq("invoice_type", type);
     maxNum = (data ?? []).reduce((max: number, r: { id: string }) => {
       const match = String(r.id).match(/\d+$/);
       return match ? Math.max(max, parseInt(match[0], 10)) : max;
     }, 0);
+    const next = maxNum === 0 ? startNumber : maxNum + 1;
+    return `${prefix}${String(next).padStart(digits, "0")}`;
   }
-  return `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
+  // No backend: honour the configured start number for a fresh series.
+  return `${prefix}${String(maxNum === 0 ? startNumber : maxNum + 1).padStart(digits, "0")}`;
 }
 
 /** Format a ticket sequence number as `T-001` (zero-padded to at least 3 digits,

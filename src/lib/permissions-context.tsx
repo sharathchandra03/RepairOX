@@ -224,8 +224,17 @@ interface PermissionsContextValue {
 
   addStaff: (input: AddStaffInput) => Promise<AddStaffResult>;
   updateStaff: (id: string, updates: Partial<TeamMember>) => void;
-  /** Self-service: the signed-in user edits their own name / phone / photo. */
-  updateProfile: (updates: { name?: string; phone?: string; avatarUrl?: string | null }) => Promise<{ ok: boolean; reason?: string }>;
+  /** Self-service: the signed-in user edits their own name / phone / photo /
+   *  language / access PIN. */
+  updateProfile: (updates: {
+    name?: string;
+    phone?: string;
+    avatarUrl?: string | null;
+    language?: string;
+    accessPin?: string | null;
+  }) => Promise<{ ok: boolean; reason?: string }>;
+  /** Authenticated fetch to a server route (attaches the bearer token). */
+  apiFetch: (path: string, init?: RequestInit) => Promise<{ ok: boolean; status: number; json: any }>;
   resetPassword: (id: string, newPassword: string) => void;
   setStaffStatus: (id: string, status: TeamMember["status"]) => void;
   toggleLogin: (id: string, enabled: boolean, password?: string) => void;
@@ -645,7 +654,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
      Either way the DB is the source of truth, so the change survives refresh
      and logout/login. */
   const updateProfile = useCallback(async (
-    updates: { name?: string; phone?: string; avatarUrl?: string | null }
+    updates: { name?: string; phone?: string; avatarUrl?: string | null; language?: string; accessPin?: string | null }
   ): Promise<{ ok: boolean; reason?: string }> => {
     const id = currentUser?.id;
     if (!id) return { ok: false, reason: "no_user" };
@@ -659,12 +668,17 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       return next;
     }));
 
-    if (isSupabaseConfigured && supabase) {
+    // The Access PIN must be hashed server-side, so any request that touches it
+    // skips the direct browser write and goes straight to the privileged route.
+    const needsServer = updates.accessPin !== undefined;
+
+    if (isSupabaseConfigured && supabase && !needsServer) {
       // 1) Direct, RLS-protected write of the caller's own row.
       const payload: Record<string, unknown> = {};
       if (updates.name !== undefined) payload.name = updates.name;
       if (updates.phone !== undefined) payload.phone = updates.phone || null;
       if (updates.avatarUrl !== undefined) payload.avatar_url = updates.avatarUrl ?? null;
+      if (updates.language !== undefined) payload.language = updates.language;
 
       const direct = await supabase.from("staff").update(payload).eq("id", id).select("*").maybeSingle();
       if (!direct.error && direct.data) {
@@ -672,8 +686,11 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         setTeam((prev) => prev.map((m) => (m.id === id ? saved : m)));
         return { ok: true };
       }
+    }
 
-      // 2) Fall back to the privileged server route.
+    if (isSupabaseConfigured && supabase) {
+      // 2) Privileged server route — handles PIN hashing and is the fallback
+      //    when the direct RLS write above is blocked.
       const res = await apiFetch("/api/profile", { method: "PATCH", body: JSON.stringify(updates) });
       if (!res.ok || !res.json?.ok) {
         // Nothing persisted — discard the optimistic change so the form shows
@@ -879,7 +896,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       return {
         grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
         team: exposedTeam, membersInRole: isDemoMode ? ((roleId: string) => DEMO_TEAM.filter((m) => m.roleId === roleId)) : membersInRole, getStaffById, setMemberRole, deleteMember,
-        addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
+        addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
         authReady: hydrated, currentUser, login, logout, landingForRole,
         adminRoleId, activeRoleId, role, can, allowedWorkspaces,
         isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
@@ -890,7 +907,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     [
       grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
       team, membersInRole, getStaffById, setMemberRole, deleteMember,
-      addStaff, updateStaff, updateProfile, resetPassword, setStaffStatus, toggleLogin,
+      addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
       hydrated, currentUser, login, logout, landingForRole,
       adminRoleId, activeRoleId, role, can, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
       featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,

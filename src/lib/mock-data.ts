@@ -378,7 +378,7 @@ export const navItems: NavItem[] = [
   { href: "/employees/salary-advances", label: "Salary Advances",  icon: "WalletCards", permission: "manage_payments" },
 
   // Administration — single entry point for all employee access / role management
-  { href: "/roles-permissions",        label: "Roles & Permissions", icon: "ShieldCheck", permission: ["manage_roles", "manage_users"] },
+  { href: "/settings/roles-permissions", label: "Roles & Permissions", icon: "ShieldCheck", permission: ["manage_roles", "manage_users"] },
 
   // Accounts sub-pages
   { href: "/accounts/ledger",          label: "Daily Ledger",        icon: "BookOpen", permission: "view_financial_reports" },
@@ -564,6 +564,30 @@ export const INVOICE_ID_COLOR: Record<InvoiceStatus, string> = {
   overdue: "text-orange-600",
   cancelled: "text-rose-500",
 };
+
+/**
+ * Build inline styles for an invoice status pill from a configured hex colour.
+ * Mirrors the ticket status-pill approach so Settings → Invoice → Status Colours
+ * is the single source of truth. `INVOICE_STATUS_TONE` remains as the Tailwind
+ * fallback for any context that has not been wired to settings yet.
+ */
+export function invoiceStatusPillStyle(hex: string | undefined): {
+  backgroundColor: string;
+  color: string;
+  boxShadow: string;
+} {
+  const color = hex || "#71717A";
+  return {
+    backgroundColor: `${color}15`,
+    color,
+    boxShadow: `inset 0 0 0 1px ${color}30`,
+  };
+}
+
+/** Muted text colour (for the invoice id) derived from the configured hex. */
+export function invoiceIdColorStyle(hex: string | undefined): { color: string | undefined } {
+  return { color: hex || undefined };
+}
 
 export type InvoiceLineItem = {
   id: string;
@@ -842,8 +866,8 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     { label: "INVENTORY",      items: ["/inventory"] },
     // Expenses remains standalone for daily operational quick-access.
     // Employees and Accounts are now expandable groups rendered separately.
-    // Roles & Permissions is the single, dedicated access-control workspace.
-    { label: "ADMINISTRATION", items: ["/expenses", "/roles-permissions"] },
+    // Roles & Permissions has moved to Settings → Roles & Permissions.
+    { label: "ADMINISTRATION", items: ["/expenses"] },
     { label: "BILLING",        items: ["/shop/payments"] },
     { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],

@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel } from "@/lib/catalog-context";
@@ -453,7 +453,12 @@ export default function PriceListPage() {
           <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={handleExport}>
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
-          <Button size="sm" className="gap-1.5 rounded-xl"><Plus className="h-3.5 w-3.5" /> Add New <ChevronDown className="h-3 w-3" /></Button>
+          <Link
+            href="/settings/inventory/price-lists?tab=categories"
+            className={cn(buttonVariants({ size: "sm" }), "gap-1.5 rounded-xl")}
+          >
+            <Plus className="h-3.5 w-3.5" /> Add New
+          </Link>
         </div>
       </div>
 
@@ -588,15 +593,6 @@ export default function PriceListPage() {
             <EmptyState />
           )}
         </div>
-      </div>
-
-      {/* Branch Info Footer */}
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-4 py-2.5 text-[12px] text-muted-foreground">
-        <Info className="h-3.5 w-3.5 text-brand-500" />
-        <span>Prices are branch specific. You&apos;re viewing prices for</span>
-        <button className="inline-flex items-center gap-1 font-semibold text-brand-600 hover:underline">
-          Main Branch <ChevronDown className="h-3 w-3" />
-        </button>
       </div>
 
       {/* Smart import confirm dialog (generic Excel/CSV sheets) */}

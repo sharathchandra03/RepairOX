@@ -1,4 +1,4 @@
-import type { StoreSettings } from "@/lib/store-settings";
+import type { StoreSettings, CustomPrintTemplate } from "@/lib/store-settings";
 import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
 import { getTicketDevices, getInvoiceDevices } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
@@ -340,9 +340,11 @@ export function buildTicketPrintData(
     printTitle: "Service Report",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
     printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
-    termsAndConditions: settings.termsAndConditions,
-    warrantyText: settings.warrantyText,
-    printFooter: settings.printFooter,
+    // Ticket documents use Settings → Tickets → Terms & Notes as their source
+    // of truth. They no longer inherit from Store Information.
+    termsAndConditions: settings.ticketTerms,
+    warrantyText: settings.ticketWarrantyText,
+    printFooter: settings.ticketFooter,
   };
 }
 
@@ -368,9 +370,102 @@ export function buildInvoicePrintData(
     printTitle: title,
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
     printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    // Invoice documents use Settings → Invoice → Terms & Notes as their source
+    // of truth. Per-invoice terms/footer are seeded from those defaults at
+    // creation and persisted on the invoice (see invoice/create). We therefore
+    // fill these generic slots from the invoice's own persisted values, falling
+    // back to the current invoice-settings defaults — never Store Information.
+    termsAndConditions: invoice.terms || settings.invoiceTerms,
+    warrantyText: settings.invoiceWarrantyText,
+    printFooter: invoice.footer || settings.invoiceFooter,
+  };
+}
+
+/* ─── Master Default + Custom Templates ──────────────────────────────────
+ *
+ * The store-level print fields (termsAndConditions / warrantyText / printFooter
+ * / printSlogan) act as the MASTER DEFAULT. Tickets and invoices do NOT use it —
+ * they are independent. It exists so that NEW document types (quotation,
+ * estimate, delivery note, …) can inherit a single house style, optionally
+ * overriding per template.
+ *
+ * To wire a future document type: register a CustomPrintTemplate in
+ * Settings → Store → Printing, then at print time call
+ * `resolveCustomTemplate(settings, templateId)` to get the effective text and
+ * feed it into buildCustomTemplatePrintData().
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/** The store master-default print text (single house style). */
+export type ResolvedPrintText = {
+  termsAndConditions: string;
+  warrantyText: string;
+  printFooter: string;
+  printSlogan: string;
+};
+
+/** Returns the store master-default text as-is. */
+export function resolveStoreMaster(settings: StoreSettings): ResolvedPrintText {
+  return {
     termsAndConditions: settings.termsAndConditions,
     warrantyText: settings.warrantyText,
     printFooter: settings.printFooter,
+    printSlogan: settings.printSlogan,
+  };
+}
+
+/**
+ * Resolve the effective print text for a custom template.
+ * A blank field on the template inherits the store master default when
+ * `inheritFromStore` is true; otherwise the (possibly blank) template value is
+ * used verbatim. Returns null when the template id doesn't exist.
+ */
+export function resolveCustomTemplate(
+  settings: StoreSettings,
+  templateId: string,
+): ResolvedPrintText | null {
+  const tpl = settings.customPrintTemplates.find((t) => t.id === templateId);
+  if (!tpl) return null;
+  const master = resolveStoreMaster(settings);
+  const pick = (value: string, fallback: string) =>
+    value?.trim() ? value : tpl.inheritFromStore ? fallback : value ?? "";
+  return {
+    termsAndConditions: pick(tpl.terms, master.termsAndConditions),
+    warrantyText: pick(tpl.warrantyText, master.warrantyText),
+    printFooter: pick(tpl.footer, master.printFooter),
+    printSlogan: pick(tpl.slogan, master.printSlogan),
+  };
+}
+
+/**
+ * Assemble a PrintDocumentData for a custom document type using a resolved
+ * template. `base` supplies the document-specific bits (title, customer, and
+ * any ticket/invoice payload the future type reuses). This reuses the existing
+ * A4/thermal templates unchanged — only the source of Terms/Notes differs.
+ */
+export function buildCustomTemplatePrintData(
+  settings: StoreSettings,
+  templateId: string,
+  base: {
+    printTitle: string;
+    customer: PrintCustomerInfo;
+    ticket?: PrintTicketInfo;
+    invoice?: PrintInvoiceInfo;
+  },
+): PrintDocumentData | null {
+  const resolved = resolveCustomTemplate(settings, templateId);
+  if (!resolved) return null;
+  const now = new Date();
+  return {
+    store: buildStoreInfo(settings),
+    customer: base.customer,
+    ticket: base.ticket,
+    invoice: base.invoice,
+    printTitle: base.printTitle,
+    printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
+    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    termsAndConditions: resolved.termsAndConditions,
+    warrantyText: resolved.warrantyText,
+    printFooter: resolved.printFooter,
   };
 }
 

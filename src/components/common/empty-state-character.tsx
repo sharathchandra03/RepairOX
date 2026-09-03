@@ -28,15 +28,13 @@ import { motion, useReducedMotion, type Variants } from "framer-motion";
  * Scope: purely visual. No layout, filtering, or data logic lives here.
  */
 
-type Variant = "ticket" | "invoice";
+type Variant = "ticket" | "invoice" | "walkin";
 
-const ASSETS: Record<Variant, { src: string; w: number; h: number; alt: string }> = {
-  ticket: { src: "/empty-states/ticket-empty.png", w: 340, h: 390, alt: "" },
-  invoice: { src: "/empty-states/invoice-empty.png", w: 340, h: 355, alt: "" },
+const ASSETS: Record<Variant, { src: string; w: number; h: number; alt: string; displayHeight: number }> = {
+  ticket: { src: "/empty-states/ticket-empty.png", w: 340, h: 390, alt: "", displayHeight: 132 },
+  invoice: { src: "/empty-states/invoice-empty.png", w: 340, h: 355, alt: "", displayHeight: 132 },
+  walkin: { src: "/empty-states/walkin-empty.png", w: 1191, h: 1140, alt: "", displayHeight: 132 },
 };
-
-// Rendered height for the illustration inside the empty-state area (compact).
-const DISPLAY_HEIGHT = 132;
 
 /* Outer layer: pop in from below with a springy overshoot, fade in,
    then a soft ground "shadow" flash implied by the scale bloom. */
@@ -85,14 +83,15 @@ const gentleFadeIn: Variants = {
 export function EmptyStateCharacter({ variant }: { variant: Variant }) {
   const reduce = useReducedMotion();
   const asset = ASSETS[variant];
-  const width = Math.round((asset.w / asset.h) * DISPLAY_HEIGHT);
+  const displayHeight = asset.displayHeight;
+  const width = Math.round((asset.w / asset.h) * displayHeight);
 
   return (
     <motion.div
       // key forces a fresh mount per variant so the entrance replays reliably.
       key={variant}
       className="relative flex items-center justify-center"
-      style={{ width, height: DISPLAY_HEIGHT }}
+      style={{ width, height: displayHeight }}
       // Always play an entrance. Under reduced motion we swap the springy pop-in
       // for a gentle fade so Windows (which often reports reduced motion) still
       // animates instead of showing a dead static image.

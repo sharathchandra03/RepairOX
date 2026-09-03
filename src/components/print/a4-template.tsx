@@ -948,12 +948,16 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
           </div>
         </div>
 
-        {/* ══ TERMS & CONDITIONS ══ (invoice-specific terms take precedence) */}
-        {inv.terms || data.termsAndConditions ? (
+        {/* ══ TERMS & CONDITIONS ══
+            Sourced from Settings → Invoice → Terms & Notes (per-invoice terms,
+            seeded from invoice defaults). buildInvoicePrintData already resolves
+            invoice.terms || invoiceTerms into data.termsAndConditions — never
+            Store Information. */}
+        {data.termsAndConditions ? (
           <div data-pdf-atomic style={{ marginTop: 7, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
             <SectionHead title="Terms & Conditions" />
             <div style={{ padding: "5px 12px" }}>
-              <TwoColList text={inv.terms || data.termsAndConditions} />
+              <TwoColList text={data.termsAndConditions} />
             </div>
           </div>
         ) : null}

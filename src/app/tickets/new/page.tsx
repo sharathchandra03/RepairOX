@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, Suspense } from "react";
+import React, { useState, useEffect, useRef, useMemo, Suspense } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
@@ -22,6 +22,7 @@ import { RSelect } from "@/components/ui/rselect";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
@@ -31,6 +32,7 @@ import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
+import { loadQCConfig, getCachedQCConfig, activeCategories as qcActiveCategories, type QCConfig } from "@/lib/qc-config";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
@@ -314,6 +316,7 @@ function NewTicketWizard() {
   const fromPage = searchParams.get("from");
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : "/tickets";
   const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands } = useStore();
+  const { settings } = useStoreSettings();
 
   const [step, setStep] = useState(editId ? 3 : 1);
   const [data, setData] = useState<WizardData>(DEFAULT);
@@ -375,7 +378,9 @@ function NewTicketWizard() {
     const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
     const primaryDevice = data.devices[0];
     const allParts = data.devices.flatMap((d) => d.parts);
-    const resMinutes = Number(primaryDevice.job.resolutionMinutes) || 59;
+    const defaultResMinutes = Number(settings.ticketDefaultResolutionMinutes) || 59;
+    const defaultStatus = (settings.ticketDefaultStatus || "in_progress") as TicketStatus;
+    const resMinutes = Number(primaryDevice.job.resolutionMinutes) || defaultResMinutes;
     const createdAt = isEdit ? (tickets.find((t) => t.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString();
     // If a custom resolution date was set, use it directly as dueDate
     const dueDate = primaryDevice.job.customResolutionDate
@@ -434,13 +439,15 @@ function NewTicketWizard() {
         : wd.job.warranty || "",
       warrantyValue: wd.job.warrantyValue ? Number(wd.job.warrantyValue) : undefined,
       warrantyUnit: (wd.job.warrantyUnit || undefined) as "days" | "months" | "years" | undefined,
-      resolutionMinutes: Number(wd.job.resolutionMinutes) || 59,
+      resolutionMinutes: Number(wd.job.resolutionMinutes) || defaultResMinutes,
       accessories: wd.job.accessories,
       notes: wd.job.notes,
       estimate: Number(wd.job.estimate) || wd.parts.reduce((s, p) => s + p.total, 0) || 0,
       parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
       qc: wd.qc,
-      status: "in_progress" as const,
+      // New tickets start at the configured default status (Settings → Tickets
+      // → Workflow). Existing tickets keep their stored status on edit.
+      status: defaultStatus,
     }));
 
     // Total amount across all devices (estimate + parts, matching quotation logic)
@@ -487,7 +494,7 @@ function NewTicketWizard() {
         service: wd.job.issue || "Repair",
       })),
       parts: allParts.length > 0 ? allParts.map((p) => ({ ...p, status: "planned" as const })) : undefined,
-      status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || "in_progress") : "in_progress") as TicketStatus,
+      status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || defaultStatus) : defaultStatus) as TicketStatus,
       priority: (primaryDevice.job.priority as any) || "normal",
       technician: primaryDevice.device.assignedTo || "Unassigned",
       createdAt,
@@ -2609,13 +2616,61 @@ function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
 function QCForm({ data, setData, onNext, isEdit }: any) {
   const [filter, setFilter] = useState<"all" | "pass" | "fail" | "skip" | "pending">("all");
   const [search, setSearch] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set(QC_GROUPS.map((g) => g.id)));
   const [noteOpen, setNoteOpen] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+
+  // ── QC checklist comes from Settings → Tickets → Quality Check ──
+  // Load the org's configured QC checklist. Falls back to the built-in
+  // defaults (QC_GROUPS/QC_FIELDS) until it resolves, so the form always
+  // renders. Keyed by config so admin edits flow straight into this form.
+  const [qcConfig, setQcConfig] = useState<QCConfig | null>(() => getCachedQCConfig());
+  useEffect(() => {
+    let alive = true;
+    loadQCConfig().then((c) => { if (alive) setQcConfig(c); });
+    return () => { alive = false; };
+  }, []);
 
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
   const qc = activeDevice.qc || {};
+
+  // Build the render groups from the configured (active) QC categories. Item
+  // ids are stable keys stored in the per-device `qc` map. On edit/view, any
+  // historical item recorded on THIS device that is no longer in the active
+  // config (renamed/archived/removed) is appended to a "Previous Checks" group
+  // so old results never disappear — historical data safety.
+  const { qcGroups, qcFields } = useMemo(() => {
+    const source = qcConfig ? qcActiveCategories(qcConfig) : null;
+    const groups = source
+      ? source.map((c) => ({ id: c.id, label: c.label, items: c.items.map((i) => i.id), labels: Object.fromEntries(c.items.map((i) => [i.id, i.label])) }))
+      : QC_GROUPS.map((g) => ({ id: g.id, label: g.label, items: g.items, labels: Object.fromEntries(g.items.map((l) => [l, l])) }));
+
+    const known = new Set(groups.flatMap((g) => g.items));
+    const historical = Object.keys(qc).filter((k) => !known.has(k));
+    if (historical.length > 0) {
+      groups.push({ id: "__historical__", label: "Previous Checks", items: historical, labels: Object.fromEntries(historical.map((k) => [k, k])) });
+    }
+    const fields = groups.flatMap((g) => g.items);
+    return { qcGroups: groups, qcFields: fields };
+  }, [qcConfig, qc]);
+
+  // Look up a display label for an item key (config label, else the key).
+  const labelFor = (key: string): string => {
+    for (const g of qcGroups) { if (g.labels[key]) return g.labels[key]; }
+    return key;
+  };
+
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  // Default all groups collapsed once the group list is known (matches the
+  // original behaviour where every group started collapsed).
+  const initializedCollapse = useRef(false);
+  useEffect(() => {
+    if (!initializedCollapse.current && qcGroups.length > 0) {
+      initializedCollapse.current = true;
+      setCollapsed(new Set(qcGroups.map((g) => g.id)));
+    }
+  }, [qcGroups]);
+
   const set = (k: string, v: "ok" | "no" | "na") => {
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
       i === activeIdx ? { ...dev, qc: { ...dev.qc, [k]: v } } : dev
@@ -2623,30 +2678,30 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     setData({ ...data, devices: updatedDevices });
   };
 
-  const total = QC_FIELDS.length;
-  const passed = QC_FIELDS.filter((f) => qc[f] === "ok").length;
-  const failed = QC_FIELDS.filter((f) => qc[f] === "no").length;
-  const skipped = QC_FIELDS.filter((f) => qc[f] === "na").length;
+  const total = qcFields.length;
+  const passed = qcFields.filter((f) => qc[f] === "ok").length;
+  const failed = qcFields.filter((f) => qc[f] === "no").length;
+  const skipped = qcFields.filter((f) => qc[f] === "na").length;
   const completed = passed + failed + skipped;
   const pending = total - completed;
   const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
-  const matchesFilter = (label: string) => {
+  const matchesFilter = (key: string) => {
     if (filter === "all") return true;
-    if (filter === "pass") return qc[label] === "ok";
-    if (filter === "fail") return qc[label] === "no";
-    if (filter === "skip") return qc[label] === "na";
-    if (filter === "pending") return !qc[label];
+    if (filter === "pass") return qc[key] === "ok";
+    if (filter === "fail") return qc[key] === "no";
+    if (filter === "skip") return qc[key] === "na";
+    if (filter === "pending") return !qc[key];
     return true;
   };
-  const matchesSearch = (label: string) => !search.trim() || label.toLowerCase().includes(search.toLowerCase());
+  const matchesSearch = (key: string) => !search.trim() || labelFor(key).toLowerCase().includes(search.toLowerCase());
 
   const toggleGroup = (id: string) => {
     setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
   };
   const markAll = () => {
     const updated = { ...qc };
-    QC_FIELDS.forEach((f) => { if (!updated[f]) updated[f] = "ok"; });
+    qcFields.forEach((f) => { if (!updated[f]) updated[f] = "ok"; });
     const updatedDevicesMarkAll = data.devices.map((dev: WizardDevice, i: number) =>
       i === activeIdx ? { ...dev, qc: updated } : dev
     );
@@ -2711,7 +2766,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
 
         {/* Groups — two balanced columns */}
         <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 lg:items-start">
-          {[QC_GROUPS.slice(0, 3), QC_GROUPS.slice(3)].map((column, colIdx) => (
+          {(() => { const half = Math.ceil(qcGroups.length / 2); return [qcGroups.slice(0, half), qcGroups.slice(half)]; })().map((column, colIdx) => (
             <div key={colIdx} className="space-y-2.5">
               {column.map((group) => {
                 const visibleItems = group.items.filter((item) => matchesFilter(item) && matchesSearch(item));
@@ -2729,19 +2784,19 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
                     </button>
                     {!isCollapsed && (
                       <div className="divide-y divide-border">
-                        {visibleItems.map((label) => {
-                          const status = qc[label];
+                        {visibleItems.map((key) => {
+                          const status = qc[key];
                           return (
-                            <div key={label} className="flex items-center gap-2.5 px-4 py-2">
+                            <div key={key} className="flex items-center gap-2.5 px-4 py-2">
                               <span className={cn("h-2 w-2 rounded-full shrink-0", status === "ok" ? "bg-emerald-500" : status === "no" ? "bg-rose-500" : status === "na" ? "bg-[#4361EE]" : "bg-zinc-300")} />
-                              <span className="flex-1 text-[13px] font-medium truncate">{label}</span>
-                              <button onClick={() => { setNoteOpen(label); setNoteText(""); }} className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold text-[#4361EE] hover:bg-[#EEF1FD] transition">
+                              <span className="flex-1 text-[13px] font-medium truncate">{labelFor(key)}</span>
+                              <button onClick={() => { setNoteOpen(key); setNoteText(""); }} className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold text-[#4361EE] hover:bg-[#EEF1FD] transition">
                                 NOTE
                               </button>
                               <div className="flex items-center gap-1 shrink-0">
-                                <button onClick={() => set(label, "ok")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "ok" ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200" : "bg-muted text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700")}>Pass</button>
-                                <button onClick={() => set(label, "no")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "no" ? "bg-rose-100 text-rose-700 ring-1 ring-rose-200" : "bg-muted text-muted-foreground hover:bg-rose-50 hover:text-rose-700")}>Fail</button>
-                                <button onClick={() => set(label, "na")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "na" ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200" : "bg-muted text-muted-foreground hover:bg-indigo-50 hover:text-indigo-700")}>Skip</button>
+                                <button onClick={() => set(key, "ok")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "ok" ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200" : "bg-muted text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700")}>Pass</button>
+                                <button onClick={() => set(key, "no")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "no" ? "bg-rose-100 text-rose-700 ring-1 ring-rose-200" : "bg-muted text-muted-foreground hover:bg-rose-50 hover:text-rose-700")}>Fail</button>
+                                <button onClick={() => set(key, "na")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "na" ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200" : "bg-muted text-muted-foreground hover:bg-indigo-50 hover:text-indigo-700")}>Skip</button>
                               </div>
                             </div>
                           );
@@ -2781,7 +2836,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
           <div className="rounded-xl border border-border bg-card p-3">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Quick Actions</p>
             <button onClick={() => setFilter("fail")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><XCircle className="h-3 w-3 text-rose-500" /> Show Failed</button>
-            <button onClick={() => setCollapsed(new Set(QC_GROUPS.map((g) => g.id)))} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><MinusCircle className="h-3 w-3 text-muted-foreground" /> Collapse All</button>
+            <button onClick={() => setCollapsed(new Set(qcGroups.map((g) => g.id)))} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><MinusCircle className="h-3 w-3 text-muted-foreground" /> Collapse All</button>
             <button onClick={() => setCollapsed(new Set())} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><CircleDot className="h-3 w-3 text-muted-foreground" /> Expand All</button>
           </div>
           <p className="text-center text-[10px] text-muted-foreground"><CheckCircle2 className="inline h-3 w-3 text-emerald-500" /> Auto-saved</p>
@@ -2792,7 +2847,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
       {noteOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setNoteOpen(null)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
-            <p className="text-sm font-bold mb-1">Note: {noteOpen}</p>
+            <p className="text-sm font-bold mb-1">Note: {labelFor(noteOpen)}</p>
             <p className="text-[11px] text-muted-foreground mb-3">Add technician notes for this item.</p>
             <Textarea value={noteText} onChange={(e: any) => setNoteText(e.target.value)} placeholder="Enter notes…" rows={3} />
             <div className="mt-3 flex justify-end gap-2">

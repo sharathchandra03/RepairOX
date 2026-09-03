@@ -1,5 +1,6 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { LayoutGrid, Building2, Laptop, Wrench, ArrowLeftRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SettingsBreadcrumb } from "@/components/settings/settings-breadcrumb";
@@ -20,8 +21,10 @@ const TABS: { id: CatalogTabId; label: string; icon: React.ComponentType<{ class
 ];
 
 export function CatalogAdmin() {
+  const searchParams = useSearchParams();
+  const initialTab = searchParams.get("tab");
   return (
-    <CatalogSelectionProvider>
+    <CatalogSelectionProvider initialTab={initialTab}>
       <CatalogAdminInner />
     </CatalogSelectionProvider>
   );

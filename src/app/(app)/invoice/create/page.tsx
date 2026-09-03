@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
 import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
 import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus } from "@/lib/mock-data";
@@ -109,18 +110,47 @@ const DEFAULT_FORM: InvoiceFormData = {
   notes: { notes: "", terms: "Limited Warranty\nWe stand behind our repair services.\nYour repaired device is covered by a service warranty.", slogan: "", footer: "THANK YOU FOR CHOOSING FIX IND" },
 };
 
-function genInvoiceId(type: InvoiceType, existingInvoices: Invoice[]): string {
-  const prefix = type === "business" ? "INVG" : "INV";
+/** Numbering config shape (from Settings → Invoice → Numbering). */
+type NumberingCfg = { prefix: string; startNumber: number; digits: number };
+
+/**
+ * Generate the next invoice id for a series. Uses the configured prefix/digits/
+ * start number from Settings when provided, otherwise the legacy INV/INVG · 3-digit
+ * defaults. The next number always continues from the highest EXISTING invoice in
+ * the series, so changing settings never renumbers historical invoices.
+ */
+function genInvoiceId(type: InvoiceType, existingInvoices: Invoice[], cfg?: NumberingCfg): string {
+  const fallbackPrefix = type === "business" ? "INVG" : "INV";
+  const prefix = (cfg?.prefix?.trim()) || fallbackPrefix;
+  const digits = cfg?.digits && cfg.digits > 0 ? cfg.digits : 3;
+  const startNumber = cfg?.startNumber && cfg.startNumber > 0 ? cfg.startNumber : 1;
   const existing = existingInvoices.filter((i) => i.invoiceType === type);
   const maxNum = existing.reduce((max, i) => {
     const match = i.id.match(/\d+$/);
     return match ? Math.max(max, parseInt(match[0], 10)) : max;
   }, 0);
-  return `${prefix}${String(maxNum + 1).padStart(3, "0")}`;
+  // First invoice in a fresh series honours the configured start number.
+  const next = existing.length === 0 ? startNumber : maxNum + 1;
+  return `${prefix}${String(next).padStart(digits, "0")}`;
 }
 
 function genLineId(): string {
   return `li-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+}
+
+/** Friendly labels for known payment modes; custom modes are title-cased. */
+const PAYMENT_MODE_LABEL: Record<string, string> = {
+  cash: "Cash",
+  upi: "UPI",
+  bank_transfer: "Bank Transfer",
+  card: "Card",
+  cheque: "Cheque",
+  wallet: "Wallet",
+  other: "Other",
+};
+
+function titleCase(s: string): string {
+  return s.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 /* ─── Page Wrapper (Suspense for useSearchParams) ────────────────────── */
@@ -140,6 +170,7 @@ function InvoiceWizard() {
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const { invoices, tickets, addInvoice, updateInvoice } = useStore();
+  const { settings, hydrated: settingsHydrated } = useStoreSettings();
   const isEdit = !!editId;
 
   // Resolve a ticket's stable primary key (stored in Invoice.ticketId) to its
@@ -285,6 +316,40 @@ function InvoiceWizard() {
     }
   }, [searchParams, editId, ticketNoForId]);
 
+  // Seed defaults from Settings → Invoice for brand-new invoices only.
+  // Never runs for edits (?edit=) or ticket pushes (?fromTicket=), and only once,
+  // so it never overwrites user input or historical invoice values.
+  const seededRef = useRef(false);
+  useEffect(() => {
+    if (seededRef.current) return;
+    if (editId || searchParams.get("fromTicket")) return; // don't touch edits/pushes
+    if (!settingsHydrated) return; // wait for settings to load
+    seededRef.current = true;
+    const d = settings.invoiceDefaults;
+    const due = new Date(Date.now() + (d.dueDateDays ?? 7) * 86_400_000).toISOString().slice(0, 10);
+    setForm((prev) => ({
+      ...prev,
+      details: {
+        ...prev.details,
+        invoiceType: d.invoiceType ?? prev.details.invoiceType,
+        serviceCategory: d.serviceCategory ?? prev.details.serviceCategory,
+        status: (d.status as InvoiceStatus) ?? prev.details.status,
+        dueDate: prev.details.dueDate || due,
+      },
+      pricing: {
+        ...prev.pricing,
+        gstRate: d.gstRate ?? prev.pricing.gstRate,
+        paymentMode: d.paymentMode ?? prev.pricing.paymentMode,
+      },
+      notes: {
+        ...prev.notes,
+        terms: settings.invoiceTerms ?? prev.notes.terms,
+        footer: settings.invoiceFooter ?? prev.notes.footer,
+        slogan: settings.invoiceSlogan ?? prev.notes.slogan,
+      },
+    }));
+  }, [settingsHydrated, settings, editId, searchParams]);
+
   // Track dirty state
   const updateForm = useCallback((updater: (prev: InvoiceFormData) => InvoiceFormData) => {
     setForm((prev) => { const next = updater(prev); setDirty(true); return next; });
@@ -355,7 +420,11 @@ function InvoiceWizard() {
     const allItems = hasDevices ? form.devices.flatMap((d) => d.parts) : form.items;
 
     const invoice: Invoice = {
-      id: editId || draftId || genInvoiceId(form.details.invoiceType as InvoiceType, invoices),
+      id: editId || draftId || genInvoiceId(
+        form.details.invoiceType as InvoiceType,
+        invoices,
+        settings.invoiceNumbering[(form.details.invoiceType as InvoiceType) === "business" ? "business" : "retail"],
+      ),
       invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
       phone: form.customer.phone,
@@ -391,7 +460,7 @@ function InvoiceWizard() {
     };
 
     return invoice;
-  }, [form, totals, editId, isEdit, invoices, draftId]);
+  }, [form, totals, editId, isEdit, invoices, draftId, settings.invoiceNumbering]);
 
   // Submit (finalize / save)
   const handleSubmit = useCallback(async () => {
@@ -1270,9 +1339,15 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 /* ─── Step 4: Pricing ────────────────────────────────────────────────── */
 
 function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number } }) {
+  const { settings } = useStoreSettings();
+  const gstPresets = settings.invoiceGstRates?.length ? settings.invoiceGstRates : [0, 12, 18];
+  const paymentModeOptions = [
+    { label: "Select payment mode…", value: "" },
+    ...settings.invoicePaymentModes.map((m) => ({ label: PAYMENT_MODE_LABEL[m] ?? titleCase(m), value: m })),
+  ];
   const p = form.pricing;
   const d = form.details;
-  const [customGst, setCustomGst] = useState(![0, 12, 18].includes(p.gstRate));
+  const [customGst, setCustomGst] = useState(!gstPresets.includes(p.gstRate));
   const [customRaw, setCustomRaw] = useState(String(p.gstRate));
   const [customFocused, setCustomFocused] = useState(false);
   return (
@@ -1289,16 +1364,7 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
         </div>
         <div className="space-y-1.5">
           <Label>Mode of Payment</Label>
-          <Select value={p.paymentMode} onChange={(e: any) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, paymentMode: e.target.value } }))} options={[
-            { label: "Select payment mode…", value: "" },
-            { label: "Cash", value: "cash" },
-            { label: "UPI", value: "upi" },
-            { label: "Bank Transfer", value: "bank_transfer" },
-            { label: "Card", value: "card" },
-            { label: "Cheque", value: "cheque" },
-            { label: "Wallet", value: "wallet" },
-            { label: "Other", value: "other" },
-          ]} />
+          <Select value={p.paymentMode} onChange={(e: any) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, paymentMode: e.target.value } }))} options={paymentModeOptions} />
         </div>
         <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} iconLeft={<span className="text-[13px]">₹</span>} /></div>
         <div className="space-y-1.5">
@@ -1311,7 +1377,7 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
         <div className="space-y-1.5">
           <Label>GST Rate</Label>
           <div className="flex items-center gap-1.5">
-            {[0, 12, 18].map((rate) => (
+            {gstPresets.map((rate) => (
               <button
                 key={rate}
                 type="button"

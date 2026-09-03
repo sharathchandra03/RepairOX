@@ -1,8 +1,45 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase-admin";
 import { rowToStaff } from "@/lib/staff-map";
+import { hashPin } from "@/lib/account-security";
+
+const SUPPORTED_LANGUAGES = ["English"];
 
 export const dynamic = "force-dynamic";
+
+/* GET /api/profile — safe account fields for the signed-in user.
+   Returns language + whether an Access PIN is set (never the PIN/hash). */
+export async function GET(req: Request) {
+  const header = req.headers.get("authorization") ?? "";
+  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7) : "";
+  if (!token) return NextResponse.json({ ok: false, error: "Not signed in." }, { status: 401 });
+
+  let admin;
+  try {
+    admin = createAdminClient();
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message ?? "Server not configured." }, { status: 500 });
+  }
+
+  const { data: auth, error: authErr } = await admin.auth.getUser(token);
+  if (authErr || !auth.user) {
+    return NextResponse.json({ ok: false, error: "Invalid session." }, { status: 401 });
+  }
+
+  const { data: row } = await admin
+    .from("staff")
+    .select("language, access_pin_set")
+    .eq("auth_user_id", auth.user.id)
+    .maybeSingle();
+
+  return NextResponse.json({
+    ok: true,
+    account: {
+      language: row?.language ?? "English",
+      hasAccessPin: Boolean(row?.access_pin_set),
+    },
+  });
+}
 
 /* PATCH /api/profile — self-service profile update for ANY signed-in user.
 
@@ -50,6 +87,30 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ ok: false, reason: "image_too_large" }, { status: 413 });
     }
     update.avatar_url = v ? String(v) : null;
+  }
+  if (body.language !== undefined) {
+    const lang = String(body.language).trim();
+    // Only accept languages the app genuinely supports; falls back to English.
+    update.language = SUPPORTED_LANGUAGES.includes(lang) ? lang : "English";
+  }
+  if (body.accessPin !== undefined) {
+    const raw = body.accessPin;
+    if (raw === null || raw === "") {
+      // Explicitly clear the PIN.
+      update.access_pin_hash = null;
+      update.access_pin_salt = null;
+      update.access_pin_set = false;
+    } else {
+      const pin = String(raw).trim();
+      if (!/^\d{4,8}$/.test(pin)) {
+        return NextResponse.json({ ok: false, reason: "invalid_pin" }, { status: 400 });
+      }
+      // Store only a salted hash — the plaintext PIN never touches the DB.
+      const { hash, salt } = hashPin(pin);
+      update.access_pin_hash = hash;
+      update.access_pin_salt = salt;
+      update.access_pin_set = true;
+    }
   }
 
   if (Object.keys(update).length === 0) {

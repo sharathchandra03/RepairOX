@@ -53,7 +53,7 @@ const SETTINGS_NAV: NavSection[] = [
     id: "tickets", label: "Tickets", icon: Ticket,
     children: [
       { label: "Ticket Settings", href: "/settings/tickets/general" },
-      { label: "QC Settings", href: "/settings/tickets/qc" },
+      { label: "Quality Check", href: "/settings/tickets/qc" },
       { label: "Workflow", href: "/settings/tickets/workflow" },
       { label: "Assigned By & To", href: "/settings/tickets/assigned" },
       { label: "Device Categories", href: "/settings/categories" },
@@ -63,7 +63,8 @@ const SETTINGS_NAV: NavSection[] = [
     id: "invoice", label: "Invoice", icon: FileText,
     children: [
       { label: "Invoice Settings", href: "/settings/invoice/general" },
-      { label: "Invoice Templates", href: "/settings/invoice/templates" },
+      { label: "Numbering", href: "/settings/invoice/numbering" },
+      { label: "Tax", href: "/settings/invoice/tax" },
       { label: "Payment", href: "/settings/invoice/payment" },
     ],
   },
@@ -103,6 +104,13 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Module Access", href: "/settings/module-access" },
       { label: "Branches", href: "/settings/branches" },
       { label: "Dashboard", href: "/settings/dashboard" },
+    ],
+  },
+  {
+    id: "roles", label: "Roles & Permissions", icon: ShieldCheck,
+    children: [
+      { label: "Roles & Permissions", href: "/settings/roles-permissions" },
+      { label: "Add User", href: "/settings/roles-permissions/add-user" },
     ],
   },
 ];

@@ -341,7 +341,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
 
       <Divider />
 
-      {/* ── Invoice Notes & Terms ── */}
+      {/* ── Invoice Notes (per-invoice, free text) ── */}
       {isInvoice && invoice && invoice.notes && (
         <div className="mt-1">
           <p className="text-[8px] font-bold uppercase tracking-wide mb-0.5">Notes</p>
@@ -349,14 +349,10 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
         </div>
       )}
 
-      {isInvoice && invoice && invoice.terms && (
-        <div className="mt-1">
-          <p className="text-[8px] font-bold uppercase tracking-wide mb-0.5">Invoice Terms</p>
-          <p className="text-[8px] text-gray-700 whitespace-pre-line leading-[1.3]">{invoice.terms}</p>
-        </div>
-      )}
-
-      {/* ── Terms & Warranty ── */}
+      {/* ── Terms & Conditions ──
+          data.termsAndConditions is resolved by the builders per-module:
+          tickets → Ticket Settings; invoices → the invoice's own terms
+          (seeded from Invoice Settings). Never Store Information. */}
       {data.termsAndConditions && (
         <div className="mt-1">
           <p className="text-[8px] font-bold uppercase tracking-wide mb-0.5">Terms & Conditions</p>
@@ -364,6 +360,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
         </div>
       )}
 
+      {/* ── Warranty ── (ticket: Ticket Settings; invoice: Invoice Settings) */}
       {data.warrantyText && (
         <div className="mt-2">
           <p className="text-[8px] font-bold uppercase tracking-wide mb-0.5">Warranty</p>
