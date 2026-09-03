@@ -1,7 +1,7 @@
 "use client";
 
 import { motion, useInView, useMotionValue, useSpring, useTransform } from "framer-motion";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ComponentType } from "react";
 import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,7 +17,7 @@ export function AnimatedNumber({ value, format }: { value: number; format?: (n: 
 }
 
 export function KpiCard({
-  title, value, format, hint, delta, tone = "rose", progress, onCardClick,
+  title, value, format, hint, delta, tone = "rose", progress, onCardClick, icon: Icon,
 }: {
   title: string;
   value: number;
@@ -29,6 +29,10 @@ export function KpiCard({
   progress?: { value: number; label?: string; targetValue?: string };
   /** If provided, the card becomes clickable (e.g. to edit target) */
   onCardClick?: () => void;
+  /** Optional leading icon rendered next to the title. Reuse an existing app icon
+   *  (e.g. the lucide `Ticket` icon used across the Tickets module). Omit to keep
+   *  the card icon-free, exactly as the other KPI cards render today. */
+  icon?: ComponentType<{ className?: string }>;
 }) {
   const TONES: Record<string, { chip: string; bar: string }> = {
     rose:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", bar: "bg-[#4361EE]" },
@@ -59,9 +63,16 @@ export function KpiCard({
           </span>
         )}
       </div>
-      <p className="relative font-display mt-3 text-[28px] font-extrabold leading-none tracking-tight tnum">
-        <AnimatedNumber value={value} format={format} />
-      </p>
+      <div className="relative mt-3 flex items-center gap-2.5">
+        {Icon && (
+          <span className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-[#EEF1FD] ring-1 ring-inset ring-[#B3BFF6]/50">
+            <Icon className="h-4 w-4 text-[#4361EE]" />
+          </span>
+        )}
+        <p className="font-display text-[28px] font-extrabold leading-none tracking-tight tnum">
+          <AnimatedNumber value={value} format={format} />
+        </p>
+      </div>
       {hint && (
         <p className="relative mt-2 inline-flex items-center rounded-full bg-[#EEF1FD] px-2.5 py-0.5 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
           {hint}

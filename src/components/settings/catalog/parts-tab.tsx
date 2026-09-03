@@ -49,12 +49,15 @@ export function PartsTab() {
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="w-40"><Select value={categoryId} onChange={(e) => setCategory(e.target.value)} options={categoryOptions} placeholder="Choose category…" /></div>
-          <div className="w-40"><Select value={effectiveBrandId} onChange={(e) => setBrand(e.target.value)} options={brandOptions} placeholder="Choose brand…" disabled={!categoryId} /></div>
-          <div className="w-52"><Select value={effectiveModelId} onChange={(e) => setModel(e.target.value)} options={modelOptions} placeholder="Choose model…" disabled={!effectiveBrandId} /></div>
+        {/* Category → Brand → Model selectors: one straight, compact pill row on
+            desktop. Only wraps below `sm` when the viewport genuinely can't fit
+            them. shrink-0 keeps all three the same height/alignment. */}
+        <div className="flex flex-wrap items-center gap-2 sm:flex-nowrap">
+          <div className="w-36 shrink-0"><Select value={categoryId} onChange={(e) => setCategory(e.target.value)} options={categoryOptions} placeholder="Choose category…" /></div>
+          <div className="w-36 shrink-0"><Select value={effectiveBrandId} onChange={(e) => setBrand(e.target.value)} options={brandOptions} placeholder="Choose brand…" disabled={!categoryId} /></div>
+          <div className="w-44 shrink-0"><Select value={effectiveModelId} onChange={(e) => setModel(e.target.value)} options={modelOptions} placeholder="Choose model…" disabled={!effectiveBrandId} /></div>
           {categoryId && (
-            <button onClick={clearSelection} className="text-[12px] font-medium text-muted-foreground hover:text-foreground">Clear</button>
+            <button onClick={clearSelection} className="shrink-0 text-[12px] font-medium text-muted-foreground hover:text-foreground">Clear</button>
           )}
         </div>
         <div className="flex items-center gap-2">

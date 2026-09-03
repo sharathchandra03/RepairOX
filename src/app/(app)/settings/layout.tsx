@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { usePathname } from "next/navigation";
 import { SettingsNav } from "@/components/settings/settings-nav";
+import { SettingsBackBar } from "@/components/settings/settings-back-bar";
 import { Menu, X } from "lucide-react";
 
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
@@ -16,7 +17,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     <div className="flex -mx-4 -mt-2 -mb-4 sm:-mx-6 lg:-mx-8" style={{ height: "calc(100vh - 56px)" }}>
       {/* Desktop left nav — fixed height, own scroll for dropdowns */}
       <aside className="hidden lg:flex w-[290px] shrink-0 flex-col border-r border-border bg-card overflow-y-auto" style={{ height: "calc(100vh - 56px)", position: "sticky", top: 0 }}>
-        <SettingsNav onNavigate={() => {}} />
+        <Suspense fallback={null}>
+          <SettingsNav onNavigate={() => {}} />
+        </Suspense>
       </aside>
 
       {/* Mobile nav toggle */}
@@ -39,7 +42,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
                 <X className="h-4 w-4" />
               </button>
             </div>
-            <SettingsNav onNavigate={() => setMobileNavOpen(false)} />
+            <Suspense fallback={null}>
+              <SettingsNav onNavigate={() => setMobileNavOpen(false)} />
+            </Suspense>
           </aside>
         </div>
       )}
@@ -47,6 +52,11 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
       {/* Right content area — scrolls independently */}
       <main className="flex-1 min-w-0 overflow-y-auto">
         <div className={`${isWide ? "max-w-none" : "max-w-4xl"} mx-auto px-4 py-6 sm:px-6 lg:px-8`}>
+          {/* Origin-aware "← Back to <Module>" — renders only when Settings was
+              opened from another module (via ?from=). Reusable across modules. */}
+          <Suspense fallback={null}>
+            <SettingsBackBar />
+          </Suspense>
           {children}
         </div>
       </main>

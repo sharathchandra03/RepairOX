@@ -3,7 +3,7 @@
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, ArrowRight, MoreHorizontal, ArrowDownToLine,
-  ChevronUp, ChevronDown, Inbox,
+  ChevronUp, ChevronDown, Inbox, Ticket,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -489,6 +489,7 @@ export default function Dashboard() {
         <KpiCard
           title="Tickets"
           value={ticketMetrics.rangeTickets}
+          icon={Ticket}
           tone="violet"
           delta={{ value: `Avg ${ticketMetrics.avgPerDay}/day`, up: true }}
           hint={`Projection: ${ticketMetrics.projection} tickets this month`}

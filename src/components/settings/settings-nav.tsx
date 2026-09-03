@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import Link from "next/link";
+import { withOrigin } from "@/lib/settings-origin";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, ChevronDown, User, Building2, Users, CreditCard,
@@ -119,6 +120,10 @@ const SETTINGS_NAV: NavSection[] = [
 
 export function SettingsNav({ onNavigate }: { onNavigate: () => void }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
+  // Preserve the originating module across Settings-internal navigation so the
+  // "← Back to <Module>" control keeps pointing at the right place.
+  const fromKey = searchParams.get("from");
   const [search, setSearch] = useState("");
 
   // Determine which section is active based on path
@@ -214,7 +219,7 @@ export function SettingsNav({ onNavigate }: { onNavigate: () => void }) {
                         return (
                           <Link
                             key={child.href}
-                            href={child.href}
+                            href={withOrigin(child.href, fromKey)}
                             onClick={onNavigate}
                             className={`block rounded-md px-3 py-2 text-[13px] transition-colors ${
                               isActive

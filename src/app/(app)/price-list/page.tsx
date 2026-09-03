@@ -1,10 +1,10 @@
 "use client";
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
-  Search, Filter, ChevronRight, ChevronLeft, ChevronDown,
+  Search, Filter, ChevronRight, ChevronDown,
   Smartphone, Tablet, Laptop, Monitor, Watch, Headphones,
   Gamepad2, Plane, Box, Upload, Download, Plus, Clock,
   User, Cpu, HardDrive, MonitorSmartphone, Calendar,
@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel } from "@/lib/catalog-context";
@@ -21,6 +21,8 @@ import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, toCSV } from 
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
 import { parseSmartSheet, type SmartImportResult } from "@/lib/smart-import";
 import { SmartImportDialog } from "@/components/price-list/smart-import-dialog";
+import { rememberOrigin } from "@/lib/settings-origin";
+import { Pagination } from "@/components/ui/pagination";
 import {
   type DeviceCategory,
   type PriceListBrand,
@@ -40,17 +42,32 @@ const PANEL_WIDTH = 460;
 const SPRING = { type: "spring", stiffness: 320, damping: 34, mass: 0.7 } as const;
 const HOVER_DELAY_OUT = 380;
 
-/* ─── Rotating search hints (fade only, no layout shift) ─────────── */
+/* ─── Rotating search hints (fade only, no layout shift) ─────────────
+   Top search operates on the DEVICE / MODEL dataset only — never Parts. */
 const SEARCH_HINTS = [
-  "Search model, part, or SKU...",
+  "Search models...",
+  "Search MacBook Air...",
   "Search iPhone 15 Pro...",
+  "Search device models...",
+] as const;
+
+/* ─── Rotating Parts search hints (fade only, no layout shift) ───────
+   Parts search operates on the PARTS dataset only — never Models. */
+const PART_SEARCH_HINTS = [
+  "Search parts...",
   "Search battery...",
-  "Search SKU...",
+  "Search screen...",
+  "Search charging port...",
+  "Search keyboard...",
+  "Search motherboard...",
+  "Search speaker...",
 ] as const;
 
 /* ─── Main Page Component ────────────────────────────────────────── */
 export default function PriceListPage() {
   const { categories, brands, models, parts: allParts, importRows, importSmartModels } = useCatalog();
+  const router = useRouter();
+  const urlParams = useSearchParams();
 
   // Selection is stored by ID and resolved against live catalog data, so any
   // edit in Settings → Price List (image upload, rename, delete) reflects here.
@@ -107,6 +124,24 @@ export default function PriceListPage() {
     }, CYCLE_MS);
     return () => clearInterval(id);
   }, [globalSearch]);
+
+  // Restore context when returning from Settings → Price List. The Add Price
+  // action encodes the exact selection + part search in the URL so Back lands
+  // the user right where they were. Runs once on mount.
+  const restoredRef = useRef(false);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    const cat = urlParams.get("cat");
+    const brand = urlParams.get("brand");
+    const model = urlParams.get("model");
+    const ps = urlParams.get("q");
+    if (cat) setSelectedCategoryId(cat);
+    if (brand) setSelectedBrandId(brand);
+    if (model) setSelectedModelId(model);
+    if (ps) setPartSearch(ps);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Enter focus mode after model selection
   useEffect(() => {
@@ -184,33 +219,55 @@ export default function PriceListPage() {
     setPartSearch("");
   }, []);
 
-  /* ── Global search (models · parts · SKU) ── */
+  // "+ Add Price" → Settings → Price List (the central admin area). We record
+  // the exact Price List context (selected category/brand/model + part search)
+  // as the return URL so the Settings Back button lands the user right back
+  // here rather than on the Shop dashboard.
+  const handleAddPrice = useCallback(() => {
+    const params = new URLSearchParams();
+    if (selectedCategoryId) params.set("cat", selectedCategoryId);
+    if (selectedBrandId) params.set("brand", selectedBrandId);
+    if (selectedModelId) params.set("model", selectedModelId);
+    if (partSearch.trim()) params.set("q", partSearch.trim());
+    const returnTo = `/price-list${params.toString() ? `?${params.toString()}` : ""}`;
+    rememberOrigin({ key: "price-list", label: "Price List", returnTo });
+    router.push("/settings/inventory/price-lists?tab=parts&from=price-list");
+  }, [router, selectedCategoryId, selectedBrandId, selectedModelId, partSearch]);
+
+  /* ── Top search — MODELS ONLY ──
+     Operates strictly on the device/model dataset: model name, brand, category,
+     year and model-level metadata. It deliberately does NOT search Parts, so
+     typing "Battery" never surfaces a part here (use the Parts search for that). */
   const globalResults = useMemo(() => {
     const q = globalSearch.trim().toLowerCase();
-    if (!q) return { models: [] as PriceListModel[], parts: [] as { part: DevicePart; model: PriceListModel }[] };
+    if (!q) return { models: [] as PriceListModel[] };
     const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? "";
     const brandName = (id: string) => brands.find((b) => b.id === id)?.name ?? "";
     const modelMatches = models
-      .filter((m) =>
-        m.name.toLowerCase().includes(q) ||
-        brandName(m.brandId).toLowerCase().includes(q) ||
-        catName(m.categoryId).toLowerCase().includes(q))
-      .slice(0, 6);
-    const partMatches = allParts
-      .filter((p) => p.partName.toLowerCase().includes(q) || p.partNumber.toLowerCase().includes(q))
-      .slice(0, 6)
-      .map((part) => ({ part, model: models.find((m) => m.id === part.modelId) }))
-      .filter((x): x is { part: DevicePart; model: PriceListModel } => !!x.model);
-    return { models: modelMatches, parts: partMatches };
-  }, [globalSearch, models, allParts, categories, brands]);
+      .filter((m) => {
+        const metaHit = Object.values(m.meta ?? {}).some((v) =>
+          String(v).toLowerCase().includes(q));
+        return (
+          m.name.toLowerCase().includes(q) ||
+          brandName(m.brandId).toLowerCase().includes(q) ||
+          catName(m.categoryId).toLowerCase().includes(q) ||
+          String(m.year ?? "").toLowerCase().includes(q) ||
+          (m.chip ?? "").toLowerCase().includes(q) ||
+          (m.variant ?? "").toLowerCase().includes(q) ||
+          metaHit
+        );
+      })
+      .slice(0, 8);
+    return { models: modelMatches };
+  }, [globalSearch, models, categories, brands]);
 
-  const hasResults = globalResults.models.length > 0 || globalResults.parts.length > 0;
+  const hasResults = globalResults.models.length > 0;
 
-  const jumpToModel = useCallback((m: PriceListModel, partHint?: string) => {
+  const jumpToModel = useCallback((m: PriceListModel) => {
     setSelectedCategoryId(m.categoryId);
     setSelectedBrandId(m.brandId);
     setSelectedModelId(m.id);
-    setPartSearch(partHint ?? "");
+    setPartSearch("");
     setGlobalSearch("");
     setSearchOpen(false);
   }, []);
@@ -335,7 +392,7 @@ export default function PriceListPage() {
   return (
     <div className="space-y-4">
       {/* Header */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mx-auto flex w-full max-w-[1400px] flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
             <span>Shop</span>
@@ -373,7 +430,7 @@ export default function PriceListPage() {
                 if (e.key === "Escape") { setGlobalSearch(""); setSearchOpen(false); }
                 if (e.key === "Enter" && globalResults.models[0]) jumpToModel(globalResults.models[0]);
               }}
-              aria-label="Search model, part, or SKU"
+              aria-label="Search models"
               placeholder={SEARCH_HINTS[hintIndex]}
               className="relative h-10 w-80 rounded-xl border-2 border-[#4361EE]/40 bg-card pl-10 pr-9 text-sm shadow-[0_1px_3px_0_rgba(67,97,238,0.06),0_1px_2px_-1px_rgba(20,30,80,0.04)] placeholder:text-transparent transition-all duration-200 hover:border-[#4361EE]/60 hover:shadow-[0_2px_8px_-2px_rgba(67,97,238,0.16)] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/20 focus:shadow-[0_0_0_3px_rgba(67,97,238,0.1),0_4px_14px_-4px_rgba(67,97,238,0.22)]"
             />
@@ -390,7 +447,7 @@ export default function PriceListPage() {
             {searchOpen && globalSearch.trim() && (
               <div className="absolute left-0 top-full z-50 mt-1 max-h-[380px] w-[340px] overflow-y-auto rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]">
                 {!hasResults && (
-                  <p className="px-3 py-4 text-center text-[12px] text-muted-foreground">No matches found.</p>
+                  <p className="px-3 py-4 text-center text-[12px] text-muted-foreground">No models found.</p>
                 )}
                 {globalResults.models.length > 0 && (
                   <>
@@ -414,28 +471,6 @@ export default function PriceListPage() {
                     ))}
                   </>
                 )}
-                {globalResults.parts.length > 0 && (
-                  <>
-                    <p className="px-2.5 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">Parts</p>
-                    {globalResults.parts.map(({ part, model }) => (
-                      <button
-                        key={part.id}
-                        onMouseDown={(e) => { e.preventDefault(); jumpToModel(model, part.partNumber || part.partName); }}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-colors hover:bg-[#EEF1FD]"
-                      >
-                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted text-muted-foreground">
-                          <Wrench className="h-3.5 w-3.5" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[13px] font-medium">{part.partName}</span>
-                          <span className="block truncate text-[11px] text-muted-foreground">
-                            {model.name} · <span className="font-mono">{part.partNumber || "—"}</span> · {formatINR(part.price)}
-                          </span>
-                        </span>
-                      </button>
-                    ))}
-                  </>
-                )}
               </div>
             )}
           </div>
@@ -453,19 +488,16 @@ export default function PriceListPage() {
           <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={handleExport}>
             <Download className="h-3.5 w-3.5" /> Export
           </Button>
-          <Link
-            href="/settings/inventory/price-lists?tab=categories"
-            className={cn(buttonVariants({ size: "sm" }), "gap-1.5 rounded-xl")}
-          >
-            <Plus className="h-3.5 w-3.5" /> Add New
-          </Link>
+          <Button size="sm" className="gap-1.5 rounded-xl" onClick={handleAddPrice}>
+            <Plus className="h-3.5 w-3.5" /> Add Price
+          </Button>
         </div>
       </div>
 
       {/* Import result notice */}
       {importNotice && (
         <div className={cn(
-          "flex items-center gap-2 rounded-xl border px-4 py-2.5 text-[12px]",
+          "mx-auto flex w-full max-w-[1400px] items-center gap-2 rounded-xl border px-4 py-2.5 text-[12px]",
           importNotice.tone === "ok"
             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
             : "border-rose-200 bg-rose-50 text-rose-700"
@@ -480,8 +512,12 @@ export default function PriceListPage() {
 
       {/* ─── Main Content Area ─────────────────────────────────────── */}
       {/* items-start keeps the left browser at its own natural height so it
-          never stretches to match a tall parts table (no empty gap below). */}
-      <div className="flex items-start relative">
+          never stretches to match a tall parts table (no empty gap below).
+          mx-auto + max-w center the ENTIRE workspace group (Devices rail +
+          main content) as one unit, so the left and right outer gutters stay
+          visually balanced on wide viewports. w-full keeps it flush and
+          overflow-free on smaller screens. */}
+      <div className="mx-auto flex w-full max-w-[1400px] items-start relative">
         {/*
           REVEAL HANDLE — a visible, in-flow handle shown when the browser is
           collapsed in Focus Mode. Anchored to the content's left edge (NOT the
@@ -492,7 +528,7 @@ export default function PriceListPage() {
           <button
             type="button"
             onClick={() => setNavVisible(true)}
-            className="group sticky top-[76px] self-start mr-3 flex h-[calc(100vh-92px)] w-14 shrink-0 flex-col items-center justify-center gap-5 rounded-2xl border border-border bg-card shadow-card transition-colors hover:border-brand-300 hover:bg-brand-50"
+            className="group sticky top-[76px] self-start mr-4 flex h-[calc(100vh-92px)] w-12 shrink-0 flex-col items-center justify-center gap-5 rounded-2xl border border-border bg-card shadow-card transition-colors hover:border-brand-300 hover:bg-brand-50"
             title="Show device browser"
             aria-label="Show device browser"
           >
@@ -581,12 +617,13 @@ export default function PriceListPage() {
         <div className="flex-1 min-w-0 space-y-4">
           {selectedModel ? (
             <>
-              <DeviceHeroCard model={selectedModel} brand={selectedBrand} category={selectedCategory} />
+              <DeviceHeroCard model={selectedModel} brand={selectedBrand} category={selectedCategory} parts={modelParts} />
               <PartsAndPricing
                 parts={modelParts}
                 modelName={selectedModel.name}
                 search={partSearch}
                 onSearchChange={setPartSearch}
+                onManageInSettings={handleAddPrice}
               />
             </>
           ) : (
@@ -828,10 +865,12 @@ function DeviceHeroCard({
   model,
   brand,
   category,
+  parts = [],
 }: {
   model: PriceListModel;
   brand: PriceListBrand | null;
   category: DeviceCategory | null;
+  parts?: DevicePart[];
 }) {
   const CategoryIcon = (category && iconMap[category.icon]) || Laptop;
   const isActive = model.status === "active";
@@ -845,6 +884,14 @@ function DeviceHeroCard({
     const v = value === undefined || value === null ? "" : String(value).trim();
     if (v) metaFields.push({ icon, label, value: v, highlight });
   };
+  // Format an ISO timestamp down to a plain readable date (no time / timezone).
+  // Falls back to the original value if it isn't a parseable date.
+  const toDate = (value?: string | number | null): string => {
+    if (value === undefined || value === null || String(value).trim() === "") return "";
+    const d = new Date(value);
+    if (isNaN(d.getTime())) return String(value);
+    return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  };
   pushField(Box, "Brand", brand?.name);
   pushField(MonitorSmartphone, "Category", category?.name, true);
   pushField(Cpu, "Chip", model.chip);
@@ -852,10 +899,27 @@ function DeviceHeroCard({
   pushField(HardDrive, "Storage (Base)", model.storage);
   pushField(Calendar, "Model Year", model.modelYear || model.year);
   pushField(Tag, "Variant", model.variant);
+  // Last Updated takes the slot Created On used to occupy. It stays synced to
+  // the most recent change across the model itself AND its parts — whichever
+  // was touched last wins, so editing any part refreshes this value.
+  const lastUpdatedRaw = (() => {
+    const candidates = [model.lastUpdated, model.createdOn, ...parts.map((p) => p.lastUpdated)];
+    let bestTime = -Infinity;
+    let bestRaw = "";
+    for (const c of candidates) {
+      if (!c) continue;
+      const t = new Date(c).getTime();
+      if (!isNaN(t) && t > bestTime) {
+        bestTime = t;
+        bestRaw = String(c);
+      }
+      if (!bestRaw) bestRaw = String(c); // keep a fallback even if unparseable
+    }
+    return bestRaw || model.lastUpdated || model.createdOn;
+  })();
+  pushField(Clock, "Last Updated", toDate(lastUpdatedRaw));
   // Extra imported metadata
   for (const [k, v] of Object.entries(model.meta ?? {})) pushField(Tag, k, v);
-  pushField(Calendar, "Created On", model.createdOn);
-  pushField(Clock, "Last Updated", model.lastUpdated);
   pushField(User, "Updated By", model.updatedBy);
 
   return (
@@ -870,18 +934,18 @@ function DeviceHeroCard({
         {/* Device image — uploaded image (from Settings → Price List) fills the
             whole panel. Falls back to a category illustration when none exists.
             Never a broken image. */}
-        <div className="w-[220px] shrink-0 self-stretch bg-white grid place-items-center relative overflow-hidden p-4">
+        <div className="w-[220px] shrink-0 self-center h-[150px] bg-white flex items-start justify-center relative overflow-hidden px-2 py-2">
           {model.imageUrl ? (
             <img
               src={model.imageUrl}
               alt={model.name}
-              className="h-full w-full object-contain rounded-xl"
+              className="h-full w-full min-h-0 object-contain object-top rounded-xl"
             />
           ) : (
             <>
               <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(67,97,238,0.08),transparent_70%)]" />
               <div className="relative">
-                <CategoryIcon className="h-24 w-24 text-brand-400/70" />
+                <CategoryIcon className="h-16 w-16 text-brand-400/70" />
               </div>
             </>
           )}
@@ -938,20 +1002,52 @@ const PART_COL_LABEL: Record<PartColKey, string> = {
 };
 
 function PartsAndPricing({
-  parts, modelName, search, onSearchChange,
+  parts, modelName, search, onSearchChange, onManageInSettings,
 }: {
   parts: DevicePart[];
   modelName: string;
   search: string;
   onSearchChange: (v: string) => void;
+  onManageInSettings: () => void;
 }) {
-  const [activeTab, setActiveTab] = useState("parts");
+  const [activeTab] = useState("parts");
   const [page, setPage] = useState(1);
-  const pageSize = 10;
+  const [pageSize, setPageSize] = useState(10);
+  // Measured height of the sticky section header so the sticky table head can
+  // pin exactly beneath it (no hard-coded offset → no header jumping/overlap).
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerH, setHeaderH] = useState(60);
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el) return;
+    const measure = () => setHeaderH(el.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   const [order, setOrder] = useState<PartColKey[]>(["image", "part", "price", "warranty"]);
   const [dragCol, setDragCol] = useState<PartColKey | null>(null);
   const [overCol, setOverCol] = useState<PartColKey | null>(null);
   const [detail, setDetail] = useState<DevicePart | null>(null);
+
+  // Rotating placeholder hint for the Parts search (fade transition only, no
+  // layout shift). Pauses while the user is typing. Parts wording only.
+  const [partHintIndex, setPartHintIndex] = useState(0);
+  const [partHintVisible, setPartHintVisible] = useState(true);
+  useEffect(() => {
+    if (search) return; // don't rotate while there's a query
+    const CYCLE_MS = 3600;
+    const FADE_MS = 400;
+    const id = setInterval(() => {
+      setPartHintVisible(false);
+      setTimeout(() => {
+        setPartHintIndex((i) => (i + 1) % PART_SEARCH_HINTS.length);
+        setPartHintVisible(true);
+      }, FADE_MS);
+    }, CYCLE_MS);
+    return () => clearInterval(id);
+  }, [search]);
 
   // Filters
   const [warrantyFilter, setWarrantyFilter] = useState<Set<string>>(new Set());
@@ -980,10 +1076,11 @@ function PartsAndPricing({
 
   const total = filtered.length;
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
-  useEffect(() => { setPage(1); }, [search, warrantyFilter, minPrice, maxPrice, sortBy, modelName]);
-  const pageParts = filtered.slice((page - 1) * pageSize, page * pageSize);
-  const startIdx = total === 0 ? 0 : (page - 1) * pageSize + 1;
-  const endIdx = Math.min(page * pageSize, total);
+  // Reset to page 1 whenever the filtered set changes (search, filters, size,
+  // or a different model) so the user never lands on a now-empty page.
+  useEffect(() => { setPage(1); }, [search, warrantyFilter, minPrice, maxPrice, sortBy, modelName, pageSize]);
+  const safePage = Math.min(page, totalPages);
+  const pageParts = filtered.slice((safePage - 1) * pageSize, safePage * pageSize);
   const activeFilters = warrantyFilter.size + (minPrice ? 1 : 0) + (maxPrice ? 1 : 0) + (sortBy !== "none" ? 1 : 0);
 
   const toggleWarranty = (w: string) =>
@@ -1004,13 +1101,15 @@ function PartsAndPricing({
 
   const copy = (t: string) => { try { navigator.clipboard?.writeText(t); } catch { /* clipboard unavailable */ } };
 
-  // Fixed column widths keep headers aligned with content and stop the Part
-  // Name column from hogging space. All columns are centre-aligned.
-  const COL_WIDTH: Record<PartColKey, string> = {
-    image: "w-28", part: "", price: "w-40", warranty: "w-40",
+  // Column grid is shared by <colgroup>, header and every row so header labels
+  // sit exactly over their row values. Per-column content alignment (kept
+  // intentional even though widths are equal): Image & Warranty centered;
+  // Part Name left; Price right; # and Actions centered.
+  const alignClass: Record<PartColKey, string> = {
+    image: "text-left", part: "text-left", price: "text-right", warranty: "text-center",
   };
 
-  const headerCell = (key: PartColKey) => (
+  const headerCell = (key: PartColKey, top: number) => (
     <th
       key={key}
       draggable
@@ -1018,15 +1117,21 @@ function PartsAndPricing({
       onDragOver={(e) => { e.preventDefault(); setOverCol(key); }}
       onDragEnd={() => { setDragCol(null); setOverCol(null); }}
       onDrop={() => onDrop(key)}
+      style={{ top }}
       className={cn(
-        "px-4 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70 cursor-grab select-none whitespace-nowrap",
-        COL_WIDTH[key],
+        "sticky z-20 bg-[#EEF1FD] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB] cursor-grab select-none whitespace-nowrap",
+        alignClass[key],
+        // Move the whole Image column (header + content) right as one unit.
+        key === "image" && "pl-[27px]",
         overCol === key && dragCol && dragCol !== key && "bg-[#DCE3FB]",
         dragCol === key && "opacity-50"
       )}
       title="Drag to reorder column"
     >
-      <span className="inline-flex items-center justify-center gap-1">
+      <span className={cn(
+        "inline-flex items-center gap-1",
+        key === "part" || key === "image" ? "justify-start" : key === "price" ? "justify-end" : "justify-center"
+      )}>
         <GripVertical className="h-3 w-3 opacity-40" />
         {PART_COL_LABEL[key]}
       </span>
@@ -1035,8 +1140,8 @@ function PartsAndPricing({
 
   const bodyCell = (key: PartColKey, part: DevicePart) => {
     if (key === "image") return (
-      <td key={key} className="px-3 py-3.5 align-middle">
-        <div className="mx-auto grid h-14 w-14 place-items-center overflow-hidden rounded-xl border border-border bg-muted/40">
+      <td key={key} className="pl-[27px] pr-4 py-3 text-left align-middle">
+        <div className="ml-[11px] grid h-12 w-12 place-items-center overflow-hidden rounded-xl border border-border bg-muted/40">
           {part.imageUrl
             ? <img src={part.imageUrl} alt={part.partName} className="h-full w-full object-cover" />
             : <ImageIcon className="h-5 w-5 text-muted-foreground/40" />}
@@ -1044,43 +1149,73 @@ function PartsAndPricing({
       </td>
     );
     if (key === "part") return (
-      <td key={key} className="px-4 py-3.5 text-center align-middle">
-        <p className="text-[14px] font-semibold leading-tight text-foreground">{part.partName}</p>
+      <td key={key} className="px-4 py-3 text-left align-middle">
+        <p className="ml-[14px] text-[15px] font-semibold leading-snug text-foreground">{part.partName}</p>
+        {part.repairCategory && (
+          <p className="ml-[14px] mt-0.5 text-[11.5px] text-muted-foreground">{part.repairCategory}</p>
+        )}
       </td>
     );
     if (key === "price") return (
-      <td key={key} className="px-4 py-3.5 text-center align-middle">
+      <td key={key} className="px-4 py-3 text-right align-middle">
         {part.priceKnown === false
-          ? <span className="text-[13px] font-medium text-muted-foreground">N/A</span>
-          : <span className="text-[16px] font-extrabold tracking-tight tabular-nums text-foreground">{formatINR(part.price)}</span>}
+          ? <span className="mr-[5px] text-[14px] font-medium text-muted-foreground">N/A</span>
+          : <span className="mr-[5px] text-[16px] font-extrabold tracking-tight tabular-nums text-foreground">{formatINR(part.price)}</span>}
       </td>
     );
     // warranty
     return (
-      <td key={key} className="px-4 py-3.5 align-middle">
-        <div className="flex justify-center"><WarrantyBadge warranty={part.warranty} /></div>
+      <td key={key} className="px-4 py-3 text-center align-middle">
+        <div className="flex justify-center"><span className="ml-[4px]"><WarrantyBadge warranty={part.warranty} /></span></div>
       </td>
     );
   };
+
+  // Column widths: the # (index) column is narrow since it only holds a small
+  // number. Every OTHER column (Image, Part Name, Price, Warranty, Actions)
+  // gets an equal share of the remaining width, so they line up evenly.
+  const IDX_W = "56px";
+  const EQUAL_W = `calc((100% - ${IDX_W}) / ${order.length + 1})`;
+  const colDefs = [
+    <col key="idx" style={{ width: IDX_W }} />,
+    ...order.map((k) => <col key={k} style={{ width: EQUAL_W }} />),
+    <col key="actions" style={{ width: EQUAL_W }} />,
+  ];
 
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-      className="rounded-2xl border border-border bg-card shadow-card overflow-hidden"
+      className="flex max-h-[calc(100vh-140px)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card"
     >
-      {/* Header + Search + Filter */}
-      <div className="flex flex-col items-center border-b border-border px-5 pt-4 pb-3 gap-3">
-        <h3 className="text-[16px] font-bold text-foreground">Parts & Pricing</h3>
+      {/* Inner scroll region — ONLY this scrolls. The section header and the
+          table head are sticky within it, so both stay visible while rows move. */}
+      <div className="min-h-0 flex-1 overflow-auto">
+      {/* ── STICKY section header (heading + Part Search + Filter on one row).
+          It is sticky within the inner scroll region below (top-0), so it stays
+          pinned while only the rows scroll. z-30 keeps it above the table head. */}
+      <div ref={headerRef} className="sticky top-0 z-30 flex flex-col gap-2.5 border-b border-border bg-card px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <h3 className="text-[16px] font-bold text-foreground shrink-0">Parts &amp; Pricing</h3>
         <div className="flex items-center gap-2">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <div className="group/partsearch relative flex-1 sm:flex-none">
+            <Search className="pointer-events-none absolute left-3 top-1/2 z-10 h-4 w-4 -translate-y-1/2 text-muted-foreground/70 transition-colors duration-200 group-focus-within/partsearch:text-[#4361EE]" />
+            {/* Rotating placeholder hint — fades only, never shifts layout. Hidden once the user types. Parts wording only. */}
+            {!search && (
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute left-9 top-1/2 z-10 -translate-y-1/2 truncate pr-3 text-[13px] text-muted-foreground/70 transition-opacity duration-[400ms] ease-in-out"
+                style={{ opacity: partHintVisible ? 1 : 0, maxWidth: "calc(100% - 3rem)" }}
+              >
+                {PART_SEARCH_HINTS[partHintIndex]}
+              </span>
+            )}
             <input
               value={search}
               onChange={(e) => onSearchChange(e.target.value)}
-              placeholder="Search part..."
-              className="h-8 w-48 rounded-lg border border-border bg-muted/50 pl-8 pr-3 text-[12px] placeholder:text-muted-foreground focus:border-brand-400 focus:outline-none focus:ring-1 focus:ring-brand-200"
+              placeholder={PART_SEARCH_HINTS[partHintIndex]}
+              aria-label="Search parts"
+              className="relative h-9 w-full rounded-lg border-2 border-[#4361EE]/40 bg-card pl-9 pr-3 text-[13px] placeholder:text-transparent shadow-[0_1px_3px_0_rgba(67,97,238,0.06),0_0_0_3px_rgba(67,97,238,0.06)] transition-all duration-200 hover:border-[#4361EE]/60 hover:shadow-[0_2px_8px_-2px_rgba(67,97,238,0.16),0_0_0_3px_rgba(67,97,238,0.08)] focus:border-[#4361EE] focus:outline-none focus:shadow-[0_0_0_3px_rgba(67,97,238,0.14),0_4px_14px_-4px_rgba(67,97,238,0.2)] sm:w-80"
             />
           </div>
           <Dropdown
@@ -1090,11 +1225,13 @@ function PartsAndPricing({
               <button
                 onClick={toggle}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12px] font-medium transition",
-                  activeFilters ? "border-brand-300 bg-brand-50 text-brand-700" : "border-border text-muted-foreground hover:bg-muted"
+                  "inline-flex h-9 items-center gap-1.5 rounded-lg border-2 px-3 text-[13px] font-medium transition-all duration-200",
+                  activeFilters
+                    ? "border-[#4361EE] bg-brand-50 text-brand-700 shadow-[0_0_0_3px_rgba(67,97,238,0.12)]"
+                    : "border-[#4361EE]/40 text-muted-foreground shadow-[0_1px_3px_0_rgba(67,97,238,0.06),0_0_0_3px_rgba(67,97,238,0.06)] hover:border-[#4361EE]/60 hover:shadow-[0_2px_8px_-2px_rgba(67,97,238,0.16),0_0_0_3px_rgba(67,97,238,0.08)]"
                 )}
               >
-                <Filter className="h-3 w-3" /> Filter
+                <Filter className="h-3.5 w-3.5" /> Filter
                 {activeFilters > 0 && (
                   <span className="grid h-4 min-w-4 place-items-center rounded-full bg-brand-500 px-1 text-[9px] font-bold text-white">{activeFilters}</span>
                 )}
@@ -1157,22 +1294,33 @@ function PartsAndPricing({
         </div>
       ) : (
         <>
-          {/* Table */}
-          <div className="overflow-x-auto">
-            <table className="w-full text-left">
-              <thead>
-                <tr className="bg-[#EEF1FD] border-b border-[#D6DDFB]">
-                  <th className="w-14 py-3 text-center text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">#</th>
-                  {order.map((key) => headerCell(key))}
-                  <th className="w-24 py-3 px-4 text-center text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
+          {/* Table. Horizontal scroll on small screens is handled by the outer
+              scroll region (min-width below); sticky heads pin to that region. */}
+          <table className="w-full min-w-[760px] table-fixed border-collapse text-left">
+            {/* Shared column grid — header + every row use identical boundaries. */}
+            <colgroup>{colDefs}</colgroup>
+            {/* Sticky table header — pins directly beneath the section header
+                using its measured height, so there is never a wrong offset,
+                header jumping, or content bleeding through. */}
+            <thead>
+              <tr>
+                <th
+                  style={{ top: headerH }}
+                  className="sticky z-20 bg-[#EEF1FD] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB]"
+                >#</th>
+                {order.map((key) => headerCell(key, headerH))}
+                <th
+                  style={{ top: headerH }}
+                  className="sticky z-20 bg-[#EEF1FD] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB]"
+                >Actions</th>
+              </tr>
+            </thead>
+            <tbody>
                 {pageParts.map((part, idx) => (
-                  <tr key={part.id} className="border-b-2 border-slate-100 transition-colors hover:bg-brand-50/40">
-                    <td className="py-3.5 text-center align-middle text-[13px] font-semibold tabular-nums text-muted-foreground">{(page - 1) * pageSize + idx + 1}</td>
+                  <tr key={part.id} className="border-b border-slate-100 transition-colors hover:bg-brand-50/40">
+                    <td className="pl-4 pr-2 py-3 text-left align-middle text-[13px] font-semibold tabular-nums text-muted-foreground">{(safePage - 1) * pageSize + idx + 1}</td>
                     {order.map((key) => bodyCell(key, part))}
-                    <td className="py-3.5 px-4 align-middle">
+                    <td className="py-3 px-4 align-middle">
                       <div className="flex items-center justify-center gap-1">
                         <button onClick={() => setDetail(part)} title="View details" className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]">
                           <Eye className="h-4 w-4" />
@@ -1193,9 +1341,9 @@ function PartsAndPricing({
                               {part.partNumber && <MenuItem icon={Copy} onClick={() => { copy(part.partNumber); close(); }}>Copy SKU</MenuItem>}
                               <MenuItem icon={Copy} onClick={() => { copy(part.partName); close(); }}>Copy part name</MenuItem>
                               <div className="my-1 border-t border-border" />
-                              <Link href="/settings/inventory/price-lists" onClick={close} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-[#EEF1FD]">
+                              <button onClick={() => { onManageInSettings(); close(); }} className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-foreground transition-colors hover:bg-[#EEF1FD]">
                                 <Settings2 className="h-4 w-4 opacity-70" /> Manage in Settings
-                              </Link>
+                              </button>
                             </>
                           )}
                         </Dropdown>
@@ -1208,21 +1356,25 @@ function PartsAndPricing({
                 )}
               </tbody>
             </table>
-          </div>
-
-          {/* Pagination */}
-          <div className="flex items-center justify-between border-t border-border px-5 py-3">
-            <p className="text-[12px] text-muted-foreground">Showing {startIdx} to {endIdx} of {total} parts</p>
-            <div className="flex items-center gap-1">
-              <button onClick={() => setPage(Math.max(1, page - 1))} disabled={page === 1} className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:opacity-40 transition"><ChevronLeft className="h-3.5 w-3.5" /></button>
-              {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => i + 1).map((p) => (
-                <button key={p} onClick={() => setPage(p)} className={cn("grid h-8 w-8 place-items-center rounded-lg text-[12px] font-medium transition", p === page ? "bg-brand-500 text-white shadow-sm" : "border border-border text-muted-foreground hover:bg-muted")}>{p}</button>
-              ))}
-              {totalPages > 5 && <span className="px-1 text-muted-foreground">...</span>}
-              <button onClick={() => setPage(Math.min(totalPages, page + 1))} disabled={page === totalPages} className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted disabled:opacity-40 transition"><ChevronRight className="h-3.5 w-3.5" /></button>
-            </div>
-          </div>
         </>
+      )}
+      </div>{/* /inner scroll region */}
+
+      {/* Pagination — pinned below the scroll region (does not scroll). Same
+          10/20/50/100 pattern as Tickets & Invoices; search resets to page 1. */}
+      {activeTab === "parts" && (
+        <div className="shrink-0 rounded-b-2xl border-t border-border bg-card px-5 py-3">
+          <Pagination
+            page={safePage}
+            totalPages={totalPages}
+            onPageChange={setPage}
+            totalItems={total}
+            pageSize={pageSize}
+            pageSizeOptions={[10, 20, 50, 100]}
+            onPageSizeChange={(size) => { setPageSize(size); setPage(1); }}
+            itemLabel="part"
+          />
+        </div>
       )}
 
       <PartDetailDrawer part={detail} modelName={modelName} onClose={() => setDetail(null)} />
