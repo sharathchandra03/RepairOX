@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, Printer, Send, Eye, FileText, Receipt, Tag } from "lucide-react";
+import { ArrowRightLeft, MessageSquarePlus, CreditCard, Mail, MessageCircle, Printer, Send, Eye, FileText, Receipt, Tag } from "lucide-react";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label, Select } from "@/components/ui/input";
@@ -299,6 +299,58 @@ export function EmailReceiptDrawer({ open, onClose, ticket }: { open: boolean; o
         <div className="space-y-1.5">
           <Label>Additional Message</Label>
           <Textarea placeholder="Optional message to include with receipt…" rows={3} />
+        </div>
+      </div>
+    </Drawer>
+  );
+}
+
+/* ─── WhatsApp Receipt Drawer ────────────────────────────────────────── */
+
+export function WhatsAppReceiptDrawer({ open, onClose, ticket }: { open: boolean; onClose: () => void; ticket: Ticket | null }) {
+  const [phone, setPhone] = useState("");
+
+  // Prefill with the ticket's phone number whenever a new ticket is opened.
+  const currentPhone = phone || ticket?.phone || "";
+
+  if (!ticket) return null;
+  return (
+    <Drawer
+      open={open}
+      onClose={onClose}
+      title="WhatsApp Receipt"
+      subtitle={`${ticket.id} — ${ticket.customer}`}
+      icon={MessageCircle}
+      width="max-w-md"
+      footer={
+        <div className="flex justify-start gap-2">
+          <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={onClose}>
+            <MessageCircle className="h-3.5 w-3.5" /> Send via WhatsApp
+          </Button>
+        </div>
+      }
+    >
+      <div className="space-y-5">
+        <div className="rounded-xl border border-border bg-muted/40 p-4">
+          <p className="text-xs text-muted-foreground">Ticket Summary</p>
+          <p className="mt-1 text-sm font-semibold">{ticket.model} — {ticket.issue}</p>
+          <p className="mt-0.5 text-sm text-muted-foreground">Amount: {formatINR(ticket.amount)}</p>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>WhatsApp Number</Label>
+          <Input
+            value={currentPhone}
+            onChange={(e: any) => setPhone(e.target.value)}
+            placeholder="+91 98765 43210"
+            type="tel"
+          />
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Message</Label>
+          <Textarea placeholder="Optional message to send with the receipt…" rows={3} />
         </div>
       </div>
     </Drawer>

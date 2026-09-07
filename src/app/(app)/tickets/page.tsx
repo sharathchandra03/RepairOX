@@ -19,7 +19,7 @@ import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
 import {
   TransferTicketDrawer, CommentDrawer,
-  CheckoutDrawer, EmailReceiptDrawer, PrintDrawer,
+  CheckoutDrawer, EmailReceiptDrawer, WhatsAppReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
@@ -1092,6 +1092,7 @@ export default function TicketsPage() {
       <CommentDrawer open={activeDrawer === "comment"} onClose={closeDrawer} ticket={activeTicket} />
       <CheckoutDrawer open={activeDrawer === "checkout"} onClose={closeDrawer} ticket={activeTicket} />
       <EmailReceiptDrawer open={activeDrawer === "email-receipt"} onClose={closeDrawer} ticket={activeTicket} />
+      <WhatsAppReceiptDrawer open={activeDrawer === "whatsapp-receipt"} onClose={closeDrawer} ticket={activeTicket} />
       <PrintDrawer open={activeDrawer === "print"} onClose={closeDrawer} ticket={activeTicket} />
 
       {/* Push to Invoice Confirmation — non-destructive. On confirm it runs the

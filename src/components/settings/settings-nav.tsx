@@ -58,6 +58,7 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Workflow", href: "/settings/tickets/workflow" },
       { label: "Assigned By & To", href: "/settings/tickets/assigned" },
       { label: "Device Categories", href: "/settings/categories" },
+      { label: "Device Colours", href: "/settings/colours" },
     ],
   },
   {

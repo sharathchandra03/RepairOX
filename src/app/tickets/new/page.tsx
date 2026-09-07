@@ -25,7 +25,7 @@ import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
-import { DEVICE_COLOUR_OPTIONS, DEFAULT_DEVICE_COLOUR } from "@/lib/mock-data";
+import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, type Brand, type DeviceModel } from "@/lib/brand-model-data";
@@ -146,7 +146,7 @@ function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     device: { brand: "", model: "", brandId: undefined, modelId: undefined, imei: "", imeiType: "imei", assignedBy: "", assignedTo: "", source: "", type: "" },
-    job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", deviceColour: DEFAULT_DEVICE_COLOUR, issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
+    job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", deviceColour: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
     category,
@@ -1672,6 +1672,64 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
     setData({ ...data, devices: updatedDevices });
   };
 
+  // Device colours are managed in Settings → Device Colours. Load them (Supabase
+  // or localStorage fallback) so the dropdown reflects saved colours, and adding
+  // a colour in Settings shows up here.
+  const [deviceColours, setDeviceColours] = useState<DeviceColourItem[]>(
+    () => getCachedColours() ?? DEFAULT_COLOURS,
+  );
+  useEffect(() => {
+    let alive = true;
+    loadDeviceColours().then((list) => {
+      if (alive) setDeviceColours(list);
+    });
+    // Stay in sync when colours change in Settings (or another tab).
+    const unsub = subscribeDeviceColours((list) => setDeviceColours(list));
+    return () => { alive = false; unsub(); };
+  }, []);
+
+  // "Skip" is pinned first so the colour step is optional — selecting it stores
+  // an empty value (no colour on the device).
+  const colourOptions = useMemo(
+    () => [
+      { label: "Skip", value: "" },
+      ...deviceColours.map((c) => ({ label: c.label, value: c.value, swatch: c.swatch })),
+    ],
+    [deviceColours],
+  );
+
+  // "Add colour" opens a small dialog with a name field + colour picker so the
+  // user can set both the label and the swatch shown beside it.
+  const [showAddColour, setShowAddColour] = useState(false);
+  const [newColourName, setNewColourName] = useState("");
+  const [newColourSwatch, setNewColourSwatch] = useState("#4361EE");
+
+  const openAddColour = (prefill?: string) => {
+    setNewColourName(prefill?.trim() || "");
+    setNewColourSwatch("#4361EE");
+    setShowAddColour(true);
+  };
+
+  // Persist the new colour (Supabase or localStorage) so it's saved for future
+  // tickets and shows up in Settings → Device Colours, then select it on the
+  // current device.
+  const saveNewColour = async () => {
+    const label = newColourName.trim();
+    if (!label) return;
+    const value = label.toLowerCase().replace(/\s+/g, "-");
+    const existing = deviceColours.find((c) => c.value === value);
+    if (existing) {
+      set("deviceColour", existing.value);
+      setShowAddColour(false);
+      return;
+    }
+    const next = [...deviceColours, { value, label, swatch: newColourSwatch }];
+    setDeviceColours(next);
+    set("deviceColour", value);
+    setShowAddColour(false);
+    await saveDeviceColours(next);
+  };
+
   // Custom date/time picker state
   const [showCustomPicker, setShowCustomPicker] = useState(false);
   const [customDate, setCustomDate] = useState<Date | null>(j.customResolutionDate ? new Date(j.customResolutionDate) : null);
@@ -1748,7 +1806,11 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 value={j.deviceColour}
                 onChange={(v) => set("deviceColour", v)}
                 placeholder="Select colour"
-                options={DEVICE_COLOUR_OPTIONS}
+                options={colourOptions}
+                searchable
+                onAddNew={openAddColour}
+                addLabel="Add colour"
+                alwaysShowAddNew
               />
             </Field>
             <Field label="Expected Resolution Time">
@@ -1927,6 +1989,57 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               <Button variant="outline" size="sm" onClick={() => setShowCustomPicker(false)}>Cancel</Button>
               <Button size="sm" onClick={confirmCustomDate} disabled={!customDate}>
                 <Check className="h-3.5 w-3.5" /> Confirm
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* Add Colour dialog — name + colour picker, saved to Device Colours */}
+      {showAddColour && (
+        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowAddColour(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <h3 className="text-base font-bold">Add Colour</h3>
+            <p className="mt-1 text-[11px] text-muted-foreground">
+              Saved to Device Colours in Settings › Tickets and available in every ticket.
+            </p>
+            <div className="mt-4 flex items-end gap-3">
+              {/* Colour picker — sets the swatch shown left of the name */}
+              <div className="space-y-1">
+                <Label>Colour</Label>
+                <label
+                  className="relative flex h-11 w-14 cursor-pointer items-center justify-center rounded-xl border border-border transition hover:border-[#4361EE]/40"
+                  title="Pick a colour"
+                >
+                  <span
+                    className="h-6 w-6 rounded-full ring-1 ring-inset ring-black/15"
+                    style={{ backgroundColor: newColourSwatch }}
+                  />
+                  <input
+                    type="color"
+                    value={newColourSwatch}
+                    onChange={(e) => setNewColourSwatch(e.target.value)}
+                    className="absolute h-0 w-0 opacity-0"
+                  />
+                </label>
+              </div>
+              <div className="flex-1 space-y-1">
+                <Label>Colour Name</Label>
+                <Input
+                  value={newColourName}
+                  onChange={(e: any) => setNewColourName(e.target.value)}
+                  onKeyDown={(e: any) => e.key === "Enter" && saveNewColour()}
+                  placeholder="e.g. Space Grey"
+                  className="h-11"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <Button variant="outline" size="sm" onClick={() => setShowAddColour(false)}>Cancel</Button>
+              <Button size="sm" onClick={saveNewColour} disabled={!newColourName.trim()}>
+                <CheckCircle2 className="h-3.5 w-3.5" /> Save Colour
               </Button>
             </div>
           </motion.div>

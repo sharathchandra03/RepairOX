@@ -223,7 +223,7 @@ export function CategoryWheel({
           onClick={goPrev}
           disabled={active === 0}
           aria-label="Previous"
-          className="absolute left-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-zinc-700 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] border border-black backdrop-blur transition hover:bg-white disabled:opacity-40"
+          className="absolute left-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-[linear-gradient(180deg,#4361EE_0%,#3B54E8_100%)] text-white shadow-[0_8px_24px_-10px_rgba(67,97,238,0.55)] border border-black backdrop-blur transition hover:brightness-105 disabled:opacity-40"
         >
           <ChevronLeft className="h-5 w-5" />
         </button>
@@ -231,7 +231,7 @@ export function CategoryWheel({
           onClick={goFwd}
           disabled={active === CATS.length - 1}
           aria-label="Next"
-          className="absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-white/90 text-zinc-700 shadow-[0_8px_24px_-12px_rgba(0,0,0,0.25)] border border-black backdrop-blur transition hover:bg-white disabled:opacity-40"
+          className="absolute right-3 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full bg-[linear-gradient(180deg,#4361EE_0%,#3B54E8_100%)] text-white shadow-[0_8px_24px_-10px_rgba(67,97,238,0.55)] border border-black backdrop-blur transition hover:brightness-105 disabled:opacity-40"
         >
           <ChevronRight className="h-5 w-5" />
         </button>

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence, useSpring, useTransform, useMotionValue } from "framer-motion";
 import {
   Plus, Download, Search, Eye, Pencil, MoreHorizontal,
-  Trash2, Copy, Printer, Mail, FileDown, TrendingUp, Receipt,
+  Trash2, Copy, Printer, Mail, MessageCircle, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
   PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, X,
   Pin, PinOff, Filter,
@@ -967,13 +967,12 @@ function renderInvCell(
           <button onClick={toggle} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="More"><MoreHorizontal className="h-4 w-4" /></button>
         )}>
           {(close) => (<>
-            <MenuItem icon={Eye} onClick={() => { onView(); close(); }}>View</MenuItem>
             <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
             <MenuItem icon={Copy} onClick={() => { onDuplicate(); close(); }}>Duplicate</MenuItem>
             <MenuItem icon={Printer} onClick={() => { onPrint(); close(); }}>Print</MenuItem>
             <MenuItem icon={FileDown} onClick={() => { onDownloadPdf(); close(); }}>Download PDF</MenuItem>
+            <MenuItem icon={MessageCircle} onClick={close}>WhatsApp Invoice</MenuItem>
             <MenuItem icon={Mail} onClick={close}>Email Invoice</MenuItem>
-            <MenuItem icon={inv.pinnedAt ? PinOff : Pin} onClick={() => { onPin(); close(); }}>{inv.pinnedAt ? "Unpin from top" : "Pin to top"}</MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
           </>)}

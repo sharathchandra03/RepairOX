@@ -1,5 +1,6 @@
 import type { PermissionKey, WorkspaceId } from "@/lib/permissions";
 import { hashPassword, DEFAULT_SEED_PASSWORD, type SalaryType } from "@/lib/auth";
+import { colourLabel } from "@/lib/device-colours";
 
 export type TicketStatus =
   | "in_progress"
@@ -65,11 +66,18 @@ export const DEFAULT_DEVICE_COLOUR = "black";
 
 /** Human-readable label for a stored device colour value. Returns "" when the
  *  value is empty/unknown so historical devices show blank / N/A rather than a
- *  guessed colour. */
+ *  guessed colour.
+ *
+ *  Resolution order: the Settings-backed colours cache (custom colours added in
+ *  Settings → Device Colours) first, then the built-in fallback list, then the
+ *  raw value. This keeps every display/print site correct once colours are
+ *  managed from Settings without touching each call site. */
 export function formatDeviceColour(value?: string): string {
   if (!value) return "";
+  const fromSettings = colourLabel(value);
+  if (fromSettings && fromSettings !== value) return fromSettings;
   const match = DEVICE_COLOUR_OPTIONS.find((o) => o.value === value);
-  return match ? match.label : value;
+  return match ? match.label : fromSettings || value;
 }
 
 export type TicketItem = {
