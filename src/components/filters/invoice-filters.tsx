@@ -1,7 +1,7 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { Search } from "lucide-react";
+import { Search, X } from "lucide-react";
 import { Input, Select } from "@/components/ui/input";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
@@ -31,6 +31,7 @@ export function InvoiceFilters({
   category,
   onChange,
   onReset,
+  onClose,
 }: {
   /** Unified live search across Invoice ID + Customer Name. */
   search: string;
@@ -39,15 +40,30 @@ export function InvoiceFilters({
   category: string;
   onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string }>) => void;
   onReset: () => void;
+  /** Closes the Advanced Filters panel. Applied filter state persists — closing
+   *  only hides the panel, it does not clear the current selections. */
+  onClose?: () => void;
   extraActions?: ReactNode;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 shadow-card space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
-        <button onClick={onReset} className="text-[11px] text-[#4361EE] font-medium hover:underline">
-          Reset Filters
-        </button>
+        <div className="flex items-center gap-3">
+          <button onClick={onReset} className="text-[13px] text-[#4361EE] font-semibold hover:underline">
+            Reset Filters
+          </button>
+          {onClose && (
+            <button
+              onClick={onClose}
+              aria-label="Close filters"
+              title="Close filters"
+              className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Filter Controls Row — 4 equal-width fields, evenly distributed (live filtering, no button) */}

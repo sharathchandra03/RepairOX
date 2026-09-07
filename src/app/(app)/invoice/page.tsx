@@ -548,6 +548,7 @@ export default function InvoicePage() {
                 setCustomTo("");
                 setQ("");
               }}
+              onClose={() => setShowFilterPanel(false)}
             />
           </motion.div>
         )}

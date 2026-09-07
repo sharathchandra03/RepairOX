@@ -451,7 +451,6 @@ export default function Dashboard() {
           delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
           hint={`Projected: ${formatINR(revenueMetrics.projection)}/month`}
           progress={{ value: Math.min(100, Math.round((monthlyRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
-          barThickness="2x"
           onCardClick={canEditTarget ? () => { setEditTargetValue(monthlyTarget.toLocaleString("en-IN")); setShowTargetEdit(true); } : undefined}
         />
       ),

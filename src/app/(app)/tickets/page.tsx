@@ -83,6 +83,11 @@ const PRIORITY_OPTIONS = [
   { label: "Normal", value: "normal" },
   { label: "High Priority", value: "high" },
   { label: "Critical", value: "critical" },
+  // Not a real priority value — a filter CONDITION that keeps only tickets whose
+  // due date/time has already passed. Uses the same isOverdue() predicate that
+  // drives the reddish row treatment (single source of truth). See okPriority
+  // handling in the `list` useMemo below.
+  { label: "Overdue Time", value: "overdue" },
 ];
 
 /** Ticket intake Type filter options — mirrors the WK/PD/OS avatar Types. */
@@ -411,10 +416,16 @@ export default function TicketsPage() {
       if (searchFilterId) {
         return tickets.filter((t) => t.id === searchFilterId);
       }
+      // "overdue" is a filter CONDITION carried on the Priority control, not a
+      // real priority value. When selected we AND-in isOverdue(t) (the same
+      // predicate driving the reddish rows) instead of matching t.priority.
+      const overdueOnly = priorityFilter === "overdue";
       const filtered = tickets.filter((t) => {
         const okStatus = statusFilter === "all" || t.status === statusFilter;
         const okDate = isInDateRange(t.createdAt, dateRange, customFrom, customTo);
-        const okPriority = priorityFilter === "all" || t.priority === priorityFilter;
+        const okPriority =
+          priorityFilter === "all" ||
+          (overdueOnly ? isOverdue(t) : t.priority === priorityFilter);
         const okTech = techFilter === "all" || t.technician === techFilter;
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
         const okType = typeFilter === "all" || getTicketType(t) === typeFilter;
@@ -425,10 +436,26 @@ export default function TicketsPage() {
             .includes(q.toLowerCase());
         return okStatus && okDate && okPriority && okTech && okCustomerType && okType && okQ;
       });
+      // Overdue Time ordering: oldest-overdue-first (the ticket whose due
+      // date/time was crossed longest ago comes first). Tie-break on the
+      // existing table order via createdAt (older created ticket first). Only
+      // applied when the Overdue Time condition is active; otherwise the normal
+      // table ordering is preserved untouched.
+      const ordered = overdueOnly
+        ? [...filtered].sort((a, b) => {
+            const da = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+            const db = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+            if (da !== db) return da - db; // earlier due timestamp = overdue longer = first
+            const ca = new Date(a.createdAt).getTime();
+            const cb = new Date(b.createdAt).getTime();
+            return ca - cb; // secondary tie-breaker: older created ticket first
+          })
+        : filtered;
       // Stable partition: pinned first, then normal — order within each group
-      // is the original table order (createdAt-desc from the store).
-      const pinned = filtered.filter((t) => t.pinnedAt);
-      const normal = filtered.filter((t) => !t.pinnedAt);
+      // is the original table order (createdAt-desc from the store), or the
+      // oldest-overdue-first order when Overdue Time is active.
+      const pinned = ordered.filter((t) => t.pinnedAt);
+      const normal = ordered.filter((t) => !t.pinnedAt);
       return [...pinned, ...normal];
     },
     [tickets, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
@@ -680,9 +707,21 @@ export default function TicketsPage() {
           >
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
-              <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); setStatusFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }} className="text-[11px] text-[#4361EE] font-medium hover:underline">
-                Reset Filters
-              </button>
+              <div className="flex items-center gap-3">
+                <button onClick={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); setStatusFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }} className="text-[13px] text-[#4361EE] font-semibold hover:underline">
+                  Reset Filters
+                </button>
+                {/* Close the panel after applying — applied filter state persists,
+                    closing only hides the panel (it does not clear selections). */}
+                <button
+                  onClick={() => setShowFilterPanel(false)}
+                  aria-label="Close filters"
+                  title="Close filters"
+                  className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-1">
