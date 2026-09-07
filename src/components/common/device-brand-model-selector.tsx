@@ -196,7 +196,7 @@ export function DeviceBrandModelSelector({
           onFocus={() => { if (!brandDisabled) setBrandOpen(true); }}
           disabled={brandDisabled}
           placeholder={brandDisabled ? "Select category first..." : "Search brand..."}
-          className="h-11"
+          className="h-9"
           iconLeft={<Search className="h-4 w-4" />}
         />
         {brandOpen && !brandDisabled && (
@@ -271,7 +271,7 @@ export function DeviceBrandModelSelector({
               ? `Search ${selectedBrand.name} models...`
               : "Select brand first..."
           }
-          className="h-11"
+          className="h-9"
           iconLeft={<Search className="h-4 w-4" />}
         />
         {modelOpen && selectedBrand && (

@@ -27,13 +27,13 @@ export default function AssignedSettingsPage() {
 
   const handleAddBy = () => {
     if (!newBy.trim()) return;
-    addAssignedByOption(createAssignedByOption(newBy.trim()));
+    addAssignedByOption(createAssignedByOption(newBy.trim(), assignedByOptions));
     setNewBy("");
   };
 
   const handleAddTo = () => {
     if (!newTo.trim()) return;
-    addAssignedToOption(createAssignedToOption(newTo.trim()));
+    addAssignedToOption(createAssignedToOption(newTo.trim(), assignedToOptions));
     setNewTo("");
   };
 

@@ -5,8 +5,8 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Plus, Filter, Download, Search, Clock, RefreshCw, Settings2,
-  GripVertical, Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
+  Plus, Filter, Download, Search, Clock, RefreshCw, Settings,
+  Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
   Pin, PinOff, Check, Ban,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -28,6 +28,8 @@ import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_L
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
+import { ALL_COLUMNS, DEFAULT_ORDER, DEFAULT_VISIBLE, type ColumnId } from "@/lib/ticket-columns";
+import { rememberOrigin } from "@/lib/settings-origin";
 import { formatINR, cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
@@ -35,32 +37,10 @@ import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pi
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 
-/* ─── Column Definition ──────────────────────────────────────────────── */
-
-type ColumnId = "checkbox" | "ticket" | "customer" | "device" | "status" | "dueDate" | "created" | "amount" | "actions";
-
-type ColumnDef = {
-  id: ColumnId;
-  label: string;
-  width: string; // tailwind width class
-  align?: "left" | "right" | "center";
-  locked?: boolean; // cannot be hidden or moved
-};
-
-const ALL_COLUMNS: ColumnDef[] = [
-  { id: "checkbox", label: "", width: "w-9", locked: true },
-  { id: "ticket", label: "Ticket", width: "w-[112px]" },
-  { id: "customer", label: "Customer", width: "w-[33%]" },
-  { id: "device", label: "Device / Service", width: "w-[33%]" },
-  { id: "status", label: "Status", width: "w-[184px]", align: "left" },
-  { id: "dueDate", label: "Due Date", width: "w-[100px]" },
-  { id: "created", label: "Created", width: "w-[100px]" },
-  { id: "amount", label: "Amount", width: "w-[92px]", align: "right" },
-  { id: "actions", label: "Actions", width: "w-[108px]", align: "center", locked: true },
-];
-
-const DEFAULT_VISIBLE: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
-const DEFAULT_ORDER: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
+/* ─── Column Definition ──────────────────────────────────────────────────
+   Column catalog, ids, and defaults now live in the shared single source of
+   truth at "@/lib/ticket-columns" so the Tickets table and the Column Settings
+   UI (Settings → Tickets → Ticket Settings → Column Settings) stay in sync. */
 
 /* ─── Constants ──────────────────────────────────────────────────────── */
 
@@ -270,10 +250,29 @@ export default function TicketsPage() {
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
 
-  // Column config
-  const [columnOrder, setColumnOrder] = useState<ColumnId[]>(DEFAULT_ORDER);
-  const [visibleColumns, setVisibleColumns] = useState<Set<ColumnId>>(new Set(DEFAULT_VISIBLE));
-  const [showColumnConfig, setShowColumnConfig] = useState(false);
+  // Column config — READ-ONLY here. The single source of truth is the persisted
+  // store settings (configured from Settings → Tickets → Ticket Settings →
+  // Column Settings). The Tickets page no longer edits columns; it just renders
+  // whatever the saved preference dictates.
+  const columnOrder = useMemo<ColumnId[]>(() => {
+    const order = (settings.ticketColumnOrder?.length ? settings.ticketColumnOrder : DEFAULT_ORDER) as ColumnId[];
+    // Guard against catalog drift: keep only known ids, then append any known
+    // ids the saved order is missing (e.g. a newly-added column) in catalog order.
+    const known = new Set(ALL_COLUMNS.map((c) => c.id));
+    const cleaned = order.filter((id) => known.has(id));
+    for (const id of DEFAULT_ORDER) if (!cleaned.includes(id)) cleaned.push(id);
+    return cleaned;
+  }, [settings.ticketColumnOrder]);
+
+  const visibleColumns = useMemo<Set<ColumnId>>(() => {
+    const vis = (settings.ticketVisibleColumns?.length ? settings.ticketVisibleColumns : DEFAULT_VISIBLE) as ColumnId[];
+    const set = new Set<ColumnId>(vis.filter((id) => ALL_COLUMNS.some((c) => c.id === id)));
+    // Structural + required columns are always visible regardless of stored prefs.
+    for (const c of ALL_COLUMNS) if (c.locked) set.add(c.id);
+    set.add("ticket");
+    set.add("status");
+    return set;
+  }, [settings.ticketVisibleColumns]);
 
   // Drawer state
   const [activeDrawer, setActiveDrawer] = useState<TicketAction | null>(null);
@@ -294,6 +293,42 @@ export default function TicketsPage() {
     const interval = setInterval(() => setTick((t) => t + 1), 60_000);
     return () => clearInterval(interval);
   }, []);
+
+  /* ─── Sticky frozen workspace (filters + search + table header) ──────────
+     The date pills, status pills and search live in one sticky wrapper that
+     pins just below the app topbar. The table header (thead) then pins right
+     beneath that wrapper. Offsets are MEASURED at runtime (topbar height +
+     wrapper height) so the header sits flush with no gap and no layout jump,
+     whatever the banner/filter-panel state. Uses CSS position:sticky — no
+     scroll listeners — so scrolling stays smooth. */
+  const stickyWrapRef = useRef<HTMLDivElement>(null);
+  const [stickyTop, setStickyTop] = useState(60);   // app topbar height
+  const [wrapH, setWrapH] = useState(0);            // frozen wrapper height
+  useEffect(() => {
+    const wrap = stickyWrapRef.current;
+    if (!wrap) return;
+    // Topbar = first child of the nearest scroll container (see AppShell).
+    let node: HTMLElement | null = wrap;
+    let bar: HTMLElement | null = null;
+    while (node && node.parentElement) {
+      const parent: HTMLElement = node.parentElement;
+      const oy = getComputedStyle(parent).overflowY;
+      if (oy === "auto" || oy === "scroll") { bar = parent.firstElementChild as HTMLElement | null; break; }
+      node = parent;
+    }
+    const measure = () => {
+      setWrapH(wrap.offsetHeight);
+      if (bar) setStickyTop(bar.offsetHeight);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    if (bar) ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
+  // The thead pins flush at the wrapper's bottom edge so there is no seam for
+  // rows to bleed through.
+  const theadTop = stickyTop + wrapH;
 
   // Unique technicians for filter
   const technicians = useMemo(() => {
@@ -526,6 +561,7 @@ export default function TicketsPage() {
         jobType: dev.jobType,
         priority: dev.priority,
         warranty: dev.warranty,
+        deviceColour: dev.deviceColour,
         technician: dev.assignedTo,
         notes: dev.notes,
         estimate: dev.estimate,
@@ -544,31 +580,12 @@ export default function TicketsPage() {
 
   const closeDrawer = useCallback(() => { setActiveDrawer(null); setActiveTicket(null); }, []);
 
-  /* Column reorder */
-  const moveColumn = useCallback((id: ColumnId, dir: "up" | "down") => {
-    setColumnOrder((prev) => {
-      const idx = prev.indexOf(id);
-      if (idx < 0) return prev;
-      const newIdx = dir === "up" ? idx - 1 : idx + 1;
-      if (newIdx < 0 || newIdx >= prev.length) return prev;
-      const next = [...prev];
-      [next[idx], next[newIdx]] = [next[newIdx], next[idx]];
-      return next;
-    });
-  }, []);
-
-  const toggleColumn = useCallback((id: ColumnId) => {
-    setVisibleColumns((prev) => {
-      const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
-      return next;
-    });
-  }, []);
-
-  const resetColumns = useCallback(() => {
-    setColumnOrder(DEFAULT_ORDER);
-    setVisibleColumns(new Set(DEFAULT_VISIBLE));
-  }, []);
+  // Open Settings → Tickets → Ticket Settings, remembering Tickets as the origin
+  // so the Settings "← Back to Tickets" control returns here.
+  const openTicketSettings = useCallback(() => {
+    rememberOrigin({ key: "tickets", label: "Tickets", returnTo: "/tickets" });
+    router.push("/settings/tickets/general?from=tickets");
+  }, [router]);
 
   return (
     <div className="space-y-5">
@@ -584,8 +601,8 @@ export default function TicketsPage() {
                 <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />
               )}
             </Button>
-            <Button variant="outline" size="md" className="rounded-full" onClick={() => setShowColumnConfig(!showColumnConfig)}>
-              <Settings2 className="h-4 w-4" /> Columns
+            <Button variant="outline" size="md" className="rounded-full" onClick={openTicketSettings}>
+              <Settings className="h-4 w-4" /> Settings
             </Button>
             <Can permission="export_reports">
               <Button variant="outline" size="md" className="rounded-full">
@@ -603,6 +620,19 @@ export default function TicketsPage() {
         }
       />
 
+      {/* ── STICKY FROZEN WORKSPACE ──────────────────────────────────────
+          Date pills → Custom picker → Pinned filters → Filter panel →
+          Status pills + Search all pin together as one block just below the
+          app topbar. Opaque page-canvas background so ticket rows never show
+          through; z-30 keeps it above the rows and below opened dropdowns.
+          space-y-5 preserves the exact spacing the elements had before, and
+          -mt-5/pt-5 keeps the top gap consistent while giving the sticky block
+          an opaque top edge. */}
+      <div
+        ref={stickyWrapRef}
+        style={{ top: stickyTop }}
+        className="sticky z-10 -mt-5 space-y-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+      >
       {/* Date Range Buttons — shared 8-option strip (scrollable on narrow screens) */}
       <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {DATE_RANGES.map((dr) => (
@@ -764,23 +794,6 @@ export default function TicketsPage() {
         )}
       </AnimatePresence>
 
-      {/* Column Config Panel */}
-      <AnimatePresence>
-        {showColumnConfig && (
-          <ColumnSettingsPanel
-            columnOrder={columnOrder}
-            visibleColumns={visibleColumns}
-            onApply={(order, visible) => {
-              setColumnOrder(order);
-              setVisibleColumns(visible);
-              setShowColumnConfig(false);
-            }}
-            onCancel={() => setShowColumnConfig(false)}
-            onReset={resetColumns}
-          />
-        )}
-      </AnimatePresence>
-
       {/* Status Filters + Search */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <SegmentedTabs
@@ -849,11 +862,19 @@ export default function TicketsPage() {
         </motion.div>
       )}
 
+      </div>{/* ── /STICKY FROZEN WORKSPACE ── */}
+
       {/* Desktop table */}
-      <div className="hidden overflow-hidden rounded-2xl border-2 border-zinc-200 bg-card shadow-card md:block">
-        <div className="overflow-x-auto">
+      {/* No overflow-hidden on the card and overflow-x:clip (not auto) on the
+          inner wrapper — an overflow:auto/hidden ancestor would trap the
+          sticky thead and break the freeze. table-fixed w-full means the table
+          already fits its container, so clipping never hides columns. */}
+      {/* Straight (square) card — flat bordered header and flat bottom, so
+          nothing bleeds through corner gaps while the header is frozen. */}
+      <div className="hidden -mt-5 border-2 border-zinc-200 bg-card shadow-card md:block">
+        <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
-            <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 {activeColumns.map((col) => (
                   <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
@@ -1419,183 +1440,8 @@ function EmptyRow() {
   );
 }
 
-/* ─── Column Settings Panel ──────────────────────────────────────────── */
-
-function ColumnSettingsPanel({
-  columnOrder,
-  visibleColumns,
-  onApply,
-  onCancel,
-  onReset,
-}: {
-  columnOrder: ColumnId[];
-  visibleColumns: Set<ColumnId>;
-  onApply: (order: ColumnId[], visible: Set<ColumnId>) => void;
-  onCancel: () => void;
-  onReset: () => void;
-}) {
-  const [localOrder, setLocalOrder] = useState<ColumnId[]>(columnOrder);
-  const [localVisible, setLocalVisible] = useState<Set<ColumnId>>(new Set(visibleColumns));
-  const [search, setSearch] = useState("");
-  const [dragId, setDragId] = useState<ColumnId | null>(null);
-
-  const editableColumns = ALL_COLUMNS.filter((c) => !c.locked);
-  const requiredIds = new Set<ColumnId>(["ticket", "status"]);
-
-  const visibleList = localOrder.filter((id) => localVisible.has(id) && !ALL_COLUMNS.find((c) => c.id === id)?.locked);
-  const hiddenList = editableColumns.filter((c) => !localVisible.has(c.id));
-
-  const filteredVisible = search
-    ? visibleList.filter((id) => ALL_COLUMNS.find((c) => c.id === id)?.label.toLowerCase().includes(search.toLowerCase()))
-    : visibleList;
-
-  const filteredHidden = search
-    ? hiddenList.filter((c) => c.label.toLowerCase().includes(search.toLowerCase()))
-    : hiddenList;
-
-  const toggleVisibility = (id: ColumnId) => {
-    if (requiredIds.has(id)) return;
-    setLocalVisible((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  // Drag & drop within visible list
-  const handleDragStart = (id: ColumnId) => setDragId(id);
-  const handleDragOver = (e: React.DragEvent, targetId: ColumnId) => {
-    e.preventDefault();
-    if (!dragId || dragId === targetId) return;
-    setLocalOrder((prev) => {
-      const from = prev.indexOf(dragId);
-      const to = prev.indexOf(targetId);
-      if (from < 0 || to < 0) return prev;
-      const next = [...prev];
-      next.splice(from, 1);
-      next.splice(to, 0, dragId);
-      return next;
-    });
-  };
-  const handleDragEnd = () => setDragId(null);
-
-  const handleReset = () => {
-    setLocalOrder(DEFAULT_ORDER);
-    setLocalVisible(new Set(DEFAULT_VISIBLE));
-    onReset();
-  };
-
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: -8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -8 }}
-      transition={{ duration: 0.2 }}
-      className="rounded-2xl border border-border bg-card shadow-card overflow-hidden"
-    >
-      {/* Header */}
-      <div className="px-5 pt-5 pb-3">
-        <h3 className="font-display text-sm font-bold tracking-tight">Column Settings</h3>
-        <p className="text-[11px] text-muted-foreground mt-0.5">Customize which columns are visible in the ticket table.</p>
-        <div className="mt-3">
-          <div className="relative">
-            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search columns…"
-              className="h-8 w-full rounded-lg border border-border bg-card pl-8 pr-3 text-xs placeholder:text-muted-foreground focus:border-[#4361EE] focus:ring-1 focus:ring-[#4361EE]/30 focus:outline-none transition"
-            />
-          </div>
-        </div>
-      </div>
-
-      {/* Body */}
-      <div className="px-5 pb-4 grid grid-cols-1 gap-4 md:grid-cols-2">
-        {/* Visible Columns */}
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
-            Visible Columns <span className="text-foreground ml-1">{filteredVisible.length}</span>
-          </p>
-          <div className="space-y-1 max-h-[240px] overflow-y-auto pr-1">
-            {filteredVisible.map((id) => {
-              const col = ALL_COLUMNS.find((c) => c.id === id)!;
-              const isRequired = requiredIds.has(id);
-              const isDragging = dragId === id;
-              return (
-                <div
-                  key={id}
-                  draggable={!isRequired}
-                  onDragStart={() => handleDragStart(id)}
-                  onDragOver={(e) => handleDragOver(e, id)}
-                  onDragEnd={handleDragEnd}
-                  className={cn(
-                    "flex items-center gap-2.5 rounded-lg px-3 py-2 transition-all group",
-                    isDragging ? "bg-indigo-50 ring-1 ring-indigo-200 shadow-sm scale-[1.02]" : "hover:bg-muted/60"
-                  )}
-                >
-                  <input
-                    type="checkbox"
-                    checked
-                    disabled={isRequired}
-                    onChange={() => toggleVisibility(id)}
-                    className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
-                  />
-                  <span className="flex-1 text-xs font-medium text-foreground">{col.label}</span>
-                  {isRequired && (
-                    <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200">Required</span>
-                  )}
-                  {!isRequired && (
-                    <span className="cursor-grab active:cursor-grabbing text-muted-foreground/50 group-hover:text-muted-foreground transition">
-                      <GripVertical className="h-3.5 w-3.5" />
-                    </span>
-                  )}
-                </div>
-              );
-            })}
-            {filteredVisible.length === 0 && (
-              <p className="py-3 text-center text-[11px] text-muted-foreground">No matching columns</p>
-            )}
-          </div>
-        </div>
-
-        {/* Hidden Columns */}
-        <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mb-2">
-            Hidden Columns <span className="text-foreground ml-1">{filteredHidden.length}</span>
-          </p>
-          <div className="space-y-1 max-h-[240px] overflow-y-auto pr-1">
-            {filteredHidden.map((col) => (
-              <div key={col.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-muted/60 transition">
-                <input
-                  type="checkbox"
-                  checked={false}
-                  onChange={() => toggleVisibility(col.id)}
-                  className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
-                />
-                <span className="flex-1 text-xs font-medium text-muted-foreground">{col.label}</span>
-              </div>
-            ))}
-            {filteredHidden.length === 0 && (
-              <p className="py-3 text-center text-[11px] text-muted-foreground">
-                {search ? "No matching columns" : "All columns are visible"}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Footer */}
-      <div className="flex items-center justify-between border-t border-border px-5 py-3">
-        <button onClick={handleReset} className="text-[11px] font-medium text-muted-foreground hover:text-foreground transition">
-          Reset Default
-        </button>
-        <div className="flex items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={onCancel}>Cancel</Button>
-          <Button size="sm" onClick={() => onApply(localOrder, localVisible)}>Apply</Button>
-        </div>
-      </div>
-    </motion.div>
-  );
-}
+/* ─── Column Settings Panel ──────────────────────────────────────────────
+   The Column Settings UI has been relocated to Settings → Tickets → Ticket
+   Settings → Column Settings. It now lives in the shared, reusable component at
+   "@/components/tickets/column-settings-panel" and writes to the persisted
+   store-settings source of truth (ticketColumnOrder / ticketVisibleColumns). */

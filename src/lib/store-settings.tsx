@@ -26,6 +26,7 @@ import {
 } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
+import { DEFAULT_ORDER as TICKET_DEFAULT_ORDER, DEFAULT_VISIBLE as TICKET_DEFAULT_VISIBLE } from "@/lib/ticket-columns";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -156,6 +157,14 @@ export type StoreSettings = {
    * Historically hardcoded to 59. */
   ticketDefaultResolutionMinutes: number;
 
+  /* ── Ticket table column configuration (Settings → Tickets → Ticket Settings
+   *    → Column Settings). Single source of truth for the Tickets table layout.
+   *    `ticketColumnOrder` is the ordered list of column ids; `ticketVisibleColumns`
+   *    is the subset that is shown. Structural columns (checkbox, actions) and
+   *    required columns (ticket, status) are always kept visible by the UI. */
+  ticketColumnOrder: string[];
+  ticketVisibleColumns: string[];
+
   /* ── Invoice configuration (single source of truth for Settings → Invoice) ── */
 
   /** Invoice status pill colours (hex), keyed by InvoiceStatus. */
@@ -283,6 +292,10 @@ WARRANTY IS VOID IF:
   ticketDefaultStatus: "in_progress",
   ticketDefaultResolutionMinutes: 59,
 
+  /* Ticket table columns — default to the full catalog order, all visible. */
+  ticketColumnOrder: [...TICKET_DEFAULT_ORDER],
+  ticketVisibleColumns: [...TICKET_DEFAULT_VISIBLE],
+
   /* Invoice configuration defaults — preserve the current hardcoded behaviour. */
   invoiceStatusColors: {
     draft: "#71717A",
@@ -377,6 +390,11 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     statusColors: row.status_colors ? (typeof row.status_colors === "string" ? JSON.parse(row.status_colors as string) : row.status_colors as Record<string, string>) : DEFAULT_STORE_SETTINGS.statusColors,
     ticketDefaultStatus: (row.ticket_default_status as string) ?? DEFAULT_STORE_SETTINGS.ticketDefaultStatus,
     ticketDefaultResolutionMinutes: Number(row.ticket_default_resolution_minutes ?? DEFAULT_STORE_SETTINGS.ticketDefaultResolutionMinutes),
+    // Ticket table column config — arrays parsed via the shared JSON helper.
+    // Older rows without these columns fall back to the full-catalog defaults,
+    // so existing installs keep every column visible in catalog order.
+    ticketColumnOrder: parseJsonColumn(row.ticket_column_order, DEFAULT_STORE_SETTINGS.ticketColumnOrder),
+    ticketVisibleColumns: parseJsonColumn(row.ticket_visible_columns, DEFAULT_STORE_SETTINGS.ticketVisibleColumns),
     invoiceStatusColors: parseJsonColumn(row.invoice_status_colors, DEFAULT_STORE_SETTINGS.invoiceStatusColors),
     invoiceNumbering: parseJsonColumn(row.invoice_numbering, DEFAULT_STORE_SETTINGS.invoiceNumbering),
     invoiceDefaults: parseJsonColumn(row.invoice_defaults, DEFAULT_STORE_SETTINGS.invoiceDefaults),
@@ -470,6 +488,8 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     statusColors: "status_colors",
     ticketDefaultStatus: "ticket_default_status",
     ticketDefaultResolutionMinutes: "ticket_default_resolution_minutes",
+    ticketColumnOrder: "ticket_column_order",
+    ticketVisibleColumns: "ticket_visible_columns",
     invoiceStatusColors: "invoice_status_colors",
     invoiceNumbering: "invoice_numbering",
     invoiceDefaults: "invoice_defaults",

@@ -451,6 +451,7 @@ export default function Dashboard() {
           delta={{ value: `Avg ${formatINR(revenueMetrics.avgRevenue)}/day`, up: true }}
           hint={`Projected: ${formatINR(revenueMetrics.projection)}/month`}
           progress={{ value: Math.min(100, Math.round((monthlyRevenue / Math.max(monthlyTarget, 1)) * 100)), label: "Monthly Target", targetValue: formatINR(monthlyTarget) }}
+          barThickness="2x"
           onCardClick={canEditTarget ? () => { setEditTargetValue(monthlyTarget.toLocaleString("en-IN")); setShowTargetEdit(true); } : undefined}
         />
       ),
@@ -476,7 +477,7 @@ export default function Dashboard() {
           title="Dues Outstanding"
           value={duesMetrics.totalDues}
           format={formatINR}
-          tone="rose"
+          tone="overdue"
           delta={{ value: `${duesMetrics.overdueCount} overdue`, up: false }}
           hint={`${duesMetrics.outstandingCount} unpaid invoice${duesMetrics.outstandingCount !== 1 ? "s" : ""} · Overdue: ${formatINR(duesMetrics.overdueAmount)}`}
           progress={{ value: invoices.length > 0 ? Math.round(((invoices.reduce((s, i) => s + i.paidAmount, 0)) / Math.max(invoices.reduce((s, i) => s + i.total, 0), 1)) * 100) : 0, label: "Collection progress" }}
@@ -490,7 +491,7 @@ export default function Dashboard() {
           title="Tickets"
           value={ticketMetrics.rangeTickets}
           icon={Ticket}
-          tone="violet"
+          tone="blue"
           delta={{ value: `Avg ${ticketMetrics.avgPerDay}/day`, up: true }}
           hint={`Projection: ${ticketMetrics.projection} tickets this month`}
           progress={{ value: ticketMetrics.rangeTickets > 0 ? Math.min(100, Math.round((ticketMetrics.rangeTickets / Math.max(ticketMetrics.avgPerDay * rangeDays, 1)) * 100)) : 0, label: "vs avg" }}

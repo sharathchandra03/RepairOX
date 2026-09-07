@@ -6,6 +6,7 @@ import { useEffect } from "react";
 import {
   getTicketDevices,
   formatWarranty,
+  formatDeviceColour,
   STATUS_LABEL,
   PRIORITY_LABEL,
   type Ticket,
@@ -60,6 +61,7 @@ function Field({ label, value, mono, always }: { label: string; value?: string |
 
 function DeviceBlock({ device, index }: { device: DeviceRecord; index: number }) {
   const warranty = formatWarranty(device.warrantyValue, device.warrantyUnit, device.warranty);
+  const deviceColour = formatDeviceColour(device.deviceColour);
   const imeiLabel = device.imeiType === "serial" ? "Serial No." : "IMEI";
   const deviceName = [device.brand, device.model].filter(Boolean).join(" ") || "Unknown Device";
   const issues = parseIssueString(device.issue).join(", ");
@@ -98,6 +100,7 @@ function DeviceBlock({ device, index }: { device: DeviceRecord; index: number })
           <Field label="Model" value={device.model} always />
           <Field label={imeiLabel} value={device.imei} mono always />
           <Field label="Category" value={device.category} />
+          <Field label="Device Colour" value={deviceColour} />
           <Field label="Source" value={formatSource(device.source)} />
           <Field label="Technician" value={device.assignedTo} />
           <Field label="Warranty" value={warranty} />

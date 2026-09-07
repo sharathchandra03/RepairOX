@@ -115,6 +115,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
             priority: t.priority || "",
             status: t.status || "",
             warranty: t.warranty || "",
+            deviceColour: t.devices?.[0]?.deviceColour || "",
             parts: t.parts || [],
             estimate: t.amount || 0,
             accessories: "",
@@ -151,6 +152,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
     if (dev.brand) descLines.push({ label: "Brand", value: dev.brand });
     if (dev.model) descLines.push({ label: "Model", value: dev.model });
     if (dev.serial) descLines.push({ label: dev.serialLabel || "IMEI / Serial", value: dev.serial });
+    if (dev.deviceColour) descLines.push({ label: "Colour", value: dev.deviceColour });
     if (dev.issue) descLines.push({ label: "Issue", value: dev.issue });
     if (dev.service && dev.service !== dev.issue) descLines.push({ label: "Service", value: dev.service });
     if (dev.technician) descLines.push({ label: "Technician", value: dev.technician });
@@ -675,6 +677,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
       if (dev.brand) descLines.push({ label: "Brand", value: dev.brand });
       if (dev.model) descLines.push({ label: "Model", value: dev.model });
       if (dev.serial) descLines.push({ label: dev.serialLabel || "IMEI / Serial", value: dev.serial });
+      if (dev.deviceColour) descLines.push({ label: "Colour", value: dev.deviceColour });
       if (dev.issue) descLines.push({ label: "Issue", value: dev.issue });
       if (dev.jobType) descLines.push({ label: "Job", value: dev.jobType });
       if (dev.technician) descLines.push({ label: "Technician", value: dev.technician });

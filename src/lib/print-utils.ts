@@ -1,6 +1,6 @@
 import type { StoreSettings, CustomPrintTemplate } from "@/lib/store-settings";
 import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
-import { getTicketDevices, getInvoiceDevices } from "@/lib/mock-data";
+import { getTicketDevices, getInvoiceDevices, formatDeviceColour } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
@@ -79,6 +79,8 @@ export type PrintDeviceInfo = {
   priority: string;
   status: string;
   warranty: string;
+  /** Selected device colour label (e.g. "Black"). Empty when not set. */
+  deviceColour: string;
   parts: PrintLineItem[];
   estimate: number;
   /** User accessories handed in with the device (optional). */
@@ -143,6 +145,8 @@ export type PrintInvoiceDeviceInfo = {
   warranty: string;
   warrantyValue?: number;
   warrantyUnit?: "days" | "months" | "years";
+  /** Selected device colour label (e.g. "Black"). Empty when not set. */
+  deviceColour: string;
   technician: string;
   notes: string;
   parts: PrintLineItem[];
@@ -228,6 +232,7 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     priority: dr.priority,
     status: dr.status,
     warranty: dr.warranty || "",
+    deviceColour: formatDeviceColour(dr.deviceColour),
     parts: dr.parts.map((p) => ({ name: p.name, qty: p.qty, price: p.unitPrice, discount: 0, total: p.total })),
     estimate: dr.estimate,
     accessories: dr.accessories || "",
@@ -288,6 +293,7 @@ export function buildInvoiceInfo(invoice: Invoice, linkedTicketNo?: string): Pri
         warranty: d.warranty,
         warrantyValue: d.warrantyValue,
         warrantyUnit: d.warrantyUnit,
+        deviceColour: formatDeviceColour(d.deviceColour),
         technician: d.technician,
         notes: d.notes,
         parts: d.parts.map((p) => ({ name: p.name, description: p.description, qty: p.qty, price: p.price, discount: p.discount, total: p.total })),

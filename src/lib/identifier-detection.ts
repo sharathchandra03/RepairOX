@@ -12,7 +12,7 @@
  * These helpers are the single source of truth for detection + validation so
  * every surface (ticket wizard, overlay, table, print, invoice) behaves the
  * same way. Detection rules deliberately mirror the pre-existing inline rules:
- *   - IMEI   : numeric only, exactly 16 digits (the app's existing IMEI length)
+ *   - IMEI   : numeric only, exactly 15 digits (the app's IMEI length)
  *   - Serial : alphanumeric, 1–15 characters, containing at least one letter
  */
 
@@ -39,19 +39,17 @@ export type IdentifierDetection = {
 export const IDENTIFIER_NEUTRAL_LABEL = "IMEI / Serial";
 export const IDENTIFIER_PLACEHOLDER = "Enter IMEI or Serial Number...";
 
-/** Max character lengths — mirror the app's pre-existing inline caps. */
-export const IMEI_MAX_LEN = 16;
+/** Max character lengths — IMEI and Serial both cap at 15. */
+export const IMEI_MAX_LEN = 15;
 export const SERIAL_MAX_LEN = 15;
 
 /**
- * Valid IMEI: numeric only, exactly 16 digits.
- * This preserves the project's existing IMEI validation (see the previous
- * ticket-wizard inline rule "IMEI must contain exactly 16 digits"). We do NOT
- * weaken it, and we do NOT classify arbitrary numeric strings as IMEI unless
- * they meet the full length rule.
+ * Valid IMEI: numeric only, exactly 15 digits.
+ * We do NOT weaken this, and we do NOT classify arbitrary numeric strings as
+ * IMEI unless they meet the full length rule.
  */
 export function isValidImei(value: string): boolean {
-  return /^[0-9]{16}$/.test(value.trim());
+  return /^[0-9]{15}$/.test(value.trim());
 }
 
 /**
@@ -67,9 +65,8 @@ export function isValidSerial(value: string): boolean {
 
 /**
  * Sanitize keystrokes for the single identifier field. We allow alphanumerics
- * (so serials can be typed) and cap the length at the larger of the two limits
- * (16). When the value is purely numeric it may reach 16 (IMEI); once a letter
- * is present it is a serial and capped at 15.
+ * (so serials can be typed) and cap the length at 15 for both IMEI (numeric)
+ * and Serial (alphanumeric).
  */
 export function sanitizeIdentifierInput(raw: string): string {
   const cleaned = raw.replace(/[^a-zA-Z0-9]/g, "");
@@ -105,7 +102,7 @@ export function detectIdentifier(rawValue: string): IdentifierDetection {
   }
 
   // Purely numeric — switch to "IMEI Number" as soon as the user starts typing
-  // digits. `valid` still tracks the full 16-digit rule for the subtle
+  // digits. `valid` still tracks the full 15-digit rule for the subtle
   // validation message, but the label updates immediately.
   return { type: "imei", label: "IMEI Number", valid: isValidImei(value) };
 }

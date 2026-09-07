@@ -2,9 +2,9 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, Filter, ChevronRight, ChevronDown,
+  Search, Filter, ChevronRight, ChevronDown, ChevronUp,
   Smartphone, Tablet, Laptop, Monitor, Watch, Headphones,
   Gamepad2, Plane, Box, Upload, Download, Plus, Clock,
   User, Cpu, HardDrive, MonitorSmartphone, Calendar,
@@ -22,6 +22,7 @@ import { readSheet, readSheetByName } from "@/lib/sheet-reader";
 import { parseSmartSheet, type SmartImportResult } from "@/lib/smart-import";
 import { SmartImportDialog } from "@/components/price-list/smart-import-dialog";
 import { rememberOrigin } from "@/lib/settings-origin";
+import { useScrollCollapse } from "@/hooks/use-scroll-collapse";
 import { Pagination } from "@/components/ui/pagination";
 import {
   type DeviceCategory,
@@ -94,6 +95,35 @@ export default function PriceListPage() {
   const [focusMode, setFocusMode] = useState(false);
   const [navVisible, setNavVisible] = useState(true);
   const hoverTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ── Device Information (hero) collapse ──────────────────────────────────
+  // Scroll-aware, with a manual override that scroll must not silently undo.
+  //  manualCollapse === null  → follow the scroll suggestion
+  //  manualCollapse === true  → user manually collapsed (stays collapsed while
+  //                             scrolling within the page)
+  //  manualCollapse === false → user manually expanded
+  // The override is cleared automatically once the user scrolls back to the
+  // very top, handing control back to the scroll behaviour (and expanding).
+  const { anchorRef: heroScrollAnchor, shouldCollapse } = useScrollCollapse({
+    enabled: !!selectedModelId,
+  });
+  const [manualCollapse, setManualCollapse] = useState<boolean | null>(null);
+  const heroCollapsed = manualCollapse ?? shouldCollapse;
+
+  // When the scroll driver reports we're back near the top (shouldCollapse
+  // false), release any manual override so auto behaviour resumes.
+  const prevShouldCollapse = useRef(shouldCollapse);
+  useEffect(() => {
+    if (prevShouldCollapse.current && !shouldCollapse) setManualCollapse(null);
+    prevShouldCollapse.current = shouldCollapse;
+  }, [shouldCollapse]);
+
+  // A new model selection resets to the default (expanded) state.
+  useEffect(() => { setManualCollapse(null); }, [selectedModelId]);
+
+  const toggleHeroCollapse = useCallback(() => {
+    setManualCollapse((prev) => !(prev ?? shouldCollapse));
+  }, [shouldCollapse]);
 
   // Resolve selected IDs against live catalog data
   const selectedCategory = useMemo<DeviceCategory | null>(
@@ -614,10 +644,17 @@ export default function PriceListPage() {
         </motion.div>
 
         {/* ─── Right Workspace: Hero Card + Parts Table ────────────── */}
-        <div className="flex-1 min-w-0 space-y-4">
+        <div ref={heroScrollAnchor as React.RefObject<HTMLDivElement>} className="flex-1 min-w-0 space-y-4 [overflow-x:clip]">
           {selectedModel ? (
             <>
-              <DeviceHeroCard model={selectedModel} brand={selectedBrand} category={selectedCategory} parts={modelParts} />
+              <DeviceHeroCard
+                model={selectedModel}
+                brand={selectedBrand}
+                category={selectedCategory}
+                parts={modelParts}
+                collapsed={heroCollapsed}
+                onToggleCollapse={toggleHeroCollapse}
+              />
               <PartsAndPricing
                 parts={modelParts}
                 modelName={selectedModel.name}
@@ -866,11 +903,17 @@ function DeviceHeroCard({
   brand,
   category,
   parts = [],
+  collapsed = false,
+  onToggleCollapse,
 }: {
   model: PriceListModel;
   brand: PriceListBrand | null;
   category: DeviceCategory | null;
   parts?: DevicePart[];
+  /** Scroll-aware / manual collapse state. When true, show the compact header. */
+  collapsed?: boolean;
+  /** Toggle handler for the expand/collapse chevron control. */
+  onToggleCollapse?: () => void;
 }) {
   const CategoryIcon = (category && iconMap[category.icon]) || Laptop;
   const isActive = model.status === "active";
@@ -922,55 +965,116 @@ function DeviceHeroCard({
   for (const [k, v] of Object.entries(model.meta ?? {})) pushField(Tag, k, v);
   pushField(User, "Updated By", model.updatedBy);
 
+  // Smooth height compression between the full hero and the compact header.
+  // Animating height:auto ⇄ auto (measured) via framer-motion keeps the Parts
+  // table flush beneath — no reserved blank space when collapsed.
+  const EASE = [0.22, 1, 0.36, 1] as const;
+
   return (
     <motion.div
       key={model.id}
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.3, ease: [0.22, 1, 0.36, 1] }}
-      className="rounded-2xl border border-border bg-card shadow-card overflow-hidden"
+      transition={{ duration: 0.3, ease: EASE }}
+      className="relative rounded-2xl border border-border bg-card shadow-card overflow-hidden"
     >
-      <div className="flex items-stretch">
-        {/* Device image — uploaded image (from Settings → Price List) fills the
-            whole panel. Falls back to a category illustration when none exists.
-            Never a broken image. */}
-        <div className="w-[220px] shrink-0 self-center h-[150px] bg-white flex items-start justify-center relative overflow-hidden px-2 py-2">
-          {model.imageUrl ? (
-            <img
-              src={model.imageUrl}
-              alt={model.name}
-              className="h-full w-full min-h-0 object-contain object-top rounded-xl"
-            />
-          ) : (
-            <>
-              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(67,97,238,0.08),transparent_70%)]" />
-              <div className="relative">
-                <CategoryIcon className="h-16 w-16 text-brand-400/70" />
-              </div>
-            </>
-          )}
-        </div>
-        <div className="flex-1 p-5 min-w-0">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2 className="text-xl font-bold tracking-tight truncate">{model.name} ({model.year})</h2>
+      {/* Expand / collapse control — small chevron, part of the card. Up = collapse,
+          Down = expand, matching the resting direction of the content. */}
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-expanded={!collapsed}
+        aria-label={collapsed ? "Expand device information" : "Collapse device information"}
+        title={collapsed ? "Expand device information" : "Collapse device information"}
+        className="absolute right-3 top-3 z-10 grid h-7 w-7 place-items-center rounded-lg border border-foreground bg-brand-50 text-brand-600 shadow-sm transition-colors hover:bg-brand-100 hover:text-brand-700"
+      >
+        {collapsed
+          ? <ChevronDown className="h-4 w-4" />
+          : <ChevronUp className="h-4 w-4" />}
+      </button>
+
+      <AnimatePresence initial={false} mode="wait">
+        {collapsed ? (
+          /* ── Compact header — keeps the selected-model context in one row ── */
+          <motion.div
+            key="compact"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.24, ease: EASE }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="flex items-center gap-3 px-4 py-2.5 pr-14">
+              <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-lg border border-border bg-white">
+                {model.imageUrl
+                  ? <img src={model.imageUrl} alt={model.name} className="h-full w-full object-contain" />
+                  : <CategoryIcon className="h-5 w-5 text-brand-400/70" />}
+              </span>
+              <div className="flex min-w-0 items-center gap-2">
+                <h2 className="truncate text-[15px] font-bold tracking-tight">{model.name} ({model.year})</h2>
                 <Badge tone={isActive ? "success" : "neutral"} dot={isActive}>
                   {isActive ? "Active" : "Discontinued"}
                 </Badge>
               </div>
+              <Button variant="outline" size="sm" className="ml-auto gap-1.5 rounded-xl text-[12px] shrink-0">
+                <Pencil className="h-3 w-3" /> Edit Model
+              </Button>
             </div>
-            <Button variant="outline" size="sm" className="gap-1.5 rounded-xl text-[12px] shrink-0">
-              <Pencil className="h-3 w-3" /> Edit Model
-            </Button>
-          </div>
-          <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-5 gap-y-3">
-            {metaFields.map((f) => (
-              <MetaItem key={f.label} icon={f.icon} label={f.label} value={f.value} highlight={f.highlight} />
-            ))}
-          </div>
-        </div>
-      </div>
+          </motion.div>
+        ) : (
+          /* ── Full hero — unchanged expanded layout ── */
+          <motion.div
+            key="expanded"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.26, ease: EASE }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="flex items-stretch">
+              {/* Device image — uploaded image (from Settings → Price List) fills the
+                  whole panel. Falls back to a category illustration when none exists.
+                  Never a broken image. */}
+              <div className="w-[220px] shrink-0 self-center h-[150px] bg-white flex items-start justify-center relative overflow-hidden px-2 py-2">
+                {model.imageUrl ? (
+                  <img
+                    src={model.imageUrl}
+                    alt={model.name}
+                    className="h-full w-full min-h-0 object-contain object-top rounded-xl"
+                  />
+                ) : (
+                  <>
+                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,rgba(67,97,238,0.08),transparent_70%)]" />
+                    <div className="relative">
+                      <CategoryIcon className="h-16 w-16 text-brand-400/70" />
+                    </div>
+                  </>
+                )}
+              </div>
+              <div className="flex-1 p-5 pr-14 min-w-0">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h2 className="text-xl font-bold tracking-tight truncate">{model.name} ({model.year})</h2>
+                      <Badge tone={isActive ? "success" : "neutral"} dot={isActive}>
+                        {isActive ? "Active" : "Discontinued"}
+                      </Badge>
+                    </div>
+                  </div>
+                  <Button variant="outline" size="sm" className="gap-1.5 rounded-xl text-[12px] shrink-0">
+                    <Pencil className="h-3 w-3" /> Edit Model
+                  </Button>
+                </div>
+                <div className="mt-4 grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-5 gap-y-3">
+                  {metaFields.map((f) => (
+                    <MetaItem key={f.label} icon={f.icon} label={f.label} value={f.value} highlight={f.highlight} />
+                  ))}
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </motion.div>
   );
 }
@@ -996,6 +1100,11 @@ function MetaItem({ icon: Icon, label, value, highlight }: {
 }
 
 /* ─── Parts & Pricing Table ──────────────────────────────────────── */
+// Fallback pin offset (px) used only until the real topbar height is measured
+// at runtime. The measured value replaces this so the section header sits
+// flush beneath the app topbar with no gap.
+const STICKY_TOP = 60;
+
 type PartColKey = "image" | "part" | "price" | "warranty";
 const PART_COL_LABEL: Record<PartColKey, string> = {
   image: "Image", part: "Part Name", price: "Price (INR)", warranty: "Warranty",
@@ -1012,11 +1121,15 @@ function PartsAndPricing({
 }) {
   const [activeTab] = useState("parts");
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(50);
   // Measured height of the sticky section header so the sticky table head can
   // pin exactly beneath it (no hard-coded offset → no header jumping/overlap).
   const headerRef = useRef<HTMLDivElement>(null);
   const [headerH, setHeaderH] = useState(60);
+  // Offset (px) at which the section header pins: the exact height of the app's
+  // sticky topbar stack (topbar + any banners). Measured at runtime so the
+  // header sits flush beneath it with NO gap, whatever the banner state.
+  const [stickyTop, setStickyTop] = useState(STICKY_TOP);
   useEffect(() => {
     const el = headerRef.current;
     if (!el) return;
@@ -1024,6 +1137,31 @@ function PartsAndPricing({
     measure();
     const ro = new ResizeObserver(measure);
     ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    // Find the scroll container's top sticky bar (topbar + banners) and use its
+    // measured height as our pin offset. Falls back to STICKY_TOP if not found.
+    const findTopbar = (): HTMLElement | null => {
+      let el: HTMLElement | null = headerRef.current;
+      while (el && el.parentElement) {
+        const p = el.parentElement;
+        const style = window.getComputedStyle(p);
+        if (style.overflowY === "auto" || style.overflowY === "scroll") {
+          // First child of the scroll container is the sticky topbar wrapper.
+          const bar = p.firstElementChild as HTMLElement | null;
+          return bar;
+        }
+        el = p;
+      }
+      return null;
+    };
+    const bar = findTopbar();
+    if (!bar) return;
+    const measure = () => setStickyTop(bar.offsetHeight);
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(bar);
     return () => ro.disconnect();
   }, []);
   const [order, setOrder] = useState<PartColKey[]>(["image", "part", "price", "warranty"]);
@@ -1176,6 +1314,10 @@ function PartsAndPricing({
   // gets an equal share of the remaining width, so they line up evenly.
   const IDX_W = "56px";
   const EQUAL_W = `calc((100% - ${IDX_W}) / ${order.length + 1})`;
+  // Pin the column head 1px UNDER the section header so the two frozen bars
+  // butt together with no seam — otherwise scrolling rows peek through a
+  // sub-pixel gap between them. Never let it go above the section header.
+  const tableHeadTop = Math.max(stickyTop, stickyTop + headerH - 1);
   const colDefs = [
     <col key="idx" style={{ width: IDX_W }} />,
     ...order.map((k) => <col key={k} style={{ width: EQUAL_W }} />),
@@ -1187,15 +1329,37 @@ function PartsAndPricing({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: 0.1, ease: [0.22, 1, 0.36, 1] }}
-      className="flex max-h-[calc(100vh-140px)] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-card"
+      className="rounded-2xl border border-border bg-card shadow-card"
     >
-      {/* Inner scroll region — ONLY this scrolls. The section header and the
-          table head are sticky within it, so both stay visible while rows move. */}
-      <div className="min-h-0 flex-1 overflow-auto">
+      {/* Single page scroll — the card grows with its content and the whole
+          page scrolls (there is no separate inner scrollbar). The section
+          header and the table head are sticky against the PAGE scroll
+          container, so scrolling anywhere (including over the rows) collapses
+          the hero and keeps these pinned.
+          NOTE: the card must NOT use overflow-hidden — an overflow ancestor
+          would trap position:sticky inside this card and let the header scroll
+          away. Corners are rounded on the sticky header / pagination footer
+          instead so the card still reads as one rounded panel. */}
       {/* ── STICKY section header (heading + Part Search + Filter on one row).
-          It is sticky within the inner scroll region below (top-0), so it stays
-          pinned while only the rows scroll. z-30 keeps it above the table head. */}
-      <div ref={headerRef} className="sticky top-0 z-30 flex flex-col gap-2.5 border-b border-border bg-card px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          Pinned just below the app topbar (measured stickyTop). z-30 keeps it
+          above the table head, which pins directly beneath it. */}
+      <div ref={headerRef} style={{ top: stickyTop }} className="sticky z-30 -mx-px -mt-px flex flex-col gap-2 rounded-t-2xl border border-border bg-card px-5 py-2 sm:flex-row sm:items-center sm:justify-between">
+        {/* Corner masks — while the header is frozen, scrolling rows would show
+            through the concave gap outside the header's rounded top corners.
+            Each mask paints ONLY that gap in the page-canvas colour using a
+            radial-gradient (transparent inside the corner radius, canvas colour
+            outside), so the rounded top reads cleanly at rest and while frozen,
+            and no row bleeds through. Sits above the rows, below the content. */}
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -left-px -top-px h-4 w-4"
+          style={{ background: "radial-gradient(circle 16px at bottom right, transparent 0 15px, hsl(var(--background)) 16px)" }}
+        />
+        <span
+          aria-hidden
+          className="pointer-events-none absolute -right-px -top-px h-4 w-4"
+          style={{ background: "radial-gradient(circle 16px at bottom left, transparent 0 15px, hsl(var(--background)) 16px)" }}
+        />
         <h3 className="text-[16px] font-bold text-foreground shrink-0">Parts &amp; Pricing</h3>
         <div className="flex items-center gap-2">
           <div className="group/partsearch relative flex-1 sm:flex-none">
@@ -1294,8 +1458,12 @@ function PartsAndPricing({
         </div>
       ) : (
         <>
-          {/* Table. Horizontal scroll on small screens is handled by the outer
-              scroll region (min-width below); sticky heads pin to that region. */}
+          {/* Table. The whole page is the single scroll surface, so the head
+              cells pin to the PAGE scroll container (top = STICKY_TOP + section
+              header height). We deliberately do NOT wrap the table in an
+              overflow container — that would create a new scroll context and
+              break position:sticky. The card's overflow-hidden clips any excess
+              width so the page never gains a horizontal scrollbar. */}
           <table className="w-full min-w-[760px] table-fixed border-collapse text-left">
             {/* Shared column grid — header + every row use identical boundaries. */}
             <colgroup>{colDefs}</colgroup>
@@ -1305,12 +1473,12 @@ function PartsAndPricing({
             <thead>
               <tr>
                 <th
-                  style={{ top: headerH }}
+                  style={{ top: tableHeadTop }}
                   className="sticky z-20 bg-[#EEF1FD] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB]"
                 >#</th>
-                {order.map((key) => headerCell(key, headerH))}
+                {order.map((key) => headerCell(key, tableHeadTop))}
                 <th
-                  style={{ top: headerH }}
+                  style={{ top: tableHeadTop }}
                   className="sticky z-20 bg-[#EEF1FD] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB]"
                 >Actions</th>
               </tr>
@@ -1358,12 +1526,12 @@ function PartsAndPricing({
             </table>
         </>
       )}
-      </div>{/* /inner scroll region */}
 
-      {/* Pagination — pinned below the scroll region (does not scroll). Same
-          10/20/50/100 pattern as Tickets & Invoices; search resets to page 1. */}
+      {/* Pagination — the card footer. It scrolls with the page (single scroll
+          surface). Same 10/20/50/100 pattern as Tickets & Invoices; search
+          resets to page 1. */}
       {activeTab === "parts" && (
-        <div className="shrink-0 rounded-b-2xl border-t border-border bg-card px-5 py-3">
+        <div className="rounded-b-2xl border-t border-border bg-card px-5 py-3">
           <Pagination
             page={safePage}
             totalPages={totalPages}

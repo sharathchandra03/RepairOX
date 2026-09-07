@@ -23,6 +23,7 @@ import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL, invoiceStatusPillStyle,
   type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
+  formatDeviceColour,
 } from "@/lib/mock-data";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 
@@ -450,6 +451,7 @@ export default function InvoiceDetailPage() {
                       {/* Job meta row */}
                       <div className="px-4 py-2 border-b border-border bg-muted/20 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4 text-[11px]">
                         {dev.issue && <div><span className="text-muted-foreground">Issue:</span> <span className="font-medium">{dev.issue}</span></div>}
+                        {dev.deviceColour && <div><span className="text-muted-foreground">Colour:</span> <span className="font-medium">{formatDeviceColour(dev.deviceColour)}</span></div>}
                         {dev.technician && <div><span className="text-muted-foreground">Tech:</span> <span className="font-medium">{dev.technician}</span></div>}
                         {dev.jobType && <div><span className="text-muted-foreground">Type:</span> <span className="font-medium capitalize">{dev.jobType}</span></div>}
                         {dev.priority && dev.priority !== "normal" && <div><span className="text-muted-foreground">Priority:</span> <span className="font-medium capitalize">{dev.priority}</span></div>}

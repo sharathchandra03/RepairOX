@@ -28,6 +28,7 @@ import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
+import { rememberOrigin } from "@/lib/settings-origin";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
@@ -202,6 +203,13 @@ export default function InvoicePage() {
     }
   }, [searchParams]);
 
+  // Open Settings → Invoice → Invoice Settings, remembering Invoice as the
+  // origin so the Settings "← Back to Invoice" control returns here.
+  const openInvoiceSettings = useCallback(() => {
+    rememberOrigin({ key: "invoice", label: "Invoice", returnTo: "/invoice" });
+    router.push("/settings/invoice/general?from=invoice");
+  }, [router]);
+
   const clearSearchFilter = useCallback(() => {
     setSearchFilterId(null);
     // Remove search_id from URL without full navigation
@@ -252,6 +260,38 @@ export default function InvoicePage() {
   useEffect(() => {
     setPage(1);
   }, [statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
+
+  /* ─── Sticky frozen workspace (filters + table header) ───────────────────
+     Same formula as the Tickets page: the date pills + status pills live in
+     one sticky wrapper that pins just below the app topbar, and the table
+     header (thead) pins right beneath it. Offsets are MEASURED at runtime
+     (topbar height + wrapper height) so the header sits flush with no gap and
+     no layout jump. Pure CSS position:sticky — no scroll listeners. */
+  const stickyWrapRef = useRef<HTMLDivElement>(null);
+  const [stickyTop, setStickyTop] = useState(60);   // app topbar height
+  const [wrapH, setWrapH] = useState(0);            // frozen wrapper height
+  useEffect(() => {
+    const wrap = stickyWrapRef.current;
+    if (!wrap) return;
+    let node: HTMLElement | null = wrap;
+    let bar: HTMLElement | null = null;
+    while (node && node.parentElement) {
+      const parent: HTMLElement = node.parentElement;
+      const oy = getComputedStyle(parent).overflowY;
+      if (oy === "auto" || oy === "scroll") { bar = parent.firstElementChild as HTMLElement | null; break; }
+      node = parent;
+    }
+    const measure = () => {
+      setWrapH(wrap.offsetHeight);
+      if (bar) setStickyTop(bar.offsetHeight);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    if (bar) ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
+  const theadTop = stickyTop + wrapH;
 
   // Pagination — pinned invoices already sit at the top of `list`.
   const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
@@ -306,8 +346,8 @@ export default function InvoicePage() {
             <Filter className="h-4 w-4" /> Filter
             {advancedActive && <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />}
           </Button>
+          <Can permission="manage_invoices"><Button variant="outline" size="md" className="rounded-full" onClick={openInvoiceSettings}><Settings2 className="h-4 w-4" /> Settings</Button></Can>
           <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button></Can>
-          <Can permission="manage_invoices"><Link href="/settings/invoice/general"><Button variant="outline" size="md" className="rounded-full"><Settings2 className="h-4 w-4" /> Settings</Button></Link></Can>
           <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
         </>}
       />
@@ -419,6 +459,19 @@ export default function InvoicePage() {
         </motion.div>
       </div>
 
+      {/* ── STICKY FROZEN WORKSPACE ──────────────────────────────────────
+          Date pills → Status pills → Custom picker → Advanced panel → Column
+          settings → Bulk status → Search banner all pin together as one block
+          just below the app topbar. Opaque page-canvas background (plus side +
+          top canvas-coloured shadows) so invoice rows never show through and
+          the block reads as part of the page. z-10 keeps it above the rows and
+          below the global header; dropdowns use higher z and still escape.
+          space-y-6 + -mt-6/pt-6/pb-6 preserve the exact original spacing. */}
+      <div
+        ref={stickyWrapRef}
+        style={{ top: stickyTop }}
+        className="sticky z-10 -mt-6 space-y-6 bg-[hsl(var(--background))] pt-6 pb-6 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+      >
       {/* Filter System — shared architecture: Date strip → Status strip → Advanced panel */}
       {/* The date strip defines the width; the status strip stretches to match it
           exactly so its right edge aligns with the "Custom" pill. */}
@@ -569,11 +622,17 @@ export default function InvoicePage() {
         </motion.div>
       )}
 
+      </div>{/* ── /STICKY FROZEN WORKSPACE ── */}
+
       {/* Table */}
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-        <div className="overflow-x-auto">
+      {/* Straight (square) card: no overflow-hidden on the card and overflow-x:clip
+          (not auto) on the inner wrapper — an overflow:auto/hidden ancestor would
+          trap the sticky thead and break the freeze. Flat bordered header and
+          flat bottom so nothing bleeds through corner gaps while frozen. */}
+      <div className="-mt-6 border border-border bg-card shadow-card">
+        <div className="[overflow-x:clip]">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="w-10 px-3 py-3">
                   <input type="checkbox"

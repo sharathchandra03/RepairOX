@@ -22,10 +22,11 @@ export function RSelect({
   className,
   onAddNew,
   addLabel,
+  alwaysShowAddNew = false,
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: { label: string; value: string }[];
+  options: { label: string; value: string; swatch?: string }[];
   placeholder?: string;
   searchable?: boolean;
   /** Tailwind width class for the menu panel. Defaults to full trigger width. */
@@ -35,6 +36,10 @@ export function RSelect({
   onAddNew?: (name: string) => void;
   /** Custom label for the add-new button. Use "{name}" as placeholder for the query text. Defaults to '+ Add "{name}"'. */
   addLabel?: string;
+  /** When true, the add-new action is always pinned at the bottom of the menu
+   *  (even with a full list and no query). Pairs with a static addLabel like
+   *  "+ Add Person". If the user has typed, the query is passed to onAddNew. */
+  alwaysShowAddNew?: boolean;
 }) {
   const [q, setQ] = React.useState("");
   const selected = options.find((o) => o.value === value);
@@ -48,9 +53,12 @@ export function RSelect({
     ? options.some((o) => o.label.toLowerCase() === trimmedQ.toLowerCase())
     : true;
   // Show add-new when: onAddNew provided AND (user typed something that doesn't match, OR list is empty and user typed)
-  const showAddNew = !!onAddNew && searchable && trimmedQ && !exactMatch;
+  const showAddNew = !!onAddNew && searchable && !!trimmedQ && !exactMatch;
   // Also show add-new when list is completely empty (no options at all) and onAddNew is provided
   const showAddNewEmpty = !!onAddNew && options.length === 0 && !trimmedQ;
+  // Opt-in: always pin the add-new action at the bottom, regardless of query
+  // or whether the list has items (used for "+ Add Person").
+  const showAddNewAlways = !!onAddNew && alwaysShowAddNew;
 
   return (
     <Dropdown
@@ -69,8 +77,14 @@ export function RSelect({
             className
           )}
         >
-          <span className={cn("truncate text-left", !selected && "text-muted-foreground")}>
-            {selected ? selected.label : placeholder}
+          <span className={cn("flex min-w-0 items-center gap-2 truncate text-left", !selected && "text-muted-foreground")}>
+            {selected?.swatch && (
+              <span
+                className="h-3 w-3 shrink-0 rounded-full ring-1 ring-inset ring-black/15"
+                style={{ backgroundColor: selected.swatch }}
+              />
+            )}
+            <span className="truncate">{selected ? selected.label : placeholder}</span>
           </span>
           <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} />
         </button>
@@ -106,6 +120,12 @@ export function RSelect({
                   <span className={cn("grid h-4 w-4 shrink-0 place-items-center", isSelected ? "text-[#4361EE]" : "opacity-0")}>
                     <Check className="h-3.5 w-3.5" strokeWidth={3} />
                   </span>
+                  {o.swatch && (
+                    <span
+                      className="h-3.5 w-3.5 shrink-0 rounded-full ring-1 ring-inset ring-black/15"
+                      style={{ backgroundColor: o.swatch }}
+                    />
+                  )}
                   <span className="truncate">{o.label}</span>
                 </button>
               );
@@ -117,15 +137,20 @@ export function RSelect({
               <p className="px-2.5 py-2 text-center text-[12px] text-muted-foreground">No items yet. Type to add one.</p>
             )}
           </div>
-          {(showAddNew || showAddNewEmpty) && (
+          {(showAddNew || showAddNewEmpty || showAddNewAlways) && (
             <button
               type="button"
               onClick={() => { onAddNew!(trimmedQ || ""); setQ(""); close(); }}
-              disabled={!trimmedQ && !showAddNewEmpty}
               className="flex w-full items-center gap-2 border-t border-border px-2.5 py-2.5 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors shrink-0"
             >
               <Plus className="h-3.5 w-3.5" />
-              <span>{trimmedQ ? (addLabel ? addLabel.replace("{name}", trimmedQ) : `Add "${trimmedQ}"`) : "Add New"}</span>
+              <span>
+                {addLabel
+                  ? addLabel.replace("{name}", trimmedQ)
+                  : trimmedQ
+                    ? `Add "${trimmedQ}"`
+                    : "Add New"}
+              </span>
             </button>
           )}
         </div>

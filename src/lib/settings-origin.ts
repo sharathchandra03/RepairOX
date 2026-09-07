@@ -69,16 +69,27 @@ const KNOWN: Record<string, { label: string; returnTo: string }> = {
   invoice: { label: "Invoice", returnTo: "/invoice" },
 };
 
+/**
+ * Modules allowed to surface the Settings "← Back to <Module>" control.
+ * Intentionally restricted to Tickets and Invoice — only these two have a
+ * Settings entry-point button, so the back bar must never appear for any other
+ * origin (or for standalone Settings visits).
+ */
+const BACK_BAR_ALLOWED = new Set<string>(["tickets", "invoice"]);
+
 function defaultLabel(key: string): string {
   return KNOWN[key]?.label ?? "back";
 }
 
 /**
  * Resolve the origin from a `from` key: prefer the rich session record, then
- * fall back to a sensible known default. Returns null when there's no origin.
+ * fall back to a sensible known default. Returns null when there's no origin,
+ * or when the origin is not one we allow a Back control for.
  */
 export function resolveOrigin(fromKey: string | null | undefined): SettingsOrigin | null {
   if (!fromKey) return null;
+  // Only Tickets and Invoice may show the Back control.
+  if (!BACK_BAR_ALLOWED.has(fromKey)) return null;
   const stored = recallOrigin(fromKey);
   if (stored) return { key: fromKey, label: stored.label, returnTo: stored.returnTo };
   const known = KNOWN[fromKey];

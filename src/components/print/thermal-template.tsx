@@ -118,6 +118,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                   </div>
                   {/* Job details */}
                   <div className="space-y-0.5 mb-1">
+                    {dev.deviceColour && <Row label="Colour" value={dev.deviceColour} />}
                     <Row label="Issue" value={dev.issue || "General service"} />
                     <Row label="Technician" value={dev.technician || "Unassigned"} />
                     <Row label="Priority" value={dev.priority || "Normal"} />
@@ -149,6 +150,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                 {ticket.serial && <Row label={ticket.serialLabel || "IMEI/SN"} value={ticket.serial} />}
               </div>
               <div className="space-y-0.5 mb-1">
+                {ticket.devices?.[0]?.deviceColour && <Row label="Colour" value={ticket.devices[0].deviceColour} />}
                 <Row label="Issue" value={ticket.issue} />
                 {ticket.service && ticket.service !== ticket.issue && <Row label="Service" value={ticket.service} />}
                 <Row label="Technician" value={ticket.technician || "Unassigned"} />
@@ -238,6 +240,7 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
                     {dev.serial && <Row label={dev.serialLabel || "IMEI/SN"} value={dev.serial} />}
                   </div>
                   <div className="space-y-0.5 mb-1">
+                    {dev.deviceColour && <Row label="Colour" value={dev.deviceColour} />}
                     <Row label="Issue" value={dev.issue || "Service"} />
                     <Row label="Technician" value={dev.technician || "—"} />
                     {dev.priority && dev.priority !== "normal" && <Row label="Priority" value={dev.priority} />}

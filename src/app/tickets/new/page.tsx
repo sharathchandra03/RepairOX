@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, Camera, Image as ImageIcon, FileSignature, ShieldCheck,
   CheckCircle2, Check, XCircle, MinusCircle, Mail, Phone, MessageCircle,
-  Printer, FileText, Plus, Search, User, Building2, Sparkles, ListPlus,
+  Printer, FileText, Plus, Search, User, Building2, Sparkles,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
   Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
   X, IndianRupee,
@@ -25,12 +25,15 @@ import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
+import { DEVICE_COLOUR_OPTIONS, DEFAULT_DEVICE_COLOUR } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
+import { usePermissions } from "@/lib/permissions-context";
+import { type PermissionKey } from "@/lib/permissions";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
 import { loadQCConfig, getCachedQCConfig, activeCategories as qcActiveCategories, type QCConfig } from "@/lib/qc-config";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
@@ -108,6 +111,8 @@ type WizardJobData = {
   warranty: string;
   warrantyValue: string;
   warrantyUnit: string;
+  /** Selected device colour value (e.g. "black"). Defaults to Black on new devices. */
+  deviceColour: string;
   issue: string;
   priority: string;
   resolutionMinutes: string;
@@ -141,7 +146,7 @@ function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     device: { brand: "", model: "", brandId: undefined, modelId: undefined, imei: "", imeiType: "imei", assignedBy: "", assignedTo: "", source: "", type: "" },
-    job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
+    job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", deviceColour: DEFAULT_DEVICE_COLOUR, issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
     category,
@@ -224,6 +229,9 @@ function ticketToWizard(t: Ticket): WizardData {
         warranty: dr.warranty || "",
         warrantyValue: dr.warrantyValue ? String(dr.warrantyValue) : "",
         warrantyUnit: dr.warrantyUnit || "",
+        // Restore the saved colour for this device. Historical devices with no
+        // colour load as blank (no forced default on existing records).
+        deviceColour: dr.deviceColour || "",
         issue: dr.issue || "",
         priority: dr.priority || "normal",
         resolutionMinutes: dr.resolutionMinutes ? String(dr.resolutionMinutes) : "",
@@ -271,6 +279,8 @@ function ticketToWizard(t: Ticket): WizardData {
       warranty: "",
       warrantyValue: "",
       warrantyUnit: "",
+      // Legacy single-device tickets predate device colour — load as blank.
+      deviceColour: "",
       issue: t.issue,
       priority: t.priority || "normal",
       resolutionMinutes: t.resolutionMinutes ? String(t.resolutionMinutes) : "",
@@ -439,6 +449,8 @@ function NewTicketWizard() {
         : wd.job.warranty || "",
       warrantyValue: wd.job.warrantyValue ? Number(wd.job.warrantyValue) : undefined,
       warrantyUnit: (wd.job.warrantyUnit || undefined) as "days" | "months" | "years" | undefined,
+      // Persist the selected device colour explicitly with the device record.
+      deviceColour: wd.job.deviceColour || undefined,
       resolutionMinutes: Number(wd.job.resolutionMinutes) || defaultResMinutes,
       accessories: wd.job.accessories,
       notes: wd.job.notes,
@@ -915,9 +927,82 @@ function subtitleFor(step: number) {
   ][step - 1];
 }
 
+/* ---------------- Add Person (inline Assigned By/To master entry) ---------------- */
+/* Permission keys allowed to add a new Assigned By/To entry from the ticket
+   flow. This writes to the Settings › Tickets "Assigned By & Assigned To"
+   master (NOT the Employees/staff system). Any one of these grants the
+   "+ Add Person" action; users without it can still select existing entries. */
+const ADD_PERSON_PERMS: PermissionKey[] = ["create_ticket", "edit_ticket", "manage_settings", "full_access"];
+
+/** Reusable RepairOX-styled dialog that adds a new name to the Assigned By /
+ *  Assigned To master (the same list managed in Settings › Tickets). On success
+ *  it returns the saved name so the caller can auto-select it. Duplicates are
+ *  handled by the store (case-insensitive) — adding an existing name is a no-op
+ *  and simply selects it. */
+function AddPersonDialog({
+  open, onClose, initialName, kind, onSave,
+}: {
+  open: boolean;
+  onClose: () => void;
+  initialName: string;
+  /** "by" → Assigned By; "to" → Assigned To. Only tweaks the copy. */
+  kind: "by" | "to";
+  /** Persist the trimmed name to the correct master + return it for selection. */
+  onSave: (name: string) => void;
+}) {
+  const [name, setName] = useState(initialName);
+
+  // Reset local state whenever the dialog opens for a fresh entry.
+  useEffect(() => {
+    if (open) setName(initialName);
+  }, [open, initialName]);
+
+  if (!open) return null;
+
+  const handleSave = () => {
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    onSave(trimmed);
+    onClose();
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={onClose}>
+      <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+        className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+        <h3 className="text-base font-bold">Add Person</h3>
+        <p className="mt-1 text-[11px] text-muted-foreground">
+          Saved to {kind === "to" ? "Assigned To" : "Assigned By"} in Settings › Tickets and available in every ticket.
+        </p>
+        <div className="mt-4 space-y-1">
+          <Label>Name</Label>
+          <Input
+            value={name}
+            onChange={(e: any) => setName(e.target.value)}
+            onKeyDown={(e: any) => e.key === "Enter" && handleSave()}
+            placeholder={kind === "to" ? "e.g. Anand, Pooja" : "e.g. Front Desk, Counter 1"}
+            className="h-11"
+            autoFocus
+          />
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+          <Button size="sm" onClick={handleSave} disabled={!name.trim()}>
+            <CheckCircle2 className="h-3.5 w-3.5" /> Save Person
+          </Button>
+        </div>
+      </motion.div>
+    </div>
+  );
+}
+
 /* ---------------- Step 3: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const { brands, deviceModels, addBrand, addDeviceModel, assignedByOptions, addAssignedByOption, assignedToOptions, addAssignedToOption } = useStore();
+  // "+ Add Person" is gated on permission to manage the Assigned By/To master
+  // (the Settings › Tickets list). Users without it can still select existing.
+  const { can } = usePermissions();
+  const canAddPerson = ADD_PERSON_PERMS.some((p) => can(p));
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
   const d = activeDevice.device;
@@ -1040,13 +1125,18 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const [showNewModel, setShowNewModel] = useState(false);
   const [newModelName, setNewModelName] = useState("");
 
-  // Add New Assigned By modal state
-  const [showNewAssignedBy, setShowNewAssignedBy] = useState(false);
-  const [newAssignedByName, setNewAssignedByName] = useState("");
-
-  // Add New Assigned To modal state
-  const [showNewAssignedTo, setShowNewAssignedTo] = useState(false);
-  const [newAssignedToName, setNewAssignedToName] = useState("");
+  // Add Person dialog state — shared by Assigned By and Assigned To. `field`
+  // records which dropdown opened it so the created person auto-selects into
+  // the right field; `kind` tailors the default role + role list.
+  const [addPersonOpen, setAddPersonOpen] = useState(false);
+  const [addPersonField, setAddPersonField] = useState<"assignedBy" | "assignedTo">("assignedTo");
+  const [addPersonName, setAddPersonName] = useState("");
+  const addPersonKind: "by" | "to" = addPersonField === "assignedBy" ? "by" : "to";
+  const openAddPerson = (field: "assignedBy" | "assignedTo", name: string) => {
+    setAddPersonField(field);
+    setAddPersonName(name);
+    setAddPersonOpen(true);
+  };
 
   // Sync local queries when active device changes
   useEffect(() => {
@@ -1056,6 +1146,40 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
 
   // Active device's category id (drives the Category → Brand → Model filter).
   const activeCategoryId = activeDevice.category || "";
+
+  // Assigned By / Assigned To option lists. These come SOLELY from the
+  // Settings › Tickets "Assigned By & Assigned To" master (assignedByOptions /
+  // assignedToOptions) — NOT from Roles & Permissions / staff. Anything added
+  // inline here is written to that same master, so it reflects in Settings and
+  // in every ticket. Deduped case-insensitively; the currently-selected value
+  // is always kept so historical ticket values never drop off.
+  const assignedBySelectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { label: string; value: string }[] = [];
+    const push = (name: string) => {
+      const key = name.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push({ label: name, value: name });
+    };
+    assignedByOptions.forEach((o) => push(o.name));
+    if (d.assignedBy) push(d.assignedBy);
+    return out;
+  }, [assignedByOptions, d.assignedBy]);
+
+  const assignedToSelectOptions = useMemo(() => {
+    const seen = new Set<string>();
+    const out: { label: string; value: string }[] = [];
+    const push = (name: string) => {
+      const key = name.trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      out.push({ label: name, value: name });
+    };
+    assignedToOptions.forEach((o) => push(o.name));
+    if (d.assignedTo) push(d.assignedTo);
+    return out;
+  }, [assignedToOptions, d.assignedTo]);
 
   // Resolve the selected brand. Prefer the stored brandId (durable link), then
   // fall back to a name match SCOPED to the active category (so "Apple" under
@@ -1229,15 +1353,15 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
       )}
 
     <div ref={formRef} className={FORM_CARD_COMPACT}>
-      <div className="grid grid-cols-1 gap-x-4 gap-y-6 lg:grid-cols-2">
-        {/* Left Column — Device Identity */}
+      <div className="space-y-6">
+        {/* Row 1 — Device Identity: Category | Brand | Model | IMEI/Serial */}
         <div className="space-y-3">
           <SectionLabel icon={Package}>Device Identity</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             {/* Per-device Category — reuses the Settings-backed category master.
                 Writes only to the active device so each device keeps its own.
                 Flows sequentially in the identity grid: Category → Brand →
-                Model → ID Type → IMEI, all sharing one consistent field width. */}
+                Model → IMEI, all sharing one consistent field width. */}
             <div className="sm:col-span-1">
               <Field label={data.devices.length > 1 ? `Category — Device ${activeIdx + 1}` : "Category"}>
                 <RSelect
@@ -1378,13 +1502,13 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                       onBlur={() => setIdentifierTouched(true)}
                       placeholder={IDENTIFIER_PLACEHOLDER}
                       className="h-[34px]"
-                      maxLength={16}
+                      maxLength={15}
                       inputMode="text"
                       autoComplete="off"
                     />
                     {showError && (
                       <p className="mt-1 text-[11px] text-amber-600">
-                        Enter a valid IMEI (16 digits) or Serial Number (letters &amp; numbers).
+                        Enter a valid IMEI (15 digits) or Serial Number (letters &amp; numbers).
                       </p>
                     )}
                   </Field>
@@ -1394,10 +1518,9 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
           </div>
         </div>
 
-        {/* Right Column — Intake */}
+        {/* Row 2 — Type | Source | Assigned By | Assigned To */}
         <div className="space-y-3">
-          <SectionLabel icon={ListPlus}>Intake Details</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2">
+          <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             <Field label="Type">
               <RSelect value={d.type} onChange={(v) => set("type", v)} placeholder="Select type" options={[
                 { label: "Walk-In", value: "walkin" },
@@ -1420,11 +1543,10 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                 onChange={(v) => set("assignedBy", v)}
                 placeholder="Select…"
                 searchable
-                onAddNew={(name) => {
-                  setNewAssignedByName(name);
-                  setShowNewAssignedBy(true);
-                }}
-                options={assignedByOptions.map((o) => ({ label: o.name, value: o.name }))}
+                addLabel="Add Person"
+                alwaysShowAddNew={canAddPerson}
+                onAddNew={canAddPerson ? (name) => openAddPerson("assignedBy", name) : undefined}
+                options={assignedBySelectOptions}
               />
             </Field>
             <Field label="Assigned To">
@@ -1433,11 +1555,10 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
                 onChange={(v) => set("assignedTo", v)}
                 placeholder="Select technician…"
                 searchable
-                onAddNew={(name) => {
-                  setNewAssignedToName(name);
-                  setShowNewAssignedTo(true);
-                }}
-                options={assignedToOptions.map((o) => ({ label: o.name, value: o.name }))}
+                addLabel="Add Person"
+                alwaysShowAddNew={canAddPerson}
+                onAddNew={canAddPerson ? (name) => openAddPerson("assignedTo", name) : undefined}
+                options={assignedToSelectOptions}
               />
             </Field>
           </div>
@@ -1513,59 +1634,27 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         </div>
       )}
 
-      {/* Add New Assigned By Modal */}
-      {showNewAssignedBy && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewAssignedBy(false)}>
-          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
-            <h3 className="text-base font-bold">Add New Assigned By</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">This name will be saved permanently and available in future tickets.</p>
-            <div className="mt-4 space-y-1">
-              <Label>Name</Label>
-              <Input value={newAssignedByName} onChange={(e: any) => setNewAssignedByName(e.target.value)} placeholder="e.g. Front Desk, Counter 1" className="h-11" autoFocus />
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setShowNewAssignedBy(false); setNewAssignedByName(""); }}>Cancel</Button>
-              <Button size="sm" disabled={!newAssignedByName.trim()} onClick={() => {
-                const option = createAssignedByOption(newAssignedByName.trim());
-                addAssignedByOption(option);
-                set("assignedBy", option.name);
-                setShowNewAssignedBy(false);
-                setNewAssignedByName("");
-              }}>
-                <CheckCircle2 className="h-3.5 w-3.5" /> Save
-              </Button>
-            </div>
-          </motion.div>
-        </div>
-      )}
-
-      {/* Add New Assigned To Modal */}
-      {showNewAssignedTo && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewAssignedTo(false)}>
-          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
-            <h3 className="text-base font-bold">Add New Technician</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">This name will be saved permanently and available in future tickets.</p>
-            <div className="mt-4 space-y-1">
-              <Label>Name</Label>
-              <Input value={newAssignedToName} onChange={(e: any) => setNewAssignedToName(e.target.value)} placeholder="e.g. Anand, Pooja" className="h-11" autoFocus />
-            </div>
-            <div className="mt-5 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={() => { setShowNewAssignedTo(false); setNewAssignedToName(""); }}>Cancel</Button>
-              <Button size="sm" disabled={!newAssignedToName.trim()} onClick={() => {
-                const option = createAssignedToOption(newAssignedToName.trim());
-                addAssignedToOption(option);
-                set("assignedTo", option.name);
-                setShowNewAssignedTo(false);
-                setNewAssignedToName("");
-              }}>
-                <CheckCircle2 className="h-3.5 w-3.5" /> Save
-              </Button>
-            </div>
-          </motion.div>
-        </div>
-      )}
+      {/* Add Person dialog — shared by Assigned By & Assigned To. Persists the
+          name to the Settings › Tickets master (assigned_by/to options) so it
+          reflects in Settings and every ticket, then auto-selects it into
+          whichever field opened it. */}
+      <AddPersonDialog
+        open={addPersonOpen}
+        onClose={() => setAddPersonOpen(false)}
+        initialName={addPersonName}
+        kind={addPersonKind}
+        onSave={(name) => {
+          if (addPersonField === "assignedBy") {
+            const option = createAssignedByOption(name, assignedByOptions);
+            addAssignedByOption(option);
+            set("assignedBy", option.name);
+          } else {
+            const option = createAssignedToOption(name, assignedToOptions);
+            addAssignedToOption(option);
+            set("assignedTo", option.name);
+          }
+        }}
+      />
     </div>
     </div>
   );
@@ -1654,36 +1743,13 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 { label: "Critical", value: "critical" },
               ]} />
             </Field>
-            <Field label="Warranty">
-              <div className="flex gap-1.5">
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={j.warrantyValue}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/[^0-9]/g, "");
-                    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-                      i === activeIdx ? { ...dev, job: { ...dev.job, warrantyValue: val, warranty: val && dev.job.warrantyUnit ? `${val} ${dev.job.warrantyUnit.charAt(0).toUpperCase() + dev.job.warrantyUnit.slice(1)}` : "" } } : dev
-                    );
-                    setData({ ...data, devices: updatedDevices });
-                  }}
-                  placeholder="0"
-                  className="h-[34px] w-[72px] rounded-xl border border-gray-200 bg-white px-2.5 text-[13px] font-medium text-zinc-800 outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
-                />
-                <div className="flex-1">
-                  <RSelect value={j.warrantyUnit} onChange={(v) => {
-                    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-                      i === activeIdx ? { ...dev, job: { ...dev.job, warrantyUnit: v, warranty: dev.job.warrantyValue && v ? `${dev.job.warrantyValue} ${v.charAt(0).toUpperCase() + v.slice(1)}` : "" } } : dev
-                    );
-                    setData({ ...data, devices: updatedDevices });
-                  }} placeholder="Duration" options={[
-                    { label: "Days", value: "days" },
-                    { label: "Months", value: "months" },
-                    { label: "Years", value: "years" },
-                  ]} />
-                </div>
-              </div>
+            <Field label="Device Colour">
+              <RSelect
+                value={j.deviceColour}
+                onChange={(v) => set("deviceColour", v)}
+                placeholder="Select colour"
+                options={DEVICE_COLOUR_OPTIONS}
+              />
             </Field>
             <Field label="Expected Resolution Time">
               {customResLabel ? (
@@ -1924,7 +1990,11 @@ function SectionLabel({ icon: Icon, children }: { icon: any; children: React.Rea
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1">
-      <Label>{label}</Label>
+      {/* Field labels are nudged one subtle step darker than the default muted
+          tone (text-foreground/70) for better readability, while staying below
+          the full-strength value text. Size (text-xs) and weight (font-medium)
+          are inherited from <Label> unchanged. Scoped to the ticket wizard. */}
+      <Label className="text-foreground/70">{label}</Label>
       {children}
     </div>
   );

@@ -24,7 +24,7 @@ export function Dropdown({
   panelClassName?: string;
 }) {
   const [open, setOpen] = React.useState(false);
-  const [pos, setPos] = React.useState<{ top?: number; bottom?: number; left?: number; right?: number }>({});
+  const [pos, setPos] = React.useState<{ top?: number; bottom?: number; left?: number; right?: number; maxHeight?: number }>({});
   const ref = React.useRef<HTMLDivElement | null>(null);
   const triggerRef = React.useRef<HTMLDivElement | null>(null);
   const panelRef = React.useRef<HTMLDivElement | null>(null);
@@ -32,27 +32,63 @@ export function Dropdown({
 
   React.useEffect(() => { setMounted(true); }, []);
 
-  // Calculate fixed positioning when opening
-  React.useEffect(() => {
-    if (!open || !triggerRef.current) return;
+  // Calculate fixed positioning when opening. Viewport-aware on BOTH axes:
+  //  • Vertical: opens down or up depending on available space, and always caps
+  //    its height to the space available (with an internal scroll) so a tall
+  //    menu never spills off the top/bottom edge.
+  //  • Horizontal: aligns to the requested side, then clamps so the panel can
+  //    never be clipped off the left or right edge of the screen.
+  const recalcPosition = React.useCallback(() => {
+    if (!triggerRef.current) return;
     const rect = triggerRef.current.getBoundingClientRect();
-    const spaceBelow = window.innerHeight - rect.bottom;
+    const GAP = 4;
+    const MARGIN = 8; // keep a small gap from the viewport edges
+    const vh = window.innerHeight;
+    const vw = window.innerWidth;
+
+    const spaceBelow = vh - rect.bottom;
     const spaceAbove = rect.top;
     const openUp = spaceBelow < 260 && spaceAbove > spaceBelow;
 
-    const position: { top?: number; bottom?: number; left?: number; right?: number } = {};
+    // Estimate the panel width from the Tailwind `w-*` class (e.g. w-48 = 12rem).
+    const widthMatch = /\bw-(\d+)\b/.exec(width);
+    const panelWidth = panelRef.current?.offsetWidth
+      ?? (widthMatch ? Number(widthMatch[1]) * 4 : 224); // tailwind spacing = 4px
+
+    const position: { top?: number; bottom?: number; left?: number; right?: number; maxHeight?: number } = {};
+
+    // Vertical placement + height cap.
     if (openUp) {
-      position.bottom = window.innerHeight - rect.top + 4;
+      position.bottom = vh - rect.top + GAP;
+      position.maxHeight = Math.max(120, rect.top - GAP - MARGIN);
     } else {
-      position.top = rect.bottom + 4;
+      position.top = rect.bottom + GAP;
+      position.maxHeight = Math.max(120, vh - rect.bottom - GAP - MARGIN);
     }
-    if (align === "right") {
-      position.right = window.innerWidth - rect.right;
-    } else {
-      position.left = rect.left;
-    }
+
+    // Horizontal placement, clamped to the viewport using explicit left so the
+    // panel is always fully on-screen regardless of the trigger's position.
+    let left = align === "right" ? rect.right - panelWidth : rect.left;
+    left = Math.min(left, vw - panelWidth - MARGIN);
+    left = Math.max(MARGIN, left);
+    position.left = left;
+
     setPos(position);
-  }, [open, align]);
+  }, [align, width]);
+
+  // Recalculate when opening. Run twice: once immediately (estimated width) and
+  // once after paint (measured width) so clamping is exact.
+  React.useEffect(() => {
+    if (!open) return;
+    recalcPosition();
+    const raf = requestAnimationFrame(recalcPosition);
+    const onResize = () => recalcPosition();
+    window.addEventListener("resize", onResize);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, recalcPosition]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -97,7 +133,9 @@ export function Dropdown({
           transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
           style={pos}
           className={cn(
-            "fixed z-[9999] overflow-hidden rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
+            // overflow-y-auto + the computed maxHeight keep tall menus fully
+            // visible: content that doesn't fit scrolls inside the panel.
+            "fixed z-[9999] overflow-y-auto overscroll-contain rounded-xl border border-border bg-popover p-1.5 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
             width,
             panelClassName
           )}

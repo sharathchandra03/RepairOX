@@ -17,18 +17,21 @@ export function AnimatedNumber({ value, format }: { value: number; format?: (n: 
 }
 
 export function KpiCard({
-  title, value, format, hint, delta, tone = "rose", progress, onCardClick, icon: Icon,
+  title, value, format, hint, delta, tone = "rose", progress, onCardClick, icon: Icon, barThickness = "default",
 }: {
   title: string;
   value: number;
   format?: (n: number) => string;
   hint?: string;
   delta?: { value: string; up?: boolean };
-  tone?: "rose" | "amber" | "emerald" | "sky" | "violet";
+  tone?: "rose" | "amber" | "emerald" | "sky" | "violet" | "blue" | "overdue";
   /** 0–100 progress value. Omit to hide the bar. */
   progress?: { value: number; label?: string; targetValue?: string };
   /** If provided, the card becomes clickable (e.g. to edit target) */
   onCardClick?: () => void;
+  /** Progress bar thickness. "default" = h-1.5 (all cards); "2x" = exactly twice
+   *  the default vertical thickness, used only by the Revenue Monthly Target bar. */
+  barThickness?: "default" | "2x";
   /** Optional leading icon rendered next to the title. Reuse an existing app icon
    *  (e.g. the lucide `Ticket` icon used across the Tickets module). Omit to keep
    *  the card icon-free, exactly as the other KPI cards render today. */
@@ -40,6 +43,10 @@ export function KpiCard({
     emerald: { chip: "text-emerald-700 bg-emerald-50 ring-emerald-200/40", bar: "bg-emerald-500" },
     sky:     { chip: "text-sky-700 bg-sky-50 ring-sky-200/40", bar: "bg-sky-500" },
     violet:  { chip: "text-violet-700 bg-violet-50 ring-violet-200/40", bar: "bg-violet-500" },
+    // RepairOX blue — the exact token already used by the Dues Outstanding card.
+    blue:    { chip: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/40", bar: "bg-[#4361EE]" },
+    // Soft, eye-friendly overdue red — muted and readable on a light background.
+    overdue: { chip: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/50", bar: "bg-[#D96A82]" },
   };
   const t = TONES[tone];
   const pct = Math.max(0, Math.min(100, progress?.value ?? 0));
@@ -74,14 +81,14 @@ export function KpiCard({
         </p>
       </div>
       {hint && (
-        <p className="relative mt-2 inline-flex items-center rounded-full bg-[#EEF1FD] px-2.5 py-0.5 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
+        <p className="relative mt-[11px] inline-flex items-center rounded-full bg-[#EEF1FD] px-2.5 py-0.5 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
           {hint}
         </p>
       )}
 
       {/* Progress indicator */}
       {progress && (
-        <div className="relative mt-3">
+        <div className={cn("relative", barThickness === "2x" ? "mt-[6px]" : "mt-3")}>
           {progress.label && (
             <div className="flex items-center justify-between mb-1.5">
               <span className="text-[10px] text-muted-foreground">{progress.label}</span>
@@ -92,7 +99,7 @@ export function KpiCard({
               )}
             </div>
           )}
-          <div className="h-1.5 w-full rounded-full bg-muted/80 overflow-hidden">
+          <div className={cn("w-full rounded-full bg-muted/80 overflow-hidden", barThickness === "2x" ? "h-3" : "h-1.5")}>
             <motion.div
               initial={{ width: 0 }}
               animate={{ width: `${pct}%` }}

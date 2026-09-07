@@ -58,6 +58,8 @@ type InvoiceFormDevice = {
   warranty: string;
   warrantyValue: string;
   warrantyUnit: string;
+  /** Device colour carried over from the linked ticket device / persisted invoice. */
+  deviceColour: string;
   technician: string;
   notes: string;
   parts: InvoiceLineItem[];
@@ -93,6 +95,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
     warranty: "",
     warrantyValue: "",
     warrantyUnit: "",
+    deviceColour: "",
     technician: "",
     notes: "",
     parts: [],
@@ -267,6 +270,7 @@ function InvoiceWizard() {
               warranty: dev.warranty || "",
               warrantyValue: dev.warrantyValue ? String(dev.warrantyValue) : "",
               warrantyUnit: dev.warrantyUnit || "",
+              deviceColour: dev.deviceColour || "",
               technician: dev.technician || "",
               notes: dev.notes || "",
               parts,
@@ -410,6 +414,7 @@ function InvoiceWizard() {
       warranty: d.warranty,
       warrantyValue: d.warrantyValue ? Number(d.warrantyValue) : undefined,
       warrantyUnit: (d.warrantyUnit || undefined) as "days" | "months" | "years" | undefined,
+      deviceColour: d.deviceColour || undefined,
       technician: d.technician,
       parts: d.parts,
       notes: d.notes,
@@ -690,6 +695,7 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
         warranty: d.warranty,
         warrantyValue: d.warrantyValue ? String(d.warrantyValue) : "",
         warrantyUnit: d.warrantyUnit || "",
+        deviceColour: d.deviceColour || "",
         technician: d.technician,
         notes: d.notes,
         parts: d.parts,
@@ -1112,7 +1118,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
   const deviceSubtotal = activeDevice.parts.reduce((s, p) => s + p.total, 0);
 
   return (
-    <div className="mx-auto max-w-[893px] space-y-4">
+    <div className="mx-auto max-w-5xl space-y-4">
       {/* Device Tabs */}
       <div className="rounded-2xl border border-border bg-card shadow-card">
         <div className="border-b border-border px-6 py-2.5 sm:px-8">
@@ -1162,6 +1168,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   value={activeDevice.category || ""}
                   onChange={(e: any) => setDeviceField("category", e.target.value)}
                   options={[{ label: "Select category…", value: "" }, ...categoryOptions.map((c) => ({ label: c.label, value: c.id }))]}
+                  className="h-9"
                 />
               </div>
               <DeviceBrandModelSelector
@@ -1195,7 +1202,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   }}
                   placeholder={IDENTIFIER_PLACEHOLDER}
                   maxLength={16}
-                  className="h-11 font-mono"
+                  className="h-9 font-mono"
                   autoComplete="off"
                 />
               </div>
@@ -1206,17 +1213,17 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           <div>
             <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Job Details</p>
             <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-11" /></div>
+              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-9" /></div>
               <div className="space-y-1">
                 <Label>Job Type</Label>
-                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} options={[
+                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} className="h-9" options={[
                   { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
                 ]} />
               </div>
-              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" className="h-11" /></div>
+              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" className="h-9" /></div>
               <div className="space-y-1">
                 <Label>Priority</Label>
-                <Select value={activeDevice.priority} onChange={(e: any) => setDeviceField("priority", e.target.value)} options={[
+                <Select value={activeDevice.priority} onChange={(e: any) => setDeviceField("priority", e.target.value)} className="h-9" options={[
                   { label: "Normal", value: "normal" }, { label: "High", value: "high" }, { label: "Critical", value: "critical" },
                 ]} />
               </div>
@@ -1239,10 +1246,10 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                       }));
                     }}
                     placeholder="0"
-                    className="h-11 w-[72px] rounded-xl border border-border bg-card px-2.5 text-sm font-medium text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                    className="h-9 w-[72px] rounded-xl border border-border bg-card px-2.5 text-sm font-medium text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
                   />
                   <div className="flex-1">
-                    <Select value={activeDevice.warrantyUnit} onChange={(e: any) => {
+                    <Select className="h-9" value={activeDevice.warrantyUnit} onChange={(e: any) => {
                       const unit = e.target.value;
                       updateForm((f) => ({
                         ...f,
@@ -1259,7 +1266,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   </div>
                 </div>
               </div>
-              <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-11" /></div>
+              <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-9" /></div>
             </div>
           </div>
 
@@ -1296,10 +1303,10 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
             {activeDevice.parts.length === 0 && !showInventorySearch && (
               <div className="rounded-xl border border-border p-3 mb-2">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
-                  <div className="space-y-1"><Label>Item</Label><Input value="" onChange={() => addPart()} onFocus={() => addPart()} placeholder="Click to add an item…" /></div>
-                  <div className="space-y-1"><Label>Qty</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">1</div></div>
-                  <div className="space-y-1"><Label>Price</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
-                  <div className="space-y-1"><Label>Total</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
+                  <div className="space-y-1"><Label>Item</Label><Input value="" onChange={() => addPart()} onFocus={() => addPart()} placeholder="Click to add an item…" className="h-9" /></div>
+                  <div className="space-y-1"><Label>Qty</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">1</div></div>
+                  <div className="space-y-1"><Label>Price</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
+                  <div className="space-y-1"><Label>Total</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
                   <div className="flex items-end"><div className="h-9 w-9" /></div>
                 </div>
               </div>
@@ -1310,10 +1317,10 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                 {activeDevice.parts.map((item) => (
                   <div key={item.id} className="rounded-xl border border-border p-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
-                      <div className="space-y-1"><Label>Item</Label><Input value={item.name} onChange={(e: any) => updatePart(item.id, "name", e.target.value)} placeholder="Display assembly" /></div>
-                      <div className="space-y-1"><Label>Qty</Label><NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} /></div>
-                      <div className="space-y-1"><Label>Price</Label><NumericInput value={item.price} onChange={(v) => updatePart(item.id, "price", v)} /></div>
-                      <div className="space-y-1"><Label>Total</Label><div className="flex h-11 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums">{formatINR(item.total)}</div></div>
+                      <div className="space-y-1"><Label>Item</Label><Input value={item.name} onChange={(e: any) => updatePart(item.id, "name", e.target.value)} placeholder="Display assembly" className="h-9" /></div>
+                      <div className="space-y-1"><Label>Qty</Label><NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} className="h-9" /></div>
+                      <div className="space-y-1"><Label>Price</Label><NumericInput value={item.price} onChange={(v) => updatePart(item.id, "price", v)} className="h-9" /></div>
+                      <div className="space-y-1"><Label>Total</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums">{formatINR(item.total)}</div></div>
                       <div className="flex items-end"><button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 hover:bg-rose-50 transition"><Trash2 className="h-3.5 w-3.5" /></button></div>
                     </div>
                   </div>

@@ -1,10 +1,17 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import { Palette } from "lucide-react";
+import { Palette, Columns3 } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings } from "@/lib/store-settings";
+import { usePermissions } from "@/lib/permissions-context";
 import { STATUS_LABEL, type TicketStatus } from "@/lib/mock-data";
+import { ColumnSettingsPanel } from "@/components/tickets/column-settings-panel";
+import {
+  DEFAULT_ORDER as COLUMN_DEFAULT_ORDER,
+  DEFAULT_VISIBLE as COLUMN_DEFAULT_VISIBLE,
+  type ColumnId,
+} from "@/lib/ticket-columns";
 
 const ALL_STATUSES: TicketStatus[] = [
   "in_progress",
@@ -32,6 +39,10 @@ const PRESET_COLORS = [
 
 export default function TicketSettingsPage() {
   const { settings, updateSettings } = useStoreSettings();
+  const { can } = usePermissions();
+  // Same permission model as the other Ticket Settings sub-sections.
+  const canManage = can("edit_ticket_settings") || can("manage_settings");
+
   const [colors, setColors] = useState<Record<string, string>>(settings.statusColors);
   const [saving, setSaving] = useState(false);
   const [activeStatus, setActiveStatus] = useState<TicketStatus | null>(null);
@@ -45,6 +56,46 @@ export default function TicketSettingsPage() {
     updateSettings({ statusColors: colors });
     setTimeout(() => setSaving(false), 400);
   }, [colors, updateSettings]);
+
+  /* ── Column Settings ──────────────────────────────────────────────────
+     Reads the shared, persisted config (single source of truth) and writes it
+     back on Apply. The panel keeps its own local working copy, so Cancel simply
+     re-seeds it from the saved settings by bumping the remount key. */
+  const [columnPanelKey, setColumnPanelKey] = useState(0);
+
+  const savedColumnOrder = (settings.ticketColumnOrder?.length
+    ? settings.ticketColumnOrder
+    : COLUMN_DEFAULT_ORDER) as ColumnId[];
+  const savedVisibleColumns = new Set<ColumnId>(
+    (settings.ticketVisibleColumns?.length
+      ? settings.ticketVisibleColumns
+      : COLUMN_DEFAULT_VISIBLE) as ColumnId[]
+  );
+
+  const handleColumnsApply = useCallback(
+    (order: ColumnId[], visible: Set<ColumnId>) => {
+      updateSettings({
+        ticketColumnOrder: order as string[],
+        ticketVisibleColumns: Array.from(visible) as string[],
+      });
+      // Re-seed the panel from the freshly-saved state.
+      setColumnPanelKey((k) => k + 1);
+    },
+    [updateSettings]
+  );
+
+  const handleColumnsCancel = useCallback(() => {
+    // Discard the working copy by remounting the panel from saved settings.
+    setColumnPanelKey((k) => k + 1);
+  }, []);
+
+  const handleColumnsReset = useCallback(() => {
+    // Persist the built-in default configuration immediately.
+    updateSettings({
+      ticketColumnOrder: [...COLUMN_DEFAULT_ORDER] as string[],
+      ticketVisibleColumns: [...COLUMN_DEFAULT_VISIBLE] as string[],
+    });
+  }, [updateSettings]);
 
   return (
     <SettingsPage
@@ -141,6 +192,28 @@ export default function TicketSettingsPage() {
             );
           })}
         </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Column Settings"
+        description="Choose which columns appear in the ticket table, reorder them, and set defaults. Applies to the Tickets table for everyone in your workspace."
+        icon={Columns3}
+      >
+        {canManage ? (
+          <ColumnSettingsPanel
+            key={columnPanelKey}
+            bare
+            columnOrder={savedColumnOrder}
+            visibleColumns={savedVisibleColumns}
+            onApply={handleColumnsApply}
+            onCancel={handleColumnsCancel}
+            onReset={handleColumnsReset}
+          />
+        ) : (
+          <p className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-[13px] text-muted-foreground">
+            You don&apos;t have permission to change ticket column settings.
+          </p>
+        )}
       </SettingsSection>
     </SettingsPage>
   );

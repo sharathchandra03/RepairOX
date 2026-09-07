@@ -44,6 +44,34 @@ export const PRIORITY_TONE: Record<TicketPriority, string> = {
   critical: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
+/* ─── Device Colour ───────────────────────────────────────────────────
+   The list of device colours offered in the Ticket → Job Details step and
+   carried through view / edit / print / invoice. Kept as a single source of
+   truth here so the list can be extended later (or wired to Settings) without
+   touching the Ticket flow. Each entry pairs a stored `value` (persisted on
+   the device) with a `label` and a subtle, professional `swatch` colour used
+   for visual identification in the dropdown. */
+export type DeviceColourOption = { label: string; value: string; swatch: string };
+
+export const DEVICE_COLOUR_OPTIONS: DeviceColourOption[] = [
+  { label: "Black", value: "black", swatch: "#2B2B2E" },
+  { label: "White", value: "white", swatch: "#E7E7EA" },
+  { label: "Red", value: "red", swatch: "#B23B3B" },
+  { label: "Blue", value: "blue", swatch: "#3E5C99" },
+];
+
+/** Default colour applied to every new device. */
+export const DEFAULT_DEVICE_COLOUR = "black";
+
+/** Human-readable label for a stored device colour value. Returns "" when the
+ *  value is empty/unknown so historical devices show blank / N/A rather than a
+ *  guessed colour. */
+export function formatDeviceColour(value?: string): string {
+  if (!value) return "";
+  const match = DEVICE_COLOUR_OPTIONS.find((o) => o.value === value);
+  return match ? match.label : value;
+}
+
 export type TicketItem = {
   device: string;
   model: string;
@@ -97,6 +125,10 @@ export type DeviceRecord = {
   warrantyValue?: number;
   /** Warranty duration unit: "days" | "months" | "years". */
   warrantyUnit?: "days" | "months" | "years";
+  /** Selected device colour value (e.g. "black"). Optional so historical
+   *  devices without a colour keep working (displayed as blank / N/A). New
+   *  devices default to Black. */
+  deviceColour?: string;
   resolutionMinutes: number;
   accessories: string;
   notes: string;
@@ -132,6 +164,7 @@ export function createDeviceRecord(overrides?: Partial<DeviceRecord>): DeviceRec
     warranty: "",
     warrantyValue: undefined,
     warrantyUnit: undefined,
+    deviceColour: DEFAULT_DEVICE_COLOUR,
     resolutionMinutes: 59,
     accessories: "",
     notes: "",
@@ -639,6 +672,9 @@ export type InvoiceDeviceRecord = {
   warrantyValue?: number;
   /** Warranty duration unit: "days" | "months" | "years" (matches ticket model). */
   warrantyUnit?: "days" | "months" | "years";
+  /** Device colour carried over from the linked ticket device (matches ticket
+   *  model). Optional for legacy records. */
+  deviceColour?: string;
   /** Assignment */
   technician: string;
   /** Parts assigned to this device */
@@ -667,6 +703,7 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
     warranty: "",
     warrantyValue: undefined,
     warrantyUnit: undefined,
+    deviceColour: undefined,
     technician: "",
     parts: [],
     notes: "",
@@ -726,6 +763,8 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
     warranty: dev.warranty,
     warrantyValue: dev.warrantyValue,
     warrantyUnit: dev.warrantyUnit,
+    // Copy the persisted colour — do not re-infer it.
+    deviceColour: dev.deviceColour,
     technician: dev.assignedTo,
     parts,
     notes: dev.notes,

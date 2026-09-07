@@ -23,7 +23,7 @@ import { formatINR, cn } from "@/lib/utils";
 import {
   STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE,
   type Ticket, type TicketStatus, type TicketPriority, type DeviceRecord,
-  getTicketDevices,
+  getTicketDevices, formatDeviceColour,
 } from "@/lib/mock-data";
 import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 
@@ -209,6 +209,7 @@ export default function TicketDetailPage() {
       jobType: dev.jobType,
       priority: dev.priority,
       warranty: dev.warranty,
+      deviceColour: dev.deviceColour,
       technician: dev.assignedTo,
       notes: dev.notes,
       estimate: dev.estimate,
@@ -355,6 +356,7 @@ export default function TicketDetailPage() {
                     <DetailField label="Brand" value={dev.brand || ticket.device} />
                     <DetailField label="Model" value={dev.model || ticket.model} />
                     <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : (dev.brand || ticket.device)} />
+                    <DetailField label="Device Colour" value={formatDeviceColour(dev.deviceColour) || "—"} />
                     <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
                     <DetailField label="Source" value={dev.source || ticket.source || "—"} />
                     <DetailField label="Issue" value={dev.issue || ticket.issue} />
@@ -381,6 +383,7 @@ export default function TicketDetailPage() {
                         <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : "—"} />
                         <DetailField label="Brand" value={dev.brand || "—"} />
                         <DetailField label="Model" value={dev.model || "—"} />
+                        <DetailField label="Device Colour" value={formatDeviceColour(dev.deviceColour) || "—"} />
                         <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
                         <DetailField label="Issue" value={dev.issue || "—"} />
                         <DetailField label="Technician" value={dev.assignedTo || "—"} />
