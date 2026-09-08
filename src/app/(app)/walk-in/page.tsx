@@ -196,7 +196,7 @@ export default function WalkInPage() {
   const pinnableFilters: PinnableFilterDef[] = useMemo(() => [
     {
       id: "type", label: "Type", type: "select", value: typeFilter,
-      options: [{ label: "All Types", value: "all" }, { label: "Direct", value: "direct" }, { label: "Sales", value: "sales" }],
+      options: [{ label: "All Types", value: "all" }, { label: WALKIN_TYPE_LABEL.direct, value: "direct" }, { label: WALKIN_TYPE_LABEL.sales, value: "sales" }],
       onChange: setTypeFilter,
     },
     {
@@ -210,8 +210,8 @@ export default function WalkInPage() {
       onChange: setStatusFilter,
     },
     {
-      id: "salesPerson", label: "Sales Person", type: "select", value: salesFilter,
-      options: [{ label: "All Sales People", value: "all" }, ...activeStaff.map((m) => ({ label: m.name, value: m.id }))],
+      id: "salesPerson", label: "Marketing Person", type: "select", value: salesFilter,
+      options: [{ label: "All Marketing People", value: "all" }, ...activeStaff.map((m) => ({ label: m.name, value: m.id }))],
       onChange: setSalesFilter,
     },
     {
@@ -766,7 +766,7 @@ function WalkInViewDrawer({
           <DetailRow label="Source">{w.source || "—"}</DetailRow>
           <DetailRow label="Model">{w.model || "—"}</DetailRow>
           <DetailRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</DetailRow>
-          {w.type === "sales" && <DetailRow label="Sales Person">{w.salesPersonName || "—"}</DetailRow>}
+          {w.type === "sales" && <DetailRow label="Marketing Person">{w.salesPersonName || "—"}</DetailRow>}
           <DetailRow label="Final Status">
             <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", WALKIN_STATUS_TONE[w.status])}>
               <span className="h-1.5 w-1.5 rounded-full bg-current" />

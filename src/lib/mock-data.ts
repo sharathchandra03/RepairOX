@@ -927,7 +927,8 @@ export type WalkInType = "direct" | "sales";
 
 export const WALKIN_TYPE_LABEL: Record<WalkInType, string> = {
   direct: "Direct",
-  sales: "Sales",
+  // Display label only — the stored value stays "sales" for backward-compat.
+  sales: "Marketing",
 };
 
 export const WALKIN_TYPE_TONE: Record<WalkInType, string> = {

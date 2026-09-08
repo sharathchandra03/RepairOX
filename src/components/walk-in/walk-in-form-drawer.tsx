@@ -173,7 +173,7 @@ export function WalkInFormDrawer({
     if (!name) { setError("Customer name is required."); return; }
     if (!(form.phone || "").trim()) { setError("Contact number is required."); return; }
     if (form.type === "sales" && requireSalesPerson && !form.salesPersonId) {
-      setError("A sales person must be assigned for a Sales walk-in.");
+      setError("A marketing person must be assigned for a Marketing walk-in.");
       return;
     }
 
@@ -383,12 +383,12 @@ export function WalkInFormDrawer({
           {/* Sales person — only when Type = Sales */}
           {form.type === "sales" && (
             <div className="space-y-1" ref={salesRef}>
-              <Label>Sales Person {requireSalesPerson ? "*" : ""}</Label>
+              <Label>Marketing Person {requireSalesPerson ? "*" : ""}</Label>
               <div className="relative">
                 <Input
                   value={salesQuery}
                   iconLeft={<Search className="h-4 w-4" />}
-                  placeholder="Assign a sales person…"
+                  placeholder="Assign a marketing person…"
                   onChange={(e: any) => { setSalesQuery(e.target.value); set({ salesPersonId: undefined, salesPersonName: undefined }); setSalesOpen(true); }}
                   onFocus={() => setSalesOpen(true)}
                 />
