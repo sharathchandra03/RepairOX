@@ -31,6 +31,8 @@ import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
+import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
+import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
@@ -60,6 +62,8 @@ export default function WalkInPage() {
   const { can } = usePermissions();
   const { sources } = useWalkInSources();
   const { requireSalesPerson } = useWalkInRequireSalesPerson();
+  // Individual filter pinning (own storage key so it doesn't collide with Tickets).
+  const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-walkin-pinned-filters");
 
   const [view, setView] = useState<"table" | "report">("table");
 
@@ -184,6 +188,36 @@ export default function WalkInPage() {
     const t = tickets.find((x) => x.id === ticketId);
     return t?.ticketNo || t?.id || ticketId;
   }, [tickets]);
+
+  /* Definitions for the pinnable filters — shared by the pinned-filter bar and
+     the advanced filter panel so a filter behaves identically in both places. */
+  const pinnableFilters: PinnableFilterDef[] = useMemo(() => [
+    {
+      id: "type", label: "Type", type: "select", value: typeFilter,
+      options: [{ label: "All Types", value: "all" }, { label: "Direct", value: "direct" }, { label: "Sales", value: "sales" }],
+      onChange: setTypeFilter,
+    },
+    {
+      id: "source", label: "Source", type: "select", value: sourceFilter,
+      options: [{ label: "All Sources", value: "all" }, ...sources.map((s) => ({ label: s, value: s }))],
+      onChange: setSourceFilter,
+    },
+    {
+      id: "status", label: "Final Status", type: "select", value: statusFilter,
+      options: [{ label: "All Statuses", value: "all" }, ...WALKIN_FINAL_STATUSES.map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))],
+      onChange: setStatusFilter,
+    },
+    {
+      id: "salesPerson", label: "Sales Person", type: "select", value: salesFilter,
+      options: [{ label: "All Sales People", value: "all" }, ...activeStaff.map((m) => ({ label: m.name, value: m.id }))],
+      onChange: setSalesFilter,
+    },
+    {
+      id: "dateRange", label: "Date Range", type: "select", value: dateRange,
+      options: WALKIN_DATE_RANGES.map((d) => ({ label: d.label, value: d.value })),
+      onChange: (v: string) => setDateRange(v as WalkInDateRange),
+    },
+  ], [typeFilter, sourceFilter, statusFilter, salesFilter, dateRange, sources, activeStaff]);
 
   /* ── Save (create or edit) ── */
   const handleSaved = useCallback(async (data: Partial<WalkIn>, editingId: string | null) => {
@@ -341,30 +375,56 @@ export default function WalkInPage() {
         />
       </div>
 
+      {/* Pinned filters bar — the filters the user chose to keep visible. */}
+      {view === "table" && (
+        <PinnedFilterBar filters={pinnableFilters} pinnedIds={pinnedIds} onUnpin={unpin} />
+      )}
+
       {/* Advanced filters */}
       {view === "table" && showFilters && (
         <motion.div
-          initial={{ opacity: 0, y: -4 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="grid grid-cols-2 gap-3 rounded-2xl border border-border bg-card p-4 shadow-card sm:grid-cols-4"
+          initial={{ opacity: 0, scaleY: 0.95 }}
+          animate={{ opacity: 1, scaleY: 1 }}
+          style={{ transformOrigin: "top" }}
+          transition={{ duration: 0.15 }}
+          className="rounded-2xl border border-border bg-card p-4 shadow-card"
         >
-          <FilterSelect label="Type" value={typeFilter} onChange={setTypeFilter}
-            options={[{ label: "All Types", value: "all" }, { label: "Direct", value: "direct" }, { label: "Sales", value: "sales" }]} />
-          <FilterSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
-            options={[{ label: "All Sources", value: "all" }, ...sources.map((s) => ({ label: s, value: s }))]} />
-          <FilterSelect label="Final Status" value={statusFilter} onChange={setStatusFilter}
-            options={[{ label: "All Statuses", value: "all" }, ...WALKIN_FINAL_STATUSES.map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))]} />
-          <FilterSelect label="Sales Person" value={salesFilter} onChange={setSalesFilter}
-            disabled={typeFilter === "direct"}
-            options={[{ label: "All Sales People", value: "all" }, ...activeStaff.map((m) => ({ label: m.name, value: m.id }))]} />
-          {anyFilterActive && (
-            <button
-              onClick={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); }}
-              className="col-span-2 justify-self-start text-[11px] font-medium text-[#4361EE] hover:underline sm:col-span-4"
-            >
-              Clear filters
-            </button>
-          )}
+          <div className="mb-3 flex items-center justify-between">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }}
+                className="text-[13px] font-semibold text-[#4361EE] hover:underline"
+              >
+                Reset Filters
+              </button>
+              <button
+                onClick={() => setShowFilters(false)}
+                aria-label="Close filters"
+                title="Close filters"
+                className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {pinnableFilters.map((f) => (
+              <PinnableField
+                key={f.id}
+                label={f.label}
+                pinned={isPinned(f.id)}
+                onTogglePin={() => togglePin(f.id)}
+              >
+                <Select
+                  value={f.value}
+                  onChange={(e: any) => f.onChange(e.target.value)}
+                  options={f.options || []}
+                  disabled={f.id === "salesPerson" && typeFilter === "direct"}
+                />
+              </PinnableField>
+            ))}
+          </div>
         </motion.div>
       )}
 
@@ -616,16 +676,29 @@ export default function WalkInPage() {
 }
 
 /* ─── Filter select ──────────────────────────────────────────────────── */
-function FilterSelect({
-  label, value, onChange, options, disabled,
+/* ─── Advanced-filter field with a per-filter Pin/Unpin toggle (like Tickets) ── */
+function PinnableField({
+  label, pinned, onTogglePin, children,
 }: {
-  label: string; value: string; onChange: (v: string) => void;
-  options: { label: string; value: string }[]; disabled?: boolean;
+  label: string; pinned: boolean; onTogglePin: () => void; children: React.ReactNode;
 }) {
   return (
     <div className="space-y-1">
-      <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</label>
-      <Select value={value} onChange={(e: any) => onChange(e.target.value)} options={options} disabled={disabled} />
+      <div className="flex items-center justify-between">
+        <label className="text-[11px] font-medium text-muted-foreground">{label}</label>
+        <button
+          onClick={onTogglePin}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+            pinned ? "bg-[#EEF1FD] text-[#4361EE]" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+          title={pinned ? "Unpin filter" : "Pin filter to header"}
+        >
+          {pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+          {pinned ? "Unpin" : "Pin"}
+        </button>
+      </div>
+      {children}
     </div>
   );
 }
