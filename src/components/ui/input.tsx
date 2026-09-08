@@ -1,5 +1,6 @@
 "use client";
 import * as React from "react";
+import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
@@ -84,12 +85,47 @@ interface SelectProps {
 }
 export function Select({ value, defaultValue, onChange, options, className, placeholder, disabled }: SelectProps) {
   const [open, setOpen] = React.useState(false);
+  const [mounted, setMounted] = React.useState(false);
   const [internalValue, setInternalValue] = React.useState(defaultValue || "");
   const currentValue = value !== undefined ? value : internalValue;
   const ref = React.useRef<HTMLDivElement>(null);
+  const triggerRef = React.useRef<HTMLButtonElement>(null);
   const selected = options.find((o) => o.value === currentValue);
 
-  // Close on click outside
+  // The dropdown panel is rendered in a portal with FIXED positioning so it's
+  // never clipped by a scrolling/overflow-hidden ancestor (e.g. inside a modal
+  // or drawer body). It also flips upward when there isn't enough room below.
+  const [pos, setPos] = React.useState<{ left: number; width: number; top?: number; bottom?: number }>({ left: 0, width: 0 });
+
+  React.useEffect(() => { setMounted(true); }, []);
+
+  const updatePosition = React.useCallback(() => {
+    const el = triggerRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < 260 && r.top > spaceBelow;
+    setPos({
+      left: r.left,
+      width: r.width,
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+    });
+  }, []);
+
+  // Recompute position when opening, and keep it aligned on scroll/resize.
+  React.useLayoutEffect(() => {
+    if (!open) return;
+    updatePosition();
+    window.addEventListener("scroll", updatePosition, true);
+    window.addEventListener("resize", updatePosition);
+    return () => {
+      window.removeEventListener("scroll", updatePosition, true);
+      window.removeEventListener("resize", updatePosition);
+    };
+  }, [open, updatePosition]);
+
+  // Close on click outside (trigger only; the backdrop handles panel clicks).
   React.useEffect(() => {
     if (!open) return;
     const handler = (e: MouseEvent) => {
@@ -102,6 +138,7 @@ export function Select({ value, defaultValue, onChange, options, className, plac
   return (
     <div ref={ref} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => !disabled && setOpen(!open)}
@@ -119,26 +156,34 @@ export function Select({ value, defaultValue, onChange, options, className, plac
         </span>
         <span className={cn("text-muted-foreground transition-transform duration-200", open && "rotate-180")}>▾</span>
       </button>
-      {open && (
-        <div className="absolute left-0 min-w-[160px] top-full z-50 mt-1 max-h-60 overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
-          {options.map((o) => {
-            const isSelected = o.value === currentValue;
-            return (
-              <button
-                key={o.value}
-                type="button"
-                onClick={() => { setInternalValue(o.value); onChange?.({ target: { value: o.value } }); setOpen(false); }}
-                className={cn(
-                  "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
-                  isSelected ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : "hover:bg-[#EEF1FD]/60"
-                )}
-              >
-                <span className={cn("text-[#4361EE]", isSelected ? "opacity-100" : "opacity-0")}>✓</span>
-                <span className="truncate">{o.label}</span>
-              </button>
-            );
-          })}
-        </div>
+      {mounted && open && createPortal(
+        <>
+          {/* Invisible click-catcher so clicking anywhere closes the panel. */}
+          <div className="fixed inset-0 z-[10040]" onMouseDown={() => setOpen(false)} />
+          <div
+            style={{ left: pos.left, width: Math.max(pos.width, 160), top: pos.top, bottom: pos.bottom }}
+            className="fixed z-[10041] max-h-60 overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
+          >
+            {options.map((o) => {
+              const isSelected = o.value === currentValue;
+              return (
+                <button
+                  key={o.value}
+                  type="button"
+                  onClick={() => { setInternalValue(o.value); onChange?.({ target: { value: o.value } }); setOpen(false); }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+                    isSelected ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : "hover:bg-[#EEF1FD]/60"
+                  )}
+                >
+                  <span className={cn("text-[#4361EE]", isSelected ? "opacity-100" : "opacity-0")}>✓</span>
+                  <span className="truncate">{o.label}</span>
+                </button>
+              );
+            })}
+          </div>
+        </>,
+        document.body,
       )}
     </div>
   );

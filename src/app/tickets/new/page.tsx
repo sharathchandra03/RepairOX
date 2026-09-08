@@ -28,6 +28,7 @@ import type { Ticket, TicketStatus } from "@/lib/mock-data";
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
+import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
@@ -2448,7 +2449,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
 
 /* ---------------- Step 6: Contact Search ---------------- */
 function ContactSearch({ data, setData, onNext, isEdit }: any) {
-  const { customers } = useStore();
+  const { customers, customerGroups } = useStore();
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(data.customerId || null);
 
@@ -2526,11 +2527,9 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
                     </span>
                     {/* Info */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold truncate">{c.fullName}</p>
-                        {c.type === "business" && (
-                          <span className="shrink-0 rounded-full bg-violet-100 px-2 py-0.5 text-[9px] font-semibold text-violet-700 uppercase">Business</span>
-                        )}
+                        <CustomerBadges type={c.type} source={c.source} groups={resolveGroups(c.groupIds, customerGroups)} maxGroups={1} />
                       </div>
                       <p className="text-[11px] text-muted-foreground truncate">
                         {c.mobile}
@@ -2567,7 +2566,10 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
                 <CheckCircle2 className="h-5 w-5" />
               </span>
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-emerald-900">{selectedCustomer.fullName}</p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-emerald-900">{selectedCustomer.fullName}</p>
+                  <CustomerBadges type={selectedCustomer.type} source={selectedCustomer.source} groups={resolveGroups(selectedCustomer.groupIds, customerGroups)} />
+                </div>
                 <p className="text-[11px] text-emerald-700">
                   {selectedCustomer.mobile}
                   {selectedCustomer.company && <> · {selectedCustomer.company}</>}

@@ -586,6 +586,11 @@ create table if not exists public.customers (
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   branch_id       uuid default public.auth_branch_id() references public.branches(id) on delete set null,
   type            text default 'personal',
+  -- Classification dimensions (independent of `type`):
+  --   source    = how the customer first entered the business (origin)
+  --   group_ids = reusable segmentation labels (many-to-many → customer_groups)
+  source          text,
+  group_ids       text[] not null default '{}'::text[],
   first_name      text,
   last_name       text,
   full_name       text,
@@ -613,6 +618,29 @@ create table if not exists public.customers (
   updated_at      timestamptz not null default now(),
   deleted_at      timestamptz
 );
+
+-- ── Customer Groups (reusable segmentation labels) ───────────────────────────
+--   Configured under Settings → Customers → Customer Groups. A customer may
+--   belong to many groups (customers.group_ids). Groups are NOT a customer type
+--   and NOT a source — they are an additional classification layer.
+create table if not exists public.customer_groups (
+  id              text primary key,
+  organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
+  branch_id       uuid default public.auth_branch_id() references public.branches(id) on delete set null,
+  name            text not null,
+  description     text,
+  color           text,
+  display_order   integer not null default 0,
+  active          boolean not null default true,
+  created_by      uuid default public.auth_staff_id() references public.staff(id) on delete set null,
+  updated_by      uuid references public.staff(id) on delete set null,
+  deleted_by      uuid references public.staff(id) on delete set null,
+  created_at      timestamptz not null default now(),
+  updated_at      timestamptz not null default now(),
+  deleted_at      timestamptz
+);
+
+create index if not exists customer_groups_org_idx on public.customer_groups(organization_id);
 
 -- ── Tickets ──────────────────────────────────────────────────────────────────
 create table if not exists public.tickets (

@@ -155,6 +155,8 @@ export type PermissionKey =
   | "merge_customer"
   | "export_customers"
   | "manage_customers"
+  | "manage_customer_groups"
+  | "assign_customer_groups"
   /* Expenses / Accounts */
   | "view_expenses"
   | "create_expense"
@@ -368,6 +370,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "merge_customer", label: "Merge Customer" },
       { key: "export_customers", label: "Export Customers" },
       { key: "manage_customers", label: "Manage Customers" },
+      { key: "manage_customer_groups", label: "Manage Customer Groups" },
+      { key: "assign_customer_groups", label: "Assign Customer Groups" },
     ],
   },
   {
@@ -556,6 +560,7 @@ export const ROLES: RoleDef[] = [
       "manage_inventory", "manage_purchases", "manage_vendors", "transfer_inventory",
       "view_customers", "create_customer", "edit_customer", "delete_customer",
       "view_customer_history", "merge_customer", "export_customers", "manage_customers",
+      "manage_customer_groups", "assign_customer_groups",
       "view_expenses", "create_expense", "edit_expense", "delete_expense",
       "post_to_ledger", "view_ledger", "manual_ledger_entry", "close_day", "reopen_day",
       "bank_transfer", "cash_settlement", "view_transaction_details", "view_financial_reports",
@@ -594,6 +599,7 @@ export const ROLES: RoleDef[] = [
       "manage_inventory", "manage_purchases", "manage_vendors", "transfer_inventory",
       "view_customers", "create_customer", "edit_customer", "delete_customer",
       "view_customer_history", "merge_customer", "export_customers", "manage_customers",
+      "manage_customer_groups", "assign_customer_groups",
       "view_expenses", "create_expense", "edit_expense", "delete_expense",
       "post_to_ledger", "view_ledger", "manual_ledger_entry", "close_day",
       "bank_transfer", "cash_settlement", "view_transaction_details", "view_financial_reports",
@@ -621,6 +627,7 @@ export const ROLES: RoleDef[] = [
       "create_invoice", "view_invoice", "print_invoice", "update_payment", "convert_from_ticket",
       "manage_invoices", "manage_payments", "use_pos",
       "view_customers", "create_customer", "edit_customer", "view_customer_history", "manage_customers",
+      "assign_customer_groups",
       "view_inventory",
       "print_documents", "upload_files", "send_communications",
     ],
@@ -681,6 +688,7 @@ export const ROLES: RoleDef[] = [
       "create", "edit",
       "view_dashboard", "view_kpi_cards", "view_charts",
       "view_customers", "create_customer", "edit_customer", "view_customer_history", "manage_customers",
+      "manage_customer_groups", "assign_customer_groups",
       "create_invoice", "edit_invoice", "view_invoice", "print_invoice", "update_payment",
       "share_invoice", "manage_invoices",
       "manage_sales", "use_pos", "send_communications",

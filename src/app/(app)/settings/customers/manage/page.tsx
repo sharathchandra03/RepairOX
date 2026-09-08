@@ -9,20 +9,33 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
-import { createCustomer, type Customer } from "@/lib/customer-data";
+import { createCustomer, CUSTOMER_SOURCES, CUSTOMER_SOURCE_LABEL, type Customer, type CustomerSource } from "@/lib/customer-data";
+import { CustomerGroupPicker } from "@/components/common/customer-group-picker";
+import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
+
+const SOURCE_OPTIONS = [
+  { label: "— Not set —", value: "" },
+  ...CUSTOMER_SOURCES.map((s) => ({ label: CUSTOMER_SOURCE_LABEL[s], value: s })),
+];
 
 export default function ManageCustomersPage() {
-  const { customers, addCustomer, updateCustomer, deleteCustomer } = useStore();
+  const { customers, customerGroups, addCustomer, updateCustomer, deleteCustomer } = useStore();
 
   const [search, setSearch] = useState("");
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<"all" | "personal" | "business">("all");
+  const [filterSource, setFilterSource] = useState<"all" | CustomerSource>("all");
+  const [filterGroup, setFilterGroup] = useState<"all" | string>("all");
+
+  const activeGroupList = customerGroups.filter((g) => g.active).sort((a, b) => a.displayOrder - b.displayOrder);
 
   // Form state
   const [form, setForm] = useState({
     type: "personal" as "personal" | "business",
+    source: "" as CustomerSource | "",
+    groupIds: [] as string[],
     firstName: "",
     lastName: "",
     mobile: "",
@@ -37,7 +50,7 @@ export default function ManageCustomersPage() {
   });
 
   const resetForm = () => {
-    setForm({ type: "personal", firstName: "", lastName: "", mobile: "", email: "", company: "", gstNumber: "", address: "", city: "", state: "", postalCode: "", notes: "" });
+    setForm({ type: "personal", source: "", groupIds: [], firstName: "", lastName: "", mobile: "", email: "", company: "", gstNumber: "", address: "", city: "", state: "", postalCode: "", notes: "" });
     setEditingId(null);
     setShowForm(false);
   };
@@ -50,6 +63,8 @@ export default function ManageCustomersPage() {
   const openEditForm = (c: Customer) => {
     setForm({
       type: c.type,
+      source: c.source ?? "",
+      groupIds: c.groupIds ?? [],
       firstName: c.firstName,
       lastName: c.lastName,
       mobile: c.mobile,
@@ -72,6 +87,8 @@ export default function ManageCustomersPage() {
     if (editingId) {
       updateCustomer(editingId, {
         type: form.type,
+        source: form.source || undefined,
+        groupIds: form.groupIds,
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         fullName: `${form.firstName.trim()} ${form.lastName.trim()}`.trim(),
@@ -89,6 +106,8 @@ export default function ManageCustomersPage() {
     } else {
       const newCustomer = createCustomer({
         type: form.type,
+        source: form.source || undefined,
+        groupIds: form.groupIds,
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
         mobile: form.mobile.trim(),
@@ -114,6 +133,8 @@ export default function ManageCustomersPage() {
   // Filter and search
   const filtered = customers.filter((c) => {
     if (filterType !== "all" && c.type !== filterType) return false;
+    if (filterSource !== "all" && c.source !== filterSource) return false;
+    if (filterGroup !== "all" && !(c.groupIds ?? []).includes(filterGroup)) return false;
     if (!search.trim()) return true;
     const q = search.toLowerCase();
     return (
@@ -135,16 +156,17 @@ export default function ManageCustomersPage() {
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex items-center gap-2 flex-1">
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+        <div className="flex flex-wrap items-center gap-2 flex-1">
+          <div className="flex-1 max-w-sm">
             <Input
               value={search}
               onChange={(e: any) => setSearch(e.target.value)}
               placeholder="Search by name, phone, email, company..."
-              className="pl-9 h-10"
+              iconLeft={<Search className="h-4 w-4" />}
+              className="h-10"
             />
           </div>
+          {/* Customer Type — separate dimension */}
           <div className="flex items-center gap-1 rounded-lg border border-border p-0.5">
             {(["all", "personal", "business"] as const).map((t) => (
               <button
@@ -161,6 +183,24 @@ export default function ManageCustomersPage() {
               </button>
             ))}
           </div>
+          {/* Source — separate dimension */}
+          <div className="w-40">
+            <RSelect
+              value={filterSource}
+              onChange={(v) => setFilterSource(v as "all" | CustomerSource)}
+              options={[{ label: "All Sources", value: "all" }, ...CUSTOMER_SOURCES.map((s) => ({ label: CUSTOMER_SOURCE_LABEL[s], value: s }))]}
+            />
+          </div>
+          {/* Group — separate dimension */}
+          {activeGroupList.length > 0 && (
+            <div className="w-40">
+              <RSelect
+                value={filterGroup}
+                onChange={(v) => setFilterGroup(v)}
+                options={[{ label: "All Groups", value: "all" }, ...activeGroupList.map((g) => ({ label: g.name, value: g.id }))]}
+              />
+            </div>
+          )}
         </div>
         <Button size="md" onClick={openNewForm}>
           <Plus className="h-4 w-4" /> Add Customer
@@ -196,6 +236,18 @@ export default function ManageCustomersPage() {
                       { label: "Business", value: "business" },
                     ]}
                   />
+                  <p className="text-[10px] text-muted-foreground">What kind of customer they are.</p>
+                </div>
+
+                {/* Source / Origin — separate dimension from Type */}
+                <div className="space-y-1">
+                  <Label>Source</Label>
+                  <RSelect
+                    value={form.source}
+                    onChange={(v) => setForm({ ...form, source: v as CustomerSource | "" })}
+                    options={SOURCE_OPTIONS}
+                  />
+                  <p className="text-[10px] text-muted-foreground">How this customer first came to us.</p>
                 </div>
 
                 {/* First Name */}
@@ -300,6 +352,15 @@ export default function ManageCustomersPage() {
                   />
                 </div>
 
+                {/* Customer Groups — multi-select, separate from Type & Source */}
+                <div className="space-y-1.5 sm:col-span-2 lg:col-span-3">
+                  <Label>Customer Groups</Label>
+                  <CustomerGroupPicker
+                    value={form.groupIds}
+                    onChange={(groupIds) => setForm({ ...form, groupIds })}
+                  />
+                </div>
+
                 {/* Notes */}
                 <div className="space-y-1 sm:col-span-2 lg:col-span-3">
                   <Label>Notes</Label>
@@ -350,14 +411,13 @@ export default function ManageCustomersPage() {
 
                 {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-medium truncate">{c.fullName}</p>
-                    <span className={cn(
-                      "shrink-0 rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase",
-                      c.type === "business" ? "bg-violet-100 text-violet-700" : "bg-sky-100 text-sky-700"
-                    )}>
-                      {c.type}
-                    </span>
+                    <CustomerBadges
+                      type={c.type}
+                      source={c.source}
+                      groups={resolveGroups(c.groupIds, customerGroups)}
+                    />
                   </div>
                   <p className="text-[11px] text-muted-foreground truncate">
                     {c.mobile}

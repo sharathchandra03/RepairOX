@@ -869,40 +869,121 @@ export const invoices: Invoice[] = [];
 
 /* ─── Walk-In Types & Seed Data ──────────────────────────────────────── */
 
-export type WalkInStatus = "waiting" | "inspection" | "quotation_given" | "converted_ticket" | "converted_invoice" | "closed" | "lost" | "follow_up";
+/* ──────────────────────────────────────────────────────────────────────────
+   Walk-In Final Status — the Walk-In outcome state machine.
+
+   The three business values (Visitor / Enquiry / Converted Ticket) are the
+   source of truth used by the sales team's spreadsheet. The remaining legacy
+   values are preserved so historically-imported / older records never break;
+   they are hidden from the create/edit dropdown but still render correctly.
+   ────────────────────────────────────────────────────────────────────────── */
+export type WalkInStatus =
+  /* Primary business outcomes */
+  | "visitor"
+  | "enquiry"
+  | "converted_ticket"
+  /* Legacy / historical (kept for backward-compatibility & safe display) */
+  | "waiting"
+  | "inspection"
+  | "quotation_given"
+  | "converted_invoice"
+  | "closed"
+  | "lost"
+  | "follow_up";
+
+/** The Final Status values offered in the Walk-In create/edit dropdown. */
+export const WALKIN_FINAL_STATUSES: WalkInStatus[] = ["visitor", "enquiry", "converted_ticket"];
 
 export const WALKIN_STATUS_LABEL: Record<WalkInStatus, string> = {
-  waiting: "Waiting", inspection: "Inspection", quotation_given: "Quotation Given",
-  converted_ticket: "Converted to Ticket", converted_invoice: "Converted to Invoice",
-  closed: "Closed", lost: "Lost Customer", follow_up: "Follow-Up Required",
+  visitor: "Visitor",
+  enquiry: "Enquiry",
+  converted_ticket: "Converted Ticket",
+  /* legacy */
+  waiting: "Waiting",
+  inspection: "Inspection",
+  quotation_given: "Quotation Given",
+  converted_invoice: "Converted to Invoice",
+  closed: "Closed",
+  lost: "Lost Customer",
+  follow_up: "Follow-Up Required",
 };
 
 export const WALKIN_STATUS_TONE: Record<WalkInStatus, string> = {
+  visitor: "bg-slate-50 text-slate-600 ring-slate-200",
+  enquiry: "bg-amber-50 text-amber-700 ring-amber-200",
+  converted_ticket: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  /* legacy */
   waiting: "bg-amber-50 text-amber-700 ring-amber-200",
   inspection: "bg-indigo-50 text-indigo-700 ring-indigo-200",
   quotation_given: "bg-violet-50 text-violet-700 ring-violet-200",
-  converted_ticket: "bg-emerald-50 text-emerald-700 ring-emerald-200",
   converted_invoice: "bg-sky-50 text-sky-700 ring-sky-200",
   closed: "bg-zinc-100 text-zinc-600 ring-zinc-200",
   lost: "bg-rose-50 text-rose-600 ring-rose-200",
   follow_up: "bg-orange-50 text-orange-700 ring-orange-200",
 };
 
+/** How the Walk-In was handled/assigned. NOT the ticket intake channel. */
+export type WalkInType = "direct" | "sales";
+
+export const WALKIN_TYPE_LABEL: Record<WalkInType, string> = {
+  direct: "Direct",
+  sales: "Sales",
+};
+
+export const WALKIN_TYPE_TONE: Record<WalkInType, string> = {
+  direct: "bg-sky-50 text-sky-700 ring-sky-200",
+  sales: "bg-violet-50 text-violet-700 ring-violet-200",
+};
+
+/**
+ * The single, shared definition of a "won" Walk-In. Used identically by the
+ * table, the report and the export so counts can never diverge. A Walk-In is
+ * WON when it has been successfully converted into a repair Ticket.
+ */
+export function isWalkInWon(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
+  return w.status === "converted_ticket";
+}
+
 export type WalkIn = {
   id: string;
+  /** Human-readable sequential business identifier, e.g. "WK-001". */
+  walkInNumber?: string;
   date: string;
   time: string;
+  /** How the walk-in was handled. */
+  type?: WalkInType;
+  /** Customer / person name. */
   customer: string;
+  /** Phone / contact number. */
   phone: string;
+  /** Customer email (optional). */
+  email?: string;
   source: string;
   category: string;
   model: string;
+  /** Optional link to the device catalog model record. */
+  modelId?: string;
+  /** Free-text reported issue. */
+  issue?: string;
+  /** Legacy multi-tag reasons — kept for backward-compat & search. */
   reasons: string[];
   status: WalkInStatus;
+  /** Assigned sales person (only when type === "sales"). Reuses the Employee/User master. */
+  salesPersonId?: string;
+  salesPersonName?: string;
+  /** Linked customer master record, when selected/created. */
+  customerId?: string;
+  /** The repair ticket this walk-in was converted into. */
+  linkedTicketId?: string;
+  /** @deprecated use linkedTicketId. Retained for older rows. */
   ticketId?: string;
   invoiceValue: number;
   businessValue: number;
   notes?: string;
+  /** Float this record to the top of the table when set. */
+  pinnedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export const walkIns: WalkIn[] = [];

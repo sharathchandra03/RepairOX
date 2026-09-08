@@ -7,22 +7,37 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { RSelect } from "@/components/ui/rselect";
 import { useStore } from "@/lib/store";
-import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
+import { searchCustomers, createCustomer, CUSTOMER_SOURCES, CUSTOMER_SOURCE_LABEL, type Customer, type CustomerSource } from "@/lib/customer-data";
+import { CustomerGroupPicker } from "@/components/common/customer-group-picker";
+import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { cn, formatINR } from "@/lib/utils";
 
+const SOURCE_OPTIONS = [
+  { label: "— Not set —", value: "" },
+  ...CUSTOMER_SOURCES.map((s) => ({ label: CUSTOMER_SOURCE_LABEL[s], value: s })),
+];
+
 export default function CustomersPage() {
-  const { customers, addCustomer, updateCustomer, deleteCustomer } = useStore();
+  const { customers, customerGroups, addCustomer, updateCustomer, deleteCustomer } = useStore();
   const [query, setQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [editId, setEditId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "personal" | "business">("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | CustomerSource>("all");
+  const [groupFilter, setGroupFilter] = useState<"all" | string>("all");
 
-  // Filter + search
+  // Filter + search. Type, Source and Group are SEPARATE dimensions — never
+  // combined into one dropdown.
   let filtered = query.trim().length >= 2 ? searchCustomers(customers, query) : customers;
   if (filter !== "all") filtered = filtered.filter((c) => c.type === filter);
+  if (sourceFilter !== "all") filtered = filtered.filter((c) => c.source === sourceFilter);
+  if (groupFilter !== "all") filtered = filtered.filter((c) => (c.groupIds ?? []).includes(groupFilter));
+
+  const activeGroups = customerGroups.filter((g) => g.active).sort((a, b) => a.displayOrder - b.displayOrder);
 
   // Stats
   const totalActive = customers.filter((c) => c.status === "active").length;
@@ -55,7 +70,8 @@ export default function CustomersPage() {
             iconLeft={<Search className="h-4 w-4" />}
           />
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Customer Type filter */}
           {(["all", "personal", "business"] as const).map((f) => (
             <button
               key={f}
@@ -68,6 +84,24 @@ export default function CustomersPage() {
               {f === "all" ? "All" : f === "personal" ? "Personal" : "Business"} ({f === "all" ? customers.length : customers.filter((c) => c.type === f).length})
             </button>
           ))}
+          {/* Source filter — separate dimension */}
+          <div className="w-40">
+            <RSelect
+              value={sourceFilter}
+              onChange={(v) => setSourceFilter(v as "all" | CustomerSource)}
+              options={[{ label: "All Sources", value: "all" }, ...CUSTOMER_SOURCES.map((s) => ({ label: CUSTOMER_SOURCE_LABEL[s], value: s }))]}
+            />
+          </div>
+          {/* Group filter — separate dimension */}
+          {activeGroups.length > 0 && (
+            <div className="w-40">
+              <RSelect
+                value={groupFilter}
+                onChange={(v) => setGroupFilter(v)}
+                options={[{ label: "All Groups", value: "all" }, ...activeGroups.map((g) => ({ label: g.name, value: g.id }))]}
+              />
+            </div>
+          )}
           <Button size="md" onClick={() => setShowAdd(true)}>
             <Plus className="h-4 w-4" /> Add Customer
           </Button>
@@ -91,6 +125,7 @@ export default function CustomersPage() {
             <CustomerRow
               key={c.id}
               customer={c}
+              groups={resolveGroups(c.groupIds, customerGroups)}
               expanded={expandedId === c.id}
               onToggle={() => setExpandedId(expandedId === c.id ? null : c.id)}
               onEdit={() => setEditId(c.id)}
@@ -145,8 +180,9 @@ function StatCard({ label, value }: { label: string; value: string }) {
 }
 
 /* ─── Customer Row ───────────────────────────────────────────────────── */
-function CustomerRow({ customer: c, expanded, onToggle, onEdit, onDelete, confirmDelete, onConfirmDelete, onCancelDelete }: {
+function CustomerRow({ customer: c, groups, expanded, onToggle, onEdit, onDelete, confirmDelete, onConfirmDelete, onCancelDelete }: {
   customer: Customer;
+  groups: import("@/lib/customer-data").CustomerGroup[];
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
@@ -169,8 +205,11 @@ function CustomerRow({ customer: c, expanded, onToggle, onEdit, onDelete, confir
         {/* Name + ID */}
         <div className="flex-1 min-w-0 sm:grid sm:grid-cols-[1fr_140px_140px_100px_80px] sm:gap-2 sm:items-center">
           <div>
-            <p className="text-sm font-medium truncate">{c.fullName}</p>
-            <p className="text-[10px] text-muted-foreground">{c.id} · {c.type === "business" ? "Business" : "Personal"}</p>
+            <div className="flex items-center gap-2 flex-wrap">
+              <p className="text-sm font-medium truncate">{c.fullName}</p>
+              <CustomerBadges type={c.type} source={c.source} groups={groups} />
+            </div>
+            <p className="text-[10px] text-muted-foreground">{c.id}</p>
           </div>
           <div className="hidden sm:block">
             <p className="text-[12px] truncate">{c.mobile}</p>
@@ -204,6 +243,25 @@ function CustomerRow({ customer: c, expanded, onToggle, onEdit, onDelete, confir
                 {c.address && <div className="flex items-center gap-2"><MapPin className="h-3.5 w-3.5 text-muted-foreground" /> {[c.address, c.city, c.state, c.postalCode].filter(Boolean).join(", ")}</div>}
                 {c.company && <div className="flex items-center gap-2"><Building2 className="h-3.5 w-3.5 text-muted-foreground" /> {c.company}</div>}
                 {c.gstNumber && <p className="text-[11px] text-muted-foreground">GST: {c.gstNumber}</p>}
+              </div>
+            </div>
+
+            {/* Classification */}
+            <div className="space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classification</p>
+              <div className="space-y-1.5 text-[13px]">
+                <div className="flex items-center gap-2"><span className="text-[11px] text-muted-foreground w-14">Type</span> {c.type === "business" ? "Business" : "Personal"}</div>
+                <div className="flex items-center gap-2"><span className="text-[11px] text-muted-foreground w-14">Source</span> {c.source ? CUSTOMER_SOURCE_LABEL[c.source] : "—"}</div>
+                <div className="flex items-start gap-2">
+                  <span className="text-[11px] text-muted-foreground w-14 pt-0.5">Groups</span>
+                  {groups.length > 0 ? (
+                    <span className="flex flex-wrap gap-1">
+                      {groups.map((g) => (
+                        <span key={g.id} className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">{g.name}</span>
+                      ))}
+                    </span>
+                  ) : "—"}
+                </div>
               </div>
             </div>
 
@@ -281,6 +339,8 @@ function CustomerFormModal({ customer, onClose, onSave }: {
     postalCode: customer?.postalCode || "",
     notes: customer?.notes || "",
     type: customer?.type || "personal" as "personal" | "business",
+    source: (customer?.source ?? "") as CustomerSource | "",
+    groupIds: customer?.groupIds ?? [],
   });
   const [errors, setErrors] = useState<Record<string, string>>({});
 
@@ -296,7 +356,7 @@ function CustomerFormModal({ customer, onClose, onSave }: {
 
   const handleSave = () => {
     if (!validate()) return;
-    onSave(form);
+    onSave({ ...form, source: form.source || undefined });
   };
 
   return (
@@ -317,10 +377,32 @@ function CustomerFormModal({ customer, onClose, onSave }: {
 
         {/* Form */}
         <div className="px-5 py-4 space-y-4">
-          {/* Type */}
-          <div className="flex items-center gap-2">
-            <button onClick={() => set("type", "personal")} className={cn("rounded-full px-3 py-1.5 text-[11px] font-semibold transition", form.type === "personal" ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground")}>Personal</button>
-            <button onClick={() => set("type", "business")} className={cn("rounded-full px-3 py-1.5 text-[11px] font-semibold transition", form.type === "business" ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground")}>Business</button>
+          {/* Type + Source — two independent dimensions */}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label>Customer Type</Label>
+              <div className="flex items-center gap-2">
+                <button onClick={() => set("type", "personal")} className={cn("rounded-full px-3 py-1.5 text-[11px] font-semibold transition", form.type === "personal" ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground")}>Personal</button>
+                <button onClick={() => set("type", "business")} className={cn("rounded-full px-3 py-1.5 text-[11px] font-semibold transition", form.type === "business" ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground")}>Business</button>
+              </div>
+            </div>
+            <div className="space-y-1">
+              <Label>Source</Label>
+              <RSelect
+                value={form.source}
+                onChange={(v) => setForm((f) => ({ ...f, source: v as CustomerSource | "" }))}
+                options={SOURCE_OPTIONS}
+              />
+            </div>
+          </div>
+
+          {/* Customer Groups — multi-select */}
+          <div className="space-y-1.5">
+            <Label>Customer Groups</Label>
+            <CustomerGroupPicker
+              value={form.groupIds}
+              onChange={(groupIds) => setForm((f) => ({ ...f, groupIds }))}
+            />
           </div>
 
           {/* Name */}

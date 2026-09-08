@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, ChevronDown, User, Building2, Users, CreditCard,
   Package, Ticket, FileText, UserCheck, Plug, Bell, Settings2,
-  ShieldCheck, Printer, Receipt, BarChart3, Palette,
+  ShieldCheck, Printer, Receipt, BarChart3, Palette, Footprints,
 } from "lucide-react";
 
 /* ─── Navigation Structure ───────────────────────────────────────────── */
@@ -59,6 +59,12 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Assigned By & To", href: "/settings/tickets/assigned" },
       { label: "Device Categories", href: "/settings/categories" },
       { label: "Device Colours", href: "/settings/colours" },
+    ],
+  },
+  {
+    id: "walk-in", label: "Walk-In", icon: Footprints,
+    children: [
+      { label: "Sources & Assignment", href: "/settings/walk-in" },
     ],
   },
   {

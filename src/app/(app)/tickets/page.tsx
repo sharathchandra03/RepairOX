@@ -843,27 +843,38 @@ export default function TicketsPage() {
           className="[&>button]:px-3"
         />
         <div className="flex items-center gap-3">
-          {someSelected && (
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-muted-foreground">{selected.size} selected</span>
-              {canDownload && (
-                <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => startBulkTicketDownload(Array.from(selected))}>
-                  <Download className="h-3 w-3" /> Download PDFs
-                </Button>
-              )}
-              <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
-                <RefreshCw className="h-3 w-3" /> Change Status
-              </Button>
-              <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
-                <Trash2 className="h-3 w-3" /> Delete
-              </Button>
-            </div>
-          )}
+          {/* Search always stays put; the bulk-action cluster now lives in its
+              own bar directly above the table header (see below). */}
           <div className="lg:w-80">
             <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search by ID, customer, model, serial…" iconLeft={<Search className="h-4 w-4" />} />
           </div>
         </div>
       </div>
+
+      {/* Bulk selection bar — sits ABOVE the table header as its own row. */}
+      {someSelected && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2"
+        >
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-xs font-semibold text-[#4361EE]">
+            {selected.size} selected
+          </span>
+          {canDownload && (
+            <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => startBulkTicketDownload(Array.from(selected))}>
+              <Download className="h-3 w-3" /> Download PDFs
+            </Button>
+          )}
+          <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
+            <RefreshCw className="h-3 w-3" /> Change Status
+          </Button>
+          <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+            <Trash2 className="h-3 w-3" /> Delete
+          </Button>
+          <button onClick={() => { setSelected(new Set()); setShowBulkStatus(false); }} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+        </motion.div>
+      )}
 
       {/* Bulk Status */}
       {showBulkStatus && someSelected && (

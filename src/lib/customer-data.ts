@@ -3,9 +3,126 @@
 export type CustomerType = "personal" | "business";
 export type CustomerStatus = "active" | "inactive";
 
+/* ─── Customer Source / Origin ─────────────────────────────────────────
+   WHERE/HOW a customer first entered the business. This is a SEPARATE
+   dimension from CustomerType — a customer can be `business` + `direct_walkin`
+   or `personal` + `direct_walkin`. It captures the customer's ORIGIN and is
+   never used to overwrite the customer's fundamental type. Individual
+   interactions (walk-ins, tickets) may carry their OWN source over time. */
+export type CustomerSource =
+  | "direct_walkin"
+  | "sales"
+  | "referral"
+  | "gmb"
+  | "meta"
+  | "other";
+
+export const CUSTOMER_SOURCE_LABEL: Record<CustomerSource, string> = {
+  direct_walkin: "Direct Walk-In",
+  sales: "Sales",
+  referral: "Referral",
+  gmb: "GMB",
+  meta: "Meta",
+  other: "Other",
+};
+
+/** Short badge label — kept compact so it doesn't overcrowd tables. */
+export const CUSTOMER_SOURCE_BADGE: Record<CustomerSource, string> = {
+  direct_walkin: "Walk-In",
+  sales: "Sales",
+  referral: "Referral",
+  gmb: "GMB",
+  meta: "Meta",
+  other: "Other",
+};
+
+export const CUSTOMER_SOURCES: CustomerSource[] = [
+  "direct_walkin",
+  "sales",
+  "referral",
+  "gmb",
+  "meta",
+  "other",
+];
+
+/* ─── Customer Group (segmentation label) ──────────────────────────────
+   Reusable segmentation labels (VIP, Wholesale, Corporate, Priority, …).
+   Managed under Settings → Customers → Customer Groups. A customer may belong
+   to MANY groups. Groups are NOT a type and NOT a source. */
+export type CustomerGroup = {
+  id: string;
+  name: string;
+  description: string;
+  /** Optional subtle colour token (see CUSTOMER_GROUP_COLORS). */
+  color: string;
+  /** Sort order in lists/badges. */
+  displayOrder: number;
+  /** Archived groups are hidden from pickers but preserved on existing members. */
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Colour tokens available for group tags (subtle, consistent with RepairOX). */
+export const CUSTOMER_GROUP_COLORS = [
+  "violet",
+  "indigo",
+  "sky",
+  "emerald",
+  "amber",
+  "rose",
+  "slate",
+] as const;
+export type CustomerGroupColor = (typeof CUSTOMER_GROUP_COLORS)[number];
+
+/** Tailwind classes for a group tag by colour token. */
+export const CUSTOMER_GROUP_TONE: Record<CustomerGroupColor, string> = {
+  violet: "bg-violet-50 text-violet-700 ring-violet-200",
+  indigo: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  sky: "bg-sky-50 text-sky-700 ring-sky-200",
+  emerald: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  amber: "bg-amber-50 text-amber-700 ring-amber-200",
+  rose: "bg-rose-50 text-rose-600 ring-rose-200",
+  slate: "bg-slate-50 text-slate-600 ring-slate-200",
+};
+
+export function groupToneClasses(color?: string): string {
+  return CUSTOMER_GROUP_TONE[(color as CustomerGroupColor) in CUSTOMER_GROUP_TONE ? (color as CustomerGroupColor) : "slate"];
+}
+
+let _groupCounter = 100;
+export function generateCustomerGroupId(): string {
+  _groupCounter += 1;
+  const ts = Date.now().toString(36).slice(-4).toUpperCase();
+  return `CG-${ts}${String(_groupCounter).padStart(3, "0")}`;
+}
+
+export function createCustomerGroup(
+  data: Pick<CustomerGroup, "name"> & Partial<Omit<CustomerGroup, "id" | "createdAt" | "updatedAt">>
+): CustomerGroup {
+  const now = new Date().toISOString();
+  return {
+    id: generateCustomerGroupId(),
+    name: data.name,
+    description: data.description ?? "",
+    color: data.color ?? "slate",
+    displayOrder: data.displayOrder ?? 0,
+    active: data.active ?? true,
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
 export type Customer = {
   id: string;
   type: CustomerType;
+  /** Customer ORIGIN — how they first entered the business. Optional; never
+   *  overwrites `type`. */
+  source?: CustomerSource;
+  /** Customer group memberships (ids into the customer_groups catalogue).
+   *  Always normalized to an array by the mappers/factory; optional on the type
+   *  only so legacy seed literals remain valid. Read with `?? []`. */
+  groupIds?: string[];
   firstName: string;
   lastName: string;
   fullName: string; // computed: firstName + lastName
@@ -49,6 +166,8 @@ export function createCustomer(
   return {
     id: generateCustomerId(),
     type: data.type || "personal",
+    source: data.source,
+    groupIds: data.groupIds ?? [],
     firstName: data.firstName,
     lastName: data.lastName,
     fullName: `${data.firstName} ${data.lastName}`.trim(),

@@ -1,455 +1,719 @@
 ﻿"use client";
 
-import { useState, useMemo, useCallback } from "react";
-import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+/* ──────────────────────────────────────────────────────────────────────────
+   Shop → Walk-In
+
+   A fast, structured replacement for the sales team's Excel process, fully
+   connected to the Customer, Employee, Device Catalog and Ticket systems.
+
+   Business structure (spreadsheet is the source of truth):
+     DATE · ID · TYPE · SOURCE · NAME · CONTACT · MODEL · ISSUE · FINAL STATUS · ACTION
+
+   One shared dataset drives the table AND the report. WON is defined once in
+   `isWalkInWon`. Reuses existing RepairOX components throughout.
+   ────────────────────────────────────────────────────────────────────────── */
+
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { motion } from "framer-motion";
 import {
-  Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal,
-  Trash2, Ticket, Receipt, Clock, Users, TrendingUp, UserPlus,
-  IndianRupee, RefreshCw, X,
+  Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal, Trash2,
+  Ticket as TicketIcon, Pin, PinOff, LayoutList, BarChart3, Filter, X,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input, Select, Label } from "@/components/ui/input";
+import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
+import { SegmentedTabs } from "@/components/ui/tabs";
+import { Pagination } from "@/components/ui/pagination";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
+import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
-import { WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, type WalkIn, type WalkInStatus } from "@/lib/mock-data";
-import { formatINR, cn } from "@/lib/utils";
+import {
+  WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE,
+  WALKIN_FINAL_STATUSES, type WalkIn, type Ticket, isWalkInWon,
+} from "@/lib/mock-data";
+import {
+  useWalkInSources, useWalkInRequireSalesPerson, nextWalkInNumber, genWalkInId, walkInDisplayId,
+  isWalkInInDateRange, WALKIN_DATE_RANGES, type WalkInDateRange,
+} from "@/lib/walk-in-data";
+import { cn } from "@/lib/utils";
+import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
+import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
+import { WalkInReport } from "@/components/walk-in/walk-in-report";
 
-const SOURCES = ["Walk-In","Reference","Google","Website","Instagram","Facebook","WhatsApp","Existing Customer","Campaign","Advertisement","Other"];
-const CATEGORIES = ["Mobile","Laptop","Tablet","Desktop","Smart Watch","Accessory","Other"];
-const REASONS = ["Repair","Screen Damage","Battery Issue","Water Damage","Quotation","Accessory Purchase","General Enquiry","Software Issue","Data Recovery","Warranty","Other"];
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
-function genWalkInId(existing: WalkIn[]): string {
-  const max = existing.reduce((m, w) => { const n = parseInt(w.id.replace("WI-", ""), 10); return n > m ? n : m; }, 0);
-  return `WI-${String(max + 1).padStart(3, "0")}`;
-}
-
-/** Parse a CSV line respecting quoted fields */
-function parseCSVLine(line: string): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') { inQuotes = !inQuotes; continue; }
-    if (ch === "," && !inQuotes) { result.push(current); current = ""; continue; }
-    current += ch;
-  }
-  result.push(current);
-  return result;
-}
-
-/** Parse date like "2-Jan", "10-Mar", "1-Feb" into ISO date string */
-function parseWalkInDate(raw: string): string {
-  if (!raw) return new Date().toISOString().slice(0, 10);
-  const months: Record<string, string> = { Jan:"01",Feb:"02",Mar:"03",Apr:"04",May:"05",Jun:"06",Jul:"07",Aug:"08",Sep:"09",Oct:"10",Nov:"11",Dec:"12" };
-  const parts = raw.split("-");
-  if (parts.length === 2) {
-    const day = parts[0].padStart(2, "0");
-    const mon = months[parts[1]] || "01";
-    return `2026-${mon}-${day}`;
-  }
-  return raw;
-}
-
-/** Map SOURCE column to our source values */
-function mapSource(raw: string): string {
-  if (!raw) return "Walk-In";
-  const upper = raw.toUpperCase();
-  if (upper === "WALKIN" || upper === "WALK-IN") return "Walk-In";
-  if (upper === "REGULAR CUSTOMER" || upper === "EXISTING CUSTOMER") return "Existing Customer";
-  if (upper.includes("S2S")) return "Reference";
-  if (upper.includes("EMPLOYEE")) return "Reference";
-  if (upper.includes("GOOGLE")) return "Google";
-  if (upper.includes("REFERENCE")) return "Reference";
-  if (upper.includes("CORP")) return "Walk-In";
-  if (upper.includes("NINJA")) return "Other";
-  return raw;
-}
-
-/** Map CATEGORY column */
-function mapCategory(raw: string): string {
-  if (!raw) return "Other";
-  const upper = raw.toUpperCase();
-  if (upper.includes("IPHONE") || upper.includes("ANDROID")) return "Mobile";
-  if (upper.includes("MACBOOK") || upper.includes("WINDOWS")) return "Laptop";
-  if (upper.includes("IPAD") || upper.includes("IPAD")) return "Tablet";
-  if (upper.includes("IWATCH")) return "Smart Watch";
-  if (upper.includes("IMAC")) return "Desktop";
-  if (upper.includes("ACCESSORIES") || upper.includes("BUYBACK")) return "Accessory";
-  return "Other";
-}
-
-/** Map STATUS column to our WalkInStatus */
-function mapStatus(raw: string): WalkInStatus {
-  if (!raw) return "waiting";
-  const upper = raw.toUpperCase();
-  if (upper === "TICKETS") return "converted_ticket";
-  if (upper === "VISITER" || upper === "VISITOR") return "closed";
-  if (upper === "ENQUIRY") return "quotation_given";
-  if (upper === "ACCESSORIES") return "converted_invoice";
-  if (upper === "REPEATED") return "follow_up";
-  return "waiting";
+function fmtDate(iso: string): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleDateString("en-IN", { dateStyle: "medium" });
 }
 
 export default function WalkInPage() {
-  const router = useRouter();
-  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn } = useStore();
+  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, addTicket, tickets, team } = useStore();
+  const { can } = usePermissions();
+  const { sources } = useWalkInSources();
+  const { requireSalesPerson } = useWalkInRequireSalesPerson();
 
+  const [view, setView] = useState<"table" | "report">("table");
+
+  // Filters
   const [q, setQ] = useState("");
+  const [typeFilter, setTypeFilter] = useState<string>("all");
+  const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [salesFilter, setSalesFilter] = useState<string>("all");
+  const [dateRange, setDateRange] = useState<WalkInDateRange>("today");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [showFilters, setShowFilters] = useState(false);
+
+  /* ─── Sticky frozen workspace (view switch + filters + search + table header) ──
+     The top block (tabs, date pills, filters, search) pins just below the app
+     topbar; the table header then pins flush beneath it. Offsets are measured
+     at runtime so there's no seam or layout jump — identical to Tickets/Invoice. */
+  const stickyWrapRef = useRef<HTMLDivElement>(null);
+  const [stickyTop, setStickyTop] = useState(60);
+  const [wrapH, setWrapH] = useState(0);
+  useEffect(() => {
+    const wrap = stickyWrapRef.current;
+    if (!wrap) return;
+    let node: HTMLElement | null = wrap;
+    let bar: HTMLElement | null = null;
+    while (node && node.parentElement) {
+      const parent: HTMLElement = node.parentElement;
+      const oy = getComputedStyle(parent).overflowY;
+      if (oy === "auto" || oy === "scroll") { bar = parent.firstElementChild as HTMLElement | null; break; }
+      node = parent;
+    }
+    const measure = () => {
+      setWrapH(wrap.offsetHeight);
+      if (bar) setStickyTop(bar.offsetHeight);
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(wrap);
+    if (bar) ro.observe(bar);
+    return () => ro.disconnect();
+  }, []);
+  const theadTop = stickyTop + wrapH;
+
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+
+  // Dialogs
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<WalkIn | null>(null);
   const [viewTarget, setViewTarget] = useState<WalkIn | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
+  const [convertTarget, setConvertTarget] = useState<WalkIn | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [importResult, setImportResult] = useState<string | null>(null);
-  const [importPreview, setImportPreview] = useState<Partial<WalkIn>[] | null>(null);
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
 
-  // Filtered list
-  const list = useMemo(() => walkIns.filter((w) => {
-    const okStatus = statusFilter === "all" || w.status === statusFilter;
-    const okQ = !q || `${w.id} ${w.customer} ${w.phone} ${w.model} ${w.reasons.join(" ")}`.toLowerCase().includes(q.toLowerCase());
-    return okStatus && okQ;
-  }), [walkIns, statusFilter, q]);
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    setTimeout(() => setToast(null), 3500);
+  }, []);
 
-  // KPIs
-  const kpis = useMemo(() => ({
-    total: walkIns.length,
-    today: walkIns.filter((w) => w.date === new Date().toISOString().slice(0, 10)).length,
-    businessValue: walkIns.reduce((s, w) => s + w.businessValue, 0),
-    converted: walkIns.filter((w) => w.status === "converted_ticket" || w.status === "converted_invoice").length,
-    pending: walkIns.filter((w) => w.status === "waiting" || w.status === "inspection" || w.status === "follow_up").length,
-    lost: walkIns.filter((w) => w.status === "lost").length,
-  }), [walkIns]);
+  // Reset to page 1 whenever a filter/search changes.
+  useEffect(() => { setPage(1); }, [q, typeFilter, sourceFilter, statusFilter, salesFilter, dateRange, customFrom, customTo]);
 
-  const allSelected = list.length > 0 && list.every((w) => selected.has(w.id));
-  const someSelected = list.some((w) => selected.has(w.id));
+  /* ── The single filtered dataset (table + report share this) ── */
+  const filtered = useMemo(() => {
+    const rows = walkIns.filter((w) => {
+      if (!isWalkInInDateRange(w.date, dateRange, customFrom, customTo)) return false;
+      if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
+      if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
+      if (statusFilter !== "all" && w.status !== statusFilter) return false;
+      if (salesFilter !== "all" && w.salesPersonId !== salesFilter) return false;
+      if (q.trim()) {
+        const hay = `${walkInDisplayId(w)} ${w.customer} ${w.phone} ${w.model} ${w.issue ?? ""} ${(w.reasons || []).join(" ")}`.toLowerCase();
+        if (!hay.includes(q.trim().toLowerCase())) return false;
+      }
+      return true;
+    });
+    // Newest first, pinned floated to the top.
+    const ordered = [...rows].sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+    const pinned = ordered.filter((w) => w.pinnedAt);
+    const normal = ordered.filter((w) => !w.pinnedAt);
+    return [...pinned, ...normal];
+  }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
+
+  // Pagination math
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  const paged = useMemo(
+    () => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [filtered, currentPage, pageSize],
+  );
+
+  /* Selection — select-all operates over the whole filtered set. */
+  const allSelected = filtered.length > 0 && filtered.every((w) => selected.has(w.id));
+  const someSelected = filtered.some((w) => selected.has(w.id));
+  const toggleAll = useCallback(() => {
+    setSelected(allSelected ? new Set() : new Set(filtered.map((w) => w.id)));
+  }, [allSelected, filtered]);
+  const toggleOne = useCallback((id: string) => {
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
+  // Drop selections that fall outside the current filter/search.
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const ids = new Set(filtered.map((w) => w.id));
+      const next = new Set(Array.from(prev).filter((id) => ids.has(id)));
+      return next.size === prev.size ? prev : next;
+    });
+  }, [filtered]);
+
+  const activeStaff = useMemo(() => team.filter((m) => m.status === "active"), [team]);
+
+  /* Resolve a linked ticket's human-readable number (T-###) from its stable
+     internal id. Falls back to the id only if the ticket can't be found. */
+  const ticketNoFor = useCallback((ticketId?: string) => {
+    if (!ticketId) return undefined;
+    const t = tickets.find((x) => x.id === ticketId);
+    return t?.ticketNo || t?.id || ticketId;
+  }, [tickets]);
+
+  /* ── Save (create or edit) ── */
+  const handleSaved = useCallback(async (data: Partial<WalkIn>, editingId: string | null) => {
+    if (editingId) {
+      await updateWalkIn(editingId, data);
+      showToast("Walk-In updated.");
+    } else {
+      const record: WalkIn = {
+        id: genWalkInId(),
+        walkInNumber: nextWalkInNumber(walkIns),
+        date: data.date || new Date().toISOString().slice(0, 10),
+        time: data.time || new Date().toTimeString().slice(0, 5),
+        type: data.type || "direct",
+        customer: data.customer || "",
+        phone: data.phone || "",
+        email: data.email || "",
+        source: data.source || "",
+        category: "",
+        model: data.model || "",
+        modelId: data.modelId,
+        issue: data.issue || "",
+        reasons: [],
+        status: data.status || "visitor",
+        salesPersonId: data.salesPersonId,
+        salesPersonName: data.salesPersonName,
+        customerId: data.customerId,
+        invoiceValue: 0,
+        businessValue: 0,
+      };
+      await addWalkIn(record);
+      showToast(`Walk-In ${record.walkInNumber} created.`);
+    }
+    setShowCreate(false);
+    setEditTarget(null);
+  }, [walkIns, addWalkIn, updateWalkIn, showToast]);
+
+  /* ── Convert Walk-In → Ticket (real, linked) ── */
+  const handleConvert = useCallback(async (w: WalkIn) => {
+    if (w.linkedTicketId) { showToast(`Already linked to ticket ${ticketNoFor(w.linkedTicketId)}.`); return; }
+    const now = new Date().toISOString();
+    const ticket: Ticket = {
+      id: "", // store assigns the real id + T-### number
+      customer: w.customer,
+      phone: w.phone,
+      device: w.model || "Device",
+      model: w.model || "",
+      issue: w.issue || (w.reasons || []).join(", ") || "Walk-in enquiry",
+      status: "in_progress",
+      priority: "normal",
+      technician: w.salesPersonName || "",
+      createdAt: now,
+      amount: 0,
+      source: w.source,
+      customerId: w.customerId,
+      internalNotes: `Converted from Walk-In ${walkInDisplayId(w)}.`,
+    };
+    const newId = await addTicket(ticket);
+    await updateWalkIn(w.id, { status: "converted_ticket", linkedTicketId: newId, ticketId: newId });
+    // addTicket returns the internal id; resolve the human ticket number for the toast.
+    showToast(`Converted ${walkInDisplayId(w)} → ticket ${ticketNoFor(newId)}.`);
+  }, [addTicket, updateWalkIn, showToast, ticketNoFor]);
+
+  const anyFilterActive = typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all" || salesFilter !== "all";
+  const canDelete = can("delete") || can("full_access") || can("manage_repair_jobs");
 
   return (
     <div className="space-y-6">
-      <PageHeader eyebrow="Shop" title="Walk-In" subtitle="Record and manage every customer visit."
-        actions={<>
-          <Button variant="outline" size="md" className="rounded-full" onClick={() => { const input = document.createElement("input"); input.type = "file"; input.accept = ".csv"; input.onchange = (e: any) => { const file = e.target.files?.[0]; if (!file) return; if (!file.name.endsWith(".csv")) { setImportResult("Only CSV files are supported. Please save your Excel as CSV first."); setTimeout(() => setImportResult(null), 5000); return; } const reader = new FileReader(); reader.onload = (ev) => { try { const text = ev.target?.result as string; const lines = text.split(/\r?\n/).filter((l) => l.trim()); if (lines.length < 2) { setImportResult("No data rows found in the file."); setTimeout(() => setImportResult(null), 4000); return; } const rows = lines.slice(1); const parsed: Partial<WalkIn>[] = []; rows.forEach((line) => { const cols = parseCSVLine(line); if (cols.length < 3) return; const name = cols[2]?.trim(); const phone = cols[3]?.trim(); if (!name && !phone && !cols[5]?.trim()) return; parsed.push({ date: parseWalkInDate(cols[0]?.trim()), time: cols[1]?.trim() || "", customer: (name && name !== "NA") ? name : "Unknown", phone: (phone && phone !== "NA") ? phone : "", source: mapSource(cols[4]?.trim()), category: mapCategory(cols[5]?.trim()), model: cols[6]?.trim() || "", reasons: (cols[7]?.trim() || "").split(/[,;]/).map((r: string) => r.trim()).filter(Boolean), status: mapStatus(cols[8]?.trim()), ticketId: cols[9]?.trim() || undefined, invoiceValue: Number(cols[10]?.trim()) || 0, businessValue: Number(cols[10]?.trim()) || 0 }); }); if (parsed.length === 0) { setImportResult("No valid rows found."); setTimeout(() => setImportResult(null), 4000); return; } setImportPreview(parsed); } catch { setImportResult("Error reading file. Ensure it is a valid CSV."); setTimeout(() => setImportResult(null), 4000); } }; reader.readAsText(file); }; input.click(); }}><Upload className="h-4 w-4" /> Import CSV</Button>
-          <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full" onClick={() => { const headers = "DATE,TIME,NAME,NUMBER,SOURCE,CATEGORY,MODEL,WALK IN REASON,STATUS,TICKET NO,INVOICE VALUE,BUSINESS VALUE"; const rows = walkIns.map((w) => `${w.date},${w.time},${w.customer},${w.phone},${w.source},${w.category},${w.model},"${w.reasons.join(";")}",${w.status},${w.ticketId || ""},${w.invoiceValue},${w.businessValue}`); const csv = [headers, ...rows].join("\n"); const blob = new Blob([csv], { type: "text/csv" }); const url = URL.createObjectURL(blob); const a = document.createElement("a"); a.href = url; a.download = `walk-ins-${new Date().toISOString().slice(0,10)}.csv`; a.click(); URL.revokeObjectURL(url); }}><Download className="h-4 w-4" /> Export</Button></Can>
-          <Button size="md" className="rounded-full" onClick={() => setShowCreate(true)}><Plus className="h-4 w-4" /> New Walk-In</Button>
-        </>}
+      <PageHeader
+        eyebrow="Shop"
+        title="Walk-In"
+        subtitle="Capture, follow up and convert every customer visit."
+        actions={
+          <>
+            <Can permission={["use_pos", "import_data", "manage_repair_jobs"]}>
+              <Button variant="outline" size="md" className="rounded-full" onClick={() => setShowImport(true)}>
+                <Upload className="h-4 w-4" /> Import
+              </Button>
+            </Can>
+            <Can permission={["export_reports", "export_csv", "use_pos"]}>
+              <Button variant="outline" size="md" className="rounded-full" onClick={() => exportWalkIns(filtered, ticketNoFor)}>
+                <Download className="h-4 w-4" /> Export
+              </Button>
+            </Can>
+            <Can permission={["use_pos", "manage_repair_jobs", "manage_sales"]}>
+              <Button size="md" className="rounded-full" onClick={() => setShowCreate(true)}>
+                <Plus className="h-4 w-4" /> New Walk-In
+              </Button>
+            </Can>
+          </>
+        }
       />
 
-      {/* KPI Cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
-        <KpiMini icon={Users} label="Total" value={String(kpis.total)} />
-        <KpiMini icon={Clock} label="Today" value={String(kpis.today)} />
-        <KpiMini icon={IndianRupee} label="Business Value" value={formatINR(kpis.businessValue)} />
-        <KpiMini icon={Ticket} label="Converted" value={String(kpis.converted)} />
-        <KpiMini icon={RefreshCw} label="Pending" value={String(kpis.pending)} />
-        <KpiMini icon={UserPlus} label="Lost" value={String(kpis.lost)} />
+      {/* ── STICKY FROZEN WORKSPACE ──────────────────────────────────────
+          View switch + date pills + advanced filters + search pin together as
+          one block just below the app topbar (identical to Tickets/Invoice).
+          The table header then pins flush beneath this wrapper. */}
+      <div
+        ref={stickyWrapRef}
+        style={{ top: stickyTop }}
+        className="sticky z-10 -mt-5 space-y-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+      >
+      {/* View switch: Table / Report */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SegmentedTabs
+          value={view}
+          onChange={(v) => setView(v as "table" | "report")}
+          options={[
+            { label: "Walk-Ins", value: "table" },
+            { label: "Report", value: "report" },
+          ]}
+          size="sm"
+        />
+        {view === "table" && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant={showFilters || anyFilterActive ? "soft" : "outline"}
+              size="sm"
+              className="rounded-full"
+              onClick={() => setShowFilters((s) => !s)}
+            >
+              <Filter className="h-3.5 w-3.5" /> Filters{anyFilterActive ? " ·" : ""}
+            </Button>
+            <div className="w-56 sm:w-72">
+              <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search ID, name, contact, model, issue…" iconLeft={<Search className="h-4 w-4" />} />
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Filters + Search */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-wrap items-center gap-2">
-          {[{ label: "All", value: "all" }, { label: "Waiting", value: "waiting" }, { label: "Inspection", value: "inspection" }, { label: "Converted", value: "converted_ticket" }, { label: "Follow-Up", value: "follow_up" }, { label: "Closed", value: "closed" }, { label: "Lost", value: "lost" }].map((f) => (
-            <button key={f.value} onClick={() => setStatusFilter(f.value)}
-              className={cn("rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all", statusFilter === f.value ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200")}>{f.label}</button>
+      {/* Date-range strip (shared by table + report) — matches the Tickets/Invoice
+          8-option strip exactly for visual uniformity across modules. */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {WALKIN_DATE_RANGES.map((r) => (
+            <button
+              key={r.value}
+              onClick={() => setDateRange(r.value)}
+              className={cn(
+                "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
+                dateRange === r.value
+                  ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
+                  : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground",
+              )}
+            >
+              {r.label}
+            </button>
           ))}
         </div>
-        <div className="w-full sm:w-72">
-          <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search walk-ins…" iconLeft={<Search className="h-4 w-4" />} />
-        </div>
+        <DateRangePicker
+          open={dateRange === "custom"}
+          from={customFrom}
+          to={customTo}
+          onFromChange={(v) => { setCustomFrom(v); setDateRange("custom"); }}
+          onToChange={(v) => { setCustomTo(v); setDateRange("custom"); }}
+        />
       </div>
 
-      {/* Bulk actions */}
-      {someSelected && (
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{selected.size} selected</span>
-          <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => { selected.forEach((id) => deleteWalkIn(id)); setSelected(new Set()); }}>
-            <Trash2 className="h-3 w-3" /> Delete Selected
-          </Button>
+      {/* Advanced filters */}
+      {view === "table" && showFilters && (
+        <motion.div
+          initial={{ opacity: 0, y: -4 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="grid grid-cols-2 gap-3 rounded-2xl border border-border bg-card p-4 shadow-card sm:grid-cols-4"
+        >
+          <FilterSelect label="Type" value={typeFilter} onChange={setTypeFilter}
+            options={[{ label: "All Types", value: "all" }, { label: "Direct", value: "direct" }, { label: "Sales", value: "sales" }]} />
+          <FilterSelect label="Source" value={sourceFilter} onChange={setSourceFilter}
+            options={[{ label: "All Sources", value: "all" }, ...sources.map((s) => ({ label: s, value: s }))]} />
+          <FilterSelect label="Final Status" value={statusFilter} onChange={setStatusFilter}
+            options={[{ label: "All Statuses", value: "all" }, ...WALKIN_FINAL_STATUSES.map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))]} />
+          <FilterSelect label="Sales Person" value={salesFilter} onChange={setSalesFilter}
+            disabled={typeFilter === "direct"}
+            options={[{ label: "All Sales People", value: "all" }, ...activeStaff.map((m) => ({ label: m.name, value: m.id }))]} />
+          {anyFilterActive && (
+            <button
+              onClick={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); }}
+              className="col-span-2 justify-self-start text-[11px] font-medium text-[#4361EE] hover:underline sm:col-span-4"
+            >
+              Clear filters
+            </button>
+          )}
+        </motion.div>
+      )}
+
+      {/* Bulk selection bar — sits ABOVE the table header as its own row. */}
+      {view === "table" && someSelected && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2"
+        >
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-xs font-semibold text-[#4361EE]">
+            {selected.size} selected
+          </span>
+          {canDelete && (
+            <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+              <Trash2 className="h-3 w-3" /> Delete
+            </Button>
+          )}
+          <button onClick={() => setSelected(new Set())} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+        </motion.div>
+      )}
+      </div>
+      {/* ── END STICKY FROZEN WORKSPACE ── */}
+
+      {/* ── REPORT VIEW ── */}
+      {view === "report" ? (
+        <WalkInReport rows={filtered} />
+      ) : (
+        /* ── TABLE VIEW ──
+           Straight (square) card with a flat bordered header — identical edge
+           treatment to the Tickets/Invoice tables. No overflow-hidden on the
+           card and [overflow-x:clip] (not auto) on the inner wrapper so the
+           sticky thead isn't trapped and the freeze keeps working. */
+        <div className="-mt-5 border-2 border-zinc-200 bg-card shadow-card">
+          <div className="[overflow-x:clip]">
+            <table className="w-full text-[14px]">
+              <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+                <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+                  <th className="w-10 pl-5 pr-2 py-4">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                      onChange={toggleAll}
+                      className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
+                      aria-label="Select all walk-ins"
+                    />
+                  </th>
+                  <th className="px-2 py-4 whitespace-nowrap">Date</th>
+                  <th className="py-4 whitespace-nowrap">ID</th>
+                  <th className="py-4">Type</th>
+                  <th className="py-4">Source</th>
+                  <th className="py-4">Name</th>
+                  <th className="py-4">Contact</th>
+                  <th className="py-4">Model</th>
+                  <th className="py-4">Issue</th>
+                  <th className="py-4">Final Status</th>
+                  <th className="px-5 py-4 text-right">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paged.map((w, i) => (
+                  <motion.tr
+                    key={w.id}
+                    initial={{ opacity: 0, y: 3 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: Math.min(0.015 * i, 0.2) }}
+                    className={cn("group h-[68px] border-t border-border align-middle transition", selected.has(w.id) ? "bg-indigo-50/40" : w.pinnedAt ? "bg-amber-50/40" : "hover:bg-muted/40")}
+                  >
+                    <td className="w-10 pl-5 pr-2 py-4" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selected.has(w.id)}
+                        onChange={() => toggleOne(w.id)}
+                        className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
+                        aria-label={`Select walk-in ${walkInDisplayId(w)}`}
+                      />
+                    </td>
+                    <td className="px-2 py-4 whitespace-nowrap text-[13px] text-muted-foreground">
+                      <div className="flex items-center gap-1.5">
+                        {w.pinnedAt && <Pin className="h-3.5 w-3.5 text-amber-500" />}
+                        {fmtDate(w.date)}
+                      </div>
+                    </td>
+                    <td className="py-4 pr-4 text-[14px] font-semibold text-foreground whitespace-nowrap">{walkInDisplayId(w)}</td>
+                    <td className="py-4 pr-4">
+                      <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
+                        {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
+                      </span>
+                      {w.type === "sales" && w.salesPersonName && (
+                        <p className="mt-0.5 text-[11px] text-muted-foreground truncate max-w-[120px]">{w.salesPersonName}</p>
+                      )}
+                    </td>
+                    <td className="py-4 pr-4 text-[13px]">{w.source || "—"}</td>
+                    <td className="py-4 pr-4">
+                      <div className="flex items-center gap-2.5">
+                        <Avatar name={w.customer} size={32} />
+                        <span className="text-[14px] font-medium truncate max-w-[150px]">{w.customer}</span>
+                      </div>
+                    </td>
+                    <td className="py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">{w.phone || "—"}</td>
+                    <td className="py-4 pr-4 text-[13px] truncate max-w-[150px]">{w.model || "—"}</td>
+                    <td className="py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
+                      {w.issue || (w.reasons || []).join(", ") || "—"}
+                    </td>
+                    <td className="py-4 pr-4">
+                      <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap", WALKIN_STATUS_TONE[w.status])}>
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {WALKIN_STATUS_LABEL[w.status]}
+                      </span>
+                      {w.linkedTicketId && (
+                        <p className="mt-0.5 text-[11px] text-emerald-600">→ {ticketNoFor(w.linkedTicketId)}</p>
+                      )}
+                    </td>
+                    <td className="px-5 py-4">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => setViewTarget(w)} title="View" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground">
+                          <Eye className="h-4 w-4" />
+                        </button>
+                        <Dropdown
+                          align="right"
+                          width="w-48"
+                          trigger={({ toggle }) => (
+                            <button onClick={toggle} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground">
+                              <MoreHorizontal className="h-4 w-4" />
+                            </button>
+                          )}
+                        >
+                          {(close) => (
+                            <>
+                              <MenuItem icon={Eye} onClick={() => { setViewTarget(w); close(); }}>View</MenuItem>
+                              <MenuItem icon={Pencil} onClick={() => { setEditTarget(w); close(); }}>Edit</MenuItem>
+                              {!w.linkedTicketId && (
+                                <MenuItem icon={TicketIcon} onClick={() => { setConvertTarget(w); close(); }}>Convert to Ticket</MenuItem>
+                              )}
+                              <MenuItem icon={w.pinnedAt ? PinOff : Pin} onClick={() => { pinWalkIn(w.id, !w.pinnedAt); close(); }}>
+                                {w.pinnedAt ? "Unpin" : "Pin to top"}
+                              </MenuItem>
+                              {canDelete && (
+                                <>
+                                  <div className="my-1 border-t border-border" />
+                                  <MenuItem icon={Trash2} danger onClick={() => { setDeleteTarget(w); close(); }}>Delete</MenuItem>
+                                </>
+                              )}
+                            </>
+                          )}
+                        </Dropdown>
+                      </div>
+                    </td>
+                  </motion.tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {filtered.length === 0 && (
+            <div className="flex flex-col items-center gap-2 p-12 text-center">
+              <EmptyStateCharacter variant="walkin" />
+              <p className="font-semibold">No walk-ins found</p>
+              <p className="text-sm text-muted-foreground">Adjust your filters or record a new walk-in.</p>
+            </div>
+          )}
+
+          <div className="border-t border-border px-5 py-4">
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              totalItems={filtered.length}
+              pageSize={pageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+              itemLabel="walk-in"
+            />
+          </div>
         </div>
       )}
 
-      {/* Table */}
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10 bg-[#EEF1FD] border-b border-[#D6DDFB]">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
-                <th className="w-10 px-3 py-3">
-                  <input type="checkbox" checked={allSelected}
-                    ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
-                    onChange={() => setSelected(allSelected ? new Set() : new Set(list.map((w) => w.id)))}
-                    className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
-                </th>
-                <th className="px-3 py-3">ID</th>
-                <th className="py-3">Time</th>
-                <th className="py-3">Customer</th>
-                <th className="py-3">Category</th>
-                <th className="py-3">Reason</th>
-                <th className="py-3">Status</th>
-                <th className="py-3 text-right">Value</th>
-                <th className="py-3 text-right px-3">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((w, i) => (
-                <motion.tr key={w.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 * i }}
-                  className={cn("group border-t border-border transition", selected.has(w.id) ? "bg-indigo-50/40" : "hover:bg-muted/40")}>
-                  <td className="px-3 py-3">
-                    <input type="checkbox" checked={selected.has(w.id)}
-                      onChange={() => setSelected((p) => { const n = new Set(p); n.has(w.id) ? n.delete(w.id) : n.add(w.id); return n; })}
-                      className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
-                  </td>
-                  <td className="px-3 py-3 font-semibold text-foreground whitespace-nowrap">{w.id}</td>
-                  <td className="py-3 text-[12px] text-muted-foreground whitespace-nowrap">{w.time}</td>
-                  <td className="py-3">
-                    <div className="flex items-center gap-2">
-                      <Avatar name={w.customer} size={28} />
-                      <div className="min-w-0">
-                        <p className="text-[13px] font-medium truncate">{w.customer}</p>
-                        <p className="text-[11px] text-muted-foreground">{w.phone}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="py-3 text-[12px]">{w.category} · {w.model}</td>
-                  <td className="py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {w.reasons.slice(0, 2).map((r) => (
-                        <span key={r} className="rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{r}</span>
-                      ))}
-                      {w.reasons.length > 2 && <span className="text-[10px] text-muted-foreground">+{w.reasons.length - 2}</span>}
-                    </div>
-                  </td>
-                  <td className="py-3">
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap ${WALKIN_STATUS_TONE[w.status]}`}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-current" />{WALKIN_STATUS_LABEL[w.status]}
-                    </span>
-                  </td>
-                  <td className="py-3 text-right tabular-nums font-medium text-[12px]">{w.businessValue > 0 ? formatINR(w.businessValue) : "—"}</td>
-                  <td className="py-3 px-3">
-                    <div className="flex items-center justify-end gap-1">
-                      <button onClick={() => setViewTarget(w)} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"><Eye className="h-3.5 w-3.5" /></button>
-                      <Dropdown align="right" width="w-44" trigger={({ toggle }) => (
-                        <button onClick={toggle} className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"><MoreHorizontal className="h-4 w-4" /></button>
-                      )}>
-                        {(close) => (<>
-                          <MenuItem icon={Eye} onClick={() => { setViewTarget(w); close(); }}>View</MenuItem>
-                          <MenuItem icon={Pencil} onClick={() => { setEditTarget(w); close(); }}>Edit</MenuItem>
-                          <MenuItem icon={Ticket} onClick={() => { router.push(`/tickets/new`); close(); }}>Convert to Ticket</MenuItem>
-                          <MenuItem icon={Receipt} onClick={() => { router.push(`/invoice/create`); close(); }}>Convert to Invoice</MenuItem>
-                          <div className="my-1 border-t border-border" />
-                          <MenuItem icon={Trash2} danger onClick={() => { setDeleteTarget(w); close(); }}>Delete</MenuItem>
-                        </>)}
-                      </Dropdown>
-                    </div>
-                  </td>
-                </motion.tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {list.length === 0 && (
-          <div className="flex flex-col items-center gap-2 p-12 text-center">
-            <EmptyStateCharacter variant="walkin" />
-            <p className="font-semibold">No walk-ins found</p>
-            <p className="text-sm text-muted-foreground">Try adjusting your filters or create a new walk-in.</p>
-          </div>
-        )}
-        <div className="flex items-center justify-between border-t border-border px-5 py-3">
-          <p className="text-xs text-muted-foreground">Showing {list.length} of {walkIns.length}</p>
-        </div>
-      </div>
+      {/* Create / Edit drawer */}
+      <WalkInFormDrawer
+        open={showCreate || !!editTarget}
+        onClose={() => { setShowCreate(false); setEditTarget(null); }}
+        walkIn={editTarget}
+        sources={sources}
+        requireSalesPerson={requireSalesPerson}
+        onSaved={handleSaved}
+      />
 
-      {/* Import Confirmation Dialog */}
-      {importPreview && typeof document !== "undefined" && createPortal(
-        <div className="fixed inset-0 z-[9999] grid place-items-center bg-black/60 backdrop-blur-sm p-4" onClick={() => setImportPreview(null)}>
-          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border overflow-hidden">
-            <div className="p-5 pb-3">
-              <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-indigo-50 text-[#4361EE] ring-1 ring-inset ring-indigo-200">
-                  <Upload className="h-5 w-5" />
-                </span>
-                <div>
-                  <h3 className="font-display text-base font-bold">Import Walk-Ins</h3>
-                  <p className="text-sm text-muted-foreground mt-0.5">Ready to import <span className="font-semibold text-foreground">{importPreview.length}</span> walk-in record{importPreview.length !== 1 ? "s" : ""}.</p>
-                </div>
-              </div>
-              {/* Preview first 3 */}
-              <div className="mt-4 space-y-1.5 max-h-[120px] overflow-y-auto">
-                {importPreview.slice(0, 3).map((w, i) => (
-                  <div key={i} className="flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs">
-                    <span className="font-medium">{w.customer}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-muted-foreground">{w.phone}</span>
-                    <span className="text-muted-foreground">·</span>
-                    <span className="text-muted-foreground">{w.category}</span>
-                  </div>
-                ))}
-                {importPreview.length > 3 && <p className="text-[11px] text-muted-foreground text-center">and {importPreview.length - 3} more…</p>}
-              </div>
-            </div>
-            <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
-              <Button variant="secondary" size="sm" onClick={() => setImportPreview(null)}>Cancel</Button>
-              <Button size="sm" onClick={() => {
-                let counter = walkIns.reduce((m, w) => { const n = parseInt(w.id.replace("WI-", ""), 10); return isNaN(n) ? m : Math.max(m, n); }, 0);
-                importPreview.forEach((data) => { counter++; addWalkIn({ ...data, id: `WI-${String(counter).padStart(3, "0")}` } as WalkIn); });
-                setImportResult(`Successfully imported ${importPreview.length} walk-in${importPreview.length !== 1 ? "s" : ""}.`);
-                setImportPreview(null);
-                setTimeout(() => setImportResult(null), 4000);
-              }}>
-                <Upload className="h-3.5 w-3.5" /> Import {importPreview.length} Records
-              </Button>
-            </div>
-          </motion.div>
-        </div>
-      , document.body)}
+      {/* View drawer */}
+      <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); setConvertTarget(w); }} />
 
-      {/* Import Result Toast */}
-      <AnimatePresence>
-        {importResult && (
-          <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 20 }}
-            className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-3 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.15)]">
-            <span className="text-sm font-medium">{importResult}</span>
-            <button onClick={() => setImportResult(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Import */}
+      <WalkInImportModal open={showImport} onClose={() => setShowImport(false)} onImported={(n) => showToast(`Imported ${n} walk-in${n !== 1 ? "s" : ""}.`)} />
 
-      {/* Create/Edit Drawer */}
-      <WalkInFormDrawer open={showCreate || !!editTarget} onClose={() => { setShowCreate(false); setEditTarget(null); }}
-        walkIn={editTarget} onSave={(data) => {
-          if (editTarget) { updateWalkIn(editTarget.id, data); }
-          else { addWalkIn({ ...data, id: genWalkInId(walkIns) } as WalkIn); }
-          setShowCreate(false); setEditTarget(null);
-        }} />
+      {/* Delete confirm */}
+      <ConfirmDialog
+        open={!!deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => { if (deleteTarget) deleteWalkIn(deleteTarget.id); showToast("Walk-In deleted."); }}
+        title="Delete Walk-In?"
+        description="This record will be removed from the list."
+        confirmLabel="Delete"
+        danger
+      />
 
-      {/* View Drawer */}
-      <WalkInViewDrawer walkIn={viewTarget} onClose={() => setViewTarget(null)} />
+      {/* Convert to Ticket confirm */}
+      <ConfirmDialog
+        open={!!convertTarget}
+        onClose={() => setConvertTarget(null)}
+        onConfirm={() => { if (convertTarget) handleConvert(convertTarget); }}
+        title="Convert to Ticket?"
+        description={
+          convertTarget
+            ? `A new repair ticket will be created for ${convertTarget.customer}${convertTarget.model ? ` (${convertTarget.model})` : ""} and linked to walk-in ${walkInDisplayId(convertTarget)}. Its final status becomes “Converted Ticket”.`
+            : ""
+        }
+        confirmLabel="Convert to Ticket"
+      />
 
-      {/* Delete Confirm */}
-      <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)}
-        onConfirm={() => { if (deleteTarget) deleteWalkIn(deleteTarget.id); }}
-        title="Delete Walk-In?" description="This record will be permanently removed." confirmLabel="Delete" danger />
+      {/* Bulk delete confirm */}
+      <ConfirmDialog
+        open={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={() => {
+          selected.forEach((id) => deleteWalkIn(id));
+          const n = selected.size;
+          setSelected(new Set());
+          showToast(`Deleted ${n} walk-in${n !== 1 ? "s" : ""}.`);
+        }}
+        title={`Delete ${selected.size} walk-in${selected.size !== 1 ? "s" : ""}?`}
+        description="The selected records will be removed from the list."
+        confirmLabel={`Delete ${selected.size} Walk-In${selected.size !== 1 ? "s" : ""}`}
+        danger
+      />
+
+      {/* Toast */}
+      {toast && (
+        <motion.div
+          initial={{ opacity: 0, y: 16 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-3 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.15)]"
+        >
+          <span className="text-sm font-medium">{toast}</span>
+          <button onClick={() => setToast(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>
+        </motion.div>
+      )}
     </div>
   );
 }
 
-/* ─── KPI Mini ───────────────────────────────────────────────────────── */
-function KpiMini({ icon: Icon, label, value }: { icon: any; label: string; value: string }) {
+/* ─── Filter select ──────────────────────────────────────────────────── */
+function FilterSelect({
+  label, value, onChange, options, disabled,
+}: {
+  label: string; value: string; onChange: (v: string) => void;
+  options: { label: string; value: string }[]; disabled?: boolean;
+}) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
-      <div className="flex items-center gap-3">
-        <span className="grid h-9 w-9 place-items-center rounded-xl bg-indigo-50 text-[#4361EE] ring-1 ring-inset ring-indigo-200">
-          <Icon className="h-4 w-4" />
-        </span>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-          <p className="font-display text-lg font-bold tracking-tight">{value}</p>
-        </div>
-      </div>
+    <div className="space-y-1">
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</label>
+      <Select value={value} onChange={(e: any) => onChange(e.target.value)} options={options} disabled={disabled} />
     </div>
   );
 }
 
-/* ─── Form Drawer ────────────────────────────────────────────────────── */
-function WalkInFormDrawer({ open, onClose, walkIn, onSave }: { open: boolean; onClose: () => void; walkIn: WalkIn | null; onSave: (data: Partial<WalkIn>) => void }) {
-  const [form, setForm] = useState<Partial<WalkIn>>({});
-  const isEdit = !!walkIn;
-
-  // Reset form when opened
-  useState(() => {
-    if (walkIn) setForm(walkIn);
-    else setForm({ date: new Date().toISOString().slice(0, 10), time: new Date().toTimeString().slice(0, 5), customer: "", phone: "", source: "Walk-In", category: "Mobile", model: "", reasons: [], status: "waiting", invoiceValue: 0, businessValue: 0 });
-  });
-
-  const set = (k: string, v: any) => setForm((f) => ({ ...f, [k]: v }));
-  const toggleReason = (r: string) => setForm((f) => {
-    const reasons = f.reasons || [];
-    return { ...f, reasons: reasons.includes(r) ? reasons.filter((x) => x !== r) : [...reasons, r] };
-  });
-
-  return (
-    <Drawer open={open} onClose={onClose} title={isEdit ? `Edit ${walkIn?.id}` : "New Walk-In"} subtitle="Quick entry — fill essentials only." icon={UserPlus} width="max-w-md"
-      footer={<div className="flex justify-end gap-2"><Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button><Button size="sm" onClick={() => onSave(form)}>Save</Button></div>}>
-      <div className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label>Customer Name *</Label><Input value={form.customer || ""} onChange={(e: any) => set("customer", e.target.value)} placeholder="Customer name" /></div>
-          <div className="space-y-1"><Label>Phone *</Label><Input value={form.phone || ""} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91…" /></div>
-        </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label>Category</Label><Select value={form.category || "Mobile"} onChange={(e: any) => set("category", e.target.value)} options={CATEGORIES.map((c) => ({ label: c, value: c }))} /></div>
-          <div className="space-y-1"><Label>Model</Label><Input value={form.model || ""} onChange={(e: any) => set("model", e.target.value)} placeholder="Device model" /></div>
-        </div>
-        <div className="space-y-1"><Label>Source</Label><Select value={form.source || "Walk-In"} onChange={(e: any) => set("source", e.target.value)} options={SOURCES.map((s) => ({ label: s, value: s }))} /></div>
-        <div className="space-y-1.5">
-          <Label>Reason</Label>
-          <div className="flex flex-wrap gap-1.5">
-            {REASONS.map((r) => (
-              <button key={r} type="button" onClick={() => toggleReason(r)}
-                className={cn("rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition", (form.reasons || []).includes(r) ? "bg-[#4361EE] text-white ring-[#4361EE]" : "bg-muted text-muted-foreground ring-border hover:ring-zinc-300")}>{r}</button>
-            ))}
-          </div>
-        </div>
-        <div className="space-y-1"><Label>Status</Label><Select value={form.status || "waiting"} onChange={(e: any) => set("status", e.target.value)}
-          options={Object.entries(WALKIN_STATUS_LABEL).map(([v, l]) => ({ label: l, value: v }))} /></div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1"><Label>Date</Label><Input type="date" value={form.date || ""} onChange={(e: any) => set("date", e.target.value)} /></div>
-          <div className="space-y-1"><Label>Time</Label><Input type="time" value={form.time || ""} onChange={(e: any) => set("time", e.target.value)} /></div>
-        </div>
-      </div>
-    </Drawer>
-  );
-}
-
-/* ─── View Drawer ────────────────────────────────────────────────────── */
-function WalkInViewDrawer({ walkIn, onClose }: { walkIn: WalkIn | null; onClose: () => void }) {
+/* ─── View drawer ────────────────────────────────────────────────────── */
+function WalkInViewDrawer({
+  walkIn, ticketNoFor, onClose, onEdit, onConvert,
+}: {
+  walkIn: WalkIn | null; ticketNoFor: (id?: string) => string | undefined;
+  onClose: () => void;
+  onEdit: (w: WalkIn) => void; onConvert: (w: WalkIn) => void;
+}) {
   if (!walkIn) return null;
+  const w = walkIn;
   return (
-    <Drawer open={!!walkIn} onClose={onClose} title={`Walk-In ${walkIn.id}`} subtitle={`${walkIn.date} at ${walkIn.time}`} icon={Eye} width="max-w-md">
+    <Drawer
+      open={!!walkIn}
+      onClose={onClose}
+      title={`Walk-In ${walkInDisplayId(w)}`}
+      subtitle={fmtDate(w.date)}
+      icon={Eye}
+      width="max-w-md"
+      footer={
+        <div className="flex justify-end gap-2">
+          {!w.linkedTicketId && <Button variant="outline" size="sm" onClick={() => onConvert(w)}><TicketIcon className="h-3.5 w-3.5" /> Convert to Ticket</Button>}
+          <Button size="sm" onClick={() => onEdit(w)}><Pencil className="h-3.5 w-3.5" /> Edit</Button>
+        </div>
+      }
+    >
       <div className="space-y-5">
         <div className="flex items-center gap-3">
-          <Avatar name={walkIn.customer} size={40} />
+          <Avatar name={w.customer} size={40} />
           <div>
-            <p className="font-semibold">{walkIn.customer}</p>
-            <p className="text-xs text-muted-foreground">{walkIn.phone}</p>
+            <p className="font-semibold">{w.customer}</p>
+            <p className="text-xs text-muted-foreground">{w.phone}</p>
           </div>
+          <span className={cn("ml-auto inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
+            {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
+          </span>
         </div>
         <div className="divide-y divide-border rounded-xl border border-border">
-          <DetailRow label="Category">{walkIn.category}</DetailRow>
-          <DetailRow label="Model">{walkIn.model}</DetailRow>
-          <DetailRow label="Source">{walkIn.source}</DetailRow>
-          <DetailRow label="Status">
-            <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${WALKIN_STATUS_TONE[walkIn.status]}`}>
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />{WALKIN_STATUS_LABEL[walkIn.status]}
+          {w.email && <DetailRow label="Email">{w.email}</DetailRow>}
+          <DetailRow label="Source">{w.source || "—"}</DetailRow>
+          <DetailRow label="Model">{w.model || "—"}</DetailRow>
+          <DetailRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</DetailRow>
+          {w.type === "sales" && <DetailRow label="Sales Person">{w.salesPersonName || "—"}</DetailRow>}
+          <DetailRow label="Final Status">
+            <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", WALKIN_STATUS_TONE[w.status])}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              {WALKIN_STATUS_LABEL[w.status]}
             </span>
           </DetailRow>
-          {walkIn.ticketId && <DetailRow label="Ticket">{walkIn.ticketId}</DetailRow>}
-          <DetailRow label="Invoice Value">{walkIn.invoiceValue > 0 ? formatINR(walkIn.invoiceValue) : "—"}</DetailRow>
-          <DetailRow label="Business Value">{walkIn.businessValue > 0 ? formatINR(walkIn.businessValue) : "—"}</DetailRow>
+          {w.linkedTicketId && <DetailRow label="Linked Ticket">{ticketNoFor(w.linkedTicketId)}</DetailRow>}
+          <DetailRow label="Won">{isWalkInWon(w) ? "Yes" : "No"}</DetailRow>
         </div>
-        <div>
-          <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Reasons</p>
-          <div className="flex flex-wrap gap-1.5">
-            {walkIn.reasons.map((r) => (
-              <span key={r} className="rounded-full bg-muted px-2.5 py-1 text-[11px] font-medium text-muted-foreground ring-1 ring-inset ring-border">{r}</span>
-            ))}
-          </div>
-        </div>
-        {walkIn.notes && (
+        {w.notes && (
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1">Notes</p>
-            <p className="text-sm text-muted-foreground">{walkIn.notes}</p>
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Notes</p>
+            <p className="text-sm text-muted-foreground">{w.notes}</p>
           </div>
         )}
       </div>
     </Drawer>
   );
+}
+
+/* ─── CSV export (spreadsheet column structure) ──────────────────────── */
+function exportWalkIns(rows: WalkIn[], ticketNoFor: (id?: string) => string | undefined) {
+  const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+  const header = ["DATE", "ID", "TYPE", "SOURCE", "NAME", "CONTACT", "MODEL", "ISSUE", "FINAL STATUS", "ACTION"];
+  const lines = rows.map((w) => [
+    w.date,
+    walkInDisplayId(w),
+    WALKIN_TYPE_LABEL[w.type ?? "direct"],
+    w.source,
+    w.customer,
+    w.phone,
+    w.model,
+    w.issue || (w.reasons || []).join("; "),
+    WALKIN_STATUS_LABEL[w.status],
+    w.linkedTicketId ? `Ticket ${ticketNoFor(w.linkedTicketId)}` : "",
+  ].map((c) => esc(String(c ?? ""))).join(","));
+  const csv = [header.join(","), ...lines].join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `walk-ins-${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
 }

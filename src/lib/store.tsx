@@ -28,7 +28,7 @@ import {
   inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS,
   type InventoryItem, type StockMovement,
 } from "@/lib/inventory-data";
-import { seedCustomers as SEED_CUSTOMERS, type Customer } from "@/lib/customer-data";
+import { seedCustomers as SEED_CUSTOMERS, type Customer, type CustomerGroup } from "@/lib/customer-data";
 import { seedCompanies as SEED_COMPANIES, type Company } from "@/lib/company-data";
 import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
@@ -63,6 +63,7 @@ interface StoreState {
   inventory: InventoryItem[];
   stockMovements: StockMovement[];
   customers: Customer[];
+  customerGroups: CustomerGroup[];
   companies: Company[];
   brands: Brand[];
   deviceModels: DeviceModel[];
@@ -89,6 +90,7 @@ interface StoreActions {
   addWalkIn: (walkIn: WalkIn) => Promise<void>;
   updateWalkIn: (id: string, updates: Partial<WalkIn>) => Promise<void>;
   deleteWalkIn: (id: string) => Promise<void>;
+  pinWalkIn: (id: string, pinned: boolean) => Promise<void>;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
   deductPartsForTicket: (ticketId: string) => Promise<void>;
   addStockMovement: (movement: StockMovement) => Promise<void>;
@@ -98,6 +100,9 @@ interface StoreActions {
   addCustomer: (customer: Customer) => Promise<void>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
+  addCustomerGroup: (group: CustomerGroup) => Promise<void>;
+  updateCustomerGroup: (id: string, updates: Partial<CustomerGroup>) => Promise<void>;
+  deleteCustomerGroup: (id: string) => Promise<void>;
   addCompany: (company: Company) => Promise<void>;
   updateCompany: (id: string, updates: Partial<Company>) => Promise<void>;
   deleteCompany: (id: string) => Promise<void>;
@@ -470,22 +475,82 @@ async function resequenceTicketNumbers(): Promise<Record<string, string>> {
   return mapping;
 }
 
+/* ── Walk-In metadata envelope ──────────────────────────────────────────────
+   The production `walk_ins` table stores the core spreadsheet fields in real
+   columns (walkin_date, customer, phone, source, category, model, status,
+   ticket_id, notes …). Newer business fields — walkInNumber, type, issue,
+   salesPerson, customerId, modelId, pinnedAt — are round-tripped inside a
+   compact JSON envelope embedded in the `notes` column. This means the module
+   works against the CURRENT database with no migration required, while keeping
+   historical rows and human-readable notes intact. The optional migration
+   `supabase/migration-walk-in-fields.sql` promotes these to first-class
+   columns; rowToWalkIn transparently prefers real columns when present.       */
+const WALKIN_META_MARKER = "\n\u241F::walkin-meta::";
+
+type WalkInMeta = Partial<
+  Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "customerId" | "modelId" | "pinnedAt">
+>;
+
+function encodeWalkInNotes(w: WalkIn): string | null {
+  const meta: WalkInMeta = {};
+  if (w.walkInNumber) meta.walkInNumber = w.walkInNumber;
+  if (w.type) meta.type = w.type;
+  if (w.issue) meta.issue = w.issue;
+  if (w.email) meta.email = w.email;
+  if (w.salesPersonId) meta.salesPersonId = w.salesPersonId;
+  if (w.salesPersonName) meta.salesPersonName = w.salesPersonName;
+  if (w.customerId) meta.customerId = w.customerId;
+  if (w.modelId) meta.modelId = w.modelId;
+  if (w.pinnedAt) meta.pinnedAt = w.pinnedAt;
+  const human = (w.notes || "").split(WALKIN_META_MARKER)[0].trimEnd();
+  if (Object.keys(meta).length === 0) return human || null;
+  return `${human}${WALKIN_META_MARKER}${JSON.stringify(meta)}`;
+}
+
+function decodeWalkInNotes(raw: string | null | undefined): { notes: string; meta: WalkInMeta } {
+  if (!raw) return { notes: "", meta: {} };
+  const idx = raw.indexOf(WALKIN_META_MARKER);
+  if (idx === -1) return { notes: raw, meta: {} };
+  const notes = raw.slice(0, idx).trimEnd();
+  try {
+    const meta = JSON.parse(raw.slice(idx + WALKIN_META_MARKER.length)) as WalkInMeta;
+    return { notes, meta: meta || {} };
+  } catch {
+    return { notes, meta: {} };
+  }
+}
+
 function rowToWalkIn(r: any): WalkIn {
+  const { notes, meta } = decodeWalkInNotes(r.notes);
+  const linkedTicketId = r.ticket_id ?? undefined;
   return {
     id: r.id,
+    // Prefer a real column when the migration has been applied, else the envelope.
+    walkInNumber: r.walkin_number ?? meta.walkInNumber ?? undefined,
     date: r.walkin_date ?? "",
     time: r.time_label ?? "",
+    type: (r.walkin_type ?? meta.type) as WalkIn["type"],
     customer: r.customer ?? "",
     phone: r.phone ?? "",
+    email: r.email_addr ?? meta.email ?? undefined,
     source: r.source ?? "",
     category: r.category ?? "",
     model: r.model ?? "",
+    modelId: r.model_id ?? meta.modelId ?? undefined,
+    issue: r.issue ?? meta.issue ?? "",
     reasons: r.reasons ?? [],
-    status: r.status ?? "waiting",
-    ticketId: r.ticket_id ?? undefined,
+    status: r.status ?? "visitor",
+    salesPersonId: r.sales_person_id ?? meta.salesPersonId ?? undefined,
+    salesPersonName: r.sales_person_name ?? meta.salesPersonName ?? undefined,
+    customerId: r.customer_id ?? meta.customerId ?? undefined,
+    linkedTicketId,
+    ticketId: linkedTicketId,
     invoiceValue: Number(r.invoice_value ?? 0),
     businessValue: Number(r.business_value ?? 0),
-    notes: r.notes ?? "",
+    notes,
+    pinnedAt: r.pinned_at ?? meta.pinnedAt ?? undefined,
+    createdAt: r.created_at ?? undefined,
+    updatedAt: r.updated_at ?? undefined,
   };
 }
 
@@ -501,10 +566,10 @@ function walkInToRow(w: WalkIn): Record<string, unknown> {
     model: w.model || null,
     reasons: w.reasons ?? [],
     status: w.status,
-    ticket_id: w.ticketId || null,
+    ticket_id: w.linkedTicketId || w.ticketId || null,
     invoice_value: w.invoiceValue ?? 0,
     business_value: w.businessValue ?? 0,
-    notes: w.notes || null,
+    notes: encodeWalkInNotes(w),
   };
 }
 
@@ -594,6 +659,8 @@ function rowToCustomer(r: any): Customer {
   return {
     id: r.id,
     type: r.type ?? "personal",
+    source: r.source ?? undefined,
+    groupIds: Array.isArray(r.group_ids) ? r.group_ids : [],
     firstName: r.first_name ?? "",
     lastName: r.last_name ?? "",
     fullName: r.full_name ?? `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
@@ -621,6 +688,8 @@ function customerToRow(c: Customer): Record<string, unknown> {
   return {
     id: c.id,
     type: c.type || "personal",
+    source: c.source || null,
+    group_ids: c.groupIds ?? [],
     first_name: c.firstName || null,
     last_name: c.lastName || null,
     full_name: c.fullName || null,
@@ -639,6 +708,30 @@ function customerToRow(c: Customer): Record<string, unknown> {
     total_repairs: c.totalRepairs,
     lifetime_value: c.lifetimeValue,
     status: c.status,
+  };
+}
+
+function rowToCustomerGroup(r: any): CustomerGroup {
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    description: r.description ?? "",
+    color: r.color ?? "slate",
+    displayOrder: Number(r.display_order ?? 0),
+    active: r.active ?? true,
+    createdAt: r.created_at ?? new Date().toISOString(),
+    updatedAt: r.updated_at ?? new Date().toISOString(),
+  };
+}
+
+function customerGroupToRow(g: CustomerGroup): Record<string, unknown> {
+  return {
+    id: g.id,
+    name: g.name || null,
+    description: g.description || null,
+    color: g.color || null,
+    display_order: g.displayOrder ?? 0,
+    active: g.active,
   };
 }
 
@@ -762,6 +855,7 @@ function loadFromStorage(storageKey?: string): StoreState | null {
       inventory: (saved.inventory ?? SEED_INVENTORY).map((i: any) => ({ ...i, reservedStock: i.reservedStock ?? 0 })),
       stockMovements: saved.stockMovements ?? SEED_MOVEMENTS,
       customers: saved.customers ?? SEED_CUSTOMERS,
+      customerGroups: saved.customerGroups ?? [],
       companies: saved.companies ?? SEED_COMPANIES,
       ...(() => {
         // Migrate any legacy category-less brands stored locally into strict
@@ -801,7 +895,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const [state, setState] = useState<StoreState>({
     tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
-    team: [], inventory: [], stockMovements: [], customers: [],
+    team: [], inventory: [], stockMovements: [], customers: [], customerGroups: [],
     companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [],
     issueLibrary: [],
     hydrated: false, mode: "local",
@@ -837,7 +931,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
         orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
         inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-        customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+        customers: SEED_CUSTOMERS, customerGroups: [], brands: SEED_BRANDS, deviceModels: SEED_MODELS,
         companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
         assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
         issueLibrary: DEFAULT_ISSUES,
@@ -858,7 +952,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
           orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
           inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-          customers: SEED_CUSTOMERS, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+          customers: SEED_CUSTOMERS, customerGroups: [], brands: SEED_BRANDS, deviceModels: SEED_MODELS,
           companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
           assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
           issueLibrary: DEFAULT_ISSUES,
@@ -885,6 +979,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: models },
         { data: abOpts },
         { data: atOpts },
+        { data: custGroups },
       ] = await Promise.all([
         supabase.from("tickets").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         supabase.from("invoices").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
@@ -897,6 +992,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         supabase.from("device_models").select("*").order("created_at", { ascending: false }),
         supabase.from("assigned_by_options").select("*").order("created_at", { ascending: false }),
         supabase.from("assigned_to_options").select("*").order("created_at", { ascending: false }),
+        // customer_groups may not exist until the migration is applied — tolerate
+        // the error so the rest of the app still loads.
+        supabase.from("customer_groups").select("*").is("deleted_at", null).order("display_order", { ascending: true }),
       ]);
 
       if (!active) return;
@@ -909,6 +1007,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         inventory: (invItems ?? []).map(rowToInventoryItem),
         stockMovements: (moves ?? []).map(rowToStockMovement),
         customers: (custs ?? []).map(rowToCustomer),
+        customerGroups: (custGroups ?? []).map(rowToCustomerGroup),
         companies: (comps ?? []).map(rowToCompany),
         brands: (brds ?? []).map(rowToBrand),
         deviceModels: (models ?? []).map(rowToDeviceModel),
@@ -1025,6 +1124,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const next = [...prev.customers]; next[idx] = cust;
             return { ...prev, customers: next };
           }
+          case "customer_groups": {
+            if (isDelete) return { ...prev, customerGroups: prev.customerGroups.filter((g) => g.id !== row.id) };
+            const grp = rowToCustomerGroup(row);
+            const idx = prev.customerGroups.findIndex((g) => g.id === row.id);
+            if (idx === -1) return { ...prev, customerGroups: [...prev.customerGroups, grp] };
+            const next = [...prev.customerGroups]; next[idx] = grp;
+            return { ...prev, customerGroups: next };
+          }
           case "companies": {
             if (isDelete) return { ...prev, companies: prev.companies.filter((c) => c.id !== row.id) };
             const comp = rowToCompany(row);
@@ -1070,7 +1177,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options"];
+    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "customer_groups", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options"];
 
     const channel = client.channel("store-realtime");
     for (const table of tables) {
@@ -1637,6 +1744,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const updateWalkIn = useCallback(async (id: string, updates: Partial<WalkIn>) => {
     const prev = stateRef.current.walkIns.find((w) => w.id === id);
+    // Merge first so the notes envelope is re-encoded from the full record.
+    const merged: WalkIn | undefined = prev ? { ...prev, ...updates } : undefined;
     if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;
@@ -1645,17 +1754,24 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("category" in updates) row.category = updates.category ?? null;
       if ("model" in updates) row.model = updates.model ?? null;
       if ("status" in updates) row.status = updates.status;
-      if ("ticketId" in updates) row.ticket_id = updates.ticketId ?? null;
+      if ("ticketId" in updates || "linkedTicketId" in updates) {
+        row.ticket_id = updates.linkedTicketId ?? updates.ticketId ?? null;
+      }
       if ("invoiceValue" in updates) row.invoice_value = updates.invoiceValue ?? 0;
       if ("businessValue" in updates) row.business_value = updates.businessValue ?? 0;
-      if ("notes" in updates) row.notes = updates.notes ?? null;
       if ("reasons" in updates) row.reasons = updates.reasons ?? [];
+      // Any change to a notes-envelope field (or notes itself) re-encodes notes.
+      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "customerId", "modelId", "pinnedAt"];
+      if (merged && envelopeKeys.some((k) => k in updates)) {
+        row.notes = encodeWalkInNotes(merged);
+      }
       const { error } = await db.from("walk_ins").update(row).eq("id", id);
       if (error) { console.error("[store] updateWalkIn failed:", error.message); return; }
     }
     setState((s) => ({ ...s, walkIns: s.walkIns.map((w) => (w.id === id ? { ...w, ...updates } : w)) }));
-    const converted = "status" in updates && (updates.status === "converted_ticket" || updates.status === "converted_invoice") && updates.status !== prev?.status;
-    logActivity({ module: "Walk-In", action: converted ? "Walk-In Converted" : "Walk-In Updated", severity: "info", entity: "Walk-In", reference: id, description: converted ? `Converted walk-in ${id}${updates.ticketId ? ` to ticket ${updates.ticketId}` : ""}.` : `Updated walk-in ${id}${prev ? ` (${prev.customer})` : ""}.`, ...(updates.ticketId ? { meta: { "New Ticket": updates.ticketId } } : {}) });
+    const newTicket = updates.linkedTicketId ?? updates.ticketId;
+    const converted = "status" in updates && updates.status === "converted_ticket" && updates.status !== prev?.status;
+    logActivity({ module: "Walk-In", action: converted ? "Walk-In Converted" : "Walk-In Updated", severity: "info", entity: "Walk-In", reference: id, description: converted ? `Converted walk-in ${id}${newTicket ? ` to ticket ${newTicket}` : ""}.` : `Updated walk-in ${id}${prev ? ` (${prev.customer})` : ""}.`, ...(newTicket ? { meta: { "New Ticket": newTicket } } : {}) });
   }, []);
 
   const deleteWalkIn = useCallback(async (id: string) => {
@@ -1666,6 +1782,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     setState((s) => ({ ...s, walkIns: s.walkIns.filter((w) => w.id !== id) }));
     logActivity({ module: "Walk-In", action: "Walk-In Deleted", severity: "critical", entity: "Walk-In", reference: id, description: prev ? `Deleted walk-in for ${prev.customer} (${prev.model}).` : `Deleted walk-in ${id}.` });
+  }, []);
+
+  const pinWalkIn = useCallback(async (id: string, pinned: boolean) => {
+    const pinnedAt = pinned ? new Date().toISOString() : undefined;
+    // Optimistic local update first (mirrors pinTicket/pinInvoice).
+    const prev = stateRef.current.walkIns.find((w) => w.id === id);
+    setState((s) => ({ ...s, walkIns: s.walkIns.map((w) => (w.id === id ? { ...w, pinnedAt } : w)) }));
+    // Persist through the notes envelope (pinned_at has no dedicated column
+    // until the optional migration is applied — encodeWalkInNotes handles it).
+    if (shouldUseDb() && prev) {
+      const row: Record<string, unknown> = { notes: encodeWalkInNotes({ ...prev, pinnedAt }) };
+      const { error } = await db.from("walk_ins").update(row).eq("id", id);
+      if (error) console.error("[store] pinWalkIn failed:", error.message);
+    }
   }, []);
 
   /* ── Team actions ── */
@@ -1803,9 +1933,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ── Customer actions (DB-first) ── */
   const addCustomer = useCallback(async (customer: Customer) => {
     if (shouldUseDb()) {
-      const { data, error } = await db.from("customers").insert(customerToRow(customer)).select("*").single();
-      if (error || !data) { console.error("[store] addCustomer failed:", error?.message); return; }
-      const saved = rowToCustomer(data);
+      let row = customerToRow(customer);
+      let res = await db.from("customers").insert(row).select("*").single();
+      // Self-heal: strip unknown columns for un-migrated schemas.
+      let heal = 0;
+      while (res.error && isUndefinedColumnError(res.error) && heal < 4) {
+        heal += 1;
+        const col = extractMissingColumn(res.error);
+        row = omitKeys(row, col ? [col] : ["source", "group_ids"]);
+        res = await db.from("customers").insert(row).select("*").single();
+      }
+      if (res.error || !res.data) { console.error("[store] addCustomer failed:", res.error?.message); return; }
+      const saved = rowToCustomer(res.data);
       setState((s) => ({ ...s, customers: [saved, ...s.customers] }));
       logActivity({ module: "Customer", action: "Customer Created", severity: "success", entity: "Customer", reference: saved.id, description: `Added new customer ${saved.fullName}.`, meta: { Mobile: saved.mobile, ...(saved.company ? { Company: saved.company } : {}) } });
       return;
@@ -1831,14 +1970,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("postalCode" in updates) row.postal_code = updates.postalCode ?? null;
       if ("notes" in updates) row.notes = updates.notes ?? null;
       if ("type" in updates) row.type = updates.type;
+      if ("source" in updates) row.source = updates.source ?? null;
+      if ("groupIds" in updates) row.group_ids = updates.groupIds ?? [];
       if ("status" in updates) row.status = updates.status;
       if ("totalTickets" in updates) row.total_tickets = updates.totalTickets;
       if ("totalInvoices" in updates) row.total_invoices = updates.totalInvoices;
       if ("totalRepairs" in updates) row.total_repairs = updates.totalRepairs;
       if ("lifetimeValue" in updates) row.lifetime_value = updates.lifetimeValue;
       if ("lastVisit" in updates) row.last_visit = updates.lastVisit ?? null;
-      const { error } = await db.from("customers").update(row).eq("id", id);
-      if (error) { console.error("[store] updateCustomer failed:", error.message); return; }
+      let currentRow = row;
+      let { error } = await db.from("customers").update(currentRow).eq("id", id);
+      // Self-heal: drop unknown columns (e.g. source/group_ids on un-migrated
+      // schemas) and retry so the rest of the update still persists.
+      let heal = 0;
+      while (error && isUndefinedColumnError(error) && Object.keys(currentRow).length > 0 && heal < 4) {
+        heal += 1;
+        const col = extractMissingColumn(error);
+        currentRow = omitKeys(currentRow, col ? [col] : ["source", "group_ids"]);
+        if (Object.keys(currentRow).length === 0) break;
+        const retry = await db.from("customers").update(currentRow).eq("id", id);
+        error = retry.error;
+      }
+      if (error && !isUndefinedColumnError(error)) { console.error("[store] updateCustomer failed:", error.message); return; }
     }
     setState((s) => ({ ...s, customers: s.customers.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c)) }));
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
@@ -1855,6 +2008,52 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
     setState((s) => ({ ...s, customers: s.customers.filter((c) => c.id !== id) }));
     logActivity({ module: "Customer", action: "Customer Deleted", severity: "critical", entity: "Customer", reference: id, description: prev ? `Deleted customer ${prev.fullName}.` : `Deleted customer ${id}.`, meta: prev ? { Mobile: prev.mobile } : undefined });
+  }, []);
+
+  /* ── Customer Group actions (DB-first) ── */
+  const addCustomerGroup = useCallback(async (group: CustomerGroup) => {
+    if (shouldUseDb()) {
+      const { data, error } = await db.from("customer_groups").insert(customerGroupToRow(group)).select("*").single();
+      if (error || !data) { console.error("[store] addCustomerGroup failed:", error?.message); return; }
+      const saved = rowToCustomerGroup(data);
+      setState((s) => ({ ...s, customerGroups: [...s.customerGroups, saved] }));
+      logActivity({ module: "Customer", action: "Customer Group Created", severity: "success", entity: "Customer Group", reference: saved.id, description: `Created customer group ${saved.name}.` });
+      return;
+    }
+    setState((s) => ({ ...s, customerGroups: [...s.customerGroups, group] }));
+    logActivity({ module: "Customer", action: "Customer Group Created", severity: "success", entity: "Customer Group", reference: group.id, description: `Created customer group ${group.name}.` });
+  }, []);
+
+  const updateCustomerGroup = useCallback(async (id: string, updates: Partial<CustomerGroup>) => {
+    const prev = stateRef.current.customerGroups.find((g) => g.id === id);
+    if (shouldUseDb()) {
+      const row: Record<string, unknown> = {};
+      if ("name" in updates) row.name = updates.name ?? null;
+      if ("description" in updates) row.description = updates.description ?? null;
+      if ("color" in updates) row.color = updates.color ?? null;
+      if ("displayOrder" in updates) row.display_order = updates.displayOrder ?? 0;
+      if ("active" in updates) row.active = updates.active;
+      const { error } = await db.from("customer_groups").update(row).eq("id", id);
+      if (error) { console.error("[store] updateCustomerGroup failed:", error.message); return; }
+    }
+    setState((s) => ({ ...s, customerGroups: s.customerGroups.map((g) => (g.id === id ? { ...g, ...updates, updatedAt: new Date().toISOString() } : g)) }));
+    logActivity({ module: "Customer", action: "Customer Group Updated", severity: "info", entity: "Customer Group", reference: id, description: `Updated customer group ${prev?.name || id}.` });
+  }, []);
+
+  const deleteCustomerGroup = useCallback(async (id: string) => {
+    const prev = stateRef.current.customerGroups.find((g) => g.id === id);
+    if (shouldUseDb()) {
+      const { error } = await db.from("customer_groups").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      if (error) { console.error("[store] deleteCustomerGroup failed:", error.message); return; }
+    }
+    // Remove the group and scrub its id from any customer's memberships (local
+    // state; DB memberships are cleaned lazily since group_ids is a plain array).
+    setState((s) => ({
+      ...s,
+      customerGroups: s.customerGroups.filter((g) => g.id !== id),
+      customers: s.customers.map((c) => (c.groupIds?.includes(id) ? { ...c, groupIds: c.groupIds.filter((gid) => gid !== id) } : c)),
+    }));
+    logActivity({ module: "Customer", action: "Customer Group Deleted", severity: "critical", entity: "Customer Group", reference: id, description: prev ? `Deleted customer group ${prev.name}.` : `Deleted customer group ${id}.` });
   }, []);
 
   /* ── Company actions (DB-first) ── */
@@ -2127,6 +2326,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addWalkIn,
     updateWalkIn,
     deleteWalkIn,
+    pinWalkIn,
     updateTeamMember,
     deductPartsForTicket,
     addStockMovement,
@@ -2136,6 +2336,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addCustomer,
     updateCustomer,
     deleteCustomer,
+    addCustomerGroup,
+    updateCustomerGroup,
+    deleteCustomerGroup,
     addCompany,
     updateCompany,
     deleteCompany,
