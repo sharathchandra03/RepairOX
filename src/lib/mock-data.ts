@@ -935,6 +935,13 @@ export const WALKIN_TYPE_TONE: Record<WalkInType, string> = {
   sales: "bg-violet-50 text-violet-700 ring-violet-200",
 };
 
+/** Solid accent colour for the leading row bar — same hue family as the Type
+ *  pill above, so the bar and pill read as one system. */
+export const WALKIN_TYPE_BAR: Record<WalkInType, string> = {
+  direct: "bg-sky-500",
+  sales: "bg-violet-500",
+};
+
 /**
  * The single, shared definition of a "won" Walk-In. Used identically by the
  * table, the report and the export so counts can never diverge. A Walk-In is

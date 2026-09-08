@@ -36,7 +36,7 @@ import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
-  WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE,
+  WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
   WALKIN_FINAL_STATUSES, type WalkIn, type Ticket, isWalkInWon,
 } from "@/lib/mock-data";
 import {
@@ -47,6 +47,7 @@ import { cn } from "@/lib/utils";
 import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
 import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
 import { WalkInReport } from "@/components/walk-in/walk-in-report";
+import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -54,7 +55,8 @@ function fmtDate(iso: string): string {
   if (!iso) return "—";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleDateString("en-IN", { dateStyle: "medium" });
+  // 2-digit year (e.g. "8 Sept 26") to keep the Date column compact.
+  return d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
 }
 
 export default function WalkInPage() {
@@ -474,14 +476,14 @@ export default function WalkInPage() {
                     />
                   </th>
                   <th className="px-2 py-4 whitespace-nowrap">Date</th>
-                  <th className="py-4 whitespace-nowrap">ID</th>
+                  <th className="py-4 whitespace-nowrap"><span className="inline-block pl-[5px]">ID</span></th>
                   <th className="py-4">Type</th>
                   <th className="py-4">Source</th>
-                  <th className="py-4">Name</th>
-                  <th className="py-4">Contact</th>
-                  <th className="py-4">Model</th>
-                  <th className="py-4">Issue</th>
-                  <th className="py-4">Final Status</th>
+                  <th className="pl-4 py-4"><span className="inline-block pl-[17px]">Name</span></th>
+                  <th className="pl-4 py-4">Contact</th>
+                  <th className="pl-4 py-4">Model</th>
+                  <th className="pl-4 py-4">Issue</th>
+                  <th className="pl-[21px] py-4">Final Status</th>
                   <th className="px-5 py-4 text-right">Action</th>
                 </tr>
               </thead>
@@ -519,18 +521,19 @@ export default function WalkInPage() {
                       )}
                     </td>
                     <td className="py-4 pr-4 text-[13px]">{w.source || "—"}</td>
-                    <td className="py-4 pr-4">
+                    <td className="pl-4 py-4 pr-4">
                       <div className="flex items-center gap-2.5">
-                        <Avatar name={w.customer} size={32} />
+                        {/* Thin type-coloured bar — same hue as the Type pill for uniformity. */}
+                        <span className={cn("h-8 w-1 shrink-0 rounded-full", WALKIN_TYPE_BAR[w.type ?? "direct"])} />
                         <span className="text-[14px] font-medium truncate max-w-[150px]">{w.customer}</span>
                       </div>
                     </td>
-                    <td className="py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">{w.phone || "—"}</td>
-                    <td className="py-4 pr-4 text-[13px] truncate max-w-[150px]">{w.model || "—"}</td>
-                    <td className="py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
+                    <td className="pl-4 py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">{w.phone || "—"}</td>
+                    <td className="pl-4 py-4 pr-4 text-[13px] truncate max-w-[150px]">{w.model || "—"}</td>
+                    <td className="pl-4 py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
                       {w.issue || (w.reasons || []).join(", ") || "—"}
                     </td>
-                    <td className="py-4 pr-4">
+                    <td className="pl-4 py-4 pr-4">
                       <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap", WALKIN_STATUS_TONE[w.status])}>
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         {WALKIN_STATUS_LABEL[w.status]}
@@ -541,6 +544,25 @@ export default function WalkInPage() {
                     </td>
                     <td className="px-5 py-4">
                       <div className="flex items-center justify-end gap-1">
+                        {/* Push to Ticket — sibling of the ticket's "Push to Invoice"
+                            quick action. Reflects a linked/converted state so no
+                            duplicate ticket is created. */}
+                        {w.linkedTicketId ? (
+                          <span
+                            title={`Linked to ticket ${ticketNoFor(w.linkedTicketId)}`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-emerald-500"
+                          >
+                            <PushToTicketIcon className="h-4 w-4" />
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setConvertTarget(w)}
+                            title="Push to Ticket"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                          >
+                            <PushToTicketIcon className="h-4 w-4" />
+                          </button>
+                        )}
                         <button onClick={() => setViewTarget(w)} title="View" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground">
                           <Eye className="h-4 w-4" />
                         </button>
