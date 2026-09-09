@@ -32,6 +32,7 @@ import { useGridLayout } from "@/lib/use-widget-order";
 import { useMonthlyTarget } from "@/lib/use-monthly-target";
 import { usePermissions } from "@/lib/permissions-context";
 import { useActivityCollapse } from "@/lib/use-activity-collapse";
+import { appendDateFilterParams } from "@/lib/date-filter";
 
 /* ── Device breakdown — computed from store data in component ── */
 
@@ -307,17 +308,46 @@ export default function Dashboard() {
   // so the logic is preserved and lint doesn't flag it as unused.
   void exportCriticalTasks;
 
-  // "View all tickets" deep-links to the Tickets page carrying the active
-  // priority/status context so the list opens pre-filtered.
+  // "View all tickets" deep-links to the Tickets page carrying BOTH the active
+  // dashboard date window AND the card's priority/status context, so the list
+  // opens showing the same rows the Critical Tasks card represents. The
+  // Critical Tasks card is always scoped to Critical/High priority, so we pass
+  // that intent through (ctPriority narrows further to only Critical or only
+  // High) — composition, not replacement.
   const viewAllHref = useMemo(() => {
     const params = new URLSearchParams();
-    if (ctPriority !== "all") params.set("priority", ctPriority);
+    // Priority: default to the widget's Critical+High set; a card filter narrows it.
+    params.set("priority", ctPriority !== "all" ? ctPriority : "critical_high");
     if (ctStatus !== "all") params.set("status", ctStatus);
     if (ctType !== "all") params.set("type", ctType);
     if (ctTech !== "all") params.set("tech", ctTech);
+    // Carry the active dashboard date window so the destination inherits it.
+    appendDateFilterParams(params, dateRange, customRange);
+    return `/tickets?${params.toString()}`;
+  }, [ctPriority, ctStatus, ctType, ctTech, dateRange, customRange]);
+
+  // Recent Transactions → Invoices. Clicking a transaction (or "View All")
+  // opens the Invoice list inheriting the SAME active dashboard date window so
+  // the invoices shown match the transactions the dashboard considers "recent".
+  const invoicesHref = useMemo(() => {
+    const params = new URLSearchParams();
+    appendDateFilterParams(params, dateRange, customRange);
     const qs = params.toString();
-    return qs ? `/tickets?${qs}` : "/tickets";
-  }, [ctPriority, ctStatus, ctType, ctTech]);
+    return qs ? `/invoice?${qs}` : "/invoice";
+  }, [dateRange, customRange]);
+
+  // Deep-link a single transaction to its linked invoice when one exists,
+  // otherwise fall back to the date-scoped invoice list. Keeps the dashboard
+  // date window intact either way.
+  const transactionHref = useCallback((ticketId: string) => {
+    const inv = invoices.find((i) => i.ticketId === ticketId);
+    if (inv) {
+      const params = new URLSearchParams();
+      params.set("search_id", inv.id);
+      return `/invoice?${params.toString()}`;
+    }
+    return invoicesHref;
+  }, [invoices, invoicesHref]);
 
   // Compute live KPIs from real data
   const now = useMemo(() => new Date(), []);
@@ -607,7 +637,7 @@ export default function Dashboard() {
         {/* Tickets by Device */}
         <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
-          <CardHeader title="Tickets by Device" badge={<span className="text-[11px] text-muted-foreground">Last 7 days</span>} />
+          <CardHeader title="Tickets by Device" badge={<span className="text-[11px] text-muted-foreground">{dateRangeLabel}</span>} />
           {deviceData.length === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center gap-1 text-muted-foreground">
               <p className="text-[13px] font-medium">No data available</p>
@@ -641,7 +671,17 @@ export default function Dashboard() {
             <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 mb-2">Recent</p>
             <ul className="space-y-1">
               {filteredTickets.slice(0, 20).map((tx, i) => (
-                <motion.li key={tx.id} initial={{ opacity: 0, x: 6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.04 * i }} className="flex items-center gap-3 rounded-xl px-2 py-2 hover:bg-[#EEF1FD]/50 transition">
+                <motion.li
+                  key={tx.id}
+                  initial={{ opacity: 0, x: 6 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: 0.04 * i }}
+                  onClick={() => router.push(transactionHref(tx.id))}
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); router.push(transactionHref(tx.id)); } }}
+                  className="flex cursor-pointer items-center gap-3 rounded-xl px-2 py-2 transition hover:bg-[#EEF1FD]/50 focus:bg-[#EEF1FD]/50 focus:outline-none"
+                >
                   <Avatar name={tx.customer} size={30} ticketType={getTicketType(tx)} />
                   <div className="min-w-0 flex-1"><p className="truncate text-[13px] font-semibold leading-tight">{tx.customer}</p><p className="text-[11px] text-muted-foreground">{tx.model}</p></div>
                   <span className="text-[13px] font-bold text-[#4361EE] tnum whitespace-nowrap">{formatINR(tx.amount)}</span>
@@ -652,7 +692,7 @@ export default function Dashboard() {
           )}
           <div className="mt-2 border-t border-border pt-3 flex items-center justify-between">
             <Can permission={["manage_reports", "export_reports"]}><button className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline"><ArrowDownToLine className="h-3.5 w-3.5" /> Download Report</button></Can>
-            <Link href="/reports" className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View All <ArrowRight className="h-3 w-3" /></Link>
+            <Link href={invoicesHref} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View All <ArrowRight className="h-3 w-3" /></Link>
           </div>
         </div>
 

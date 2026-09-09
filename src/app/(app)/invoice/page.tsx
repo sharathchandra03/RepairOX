@@ -22,13 +22,16 @@ import { Pagination } from "@/components/ui/pagination";
 import { useStore } from "@/lib/store";
 import { InvoiceFilters } from "@/components/filters/invoice-filters";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
+import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
+import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, invoiceStatusPillStyle, invoiceIdColorStyle, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
 import { useStoreSettings } from "@/lib/store-settings";
-import { formatINR, cn } from "@/lib/utils";
+import { formatINR, cn, openWhatsApp } from "@/lib/utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 import { rememberOrigin } from "@/lib/settings-origin";
+import { readDateFilterParams } from "@/lib/date-filter";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
@@ -177,8 +180,42 @@ export default function InvoicePage() {
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   // Advanced-panel unified live search across Invoice ID + Customer Name.
   const [panelSearch, setPanelSearch] = useState("");
+  // Individual filter pinning (own storage key so it doesn't collide with other modules).
+  const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-invoice-pinned-filters");
   // True when any filter differs from the defaults (Date=Today, Status=All).
   const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || panelSearch !== "";
+
+  // Pinnable filter definitions — shared by the pinned-filter bar. Bound
+  // directly to the same setters as the advanced panel, so a pinned filter
+  // behaves identically to using the panel (pinning is optional personalization).
+  const pinnableFilters: PinnableFilterDef[] = useMemo(() => [
+    {
+      id: "invoiceStatus", label: "Invoice Status", type: "select", value: statusFilter,
+      options: [
+        { label: "All Statuses", value: "all" },
+        { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" },
+        { label: "Paid", value: "paid" }, { label: "Partial", value: "partial" },
+        { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
+      ],
+      onChange: setStatusFilter,
+    },
+    {
+      id: "invoiceType", label: "Invoice Type", type: "select", value: typeFilter,
+      options: [
+        { label: "All Types", value: "all" },
+        { label: "Retail", value: "retail" }, { label: "Business", value: "business" },
+      ],
+      onChange: setTypeFilter,
+    },
+    {
+      id: "category", label: "Category", type: "select", value: categoryFilter,
+      options: [
+        { label: "All Categories", value: "all" },
+        { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" },
+      ],
+      onChange: setCategoryFilter,
+    },
+  ], [statusFilter, typeFilter, categoryFilter]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
@@ -200,7 +237,31 @@ export default function InvoicePage() {
       setCustomTo("");
       setQ("");
       setPanelSearch("");
+      return;
     }
+    // Deep-link filter context (e.g. from the Dashboard Recent Transactions
+    // "View All": /invoice?dateRange=1month). Only apply params that are
+    // present so direct visits keep their defaults. The inherited dashboard
+    // date window is the single source of truth for the initial date filter.
+    const status = searchParams.get("status");
+    const type = searchParams.get("type");
+    const category = searchParams.get("category");
+    const inheritedDate = readDateFilterParams(searchParams);
+
+    if (status || type || category || inheritedDate) {
+      if (status) setStatusFilter(status);
+      if (type) setTypeFilter(type);
+      if (category) setCategoryFilter(category);
+      if (inheritedDate) {
+        setDateRange(inheritedDate.preset);
+        if (inheritedDate.preset === "custom") {
+          setCustomFrom(inheritedDate.from ?? "");
+          setCustomTo(inheritedDate.to ?? "");
+        }
+      }
+    }
+    // After this initial inheritance the user can freely change filters here;
+    // we do not re-sync on every render so their explicit choices always win.
   }, [searchParams]);
 
   // Open Settings → Invoice → Invoice Settings, remembering Invoice as the
@@ -549,10 +610,15 @@ export default function InvoicePage() {
                 setQ("");
               }}
               onClose={() => setShowFilterPanel(false)}
+              isPinned={isPinned}
+              onTogglePin={togglePin}
             />
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Pinned filters bar — the filters the user chose to keep visible. */}
+      <PinnedFilterBar filters={pinnableFilters} pinnedIds={pinnedIds} onUnpin={unpin} />
 
       {/* Column Settings Panel */}
       <AnimatePresence>
@@ -971,7 +1037,7 @@ function renderInvCell(
             <MenuItem icon={Copy} onClick={() => { onDuplicate(); close(); }}>Duplicate</MenuItem>
             <MenuItem icon={Printer} onClick={() => { onPrint(); close(); }}>Print</MenuItem>
             <MenuItem icon={FileDown} onClick={() => { onDownloadPdf(); close(); }}>Download PDF</MenuItem>
-            <MenuItem icon={MessageCircle} onClick={close}>WhatsApp Invoice</MenuItem>
+            <MenuItem icon={MessageCircle} onClick={() => { openWhatsApp(inv.phone, `Hi ${inv.customer}, here is your invoice ${inv.id} — ${formatINR(inv.total)}.`); close(); }}>WhatsApp Invoice</MenuItem>
             <MenuItem icon={Mail} onClick={close}>Email Invoice</MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>

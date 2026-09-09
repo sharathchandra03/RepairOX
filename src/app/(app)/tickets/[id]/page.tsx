@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   ArrowLeft, Pencil, MoreHorizontal, Printer, Trash2,
@@ -33,6 +33,24 @@ function fmtDate(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** ISO → value for a <input type="datetime-local"> ("YYYY-MM-DDTHH:mm") in
+ *  LOCAL time, so the picker shows the same wall-clock time we display. */
+function isoToLocalInput(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** datetime-local input value ("YYYY-MM-DDTHH:mm", local) → ISO string. */
+function localInputToIso(local: string): string | undefined {
+  if (!local) return undefined;
+  const d = new Date(local); // interpreted as local time
+  if (isNaN(d.getTime())) return undefined;
+  return d.toISOString();
 }
 
 function fmtDateShort(iso: string): string {
@@ -118,6 +136,7 @@ function generateTimeline(ticket: Ticket) {
 export default function TicketDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { tickets, invoices, deleteTicket, updateTicket, deductPartsForTicket } = useStore();
   const ticketId = params.id as string;
   const [editingNotes, setEditingNotes] = useState(false);
@@ -138,6 +157,25 @@ export default function TicketDetailPage() {
     "customer" | "device" | "job" | "assignment" | "billing" | null
   >(null);
   const [showQCDrawer, setShowQCDrawer] = useState(false);
+
+  // Deep-link support: /tickets/[id]?section=job|billing[&edit=1] scrolls the
+  // targeted section into view once the ticket has rendered, and (optionally)
+  // opens that section's editor. Used by the Tickets table Due Date → Job
+  // Details and Amount → Billing quick navigations.
+  useEffect(() => {
+    if (!ticket) return;
+    const section = searchParams.get("section");
+    if (section !== "job" && section !== "billing") return;
+    const anchorId = section === "job" ? "section-job" : "section-billing";
+    const wantsEdit = searchParams.get("edit") === "1";
+    // Wait a frame so the section is in the DOM before scrolling.
+    const t = setTimeout(() => {
+      document.getElementById(anchorId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (wantsEdit) setActiveEditor(section === "job" ? "job" : "billing");
+    }, 120);
+    return () => clearTimeout(t);
+    // Depend on ticket presence + the raw query so re-navigation re-triggers.
+  }, [ticket, searchParams]);
 
   const handleDelete = useCallback(() => {
     if (ticket) {
@@ -417,6 +455,7 @@ export default function TicketDetailPage() {
 
           {/* Job Details */}
           <DetailSection
+            id="section-job"
             title="Job Details"
             icon={Tag}
             action={<SectionEditButton onClick={() => setActiveEditor("job")} />}
@@ -631,6 +670,7 @@ export default function TicketDetailPage() {
 
           {/* Billing Information */}
           <DetailSection
+            id="section-billing"
             title="Billing / Invoice Link"
             icon={CreditCard}
             action={<SectionEditButton onClick={() => setActiveEditor("billing")} />}
@@ -927,7 +967,11 @@ export default function TicketDetailPage() {
           amount: String(ticket.amount),
           priority: ticket.priority,
           status: ticket.status,
-          resolutionMinutes: String(ticket.resolutionMinutes || 59),
+          // Prefer the real due date/time; fall back to created + resolution.
+          dueDate: isoToLocalInput(
+            ticket.dueDate ||
+            new Date(new Date(ticket.createdAt).getTime() + (ticket.resolutionMinutes || 59) * 60_000).toISOString(),
+          ),
         }}
         fields={[
           { key: "issue", label: "Issue", type: "text" },
@@ -950,15 +994,25 @@ export default function TicketDetailPage() {
             { label: "Waiting for Parts", value: "waiting_parts" }, { label: "Returned", value: "return" },
             { label: "Returned & Collected", value: "return_collected" },
           ]},
-          { key: "resolutionMinutes", label: "Expected Resolution (minutes)", type: "number" },
+          { key: "dueDate", label: "Due Date & Time", type: "datetime", hint: "Pick the resolution date and time. Expected resolution is recalculated from this." },
         ]}
         onSave={(v) => {
+          // The user edits the due date/time directly via the calendar. Persist
+          // that as dueDate (ISO) and recompute resolutionMinutes from
+          // dueDate − createdAt so the "Expected Resolution" display and the
+          // overdue logic stay consistent with the chosen due time.
+          const dueIso = localInputToIso(v.dueDate);
+          const createdMs = new Date(ticket.createdAt).getTime();
+          const recalcMins = dueIso
+            ? Math.max(1, Math.round((new Date(dueIso).getTime() - createdMs) / 60_000))
+            : (ticket.resolutionMinutes || 59);
           updateTicket(ticket.id, {
             issue: v.issue, service: v.service || undefined, source: v.source || undefined,
             amount: Number(v.amount) || 0,
             priority: v.priority as any,
             status: v.status as any,
-            resolutionMinutes: Number(v.resolutionMinutes) || 59,
+            dueDate: dueIso ?? ticket.dueDate,
+            resolutionMinutes: recalcMins,
           });
           setActiveEditor(null);
         }}
@@ -1073,9 +1127,9 @@ function SummaryCard({ label, value, icon: Icon }: { label: string; value: strin
   );
 }
 
-function DetailSection({ title, icon: Icon, children, action }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode }) {
+function DetailSection({ title, icon: Icon, children, action, id }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode; id?: string }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+    <div id={id} className="scroll-mt-24 rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
       <div className="flex items-center justify-between gap-2.5 mb-5 pb-4 border-b border-border/70">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">

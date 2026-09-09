@@ -36,6 +36,7 @@ import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
+import { readDateFilterParams } from "@/lib/date-filter";
 
 /* ─── Column Definition ──────────────────────────────────────────────────
    Column catalog, ids, and defaults now live in the shared single source of
@@ -80,6 +81,7 @@ const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
 
 const PRIORITY_OPTIONS = [
   { label: "All Priorities", value: "all" },
+  { label: "Critical + High", value: "critical_high" },
   { label: "Normal", value: "normal" },
   { label: "High Priority", value: "high" },
   { label: "Critical", value: "critical" },
@@ -226,20 +228,38 @@ export default function TicketsPage() {
       return;
     }
     // Deep-link filter context (e.g. from the Dashboard "Critical Tasks" card:
-    // /tickets?priority=critical). Only apply params that are actually present
-    // so direct visits keep their defaults.
+    // /tickets?priority=critical_high&dateRange=1month). Only apply params that
+    // are actually present so direct visits keep their defaults.
     const priority = searchParams.get("priority");
     const status = searchParams.get("status");
     const type = searchParams.get("type");
     const tech = searchParams.get("tech");
-    if (priority || status || type || tech) {
+    // The active dashboard date window, if the caller passed one. This is the
+    // single source of truth for the destination's initial date filter.
+    const inheritedDate = readDateFilterParams(searchParams);
+
+    if (priority || status || type || tech || inheritedDate) {
       if (priority) setPriorityFilter(priority);
       if (status) setStatusFilter(status);
       if (type) setTypeFilter(type);
       if (tech) setTechFilter(tech);
-      // Show the full matching set regardless of when tickets were created.
-      setDateRange("all");
+
+      if (inheritedDate) {
+        // Inherit the dashboard's exact date window (composition, not override).
+        setDateRange(inheritedDate.preset);
+        if (inheritedDate.preset === "custom") {
+          setCustomFrom(inheritedDate.from ?? "");
+          setCustomTo(inheritedDate.to ?? "");
+        }
+      } else {
+        // A filter param was supplied without a date window — show the full
+        // matching set regardless of when tickets were created (legacy behavior).
+        setDateRange("all");
+      }
     }
+    // NOTE: after this initial inheritance the user can freely change the date
+    // range / filters on this page; we intentionally do not re-sync on every
+    // render, so their explicit choices always win.
   }, [searchParams]);
 
   const clearSearchFilter = useCallback(() => {
@@ -420,12 +440,19 @@ export default function TicketsPage() {
       // real priority value. When selected we AND-in isOverdue(t) (the same
       // predicate driving the reddish rows) instead of matching t.priority.
       const overdueOnly = priorityFilter === "overdue";
+      // "critical_high" is the composed Critical + High set the Dashboard's
+      // Critical Tasks card represents; it matches either priority value.
+      const criticalHigh = priorityFilter === "critical_high";
       const filtered = tickets.filter((t) => {
         const okStatus = statusFilter === "all" || t.status === statusFilter;
         const okDate = isInDateRange(t.createdAt, dateRange, customFrom, customTo);
         const okPriority =
           priorityFilter === "all" ||
-          (overdueOnly ? isOverdue(t) : t.priority === priorityFilter);
+          (overdueOnly
+            ? isOverdue(t)
+            : criticalHigh
+              ? t.priority === "critical" || t.priority === "high"
+              : t.priority === priorityFilter);
         const okTech = techFilter === "all" || t.technician === techFilter;
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
         const okType = typeFilter === "all" || getTicketType(t) === typeFilter;
@@ -983,7 +1010,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id), setDeviceDetailsTicket)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`))}
                       </td>
                     ))}
                   </motion.tr>
@@ -1334,6 +1361,7 @@ function renderCell(
   statusColors: Record<string, string>,
   hasInvoice: boolean,
   onOpenDeviceDetails: (ticket: Ticket) => void,
+  navigateToSection: (ticketId: string, section: "job" | "billing") => void,
 ) {
   switch (colId) {
     case "checkbox":
@@ -1460,10 +1488,18 @@ function renderCell(
       );
     case "dueDate":
       return t.dueDate ? (
-        <div className={cn("text-[12px]", isOverdue(t) ? "text-[#922B21] font-semibold" : "text-[#922B21]/70")}>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); navigateToSection(t.id, "job"); }}
+          title="Open Job Details"
+          className={cn(
+            "-mx-1 rounded-md px-1 py-0.5 text-left text-[12px] transition hover:bg-[#EEF1FD]",
+            isOverdue(t) ? "text-[#922B21] font-semibold" : "text-[#922B21]/70",
+          )}
+        >
           <p>{new Date(t.dueDate).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
           <p className="text-[11px]">{new Date(t.dueDate).toLocaleTimeString("en-IN", { timeStyle: "short" })}</p>
-        </div>
+        </button>
       ) : <span className="text-[12px] text-muted-foreground">—</span>;
     case "created":
       return (
@@ -1473,7 +1509,16 @@ function renderCell(
         </div>
       );
     case "amount":
-      return <span className="font-semibold tabular-nums whitespace-nowrap">{formatINR(t.amount)}</span>;
+      return (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); navigateToSection(t.id, "billing"); }}
+          title="Open Billing / Invoice"
+          className="-mx-1 rounded-md px-1 py-0.5 font-semibold tabular-nums whitespace-nowrap transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        >
+          {formatINR(t.amount)}
+        </button>
+      );
     case "actions":
       return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={hasInvoice} /></div>;
     default:

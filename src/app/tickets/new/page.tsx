@@ -29,7 +29,7 @@ import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDevice
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
-import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, type Brand, type DeviceModel } from "@/lib/brand-model-data";
+import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, inferCategoryFromName, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
@@ -325,11 +325,16 @@ function NewTicketWizard() {
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const fromPage = searchParams.get("from");
-  const closeTarget = fromPage === "dashboard" ? "/dashboard" : "/tickets";
-  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands } = useStore();
+  // Walk-In conversion: when present, prefill from the walk-in and land on the
+  // Device Details step. The ticket is only created when the user completes the
+  // wizard, at which point we link it back to this walk-in.
+  const fromWalkInId = searchParams.get("fromWalkIn");
+  const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : "/tickets";
+  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, updateWalkIn } = useStore();
   const { settings } = useStoreSettings();
 
-  const [step, setStep] = useState(editId ? 3 : 1);
+  // Start on Device Details (step 3) for both edit and walk-in conversion.
+  const [step, setStep] = useState(editId || fromWalkInId ? 3 : 1);
   const [data, setData] = useState<WizardData>(DEFAULT);
   const [submitted, setSubmitted] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
@@ -349,6 +354,52 @@ function NewTicketWizard() {
       }
     }
   }, [editId, tickets]);
+
+  // Pre-fill data when converting from a Walk-In. Reuses the SAME prefill
+  // mechanism as edit: build a WizardData and setData once. Category/brand are
+  // resolved from the Device Catalog (modelId → model.categoryId/brandId, else
+  // inferCategoryFromName(model)); nothing is guessed beyond that — the user can
+  // edit every field before the ticket is created.
+  const walkInPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!fromWalkInId || walkInPrefilledRef.current) return;
+    const w = walkIns.find((x) => x.id === fromWalkInId);
+    if (!w) return; // walk-ins may still be hydrating; effect re-runs when they load
+    walkInPrefilledRef.current = true;
+
+    // Resolve the catalog model record (by id, else exact name match).
+    const modelRec = w.modelId
+      ? deviceModels.find((m) => m.id === w.modelId)
+      : (w.model ? deviceModels.find((m) => m.name.toLowerCase() === w.model.toLowerCase()) : undefined);
+    // Category: catalog record → walk-in category → inferred from model name.
+    const categoryId = modelRec?.categoryId || w.category || (w.model ? inferCategoryFromName(w.model) : undefined);
+    const brandRec = modelRec ? brands.find((b) => b.id === modelRec.brandId) : undefined;
+
+    const nameParts = (w.customer || "").trim().split(/\s+/);
+    const dev = createWizardDevice(categoryId);
+    dev.device.model = w.model || "";
+    dev.device.modelId = modelRec?.id;
+    dev.device.brand = brandRec?.name || "";
+    dev.device.brandId = brandRec?.id;
+    dev.device.source = w.source || "";
+    dev.job.issue = w.issue || (w.reasons || []).join(", ") || "";
+
+    setData({
+      ...DEFAULT,
+      category: categoryId,
+      devices: [dev],
+      activeDeviceIndex: 0,
+      contactType: "personal",
+      customer: {
+        first: nameParts[0] || "",
+        last: nameParts.slice(1).join(" ") || "",
+        phone: w.phone || "",
+        email: w.email || "",
+        address: "", postal: "", city: "", company: "",
+      },
+      customerId: w.customerId || null,
+    });
+  }, [fromWalkInId, walkIns, deviceModels, brands]);
 
   // Preload device categories + images on mount so the wheel renders instantly.
   useEffect(() => {
@@ -543,6 +594,18 @@ function NewTicketWizard() {
       // addTicket assigns the real sequential ticket number (T-001, …) from the
       // DB and returns it. Use that id everywhere downstream.
       const newId = await addTicket(ticketData);
+      // Walk-In conversion: link the created ticket back to its source walk-in
+      // and mark it converted. This is the ONLY place a walk-in becomes
+      // "Converted Ticket" — clicking Convert alone never creates a ticket.
+      if (fromWalkInId) {
+        const linkId = newId || ticketData.id;
+        await updateWalkIn(fromWalkInId, {
+          status: "converted_ticket",
+          linkedTicketId: linkId,
+          ticketId: linkId,
+          convertedAt: new Date().toISOString(),
+        });
+      }
       // Update customer stats (totalTickets, lastVisit)
       if (finalCustomerId) {
         const cust = customers.find((c) => c.id === finalCustomerId);

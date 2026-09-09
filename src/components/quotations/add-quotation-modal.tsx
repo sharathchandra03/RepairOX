@@ -21,7 +21,7 @@ import {
   FileText, IndianRupee, MapPin, ScrollText, StickyNote, ClipboardCheck, Info,
   CheckCircle2, Eye, Download, Mail, MessageCircle, ArrowLeft, RefreshCw, FileCheck2,
 } from "lucide-react";
-import { cn, formatINR } from "@/lib/utils";
+import { cn, formatINR, openWhatsApp } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { StoreLogo } from "@/components/ui/store-logo";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/card";
@@ -489,7 +489,7 @@ export function AddQuotationModal({
                   onView={() => { handleGeneratePdf(); }}
                   onDownload={handleGeneratePdf}
                   onEmail={() => window.open(`mailto:${resolved.email}?subject=${encodeURIComponent(`Quotation ${savedId}`)}`)}
-                  onWhatsApp={() => window.open(`https://wa.me/?text=${encodeURIComponent(`Quotation ${savedId} — ${formatINR(totals.grandTotal)}`)}`, "_blank")}
+                  onWhatsApp={() => openWhatsApp(resolved.phone, `Hi${resolved.customerName ? ` ${resolved.customerName}` : ""}, here is your quotation ${savedId} — ${formatINR(totals.grandTotal)}.`)}
                   onConvert={handleConvertToInvoice}
                   onCreateAnother={resetForNew}
                   onBack={() => { resetForNew(); onClose(); }}

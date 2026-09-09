@@ -910,8 +910,10 @@ export const WALKIN_STATUS_LABEL: Record<WalkInStatus, string> = {
 
 export const WALKIN_STATUS_TONE: Record<WalkInStatus, string> = {
   visitor: "bg-slate-50 text-slate-600 ring-slate-200",
+  // Enquiry — a soft, eye-friendly amber, distinct from Marketing (violet).
   enquiry: "bg-amber-50 text-amber-700 ring-amber-200",
-  converted_ticket: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  // Converted Ticket — RepairOX blue (deeper indigo), NOT green.
+  converted_ticket: "bg-indigo-100 text-indigo-700 ring-indigo-300",
   /* legacy */
   waiting: "bg-amber-50 text-amber-700 ring-amber-200",
   inspection: "bg-indigo-50 text-indigo-700 ring-indigo-200",
@@ -985,6 +987,15 @@ export type WalkIn = {
   linkedTicketId?: string;
   /** @deprecated use linkedTicketId. Retained for older rows. */
   ticketId?: string;
+  /** ISO timestamp of when the walk-in was converted to a ticket. */
+  convertedAt?: string;
+  /** Follow-up schedule (optional). Date is ISO YYYY-MM-DD; time is "HH:mm" (24h). */
+  followUpDate?: string;
+  followUpTime?: string;
+  /** Follow-up lifecycle: undefined/"pending" = scheduled, "done" = completed. */
+  followUpStatus?: "pending" | "done";
+  /** ISO timestamp of when the follow-up was marked read (clears the unread badge). */
+  followUpReadAt?: string;
   invoiceValue: number;
   businessValue: number;
   notes?: string;
@@ -993,6 +1004,31 @@ export type WalkIn = {
   createdAt?: string;
   updatedAt?: string;
 };
+
+/** True when a walk-in has a follow-up scheduled that is not yet completed. */
+export function hasPendingFollowUp(w: Pick<WalkIn, "followUpDate" | "followUpStatus">): boolean {
+  return !!w.followUpDate && w.followUpStatus !== "done";
+}
+
+/**
+ * Combine a follow-up date (YYYY-MM-DD) + optional time (HH:mm) into a Date.
+ * When no time is given, defaults to 09:00 local so a date-only follow-up
+ * becomes due in the morning rather than at midnight.
+ */
+export function followUpDueAt(w: Pick<WalkIn, "followUpDate" | "followUpTime">): Date | null {
+  if (!w.followUpDate) return null;
+  const [y, m, d] = w.followUpDate.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  const [hh, mm] = (w.followUpTime || "09:00").split(":").map(Number);
+  return new Date(y, m - 1, d, hh || 0, mm || 0, 0, 0);
+}
+
+/** True when the follow-up's due date/time has arrived (and not completed). */
+export function isFollowUpDue(w: Pick<WalkIn, "followUpDate" | "followUpTime" | "followUpStatus">, now: Date = new Date()): boolean {
+  if (w.followUpStatus === "done") return false;
+  const due = followUpDueAt(w);
+  return !!due && due.getTime() <= now.getTime();
+}
 
 export const walkIns: WalkIn[] = [];
 

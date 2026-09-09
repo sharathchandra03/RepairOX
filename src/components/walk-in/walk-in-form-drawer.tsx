@@ -54,6 +54,8 @@ export function WalkInFormDrawer({
 }) {
   const { customers, customerGroups, addCustomer, team, deviceModels } = useStore();
   const isEdit = !!walkIn;
+  // Once converted to a ticket, the follow-up schedule is locked (business rule).
+  const isConverted = !!walkIn?.linkedTicketId;
 
   const [form, setForm] = useState<Partial<WalkIn>>({});
   // Customer Type for a NEW customer created from this walk-in (Personal/Business).
@@ -486,6 +488,50 @@ export function WalkInFormDrawer({
                 Tip: use the “Convert to Ticket” action to create and link a real ticket.
               </p>
             )}
+          </div>
+
+          {/* Follow-Up (optional). Compact date + time. Locked once the walk-in
+              has been converted to a ticket (per business rule). */}
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <Label>Follow-Up <span className="font-normal text-muted-foreground">(optional)</span></Label>
+              {form.followUpDate && !isConverted && (
+                <button
+                  type="button"
+                  onClick={() => set({ followUpDate: undefined, followUpTime: undefined, followUpStatus: undefined, followUpReadAt: undefined })}
+                  className="text-[10px] font-medium text-rose-600 hover:underline"
+                >
+                  Remove
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                type="date"
+                value={form.followUpDate || ""}
+                disabled={isConverted}
+                onChange={(e: any) => set({ followUpDate: e.target.value, followUpStatus: e.target.value ? "pending" : undefined })}
+              />
+              <Input
+                type="time"
+                value={form.followUpTime || ""}
+                disabled={isConverted || !form.followUpDate}
+                onChange={(e: any) => set({ followUpTime: e.target.value })}
+              />
+            </div>
+            {isConverted ? (
+              <p className="text-[10px] text-muted-foreground">Follow-up is locked — this walk-in is already converted to a ticket.</p>
+            ) : form.followUpStatus === "done" ? (
+              <p className="flex items-center gap-1 text-[10px] font-medium text-emerald-600">
+                <Check className="h-3 w-3" /> Follow-up marked complete
+                <button type="button" onClick={() => set({ followUpStatus: "pending" })} className="ml-1 text-muted-foreground hover:underline">Reopen</button>
+              </p>
+            ) : form.followUpDate ? (
+              <div className="flex items-center justify-between">
+                <p className="text-[10px] text-muted-foreground">A reminder appears in the Walk-In bell when this is due.</p>
+                <button type="button" onClick={() => set({ followUpStatus: "done" })} className="text-[10px] font-medium text-[#4361EE] hover:underline">Mark complete</button>
+              </div>
+            ) : null}
           </div>
         </section>
                 </div>

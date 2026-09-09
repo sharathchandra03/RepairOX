@@ -125,14 +125,18 @@ export function Select({ value, defaultValue, onChange, options, className, plac
     };
   }, [open, updatePosition]);
 
-  // Close on click outside (trigger only; the backdrop handles panel clicks).
+  // NOTE: outside-click closing is handled by the portal backdrop below.
+  // We must NOT add a document "mousedown" listener that closes when the click
+  // target is outside the trigger wrapper `ref` — the dropdown panel is
+  // portalled to <body>, so such a listener treats a click on an option as
+  // "outside" and closes the panel on mousedown, BEFORE the option's onClick
+  // can fire. That was the bug where filters never got selected. Close instead
+  // on Escape (keyboard) and via the backdrop (pointer).
   React.useEffect(() => {
     if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
   }, [open]);
 
   return (
@@ -158,8 +162,10 @@ export function Select({ value, defaultValue, onChange, options, className, plac
       </button>
       {mounted && open && createPortal(
         <>
-          {/* Invisible click-catcher so clicking anywhere closes the panel. */}
-          <div className="fixed inset-0 z-[10040]" onMouseDown={() => setOpen(false)} />
+          {/* Invisible click-catcher so clicking OUTSIDE the panel closes it.
+              Uses onClick (not onMouseDown) so it can never preempt an option's
+              own click handler. */}
+          <div className="fixed inset-0 z-[10040]" onClick={() => setOpen(false)} />
           <div
             style={{ left: pos.left, width: Math.max(pos.width, 160), top: pos.top, bottom: pos.bottom }}
             className="fixed z-[10041] max-h-60 overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"

@@ -9,7 +9,7 @@ import { Input, Textarea, Label, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import type { Ticket } from "@/lib/mock-data";
 import { STATUS_LABEL, STATUS_TONE, getTicketDevices, getTicketType } from "@/lib/mock-data";
-import { formatINR } from "@/lib/utils";
+import { formatINR, openWhatsApp } from "@/lib/utils";
 import { getTicketPrintUrl, type PrintFormat } from "@/lib/print-utils";
 
 /* ─── View Ticket Drawer ─────────────────────────────────────────────── */
@@ -309,11 +309,22 @@ export function EmailReceiptDrawer({ open, onClose, ticket }: { open: boolean; o
 
 export function WhatsAppReceiptDrawer({ open, onClose, ticket }: { open: boolean; onClose: () => void; ticket: Ticket | null }) {
   const [phone, setPhone] = useState("");
+  const [message, setMessage] = useState("");
 
   // Prefill with the ticket's phone number whenever a new ticket is opened.
   const currentPhone = phone || ticket?.phone || "";
 
   if (!ticket) return null;
+
+  const defaultMessage = `Hi ${ticket.customer}, here is your ticket ${ticket.id} — ${ticket.model} (${ticket.issue}). Amount: ${formatINR(ticket.amount)}.`;
+
+  // Open WhatsApp (mobile app or WhatsApp Web/desktop) with the number and
+  // message prefilled so the user can review and send it manually.
+  const handleSend = () => {
+    openWhatsApp(currentPhone, message.trim() || defaultMessage);
+    onClose();
+  };
+
   return (
     <Drawer
       open={open}
@@ -325,7 +336,7 @@ export function WhatsAppReceiptDrawer({ open, onClose, ticket }: { open: boolean
       footer={
         <div className="flex justify-start gap-2">
           <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={onClose}>
+          <Button size="sm" onClick={handleSend}>
             <MessageCircle className="h-3.5 w-3.5" /> Send via WhatsApp
           </Button>
         </div>
@@ -350,7 +361,12 @@ export function WhatsAppReceiptDrawer({ open, onClose, ticket }: { open: boolean
 
         <div className="space-y-1.5">
           <Label>Message</Label>
-          <Textarea placeholder="Optional message to send with the receipt…" rows={3} />
+          <Textarea
+            value={message}
+            onChange={(e: any) => setMessage(e.target.value)}
+            placeholder={defaultMessage}
+            rows={3}
+          />
         </div>
       </div>
     </Drawer>

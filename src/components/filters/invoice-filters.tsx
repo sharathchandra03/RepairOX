@@ -1,8 +1,38 @@
 "use client";
 
 import { type ReactNode } from "react";
-import { Search, X } from "lucide-react";
+import { Search, X, Pin, PinOff } from "lucide-react";
 import { Input, Select } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
+
+/* A filter field label with an optional Pin/Unpin toggle (matches the Tickets /
+   Walk-In advanced-filter panels). Pinning is purely optional personalization —
+   it never affects whether the filter works. */
+function FieldLabel({ label, filterId, isPinned, onTogglePin }: {
+  label: string; filterId?: string; isPinned?: (id: string) => boolean; onTogglePin?: (id: string) => void;
+}) {
+  const pinnable = !!filterId && !!onTogglePin && !!isPinned;
+  const pinned = pinnable ? isPinned!(filterId!) : false;
+  return (
+    <div className="flex items-center justify-between">
+      <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</label>
+      {pinnable && (
+        <button
+          type="button"
+          onClick={() => onTogglePin!(filterId!)}
+          className={cn(
+            "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+            pinned ? "bg-[#EEF1FD] text-[#4361EE]" : "text-muted-foreground hover:bg-muted hover:text-foreground",
+          )}
+          title={pinned ? "Unpin filter" : "Pin filter to header"}
+        >
+          {pinned ? <PinOff className="h-3 w-3" /> : <Pin className="h-3 w-3" />}
+          {pinned ? "Unpin" : "Pin"}
+        </button>
+      )}
+    </div>
+  );
+}
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 
@@ -32,6 +62,8 @@ export function InvoiceFilters({
   onChange,
   onReset,
   onClose,
+  isPinned,
+  onTogglePin,
 }: {
   /** Unified live search across Invoice ID + Customer Name. */
   search: string;
@@ -44,6 +76,10 @@ export function InvoiceFilters({
    *  only hides the panel, it does not clear the current selections. */
   onClose?: () => void;
   extraActions?: ReactNode;
+  /** Optional pin support (matches Tickets / Walk-In). When provided, each
+   *  filter shows a Pin/Unpin toggle. Pinning never affects filtering. */
+  isPinned?: (id: string) => boolean;
+  onTogglePin?: (id: string) => void;
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 shadow-card space-y-4">
@@ -82,7 +118,7 @@ export function InvoiceFilters({
 
         {/* Invoice Status */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice Status</label>
+          <FieldLabel label="Invoice Status" filterId="invoiceStatus" isPinned={isPinned} onTogglePin={onTogglePin} />
           <Select
             value={invoiceStatus}
             onChange={(e: any) => onChange({ invoiceStatus: e.target.value })}
@@ -100,7 +136,7 @@ export function InvoiceFilters({
 
         {/* Invoice Type */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice Type</label>
+          <FieldLabel label="Invoice Type" filterId="invoiceType" isPinned={isPinned} onTogglePin={onTogglePin} />
           <Select
             value={invoiceType}
             onChange={(e: any) => onChange({ invoiceType: e.target.value })}
@@ -114,7 +150,7 @@ export function InvoiceFilters({
 
         {/* Category */}
         <div className="space-y-1.5">
-          <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Category</label>
+          <FieldLabel label="Category" filterId="category" isPinned={isPinned} onTogglePin={onTogglePin} />
           <Select
             value={category}
             onChange={(e: any) => onChange({ category: e.target.value })}

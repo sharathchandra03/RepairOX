@@ -14,10 +14,12 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal, Trash2,
-  Ticket as TicketIcon, Pin, PinOff, LayoutList, BarChart3, Filter, X,
+  Ticket as TicketIcon, Pin, PinOff, LayoutList, BarChart3, Filter, X, Check,
+  Phone, Mail, Clock,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -27,7 +29,7 @@ import { Can } from "@/components/common/can";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { Drawer, DetailRow } from "@/components/ui/drawer";
+import { Drawer } from "@/components/ui/drawer";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
@@ -37,7 +39,7 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
-  WALKIN_FINAL_STATUSES, type WalkIn, type Ticket, isWalkInWon,
+  WALKIN_FINAL_STATUSES, type WalkIn, isWalkInWon, isFollowUpDue,
 } from "@/lib/mock-data";
 import {
   useWalkInSources, useWalkInRequireSalesPerson, nextWalkInNumber, genWalkInId, walkInDisplayId,
@@ -48,6 +50,7 @@ import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
 import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
 import { WalkInReport } from "@/components/walk-in/walk-in-report";
 import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
+import { WalkInFollowUpBell } from "@/components/walk-in/walk-in-followup-bell";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -60,7 +63,8 @@ function fmtDate(iso: string): string {
 }
 
 export default function WalkInPage() {
-  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, addTicket, tickets, team } = useStore();
+  const router = useRouter();
+  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets } = useStore();
   const { can } = usePermissions();
   const { sources } = useWalkInSources();
   const { requireSalesPerson } = useWalkInRequireSalesPerson();
@@ -119,7 +123,6 @@ export default function WalkInPage() {
   const [editTarget, setEditTarget] = useState<WalkIn | null>(null);
   const [viewTarget, setViewTarget] = useState<WalkIn | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
-  const [convertTarget, setConvertTarget] = useState<WalkIn | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -181,14 +184,19 @@ export default function WalkInPage() {
     });
   }, [filtered]);
 
-  const activeStaff = useMemo(() => team.filter((m) => m.status === "active"), [team]);
-
   /* Resolve a linked ticket's human-readable number (T-###) from its stable
-     internal id. Falls back to the id only if the ticket can't be found. */
+     internal id. Matches by primary id OR by ticketNo (older links stored the
+     display number). Never exposes the internal "TK-…" primary key — if the
+     ticket record can't be found and the stored value is a raw internal id,
+     show a neutral "Ticket" label instead of the ugly code. */
   const ticketNoFor = useCallback((ticketId?: string) => {
     if (!ticketId) return undefined;
-    const t = tickets.find((x) => x.id === ticketId);
-    return t?.ticketNo || t?.id || ticketId;
+    const t = tickets.find((x) => x.id === ticketId || x.ticketNo === ticketId);
+    if (t?.ticketNo) return t.ticketNo;
+    // The stored value is already a human number (e.g. "T-057").
+    if (/^T-\d+/i.test(ticketId)) return ticketId;
+    // Unresolved internal id (e.g. "TK-…") — don't surface the raw code.
+    return "Ticket";
   }, [tickets]);
 
   /* Definitions for the pinnable filters — shared by the pinned-filter bar and
@@ -210,16 +218,11 @@ export default function WalkInPage() {
       onChange: setStatusFilter,
     },
     {
-      id: "salesPerson", label: "Marketing Person", type: "select", value: salesFilter,
-      options: [{ label: "All Marketing People", value: "all" }, ...activeStaff.map((m) => ({ label: m.name, value: m.id }))],
-      onChange: setSalesFilter,
-    },
-    {
       id: "dateRange", label: "Date Range", type: "select", value: dateRange,
       options: WALKIN_DATE_RANGES.map((d) => ({ label: d.label, value: d.value })),
       onChange: (v: string) => setDateRange(v as WalkInDateRange),
     },
-  ], [typeFilter, sourceFilter, statusFilter, salesFilter, dateRange, sources, activeStaff]);
+  ], [typeFilter, sourceFilter, statusFilter, dateRange, sources]);
 
   /* ── Save (create or edit) ── */
   const handleSaved = useCallback(async (data: Partial<WalkIn>, editingId: string | null) => {
@@ -246,6 +249,9 @@ export default function WalkInPage() {
         salesPersonId: data.salesPersonId,
         salesPersonName: data.salesPersonName,
         customerId: data.customerId,
+        followUpDate: data.followUpDate,
+        followUpTime: data.followUpTime,
+        followUpStatus: data.followUpStatus,
         invoiceValue: 0,
         businessValue: 0,
       };
@@ -256,31 +262,55 @@ export default function WalkInPage() {
     setEditTarget(null);
   }, [walkIns, addWalkIn, updateWalkIn, showToast]);
 
-  /* ── Convert Walk-In → Ticket (real, linked) ── */
-  const handleConvert = useCallback(async (w: WalkIn) => {
-    if (w.linkedTicketId) { showToast(`Already linked to ticket ${ticketNoFor(w.linkedTicketId)}.`); return; }
-    const now = new Date().toISOString();
-    const ticket: Ticket = {
-      id: "", // store assigns the real id + T-### number
-      customer: w.customer,
-      phone: w.phone,
-      device: w.model || "Device",
-      model: w.model || "",
-      issue: w.issue || (w.reasons || []).join(", ") || "Walk-in enquiry",
-      status: "in_progress",
-      priority: "normal",
-      technician: w.salesPersonName || "",
-      createdAt: now,
-      amount: 0,
-      source: w.source,
-      customerId: w.customerId,
-      internalNotes: `Converted from Walk-In ${walkInDisplayId(w)}.`,
-    };
-    const newId = await addTicket(ticket);
-    await updateWalkIn(w.id, { status: "converted_ticket", linkedTicketId: newId, ticketId: newId });
-    // addTicket returns the internal id; resolve the human ticket number for the toast.
-    showToast(`Converted ${walkInDisplayId(w)} → ticket ${ticketNoFor(newId)}.`);
-  }, [addTicket, updateWalkIn, showToast, ticketNoFor]);
+  /* ── Convert Walk-In → Ticket ──
+     Does NOT create a ticket directly. It opens the EXISTING ticket creation
+     wizard, landing on the Device Details step, prefilled from this walk-in
+     (via ?fromWalkIn=). The ticket is only created when the user completes the
+     wizard, which then links the ticket back to this walk-in. Duplicate
+     protection: a walk-in that already has a linked ticket opens that ticket
+     instead of starting a new conversion. */
+  const handleConvert = useCallback((w: WalkIn) => {
+    if (w.linkedTicketId) {
+      router.push(`/tickets/${w.linkedTicketId}`);
+      return;
+    }
+    router.push(`/tickets/new?fromWalkIn=${encodeURIComponent(w.id)}&from=walk-in`);
+  }, [router]);
+
+  /* ── Follow-up notification actions ── */
+  const handleFollowUpRead = useCallback((w: WalkIn) => {
+    if (w.followUpReadAt) return;
+    updateWalkIn(w.id, { followUpReadAt: new Date().toISOString() });
+  }, [updateWalkIn]);
+
+  const handleFollowUpComplete = useCallback((w: WalkIn) => {
+    // Preserve the historical record — only flip the status to done (+ read).
+    updateWalkIn(w.id, { followUpStatus: "done", followUpReadAt: w.followUpReadAt || new Date().toISOString() });
+    showToast(`Follow-up completed for ${w.customer || walkInDisplayId(w)}.`);
+  }, [updateWalkIn, showToast]);
+
+  /* Surface a one-time toast when a follow-up first becomes due this session.
+     A dedupe ref prevents re-toasting on every re-render/realtime refresh. A
+     light 60s interval + focus re-check keeps it current without heavy polling. */
+  const notifiedFollowUps = useRef<Set<string>>(new Set());
+  const [followUpTick, setFollowUpTick] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setFollowUpTick((t) => t + 1), 60_000);
+    const onFocus = () => setFollowUpTick((t) => t + 1);
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(id); window.removeEventListener("focus", onFocus); };
+  }, []);
+  useEffect(() => {
+    const asOf = new Date();
+    for (const w of walkIns) {
+      if (isFollowUpDue(w, asOf) && !w.followUpReadAt && !notifiedFollowUps.current.has(w.id)) {
+        notifiedFollowUps.current.add(w.id);
+        showToast(`Follow-up due: ${w.customer || walkInDisplayId(w)} (${walkInDisplayId(w)}).`);
+      }
+      // If it's no longer due (rescheduled/completed), allow a future re-notify.
+      if (!isFollowUpDue(w, asOf)) notifiedFollowUps.current.delete(w.id);
+    }
+  }, [walkIns, followUpTick, showToast]);
 
   const anyFilterActive = typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all" || salesFilter !== "all";
   const canDelete = can("delete") || can("full_access") || can("manage_repair_jobs");
@@ -334,6 +364,13 @@ export default function WalkInPage() {
         />
         {view === "table" && (
           <div className="flex items-center gap-2">
+            <WalkInFollowUpBell
+              walkIns={walkIns}
+              displayId={walkInDisplayId}
+              onOpenWalkIn={(w) => setViewTarget(w)}
+              onMarkRead={handleFollowUpRead}
+              onMarkComplete={handleFollowUpComplete}
+            />
             <Button
               variant={showFilters || anyFilterActive ? "soft" : "outline"}
               size="sm"
@@ -389,10 +426,10 @@ export default function WalkInPage() {
           animate={{ opacity: 1, scaleY: 1 }}
           style={{ transformOrigin: "top" }}
           transition={{ duration: 0.15 }}
-          className="rounded-2xl border border-border bg-card p-4 shadow-card"
+          className="rounded-2xl border border-border bg-card px-4 py-3 shadow-card"
         >
-          <div className="mb-3 flex items-center justify-between">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
+          <div className="mb-2 flex items-center justify-between">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
             <div className="flex items-center gap-3">
               <button
                 onClick={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }}
@@ -410,7 +447,10 @@ export default function WalkInPage() {
               </button>
             </div>
           </div>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {/* One compact row on desktop: Type · Source · Final Status · Date Range.
+              Each select is bound DIRECTLY to its state setter, so selecting a
+              value filters immediately — pinning is purely optional personalization. */}
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {pinnableFilters.map((f) => (
               <PinnableField
                 key={f.id}
@@ -422,7 +462,6 @@ export default function WalkInPage() {
                   value={f.value}
                   onChange={(e: any) => f.onChange(e.target.value)}
                   options={f.options || []}
-                  disabled={f.id === "salesPerson" && typeFilter === "direct"}
                 />
               </PinnableField>
             ))}
@@ -511,7 +550,23 @@ export default function WalkInPage() {
                         {fmtDate(w.date)}
                       </div>
                     </td>
-                    <td className="py-4 pr-4 text-[14px] font-semibold text-foreground whitespace-nowrap">{walkInDisplayId(w)}</td>
+                    <td className="py-4 pr-4 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[14px] font-semibold text-foreground">{walkInDisplayId(w)}</span>
+                        {/* Blue conversion check — only when a Ticket has actually
+                            been created and persisted (linkedTicketId). Same visual
+                            concept as the Ticket table's invoice indicator, in blue. */}
+                        {w.linkedTicketId && (
+                          <span
+                            title="Converted to Ticket"
+                            aria-label="Converted to Ticket"
+                            className="grid h-4 w-4 shrink-0 place-items-center rounded-full bg-[#4361EE] text-white ring-1 ring-inset ring-[#3651d4]"
+                          >
+                            <Check className="h-2.5 w-2.5" strokeWidth={3.5} />
+                          </span>
+                        )}
+                      </div>
+                    </td>
                     <td className="py-4 pr-4">
                       <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
                         {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
@@ -539,7 +594,7 @@ export default function WalkInPage() {
                         {WALKIN_STATUS_LABEL[w.status]}
                       </span>
                       {w.linkedTicketId && (
-                        <p className="mt-0.5 text-[11px] text-emerald-600">→ {ticketNoFor(w.linkedTicketId)}</p>
+                        <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
                       )}
                     </td>
                     <td className="px-5 py-4">
@@ -548,17 +603,20 @@ export default function WalkInPage() {
                             quick action. Reflects a linked/converted state so no
                             duplicate ticket is created. */}
                         {w.linkedTicketId ? (
-                          <span
-                            title={`Linked to ticket ${ticketNoFor(w.linkedTicketId)}`}
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-emerald-500"
+                          <button
+                            onClick={() => router.push(`/tickets/${w.linkedTicketId}`)}
+                            title={`View linked ticket ${ticketNoFor(w.linkedTicketId)}`}
+                            aria-label={`View linked ticket ${ticketNoFor(w.linkedTicketId)}`}
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-indigo-50 text-[#4361EE] ring-1 ring-inset ring-indigo-200 transition hover:bg-indigo-100"
                           >
                             <PushToTicketIcon className="h-4 w-4" />
-                          </span>
+                          </button>
                         ) : (
                           <button
-                            onClick={() => setConvertTarget(w)}
-                            title="Push to Ticket"
-                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                            onClick={() => handleConvert(w)}
+                            title="Convert Walk-In to Ticket"
+                            aria-label="Convert Walk-In to Ticket"
+                            className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#4361EE] transition hover:bg-[#EEF1FD]"
                           >
                             <PushToTicketIcon className="h-4 w-4" />
                           </button>
@@ -580,7 +638,7 @@ export default function WalkInPage() {
                               <MenuItem icon={Eye} onClick={() => { setViewTarget(w); close(); }}>View</MenuItem>
                               <MenuItem icon={Pencil} onClick={() => { setEditTarget(w); close(); }}>Edit</MenuItem>
                               {!w.linkedTicketId && (
-                                <MenuItem icon={TicketIcon} onClick={() => { setConvertTarget(w); close(); }}>Convert to Ticket</MenuItem>
+                                <MenuItem icon={TicketIcon} onClick={() => { handleConvert(w); close(); }}>Convert to Ticket</MenuItem>
                               )}
                               <MenuItem icon={w.pinnedAt ? PinOff : Pin} onClick={() => { pinWalkIn(w.id, !w.pinnedAt); close(); }}>
                                 {w.pinnedAt ? "Unpin" : "Pin to top"}
@@ -636,7 +694,7 @@ export default function WalkInPage() {
       />
 
       {/* View drawer */}
-      <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); setConvertTarget(w); }} />
+      <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); handleConvert(w); }} />
 
       {/* Import */}
       <WalkInImportModal open={showImport} onClose={() => setShowImport(false)} onImported={(n) => showToast(`Imported ${n} walk-in${n !== 1 ? "s" : ""}.`)} />
@@ -650,20 +708,6 @@ export default function WalkInPage() {
         description="This record will be removed from the list."
         confirmLabel="Delete"
         danger
-      />
-
-      {/* Convert to Ticket confirm */}
-      <ConfirmDialog
-        open={!!convertTarget}
-        onClose={() => setConvertTarget(null)}
-        onConfirm={() => { if (convertTarget) handleConvert(convertTarget); }}
-        title="Convert to Ticket?"
-        description={
-          convertTarget
-            ? `A new repair ticket will be created for ${convertTarget.customer}${convertTarget.model ? ` (${convertTarget.model})` : ""} and linked to walk-in ${walkInDisplayId(convertTarget)}. Its final status becomes “Converted Ticket”.`
-            : ""
-        }
-        confirmLabel="Convert to Ticket"
       />
 
       {/* Bulk delete confirm */}
@@ -751,39 +795,119 @@ function WalkInViewDrawer({
       }
     >
       <div className="space-y-5">
-        <div className="flex items-center gap-3">
-          <Avatar name={w.customer} size={40} />
-          <div>
-            <p className="font-semibold">{w.customer}</p>
-            <p className="text-xs text-muted-foreground">{w.phone}</p>
+        {/* ── Customer contact card — everything needed to follow up at a glance ── */}
+        <div className="rounded-2xl border border-border bg-gradient-to-br from-[#EEF1FD]/60 to-card p-4">
+          <div className="flex items-start gap-3">
+            <Avatar name={w.customer} size={44} />
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-semibold leading-tight">{w.customer || "Unknown"}</p>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
+                  {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
+                </span>
+                <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", WALKIN_STATUS_TONE[w.status])}>
+                  <span className="h-1 w-1 rounded-full bg-current" />
+                  {WALKIN_STATUS_LABEL[w.status]}
+                </span>
+              </div>
+            </div>
           </div>
-          <span className={cn("ml-auto inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
-            {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
-          </span>
+
+          {/* Contact rows — tap to call / email for quick follow-up */}
+          <div className="mt-3 space-y-2">
+            <a
+              href={w.phone ? `tel:${w.phone}` : undefined}
+              className={cn(
+                "flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 transition",
+                w.phone ? "hover:border-[#4361EE]/40 hover:bg-[#EEF1FD]/40" : "opacity-60",
+              )}
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-emerald-50 text-emerald-600 ring-1 ring-inset ring-emerald-200">
+                <Phone className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Contact</p>
+                <p className="truncate text-[14px] font-semibold tabular-nums">{w.phone || "—"}</p>
+              </div>
+            </a>
+            <a
+              href={w.email ? `mailto:${w.email}` : undefined}
+              className={cn(
+                "flex items-center gap-2.5 rounded-xl border border-border bg-card px-3 py-2.5 transition",
+                w.email ? "hover:border-[#4361EE]/40 hover:bg-[#EEF1FD]/40" : "opacity-60",
+              )}
+            >
+              <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-indigo-50 text-[#4361EE] ring-1 ring-inset ring-indigo-200">
+                <Mail className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Email</p>
+                <p className="truncate text-[14px] font-medium">{w.email || "—"}</p>
+              </div>
+            </a>
+          </div>
         </div>
-        <div className="divide-y divide-border rounded-xl border border-border">
-          {w.email && <DetailRow label="Email">{w.email}</DetailRow>}
-          <DetailRow label="Source">{w.source || "—"}</DetailRow>
-          <DetailRow label="Model">{w.model || "—"}</DetailRow>
-          <DetailRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</DetailRow>
-          {w.type === "sales" && <DetailRow label="Marketing Person">{w.salesPersonName || "—"}</DetailRow>}
-          <DetailRow label="Final Status">
-            <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset", WALKIN_STATUS_TONE[w.status])}>
-              <span className="h-1.5 w-1.5 rounded-full bg-current" />
-              {WALKIN_STATUS_LABEL[w.status]}
+
+        {/* ── Follow-Up highlight (only when scheduled) ── */}
+        {w.followUpDate && (
+          <div className={cn(
+            "flex items-center gap-3 rounded-2xl border p-3.5",
+            w.followUpStatus === "done"
+              ? "border-emerald-200 bg-emerald-50/50"
+              : "border-indigo-200 bg-indigo-50/50",
+          )}>
+            <span className={cn(
+              "grid h-9 w-9 shrink-0 place-items-center rounded-xl ring-1 ring-inset",
+              w.followUpStatus === "done" ? "bg-emerald-100 text-emerald-600 ring-emerald-200" : "bg-indigo-100 text-indigo-700 ring-indigo-200",
+            )}>
+              <Clock className="h-4 w-4" />
             </span>
-          </DetailRow>
-          {w.linkedTicketId && <DetailRow label="Linked Ticket">{ticketNoFor(w.linkedTicketId)}</DetailRow>}
-          <DetailRow label="Won">{isWalkInWon(w) ? "Yes" : "No"}</DetailRow>
+            <div className="min-w-0">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Follow-Up</p>
+              <p className={cn("text-[13px] font-semibold", w.followUpStatus === "done" ? "text-emerald-700" : "text-indigo-700")}>
+                {new Date(`${w.followUpDate}T${w.followUpTime || "09:00"}`).toLocaleString("en-IN", { dateStyle: "medium", ...(w.followUpTime ? { timeStyle: "short" } : {}) })}
+                {w.followUpStatus === "done" ? " · Completed" : ""}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* ── Walk-In details ── */}
+        <div className="overflow-hidden rounded-2xl border border-border">
+          <ViewRow label="Walk-In ID"><span className="font-semibold">{walkInDisplayId(w)}</span></ViewRow>
+          <ViewRow label="Date">{fmtDate(w.date)}</ViewRow>
+          <ViewRow label="Source">{w.source || "—"}</ViewRow>
+          <ViewRow label="Model">{w.model || "—"}</ViewRow>
+          <ViewRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</ViewRow>
+          {w.type === "sales" && <ViewRow label="Marketing Person">{w.salesPersonName || "—"}</ViewRow>}
+          {w.linkedTicketId && (
+            <ViewRow label="Linked Ticket"><span className="font-semibold text-indigo-700">{ticketNoFor(w.linkedTicketId)}</span></ViewRow>
+          )}
+          <ViewRow label="Won">
+            <span className={cn("font-semibold", isWalkInWon(w) ? "text-emerald-600" : "text-muted-foreground")}>{isWalkInWon(w) ? "Yes" : "No"}</span>
+          </ViewRow>
         </div>
+
         {w.notes && (
-          <div>
+          <div className="rounded-2xl border border-border p-4">
             <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Notes</p>
-            <p className="text-sm text-muted-foreground">{w.notes}</p>
+            <p className="text-[13px] text-foreground/80 break-words">{w.notes}</p>
           </div>
         )}
       </div>
     </Drawer>
+  );
+}
+
+/* Padded key/value row for the View drawer. Label stays fixed-width on the
+   left; the value wraps within the remaining space so long text (email, model,
+   issue) never overflows the card edge. */
+function ViewRow({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-3 border-b border-border px-4 py-3 last:border-b-0">
+      <span className="shrink-0 pt-0.5 text-[12px] font-medium text-muted-foreground">{label}</span>
+      <span className="min-w-0 break-words text-right text-[13px] font-medium text-foreground">{children}</span>
+    </div>
   );
 }
 

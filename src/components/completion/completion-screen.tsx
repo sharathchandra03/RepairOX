@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Printer, MessageCircle, Mail, Pencil, Plus, LayoutDashboard, ListChecks, Tag, Eye, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { StoreLogo } from "@/components/ui/store-logo";
-import { cn } from "@/lib/utils";
+import { cn, formatINR, openWhatsApp } from "@/lib/utils";
 import {
   getTicketPrintUrl,
   getInvoicePrintUrl,
@@ -95,8 +95,20 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
   };
 
   const handlePrint = () => openPreview(false);
-  const handleWhatsApp = () => openPreview(false);
   const handleEmail = () => openPreview(false);
+
+  /*
+   * Open WhatsApp (app on mobile, WhatsApp Web/desktop on computers) with the
+   * customer's number prefilled where available, plus a short receipt message.
+   * The user can then review the chat and send whatever they like manually.
+   */
+  const handleWhatsApp = () => {
+    const phone = viewData?.customer.phone;
+    const amount = viewData?.ticket?.amount ?? viewData?.invoice?.total;
+    const amountText = typeof amount === "number" ? ` — ${formatINR(amount)}` : "";
+    const message = `Hi${viewData?.customer.name ? ` ${viewData.customer.name}` : ""}, here is your ${label.toLowerCase()} ${id}${amountText}.`;
+    openWhatsApp(phone, message);
+  };
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-gradient-to-b from-white via-indigo-50/30 to-white">

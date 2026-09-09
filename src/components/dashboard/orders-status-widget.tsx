@@ -3,9 +3,10 @@
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  MoreHorizontal, Eye, Download, Truck, MapPin, Store,
+  MoreHorizontal, Eye, Download, Truck, MapPin,
   User, Package,
 } from "lucide-react";
+import { WalkInIcon } from "@/components/ui/icon-walk-in";
 import { Badge } from "@/components/ui/badge";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
@@ -29,7 +30,7 @@ type OrderTypeRow = {
 const TYPE_CONFIG: Record<OrderType, { label: string; icon: React.ComponentType<{ className?: string }>; dot: string }> = {
   pickup: { label: "Pickup", icon: Truck, dot: "bg-violet-500" },
   onsite: { label: "On-site", icon: MapPin, dot: "bg-sky-500" },
-  walkin: { label: "Walk-in", icon: Store, dot: "bg-emerald-500" },
+  walkin: { label: "Walk-in", icon: WalkInIcon, dot: "bg-emerald-500" },
 };
 
 /* ── Helper: get device type from ticket ── */

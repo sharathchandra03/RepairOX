@@ -12,7 +12,11 @@ import { Input, Textarea, Select, Label } from "@/components/ui/input";
 export type QuickField =
   | { key: string; label: string; type: "text" | "number"; placeholder?: string }
   | { key: string; label: string; type: "textarea"; placeholder?: string; rows?: number }
-  | { key: string; label: string; type: "select"; options: { label: string; value: string }[] };
+  | { key: string; label: string; type: "select"; options: { label: string; value: string }[] }
+  /* Native date / date+time pickers. The value is the raw input string
+     ("YYYY-MM-DD" for date, "YYYY-MM-DDTHH:mm" for datetime); the caller
+     converts to/from ISO in initialValues / onSave. `hint` shows helper text. */
+  | { key: string; label: string; type: "date" | "datetime"; hint?: string; min?: string };
 
 /* Small, reusable section editor — a Drawer pre-wired with a form built from
    a `fields` config. Since the parent only renders this while `open` is
@@ -76,18 +80,28 @@ function QuickEditDrawerInner({
     >
       <div className={fields.length > 3 ? "grid grid-cols-1 gap-4 sm:grid-cols-2" : "space-y-4"}>
         {fields.map((f) => (
-          <div key={f.key} className={`space-y-1.5 ${f.type === "textarea" ? "sm:col-span-2" : ""}`}>
+          <div key={f.key} className={`space-y-1.5 ${f.type === "textarea" || f.type === "datetime" ? "sm:col-span-2" : ""}`}>
             <Label>{f.label}</Label>
             {f.type === "select" ? (
               <Select value={values[f.key] ?? ""} onChange={(e: any) => set(f.key, e.target.value)} options={f.options} />
             ) : f.type === "textarea" ? (
               <Textarea value={values[f.key] ?? ""} onChange={(e: any) => set(f.key, e.target.value)} placeholder={f.placeholder} rows={f.rows ?? 3} />
+            ) : f.type === "date" || f.type === "datetime" ? (
+              <>
+                <Input
+                  type={f.type === "datetime" ? "datetime-local" : "date"}
+                  value={values[f.key] ?? ""}
+                  min={f.min}
+                  onChange={(e: any) => set(f.key, e.target.value)}
+                />
+                {f.hint && <p className="text-[11px] text-muted-foreground">{f.hint}</p>}
+              </>
             ) : (
               <Input
                 type={f.type === "number" ? "number" : "text"}
                 value={values[f.key] ?? ""}
                 onChange={(e: any) => set(f.key, e.target.value)}
-                placeholder={f.placeholder}
+                placeholder={"placeholder" in f ? f.placeholder : undefined}
               />
             )}
           </div>
