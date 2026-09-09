@@ -22,6 +22,8 @@ import {
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
+import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
+import { FulfilmentRouteBadge } from "@/components/leads/fulfilment-route-badge";
 import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -118,6 +120,7 @@ export default function LeadsListPage() {
   const [editLead, setEditLead] = useState<Lead | null>(null);
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Lead | null>(null);
+  const [routeLeadTarget, setRouteLeadTarget] = useState<Lead | null>(null);
 
   /* Merge configured Settings options with values actually present in data. */
   const distinct = (key: keyof Lead) => Array.from(new Set(leads.map((l) => String(l[key] || "")).filter(Boolean)));
@@ -152,6 +155,7 @@ export default function LeadsListPage() {
       case "priority": openEdit(lead); break; // priority lives in the edit flow
       case "pin": void pinLead(lead.id, !lead.pinnedAt); break;
       case "delete": setConfirmDelete(lead); break;
+      case "route": setRouteLeadTarget(lead); break;
     }
   };
 
@@ -307,7 +311,10 @@ export default function LeadsListPage() {
                   {canAssign ? <AssignMenu lead={lead} /> : <AssignBadge lead={lead} />}
                 </td>
                 <td className="px-3 py-3"><span className="text-zinc-700">{lead.device || "—"}</span></td>
-                <td className="px-3 py-3"><span className="text-zinc-600">{lead.leadCategory || "—"}</span></td>
+                <td className="px-3 py-3">
+                  <span className="text-zinc-600">{lead.leadCategory || "—"}</span>
+                  <FulfilmentRouteBadge lead={lead} className="mt-1" />
+                </td>
                 <td className="px-3 py-3">{lead.status ? <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
                 <td className="px-3 py-3">{lead.priority ? <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
                 <td className="px-3 py-3"><FollowUpCell lead={lead} /></td>
@@ -400,6 +407,13 @@ export default function LeadsListPage() {
         description={confirmDelete ? `${confirmDelete.leadNo} · ${confirmDelete.name || "Unnamed"} will be removed. This can't be undone.` : ""}
         confirmLabel="Delete"
         danger
+      />
+
+      {/* Route / Assign fulfilment dialog */}
+      <RouteLeadDialog
+        lead={routeLeadTarget}
+        open={!!routeLeadTarget}
+        onClose={() => setRouteLeadTarget(null)}
       />
     </div>
   );

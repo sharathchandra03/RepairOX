@@ -360,6 +360,12 @@ export type Ticket = {
   cgst?: number;
   /** Multi-device support — when present, each device has its own record */
   devices?: DeviceRecord[];
+  /** Originating Walk-In when converted from one (Store-to-Store route). */
+  linkedWalkInId?: string;
+  /** Originating Field Job when converted from one (Pickup & Drop route). */
+  linkedFieldJobId?: string;
+  /** Originating Lead (carried through either route) for full traceability. */
+  linkedLeadId?: string;
   /** DB-backed pin marker. Non-null → pinned to the top of the table. */
   pinnedAt?: string;
   /** Human-readable ticket number (e.g. "T-001"). Separate from `id`, which is
@@ -410,6 +416,7 @@ export const navItems: NavItem[] = [
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "WalkIn", permission: "use_pos" },
+  { href: "/field",            label: "Field",         icon: "Truck", permission: "view_field_jobs" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "IndianRupee", permission: "manage_payments" },
 
@@ -987,6 +994,8 @@ export type WalkIn = {
   salesPersonName?: string;
   /** Linked customer master record, when selected/created. */
   customerId?: string;
+  /** Originating Lead when this walk-in was received from a Store-to-Store route. */
+  linkedLeadId?: string;
   /** The repair ticket this walk-in was converted into. */
   linkedTicketId?: string;
   /** @deprecated use linkedTicketId. Retained for older rows. */
@@ -1038,7 +1047,7 @@ export const walkIns: WalkIn[] = [];
 
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
-    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
+    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/field", "/price-list"] },
     { label: "INVENTORY",      items: ["/inventory"] },
     // Expenses remains standalone for daily operational quick-access.
     // Employees and Accounts are now expandable groups rendered separately.

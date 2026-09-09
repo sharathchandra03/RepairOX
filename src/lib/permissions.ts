@@ -228,7 +228,17 @@ export type PermissionKey =
   /* System */
   | "access_api"
   | "backup_restore"
-  | "system_administrator";
+  | "system_administrator"
+  /* Field Management (Pickup & Drop logistics) */
+  | "view_field_jobs"
+  | "manage_field_jobs"
+  | "route_leads"
+  | "receive_store_handoff"
+  | "assign_field_manager"
+  | "assign_ninja"
+  | "update_pickup"
+  | "update_drop"
+  | "view_field_reports";
 
 export interface PermissionDef {
   key: PermissionKey;
@@ -485,6 +495,22 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     ],
   },
   {
+    id: "field",
+    label: "Field Management",
+    description: "Pickup & drop logistics — routing, field jobs, ninja assignment",
+    permissions: [
+      { key: "view_field_jobs", label: "View Field Jobs" },
+      { key: "manage_field_jobs", label: "Manage Field Jobs" },
+      { key: "route_leads", label: "Route Leads (Store / Field)" },
+      { key: "receive_store_handoff", label: "Receive Store-to-Store" },
+      { key: "assign_field_manager", label: "Assign Field Manager" },
+      { key: "assign_ninja", label: "Assign Ninja" },
+      { key: "update_pickup", label: "Update Pickup" },
+      { key: "update_drop", label: "Update Drop" },
+      { key: "view_field_reports", label: "View Field Reports" },
+    ],
+  },
+  {
     id: "system",
     label: "System & Platform",
     description: "Platform-level technical and administrative controls",
@@ -576,6 +602,8 @@ export const ROLES: RoleDef[] = [
       "view_reports", "export_reports", "view_inventory_reports", "view_sales_reports",
       "view_ticket_reports", "view_audit_logs", "manage_reports", "import_data",
       "print_documents", "upload_files",
+      "view_field_jobs", "manage_field_jobs", "route_leads", "receive_store_handoff",
+      "assign_field_manager", "assign_ninja", "update_pickup", "update_drop", "view_field_reports",
     ],
   },
   {
@@ -611,6 +639,8 @@ export const ROLES: RoleDef[] = [
       "view_reports", "export_reports", "view_inventory_reports", "view_sales_reports",
       "view_ticket_reports", "manage_reports",
       "print_documents", "upload_files",
+      "view_field_jobs", "manage_field_jobs", "route_leads", "receive_store_handoff",
+      "assign_field_manager", "assign_ninja", "update_pickup", "update_drop", "view_field_reports",
     ],
   },
   {
@@ -630,6 +660,8 @@ export const ROLES: RoleDef[] = [
       "assign_customer_groups",
       "view_inventory",
       "print_documents", "upload_files", "send_communications",
+      // Reception receives store-to-store handoffs and sees field jobs.
+      "view_field_jobs", "receive_store_handoff",
     ],
   },
   {
@@ -695,6 +727,35 @@ export const ROLES: RoleDef[] = [
       "view_device_catalog",
       "view_sales_reports",
       "print_documents",
+      // Sales owns the fulfilment routing decision + high-level progress view.
+      "route_leads", "view_field_jobs",
+    ],
+  },
+  {
+    id: "field_manager",
+    label: "Field Manager",
+    summary: "Runs pickup & drop logistics — assigns ninjas, schedules and tracks field jobs.",
+    workspaces: ["shop"],
+    permissions: [
+      "view_only", "assign",
+      "view_dashboard", "view_kpi_cards",
+      "view_field_jobs", "manage_field_jobs", "assign_ninja",
+      "update_pickup", "update_drop", "view_field_reports",
+      "view_customer_details", "view_device_details",
+      "view_ticket",
+      "print_documents", "upload_files", "send_communications",
+    ],
+  },
+  {
+    id: "ninja",
+    label: "Ninja",
+    summary: "Field agent who physically picks up and drops devices to customers.",
+    workspaces: ["shop"],
+    permissions: [
+      "view_only",
+      "view_field_jobs", "update_pickup", "update_drop",
+      "view_customer_details", "view_device_details",
+      "upload_files",
     ],
   },
   {

@@ -342,6 +342,118 @@ export function isWalkInInDateRange(
   }
 }
 
+/* ─── Comparison periods (Month-over-Month / Year-over-Year / equal-duration) ──
+   These helpers resolve the SELECTED range to concrete [from,to] day bounds and
+   compute the correct PREVIOUS comparison window. They reuse the exact same
+   calendar semantics as `isWalkInInDateRange` so the report and its comparisons
+   can never diverge. All bounds are start-of-day; both ends are inclusive.
+   ────────────────────────────────────────────────────────────────────────── */
+
+export type WalkInComparisonMode =
+  | "mom"        // Month-over-Month
+  | "yoy"        // Year-over-Year
+  | "trend"      // no comparison — trend view
+  | "source"     // no comparison — source view
+  | "conversion"; // no comparison — conversion view
+
+export type DayRange = { from: Date; to: Date };
+
+function addDays(d: Date, n: number): Date { const x = new Date(d); x.setDate(x.getDate() + n); return x; }
+function addMonths(d: Date, n: number): Date { const x = new Date(d); x.setMonth(x.getMonth() + n); return x; }
+function addYears(d: Date, n: number): Date { const x = new Date(d); x.setFullYear(x.getFullYear() + n); return x; }
+function dayCount(r: DayRange): number {
+  return Math.floor((startOfDay(r.to).getTime() - startOfDay(r.from).getTime()) / 86_400_000) + 1;
+}
+
+/**
+ * Resolve the selected date-range pill to a concrete inclusive [from,to] window
+ * of calendar days. Returns null for "all" (unbounded) so callers can fall back
+ * to the data's own min/max dates. Mirrors `isWalkInInDateRange` exactly.
+ */
+export function resolveWalkInRange(
+  range: WalkInDateRange,
+  customFrom?: string,
+  customTo?: string,
+): DayRange | null {
+  const today = startOfDay(new Date());
+  switch (range) {
+    case "all":
+      return null;
+    case "today":
+      return { from: today, to: today };
+    case "yesterday": {
+      const y = addDays(today, -1);
+      return { from: y, to: y };
+    }
+    case "7days":
+      return { from: addDays(today, -6), to: today };
+    case "1month":
+      return { from: addMonths(today, -1), to: today };
+    case "lastmonth": {
+      const first = startOfDay(new Date(today.getFullYear(), today.getMonth() - 1, 1));
+      const last = startOfDay(new Date(today.getFullYear(), today.getMonth(), 0));
+      return { from: first, to: last };
+    }
+    case "1year":
+      return { from: addYears(today, -1), to: today };
+    case "custom": {
+      const from = customFrom ? startOfDay(new Date(customFrom)) : today;
+      const to = customTo ? startOfDay(new Date(customTo)) : today;
+      // Guard against inverted custom ranges.
+      return from <= to ? { from, to } : { from: to, to: from };
+    }
+    default:
+      return { from: today, to: today };
+  }
+}
+
+/**
+ * Given a CURRENT window, compute the equivalent PREVIOUS window for the chosen
+ * comparison mode:
+ *   • mom  → shift back one month (same day span)
+ *   • yoy  → shift back one year (same day span)
+ * For "trend"/"source"/"conversion" there is no comparison, so this returns
+ * null. When the current window is unbounded ("all", current === null) there is
+ * likewise nothing meaningful to compare against.
+ *
+ * The previous window ALWAYS preserves the current window's exact duration, so a
+ * 7-day range is compared with the immediately-preceding equal 7-day span — we
+ * never compare a 7-day range against a whole month.
+ */
+export function previousWalkInPeriod(
+  current: DayRange | null,
+  mode: WalkInComparisonMode,
+): DayRange | null {
+  if (!current) return null;
+  if (mode === "mom") {
+    return { from: addMonths(current.from, -1), to: addMonths(current.to, -1) };
+  }
+  if (mode === "yoy") {
+    return { from: addYears(current.from, -1), to: addYears(current.to, -1) };
+  }
+  return null;
+}
+
+/** True when an ISO `YYYY-MM-DD` date falls inside an inclusive DayRange. */
+export function isInDayRange(dateStr: string, r: DayRange | null): boolean {
+  if (!r) return true; // unbounded (e.g. "all")
+  if (!dateStr) return false;
+  const d = startOfDay(new Date(dateStr));
+  if (Number.isNaN(d.getTime())) return false;
+  return d >= startOfDay(r.from) && d <= startOfDay(r.to);
+}
+
+/** Human label for a DayRange, e.g. "1 Sep – 9 Sep 26". Compact, en-IN. */
+export function fmtRangeLabel(r: DayRange | null): string {
+  if (!r) return "All time";
+  const opts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", year: "2-digit" };
+  const from = r.from.toLocaleDateString("en-IN", opts);
+  const to = r.to.toLocaleDateString("en-IN", opts);
+  return from === to ? from : `${from} – ${to}`;
+}
+
+export { dayCount as walkInDayCount };
+
 /* ─── Spreadsheet reading (CSV + Excel) ───────────────────────────────────── */
 
 /** File extensions the importer accepts. */

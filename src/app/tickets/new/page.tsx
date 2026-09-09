@@ -22,6 +22,8 @@ import { RSelect } from "@/components/ui/rselect";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { useStore } from "@/lib/store";
+import { useField } from "@/lib/field-context";
+import { useLeads } from "@/lib/leads-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
 import type { Ticket, TicketStatus } from "@/lib/mock-data";
@@ -329,12 +331,17 @@ function NewTicketWizard() {
   // Device Details step. The ticket is only created when the user completes the
   // wizard, at which point we link it back to this walk-in.
   const fromWalkInId = searchParams.get("fromWalkIn");
-  const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : "/tickets";
+  // Field Job conversion (Pickup & Drop route): prefill from the field job and
+  // land on Device Details, exactly like a Walk-In conversion.
+  const fromFieldJobId = searchParams.get("fromFieldJob");
+  const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
   const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, updateWalkIn } = useStore();
+  const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
+  const { updateLead } = useLeads();
   const { settings } = useStoreSettings();
 
-  // Start on Device Details (step 3) for both edit and walk-in conversion.
-  const [step, setStep] = useState(editId || fromWalkInId ? 3 : 1);
+  // Start on Device Details (step 3) for edit, walk-in and field-job conversion.
+  const [step, setStep] = useState(editId || fromWalkInId || fromFieldJobId ? 3 : 1);
   const [data, setData] = useState<WizardData>(DEFAULT);
   const [submitted, setSubmitted] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
@@ -400,6 +407,49 @@ function NewTicketWizard() {
       customerId: w.customerId || null,
     });
   }, [fromWalkInId, walkIns, deviceModels, brands]);
+
+  // Pre-fill from a Field Job (Pickup & Drop). Mirrors the walk-in prefill:
+  // resolve category/brand from the Device Catalog, prefill customer/device/issue
+  // from the field job, and keep customerId so the SAME customer is reused.
+  const fieldPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!fromFieldJobId || fieldPrefilledRef.current) return;
+    const job = getFieldJob(fromFieldJobId);
+    if (!job) return; // field jobs may still be hydrating
+    fieldPrefilledRef.current = true;
+
+    const modelRec = job.modelId
+      ? deviceModels.find((m) => m.id === job.modelId)
+      : (job.device ? deviceModels.find((m) => m.name.toLowerCase() === job.device.toLowerCase()) : undefined);
+    const categoryId = modelRec?.categoryId || job.category || (job.device ? inferCategoryFromName(job.device) : undefined);
+    const brandRec = modelRec ? brands.find((b) => b.id === modelRec.brandId) : undefined;
+
+    const nameParts = (job.customer || "").trim().split(/\s+/);
+    const dev = createWizardDevice(categoryId);
+    dev.device.model = job.device || "";
+    dev.device.modelId = modelRec?.id;
+    dev.device.brand = brandRec?.name || "";
+    dev.device.brandId = brandRec?.id;
+    // Intake channel for a field job is a pickup.
+    dev.device.type = "pickup";
+    dev.job.issue = job.issue || "";
+
+    setData({
+      ...DEFAULT,
+      category: categoryId,
+      devices: [dev],
+      activeDeviceIndex: 0,
+      contactType: "personal",
+      customer: {
+        first: nameParts[0] || "",
+        last: nameParts.slice(1).join(" ") || "",
+        phone: job.phone || "",
+        email: job.email || "",
+        address: job.pickupAddress || "", postal: "", city: "", company: "",
+      },
+      customerId: job.customerId || null,
+    });
+  }, [fromFieldJobId, getFieldJob, deviceModels, brands]);
 
   // Preload device categories + images on mount so the wheel renders instantly.
   useEffect(() => {
@@ -581,6 +631,12 @@ function NewTicketWizard() {
       cgst: ticketCgst || undefined,
       // Multi-device data — always store for data consistency
       devices: deviceRecords,
+      // Origin links for full Lead ↔ Walk-In/Field ↔ Ticket traceability.
+      linkedWalkInId: fromWalkInId || (isEdit ? tickets.find((t) => t.id === editId)?.linkedWalkInId : undefined) || undefined,
+      linkedFieldJobId: fromFieldJobId || (isEdit ? tickets.find((t) => t.id === editId)?.linkedFieldJobId : undefined) || undefined,
+      linkedLeadId: (fromFieldJobId ? getFieldJob(fromFieldJobId)?.leadId : undefined)
+        || (fromWalkInId ? walkIns.find((w) => w.id === fromWalkInId)?.linkedLeadId : undefined)
+        || (isEdit ? tickets.find((t) => t.id === editId)?.linkedLeadId : undefined) || undefined,
     };
 
     if (isEdit) {
@@ -605,6 +661,22 @@ function NewTicketWizard() {
           ticketId: linkId,
           convertedAt: new Date().toISOString(),
         });
+        // Carry the ticket link back to the originating Lead (Store-to-Store).
+        const srcWalkIn = walkIns.find((w) => w.id === fromWalkInId);
+        if (srcWalkIn?.linkedLeadId) {
+          await updateLead(srcWalkIn.linkedLeadId, { linkedTicketId: linkId, finalResult: "Converted to Ticket" });
+        }
+      }
+      // Field Job conversion (Pickup & Drop): link the ticket to the field job
+      // (moving it to In Repair) and back to the originating Lead. The device is
+      // now on the workbench — the field layer waits for the repair milestone.
+      if (fromFieldJobId) {
+        const linkId = newId || ticketData.id;
+        const job = getFieldJob(fromFieldJobId);
+        await linkFieldTicket(fromFieldJobId, linkId, { setInRepair: true });
+        if (job?.leadId) {
+          await updateLead(job.leadId, { linkedTicketId: linkId });
+        }
       }
       // Update customer stats (totalTickets, lastVisit)
       if (finalCustomerId) {

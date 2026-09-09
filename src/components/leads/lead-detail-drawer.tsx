@@ -26,6 +26,7 @@ import {
 } from "@/lib/leads-data";
 import { priorityTone, statusTone } from "@/components/leads/lead-pills";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
+import { LeadOperationsPanel } from "@/components/leads/lead-operations-panel";
 
 function formatDateTime(iso: string): string {
   if (!iso) return "";
@@ -243,6 +244,9 @@ export function LeadDetailDrawer({
                 </div>
               </div>
             )}
+
+            {/* Fulfilment & operations — routing + store/field hand-off */}
+            <LeadOperationsPanel lead={lead} />
           </>
         )}
 

@@ -7,13 +7,13 @@
    <Dropdown>) so it floats above the table instead of being clipped.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Phone, MessageSquare, Mail } from "lucide-react";
+import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Phone, MessageSquare, Mail, Route as RouteIcon } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Can } from "@/components/common/can";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads-data";
 
-export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete";
+export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete" | "route";
 
 export function LeadActionsMenu({
   lead, onAction,
@@ -69,6 +69,9 @@ export function LeadActionsMenu({
         {(close) => (
           <>
             <MenuItem icon={Eye} onClick={() => { onAction("view", lead); close(); }}>View</MenuItem>
+            <Can permission="route_leads">
+              <MenuItem icon={RouteIcon} onClick={() => { onAction("route", lead); close(); }}>Route / Assign</MenuItem>
+            </Can>
             <Can permission="manage_sales">
               <MenuItem icon={Pencil} onClick={() => { onAction("edit", lead); close(); }}>Edit</MenuItem>
             </Can>

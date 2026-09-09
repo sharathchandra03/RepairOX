@@ -124,9 +124,21 @@ export default function WalkInPage() {
   const [viewTarget, setViewTarget] = useState<WalkIn | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const openedDeepLinkRef = useRef(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showImport, setShowImport] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+
+  // Deep link: /walk-in?walkIn=<id> opens that walk-in's view drawer once it
+  // has loaded (used by the Lead → "Convert to Walk-In" store hand-off).
+  useEffect(() => {
+    if (openedDeepLinkRef.current) return;
+    const params = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+    const id = params.get("walkIn");
+    if (!id) return;
+    const w = walkIns.find((x) => x.id === id);
+    if (w) { setViewTarget(w); openedDeepLinkRef.current = true; }
+  }, [walkIns]);
 
   const showToast = useCallback((msg: string) => {
     setToast(msg);
@@ -492,7 +504,18 @@ export default function WalkInPage() {
 
       {/* ── REPORT VIEW ── */}
       {view === "report" ? (
-        <WalkInReport rows={filtered} />
+        <WalkInReport
+          rows={filtered}
+          allRows={walkIns}
+          dateRange={dateRange}
+          customFrom={customFrom}
+          customTo={customTo}
+          onCustomRangeChange={(from, to) => {
+            setCustomFrom(from);
+            setCustomTo(to);
+            setDateRange("custom");
+          }}
+        />
       ) : (
         /* ── TABLE VIEW ──
            Straight (square) card with a flat bordered header — identical edge

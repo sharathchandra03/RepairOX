@@ -1,9 +1,10 @@
 "use client";
 
 import {
-  Bell, HelpCircle, MoreHorizontal, ChevronDown, Menu,
+  HelpCircle, MoreHorizontal, ChevronDown, Menu,
   ShoppingBag, Check, LayoutGrid, LogOut,
 } from "lucide-react";
+import { NotificationBell } from "@/components/layout/notification-bell";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
@@ -131,10 +132,7 @@ export function Topbar({
           <button className="grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition">
             <MoreHorizontal className="h-4 w-4" />
           </button>
-          <button className="relative grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition">
-            <Bell className="h-4 w-4" />
-            <span className="absolute right-2 top-2 inline-flex h-1.5 w-1.5 rounded-full bg-[#4361EE] animate-pulse-dot" />
-          </button>
+          <NotificationBell />
           <button className="grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition">
             <HelpCircle className="h-4 w-4" />
           </button>

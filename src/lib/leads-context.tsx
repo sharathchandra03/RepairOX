@@ -76,6 +76,13 @@ function rowToLead(r: any): Lead {
     assignedByName: r.assigned_by_name ?? "",
     assignedAt: r.assigned_at ?? "",
     pinnedAt: r.pinned_at ?? "",
+    fulfilmentRoute: r.fulfilment_route ?? "",
+    assignedStore: r.assigned_store ?? "",
+    routedAt: r.routed_at ?? "",
+    linkedWalkInId: r.linked_walk_in_id ?? "",
+    linkedFieldJobId: r.linked_field_job_id ?? "",
+    linkedTicketId: r.linked_ticket_id ?? "",
+    customerId: r.customer_id ?? "",
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
   };
@@ -121,6 +128,15 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   if (l.assignedByName !== undefined) row.assigned_by_name = l.assignedByName || null;
   if (l.assignedAt !== undefined) row.assigned_at = l.assignedAt || null;
   if (l.pinnedAt !== undefined) row.pinned_at = l.pinnedAt || null;
+  // Fulfilment routing + downstream links (nullable columns; added idempotently
+  // in supabase/field-management.sql — safe to skip if the column is missing).
+  set("fulfilment_route", l.fulfilmentRoute);
+  set("assigned_store", l.assignedStore);
+  if (l.routedAt !== undefined) row.routed_at = l.routedAt || null;
+  set("linked_walk_in_id", l.linkedWalkInId);
+  set("linked_field_job_id", l.linkedFieldJobId);
+  set("linked_ticket_id", l.linkedTicketId);
+  set("customer_id", l.customerId);
   return row;
 }
 
@@ -162,6 +178,8 @@ interface LeadsContextValue {
   assignLead: (id: string, staffId: string, staffName: string) => Promise<void>;
   /** Pin/unpin a lead so it floats to the top of the list (DB-backed). */
   pinLead: (id: string, pinned: boolean) => Promise<void>;
+  /** Record the Sales fulfilment routing decision (store-visit vs pickup-drop). */
+  routeLead: (id: string, route: "STORE_VISIT" | "PICKUP_DROP", opts?: { assignedStore?: string; fieldManagerId?: string }) => Promise<void>;
 
   addOption: (field: LeadFieldKey, value: string) => Promise<void>;
   updateOption: (id: string, value: string) => Promise<void>;
@@ -187,6 +205,99 @@ function readLS<T>(key: string, fallback: T): T {
 function writeLS(key: string, value: unknown) {
   if (typeof window === "undefined") return;
   try { localStorage.setItem(demoKey(key), JSON.stringify(value)); } catch { /* ignore quota */ }
+}
+
+/* ─── Schema-drift resilience ───────────────────────────────────────────
+   The fulfilment-route + downstream-link columns (fulfilment_route,
+   assigned_store, routed_at, linked_walk_in_id, linked_field_job_id,
+   linked_ticket_id, customer_id) are added by the OPTIONAL
+   supabase/field-management.sql migration. If it hasn't been applied, the DB
+   rejects the whole write with an "undefined column" error. Rather than fail
+   the user's action, we drop the missing column(s) and retry — the routing
+   still succeeds locally (optimistic state) and persists whatever columns exist.
+   Mirrors the same pattern used in store.tsx for tickets/customers. */
+
+/** Optional lead columns that may be absent before the migration is applied. */
+const LEAD_OPTIONAL_COLUMNS = [
+  "fulfilment_route", "assigned_store", "routed_at",
+  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "customer_id",
+];
+
+function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return (
+    err.code === "42703" ||
+    err.code === "PGRST204" ||
+    /column .* does not exist|could not find the .* column/i.test(err.message ?? "")
+  );
+}
+
+function extractMissingColumn(err: { message?: string } | null): string | null {
+  const m = err?.message ?? "";
+  const a = /column "?([a-z0-9_]+)"? does not exist/i.exec(m);
+  if (a) return a[1];
+  const b = /could not find the '?([a-z0-9_]+)'? column/i.exec(m);
+  if (b) return b[1];
+  return null;
+}
+
+function omitKeys(row: Record<string, unknown>, keys: string[]): Record<string, unknown> {
+  const next = { ...row };
+  for (const k of keys) delete next[k];
+  return next;
+}
+
+/* ─── Fulfilment overlay (durable without the DB migration) ─────────────
+   The routing + downstream-link fields live in real DB columns once the
+   optional migration is applied. Until then, we ALSO mirror them to a small
+   localStorage overlay keyed by lead id, so the routing survives a page
+   refresh (which re-reads leads from the DB and would otherwise drop them).
+   When the columns exist, the DB value wins; the overlay is a harmless mirror. */
+const LEAD_FULFILMENT_KEY = "repairox-lead-fulfilment";
+type LeadFulfilmentOverlay = Partial<Pick<Lead,
+  "fulfilmentRoute" | "assignedStore" | "routedAt"
+  | "linkedWalkInId" | "linkedFieldJobId" | "linkedTicketId" | "customerId">>;
+
+function readFulfilmentOverlay(): Record<string, LeadFulfilmentOverlay> {
+  return readLS<Record<string, LeadFulfilmentOverlay>>(LEAD_FULFILMENT_KEY, {});
+}
+function writeFulfilmentOverlay(map: Record<string, LeadFulfilmentOverlay>) {
+  writeLS(LEAD_FULFILMENT_KEY, map);
+}
+/** Record the fulfilment/link fields present in `updates` into the overlay. */
+function mergeFulfilmentOverlay(id: string, updates: Partial<Lead>) {
+  const keys: (keyof LeadFulfilmentOverlay)[] = [
+    "fulfilmentRoute", "assignedStore", "routedAt",
+    "linkedWalkInId", "linkedFieldJobId", "linkedTicketId", "customerId",
+  ];
+  const patch: LeadFulfilmentOverlay = {};
+  let touched = false;
+  for (const k of keys) {
+    if (updates[k] !== undefined) { (patch as any)[k] = updates[k]; touched = true; }
+  }
+  if (!touched) return;
+  const map = readFulfilmentOverlay();
+  map[id] = { ...(map[id] || {}), ...patch };
+  writeFulfilmentOverlay(map);
+}
+/** Apply the overlay on top of DB-loaded leads (DB non-empty values win). */
+function applyFulfilmentOverlay(leads: Lead[]): Lead[] {
+  const map = readFulfilmentOverlay();
+  if (!map || Object.keys(map).length === 0) return leads;
+  return leads.map((l) => {
+    const o = map[l.id];
+    if (!o) return l;
+    return {
+      ...l,
+      fulfilmentRoute: l.fulfilmentRoute || o.fulfilmentRoute || "",
+      assignedStore: l.assignedStore || o.assignedStore || "",
+      routedAt: l.routedAt || o.routedAt || "",
+      linkedWalkInId: l.linkedWalkInId || o.linkedWalkInId || "",
+      linkedFieldJobId: l.linkedFieldJobId || o.linkedFieldJobId || "",
+      linkedTicketId: l.linkedTicketId || o.linkedTicketId || "",
+      customerId: l.customerId || o.customerId || "",
+    };
+  });
 }
 
 function nowParts() {
@@ -275,7 +386,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
         db.from("lead_options").select("*").order("field", { ascending: true }).order("sort_order", { ascending: true }),
       ]);
       if (!active) return;
-      if (!leadErr && leadRows) setLeads(leadRows.map(rowToLead));
+      if (!leadErr && leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
 
       if (!optErr && optRows) {
         if (optRows.length === 0) {
@@ -328,7 +439,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
         db.from("lead_options").select("*").order("field", { ascending: true }).order("sort_order", { ascending: true }),
       ]);
       if (!active) return;
-      if (leadRows) setLeads(leadRows.map(rowToLead));
+      if (leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
       if (optRows) setOptions(optRows.map(rowToOption));
     };
     for (const table of ["leads", "lead_options"]) {
@@ -384,11 +495,21 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (!seqErr && typeof seq === "string") leadNo = seq;
       else if (seqErr) console.error("[leads] next_lead_id failed:", seqErr.message);
 
-      const row = {
+      let row: Record<string, unknown> = {
         ...leadToRow({ ...draft, date, time, month } as Partial<Lead>),
         ...(leadNo ? { lead_no: leadNo } : {}),
       };
-      const { data, error } = await db.from("leads").insert(row).select("*").single();
+      let res = await db.from("leads").insert(row).select("*").single();
+      // Schema-drift: drop optional columns the DB doesn't have yet and retry.
+      let heal = 0;
+      while (res.error && isUndefinedColumnError(res.error) && heal < 8) {
+        heal += 1;
+        const col = extractMissingColumn(res.error);
+        row = omitKeys(row, col ? [col] : LEAD_OPTIONAL_COLUMNS);
+        res = await db.from("leads").insert(row).select("*").single();
+        if (!res.error) console.warn("[leads] addLead: retried without missing column(s) (schema drift).");
+      }
+      const { data, error } = res;
       if (error || !data) {
         console.error("[leads] addLead failed:", error?.message);
         toast.error("Lead not saved", { description: "We couldn't save this lead to the database. Please try again." });
@@ -415,6 +536,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       followUpAgent: draft.followUpAgent ?? "", finalResult: draft.finalResult ?? "", followUpComments: draft.followUpComments ?? "",
       assignedTo: "", assignedToName: "", assignedBy: "", assignedByName: "", assignedAt: "",
       pinnedAt: "",
+      fulfilmentRoute: draft.fulfilmentRoute ?? "", assignedStore: draft.assignedStore ?? "", routedAt: "",
+      linkedWalkInId: "", linkedFieldJobId: "", linkedTicketId: "", customerId: draft.customerId ?? "",
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     setLeads((prev) => { const next = [lead, ...prev]; writeLS(LEADS_KEY, next); return next; });
@@ -423,21 +546,38 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [useDb, db, nextLeadNoLocal]);
 
   const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
-    if (useDb) {
-      const { error } = await db.from("leads").update(leadToRow(updates)).eq("id", id);
-      if (error) {
-        console.error("[leads] updateLead failed:", error.message);
-        toast.error("Changes not saved", { description: "We couldn't update this lead in the database. Please try again." });
-        return;
-      }
-      setLeads((prev) => prev.map((l) => (l.id === id ? { ...l, ...updates, updatedAt: new Date().toISOString() } : l)));
-      return;
-    }
+    // Mirror any fulfilment/link fields to the durable overlay so they survive a
+    // DB reload even before the optional migration adds the real columns.
+    mergeFulfilmentOverlay(id, updates);
+    // Apply the optimistic update FIRST so the route/link changes reflect in the
+    // UI (and downstream Store/Field handoff) even if the DB is missing the
+    // optional columns. In local mode this is also the persistence.
     setLeads((prev) => {
       const next = prev.map((l) => (l.id === id ? { ...l, ...updates, updatedAt: new Date().toISOString() } : l));
-      writeLS(LEADS_KEY, next);
+      if (!useDb) writeLS(LEADS_KEY, next);
       return next;
     });
+
+    if (useDb) {
+      let row = leadToRow(updates);
+      let res = await db.from("leads").update(row).eq("id", id);
+      // Schema-drift: the fulfilment_route / linked_* / customer_id columns are
+      // added by the optional migration. Drop any the DB doesn't have and retry
+      // so routing/linking never fails the user's action.
+      let heal = 0;
+      while (res.error && isUndefinedColumnError(res.error) && Object.keys(row).length > 0 && heal < 8) {
+        heal += 1;
+        const col = extractMissingColumn(res.error);
+        row = omitKeys(row, col ? [col] : LEAD_OPTIONAL_COLUMNS);
+        if (Object.keys(row).length === 0) { res = { error: null } as any; break; }
+        res = await db.from("leads").update(row).eq("id", id);
+        if (!res.error) console.warn("[leads] updateLead: retried without missing column(s) (schema drift).");
+      }
+      if (res.error) {
+        console.error("[leads] updateLead failed:", res.error.message);
+        toast.error("Changes not saved", { description: "We couldn't update this lead in the database. Please try again." });
+      }
+    }
   }, [useDb, db]);
 
   const deleteLead = useCallback(async (id: string) => {
@@ -519,6 +659,37 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (error) console.error("[leads] pinLead failed:", error.message);
     }
   }, [useDb, db]);
+
+  /* ── Fulfilment routing ──
+     Records the Sales routing decision on the lead (route + optional store).
+     Creating the downstream Walk-In / Field Job happens in the UI layer where
+     both useLeads and useField/useStore are available — this keeps the leads
+     context free of cross-module dependencies. */
+  const routeLead = useCallback(async (
+    id: string,
+    route: "STORE_VISIT" | "PICKUP_DROP",
+    opts?: { assignedStore?: string; fieldManagerId?: string },
+  ) => {
+    const lead = leadsRef.current.find((l) => l.id === id);
+    if (!lead) return;
+    const routeLabel = route === "STORE_VISIT" ? "Store-to-Store" : "Pickup & Drop";
+    const updates: Partial<Lead> = {
+      fulfilmentRoute: route,
+      assignedStore: route === "STORE_VISIT" ? (opts?.assignedStore ?? "") : "",
+      routedAt: new Date().toISOString(),
+    };
+    await updateLead(id, updates);
+
+    logActivity({
+      module: "Lead", action: "Lead Routed", severity: "info", entity: "Lead",
+      reference: lead.leadNo,
+      description: `${lead.leadNo} (${lead.name || "Unnamed"}) routed to ${routeLabel}${updates.assignedStore ? ` · ${updates.assignedStore}` : ""}.`,
+      changes: [{ field: "Fulfilment Route", from: lead.fulfilmentRoute || "Unrouted", to: routeLabel }],
+    });
+
+    // Confirmation to the sales person who routed it.
+    toast.success("Lead routed", { description: `${lead.leadNo} → ${routeLabel}` });
+  }, [updateLead]);
 
   /* ── Shared filters ── */
   const setFilters = useCallback((updater: LeadFilters | ((prev: LeadFilters) => LeadFilters)) => {
@@ -613,9 +784,9 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LeadsContextValue>(() => ({
     leads, filteredLeads, options, hydrated, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
-    optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead,
+    optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
-  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption]);
+  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

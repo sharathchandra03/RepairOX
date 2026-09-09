@@ -63,6 +63,19 @@ export interface Lead {
   /* ── Pin (floats the lead to the top of the list) ── */
   pinnedAt: string;         // ISO timestamp; "" = not pinned
 
+  /* ── Fulfilment routing (the operational decision Sales makes) ──
+     Separate from status/source/leadCategory. Internal values are
+     "STORE_VISIT" | "PICKUP_DROP" (see FulfilmentRoute in field-data). */
+  fulfilmentRoute: string;  // "STORE_VISIT" | "PICKUP_DROP" | "" (not yet routed)
+  assignedStore: string;    // Branch/Store handling a Store-to-Store lead ("" otherwise)
+  routedAt: string;         // ISO timestamp the routing decision was made ("" = never)
+
+  /* ── Downstream links (nullable — historical leads keep working) ── */
+  linkedWalkInId: string;   // Walk-In created for a Store-to-Store lead
+  linkedFieldJobId: string; // Field Job created for a Pickup & Drop lead
+  linkedTicketId: string;   // eventual repair Ticket (cached for progress display)
+  customerId: string;       // Customer Master link once a customer record exists
+
   /* ── Audit ── */
   createdAt: string;
   updatedAt: string;

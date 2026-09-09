@@ -165,6 +165,9 @@ function rowToTicket(r: any): Ticket {
     sgst: meta.sgst != null ? Number(meta.sgst) : undefined,
     cgst: meta.cgst != null ? Number(meta.cgst) : undefined,
     devices: deviceRecords,
+    linkedWalkInId: meta.linkedWalkInId ?? undefined,
+    linkedFieldJobId: meta.linkedFieldJobId ?? undefined,
+    linkedLeadId: meta.linkedLeadId ?? undefined,
     pinnedAt: r.pinned_at ?? undefined,
     ticketNo: r.ticket_no ?? undefined,
   };
@@ -207,6 +210,9 @@ function ticketToRow(t: Ticket): Record<string, unknown> {
       cgstRate: t.cgstRate ?? null,
       sgst: t.sgst ?? null,
       cgst: t.cgst ?? null,
+      linkedWalkInId: t.linkedWalkInId || null,
+      linkedFieldJobId: t.linkedFieldJobId || null,
+      linkedLeadId: t.linkedLeadId || null,
     },
   };
 }
@@ -489,7 +495,7 @@ const WALKIN_META_MARKER = "\n\u241F::walkin-meta::";
 
 type WalkInMeta = Partial<
   Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "customerId" | "modelId" | "pinnedAt"
-    | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt">
+    | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt" | "linkedLeadId">
 >;
 
 function encodeWalkInNotes(w: WalkIn): string | null {
@@ -501,6 +507,7 @@ function encodeWalkInNotes(w: WalkIn): string | null {
   if (w.salesPersonId) meta.salesPersonId = w.salesPersonId;
   if (w.salesPersonName) meta.salesPersonName = w.salesPersonName;
   if (w.customerId) meta.customerId = w.customerId;
+  if (w.linkedLeadId) meta.linkedLeadId = w.linkedLeadId;
   if (w.modelId) meta.modelId = w.modelId;
   if (w.pinnedAt) meta.pinnedAt = w.pinnedAt;
   if (w.convertedAt) meta.convertedAt = w.convertedAt;
@@ -549,6 +556,7 @@ function rowToWalkIn(r: any): WalkIn {
     salesPersonId: r.sales_person_id ?? meta.salesPersonId ?? undefined,
     salesPersonName: r.sales_person_name ?? meta.salesPersonName ?? undefined,
     customerId: r.customer_id ?? meta.customerId ?? undefined,
+    linkedLeadId: r.linked_lead_id ?? meta.linkedLeadId ?? undefined,
     linkedTicketId,
     ticketId: linkedTicketId,
     convertedAt: r.converted_at ?? meta.convertedAt ?? undefined,
