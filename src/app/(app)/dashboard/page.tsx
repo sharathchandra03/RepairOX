@@ -637,27 +637,68 @@ export default function Dashboard() {
         {/* Tickets by Device */}
         <div className="h-full rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] overflow-auto">
           <div className="drag-handle h-3 cursor-grab active:cursor-grabbing" />
-          <CardHeader title="Tickets by Device" badge={<span className="text-[11px] text-muted-foreground">{dateRangeLabel}</span>} />
+          <CardHeader title="Tickets by Device" badge={<span className="text-[11px] font-medium text-slate-500">{dateRangeLabel}</span>} />
           {deviceData.length === 0 ? (
             <div className="flex h-32 flex-col items-center justify-center gap-1 text-muted-foreground">
               <p className="text-[13px] font-medium">No data available</p>
               <p className="text-[11px]">No tickets found for this period</p>
             </div>
-          ) : (<>
-          <p className="text-[11px] text-muted-foreground mb-4">{deviceData.reduce((s,d)=>s+d.count,0)} total tickets</p>
-          <div className="space-y-2.5">
-            {deviceData.map((d) => (
-              <div key={d.device} className="flex items-center gap-3">
-                <span className="w-[56px] shrink-0 text-[12px] text-muted-foreground text-right">{d.device}</span>
-                <div className="flex-1 h-6 rounded-full bg-slate-100 overflow-hidden">
-                  <motion.div initial={{ width: 0 }} animate={{ width: `${(d.count / Math.max(...deviceData.map(x => x.count), 1)) * 100}%` }} transition={{ type: "spring", stiffness: 80, damping: 20 }} className={`h-full rounded-full ${d.highlight ? "bg-orange-400" : "bg-[#4361EE]"}`} />
+          ) : (() => {
+            const totalCount = deviceData.reduce((s, d) => s + d.count, 0) || 1;
+            const topShare = Math.round((deviceData[0].count / totalCount) * 100);
+            return (
+            <>
+            {/* Total + top-device share — a quick analytical summary line. */}
+            <div className="mb-4 flex items-baseline justify-between">
+              <p className="text-[13px] font-semibold text-slate-800">
+                {totalCount} <span className="text-[12px] font-medium text-slate-500">total tickets</span>
+              </p>
+              <p className="text-[11px] font-medium text-slate-500">
+                Top device <span className="font-bold text-slate-700">{topShare}%</span>
+              </p>
+            </div>
+            <div className="space-y-3">
+              {deviceData.map((d, i) => {
+                const share = Math.round((d.count / totalCount) * 100);
+                return (
+                <div key={d.device} className="flex items-center gap-3">
+                  {/* Rank + device name — left-aligned so names form a straight
+                      column (no zig-zag). Rank shown as "1.", "2." etc. */}
+                  <div className="flex w-[92px] shrink-0 items-center gap-1.5">
+                    <span className="w-[16px] shrink-0 text-[11px] font-bold tabular-nums text-slate-500">{i + 1}.</span>
+                    <span className="truncate text-[12.5px] font-semibold text-slate-800" title={d.device}>{d.device}</span>
+                  </div>
+                  {/* Bar — width = share of TOTAL so the composition is truthful. */}
+                  <div className="relative h-6 flex-1 overflow-hidden rounded-full bg-slate-100">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${Math.max(share, 3)}%` }}
+                      transition={{ type: "spring", stiffness: 80, damping: 20 }}
+                      className={cn(
+                        "h-full rounded-full",
+                        d.highlight
+                          ? "bg-gradient-to-r from-orange-400 to-orange-500"
+                          : "bg-gradient-to-r from-[#4361EE] to-[#6366F1]"
+                      )}
+                    />
+                  </div>
+                  {/* Count + share — left-aligned with a fixed-width count cell
+                      so the numbers form a straight column (no zig-zag). */}
+                  <div className="flex w-[62px] shrink-0 items-baseline gap-1.5">
+                    <span className="w-[22px] text-left text-[13px] font-bold tabular-nums text-slate-800">{d.count}</span>
+                    <span className="text-[10px] font-medium tabular-nums text-slate-400">{share}%</span>
+                  </div>
                 </div>
-                <span className="w-[24px] shrink-0 text-[12px] font-semibold tnum text-right">{d.count}</span>
-              </div>
-            ))}
-          </div>
-          <p className="mt-3 text-[10px] text-muted-foreground flex items-center gap-1"><span className="inline-block h-2 w-2 rounded-full bg-orange-400" /> {deviceData[0]?.device || "N/A"} flagged as highest volume</p>
-          </>)}
+                );
+              })}
+            </div>
+            <p className="mt-4 flex items-center gap-1.5 text-[11px] font-medium text-slate-600">
+              <span className="inline-block h-2 w-2 rounded-full bg-orange-400" />
+              <span className="font-semibold text-slate-800">{deviceData[0]?.device || "N/A"}</span> leads with {topShare}% of tickets
+            </p>
+            </>
+            );
+          })()}
         </div>
 
         {/* Transactions */}
@@ -848,7 +889,7 @@ export default function Dashboard() {
                 <ChevronUp className="h-4 w-4" />
               </motion.span>
             </button>
-            <Link href="/activity" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View all activities <ArrowRight className="h-3.5 w-3.5" /></Link>
+            <Link href="/activity?from=dashboard" className="inline-flex shrink-0 items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">View all activities <ArrowRight className="h-3.5 w-3.5" /></Link>
           </div>
         </div>
         <motion.div

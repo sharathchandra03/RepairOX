@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useEffect } from "react";
-import { Search, SlidersHorizontal, CalendarDays, User, Layers, X, ScrollText } from "lucide-react";
+import { useMemo, useState, useEffect, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Search, SlidersHorizontal, CalendarDays, User, Layers, X, ScrollText, ArrowLeft } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
@@ -23,6 +24,27 @@ const DATE_LABEL: Record<DateRange, string> = {
 
 export default function ActivityLogPage() {
   const activities = useActivityLog();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Where the user came from (e.g. the Dashboard "View all activities" link
+  // adds ?from=dashboard). Map known origins to a friendly label + fallback
+  // route so the Back control returns exactly where they were.
+  const from = searchParams.get("from");
+  const ORIGIN_MAP: Record<string, { label: string; href: string }> = {
+    dashboard: { label: "Dashboard", href: "/dashboard" },
+  };
+  const origin = from ? ORIGIN_MAP[from] : undefined;
+
+  // Prefer real browser history so scroll position / dashboard state is kept;
+  // fall back to the origin route when there's no in-app history to pop.
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push(origin?.href ?? "/dashboard");
+    }
+  }, [router, origin]);
 
   const [moduleFilter, setModuleFilter] = useState<ActivityModule | "all">("all");
   const [severity, setSeverity] = useState<ActivitySeverity | "all">("all");
@@ -91,6 +113,19 @@ export default function ActivityLogPage() {
         eyebrow="Audit Trail"
         title="Activity Log"
         subtitle="A complete, centralized record of every important action across RepairOX."
+        actions={
+          origin ? (
+            <button
+              onClick={handleBack}
+              className="group inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.5)] ring-1 ring-inset ring-white/10 transition-all duration-200 hover:bg-[#3A56D4] hover:shadow-[0_6px_16px_-4px_rgba(67,97,238,0.6)] active:scale-[0.97]"
+              aria-label={`Back to ${origin.label}`}
+              title={`Back to ${origin.label}`}
+            >
+              <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+              Back to {origin.label}
+            </button>
+          ) : undefined
+        }
       />
 
       {/* Filters */}

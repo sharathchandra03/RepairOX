@@ -910,8 +910,8 @@ export const WALKIN_STATUS_LABEL: Record<WalkInStatus, string> = {
 
 export const WALKIN_STATUS_TONE: Record<WalkInStatus, string> = {
   visitor: "bg-slate-50 text-slate-600 ring-slate-200",
-  // Enquiry — a soft, eye-friendly amber, distinct from Marketing (violet).
-  enquiry: "bg-amber-50 text-amber-700 ring-amber-200",
+  // Enquiry — reuses the existing Marketing purple/violet theme.
+  enquiry: "bg-violet-50 text-violet-700 ring-violet-200",
   // Converted Ticket — RepairOX blue (deeper indigo), NOT green.
   converted_ticket: "bg-indigo-100 text-indigo-700 ring-indigo-300",
   /* legacy */
@@ -934,15 +934,19 @@ export const WALKIN_TYPE_LABEL: Record<WalkInType, string> = {
 };
 
 export const WALKIN_TYPE_TONE: Record<WalkInType, string> = {
-  direct: "bg-sky-50 text-sky-700 ring-sky-200",
-  sales: "bg-violet-50 text-violet-700 ring-violet-200",
+  // Direct — reuses the existing Enquiry orange/amber theme.
+  direct: "bg-amber-50 text-amber-700 ring-amber-200",
+  // Marketing — reuses the existing Converted Ticket blue/indigo theme.
+  sales: "bg-indigo-100 text-indigo-700 ring-indigo-300",
 };
 
 /** Solid accent colour for the leading row bar — same hue family as the Type
  *  pill above, so the bar and pill read as one system. */
 export const WALKIN_TYPE_BAR: Record<WalkInType, string> = {
-  direct: "bg-sky-500",
-  sales: "bg-violet-500",
+  // Matches the Direct pill's new orange/amber theme.
+  direct: "bg-amber-500",
+  // Matches the Marketing pill's new blue/indigo theme.
+  sales: "bg-indigo-500",
 };
 
 /**

@@ -497,14 +497,43 @@ export default function WalkInPage() {
         /* ── TABLE VIEW ──
            Straight (square) card with a flat bordered header — identical edge
            treatment to the Tickets/Invoice tables. No overflow-hidden on the
-           card and [overflow-x:clip] (not auto) on the inner wrapper so the
-           sticky thead isn't trapped and the freeze keeps working. */
+           card; the inner wrapper below documents the responsive strategy. */
         <div className="-mt-5 border-2 border-zinc-200 bg-card shadow-card">
+          {/* Same responsive architecture as the Tickets/Invoice tables:
+             `table-fixed` + `w-full` makes the table lay out to EXACTLY its
+             container width and honour the fixed column widths below, so as the
+             viewport narrows (browser zoom, small laptop, responsive breakpoint)
+             every column shrinks together in proportion instead of the table
+             overflowing and the rightmost Action column being pushed off and
+             clipped. The wrapper uses [overflow-x:clip] (not auto) — an
+             overflow:auto/scroll ancestor would become the scroll container for
+             the sticky <thead> and break the header freeze. Because table-fixed
+             guarantees the table already fits the container, clipping never
+             hides the Action column. Overflow stays inside this table region,
+             so the app shell (min-w-0 / overflow-y-auto) never scrolls sideways. */}
           <div className="[overflow-x:clip]">
-            <table className="w-full text-[14px]">
+            <table className="w-full table-fixed text-[14px]">
+              {/* Column widths mirror the Tickets table strategy: compact/stable
+                  columns get a fixed px width so they never collapse, while the
+                  free-text columns (Name / Model / Issue) use % widths and
+                  absorb the shrink/growth as the viewport changes. Action is a
+                  fixed width so its icons never collapse or wrap. */}
+              <colgroup>
+                <col className="w-9" />{/* checkbox */}
+                <col className="w-[104px]" />{/* Date */}
+                <col className="w-[92px]" />{/* ID */}
+                <col className="w-[96px]" />{/* Type */}
+                <col className="w-[104px]" />{/* Source */}
+                <col className="w-[22%]" />{/* Name — flexible */}
+                <col className="w-[124px]" />{/* Contact */}
+                <col className="w-[18%]" />{/* Model — flexible */}
+                <col className="w-[28%]" />{/* Issue — flexible */}
+                <col className="w-[136px]" />{/* Final Status */}
+                <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
+              </colgroup>
               <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
                 <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
-                  <th className="w-10 pl-5 pr-2 py-4">
+                  <th className="pl-5 pr-2 py-4">
                     <input
                       type="checkbox"
                       checked={allSelected}
@@ -522,8 +551,8 @@ export default function WalkInPage() {
                   <th className="pl-4 py-4">Contact</th>
                   <th className="pl-4 py-4">Model</th>
                   <th className="pl-4 py-4">Issue</th>
-                  <th className="pl-[21px] py-4">Final Status</th>
-                  <th className="px-5 py-4 text-right">Action</th>
+                  <th className="pl-[10px] py-4">Final Status</th>
+                  <th className="px-4 py-4 text-right">Action</th>
                 </tr>
               </thead>
               <tbody>
@@ -535,7 +564,7 @@ export default function WalkInPage() {
                     transition={{ delay: Math.min(0.015 * i, 0.2) }}
                     className={cn("group h-[68px] border-t border-border align-middle transition", selected.has(w.id) ? "bg-indigo-50/40" : w.pinnedAt ? "bg-amber-50/40" : "hover:bg-muted/40")}
                   >
-                    <td className="w-10 pl-5 pr-2 py-4" onClick={(e) => e.stopPropagation()}>
+                    <td className="pl-5 pr-2 py-4" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
                         checked={selected.has(w.id)}
@@ -568,7 +597,7 @@ export default function WalkInPage() {
                       </div>
                     </td>
                     <td className="py-4 pr-4">
-                      <span className={cn("inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
+                      <span className={cn("inline-flex min-w-[76px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
                         {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
                       </span>
                       {w.type === "sales" && w.salesPersonName && (
@@ -577,10 +606,10 @@ export default function WalkInPage() {
                     </td>
                     <td className="py-4 pr-4 text-[13px]">{w.source || "—"}</td>
                     <td className="pl-4 py-4 pr-4">
-                      <div className="flex items-center gap-2.5">
+                      <div className="flex min-w-0 items-center gap-2.5">
                         {/* Thin type-coloured bar — same hue as the Type pill for uniformity. */}
                         <span className={cn("h-8 w-1 shrink-0 rounded-full", WALKIN_TYPE_BAR[w.type ?? "direct"])} />
-                        <span className="text-[14px] font-medium truncate max-w-[150px]">{w.customer}</span>
+                        <span className="truncate text-[14px] font-medium">{w.customer}</span>
                       </div>
                     </td>
                     <td className="pl-4 py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">{w.phone || "—"}</td>
@@ -588,7 +617,7 @@ export default function WalkInPage() {
                     <td className="pl-4 py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
                       {w.issue || (w.reasons || []).join(", ") || "—"}
                     </td>
-                    <td className="pl-4 py-4 pr-4">
+                    <td className="pl-[1px] py-4 pr-4">
                       <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap", WALKIN_STATUS_TONE[w.status])}>
                         <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         {WALKIN_STATUS_LABEL[w.status]}
@@ -597,7 +626,7 @@ export default function WalkInPage() {
                         <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
                       )}
                     </td>
-                    <td className="px-5 py-4">
+                    <td className="px-4 py-4">
                       <div className="flex items-center justify-end gap-1">
                         {/* Push to Ticket — sibling of the ticket's "Push to Invoice"
                             quick action. Reflects a linked/converted state so no
