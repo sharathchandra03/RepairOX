@@ -76,6 +76,9 @@ export function WalkInFollowUpBell({
   }, [walkIns, now]);
 
   // Unread = due and not yet marked read → drives the badge + animation.
+  // The notification sound + durable topbar notification are fired centrally in
+  // the Walk-In page's due-detection effect (so they work regardless of which
+  // view is open), keeping this bell purely presentational.
   const unread = useMemo(() => dueList.filter((w) => !w.followUpReadAt), [dueList]);
   const unreadCount = unread.length;
 

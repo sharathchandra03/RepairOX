@@ -100,6 +100,7 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Email", href: "/settings/notifications/email" },
       { label: "SMS", href: "/settings/notifications/sms" },
       { label: "Push", href: "/settings/notifications/push" },
+      { label: "Walk-In Sound", href: "/settings/notifications/walk-in" },
     ],
   },
   {

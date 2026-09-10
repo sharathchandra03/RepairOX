@@ -19,7 +19,7 @@ import { motion } from "framer-motion";
 import {
   Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal, Trash2,
   Ticket as TicketIcon, Pin, PinOff, LayoutList, BarChart3, Filter, X, Check,
-  Phone, Mail, Clock,
+  Phone, Mail, Clock, ChevronDown,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,7 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
-  WALKIN_FINAL_STATUSES, type WalkIn, isWalkInWon, isFollowUpDue,
+  WALKIN_FINAL_STATUSES, type WalkIn, type WalkInStatus, isWalkInWon,
 } from "@/lib/mock-data";
 import {
   useWalkInSources, useWalkInRequireSalesPerson, nextWalkInNumber, genWalkInId, walkInDisplayId,
@@ -51,6 +51,7 @@ import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
 import { WalkInReport } from "@/components/walk-in/walk-in-report";
 import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
 import { WalkInFollowUpBell } from "@/components/walk-in/walk-in-followup-bell";
+import { WalkInFollowUpView } from "@/components/walk-in/walk-in-followup-view";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -71,7 +72,7 @@ export default function WalkInPage() {
   // Individual filter pinning (own storage key so it doesn't collide with Tickets).
   const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-walkin-pinned-filters");
 
-  const [view, setView] = useState<"table" | "report">("table");
+  const [view, setView] = useState<"table" | "report" | "followup">("table");
 
   // Filters
   const [q, setQ] = useState("");
@@ -123,6 +124,8 @@ export default function WalkInPage() {
   const [editTarget, setEditTarget] = useState<WalkIn | null>(null);
   const [viewTarget, setViewTarget] = useState<WalkIn | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
+  // Pending inline Final-Status change awaiting user confirmation.
+  const [statusChange, setStatusChange] = useState<{ walkIn: WalkIn; next: WalkInStatus } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const openedDeepLinkRef = useRef(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
@@ -167,6 +170,28 @@ export default function WalkInPage() {
     const pinned = ordered.filter((w) => w.pinnedAt);
     const normal = ordered.filter((w) => !w.pinnedAt);
     return [...pinned, ...normal];
+  }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
+
+  /* Dataset for the Follow-Up view. It is synced with the top date strip, but
+     the range applies to the FOLLOW-UP date (not the walk-in creation date) —
+     a follow-up is about WHEN the customer needs contacting. Type / Source /
+     Final-Status filters and the search box also apply so the list stays
+     consistent with the toolbar. */
+  const followUpRows = useMemo(() => {
+    return walkIns.filter((w) => {
+      // Match the date strip against the follow-up's scheduled date.
+      if (!w.followUpDate) return false;
+      if (!isWalkInInDateRange(w.followUpDate, dateRange, customFrom, customTo)) return false;
+      if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
+      if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
+      if (statusFilter !== "all" && w.status !== statusFilter) return false;
+      if (salesFilter !== "all" && w.salesPersonId !== salesFilter) return false;
+      if (q.trim()) {
+        const hay = `${walkInDisplayId(w)} ${w.customer} ${w.phone} ${w.model} ${w.issue ?? ""} ${(w.reasons || []).join(" ")}`.toLowerCase();
+        if (!hay.includes(q.trim().toLowerCase())) return false;
+      }
+      return true;
+    });
   }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
 
   // Pagination math
@@ -289,6 +314,22 @@ export default function WalkInPage() {
     router.push(`/tickets/new?fromWalkIn=${encodeURIComponent(w.id)}&from=walk-in`);
   }, [router]);
 
+  /* ── Inline Final Status change (from the table pill dropdown) ──
+     Picking "Converted Ticket" on a walk-in that has NOT been converted yet does
+     NOT silently flip the status — a ticket must actually be created first, so
+     we route into the existing push-to-ticket flow (handleConvert). The status
+     becomes "converted_ticket" only when that wizard completes and links a
+     ticket back. Every other status change persists immediately via the store. */
+  const handleStatusChange = useCallback((w: WalkIn, next: WalkInStatus) => {
+    if (next === w.status) return;
+    if (next === "converted_ticket" && !w.linkedTicketId) {
+      handleConvert(w);
+      return;
+    }
+    updateWalkIn(w.id, { status: next });
+    showToast(`Status updated to ${WALKIN_STATUS_LABEL[next]}.`);
+  }, [handleConvert, updateWalkIn, showToast]);
+
   /* ── Follow-up notification actions ── */
   const handleFollowUpRead = useCallback((w: WalkIn) => {
     if (w.followUpReadAt) return;
@@ -301,28 +342,9 @@ export default function WalkInPage() {
     showToast(`Follow-up completed for ${w.customer || walkInDisplayId(w)}.`);
   }, [updateWalkIn, showToast]);
 
-  /* Surface a one-time toast when a follow-up first becomes due this session.
-     A dedupe ref prevents re-toasting on every re-render/realtime refresh. A
-     light 60s interval + focus re-check keeps it current without heavy polling. */
-  const notifiedFollowUps = useRef<Set<string>>(new Set());
-  const [followUpTick, setFollowUpTick] = useState(0);
-  useEffect(() => {
-    const id = setInterval(() => setFollowUpTick((t) => t + 1), 60_000);
-    const onFocus = () => setFollowUpTick((t) => t + 1);
-    window.addEventListener("focus", onFocus);
-    return () => { clearInterval(id); window.removeEventListener("focus", onFocus); };
-  }, []);
-  useEffect(() => {
-    const asOf = new Date();
-    for (const w of walkIns) {
-      if (isFollowUpDue(w, asOf) && !w.followUpReadAt && !notifiedFollowUps.current.has(w.id)) {
-        notifiedFollowUps.current.add(w.id);
-        showToast(`Follow-up due: ${w.customer || walkInDisplayId(w)} (${walkInDisplayId(w)}).`);
-      }
-      // If it's no longer due (rescheduled/completed), allow a future re-notify.
-      if (!isFollowUpDue(w, asOf)) notifiedFollowUps.current.delete(w.id);
-    }
-  }, [walkIns, followUpTick, showToast]);
+  /* Follow-up "due" indications (toast + topbar bell notification + sound) are
+     handled globally by <WalkInFollowUpWatcher /> mounted in the (app) layout,
+     so they fire on any page — not just here — and never double-fire. */
 
   const anyFilterActive = typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all" || salesFilter !== "all";
   const canDelete = can("delete") || can("full_access") || can("manage_repair_jobs");
@@ -367,14 +389,16 @@ export default function WalkInPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <SegmentedTabs
           value={view}
-          onChange={(v) => setView(v as "table" | "report")}
+          onChange={(v) => setView(v as "table" | "report" | "followup")}
           options={[
             { label: "Walk-Ins", value: "table" },
-            { label: "Report", value: "report" },
+            { label: <span className="pl-[2px]">Summary</span>, value: "report" },
+            { label: "Follow-Up", value: "followup" },
           ]}
           size="sm"
+          className="[&>button]:px-3"
         />
-        {view === "table" && (
+        {view !== "report" && (
           <div className="flex items-center gap-2">
             <WalkInFollowUpBell
               walkIns={walkIns}
@@ -383,14 +407,16 @@ export default function WalkInPage() {
               onMarkRead={handleFollowUpRead}
               onMarkComplete={handleFollowUpComplete}
             />
-            <Button
-              variant={showFilters || anyFilterActive ? "soft" : "outline"}
-              size="sm"
-              className="rounded-full"
-              onClick={() => setShowFilters((s) => !s)}
-            >
-              <Filter className="h-3.5 w-3.5" /> Filters{anyFilterActive ? " ·" : ""}
-            </Button>
+            {view === "table" && (
+              <Button
+                variant={showFilters || anyFilterActive ? "soft" : "outline"}
+                size="sm"
+                className="rounded-full"
+                onClick={() => setShowFilters((s) => !s)}
+              >
+                <Filter className="h-3.5 w-3.5" /> Filters{anyFilterActive ? " ·" : ""}
+              </Button>
+            )}
             <div className="w-56 sm:w-72">
               <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search ID, name, contact, model, issue…" iconLeft={<Search className="h-4 w-4" />} />
             </div>
@@ -502,7 +528,7 @@ export default function WalkInPage() {
       </div>
       {/* ── END STICKY FROZEN WORKSPACE ── */}
 
-      {/* ── REPORT VIEW ── */}
+      {/* ── SUMMARY (REPORT) VIEW ── */}
       {view === "report" ? (
         <WalkInReport
           rows={filtered}
@@ -515,6 +541,16 @@ export default function WalkInPage() {
             setCustomTo(to);
             setDateRange("custom");
           }}
+        />
+      ) : view === "followup" ? (
+        /* ── FOLLOW-UP VIEW ──
+           Only walk-ins with a pending follow-up, ordered overdue → today →
+           upcoming. Reuses the filtered dataset so search + type/source/status
+           filters still apply; rows open the existing Edit Walk-In. */
+        <WalkInFollowUpView
+          rows={followUpRows}
+          onOpen={(w) => setEditTarget(w)}
+          onComplete={handleFollowUpComplete}
         />
       ) : (
         /* ── TABLE VIEW ──
@@ -574,7 +610,7 @@ export default function WalkInPage() {
                   <th className="pl-4 py-4">Contact</th>
                   <th className="pl-4 py-4">Model</th>
                   <th className="pl-4 py-4">Issue</th>
-                  <th className="pl-[10px] py-4">Final Status</th>
+                  <th className="pl-[5px] py-4">Final Status</th>
                   <th className="px-4 py-4 text-right">Action</th>
                 </tr>
               </thead>
@@ -604,7 +640,14 @@ export default function WalkInPage() {
                     </td>
                     <td className="py-4 pr-4 whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[14px] font-semibold text-foreground">{walkInDisplayId(w)}</span>
+                        <button
+                          type="button"
+                          onClick={() => setEditTarget(w)}
+                          title={`Edit ${walkInDisplayId(w)}`}
+                          className="cursor-pointer rounded text-[14px] font-semibold text-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                        >
+                          {walkInDisplayId(w)}
+                        </button>
                         {/* Blue conversion check — only when a Ticket has actually
                             been created and persisted (linkedTicketId). Same visual
                             concept as the Ticket table's invoice indicator, in blue. */}
@@ -635,16 +678,73 @@ export default function WalkInPage() {
                         <span className="truncate text-[14px] font-medium">{w.customer}</span>
                       </div>
                     </td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">{w.phone || "—"}</td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] truncate max-w-[150px]">{w.model || "—"}</td>
+                    <td className="pl-4 py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">
+                      {w.phone ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditTarget(w)}
+                          title={`Edit ${walkInDisplayId(w)}`}
+                          className="cursor-pointer rounded tabular-nums transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                        >
+                          {w.phone}
+                        </button>
+                      ) : "—"}
+                    </td>
+                    <td className="pl-4 py-4 pr-4 text-[13px] max-w-[150px]">
+                      {w.model ? (
+                        <button
+                          type="button"
+                          onClick={() => setEditTarget(w)}
+                          title={`Edit ${walkInDisplayId(w)}`}
+                          className="block max-w-full cursor-pointer truncate rounded text-left transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                        >
+                          {w.model}
+                        </button>
+                      ) : "—"}
+                    </td>
                     <td className="pl-4 py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
                       {w.issue || (w.reasons || []).join(", ") || "—"}
                     </td>
-                    <td className="pl-[1px] py-4 pr-4">
-                      <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap", WALKIN_STATUS_TONE[w.status])}>
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                        {WALKIN_STATUS_LABEL[w.status]}
-                      </span>
+                    <td className="py-4 pr-4 pl-0 [&>*:first-child]:-ml-[4px]" onClick={(e) => e.stopPropagation()}>
+                      <Dropdown
+                        align="left"
+                        width="w-52"
+                        trigger={({ toggle }) => (
+                          <button
+                            onClick={toggle}
+                            title="Change status"
+                            className={cn(
+                              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+                              WALKIN_STATUS_TONE[w.status],
+                              w.status === "converted_ticket" && "-ml-[2px]",
+                            )}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                            {WALKIN_STATUS_LABEL[w.status]}
+                            <ChevronDown className="h-3 w-3 opacity-70" />
+                          </button>
+                        )}
+                      >
+                        {(close) => (
+                          <>
+                            {WALKIN_FINAL_STATUSES.map((s) => (
+                              <MenuItem
+                                key={s}
+                                onClick={() => { if (s !== w.status) setStatusChange({ walkIn: w, next: s }); close(); }}
+                              >
+                                <span className="flex items-center gap-2">
+                                  <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_STATUS_TONE[s])} />
+                                  <span className={cn(s === w.status && "font-semibold text-[#4361EE]")}>{WALKIN_STATUS_LABEL[s]}</span>
+                                  {s === "converted_ticket" && !w.linkedTicketId && (
+                                    <span className="ml-auto text-[10px] text-muted-foreground">Push to Ticket</span>
+                                  )}
+                                  {s === w.status && <Check className="ml-auto h-3.5 w-3.5 text-[#4361EE]" />}
+                                </span>
+                              </MenuItem>
+                            ))}
+                          </>
+                        )}
+                      </Dropdown>
                       {w.linkedTicketId && (
                         <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
                       )}
@@ -778,12 +878,32 @@ export default function WalkInPage() {
         danger
       />
 
+      {/* Inline status-change confirm */}
+      <ConfirmDialog
+        open={!!statusChange}
+        onClose={() => setStatusChange(null)}
+        onConfirm={() => { if (statusChange) handleStatusChange(statusChange.walkIn, statusChange.next); }}
+        title="Change status?"
+        description={
+          statusChange
+            ? statusChange.next === "converted_ticket" && !statusChange.walkIn.linkedTicketId
+              ? `Do you want to change ${walkInDisplayId(statusChange.walkIn)} to “${WALKIN_STATUS_LABEL[statusChange.next]}”? A ticket will be created first via Push to Ticket.`
+              : `Do you want to change ${walkInDisplayId(statusChange.walkIn)} to “${WALKIN_STATUS_LABEL[statusChange.next]}”?`
+            : undefined
+        }
+        confirmLabel="Change Status"
+        danger={false}
+      />
+
       {/* Toast */}
       {toast && (
         <motion.div
           initial={{ opacity: 0, y: 16 }}
           animate={{ opacity: 1, y: 0 }}
-          className="fixed bottom-6 right-6 z-50 flex items-center gap-3 rounded-xl border border-border bg-card px-5 py-3 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.15)]"
+          /* Anchored bottom-center (matching the global toaster) so it never
+             collides with the floating chat button in the bottom-right corner.
+             Higher z-index than the chat FAB (z-50) keeps it fully visible. */
+          className="fixed bottom-6 left-1/2 z-[100] flex -translate-x-1/2 items-center gap-3 rounded-xl border border-border bg-card px-5 py-3 shadow-[0_8px_24px_-8px_rgba(0,0,0,0.15)]"
         >
           <span className="text-sm font-medium">{toast}</span>
           <button onClick={() => setToast(null)} className="text-muted-foreground hover:text-foreground"><X className="h-3.5 w-3.5" /></button>

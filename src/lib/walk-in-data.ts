@@ -22,6 +22,7 @@ import {
   type WalkInType,
   type WalkInStatus,
   WALKIN_STATUS_LABEL,
+  followUpDueAt,
 } from "@/lib/mock-data";
 
 /* ─── WK-### business number ─────────────────────────────────────────────── */
@@ -160,6 +161,56 @@ export function useWalkInRequireSalesPerson() {
   }, []);
 
   return { requireSalesPerson: value, setRequireSalesPerson: set, hydrated };
+}
+
+/* ─── Follow-Up view helpers ─────────────────────────────────────────────────
+   The Follow-Up view surfaces walk-ins that ACTUALLY have a scheduled follow-up
+   still pending. State is derived purely from the walk-in record (followUpDate/
+   followUpTime/followUpStatus) — no parallel reminder engine. These helpers
+   classify each pending follow-up as Overdue / Today / Upcoming and provide the
+   intelligent ordering the view uses (overdue first, then today, then upcoming;
+   nearest due first within each bucket). "done" follow-ups are treated as
+   Completed and excluded from the pending list (history is preserved on the
+   record). */
+
+export type FollowUpState = "overdue" | "today" | "upcoming" | "completed";
+
+/** Does this walk-in have a follow-up scheduled that is still pending? */
+export function isPendingFollowUp(w: Pick<WalkIn, "followUpDate" | "followUpStatus">): boolean {
+  return !!w.followUpDate && w.followUpStatus !== "done";
+}
+
+/** Classify a walk-in's follow-up into a display state, relative to `now`. */
+export function followUpState(
+  w: Pick<WalkIn, "followUpDate" | "followUpTime" | "followUpStatus">,
+  now: Date = new Date(),
+): FollowUpState | null {
+  if (!w.followUpDate) return null;
+  if (w.followUpStatus === "done") return "completed";
+  const due = followUpDueAt(w);
+  if (!due) return null;
+  // Same calendar day → "Today" (even if the exact time has passed today).
+  if (due.toDateString() === now.toDateString()) return "today";
+  return due.getTime() < now.getTime() ? "overdue" : "upcoming";
+}
+
+/** Sort weight so overdue floats above today above upcoming. */
+const FOLLOWUP_ORDER: Record<FollowUpState, number> = { overdue: 0, today: 1, upcoming: 2, completed: 3 };
+
+/**
+ * The pending follow-up list for the Follow-Up view: only walk-ins with a
+ * pending follow-up, ordered overdue → today → upcoming, then nearest due
+ * date/time first within the same bucket.
+ */
+export function pendingFollowUps(rows: WalkIn[], now: Date = new Date()): WalkIn[] {
+  return rows
+    .filter((w) => isPendingFollowUp(w))
+    .sort((a, b) => {
+      const sa = followUpState(a, now) ?? "upcoming";
+      const sb = followUpState(b, now) ?? "upcoming";
+      if (FOLLOWUP_ORDER[sa] !== FOLLOWUP_ORDER[sb]) return FOLLOWUP_ORDER[sa] - FOLLOWUP_ORDER[sb];
+      return (followUpDueAt(a)?.getTime() ?? 0) - (followUpDueAt(b)?.getTime() ?? 0);
+    });
 }
 
 /* ─── Import normalization ───────────────────────────────────────────────── */

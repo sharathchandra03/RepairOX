@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { cn } from "@/lib/utils";
 
 interface TabsProps {
-  options: { label: string; value: string }[];
+  options: { label: React.ReactNode; value: string }[];
   value: string;
   onChange: (v: string) => void;
   className?: string;
