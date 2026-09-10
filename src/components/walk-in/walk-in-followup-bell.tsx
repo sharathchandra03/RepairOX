@@ -89,8 +89,8 @@ export function WalkInFollowUpBell({
         aria-haspopup="dialog"
         aria-expanded={open}
         className={cn(
-          "relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-border bg-card text-muted-foreground transition hover:border-[#4361EE]/40 hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
-          open && "border-[#4361EE] text-[#4361EE]",
+          "relative inline-flex h-10 w-10 items-center justify-center rounded-full border border-[#4361EE] bg-[#4361EE] text-white shadow-sm ring-1 ring-inset ring-[#4361EE]/40 transition hover:bg-[#3550d8] hover:text-white hover:ring-[#4361EE]/60 hover:shadow-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/60",
+          open && "bg-[#3550d8] text-white ring-[#4361EE]/60",
         )}
       >
         <motion.span
