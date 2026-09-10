@@ -603,9 +603,9 @@ export default function WalkInPage() {
                     />
                   </th>
                   <th className="px-2 py-4 whitespace-nowrap">Date</th>
-                  <th className="py-4 whitespace-nowrap"><span className="inline-block pl-[5px]">ID</span></th>
-                  <th className="py-4">Type</th>
-                  <th className="py-4">Source</th>
+                  <th className="py-4 whitespace-nowrap"><span className="inline-block pl-[8px]">ID</span></th>
+                  <th className="py-4"><span className="inline-block pl-[17px]">Type</span></th>
+                  <th className="py-4 pl-[14px]">Source</th>
                   <th className="pl-4 py-4"><span className="inline-block pl-[17px]">Name</span></th>
                   <th className="pl-4 py-4">Contact</th>
                   <th className="pl-4 py-4">Model</th>
@@ -662,7 +662,7 @@ export default function WalkInPage() {
                         )}
                       </div>
                     </td>
-                    <td className="py-4 pr-4">
+                    <td className="py-4 pr-4 pl-[2px]">
                       <span className={cn("inline-flex min-w-[76px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
                         {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
                       </span>
@@ -670,7 +670,7 @@ export default function WalkInPage() {
                         <p className="mt-0.5 text-[11px] text-muted-foreground truncate max-w-[120px]">{w.salesPersonName}</p>
                       )}
                     </td>
-                    <td className="py-4 pr-4 text-[13px]">{w.source || "—"}</td>
+                    <td className="py-4 pr-4 pl-[19px] text-[13px]">{w.source || "—"}</td>
                     <td className="pl-4 py-4 pr-4">
                       <div className="flex min-w-0 items-center gap-2.5">
                         {/* Thin type-coloured bar — same hue as the Type pill for uniformity. */}

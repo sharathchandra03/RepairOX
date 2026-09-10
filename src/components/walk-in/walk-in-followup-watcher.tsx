@@ -4,8 +4,8 @@
    Walk-In Follow-Up Watcher (global, headless)
 
    A tiny always-mounted component that watches EVERY walk-in for a follow-up
-   whose scheduled date/time has just been crossed — regardless of which page
-   the user is on — and fires the indication trio:
+   whose scheduled date/time has been crossed — regardless of which page the
+   user is on — and fires the indication trio:
 
      • a toast (via the global toast channel)
      • a durable notification for the topbar bell (persisted)
@@ -15,10 +15,11 @@
    anywhere in the app. Living in the (app) layout means the watcher keeps
    ticking everywhere, so a crossed follow-up always produces an indication.
 
-   De-dupe: each due event is keyed by walk-in id + its exact due timestamp, so
-   a follow-up notifies EXACTLY ONCE, and rescheduling it (new time) is treated
-   as a fresh event that can notify again. The key set is persisted to
-   sessionStorage so navigating between pages / remounts doesn't re-fire.
+   De-dupe is IN-MEMORY (per page load): a follow-up alerts once per session,
+   and rescheduling it (new due time) alerts again. It deliberately does NOT
+   persist the "fired" set — that way a due-but-unacknowledged follow-up is
+   re-surfaced when the app is reopened, so it can't be silently missed. The
+   walk-in's own `followUpReadAt` / completion is what permanently silences it.
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useEffect, useRef } from "react";
@@ -29,26 +30,11 @@ import { notify } from "@/lib/notifications";
 import { toast } from "@/components/ui/toaster";
 import { useWalkInSound, playWalkInSound } from "@/lib/walk-in-notification-sound";
 
-const SESSION_KEY = "repairox-walkin-followup-fired";
-
-/** A stable key for a specific due event (id + due instant). */
+/** A stable key for a specific due event (id + due instant). Rescheduling to a
+    new time yields a new key, so it can alert again. */
 function dueKey(w: WalkIn): string {
   const due = followUpDueAt(w);
   return `${w.id}@${due ? due.getTime() : 0}`;
-}
-
-function loadFired(): Set<string> {
-  if (typeof window === "undefined") return new Set();
-  try {
-    const raw = sessionStorage.getItem(SESSION_KEY);
-    return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function saveFired(fired: Set<string>) {
-  try { sessionStorage.setItem(SESSION_KEY, JSON.stringify(Array.from(fired))); } catch { /* quota */ }
 }
 
 export function WalkInFollowUpWatcher() {
@@ -62,54 +48,83 @@ export function WalkInFollowUpWatcher() {
   const soundPrefsRef = useRef(soundPrefs);
   soundPrefsRef.current = soundPrefs;
 
-  const firedRef = useRef<Set<string>>(loadFired());
+  /* Per due-event bookkeeping: the last time we alerted for it. A due + UNREAD
+     follow-up is re-alerted on a repeating cadence so it can't be missed — it
+     keeps notifying until the user marks it read / complete. Once acknowledged
+     (followUpReadAt set) it's dropped and never re-alerts. */
+  const lastAlertRef = useRef<Map<string, number>>(new Map());
 
   useEffect(() => {
+    // How often to RE-alert an unread, still-due follow-up (ms).
+    const REALERT_EVERY = 60_000;
+
     const check = () => {
       const asOf = new Date();
-      let changed = false;
+      const nowMs = asOf.getTime();
+      const activeKeys = new Set<string>();
+
       for (const w of walkInsRef.current) {
         // Only pending (not completed) follow-ups whose time has arrived.
         if (!isFollowUpDue(w, asOf)) continue;
-        // A follow-up the user already acknowledged (read) shouldn't re-alert.
+        // Acknowledged (read) → never alert again.
         if (w.followUpReadAt) continue;
-        const key = dueKey(w);
-        if (firedRef.current.has(key)) continue;
 
-        firedRef.current.add(key);
-        changed = true;
+        const key = dueKey(w);
+        activeKeys.add(key);
+
+        const last = lastAlertRef.current.get(key);
+        const firstAlert = last === undefined;
+        // Alert if we've never alerted this event, or the re-alert window elapsed.
+        if (!firstAlert && nowMs - last! < REALERT_EVERY) continue;
+        lastAlertRef.current.set(key, nowMs);
 
         const who = w.customer || walkInDisplayId(w);
+        const desc = `${who} · ${walkInDisplayId(w)}${w.model ? ` · ${w.model}` : ""}`;
+
+        // Transient toast + sound repeat on every re-alert so it keeps nagging
+        // until acknowledged.
         toast.info("Walk-In follow-up due", {
-          description: `${who} · ${walkInDisplayId(w)}${w.model ? ` · ${w.model}` : ""}`,
+          description: desc,
+          duration: 8000,
           action: {
             label: "Open Walk-In",
             onClick: () => { window.location.href = `/walk-in?walkIn=${encodeURIComponent(w.id)}`; },
           },
         });
-        notify({
-          kind: "generic",
-          title: "Walk-In follow-up due",
-          body: `${who} · ${walkInDisplayId(w)}${w.model ? ` · ${w.model}` : ""}`,
-          href: `/walk-in?walkIn=${encodeURIComponent(w.id)}`,
-          reference: walkInDisplayId(w),
-          recipientId: w.salesPersonId || undefined,
-        });
         playWalkInSound(soundPrefsRef.current);
+
+        // Durable topbar-bell notification is created ONCE per due event (not on
+        // every re-alert) so the bell feed doesn't fill with duplicates.
+        if (firstAlert) {
+          notify({
+            kind: "generic",
+            title: "Walk-In follow-up due",
+            body: desc,
+            href: `/walk-in?walkIn=${encodeURIComponent(w.id)}`,
+            reference: walkInDisplayId(w),
+            recipientId: w.salesPersonId || undefined,
+          });
+        }
       }
-      if (changed) saveFired(firedRef.current);
+
+      // Forget events that are no longer active (completed / read / rescheduled)
+      // so a genuinely new due event can alert immediately.
+      for (const key of Array.from(lastAlertRef.current.keys())) {
+        if (!activeKeys.has(key)) lastAlertRef.current.delete(key);
+      }
     };
 
-    // Check immediately on mount (catches follow-ups already crossed while the
-    // app was closed), then on a light interval + when the tab refocuses.
+    /* Poll on a short cadence so a follow-up crossing its time surfaces quickly,
+       and so it catches the store finishing its async hydration (walkIns start
+       empty, then populate). Also re-check on focus / tab visibility. */
     check();
-    const id = setInterval(check, 20_000);
+    const fast = setInterval(check, 5_000);
     const onFocus = () => check();
     const onVisible = () => { if (document.visibilityState === "visible") check(); };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
-      clearInterval(id);
+      clearInterval(fast);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
     };

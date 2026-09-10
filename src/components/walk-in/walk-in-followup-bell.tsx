@@ -104,7 +104,9 @@ export function WalkInFollowUpBell({
           <Bell className="h-[18px] w-[18px]" />
         </motion.span>
         {unreadCount > 0 && (
-          <span className="absolute -right-0.5 -top-0.5 grid min-h-4 min-w-4 place-items-center rounded-full bg-[#4361EE] px-1 text-[10px] font-bold leading-none text-white ring-2 ring-[hsl(var(--background))]">
+          /* Rose badge on the blue bell so the count is clearly visible (a blue
+             badge would blend into the blue button). White ring lifts it off. */
+          <span className="absolute -right-1 -top-1 grid min-h-[18px] min-w-[18px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-white">
             {unreadCount > 9 ? "9+" : unreadCount}
           </span>
         )}
