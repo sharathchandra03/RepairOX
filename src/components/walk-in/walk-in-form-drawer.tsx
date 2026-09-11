@@ -27,6 +27,8 @@ import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, type CustomerType } from "@/lib/customer-data";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
+import { IssueSelector } from "@/components/common/issue-selector";
+import { FollowUpHistoryTimeline } from "@/components/walk-in/walk-in-followup-cell";
 
 import {
   type WalkIn,
@@ -236,7 +238,9 @@ export function WalkInFormDrawer({
             className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           >
             <div
-              className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
+              /* Defined graphite boundary so the form reads as a distinct card
+                 against the dimmed backdrop — keeps the RepairOX radius + shadow. */
+              className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border-2 border-zinc-300 ring-1 ring-zinc-900/5 bg-card shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
               role="dialog" aria-modal="true"
               onClick={(e) => e.stopPropagation()}
             >
@@ -459,13 +463,28 @@ export function WalkInFormDrawer({
             </div>
           </div>
 
+          {/* Issue — reuses the shared Issue Master (same control + data source
+              as the Ticket Issue field). Search existing, select one or more, or
+              add a new issue that becomes immediately available everywhere. */}
           <div className="space-y-1">
             <Label>Issue</Label>
+            <IssueSelector
+              value={form.issue || ""}
+              onChange={(v) => set({ issue: v })}
+              placeholder="Search issues e.g. Display… or add a new one"
+            />
+          </div>
+
+          {/* Customer Comments — free text capturing what the CUSTOMER said
+              during the visit (conversation context). Distinct from Issue (the
+              device problem) and internal Notes. */}
+          <div className="space-y-1">
+            <Label>Customer Comments <span className="font-normal text-muted-foreground">(optional)</span></Label>
             <Textarea
               rows={2}
-              value={form.issue || ""}
-              placeholder="e.g. Screen damaged, Battery issue, Camera not working…"
-              onChange={(e: any) => set({ issue: e.target.value })}
+              value={form.customerComments || ""}
+              placeholder="Capture what the customer said…"
+              onChange={(e: any) => set({ customerComments: e.target.value })}
             />
           </div>
 
@@ -510,7 +529,18 @@ export function WalkInFormDrawer({
                 type="date"
                 value={form.followUpDate || ""}
                 disabled={isConverted}
-                onChange={(e: any) => set({ followUpDate: e.target.value, followUpStatus: e.target.value ? "pending" : undefined })}
+                onChange={(e: any) =>
+                  set({
+                    followUpDate: e.target.value,
+                    followUpStatus: e.target.value ? "pending" : undefined,
+                    // Keep the attempt number consistent with prior history: the
+                    // active attempt is (completed history + 1), min 1.
+                    followUpAttempt: e.target.value ? ((form.followUpHistory?.length ?? 0) + 1) : undefined,
+                    // A freshly (re)scheduled follow-up is unread again so it can
+                    // re-notify at the new time.
+                    followUpReadAt: undefined,
+                  })
+                }
               />
               <Input
                 type="time"
@@ -521,18 +551,28 @@ export function WalkInFormDrawer({
             </div>
             {isConverted ? (
               <p className="text-[10px] text-muted-foreground">Follow-up is locked — this walk-in is already converted to a ticket.</p>
-            ) : form.followUpStatus === "done" ? (
-              <p className="flex items-center gap-1 text-[10px] font-medium text-emerald-600">
-                <Check className="h-3 w-3" /> Follow-up marked complete
-                <button type="button" onClick={() => set({ followUpStatus: "pending" })} className="ml-1 text-muted-foreground hover:underline">Reopen</button>
+            ) : form.followUpStatus === "done" && !form.followUpDate ? (
+              <p className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground">
+                Last follow-up attempt completed. Set a date above to schedule the next one.
               </p>
             ) : form.followUpDate ? (
-              <div className="flex items-center justify-between">
-                <p className="text-[10px] text-muted-foreground">A reminder appears in the Walk-In bell when this is due.</p>
-                <button type="button" onClick={() => set({ followUpStatus: "done" })} className="text-[10px] font-medium text-[#4361EE] hover:underline">Mark complete</button>
-              </div>
+              <p className="flex items-center gap-1 text-[10px] font-medium text-sky-700">
+                <Check className="h-3 w-3" /> Scheduled — a reminder appears in the notification bells when it's due. Complete the attempt (and record its outcome) from the Follow-Up pill in the table.
+              </p>
             ) : null}
           </div>
+
+          {/* Follow-Up History — the full attempt trail so the store user can see
+              the customer journey before making the next call. Read-only here;
+              completing/scheduling attempts is done via the Follow-Up pill. */}
+          {isEdit && walkIn && (walkIn.followUpHistory?.length || walkIn.followUpDate) ? (
+            <div className="space-y-1">
+              <Label>Follow-Up History</Label>
+              <div className="overflow-hidden rounded-xl border border-border bg-muted/20">
+                <FollowUpHistoryTimeline walkIn={walkIn} />
+              </div>
+            </div>
+          ) : null}
         </section>
                 </div>
               </div>
@@ -542,7 +582,7 @@ export function WalkInFormDrawer({
                 <span className="text-xs text-rose-600">{error}</span>
                 <div className="flex gap-2">
                   <Button variant="secondary" size="sm" onClick={onClose}>Cancel</Button>
-                  <Button size="sm" onClick={handleSave}>Save Walk-In</Button>
+                  <Button size="sm" onClick={handleSave}>Save</Button>
                 </div>
               </div>
             </div>

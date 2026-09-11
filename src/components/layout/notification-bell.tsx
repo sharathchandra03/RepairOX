@@ -60,7 +60,10 @@ export function NotificationBell() {
         >
           <Bell className="h-4 w-4" />
           {unread > 0 && (
-            <span className="absolute right-1 top-1 inline-flex min-w-[16px] items-center justify-center rounded-full bg-[#4361EE] px-1 text-[9px] font-bold leading-none text-white ring-2 ring-card">
+            /* Compact circular red badge, lifted onto the upper-right of the bell
+               with a card-coloured ring so it reads as a distinct pill (same
+               visual quality as the Walk-In follow-up bell badge). */
+            <span className="absolute -right-0.5 -top-0.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
               {unread > 9 ? "9+" : unread}
             </span>
           )}

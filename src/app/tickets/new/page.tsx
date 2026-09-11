@@ -26,7 +26,7 @@ import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
-import type { Ticket, TicketStatus } from "@/lib/mock-data";
+import type { Ticket, TicketStatus, WalkIn } from "@/lib/mock-data";
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
@@ -655,11 +655,42 @@ function NewTicketWizard() {
       // "Converted Ticket" — clicking Convert alone never creates a ticket.
       if (fromWalkInId) {
         const linkId = newId || ticketData.id;
+        const srcW = walkIns.find((w) => w.id === fromWalkInId);
+        // Auto-terminate the follow-up lifecycle on conversion (spec §24/§45/§46):
+        // any active schedule is recorded in history with a "converted" outcome,
+        // the active reminder is cleared so no future notification can fire, and
+        // the walk-in becomes Converted Ticket — all in this single update.
+        const followUpClose: Partial<WalkIn> = {};
+        if (srcW) {
+          const hadActive = !!srcW.followUpDate && srcW.followUpStatus !== "done";
+          if (hadActive) {
+            const attempt = (srcW.followUpHistory?.length ?? 0) + 1;
+            followUpClose.followUpHistory = [
+              ...(srcW.followUpHistory ?? []),
+              {
+                attempt,
+                scheduledDate: srcW.followUpDate!,
+                scheduledTime: srcW.followUpTime,
+                completedAt: new Date().toISOString(),
+                outcome: "converted",
+                comment: "Auto-closed on ticket conversion",
+              },
+            ];
+          }
+          // Clear the active schedule + mark the lifecycle done regardless.
+          followUpClose.followUpStatus = "done";
+          followUpClose.followUpDate = undefined;
+          followUpClose.followUpTime = undefined;
+          followUpClose.followUpAttempt = undefined;
+          followUpClose.followUpComments = undefined;
+          followUpClose.followUpReadAt = srcW.followUpReadAt || new Date().toISOString();
+        }
         await updateWalkIn(fromWalkInId, {
           status: "converted_ticket",
           linkedTicketId: linkId,
           ticketId: linkId,
           convertedAt: new Date().toISOString(),
+          ...followUpClose,
         });
         // Carry the ticket link back to the originating Lead (Store-to-Store).
         const srcWalkIn = walkIns.find((w) => w.id === fromWalkInId);

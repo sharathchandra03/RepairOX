@@ -13,7 +13,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Bell, X, Check, CheckCheck, ExternalLink, Clock } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
-import { type WalkIn, followUpDueAt, isFollowUpDue } from "@/lib/mock-data";
+import { type WalkIn, followUpDueAt } from "@/lib/mock-data";
+import { useFollowUpClock, dueFollowUps } from "@/lib/walk-in-followup-engine";
 import { cn } from "@/lib/utils";
 
 function fmtDue(w: WalkIn): string {
@@ -31,31 +32,21 @@ export function WalkInFollowUpBell({
   displayId,
   onOpenWalkIn,
   onMarkRead,
-  onMarkComplete,
+  onCompleteFollowUp,
 }: {
   walkIns: WalkIn[];
   displayId: (w: WalkIn) => string;
   onOpenWalkIn: (w: WalkIn) => void;
   onMarkRead: (w: WalkIn) => void;
-  onMarkComplete: (w: WalkIn) => void;
+  /** Open the SAFE completion dialog (outcome + next action) — never a silent close. */
+  onCompleteFollowUp: (w: WalkIn) => void;
 }) {
   const [open, setOpen] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
+  // The SAME shared clock the global watcher/bell uses — driven by a precise
+  // timer scheduled to each follow-up's exact due instant. This is what removes
+  // the old 30–40s gap: both bells re-evaluate on the identical tick.
+  const now = useFollowUpClock();
   const ref = useRef<HTMLDivElement>(null);
-
-  // Re-evaluate "due" on a light interval (60s) and when the tab refocuses, so
-  // the bell reflects a follow-up becoming due without a heavy polling loop.
-  useEffect(() => {
-    const tick = () => setNow(Date.now());
-    const id = setInterval(tick, 60_000);
-    window.addEventListener("focus", tick);
-    document.addEventListener("visibilitychange", tick);
-    return () => {
-      clearInterval(id);
-      window.removeEventListener("focus", tick);
-      document.removeEventListener("visibilitychange", tick);
-    };
-  }, []);
 
   // Close on outside click.
   useEffect(() => {
@@ -67,13 +58,9 @@ export function WalkInFollowUpBell({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // Due follow-ups (date/time arrived, not completed), soonest first.
-  const dueList = useMemo(() => {
-    const asOf = new Date(now);
-    return walkIns
-      .filter((w) => isFollowUpDue(w, asOf))
-      .sort((a, b) => (followUpDueAt(a)?.getTime() ?? 0) - (followUpDueAt(b)?.getTime() ?? 0));
-  }, [walkIns, now]);
+  // Due follow-ups (date/time arrived, ACTIVE only), soonest first — derived
+  // with the shared engine helper so it matches the global watcher exactly.
+  const dueList = useMemo(() => dueFollowUps(walkIns, new Date(now)), [walkIns, now]);
 
   // Unread = due and not yet marked read → drives the badge + animation.
   // The notification sound + durable topbar notification are fired centrally in
@@ -184,10 +171,11 @@ export function WalkInFollowUpBell({
                           </button>
                         )}
                         <button
-                          onClick={() => onMarkComplete(w)}
+                          onClick={() => { onCompleteFollowUp(w); setOpen(false); }}
+                          title="Record the outcome of this follow-up attempt"
                           className="inline-flex items-center gap-1 text-[11px] font-medium text-emerald-600 transition hover:text-emerald-700"
                         >
-                          <CheckCheck className="h-3 w-3" /> Complete
+                          <CheckCheck className="h-3 w-3" /> Complete Follow-Up
                         </button>
                       </div>
                     </div>

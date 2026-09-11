@@ -52,6 +52,10 @@ export interface AppNotification {
   href?: string;
   /** Related entity reference for display (e.g. FJ-001). */
   reference?: string;
+  /** Stable idempotency key. When set, a second notify() with the same key
+   *  will NOT create a duplicate record — it returns the existing one. Used to
+   *  guarantee "one follow-up due event → one notification". */
+  dedupeKey?: string;
   read: boolean;
 }
 
@@ -86,6 +90,13 @@ function emitChange() {
 /** Add a notification (module-level; callable from non-React code). */
 export function notify(input: NotificationInput): AppNotification {
   hydrate();
+  // Idempotency: if a notification with the same dedupeKey already exists, don't
+  // create a duplicate. This is the single guarantee that one due event yields
+  // exactly one notification, no matter how many times the caller fires.
+  if (input.dedupeKey) {
+    const existing = items.find((n) => n.dedupeKey === input.dedupeKey);
+    if (existing) return existing;
+  }
   const n: AppNotification = {
     id: `ntf-${Date.now()}-${(_counter++).toString(36)}`,
     ts: input.ts ?? Date.now(),
@@ -96,12 +107,19 @@ export function notify(input: NotificationInput): AppNotification {
     recipientRole: input.recipientRole,
     href: input.href,
     reference: input.reference,
+    dedupeKey: input.dedupeKey,
     read: false,
   };
   items = [n, ...items].slice(0, MAX);
   persist();
   emitChange();
   return n;
+}
+
+/** True when a notification with this dedupeKey already exists (any read state). */
+export function hasNotification(dedupeKey: string): boolean {
+  hydrate();
+  return items.some((n) => n.dedupeKey === dedupeKey);
 }
 
 export function markRead(id: string) {

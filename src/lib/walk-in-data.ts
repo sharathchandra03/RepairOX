@@ -23,7 +23,14 @@ import {
   type WalkInStatus,
   WALKIN_STATUS_LABEL,
   followUpDueAt,
+  hasActiveFollowUp,
+  isFollowUpTerminated,
 } from "@/lib/mock-data";
+
+/** English ordinal for a small attempt number (1→"1st", 2→"2nd", 3→"3rd"). */
+export function ordinal(n: number): string {
+  return n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
+}
 
 /* ─── WK-### business number ─────────────────────────────────────────────── */
 
@@ -173,44 +180,112 @@ export function useWalkInRequireSalesPerson() {
    Completed and excluded from the pending list (history is preserved on the
    record). */
 
-export type FollowUpState = "overdue" | "today" | "upcoming" | "completed";
+export type FollowUpState = "overdue" | "today" | "upcoming" | "completed" | "none";
 
-/** Does this walk-in have a follow-up scheduled that is still pending? */
-export function isPendingFollowUp(w: Pick<WalkIn, "followUpDate" | "followUpStatus">): boolean {
-  return !!w.followUpDate && w.followUpStatus !== "done";
+/**
+ * Does this walk-in have an ACTIVE follow-up? An active follow-up is scheduled,
+ * not completed, and the walk-in is not converted / not terminal. This is the
+ * single definition the Follow-Up tab, column, counts and notifications share.
+ */
+export function isPendingFollowUp(
+  w: Pick<WalkIn, "followUpDate" | "followUpStatus" | "status" | "linkedTicketId">,
+): boolean {
+  return hasActiveFollowUp(w);
 }
 
 /** Classify a walk-in's follow-up into a display state, relative to `now`. */
 export function followUpState(
-  w: Pick<WalkIn, "followUpDate" | "followUpTime" | "followUpStatus">,
+  w: Pick<WalkIn, "followUpDate" | "followUpTime" | "followUpStatus" | "status" | "linkedTicketId" | "followUpHistory">,
   now: Date = new Date(),
-): FollowUpState | null {
-  if (!w.followUpDate) return null;
+): FollowUpState {
+  // A terminated (converted / lost / closed) walk-in with any prior history reads
+  // as Completed; otherwise No Follow-Up.
+  if (isFollowUpTerminated(w)) {
+    return (w.followUpHistory?.length || w.followUpStatus === "done") ? "completed" : "none";
+  }
+  if (!w.followUpDate) {
+    return w.followUpHistory?.length ? "completed" : "none";
+  }
   if (w.followUpStatus === "done") return "completed";
   const due = followUpDueAt(w);
-  if (!due) return null;
+  if (!due) return "none";
   // Same calendar day → "Today" (even if the exact time has passed today).
   if (due.toDateString() === now.toDateString()) return "today";
   return due.getTime() < now.getTime() ? "overdue" : "upcoming";
 }
 
 /** Sort weight so overdue floats above today above upcoming. */
-const FOLLOWUP_ORDER: Record<FollowUpState, number> = { overdue: 0, today: 1, upcoming: 2, completed: 3 };
+const FOLLOWUP_ORDER: Record<FollowUpState, number> = { overdue: 0, today: 1, upcoming: 2, completed: 3, none: 4 };
 
 /**
- * The pending follow-up list for the Follow-Up view: only walk-ins with a
- * pending follow-up, ordered overdue → today → upcoming, then nearest due
- * date/time first within the same bucket.
+ * The active follow-up list for the Follow-Up view: only walk-ins with an active
+ * follow-up, ordered overdue → today → upcoming, then nearest due date/time
+ * first within the same bucket.
  */
 export function pendingFollowUps(rows: WalkIn[], now: Date = new Date()): WalkIn[] {
   return rows
     .filter((w) => isPendingFollowUp(w))
     .sort((a, b) => {
-      const sa = followUpState(a, now) ?? "upcoming";
-      const sb = followUpState(b, now) ?? "upcoming";
+      const sa = followUpState(a, now);
+      const sb = followUpState(b, now);
       if (FOLLOWUP_ORDER[sa] !== FOLLOWUP_ORDER[sb]) return FOLLOWUP_ORDER[sa] - FOLLOWUP_ORDER[sb];
       return (followUpDueAt(a)?.getTime() ?? 0) - (followUpDueAt(b)?.getTime() ?? 0);
     });
+}
+
+/* ─── Follow-Up pill presentation (shared by the table column + follow-up view) ── */
+
+export interface FollowUpPill {
+  state: FollowUpState;
+  /** Compact label, e.g. "1st Follow-Up · Today", "Overdue · 2nd", "No Follow-Up". */
+  label: string;
+  /** Tailwind classes for the pill (semantic RepairOX tones). */
+  tone: string;
+}
+
+const FOLLOWUP_TONE: Record<FollowUpState, string> = {
+  // Upcoming — soft blue.
+  upcoming: "bg-sky-50 text-sky-700 ring-sky-200",
+  // Today — soft purple/brand blue.
+  today: "bg-[#EEF1FD] text-[#4361EE] ring-[#B3BFF6]",
+  // Overdue — soft red/pink.
+  overdue: "bg-rose-50 text-rose-600 ring-rose-200",
+  // Completed — soft green.
+  completed: "bg-emerald-50 text-emerald-600 ring-emerald-200",
+  // No follow-up — neutral.
+  none: "bg-slate-50 text-slate-500 ring-slate-200",
+};
+
+function fmtShortDate(due: Date, now: Date): string {
+  const sameDay = due.toDateString() === now.toDateString();
+  if (sameDay) return "Today";
+  const tomorrow = new Date(now); tomorrow.setDate(tomorrow.getDate() + 1);
+  if (due.toDateString() === tomorrow.toDateString()) return "Tomorrow";
+  return due.toLocaleDateString("en-IN", { day: "numeric", month: "short" });
+}
+
+/**
+ * Build the compact Follow-Up pill descriptor for a walk-in. Examples:
+ *   No Follow-Up / 1st Follow-Up · Today / 2nd Follow-Up · 13 Sep /
+ *   Overdue · 1st / Completed.
+ */
+export function followUpPill(w: WalkIn, now: Date = new Date()): FollowUpPill {
+  const state = followUpState(w, now);
+  const tone = FOLLOWUP_TONE[state];
+  const attempt = w.followUpAttempt ?? ((w.followUpHistory?.length ?? 0) + (w.followUpDate ? 1 : 0));
+
+  if (state === "none") return { state, tone, label: "No Follow-Up" };
+  if (state === "completed") return { state, tone, label: "Completed" };
+
+  const due = followUpDueAt(w);
+  const when = due ? fmtShortDate(due, now) : "";
+  const ord = attempt ? `${ordinal(attempt)} Follow-Up` : "Follow-Up";
+
+  if (state === "overdue") {
+    return { state, tone, label: attempt ? `Overdue · ${ordinal(attempt)}` : "Overdue" };
+  }
+  // today / upcoming → "1st Follow-Up · Today" / "2nd Follow-Up · 13 Sep"
+  return { state, tone, label: when ? `${ord} · ${when}` : ord };
 }
 
 /* ─── Import normalization ───────────────────────────────────────────────── */

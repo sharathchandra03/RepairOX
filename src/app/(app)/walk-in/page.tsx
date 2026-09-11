@@ -39,12 +39,14 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
-  WALKIN_FINAL_STATUSES, type WalkIn, type WalkInStatus, isWalkInWon,
+  WALKIN_FINAL_STATUSES, type WalkIn, type WalkInStatus, isWalkInWon, hasActiveFollowUp,
+  FOLLOWUP_OUTCOME_LABEL,
 } from "@/lib/mock-data";
 import {
   useWalkInSources, useWalkInRequireSalesPerson, nextWalkInNumber, genWalkInId, walkInDisplayId,
-  isWalkInInDateRange, WALKIN_DATE_RANGES, type WalkInDateRange,
+  isWalkInInDateRange, WALKIN_DATE_RANGES, type WalkInDateRange, followUpState, followUpPill,
 } from "@/lib/walk-in-data";
+import { useSession } from "@/lib/use-session";
 import { cn } from "@/lib/utils";
 import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
 import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
@@ -52,6 +54,7 @@ import { WalkInReport } from "@/components/walk-in/walk-in-report";
 import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
 import { WalkInFollowUpBell } from "@/components/walk-in/walk-in-followup-bell";
 import { WalkInFollowUpView } from "@/components/walk-in/walk-in-followup-view";
+import { WalkInFollowUpCell, WalkInFollowUpCompleteModal } from "@/components/walk-in/walk-in-followup-cell";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -65,14 +68,17 @@ function fmtDate(iso: string): string {
 
 export default function WalkInPage() {
   const router = useRouter();
-  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets } = useStore();
+  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary } = useStore();
   const { can } = usePermissions();
+  const { id: sessionUserId, name: sessionUserName } = useSession();
   const { sources } = useWalkInSources();
   const { requireSalesPerson } = useWalkInRequireSalesPerson();
   // Individual filter pinning (own storage key so it doesn't collide with Tickets).
   const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-walkin-pinned-filters");
 
   const [view, setView] = useState<"table" | "report" | "followup">("table");
+  // Sub-view inside the Follow-Up tab: actionable queue vs. completed history.
+  const [followUpSub, setFollowUpSub] = useState<"active" | "history">("active");
 
   // Filters
   const [q, setQ] = useState("");
@@ -80,6 +86,13 @@ export default function WalkInPage() {
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [salesFilter, setSalesFilter] = useState<string>("all");
+  // Follow-Up filters (spec §33/§47): schedule state, attempt #, outcome.
+  const [followUpFilter, setFollowUpFilter] = useState<string>("all");
+  const [followUpAttemptFilter, setFollowUpAttemptFilter] = useState<string>("all");
+  const [followUpOutcomeFilter, setFollowUpOutcomeFilter] = useState<string>("all");
+  // Issue filter (from the shared Issue Master) + conversion filter (linked ticket).
+  const [issueFilter, setIssueFilter] = useState<string>("all");
+  const [conversionFilter, setConversionFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<WalkInDateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -124,6 +137,8 @@ export default function WalkInPage() {
   const [editTarget, setEditTarget] = useState<WalkIn | null>(null);
   const [viewTarget, setViewTarget] = useState<WalkIn | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
+  // Target for the SAFE follow-up completion dialog (outcome + next action).
+  const [completeTarget, setCompleteTarget] = useState<WalkIn | null>(null);
   // Pending inline Final-Status change awaiting user confirmation.
   const [statusChange, setStatusChange] = useState<{ walkIn: WalkIn; next: WalkInStatus } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -149,7 +164,7 @@ export default function WalkInPage() {
   }, []);
 
   // Reset to page 1 whenever a filter/search changes.
-  useEffect(() => { setPage(1); }, [q, typeFilter, sourceFilter, statusFilter, salesFilter, dateRange, customFrom, customTo]);
+  useEffect(() => { setPage(1); }, [q, typeFilter, sourceFilter, statusFilter, salesFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, issueFilter, conversionFilter, dateRange, customFrom, customTo]);
 
   /* ── The single filtered dataset (table + report share this) ── */
   const filtered = useMemo(() => {
@@ -159,6 +174,36 @@ export default function WalkInPage() {
       if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
       if (statusFilter !== "all" && w.status !== statusFilter) return false;
       if (salesFilter !== "all" && w.salesPersonId !== salesFilter) return false;
+      if (followUpFilter !== "all") {
+        const fs = followUpState(w);
+        if (followUpFilter === "active" && !hasActiveFollowUp(w)) return false;
+        else if (followUpFilter === "today" && fs !== "today") return false;
+        else if (followUpFilter === "overdue" && fs !== "overdue") return false;
+        else if (followUpFilter === "upcoming" && fs !== "upcoming") return false;
+        else if (followUpFilter === "completed" && fs !== "completed") return false;
+        else if (followUpFilter === "none" && fs !== "none") return false;
+      }
+      if (followUpAttemptFilter !== "all") {
+        const n = Number(followUpAttemptFilter);
+        // Matches the active attempt OR any recorded attempt in history.
+        const active = w.followUpAttempt ?? ((w.followUpHistory?.length ?? 0) + (w.followUpDate ? 1 : 0));
+        const inHistory = (w.followUpHistory ?? []).some((r) => r.attempt === n);
+        if (active !== n && !inHistory) return false;
+      }
+      if (followUpOutcomeFilter !== "all") {
+        const hasOutcome = (w.followUpHistory ?? []).some((r) => r.outcome === followUpOutcomeFilter);
+        if (!hasOutcome) return false;
+      }
+      if (issueFilter !== "all") {
+        // Issue is a comma-separated list of Issue-Master values; match any part.
+        const parts = `${w.issue ?? ""}`.split(",").map((s) => s.trim().toLowerCase());
+        if (!parts.includes(issueFilter.toLowerCase())) return false;
+      }
+      if (conversionFilter !== "all") {
+        const converted = !!w.linkedTicketId;
+        if (conversionFilter === "converted" && !converted) return false;
+        if (conversionFilter === "not_converted" && converted) return false;
+      }
       if (q.trim()) {
         const hay = `${walkInDisplayId(w)} ${w.customer} ${w.phone} ${w.model} ${w.issue ?? ""} ${(w.reasons || []).join(" ")}`.toLowerCase();
         if (!hay.includes(q.trim().toLowerCase())) return false;
@@ -170,7 +215,7 @@ export default function WalkInPage() {
     const pinned = ordered.filter((w) => w.pinnedAt);
     const normal = ordered.filter((w) => !w.pinnedAt);
     return [...pinned, ...normal];
-  }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
+  }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, issueFilter, conversionFilter, q]);
 
   /* Dataset for the Follow-Up view. It is synced with the top date strip, but
      the range applies to the FOLLOW-UP date (not the walk-in creation date) —
@@ -179,9 +224,12 @@ export default function WalkInPage() {
      consistent with the toolbar. */
   const followUpRows = useMemo(() => {
     return walkIns.filter((w) => {
-      // Match the date strip against the follow-up's scheduled date.
-      if (!w.followUpDate) return false;
-      if (!isWalkInInDateRange(w.followUpDate, dateRange, customFrom, customTo)) return false;
+      // Only walk-ins with an ACTIVE follow-up (scheduled, not completed, not
+      // converted / terminal) — the single shared definition (spec §26/§27).
+      if (!hasActiveFollowUp(w)) return false;
+      // The date strip applies to the FOLLOW-UP scheduled date here (spec §48),
+      // NOT the walk-in creation date. "All" shows every active follow-up.
+      if (!isWalkInInDateRange(w.followUpDate!, dateRange, customFrom, customTo)) return false;
       if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
       if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
       if (statusFilter !== "all" && w.status !== statusFilter) return false;
@@ -191,6 +239,34 @@ export default function WalkInPage() {
         if (!hay.includes(q.trim().toLowerCase())) return false;
       }
       return true;
+    });
+  }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
+
+  /* History dataset for the Follow-Up → History sub-view: walk-ins that have at
+     least one COMPLETED follow-up attempt. Nothing is deleted on completion, so
+     this is the permanent audit trail. The date strip applies to the most recent
+     completed attempt's date; toolbar filters + search still apply. Ordered by
+     most-recently-completed first. */
+  const followUpHistoryRows = useMemo(() => {
+    const rows = walkIns.filter((w) => {
+      const hist = w.followUpHistory ?? [];
+      if (hist.length === 0) return false;
+      const lastDate = hist[hist.length - 1]?.scheduledDate || w.date;
+      if (!isWalkInInDateRange(lastDate, dateRange, customFrom, customTo)) return false;
+      if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
+      if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
+      if (statusFilter !== "all" && w.status !== statusFilter) return false;
+      if (salesFilter !== "all" && w.salesPersonId !== salesFilter) return false;
+      if (q.trim()) {
+        const hay = `${walkInDisplayId(w)} ${w.customer} ${w.phone} ${w.model} ${w.issue ?? ""} ${(w.reasons || []).join(" ")}`.toLowerCase();
+        if (!hay.includes(q.trim().toLowerCase())) return false;
+      }
+      return true;
+    });
+    return rows.sort((a, b) => {
+      const la = a.followUpHistory?.[a.followUpHistory.length - 1]?.completedAt || "";
+      const lb = b.followUpHistory?.[b.followUpHistory.length - 1]?.completedAt || "";
+      return lb.localeCompare(la);
     });
   }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
 
@@ -250,16 +326,72 @@ export default function WalkInPage() {
       onChange: setSourceFilter,
     },
     {
+      id: "issue", label: "Issue", type: "select", value: issueFilter,
+      // Sourced from the shared Issue Master so it matches the table's Issue column.
+      options: [{ label: "All Issues", value: "all" }, ...[...issueLibrary].sort((a, b) => a.localeCompare(b)).map((i) => ({ label: i, value: i }))],
+      onChange: setIssueFilter,
+    },
+    {
       id: "status", label: "Final Status", type: "select", value: statusFilter,
       options: [{ label: "All Statuses", value: "all" }, ...WALKIN_FINAL_STATUSES.map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))],
       onChange: setStatusFilter,
+    },
+    {
+      id: "conversion", label: "Conversion", type: "select", value: conversionFilter,
+      // Maps to the table's conversion check / linked-ticket indicator.
+      options: [
+        { label: "All", value: "all" },
+        { label: "Converted", value: "converted" },
+        { label: "Not Converted", value: "not_converted" },
+      ],
+      onChange: setConversionFilter,
+    },
+    {
+      id: "followUp", label: "Follow-Up", type: "select", value: followUpFilter,
+      options: [
+        { label: "All", value: "all" },
+        { label: "Active", value: "active" },
+        { label: "Due Today", value: "today" },
+        { label: "Overdue", value: "overdue" },
+        { label: "Upcoming", value: "upcoming" },
+        { label: "Completed", value: "completed" },
+        { label: "No Follow-Up", value: "none" },
+      ],
+      onChange: setFollowUpFilter,
+    },
+    {
+      id: "followUpAttempt", label: "Follow-Up Attempt", type: "select", value: followUpAttemptFilter,
+      options: [
+        { label: "Any Attempt", value: "all" },
+        { label: "1st Attempt", value: "1" },
+        { label: "2nd Attempt", value: "2" },
+        { label: "3rd Attempt", value: "3" },
+      ],
+      onChange: setFollowUpAttemptFilter,
+    },
+    {
+      id: "followUpOutcome", label: "Follow-Up Outcome", type: "select", value: followUpOutcomeFilter,
+      options: [
+        { label: "Any Outcome", value: "all" },
+        ...(Object.keys(FOLLOWUP_OUTCOME_LABEL) as (keyof typeof FOLLOWUP_OUTCOME_LABEL)[])
+          .map((o) => ({ label: FOLLOWUP_OUTCOME_LABEL[o], value: o })),
+      ],
+      onChange: setFollowUpOutcomeFilter,
+    },
+    {
+      id: "responsible", label: "Responsible", type: "select", value: salesFilter,
+      options: [
+        { label: "All Staff", value: "all" },
+        ...team.filter((m) => m.status === "active").map((m) => ({ label: m.name, value: m.id })),
+      ],
+      onChange: setSalesFilter,
     },
     {
       id: "dateRange", label: "Date Range", type: "select", value: dateRange,
       options: WALKIN_DATE_RANGES.map((d) => ({ label: d.label, value: d.value })),
       onChange: (v: string) => setDateRange(v as WalkInDateRange),
     },
-  ], [typeFilter, sourceFilter, statusFilter, dateRange, sources]);
+  ], [typeFilter, sourceFilter, statusFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, salesFilter, dateRange, sources, team, issueFilter, conversionFilter, issueLibrary]);
 
   /* ── Save (create or edit) ── */
   const handleSaved = useCallback(async (data: Partial<WalkIn>, editingId: string | null) => {
@@ -281,6 +413,7 @@ export default function WalkInPage() {
         model: data.model || "",
         modelId: data.modelId,
         issue: data.issue || "",
+        customerComments: data.customerComments || "",
         reasons: [],
         status: data.status || "visitor",
         salesPersonId: data.salesPersonId,
@@ -289,6 +422,8 @@ export default function WalkInPage() {
         followUpDate: data.followUpDate,
         followUpTime: data.followUpTime,
         followUpStatus: data.followUpStatus,
+        followUpAttempt: data.followUpDate ? (data.followUpAttempt || 1) : undefined,
+        followUpComments: data.followUpComments,
         invoiceValue: 0,
         businessValue: 0,
       };
@@ -326,7 +461,20 @@ export default function WalkInPage() {
       handleConvert(w);
       return;
     }
-    updateWalkIn(w.id, { status: next });
+    // Terminal outcomes (Lost / Closed) close any active follow-up: the pending
+    // reminder is cancelled so no future notification fires, while the follow-up
+    // history is preserved (spec §25/§46).
+    const terminal = next === "lost" || next === "closed";
+    const patch: Partial<WalkIn> = { status: next };
+    if (terminal && hasActiveFollowUp(w)) {
+      patch.followUpStatus = "done";
+      patch.followUpDate = undefined;
+      patch.followUpTime = undefined;
+      patch.followUpAttempt = undefined;
+      patch.followUpComments = undefined;
+      patch.followUpReadAt = w.followUpReadAt || new Date().toISOString();
+    }
+    updateWalkIn(w.id, patch);
     showToast(`Status updated to ${WALKIN_STATUS_LABEL[next]}.`);
   }, [handleConvert, updateWalkIn, showToast]);
 
@@ -336,18 +484,23 @@ export default function WalkInPage() {
     updateWalkIn(w.id, { followUpReadAt: new Date().toISOString() });
   }, [updateWalkIn]);
 
-  const handleFollowUpComplete = useCallback((w: WalkIn) => {
-    // Preserve the historical record — only flip the status to done (+ read).
-    updateWalkIn(w.id, { followUpStatus: "done", followUpReadAt: w.followUpReadAt || new Date().toISOString() });
-    showToast(`Follow-up completed for ${w.customer || walkInDisplayId(w)}.`);
-  }, [updateWalkIn, showToast]);
+  /* Persist any follow-up lifecycle change emitted by the Follow-Up cell
+     (schedule / reschedule / mark contacted / complete+outcome / cancel /
+     schedule-next). One place, one store write — history + active schedule
+     both live on the record. */
+  const handleFollowUpUpdate = useCallback((w: WalkIn, patch: Partial<WalkIn>) => {
+    updateWalkIn(w.id, patch);
+  }, [updateWalkIn]);
 
   /* Follow-up "due" indications (toast + topbar bell notification + sound) are
      handled globally by <WalkInFollowUpWatcher /> mounted in the (app) layout,
      so they fire on any page — not just here — and never double-fire. */
 
-  const anyFilterActive = typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all" || salesFilter !== "all";
+  const anyFilterActive = typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all" || salesFilter !== "all" || followUpFilter !== "all" || followUpAttemptFilter !== "all" || followUpOutcomeFilter !== "all" || issueFilter !== "all" || conversionFilter !== "all";
   const canDelete = can("delete") || can("full_access") || can("manage_repair_jobs");
+
+  // Count of walk-ins with an ACTIVE follow-up (shown on the Follow-Up tab).
+  const activeFollowUpCount = useMemo(() => walkIns.filter((w) => hasActiveFollowUp(w)).length, [walkIns]);
 
   return (
     <div className="space-y-6">
@@ -393,7 +546,28 @@ export default function WalkInPage() {
           options={[
             { label: "Walk-Ins", value: "table" },
             { label: <span className="pl-[2px]">Summary</span>, value: "report" },
-            { label: "Follow-Up", value: "followup" },
+            {
+              label: (
+                <span className="inline-flex items-center gap-2">
+                  Follow-Up
+                  {activeFollowUpCount > 0 && (
+                    <span
+                      className={cn(
+                        "inline-flex h-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-bold leading-none tabular-nums",
+                        // A crisp white pill on the active (blue) tab; brand-blue
+                        // pill on the inactive (grey) tab. Fixed height + centred
+                        // so a single digit reads as a clean circle, not squished.
+                        view === "followup" ? "bg-white text-[#4361EE]" : "bg-[#4361EE] text-white",
+                      )}
+                      style={{ minWidth: 18 }}
+                    >
+                      {activeFollowUpCount > 99 ? "99+" : activeFollowUpCount}
+                    </span>
+                  )}
+                </span>
+              ),
+              value: "followup",
+            },
           ]}
           size="sm"
           className="[&>button]:px-3"
@@ -405,7 +579,7 @@ export default function WalkInPage() {
               displayId={walkInDisplayId}
               onOpenWalkIn={(w) => setViewTarget(w)}
               onMarkRead={handleFollowUpRead}
-              onMarkComplete={handleFollowUpComplete}
+              onCompleteFollowUp={(w) => setCompleteTarget(w)}
             />
             {view === "table" && (
               <Button
@@ -470,7 +644,7 @@ export default function WalkInPage() {
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Advanced Filters</p>
             <div className="flex items-center gap-3">
               <button
-                onClick={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }}
+                onClick={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setFollowUpFilter("all"); setFollowUpAttemptFilter("all"); setFollowUpOutcomeFilter("all"); setIssueFilter("all"); setConversionFilter("all"); setDateRange("today"); setCustomFrom(""); setCustomTo(""); }}
                 className="text-[13px] font-semibold text-[#4361EE] hover:underline"
               >
                 Reset Filters
@@ -548,9 +722,18 @@ export default function WalkInPage() {
            upcoming. Reuses the filtered dataset so search + type/source/status
            filters still apply; rows open the existing Edit Walk-In. */
         <WalkInFollowUpView
-          rows={followUpRows}
+          mode={followUpSub}
+          onModeChange={setFollowUpSub}
+          rows={followUpSub === "active" ? followUpRows : followUpHistoryRows}
+          activeCount={followUpRows.length}
+          historyCount={followUpHistoryRows.length}
+          currentUserId={sessionUserId}
+          currentUserName={sessionUserName}
+          statusLabel={WALKIN_STATUS_LABEL}
+          statusTone={WALKIN_STATUS_TONE}
           onOpen={(w) => setEditTarget(w)}
-          onComplete={handleFollowUpComplete}
+          onUpdate={handleFollowUpUpdate}
+          onConvert={handleConvert}
         />
       ) : (
         /* ── TABLE VIEW ──
@@ -583,10 +766,10 @@ export default function WalkInPage() {
                 <col className="w-[92px]" />{/* ID */}
                 <col className="w-[96px]" />{/* Type */}
                 <col className="w-[104px]" />{/* Source */}
-                <col className="w-[22%]" />{/* Name — flexible */}
-                <col className="w-[124px]" />{/* Contact */}
-                <col className="w-[18%]" />{/* Model — flexible */}
-                <col className="w-[28%]" />{/* Issue — flexible */}
+                <col className="w-[20%]" />{/* Name (+ contact underneath) — flexible */}
+                <col className="w-[16%]" />{/* Model — flexible */}
+                <col className="w-[19%]" />{/* Issue — flexible */}
+                <col className="w-[150px]" />{/* Follow-Up — wide enough for "2nd Follow-Up · Today" */}
                 <col className="w-[136px]" />{/* Final Status */}
                 <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
               </colgroup>
@@ -607,9 +790,9 @@ export default function WalkInPage() {
                   <th className="py-4"><span className="inline-block pl-[17px]">Type</span></th>
                   <th className="py-4 pl-[14px]">Source</th>
                   <th className="pl-4 py-4"><span className="inline-block pl-[17px]">Name</span></th>
-                  <th className="pl-4 py-4">Contact</th>
                   <th className="pl-4 py-4">Model</th>
                   <th className="pl-4 py-4">Issue</th>
+                  <th className="pl-4 py-4">Follow-Up</th>
                   <th className="pl-[5px] py-4">Final Status</th>
                   <th className="px-4 py-4 text-right">Action</th>
                 </tr>
@@ -675,20 +858,24 @@ export default function WalkInPage() {
                       <div className="flex min-w-0 items-center gap-2.5">
                         {/* Thin type-coloured bar — same hue as the Type pill for uniformity. */}
                         <span className={cn("h-8 w-1 shrink-0 rounded-full", WALKIN_TYPE_BAR[w.type ?? "direct"])} />
-                        <span className="truncate text-[14px] font-medium">{w.customer}</span>
+                        <div className="min-w-0">
+                          <span className="block truncate text-[14px] font-medium">{w.customer}</span>
+                          {/* Contact moved under the name to save a whole column.
+                              Still clickable → opens Edit, same as before. */}
+                          {w.phone ? (
+                            <button
+                              type="button"
+                              onClick={() => setEditTarget(w)}
+                              title={`Edit ${walkInDisplayId(w)}`}
+                              className="cursor-pointer rounded text-[12px] tabular-nums text-muted-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                            >
+                              {w.phone}
+                            </button>
+                          ) : (
+                            <span className="text-[12px] text-muted-foreground">—</span>
+                          )}
+                        </div>
                       </div>
-                    </td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">
-                      {w.phone ? (
-                        <button
-                          type="button"
-                          onClick={() => setEditTarget(w)}
-                          title={`Edit ${walkInDisplayId(w)}`}
-                          className="cursor-pointer rounded tabular-nums transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
-                        >
-                          {w.phone}
-                        </button>
-                      ) : "—"}
                     </td>
                     <td className="pl-4 py-4 pr-4 text-[13px] max-w-[150px]">
                       {w.model ? (
@@ -704,6 +891,17 @@ export default function WalkInPage() {
                     </td>
                     <td className="pl-4 py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
                       {w.issue || (w.reasons || []).join(", ") || "—"}
+                    </td>
+                    {/* Follow-Up — interactive compact pill managing the multi-stage
+                        lifecycle. Sits immediately before Final Status. */}
+                    <td className="pl-4 py-4 pr-4" onClick={(e) => e.stopPropagation()}>
+                      <WalkInFollowUpCell
+                        walkIn={w}
+                        currentUserId={sessionUserId}
+                        currentUserName={sessionUserName}
+                        onUpdate={(patch) => handleFollowUpUpdate(w, patch)}
+                        onConvert={handleConvert}
+                      />
                     </td>
                     <td className="py-4 pr-4 pl-0 [&>*:first-child]:-ml-[4px]" onClick={(e) => e.stopPropagation()}>
                       <Dropdown
@@ -847,6 +1045,19 @@ export default function WalkInPage() {
 
       {/* View drawer */}
       <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); handleConvert(w); }} />
+
+      {/* Safe follow-up completion dialog — opened from the Walk-In bell. Requires
+          an outcome + optional comment, then an explicit next action. Never a
+          silent close. */}
+      <WalkInFollowUpCompleteModal
+        walkIn={completeTarget}
+        displayId={walkInDisplayId}
+        currentUserId={sessionUserId}
+        currentUserName={sessionUserName}
+        onUpdate={handleFollowUpUpdate}
+        onConvert={(w) => { setCompleteTarget(null); handleConvert(w); }}
+        onClose={() => setCompleteTarget(null)}
+      />
 
       {/* Import */}
       <WalkInImportModal open={showImport} onClose={() => setShowImport(false)} onImported={(n) => showToast(`Imported ${n} walk-in${n !== 1 ? "s" : ""}.`)} />
@@ -1037,10 +1248,33 @@ function WalkInViewDrawer({
             <div className="min-w-0">
               <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Follow-Up</p>
               <p className={cn("text-[13px] font-semibold", w.followUpStatus === "done" ? "text-emerald-700" : "text-indigo-700")}>
+                {w.followUpAttempt ? `${w.followUpAttempt === 1 ? "1st" : w.followUpAttempt === 2 ? "2nd" : w.followUpAttempt === 3 ? "3rd" : `${w.followUpAttempt}th`} · ` : ""}
                 {new Date(`${w.followUpDate}T${w.followUpTime || "09:00"}`).toLocaleString("en-IN", { dateStyle: "medium", ...(w.followUpTime ? { timeStyle: "short" } : {}) })}
                 {w.followUpStatus === "done" ? " · Completed" : ""}
               </p>
             </div>
+          </div>
+        )}
+
+        {/* ── Follow-Up history (audit trail across attempts) ── */}
+        {w.followUpHistory && w.followUpHistory.length > 0 && (
+          <div className="rounded-2xl border border-border p-4">
+            <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Follow-Up History</p>
+            <ol className="space-y-2.5">
+              {w.followUpHistory.map((r) => (
+                <li key={r.attempt} className="relative pl-4">
+                  <span className="absolute left-0 top-1.5 h-2 w-2 rounded-full bg-emerald-500" />
+                  <p className="text-[12px] font-semibold">
+                    {r.attempt === 1 ? "1st" : r.attempt === 2 ? "2nd" : r.attempt === 3 ? "3rd" : `${r.attempt}th`} Follow-Up
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {new Date(`${r.scheduledDate}T${r.scheduledTime || "09:00"}`).toLocaleString("en-IN", { dateStyle: "medium", ...(r.scheduledTime ? { timeStyle: "short" } : {}) })}
+                    {" · "}{FOLLOWUP_OUTCOME_LABEL[r.outcome]}
+                  </p>
+                  {r.comment && <p className="text-[11.5px] text-foreground/70">“{r.comment}”</p>}
+                </li>
+              ))}
+            </ol>
           </div>
         )}
 
@@ -1051,6 +1285,7 @@ function WalkInViewDrawer({
           <ViewRow label="Source">{w.source || "—"}</ViewRow>
           <ViewRow label="Model">{w.model || "—"}</ViewRow>
           <ViewRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</ViewRow>
+          {w.customerComments && <ViewRow label="Customer Comments">{w.customerComments}</ViewRow>}
           {w.type === "sales" && <ViewRow label="Marketing Person">{w.salesPersonName || "—"}</ViewRow>}
           {w.linkedTicketId && (
             <ViewRow label="Linked Ticket"><span className="font-semibold text-indigo-700">{ticketNoFor(w.linkedTicketId)}</span></ViewRow>
@@ -1086,7 +1321,7 @@ function ViewRow({ label, children }: { label: string; children: React.ReactNode
 /* ─── CSV export (spreadsheet column structure) ──────────────────────── */
 function exportWalkIns(rows: WalkIn[], ticketNoFor: (id?: string) => string | undefined) {
   const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = ["DATE", "ID", "TYPE", "SOURCE", "NAME", "CONTACT", "MODEL", "ISSUE", "FINAL STATUS", "ACTION"];
+  const header = ["DATE", "ID", "TYPE", "SOURCE", "NAME", "CONTACT", "MODEL", "ISSUE", "CUSTOMER COMMENTS", "FOLLOW-UP", "FINAL STATUS", "ACTION"];
   const lines = rows.map((w) => [
     w.date,
     walkInDisplayId(w),
@@ -1096,6 +1331,8 @@ function exportWalkIns(rows: WalkIn[], ticketNoFor: (id?: string) => string | un
     w.phone,
     w.model,
     w.issue || (w.reasons || []).join("; "),
+    w.customerComments || "",
+    followUpPill(w).label,
     WALKIN_STATUS_LABEL[w.status],
     w.linkedTicketId ? `Ticket ${ticketNoFor(w.linkedTicketId)}` : "",
   ].map((c) => esc(String(c ?? ""))).join(","));

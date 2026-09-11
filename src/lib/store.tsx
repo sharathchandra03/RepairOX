@@ -495,7 +495,8 @@ const WALKIN_META_MARKER = "\n\u241F::walkin-meta::";
 
 type WalkInMeta = Partial<
   Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "customerId" | "modelId" | "pinnedAt"
-    | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt" | "linkedLeadId">
+    | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt" | "linkedLeadId"
+    | "customerComments" | "followUpAttempt" | "followUpComments" | "followUpHistory">
 >;
 
 function encodeWalkInNotes(w: WalkIn): string | null {
@@ -515,6 +516,10 @@ function encodeWalkInNotes(w: WalkIn): string | null {
   if (w.followUpTime) meta.followUpTime = w.followUpTime;
   if (w.followUpStatus) meta.followUpStatus = w.followUpStatus;
   if (w.followUpReadAt) meta.followUpReadAt = w.followUpReadAt;
+  if (w.customerComments) meta.customerComments = w.customerComments;
+  if (w.followUpAttempt) meta.followUpAttempt = w.followUpAttempt;
+  if (w.followUpComments) meta.followUpComments = w.followUpComments;
+  if (w.followUpHistory && w.followUpHistory.length) meta.followUpHistory = w.followUpHistory;
   const human = (w.notes || "").split(WALKIN_META_MARKER)[0].trimEnd();
   if (Object.keys(meta).length === 0) return human || null;
   return `${human}${WALKIN_META_MARKER}${JSON.stringify(meta)}`;
@@ -564,6 +569,10 @@ function rowToWalkIn(r: any): WalkIn {
     followUpTime: r.follow_up_time ?? meta.followUpTime ?? undefined,
     followUpStatus: (r.follow_up_status ?? meta.followUpStatus) as WalkIn["followUpStatus"],
     followUpReadAt: r.follow_up_read_at ?? meta.followUpReadAt ?? undefined,
+    customerComments: r.customer_comments ?? meta.customerComments ?? undefined,
+    followUpAttempt: r.follow_up_attempt ?? meta.followUpAttempt ?? undefined,
+    followUpComments: meta.followUpComments ?? undefined,
+    followUpHistory: meta.followUpHistory ?? undefined,
     invoiceValue: Number(r.invoice_value ?? 0),
     businessValue: Number(r.business_value ?? 0),
     notes,
@@ -1780,7 +1789,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("businessValue" in updates) row.business_value = updates.businessValue ?? 0;
       if ("reasons" in updates) row.reasons = updates.reasons ?? [];
       // Any change to a notes-envelope field (or notes itself) re-encodes notes.
-      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "customerId", "modelId", "pinnedAt", "convertedAt", "followUpDate", "followUpTime", "followUpStatus", "followUpReadAt"];
+      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "customerId", "modelId", "pinnedAt", "convertedAt", "followUpDate", "followUpTime", "followUpStatus", "followUpReadAt", "customerComments", "followUpAttempt", "followUpComments", "followUpHistory"];
       if (merged && envelopeKeys.some((k) => k in updates)) {
         row.notes = encodeWalkInNotes(merged);
       }

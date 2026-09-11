@@ -1002,6 +1002,9 @@ export type WalkIn = {
   ticketId?: string;
   /** ISO timestamp of when the walk-in was converted to a ticket. */
   convertedAt?: string;
+  /** Free-text captured during the visit — what the CUSTOMER said (conversation
+   *  context). Distinct from `issue` (the device problem) and `notes` (internal). */
+  customerComments?: string;
   /** Follow-up schedule (optional). Date is ISO YYYY-MM-DD; time is "HH:mm" (24h). */
   followUpDate?: string;
   followUpTime?: string;
@@ -1009,6 +1012,12 @@ export type WalkIn = {
   followUpStatus?: "pending" | "done";
   /** ISO timestamp of when the follow-up was marked read (clears the unread badge). */
   followUpReadAt?: string;
+  /** Which follow-up attempt the ACTIVE schedule represents (1..3). */
+  followUpAttempt?: number;
+  /** Free-text comment attached to the ACTIVE (currently-scheduled) follow-up. */
+  followUpComments?: string;
+  /** Completed history of prior follow-up attempts (attempt 1..3), newest last. */
+  followUpHistory?: FollowUpRecord[];
   invoiceValue: number;
   businessValue: number;
   notes?: string;
@@ -1041,6 +1050,88 @@ export function isFollowUpDue(w: Pick<WalkIn, "followUpDate" | "followUpTime" | 
   if (w.followUpStatus === "done") return false;
   const due = followUpDueAt(w);
   return !!due && due.getTime() <= now.getTime();
+}
+
+/* ─── Multi-stage follow-up lifecycle ─────────────────────────────────────────
+   A walk-in may need up to THREE follow-up attempts. Each completed attempt is
+   recorded in `followUpHistory` (audit trail) with its outcome + comment; the
+   ACTIVE schedule (if any) lives on the flat followUpDate/Time/Attempt fields so
+   all the existing due/notification logic keeps working unchanged. The final
+   business outcome is expressed through the existing `status` (Converted Ticket
+   / Lost / …) — the follow-up lifecycle is SEPARATE from Final Status. */
+
+/** Maximum number of follow-up attempts allowed on a single walk-in. */
+export const MAX_FOLLOWUP_ATTEMPTS = 3;
+
+/** Configured outcomes recorded when a follow-up attempt is completed. */
+export type FollowUpOutcome =
+  | "interested"
+  | "call_again"
+  | "need_more_time"
+  | "not_interested"
+  | "converted"
+  | "lost"
+  | "no_response";
+
+export const FOLLOWUP_OUTCOME_LABEL: Record<FollowUpOutcome, string> = {
+  interested: "Customer Interested",
+  call_again: "Call Again",
+  need_more_time: "Need More Time",
+  not_interested: "Not Interested",
+  converted: "Converted",
+  lost: "Lost",
+  no_response: "No Response",
+};
+
+/** Outcomes that naturally lead to scheduling ANOTHER follow-up attempt. */
+export const FOLLOWUP_CONTINUE_OUTCOMES: FollowUpOutcome[] = ["interested", "call_again", "need_more_time", "no_response"];
+
+/** Outcomes that terminate the follow-up lifecycle (no further attempts). */
+export const FOLLOWUP_TERMINAL_OUTCOMES: FollowUpOutcome[] = ["converted", "lost", "not_interested"];
+
+/** One completed follow-up attempt, retained for history / audit. */
+export interface FollowUpRecord {
+  /** Attempt number (1..MAX_FOLLOWUP_ATTEMPTS). */
+  attempt: number;
+  /** The date/time the attempt was scheduled for (ISO date + optional HH:mm). */
+  scheduledDate: string;
+  scheduledTime?: string;
+  /** ISO timestamp when the attempt was marked complete. */
+  completedAt: string;
+  /** Staff id / name who completed it (from the current session). */
+  completedById?: string;
+  completedByName?: string;
+  /** Recorded outcome + optional free-text comment for THIS attempt. */
+  outcome: FollowUpOutcome;
+  comment?: string;
+}
+
+/** How many attempts have already been made (completed history + active one). */
+export function followUpAttemptCount(w: Pick<WalkIn, "followUpHistory" | "followUpAttempt" | "followUpDate" | "followUpStatus">): number {
+  const done = w.followUpHistory?.length ?? 0;
+  // An active (scheduled, not-yet-completed) follow-up counts as the current attempt.
+  const hasActive = !!w.followUpDate && w.followUpStatus !== "done";
+  return hasActive ? Math.max(done + 1, w.followUpAttempt ?? done + 1) : done;
+}
+
+/** True when the walk-in still has attempts available (fewer than the max used). */
+export function canScheduleFollowUp(w: Pick<WalkIn, "followUpHistory" | "followUpAttempt" | "followUpDate" | "followUpStatus" | "status" | "linkedTicketId">): boolean {
+  if (isFollowUpTerminated(w)) return false;
+  return (w.followUpHistory?.length ?? 0) < MAX_FOLLOWUP_ATTEMPTS;
+}
+
+/** A walk-in whose lifecycle is closed by conversion or a terminal final status. */
+export function isFollowUpTerminated(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
+  return !!w.linkedTicketId || w.status === "converted_ticket" || w.status === "lost" || w.status === "closed";
+}
+
+/**
+ * A walk-in has an ACTIVE follow-up only when a follow-up is scheduled, not yet
+ * completed, and the walk-in is not converted / not in a terminal state. This is
+ * the single definition used by the Follow-Up tab, column, notifications, counts.
+ */
+export function hasActiveFollowUp(w: Pick<WalkIn, "followUpDate" | "followUpStatus" | "status" | "linkedTicketId">): boolean {
+  return !!w.followUpDate && w.followUpStatus !== "done" && !isFollowUpTerminated(w);
 }
 
 export const walkIns: WalkIn[] = [];
