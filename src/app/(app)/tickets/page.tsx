@@ -15,6 +15,7 @@ import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
+import { StoreFilter } from "@/components/common/store-filter";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
 import {
@@ -189,6 +190,7 @@ export default function TicketsPage() {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [storeFilter, setStoreFilter] = useState<string>(""); // "" = All Stores (All-Shops view)
   const [dateRange, setDateRange] = useState<DateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -444,6 +446,7 @@ export default function TicketsPage() {
       // Critical Tasks card represents; it matches either priority value.
       const criticalHigh = priorityFilter === "critical_high";
       const filtered = tickets.filter((t) => {
+        const okStore = !storeFilter || t.branchId === storeFilter;
         const okStatus = statusFilter === "all" || t.status === statusFilter;
         const okDate = isInDateRange(t.createdAt, dateRange, customFrom, customTo);
         const okPriority =
@@ -461,7 +464,7 @@ export default function TicketsPage() {
           `${t.ticketNo ?? ""} ${t.id} ${t.customer} ${t.model} ${t.issue} ${t.phone} ${t.items?.map((i) => `${i.model} ${i.serial} ${i.issue}`).join(" ") || ""}`
             .toLowerCase()
             .includes(q.toLowerCase());
-        return okStatus && okDate && okPriority && okTech && okCustomerType && okType && okQ;
+        return okStore && okStatus && okDate && okPriority && okTech && okCustomerType && okType && okQ;
       });
       // Overdue Time ordering: oldest-overdue-first (the ticket whose due
       // date/time was crossed longest ago comes first). Tie-break on the
@@ -485,14 +488,14 @@ export default function TicketsPage() {
       const normal = ordered.filter((t) => !t.pinnedAt);
       return [...pinned, ...normal];
     },
-    [tickets, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
+    [tickets, storeFilter, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
   );
 
   // Reset to the first page whenever the filtered result set changes so
   // pagination always reflects the current filters/search.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]);
+  }, [storeFilter, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]);
 
   // Pagination — pinned records already float to the top of `list`, so slicing
   // here keeps pinned rows at the top of page 1 while respecting page size.
@@ -870,10 +873,13 @@ export default function TicketsPage() {
           className="[&>button]:px-3"
         />
         <div className="flex items-center gap-3">
+          {/* Store filter — only shows in the owner's All-Shops view, to slice
+              the consolidated list down to one store from right here. */}
+          <StoreFilter value={storeFilter} onChange={setStoreFilter} />
           {/* Search always stays put; the bulk-action cluster now lives in its
               own bar directly above the table header (see below). */}
-          <div className="lg:w-80">
-            <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search by ID, customer, model, serial…" iconLeft={<Search className="h-4 w-4" />} />
+          <div className="w-56">
+            <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search tickets…" iconLeft={<Search className="h-4 w-4" />} />
           </div>
         </div>
       </div>

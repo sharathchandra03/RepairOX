@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requireAdmin } from "@/lib/api-auth";
 import { rowToStaff } from "@/lib/staff-map";
 import { normalizeEmail } from "@/lib/auth";
@@ -16,7 +17,7 @@ export async function POST(req: Request) {
   const body = await req.json();
   const {
     name, phone, email: rawEmail, hasLogin, password,
-    roleId, branch, salaryType, salaryAmount, department, designation, createdBy,
+    roleId, branch, storeId, salaryType, salaryAmount, department, designation, createdBy,
   } = body ?? {};
 
   const email = rawEmail ? normalizeEmail(rawEmail) : "";
@@ -56,7 +57,27 @@ export async function POST(req: Request) {
     orgId = await ensureOrganization(admin);
     await ensureBranches(admin, orgId);
   }
-  const branchId = await resolveBranchId(admin, orgId, branch ?? HQ_BRANCH);
+  // Resolve the store (branch) this user belongs to. Prefer an explicit
+  // storeId (a real branches.id — the robust binding used for store logins);
+  // otherwise fall back to resolving the branch name label.
+  let branchId: string | null;
+  let branchName: string | null = branch ?? null;
+  if (storeId) {
+    const { data: br } = await admin
+      .from("branches")
+      .select("id, name, organization_id")
+      .eq("id", storeId)
+      .maybeSingle();
+    // Only accept a store that belongs to the creator's organization.
+    if (br && br.organization_id === orgId) {
+      branchId = br.id as string;
+      branchName = (br.name as string) ?? branchName;
+    } else {
+      branchId = await resolveBranchId(admin, orgId, branch ?? HQ_BRANCH);
+    }
+  } else {
+    branchId = await resolveBranchId(admin, orgId, branch ?? HQ_BRANCH);
+  }
 
   const { data: inserted, error: insErr } = await admin
     .from("staff")
@@ -68,7 +89,7 @@ export async function POST(req: Request) {
       phone: phone?.trim() || null,
       email: email || null,
       role_id: roleId,
-      branch: branch ?? null,
+      branch: branchName,
       status: "active",
       login_enabled: Boolean(hasLogin),
       salary_type: salaryType ?? "monthly",
@@ -90,5 +111,35 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: insErr?.message ?? "Insert failed." }, { status: 400 });
   }
 
+  // Robust store binding: write an explicit user_stores grant so the user's
+  // access is anchored to the store's branch_id (not just the fragile branch
+  // name text match). This is the source of truth for "which stores can this
+  // user enter". Best-effort: the table is optional (multi-store migration),
+  // and the staff.branch/branch_id already scope the user, so we don't fail
+  // the whole request if this insert can't run.
+  if (branchId) {
+    await admin
+      .from("user_stores")
+      .upsert(
+        {
+          organization_id: orgId,
+          staff_id: inserted.id,
+          branch_id: branchId,
+          role_id: null,
+          is_default: true,
+          status: "active",
+          created_by: (await orgStaffId(admin, user.id)) ?? null,
+        },
+        { onConflict: "staff_id,branch_id" }
+      )
+      .then(() => {}, () => {}); // ignore if user_stores isn't present
+  }
+
   return NextResponse.json({ ok: true, member: rowToStaff(inserted) });
+}
+
+/** The staff.id for the signed-in auth user (creator), for created_by stamping. */
+async function orgStaffId(admin: SupabaseClient, authUserId: string): Promise<string | null> {
+  const { data } = await admin.from("staff").select("id").eq("auth_user_id", authUserId).maybeSingle();
+  return (data?.id as string) ?? null;
 }

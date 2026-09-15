@@ -17,6 +17,7 @@ import { supabase, isSupabaseConfigured } from "./supabase";
 import { logActivity, buildChanges, type ActivitySeverity } from "./activity-log";
 import { toast } from "@/components/ui/toaster";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStoreContext } from "@/lib/store-context";
 import { demoKey } from "@/lib/demo-mode";
 import {
   tickets as SEED_TICKETS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE,
@@ -133,6 +134,7 @@ function rowToTicket(r: any): Ticket {
   const meta = isLegacyArray ? {} : rawDevices;
   return {
     id: r.id,
+    branchId: r.branch_id ?? null,
     customer: r.customer ?? "",
     phone: r.phone ?? "",
     company: r.company ?? undefined,
@@ -225,6 +227,7 @@ function rowToInvoice(r: any): Invoice {
   const meta = isLegacyArray ? {} : rawDevices;
   return {
     id: r.id,
+    branchId: r.branch_id ?? null,
     reference: r.reference ?? "",
     invoiceType: r.invoice_type ?? "retail",
     customer: r.customer ?? "",
@@ -356,7 +359,7 @@ function isAuthOrRlsError(err: { code?: string; message?: string } | null): bool
  * The in-memory list only holds live invoices, so relying on it can regenerate
  * an id that still belongs to a soft-deleted row and collide on insert.
  */
-async function nextInvoiceIdFromDb(type: string): Promise<string> {
+async function nextInvoiceIdFromDb(type: string, storeId?: string | null, storePrefix?: string | null): Promise<string> {
   // Series numbering config lives in Settings → Invoice (organization_settings).
   // Fall back to the legacy INV/INVG · 3-digit defaults when unavailable so the
   // collision-recovery path always produces a valid id.
@@ -364,6 +367,10 @@ async function nextInvoiceIdFromDb(type: string): Promise<string> {
   let digits = 3;
   let startNumber = 1;
   let maxNum = 0;
+  // Optional per-store alphabetic prefix (branch_settings.invoice_prefix), e.g.
+  // "KOR" → KOR-INV001. Keeps each store's series visually distinct while the
+  // numeric sequence stays per-store (query is scoped by branch_id below).
+  const sp = ticketPrefixSep(storePrefix); // "KOR-" or null
   if (supabase) {
     try {
       const { data: settingsRows } = await supabase
@@ -384,22 +391,35 @@ async function nextInvoiceIdFromDb(type: string): Promise<string> {
       /* keep legacy defaults */
     }
 
-    const { data } = await supabase.from("invoices").select("id").eq("invoice_type", type);
+    // STORE-AWARE: scope the running max to the active store so each store's
+    // invoice series is independent and never collides across stores.
+    let invQ = supabase.from("invoices").select("id").eq("invoice_type", type);
+    if (storeId) invQ = invQ.eq("branch_id", storeId);
+    const { data } = await invQ;
     maxNum = (data ?? []).reduce((max: number, r: { id: string }) => {
       const match = String(r.id).match(/\d+$/);
       return match ? Math.max(max, parseInt(match[0], 10)) : max;
     }, 0);
     const next = maxNum === 0 ? startNumber : maxNum + 1;
-    return `${prefix}${String(next).padStart(digits, "0")}`;
+    return `${sp ?? ""}${prefix}${String(next).padStart(digits, "0")}`;
   }
   // No backend: honour the configured start number for a fresh series.
-  return `${prefix}${String(maxNum === 0 ? startNumber : maxNum + 1).padStart(digits, "0")}`;
+  return `${sp ?? ""}${prefix}${String(maxNum === 0 ? startNumber : maxNum + 1).padStart(digits, "0")}`;
 }
 
 /** Format a ticket sequence number as `T-001` (zero-padded to at least 3 digits,
  *  growing automatically past T-999). */
-function formatTicketNo(n: number): string {
-  return `T-${String(n).padStart(3, "0")}`;
+function formatTicketNo(n: number, prefix?: string | null): string {
+  const p = prefix ? `${prefix}` : "";
+  return `${p}T-${String(n).padStart(3, "0")}`;
+}
+
+/** Normalize a store prefix ("KOR", "KOR-", " kor ") into the canonical
+ *  uppercase, dash-terminated form used inside ticket/invoice numbers
+ *  ("KOR-"), or null when there is no prefix. e.g. KOR → "KOR-" → KOR-T-0001. */
+function ticketPrefixSep(prefix?: string | null): string | null {
+  const raw = (prefix ?? "").trim().toUpperCase().replace(/-+$/, "");
+  return raw ? `${raw}-` : null;
 }
 
 /**
@@ -415,8 +435,15 @@ function genUniqueTicketId(): string {
 }
 
 /** Extract the numeric part of a `T-<digits>` value, or 0 if it doesn't match. */
-function ticketSeq(value: string | null | undefined): number {
-  const match = String(value ?? "").match(/^T-(\d+)$/);
+function ticketSeq(value: string | null | undefined, prefix?: string | null): number {
+  const v = String(value ?? "");
+  // Support an optional store prefix (e.g. "BLR-T-0007"). When a prefix is
+  // supplied, only count numbers that carry it so per-store sequences don't
+  // interfere with each other.
+  const re = prefix
+    ? new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}T-(\\d+)$`)
+    : /^T-(\d+)$/;
+  const match = v.match(re);
   return match ? parseInt(match[1], 10) : 0;
 }
 
@@ -432,18 +459,21 @@ function ticketSeq(value: string | null | undefined): number {
  * next number aligned with the visible T-001…T-NNN run. Falls back to a
  * best-effort value only when Supabase is unavailable.
  */
-export async function nextTicketIdFromDb(): Promise<string> {
+export async function nextTicketIdFromDb(storeId?: string | null, prefix?: string | null): Promise<string> {
   let maxNum = 0;
   if (supabase) {
-    const { data } = await supabase
-      .from("tickets")
-      .select("ticket_no")
-      .is("deleted_at", null);
+    // STORE-AWARE numbering: when a concrete store is active, the sequence is
+    // scoped to that store's branch so each store keeps its own independent
+    // T-001, T-002 … run and numbers never collide across stores. In All-Shops
+    // mode (no storeId) it falls back to the full visible set for continuity.
+    let q = supabase.from("tickets").select("ticket_no").is("deleted_at", null);
+    if (storeId) q = q.eq("branch_id", storeId);
+    const { data } = await q;
     maxNum = (data ?? []).reduce((max: number, r: { ticket_no?: string }) => {
-      return Math.max(max, ticketSeq(r.ticket_no));
+      return Math.max(max, ticketSeq(r.ticket_no, prefix));
     }, 0);
   }
-  return formatTicketNo(maxNum + 1);
+  return formatTicketNo(maxNum + 1, prefix);
 }
 
 /**
@@ -455,19 +485,26 @@ export async function nextTicketIdFromDb(): Promise<string> {
  * state. Safe to run on every load: once everything is sequenced it writes
  * nothing and returns the existing mapping.
  */
-async function resequenceTicketNumbers(): Promise<Record<string, string>> {
+async function resequenceTicketNumbers(storeId?: string | null, prefix?: string | null): Promise<Record<string, string>> {
   const mapping: Record<string, string> = {};
   if (!supabase) return mapping;
+  // STORE-AWARE: only resequence WITHIN the active store so each store keeps an
+  // independent, gap-free T-001…T-N run ordered by creation. In All-Shops mode
+  // (no storeId) we skip resequencing entirely — renumbering across stores
+  // would scramble every store's per-store sequence. The per-store run happens
+  // whenever the owner (or a store user) enters that specific store.
+  if (!storeId) return mapping;
   const { data, error } = await supabase
     .from("tickets")
     .select("id, ticket_no, created_at")
     .is("deleted_at", null)
+    .eq("branch_id", storeId)
     .order("created_at", { ascending: true });
   if (error || !data) return mapping;
 
   const updates: { id: string; ticket_no: string }[] = [];
   data.forEach((row: { id: string; ticket_no?: string; created_at?: string }, idx) => {
-    const desired = formatTicketNo(idx + 1);
+    const desired = formatTicketNo(idx + 1, prefix);
     mapping[row.id] = desired;
     if (row.ticket_no !== desired) updates.push({ id: row.id, ticket_no: desired });
   });
@@ -543,6 +580,7 @@ function rowToWalkIn(r: any): WalkIn {
   const linkedTicketId = r.ticket_id ?? undefined;
   return {
     id: r.id,
+    branchId: r.branch_id ?? null,
     // Prefer a real column when the migration has been applied, else the envelope.
     walkInNumber: r.walkin_number ?? meta.walkInNumber ?? undefined,
     date: r.walkin_date ?? "",
@@ -919,7 +957,23 @@ function saveToStorage(state: StoreState, storageKey?: string) {
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const { isDemoMode, authReady, demoResetCounter } = usePermissions();
+  // Active-store (multi-store) context. When a concrete store is selected, DB
+  // reads are filtered to that store's branch_id and new records are stamped
+  // with it. When `activeStoreId` is null (All Shops), reads fall back to the
+  // full RLS-scoped set (every store the user may access) for consolidated
+  // reporting. `storeReady` gates the initial load until the selection is known
+  // so we never briefly show another store's data.
+  const { activeStoreId, ready: storeReady, activePrefixes } = useStoreContext();
   const resolvedKey = isDemoMode ? demoKey(STORAGE_KEY) : STORAGE_KEY;
+
+  // Latest active store id for use inside callbacks (insert stamping) without
+  // adding it to every callback's dependency list.
+  const activeStoreIdRef = useRef<string | null>(activeStoreId);
+  useEffect(() => { activeStoreIdRef.current = activeStoreId; }, [activeStoreId]);
+
+  // Latest active-store document prefixes (KOR-T-0001 etc.) for numbering.
+  const activePrefixesRef = useRef(activePrefixes);
+  useEffect(() => { activePrefixesRef.current = activePrefixes; }, [activePrefixes]);
 
   const [state, setState] = useState<StoreState>({
     tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
@@ -946,12 +1000,51 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** Non-null supabase client — only call after shouldUseDb() returns true. */
   const db = supabase!;
 
+  /**
+   * Stamp the CURRENT active store onto an outgoing insert row for a
+   * store-scoped entity (ticket, invoice, walk-in, inventory item, stock
+   * movement). This is what makes "the current store context is the source of
+   * truth" real: an employee never picks a store — the record inherits the
+   * store they are operating in.
+   *
+   *   • A concrete store is active  → stamp that store's branch_id.
+   *   • All-Shops mode (owner)      → leave branch_id unset so the DB default
+   *     (auth_branch_id() = the user's home branch) applies. Transactional
+   *     creation should happen inside a specific store; the header nudges the
+   *     owner to pick one, and this fallback keeps a valid, non-null branch.
+   *
+   * Never overrides an explicit branch_id already present on the row.
+   */
+  const withStore = useCallback((row: Record<string, unknown>): Record<string, unknown> => {
+    if ("branch_id" in row && row.branch_id != null) return row;
+    const sid = activeStoreIdRef.current;
+    if (sid) return { ...row, branch_id: sid };
+    return row;
+  }, []);
+
   const inr = (v: unknown) => `₹${Number(v ?? 0).toLocaleString("en-IN")}`;
 
   /* ── DB Load + Realtime Subscriptions ── */
   useEffect(() => {
     // Wait until we know who the user is before deciding data source.
     if (!authReady) return;
+    // In DB mode, also wait until the active-store selection is resolved so the
+    // very first load is already scoped to the right store (no flash of another
+    // store's data, no double fetch).
+    if (isSupabaseConfigured && supabase && !isDemoMode && !storeReady) return;
+
+    // The store to scope this load to. null = All Shops (RLS-scoped superset).
+    const scopeStoreId = activeStoreId;
+    // Apply a store filter to a Supabase query builder when a concrete store is
+    // selected. Store-specific transactional rows always carry a branch_id;
+    // org-wide shared master data (branch_id NULL) is intentionally left out of
+    // the per-store filter for tables where it would exclude shared catalog.
+    const scopeToStore = (q: any) =>
+      scopeStoreId ? q.eq("branch_id", scopeStoreId) : q;
+    // For catalog/master tables that are org-wide shared (branch_id NULL) we
+    // must NOT filter by store, or the shared catalog would vanish inside a
+    // store context. These stay unfiltered (RLS still guards the org).
+    const noScope = (q: any) => q;
 
     // Demo mode: always start fresh — wipe any stale demo data and seed clean.
     if (isDemoMode) {
@@ -1009,20 +1102,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: atOpts },
         { data: custGroups },
       ] = await Promise.all([
-        supabase.from("tickets").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-        supabase.from("invoices").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-        supabase.from("walk_ins").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-        supabase.from("inventory_items").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-        supabase.from("stock_movements").select("*").order("created_at", { ascending: false }),
-        supabase.from("customers").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-        supabase.from("companies").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
-        supabase.from("brands").select("*").order("created_at", { ascending: false }),
-        supabase.from("device_models").select("*").order("created_at", { ascending: false }),
-        supabase.from("assigned_by_options").select("*").order("created_at", { ascending: false }),
-        supabase.from("assigned_to_options").select("*").order("created_at", { ascending: false }),
+        // Transactional data → scoped to the active store (branch_id) when one
+        // is selected; the full RLS-scoped set in All-Shops mode.
+        scopeToStore(supabase.from("tickets").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        scopeToStore(supabase.from("invoices").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        scopeToStore(supabase.from("walk_ins").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        scopeToStore(supabase.from("inventory_items").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        scopeToStore(supabase.from("stock_movements").select("*").order("created_at", { ascending: false })),
+        // Customers are an organization-wide master (a customer can visit any
+        // store), so they are NOT filtered by store — the Owner and store users
+        // both resolve customer history through RLS + permissions.
+        noScope(supabase.from("customers").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        noScope(supabase.from("companies").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        // Catalog/master data is org-wide shared (branch_id NULL) → never store-filtered.
+        noScope(supabase.from("brands").select("*").order("created_at", { ascending: false })),
+        noScope(supabase.from("device_models").select("*").order("created_at", { ascending: false })),
+        noScope(supabase.from("assigned_by_options").select("*").order("created_at", { ascending: false })),
+        noScope(supabase.from("assigned_to_options").select("*").order("created_at", { ascending: false })),
         // customer_groups may not exist until the migration is applied — tolerate
         // the error so the rest of the app still loads.
-        supabase.from("customer_groups").select("*").is("deleted_at", null).order("display_order", { ascending: true }),
+        noScope(supabase.from("customer_groups").select("*").is("deleted_at", null).order("display_order", { ascending: true })),
       ]);
 
       if (!active) return;
@@ -1045,9 +1144,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         hydrated: true,
       }));
 
-      // Resequence all existing tickets to T-001, T-002 … by original creation
-      // order (idempotent) and patch the display numbers into local state.
-      const ticketNoMap = await resequenceTicketNumbers();
+      // Resequence the ACTIVE store's tickets to <PREFIX>T-001, …-002 … by
+      // original creation order (idempotent, per-store) and patch the display
+      // numbers into local state. Skipped in All-Shops mode (scopeStoreId null).
+      const ticketNoMap = await resequenceTicketNumbers(scopeStoreId, ticketPrefixSep(activePrefixes.ticket));
       if (active && Object.keys(ticketNoMap).length > 0) {
         setState((s) => ({
           ...s,
@@ -1093,11 +1193,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Realtime subscriptions for all business tables.
     const client = supabase;
 
+    // Transactional tables that are scoped to a single store. Master/catalog
+    // tables (brands, device_models, assigned_*_options, customers, companies,
+    // customer_groups) are org-wide shared and must NOT be store-filtered here.
+    const STORE_SCOPED_TABLES = new Set([
+      "tickets", "invoices", "walk_ins", "inventory_items", "stock_movements",
+    ]);
+
     const handleChange = (table: string, payload: any) => {
       if (!active) return;
       const { eventType } = payload;
       const row = payload.new ?? payload.old;
       if (!row) return;
+
+      // Multi-store isolation on the realtime path: when a concrete store is
+      // active, ignore live changes for store-scoped tables that belong to a
+      // different store, so another store's inserts/updates never bleed into
+      // the current workspace. (Initial loads are already store-filtered above;
+      // RLS guarantees we only ever receive rows we're allowed to see.)
+      if (
+        scopeStoreId &&
+        STORE_SCOPED_TABLES.has(table) &&
+        row.branch_id != null &&
+        row.branch_id !== scopeStoreId
+      ) {
+        return;
+      }
 
       // Soft-deleted rows should be removed from local state.
       const isSoftDeleted = row.deleted_at != null;
@@ -1221,7 +1342,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       active = false;
       client.removeChannel(channel);
     };
-  }, [authReady, isDemoMode, resolvedKey, demoResetCounter]);
+    // Re-run when the active store changes so switching stores immediately
+    // refreshes every store-dependent dataset (tickets, invoices, walk-ins,
+    // inventory, movements) with no stale rows from the previous store.
+  }, [authReady, isDemoMode, resolvedKey, demoResetCounter, activeStoreId, storeReady, activePrefixes.ticket]);
 
   // Persist local-mode state to localStorage.
   useEffect(() => {
@@ -1251,10 +1375,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // persist and vanish on reload. A random/unique id sidesteps this while
       // ticket_no still shows the clean sequence, and resequencing only ever
       // rewrites ticket_no (never id) so FK relationships stay intact.
-      const seq = await nextTicketIdFromDb();
+      const seq = await nextTicketIdFromDb(activeStoreIdRef.current, ticketPrefixSep(activePrefixesRef.current.ticket));
       let current: Ticket = { ...ticket, id: genUniqueTicketId(), ticketNo: seq };
       const insertTicket = async (t: Ticket) => {
-        let row = ticketToRow(t);
+        let row = withStore(ticketToRow(t));
         let r = await db.from("tickets").insert(row).select("*").single();
         // Schema-drift self-heal: drop whichever optional column the DB reports
         // as missing (e.g. ticket_no or pinned_at before the migration is
@@ -1553,7 +1677,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Single insert attempt. Retries once without the optional columns in case
       // an older DB is missing them.
       const attemptInsert = async (inv: Invoice) => {
-        let row = invoiceToRow(inv);
+        let row = withStore(invoiceToRow(inv));
         let res = await supabase!.from("invoices").insert(row).select("*").single();
         // Schema-drift self-heal: if the DB is missing an optional column (e.g.
         // `pinned_at` before the migration is applied), drop that column and
@@ -1584,7 +1708,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       let guard = 0;
       while (res.error && isDuplicateKeyError(res.error) && guard < 5) {
         guard += 1;
-        const nextId = await nextInvoiceIdFromDb(current.invoiceType);
+        const nextId = await nextInvoiceIdFromDb(current.invoiceType, activeStoreIdRef.current, activePrefixesRef.current.invoice);
         current = { ...current, id: nextId };
         res = await attemptInsert(current);
       }
@@ -1759,7 +1883,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ── Walk-In actions (DB-first) ── */
   const addWalkIn = useCallback(async (walkIn: WalkIn) => {
     if (shouldUseDb()) {
-      const { data, error } = await db.from("walk_ins").insert(walkInToRow(walkIn)).select("*").single();
+      const { data, error } = await db.from("walk_ins").insert(withStore(walkInToRow(walkIn))).select("*").single();
       if (error || !data) { console.error("[store] addWalkIn failed:", error?.message); return; }
       const saved = rowToWalkIn(data);
       setState((s) => ({ ...s, walkIns: [saved, ...s.walkIns] }));
@@ -1858,10 +1982,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await db.from("tickets").update({ parts: updatedParts ?? [], devices: updatedDevices ?? [] }).eq("id", ticketId);
       // Create stock movements.
       for (const [i, part] of partsToDeduct.entries()) {
-        await db.from("stock_movements").insert(stockMovementToRow({
+        await db.from("stock_movements").insert(withStore(stockMovementToRow({
           docNumber: `MOV-TC-${Date.now()}-${i}`, fromStore: "Main Store", toStore: `Ticket ${ticketId}`,
           items: part.qty, date: new Date().toLocaleDateString("en-IN"), user: preTicket.technician, type: "Outward", status: "completed",
-        }));
+        })));
       }
     }
 
@@ -1889,7 +2013,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addStockMovement = useCallback(async (movement: StockMovement) => {
     if (shouldUseDb()) {
-      const { error } = await db.from("stock_movements").insert(stockMovementToRow(movement));
+      const { error } = await db.from("stock_movements").insert(withStore(stockMovementToRow(movement)));
       if (error) { console.error("[store] addStockMovement failed:", error.message); return; }
     }
     setState((s) => ({ ...s, stockMovements: [movement, ...s.stockMovements] }));
@@ -1899,7 +2023,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addInventoryItem = useCallback(async (item: InventoryItem) => {
     if (shouldUseDb()) {
-      const { data, error } = await db.from("inventory_items").insert(inventoryItemToRow(item)).select("*").single();
+      const { data, error } = await db.from("inventory_items").insert(withStore(inventoryItemToRow(item))).select("*").single();
       if (error || !data) { console.error("[store] addInventoryItem failed:", error?.message); return; }
       const saved = rowToInventoryItem(data);
       setState((s) => ({ ...s, inventory: [saved, ...s.inventory] }));

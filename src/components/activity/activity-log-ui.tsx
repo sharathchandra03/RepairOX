@@ -60,6 +60,12 @@ export function ActivityRow({ entry, onClick }: { entry: ActivityEntry; onClick?
         <span className="mt-0.5 block truncate text-[12px] text-muted-foreground">{entry.description}</span>
         <span className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground/80">
           <span className="font-medium text-muted-foreground">{entry.actor}</span>
+          {entry.branch && (
+            <>
+              <span className="h-0.5 w-0.5 rounded-full bg-muted-foreground/40" />
+              <span className="truncate">{entry.branch}</span>
+            </>
+          )}
           <span className="h-0.5 w-0.5 rounded-full bg-muted-foreground/40" />
           <span>{formatWhen(entry.ts)}</span>
         </span>

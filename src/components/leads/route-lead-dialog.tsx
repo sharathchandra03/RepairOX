@@ -27,7 +27,7 @@ import { useSession } from "@/lib/use-session";
 import { toast } from "@/components/ui/toaster";
 import { BRANCHES } from "@/lib/auth";
 import { resolveCustomer, staffByRole } from "@/lib/field-linking";
-import { normaliseRoute, type FulfilmentRoute } from "@/lib/field-data";
+import { normaliseRoute, FIELD_LEAD_TYPES, type FulfilmentRoute, type FieldLeadType } from "@/lib/field-data";
 import { notify } from "@/lib/notifications";
 import type { Lead } from "@/lib/leads-data";
 
@@ -46,6 +46,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
   const [route, setRoute] = useState<FulfilmentRoute | "">(existingRoute);
   const [store, setStore] = useState<string>(lead?.assignedStore || "");
   const [fieldManagerId, setFieldManagerId] = useState<string>("");
+  const [leadType, setLeadType] = useState<FieldLeadType>("pickup");
   const [pickupAddress, setPickupAddress] = useState<string>(lead?.location || "");
   const [pickupDate, setPickupDate] = useState<string>("");
   const [pickupTime, setPickupTime] = useState<string>("");
@@ -99,6 +100,10 @@ export function RouteLeadDialog({ lead, open, onClose }: {
             leadId: lead.id, leadNo: lead.leadNo, customerId,
             customer: lead.name, phone: lead.number, email: lead.email,
             device: lead.device, issue: lead.issue,
+            // Field-specific operational classification. Source is MAPPED from
+            // the lead (never re-entered); leadType is the trip nature.
+            leadType,
+            source: lead.source || "",
             branch: manager?.branch || store || "",
             salesPersonId: currentUserId || "", salesPersonName: currentUserName || "",
             fieldManagerId: manager?.id || "", fieldManagerName: manager?.name || "",
@@ -200,9 +205,22 @@ export function RouteLeadDialog({ lead, open, onClose }: {
           </div>
         )}
 
-        {/* Pickup & Drop: optional field manager + pickup logistics */}
+        {/* Pickup & Drop: trip type + optional field manager + pickup logistics */}
         {route === "PICKUP_DROP" && (
           <div className="space-y-3">
+            <div>
+              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Trip Type</label>
+              <select
+                value={leadType}
+                onChange={(e) => setLeadType(e.target.value as FieldLeadType)}
+                className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm focus:border-[#4361EE] focus:outline-none"
+              >
+                {FIELD_LEAD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+              </select>
+              <p className="mt-1.5 text-[11px] text-zinc-500">
+                Source is taken from the lead ({lead.source || "unspecified"}) — no need to re-enter it.
+              </p>
+            </div>
             <div>
               <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Field Manager (optional)</label>
               <select

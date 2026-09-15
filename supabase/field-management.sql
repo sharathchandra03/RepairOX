@@ -30,7 +30,10 @@ create table if not exists public.field_jobs (
   lead_no           text,
   customer_id       text,
   linked_ticket_id  text,
+  linked_ticket_device_id text,
   linked_invoice_id text,
+  lead_type         text not null default 'pickup',
+  source            text,
   customer          text,
   phone             text,
   email             text,
@@ -66,10 +69,17 @@ create table if not exists public.field_jobs (
   deleted_at        timestamptz
 );
 
-create index if not exists field_jobs_lead_idx     on public.field_jobs (lead_id);
-create index if not exists field_jobs_customer_idx on public.field_jobs (customer_id);
-create index if not exists field_jobs_status_idx   on public.field_jobs (status);
-create index if not exists field_jobs_branch_idx   on public.field_jobs (branch);
+create index if not exists field_jobs_lead_idx      on public.field_jobs (lead_id);
+create index if not exists field_jobs_customer_idx  on public.field_jobs (customer_id);
+create index if not exists field_jobs_status_idx    on public.field_jobs (status);
+create index if not exists field_jobs_branch_idx    on public.field_jobs (branch);
+create index if not exists field_jobs_lead_type_idx on public.field_jobs (lead_type);
+create index if not exists field_jobs_ticket_idx    on public.field_jobs (linked_ticket_id);
+
+-- For an already-created table (previous version), add the new columns idempotently.
+alter table if exists public.field_jobs add column if not exists linked_ticket_device_id text;
+alter table if exists public.field_jobs add column if not exists lead_type text not null default 'pickup';
+alter table if exists public.field_jobs add column if not exists source text;
 
 -- 4) Realtime + RLS. RLS mirrors the existing pattern: authenticated users of
 --    the org can read; writes require a field/repair capability. Adjust the

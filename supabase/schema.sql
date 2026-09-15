@@ -1,4 +1,9 @@
 -- ============================================================================
+-- ⚠️ REFERENCE ARTIFACT — the authoritative copy is now
+--    supabase/migrations/0001_initial_schema.sql. The database is
+--    migration-managed (see supabase/README.md). Do not hand-apply this file;
+--    make schema changes as NEW migrations via `npm run db:migrate`.
+-- ============================================================================
 -- RepairOX — Supabase schema (multi-tenant, real-time, permission-enforced,
 -- audited).
 --

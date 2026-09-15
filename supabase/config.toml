@@ -1,0 +1,30 @@
+# ============================================================================
+# RepairOX — Supabase CLI project configuration.
+#
+# This makes the repository a first-class Supabase CLI project so migrations in
+# supabase/migrations/ are the single source of truth for the database schema.
+#
+#   Local CLI workflow (once `supabase` CLI is installed):
+#     supabase link --project-ref <ref>     # one-time, uses your login
+#     supabase db push                       # apply pending migrations to the linked DB
+#     supabase migration new <name>          # scaffold a new migration
+#
+#   CLI-free workflow (works today, no install required):
+#     npm run db:migrate                      # apply pending migrations via pg + SUPABASE_DB_URL
+#     npm run db:migrate:status               # show applied vs pending
+#
+# The `project_id` below is a local label only; the real project ref is supplied
+# at link time and is NEVER committed. Database URLs / keys live in .env.local
+# (gitignored) — never in this file.
+# ============================================================================
+
+project_id = "repairox"
+
+[db]
+# The Postgres major version of the linked Supabase project.
+major_version = 15
+
+[db.migrations]
+# Migrations are ordered lexicographically by filename. We use a numeric prefix
+# (0001_, 0002_, …) so ordering is explicit and review-friendly.
+schema_paths = []

@@ -15,6 +15,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { StoreFilter } from "@/components/common/store-filter";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -176,6 +177,7 @@ export default function InvoicePage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
+  const [storeFilter, setStoreFilter] = useState<string>(""); // "" = All Stores
   // Advanced filter panel — hidden by default, toggled by the Filter button.
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   // Advanced-panel unified live search across Invoice ID + Customer Name.
@@ -300,6 +302,7 @@ export default function InvoicePage() {
       return invoices.filter((inv) => inv.id === searchFilterId);
     }
     const filtered = invoices.filter((inv) => {
+      const okStore = !storeFilter || inv.branchId === storeFilter;
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
@@ -309,13 +312,13 @@ export default function InvoicePage() {
       const okQ = !q || haystack.includes(q.toLowerCase());
       // Unified panel search matches across Invoice ID + Customer (+ company).
       const okPanelSearch = !panelSearch || `${inv.id} ${inv.customer} ${inv.company || ""}`.toLowerCase().includes(panelSearch.toLowerCase());
-      return okStatus && okType && okCategory && okDate && okQ && okPanelSearch;
+      return okStore && okStatus && okType && okCategory && okDate && okQ && okPanelSearch;
     });
     // Pinned invoices float to the top; order within each group is preserved.
     const pinned = filtered.filter((inv) => inv.pinnedAt);
     const normal = filtered.filter((inv) => !inv.pinnedAt);
     return [...pinned, ...normal];
-  }, [invoices, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
+  }, [invoices, storeFilter, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
 
   // Reset to page 1 whenever the filtered result set changes.
   useEffect(() => {
@@ -555,16 +558,33 @@ export default function InvoicePage() {
           ))}
         </div>
 
-        {/* Invoice Status Strip (always visible) — stretches to the date strip's
-            width (right edge aligns with "Custom") while keeping the same pill
-            thickness/padding as the Tickets status strip. */}
-        <SegmentedTabs
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
-          size="sm"
-          className="flex w-full [&>button]:flex-1 [&>button]:px-3"
-        />
+        {/* Status strip + Store filter + Search — one tidy row. The status
+            pills stay on the left and stretch; the Store filter (All-Shops
+            only) and the search box sit together on the right, matching the
+            Tickets / Walk-In pages. */}
+        <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center">
+          <SegmentedTabs
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
+            size="sm"
+            className="flex flex-1 [&>button]:flex-1 [&>button]:px-3"
+          />
+          <div className="flex shrink-0 items-center gap-2">
+            {/* Store filter — only in the owner's All-Shops view. */}
+            <StoreFilter value={storeFilter} onChange={setStoreFilter} width="w-[150px]" />
+            {/* Search — matches the Tickets / Walk-In search boxes. */}
+            <div className="relative w-56">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <input
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Search invoices…"
+                className="h-[34px] w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+              />
+            </div>
+          </div>
+        </div>
       </div>
 
       {/* Custom Date Range — reuses the shared Date Range picker (same as Tickets) */}

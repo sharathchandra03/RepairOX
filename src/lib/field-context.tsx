@@ -29,10 +29,11 @@ import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
 import { notify } from "@/lib/notifications";
 import {
-  genFieldJobId, nextFieldJobNo, applyFieldFilters, EMPTY_FIELD_FILTERS,
-  FIELD_STATUS_LABEL,
+  genFieldJobId, nextFieldJobNo, nextFieldJobNoFromDb, applyFieldFilters, EMPTY_FIELD_FILTERS,
+  FIELD_STATUS_LABEL, normaliseLeadType,
   type FieldJob, type FieldJobDraft, type FieldJobStatus, type FieldJobFilters, type FieldProof,
 } from "@/lib/field-data";
+import { useStoreContext } from "@/lib/store-context";
 
 const JOBS_KEY = "repairox-field-jobs";
 
@@ -46,7 +47,10 @@ function rowToJob(r: any): FieldJob {
     leadNo: r.lead_no ?? "",
     customerId: r.customer_id ?? "",
     linkedTicketId: r.linked_ticket_id ?? "",
+    linkedTicketDeviceId: r.linked_ticket_device_id ?? "",
     linkedInvoiceId: r.linked_invoice_id ?? "",
+    leadType: normaliseLeadType(r.lead_type),
+    source: r.source ?? "",
     customer: r.customer ?? "",
     phone: r.phone ?? "",
     email: r.email ?? "",
@@ -79,6 +83,36 @@ function rowToJob(r: any): FieldJob {
   };
 }
 
+/** Columns added by later migrations (0028). If the DB hasn't been migrated
+ *  yet, writes including these fail with an unknown-column error; we strip them
+ *  and retry so the module keeps working against an older schema. */
+const OPTIONAL_JOB_COLUMNS = ["lead_type", "source", "linked_ticket_device_id"] as const;
+
+/** True when a Supabase error is about an unknown column (schema not migrated).
+ *  Covers Postgres 42703 and PostgREST's PGRST204 schema-cache message. */
+function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return (
+    err.code === "42703" ||
+    err.code === "PGRST204" ||
+    /column .* does not exist|could not find the .* column/i.test(err.message ?? "")
+  );
+}
+
+/** True when a Supabase error is a unique-constraint violation (Postgres 23505)
+ *  — e.g. two concurrent field jobs racing for the same job_no. Recoverable by
+ *  re-deriving the next number and retrying. */
+function isUniqueViolation(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === "23505" || /duplicate key|unique constraint/i.test(err.message ?? "");
+}
+
+function stripOptionalColumns(row: Record<string, unknown>): Record<string, unknown> {
+  const out = { ...row };
+  for (const c of OPTIONAL_JOB_COLUMNS) delete out[c];
+  return out;
+}
+
 function jobToRow(j: Partial<FieldJob>): Record<string, unknown> {
   const row: Record<string, unknown> = {};
   const set = (col: string, v: unknown) => { if (v !== undefined) row[col] = v === "" ? null : v; };
@@ -87,7 +121,10 @@ function jobToRow(j: Partial<FieldJob>): Record<string, unknown> {
   set("lead_no", j.leadNo);
   set("customer_id", j.customerId);
   set("linked_ticket_id", j.linkedTicketId);
+  set("linked_ticket_device_id", j.linkedTicketDeviceId);
   set("linked_invoice_id", j.linkedInvoiceId);
+  set("lead_type", j.leadType);
+  set("source", j.source);
   set("customer", j.customer);
   set("phone", j.phone);
   set("email", j.email);
@@ -155,8 +192,8 @@ interface FieldContextValue {
   confirmDelivery: (id: string, proof: FieldProof) => Promise<void>;
   /** Cancel the job (non-destructive; preserves history). */
   cancelJob: (id: string, reason?: string) => Promise<void>;
-  /** Link a repair Ticket (and optionally set in_repair). */
-  linkTicket: (id: string, ticketId: string, opts?: { setInRepair?: boolean }) => Promise<void>;
+  /** Link a repair Ticket (optionally a specific device + invoice, and set in_repair). */
+  linkTicket: (id: string, ticketId: string, opts?: { setInRepair?: boolean; ticketDeviceId?: string; invoiceId?: string }) => Promise<void>;
 }
 
 const FieldContext = createContext<FieldContextValue | null>(null);
@@ -186,6 +223,13 @@ export function openFieldJob(id: string) {
 export function FieldProvider({ children }: { children: ReactNode }) {
   const { authReady } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
+  // Active-store context: scopes field-job reads to the current store and
+  // supplies the store's branch_id + Field prefix for creation.
+  const { activeStoreId, ready: storeReady, activePrefixes } = useStoreContext();
+  const activeStoreIdRef = useRef<string | null>(activeStoreId);
+  useEffect(() => { activeStoreIdRef.current = activeStoreId; }, [activeStoreId]);
+  const activePrefixesRef = useRef(activePrefixes);
+  useEffect(() => { activePrefixesRef.current = activePrefixes; }, [activePrefixes]);
   const [jobs, setJobs] = useState<FieldJob[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [filters, setFiltersState] = useState<FieldJobFilters>(EMPTY_FIELD_FILTERS);
@@ -203,9 +247,13 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     let active = true;
     async function load() {
       if (isSupabaseConfigured && supabase && authReady) {
-        const { data, error } = await supabase
+        // Scope to the active store when one is selected; in All-Shops mode
+        // (activeStoreId null) load the full RLS-visible set (owner view).
+        let q = supabase
           .from("field_jobs").select("*").is("deleted_at", null)
           .order("created_at", { ascending: false });
+        if (activeStoreId) q = q.eq("branch_id", activeStoreId);
+        const { data, error } = await q;
         if (!active) return;
         if (error) {
           // Table missing / RLS — fall back to localStorage transparently.
@@ -221,11 +269,12 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       setJobs(readLS<FieldJob[]>(JOBS_KEY, []));
       setHydrated(true);
     }
-    // Wait for auth in DB mode so RLS reads succeed.
-    if (isSupabaseConfigured && supabase && !authReady) return;
+    // Wait for auth AND the active-store selection in DB mode so RLS reads
+    // succeed and are scoped to the right store (no flash of another store).
+    if (isSupabaseConfigured && supabase && (!authReady || !storeReady)) return;
     load();
     return () => { active = false; };
-  }, [authReady]);
+  }, [authReady, storeReady, activeStoreId]);
 
   /* ── Realtime (DB mode) ── */
   useEffect(() => {
@@ -233,15 +282,17 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     let active = true;
     const channel = db.channel("field-jobs-realtime");
     const reload = async () => {
-      const { data, error } = await db.from("field_jobs").select("*").is("deleted_at", null)
+      let q = db.from("field_jobs").select("*").is("deleted_at", null)
         .order("created_at", { ascending: false });
+      if (activeStoreIdRef.current) q = q.eq("branch_id", activeStoreIdRef.current);
+      const { data, error } = await q;
       if (!active || error) return;
       setJobs((data ?? []).map(rowToJob));
     };
     channel.on("postgres_changes", { event: "*", schema: "public", table: "field_jobs" }, reload);
     channel.subscribe();
     return () => { active = false; db.removeChannel(channel); };
-  }, [useDb, authReady, db]);
+  }, [useDb, authReady, db, activeStoreId]);
 
   const persistLocal = useCallback((next: FieldJob[]) => {
     if (!useDb) writeLS(JOBS_KEY, next);
@@ -269,14 +320,26 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       }
     }
     const nowIso = new Date().toISOString();
+    // STORE-AWARE, DB-BACKED numbering. When Supabase is active, the sequence
+    // is computed from the DB scoped to the active store's branch_id, with the
+    // store's configured Field prefix (e.g. KOR-FJ-001). Local mode falls back
+    // to the in-memory max+1. Concurrency is handled by a retry loop on the
+    // unique(organization_id, branch_id, job_no) index below.
+    const fieldPrefix = activePrefixesRef.current.field;
+    const initialJobNo = useDb
+      ? await nextFieldJobNoFromDb(activeStoreIdRef.current, fieldPrefix)
+      : nextFieldJobNo(jobsRef.current, fieldPrefix);
     const job: FieldJob = {
       id: genFieldJobId(),
-      jobNo: nextFieldJobNo(jobsRef.current),
+      jobNo: initialJobNo,
       leadId: draft.leadId ?? "",
       leadNo: draft.leadNo ?? "",
       customerId: draft.customerId ?? "",
-      linkedTicketId: "",
-      linkedInvoiceId: "",
+      linkedTicketId: draft.linkedTicketId ?? "",
+      linkedTicketDeviceId: draft.linkedTicketDeviceId ?? "",
+      linkedInvoiceId: draft.linkedInvoiceId ?? "",
+      leadType: normaliseLeadType(draft.leadType),
+      source: draft.source ?? "",
       customer: draft.customer ?? "",
       phone: draft.phone ?? "",
       email: draft.email ?? "",
@@ -307,13 +370,46 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     };
 
     if (useDb) {
-      const { data, error } = await db.from("field_jobs").insert(jobToRow(job)).select("*").single();
+      // Stamp the active store's branch_id so the record is owned by the right
+      // store (organization_id defaults from auth_org_id() server-side). When a
+      // store is active we set branch_id explicitly; in All-Shops mode we let
+      // the DB default (the owner's home branch) apply.
+      const buildRow = (j: FieldJob) => {
+        const row = jobToRow(j);
+        if (activeStoreIdRef.current) row.branch_id = activeStoreIdRef.current;
+        return row;
+      };
+
+      const insertOnce = async (j: FieldJob) => {
+        let r = await db.from("field_jobs").insert(buildRow(j)).select("*").single();
+        // Schema not migrated yet (0028 columns missing): retry without them so
+        // the module keeps persisting to the DB instead of dropping to local.
+        if (r.error && isUndefinedColumnError(r.error)) {
+          r = await db.from("field_jobs").insert(stripOptionalColumns(buildRow(j))).select("*").single();
+        }
+        return r;
+      };
+
+      let current = job;
+      let { data, error } = await insertOnce(current);
+      // CONCURRENCY: if two users in the same store allocate the same number,
+      // the unique(organization_id, branch_id, job_no) index rejects the loser
+      // with 23505. Re-derive the next number from the DB and retry so each job
+      // still gets a unique, gap-respecting number (no duplicate FJ-00X).
+      let guard = 0;
+      while (error && isUniqueViolation(error) && guard < 6) {
+        guard += 1;
+        const retryNo = await nextFieldJobNoFromDb(activeStoreIdRef.current, activePrefixesRef.current.field);
+        current = { ...current, jobNo: retryNo };
+        ({ data, error } = await insertOnce(current));
+      }
       if (error || !data) {
         setDbOk(false); // fall back to local for the rest of the session
-        setJobs((prev) => { const next = [job, ...prev]; writeLS(JOBS_KEY, next); return next; });
+        setJobs((prev) => { const next = [current, ...prev]; writeLS(JOBS_KEY, next); return next; });
       } else {
         const created = rowToJob(data);
         setJobs((prev) => [created, ...prev]);
+        job.jobNo = created.jobNo; // keep downstream activity/notify in sync
       }
     } else {
       setJobs((prev) => { const next = [job, ...prev]; persistLocal(next); return next; });
@@ -338,7 +434,10 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   const updateJob = useCallback(async (id: string, updates: Partial<FieldJob>) => {
     const nowIso = new Date().toISOString();
     if (useDb) {
-      const { error } = await db.from("field_jobs").update(jobToRow(updates)).eq("id", id);
+      let { error } = await db.from("field_jobs").update(jobToRow(updates)).eq("id", id);
+      if (error && isUndefinedColumnError(error)) {
+        ({ error } = await db.from("field_jobs").update(stripOptionalColumns(jobToRow(updates))).eq("id", id));
+      }
       if (error) { setDbOk(false); }
     }
     setJobs((prev) => {
@@ -498,10 +597,15 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   }, [updateJob]);
 
   /* ── Link ticket ── */
-  const linkTicket = useCallback(async (id: string, ticketId: string, opts?: { setInRepair?: boolean }) => {
+  const linkTicket = useCallback(async (id: string, ticketId: string, opts?: { setInRepair?: boolean; ticketDeviceId?: string; invoiceId?: string }) => {
     const job = jobsRef.current.find((j) => j.id === id);
     if (!job) return;
-    await updateJob(id, { linkedTicketId: ticketId, ...(opts?.setInRepair ? { status: "in_repair" } : {}) });
+    await updateJob(id, {
+      linkedTicketId: ticketId,
+      ...(opts?.ticketDeviceId ? { linkedTicketDeviceId: opts.ticketDeviceId } : {}),
+      ...(opts?.invoiceId ? { linkedInvoiceId: opts.invoiceId } : {}),
+      ...(opts?.setInRepair ? { status: "in_repair" } : {}),
+    });
     logActivity({
       module: "Field", action: "Ticket Linked", severity: "info", entity: "Field Job",
       reference: job.jobNo, description: `${job.jobNo} linked to Ticket ${ticketId}.`,

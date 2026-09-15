@@ -16,6 +16,35 @@ export function AnimatedNumber({ value, format }: { value: number; format?: (n: 
   return <motion.span ref={ref}>{out}</motion.span>;
 }
 
+/**
+ * Fluid value font size that adapts to BOTH the card's own width (container
+ * query units) and the displayed string length, so a figure like "₹92,90,500"
+ * is always fully visible whether the card is narrow (6-up on desktop) or wide
+ * (single column on mobile) — and never clips.
+ *
+ * Returns a CSS `clamp(min, preferred, max)` where:
+ *   • the preferred size scales with container width (cqw), and
+ *   • the max is capped lower for longer strings so dense currency shrinks
+ *     enough to fit even in the narrowest card.
+ *
+ * The values are intentionally a touch smaller than the previous fixed 30px so
+ * KPI numbers read comfortably across the whole grid.
+ */
+function valueFontSize(len: number): string {
+  // Per-length ceiling (px). Longer strings get a smaller cap.
+  let maxPx: number;
+  if (len <= 6) maxPx = 27;
+  else if (len <= 8) maxPx = 24;
+  else if (len <= 10) maxPx = 21;
+  else if (len <= 12) maxPx = 19;
+  else if (len <= 15) maxPx = 17;
+  else maxPx = 15;
+  // Floor keeps it legible on the very narrowest cards.
+  const minPx = Math.max(13, maxPx - 8);
+  // ~11cqw ≈ scales from ~20px at 180px cards up to the cap on wide cards.
+  return `clamp(${minPx}px, 11cqw, ${maxPx}px)`;
+}
+
 /* ── Per-tone visual system ───────────────────────────────────────────────
    Each KPI tone maps to a coherent accent set: the delta chip, the progress
    fill gradient, the left accent rail, the top wash, and the sparkline stroke.
@@ -59,6 +88,11 @@ export function KpiCard({
   const t = TONES[tone] ?? TONES.rose;
   const pct = Math.max(0, Math.min(100, progress?.value ?? 0));
 
+  // Length of the value AS DISPLAYED (after formatting, e.g. "₹92,90,500"),
+  // used to step the font size down so long currency figures stay fully
+  // readable and never clip inside the fixed-width KPI card.
+  const displayLength = (format ? format(Math.round(value)) : Math.round(value).toLocaleString("en-IN")).length;
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -68,6 +102,10 @@ export function KpiCard({
         "group relative overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-5 pl-[22px] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
         onCardClick && "cursor-pointer"
       )}
+      // Establish a size container so the value can scale to the card's OWN
+      // width (cqw), keeping large currency fully visible whether the card is
+      // ~180px (6-up) or ~340px (single column on mobile).
+      style={{ containerType: "inline-size" }}
     >
       {/* Left accent rail — instantly distinguishes each metric at a glance. */}
       <span
@@ -97,7 +135,15 @@ export function KpiCard({
             <Icon className="h-4 w-4" />
           </span>
         )}
-        <p className="font-display text-[30px] font-extrabold leading-none tracking-tight tnum text-foreground">
+        {/* Value auto-fits to the card's OWN width AND its content length so
+            large currency (e.g. ₹92,90,500) never clips: the font size is a
+            fluid clamp driven by container width (cqw), capped smaller for
+            longer strings. min-w-0 lets it shrink inside the flex row; nowrap
+            keeps it on one line. */}
+        <p
+          className="min-w-0 flex-1 font-display font-extrabold leading-none tracking-tight tnum text-foreground whitespace-nowrap"
+          style={{ fontSize: valueFontSize(displayLength) }}
+        >
           <AnimatedNumber value={value} format={format} />
         </p>
       </div>

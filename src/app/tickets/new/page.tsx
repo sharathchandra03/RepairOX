@@ -704,7 +704,11 @@ function NewTicketWizard() {
       if (fromFieldJobId) {
         const linkId = newId || ticketData.id;
         const job = getFieldJob(fromFieldJobId);
-        await linkFieldTicket(fromFieldJobId, linkId, { setInRepair: true });
+        // Link the specific ticket device so the Field table's MODEL / INVOICE
+        // columns resolve to the right device on a multi-device ticket. A field
+        // job concerns one device — use the first device on the new ticket.
+        const firstDeviceId = ticketData.devices?.[0]?.id;
+        await linkFieldTicket(fromFieldJobId, linkId, { setInRepair: true, ticketDeviceId: firstDeviceId });
         if (job?.leadId) {
           await updateLead(job.leadId, { linkedTicketId: linkId });
         }

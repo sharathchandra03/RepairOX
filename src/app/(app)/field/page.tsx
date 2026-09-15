@@ -39,9 +39,13 @@ import { isWalkInInDateRange } from "@/lib/walk-in-data";
 import {
   jobMatchesQueue, isDelayed, isPickupLeg, isDropLeg, accentColor, initials,
   FIELD_STATUS_LABEL, FIELD_STATUS_TONE,
+  FIELD_LEAD_TYPE_LABEL, FIELD_LEAD_TYPE_TONE, FIELD_LEAD_TYPES,
+  FIELD_SOURCE_LABEL, FIELD_SOURCE_TONE, classifySource, normaliseLeadType,
+  allowedFieldTransitions,
   FIELD_DATE_RANGES,
-  type FieldQueue, type FieldJob, type FieldJobStatus, type FieldDateRange,
+  type FieldQueue, type FieldJob, type FieldJobStatus, type FieldDateRange, type FieldSource,
 } from "@/lib/field-data";
+import { resolveFieldRow, formatInvoiceAmount, type FieldResolveSources } from "@/lib/field-resolve";
 
 const PAGE_SIZES = [10, 20, 50, 100];
 
@@ -73,7 +77,8 @@ const STRIP: { value: FieldQueue; label: string }[] = [
 function fmtPickup(date: string, time: string): { day: string; time: string } {
   if (!date) return { day: "—", time: "" };
   const d = new Date(date + "T00:00:00");
-  const day = Number.isNaN(d.getTime()) ? date : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
+  // Compact form: "10 Sept 26" (2-digit year) so the Date column stays narrow.
+  const day = Number.isNaN(d.getTime()) ? date : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
   return { day, time: time || "" };
 }
 
@@ -82,14 +87,15 @@ export default function FieldPage() {
   const searchParams = useSearchParams();
   const { can, role, team } = usePermissions();
   const { id: currentUserId } = useSession();
-  const { jobs, hydrated, filters, setFilters, clearFilters, getJob } = useField();
-  const { tickets } = useStore();
+  const { jobs, hydrated, filters, setFilters, clearFilters, getJob, transition } = useField();
+  const { tickets, invoices, customers } = useStore();
 
-  /* Resolve a Ticket's human number (T-052) from its id for the Ticket column. */
-  const getTicketLabel = (ticketId: string): string => {
-    const t = tickets.find((x) => x.id === ticketId);
-    return t?.ticketNo || t?.id || ticketId;
-  };
+  /* Live source-of-truth records the resolver reads from (Customer Master,
+     linked Ticket + Ticket Device, linked Invoice) — nothing is duplicated. */
+  const resolveSrc: FieldResolveSources = useMemo(
+    () => ({ tickets, invoices, customers }),
+    [tickets, invoices, customers],
+  );
 
   const [queue, setQueue] = useState<FieldQueue>("all");
   const [page, setPage] = useState(1);
@@ -111,11 +117,17 @@ export default function FieldPage() {
     return jobs;
   }, [jobs, isNinja, currentUserId]);
 
-  /* Shared predicate: search + advanced filters + date range (NOT the queue). */
+  /* Shared predicate: search + advanced filters + date range (NOT the queue).
+     Search resolves the live Ticket number / Invoice id so "T-056" and the
+     invoice id find the job even though the job only stores raw record ids. */
   const matchesFilters = useMemo(() => (j: FieldJob): boolean => {
     if (filters.query) {
-      const hay = [j.jobNo, j.leadNo, j.customer, j.phone, j.device, j.linkedTicketId, j.ninjaName, j.fieldManagerName]
-        .filter(Boolean).join(" ").toLowerCase();
+      const r = resolveFieldRow(j, resolveSrc);
+      const hay = [
+        j.jobNo, j.leadNo, r.customerName, r.contact, r.model, j.device,
+        r.ticketNo, r.invoiceId, j.ninjaName, j.fieldManagerName, j.source,
+        FIELD_LEAD_TYPE_LABEL[normaliseLeadType(j.leadType)],
+      ].filter(Boolean).join(" ").toLowerCase();
       if (!hay.includes(filters.query.toLowerCase())) return false;
     }
     if (filters.status && j.status !== filters.status) return false;
@@ -127,11 +139,13 @@ export default function FieldPage() {
     if (filters.delayed && !isDelayed(j)) return false;
     if (filters.hasTicket === "yes" && !j.linkedTicketId) return false;
     if (filters.hasTicket === "no" && j.linkedTicketId) return false;
+    if (filters.leadType && normaliseLeadType(j.leadType) !== filters.leadType) return false;
+    if (filters.source && classifySource(j.source) !== filters.source) return false;
     // Date range applies to the relevant leg's scheduled date (pickup, else drop).
     const refDate = j.pickupDate || j.dropDate || j.createdAt.slice(0, 10);
     if (!isWalkInInDateRange(refDate, dateRange as any, customFrom, customTo)) return false;
     return true;
-  }, [filters, dateRange, customFrom, customTo]);
+  }, [filters, dateRange, customFrom, customTo, resolveSrc]);
 
   /* Jobs after search+filters+date (used for BOTH the strip counts and table). */
   const filteredBase = useMemo(() => scopedJobs.filter(matchesFilters), [scopedJobs, matchesFilters]);
@@ -193,7 +207,7 @@ export default function FieldPage() {
   const managers = useMemo(() => staffByRole(team, ["field_manager", "shop_owner_branch_manager"]), [team]);
   const ninjas = useMemo(() => staffByRole(team, ["ninja"]), [team]);
 
-  const activeFilters = !!(filters.status || filters.branch || filters.ninjaId || filters.fieldManagerId || filters.leg || filters.delayed || filters.hasTicket || dateRange !== "all");
+  const activeFilters = !!(filters.status || filters.branch || filters.ninjaId || filters.fieldManagerId || filters.leg || filters.delayed || filters.hasTicket || filters.leadType || filters.source || dateRange !== "all");
 
   const resetAll = () => {
     clearFilters();
@@ -245,7 +259,7 @@ export default function FieldPage() {
               <Input
                 value={filters.query}
                 onChange={(e: any) => setFilters((f) => ({ ...f, query: e.target.value }))}
-                placeholder="Search job, customer, device, ticket…"
+                placeholder="Search field jobs…"
                 iconLeft={<Search className="h-4 w-4" />}
               />
             </div>
@@ -351,6 +365,26 @@ export default function FieldPage() {
             />
           </div>
 
+          <div className="w-[140px]">
+            <RSelect
+              value={filters.leadType}
+              onChange={(v) => setFilters((f) => ({ ...f, leadType: v as any }))}
+              options={[{ label: "All Types", value: "" }, ...FIELD_LEAD_TYPES.map((t) => ({ label: t.label, value: t.value }))]}
+              placeholder="All Types"
+              menuWidth="w-52"
+            />
+          </div>
+
+          <div className="w-[140px]">
+            <RSelect
+              value={filters.source}
+              onChange={(v) => setFilters((f) => ({ ...f, source: v as FieldSource | "" }))}
+              options={[{ label: "All Sources", value: "" }, ...(Object.keys(FIELD_SOURCE_LABEL) as FieldSource[]).map((s) => ({ label: FIELD_SOURCE_LABEL[s], value: s }))]}
+              placeholder="All Sources"
+              menuWidth="w-48"
+            />
+          </div>
+
           {!isNinja && (
             <div className="w-[150px]">
               <RSelect
@@ -426,137 +460,187 @@ export default function FieldPage() {
           fits its container (header & body aligned, no column lost), and lets the
           thead FREEZE (an overflow:auto ancestor would trap the sticky header). */}
       <div className="hidden -mt-3 border-2 border-zinc-200 bg-card shadow-card md:block">
+        {/* [overflow-x:clip] (NOT auto) + table-fixed w-full: the table always
+            fits its container so the frozen thead survives and no column is
+            ever lost/hidden at any zoom (same technique as Tickets/Invoices).
+            Widths favour Customer / Model / Service Status; IDs stay compact. */}
         <div className="[overflow-x:clip]">
           <table className="w-full table-fixed text-sm">
+            {/* Single shared column definition — the SAME <colgroup> governs
+                both the header and every body row, so a header always sits
+                exactly over its content. Widths are proportional to how much
+                information each column carries (not uniform). */}
             <colgroup>
-              <col className="w-[9%]" />   {/* Job */}
-              <col className="w-[16%]" />  {/* Customer */}
-              <col className="w-[18%]" />  {/* Device */}
-              <col className="w-[13%]" />  {/* Store */}
-              <col className="w-[12%]" />  {/* Pickup */}
-              <col className="w-[13%]" />  {/* Status */}
-              <col className="w-[13%]" />  {/* Ninja */}
-              <col className="w-[70px]" /> {/* Ticket */}
-              <col className="w-[84px]" /> {/* Actions — stable minimum width */}
+              <col className="w-[8%]" />   {/* Date */}
+              <col className="w-[9%]" />   {/* Trip ID — widened so FJ-001 never wraps */}
+              <col className="w-[9%]" />   {/* Lead Type */}
+              <col className="w-[8%]" />   {/* Source */}
+              <col className="w-[11%]" />  {/* Assignee */}
+              <col className="w-[15%]" />  {/* Customer (+ contact below) */}
+              <col className="w-[13%]" />  {/* Model Info (+ issue below) */}
+              <col className="w-[6%]" />   {/* Ticket */}
+              <col className="w-[11%]" />  {/* Service Status */}
+              <col className="w-[6%]" />   {/* Invoice */}
+              <col className="w-[7%]" />   {/* Invoice Amt */}
+              <col className="w-[64px]" /> {/* Action — fixed, always visible */}
             </colgroup>
             <thead style={{ top: theadTop }} className="sticky z-[5] border-b-2 border-[#4361EE]/25 bg-[#D6DDFB]">
-              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
-                <th className="px-4 py-3">Job</th>
-                <th className="px-3 py-3">Customer</th>
-                <th className="px-3 py-3">Device</th>
-                <th className="px-3 py-3">Store</th>
-                <th className="px-3 py-3">Pickup</th>
-                <th className="px-3 py-3">Status</th>
-                <th className="px-3 py-3">Ninja</th>
-                <th className="px-3 py-3">Ticket</th>
-                <th className="px-4 py-3 text-right">Actions</th>
+              {/* Header alignment matches the data type of each column
+                  (left for text, center for compact IDs/pill, right for money). */}
+              <tr className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
+                <th className="px-3 py-3 text-left">Date</th>
+                <th className="px-3 py-3 text-left">Trip ID</th>
+                <th className="px-3 py-3 text-left">Lead Type</th>
+                <th className="px-3 py-3 text-left">Source</th>
+                <th className="px-3 py-3 text-left">Assignee</th>
+                <th className="px-3 py-3 text-left">Customer</th>
+                <th className="py-3 pr-3 pl-[7px] text-left"><span className="inline-block -ml-[14px]">Model Info</span></th>
+                <th className="py-3 pr-3 pl-[7px] text-center"><span className="inline-block -ml-[31px]">Ticket</span></th>
+                <th className="px-3 py-3 text-center">Service Status</th>
+                <th className="px-3 py-3 text-center">Invoice</th>
+                <th className="px-3 py-3 text-right">Inv. Amt</th>
+                <th className="px-3 py-3 text-center">Action</th>
               </tr>
             </thead>
             <tbody>
               {paged.map((j, i) => {
                 const delayed = isDelayed(j);
-                const p = fmtPickup(j.pickupDate, j.pickupTime);
+                const r = resolveFieldRow(j, resolveSrc);
+                const p = fmtPickup(j.pickupDate || j.dropDate, j.pickupTime || j.dropTime);
+                const lt = normaliseLeadType(j.leadType);
+                const srcBucket = classifySource(j.source);
+                const srcLabel = j.source?.trim() || FIELD_SOURCE_LABEL[srcBucket];
+                const assignee = j.ninjaName || j.fieldManagerName || "";
                 return (
                   <motion.tr
                     key={j.id}
                     initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(0.015 * i, 0.25) }}
                     onClick={() => setDetailJob(j)}
                     className={cn(
-                      "group h-[72px] cursor-pointer border-b border-zinc-200 align-middle transition-colors",
+                      "group h-[84px] cursor-pointer border-b border-zinc-200 transition-colors",
                       delayed ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-[#EEF1FD]/50",
                     )}
                   >
-                    {/* JOB */}
-                    <td className="px-4 py-3 align-middle">
-                      <p className="font-semibold text-foreground tnum">{j.jobNo}</p>
-                      {j.leadNo && <p className="text-[11px] text-zinc-400">· {j.leadNo}</p>}
-                    </td>
-
-                    {/* CUSTOMER — neutral initials (no multicolour avatars) */}
-                    <td className="px-3 py-3 align-middle">
-                      <button
-                        onClick={(e) => { e.stopPropagation(); router.push("/contacts"); }}
-                        className="flex w-full min-w-0 items-center gap-2.5 text-left"
-                        title="View customer"
-                      >
-                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-[#EEF1FD] text-[11px] font-bold text-[#4361EE] ring-1 ring-inset ring-[#4361EE]/15">
-                          {initials(j.customer)}
-                        </span>
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-foreground">{j.customer || "—"}</span>
-                          {j.phone && <span className="block truncate text-[11px] text-zinc-400">{j.phone}</span>}
-                        </span>
-                      </button>
-                    </td>
-
-                    {/* DEVICE — coloured left strip + model + issue */}
-                    <td className="px-3 py-3 align-middle">
-                      <div className="flex min-w-0 items-stretch gap-2.5">
-                        <span className="w-1 shrink-0 self-stretch rounded-full" style={{ backgroundColor: accentColor(j.device) }} />
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-foreground">{j.device || "N/A"}</span>
-                          {j.issue && <span className="block truncate text-[11px] text-zinc-400">{j.issue}</span>}
-                        </span>
-                      </div>
-                    </td>
-
-                    {/* STORE — coloured square marker (distinct from the device strip) */}
-                    <td className="px-3 py-3 align-middle">
-                      {j.branch ? (
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ backgroundColor: accentColor(j.branch) }} />
-                          <span className="truncate text-zinc-700">{j.branch}</span>
-                        </span>
+                    {/* DATE — the field trip date (scheduled pickup, else drop). */}
+                    <td className="px-3 py-4 text-left align-middle">
+                      {p.day !== "—" ? (
+                        <div className={cn("leading-tight", delayed && "font-semibold text-rose-600")}>
+                          <p className="whitespace-nowrap text-[12.5px] font-medium">{p.day}</p>
+                          {p.time && <p className="text-[11px] font-normal text-zinc-500">{p.time}</p>}
+                        </div>
                       ) : <span className="text-zinc-300">—</span>}
                     </td>
 
-                    {/* PICKUP */}
-                    <td className="px-3 py-3 align-middle">
-                      {j.pickupDate ? (
-                        <span className={cn("inline-flex items-center gap-1.5", delayed && "font-semibold text-rose-600")}>
-                          <Clock className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
-                          <span className="min-w-0">
-                            <span className="block truncate">{p.day}</span>
-                            {p.time && <span className="block text-[11px] text-zinc-400">{p.time}</span>}
-                          </span>
-                        </span>
-                      ) : <span className="text-zinc-300">—</span>}
+                    {/* TRIP ID (+ originating lead) */}
+                    <td className="px-3 py-4 text-left align-middle">
+                      <p className="whitespace-nowrap font-semibold leading-tight text-foreground tnum">{j.jobNo}</p>
+                      {j.leadNo && <p className="whitespace-nowrap text-[11px] font-medium leading-tight text-zinc-500 tnum">{j.leadNo}</p>}
                     </td>
 
-                    {/* STATUS pill */}
-                    <td className="px-3 py-3 align-middle">
-                      <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[j.status])}>
-                        {FIELD_STATUS_LABEL[j.status]}
+                    {/* LEAD TYPE */}
+                    <td className="px-3 py-4 text-left align-middle">
+                      <span className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", FIELD_LEAD_TYPE_TONE[lt])}>
+                        {FIELD_LEAD_TYPE_LABEL[lt]}
                       </span>
                     </td>
 
-                    {/* NINJA — neutral initials + name, or Unassigned */}
-                    <td className="px-3 py-3 align-middle">
-                      {j.ninjaName ? (
-                        <span className="flex min-w-0 items-center gap-2">
-                          <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-zinc-100 text-[10px] font-bold text-zinc-600">{initials(j.ninjaName)}</span>
-                          <span className="min-w-0 truncate text-zinc-700">{j.ninjaName}</span>
+                    {/* SOURCE — mapped from the originating lead/walk-in */}
+                    <td className="px-3 py-4 text-left align-middle">
+                      {j.source || srcBucket !== "other" ? (
+                        <span className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset", FIELD_SOURCE_TONE[srcBucket])}>
+                          {srcLabel}
                         </span>
+                      ) : <span className="text-zinc-300">—</span>}
+                    </td>
+
+                    {/* ASSIGNEE — Ninja (operational), else Field Manager.
+                        Short colour strip sits INSIDE the px-3 padding (absolute,
+                        vertically centred) so text starts at the same 12px edge
+                        as the header. */}
+                    <td className="relative px-3 py-4 text-left align-middle">
+                      {assignee ? (
+                        <>
+                          <span className="absolute left-1 top-1/2 h-7 w-1 -translate-y-1/2 rounded-full" style={{ backgroundColor: accentColor(assignee) }} />
+                          <div className="min-w-0">
+                            <span className="block truncate font-medium leading-tight text-zinc-800">{assignee}</span>
+                            <span className="block text-[11px] leading-tight text-zinc-500">{j.ninjaName ? "Ninja" : "Field Mgr"}</span>
+                          </div>
+                        </>
                       ) : (
-                        <span className="text-[12px] text-zinc-400">Unassigned</span>
+                        <span className="text-[12px] italic text-zinc-500">Unassigned</span>
                       )}
                     </td>
 
-                    {/* TICKET */}
-                    <td className="px-3 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
-                      {j.linkedTicketId ? (
-                        <button onClick={() => router.push(`/tickets/${j.linkedTicketId}`)} className="font-medium text-[#4361EE] hover:underline">
-                          {getTicketLabel(j.linkedTicketId)}
+                    {/* CUSTOMER — live Customer Master name with the contact number
+                        below it (like the Tickets table). Colour strip (no avatar). */}
+                    <td className="relative px-3 py-4 text-left align-middle" onClick={(e) => e.stopPropagation()}>
+                      <span className="absolute left-1 top-1/2 h-7 w-1 -translate-y-1/2 rounded-full" style={{ backgroundColor: accentColor(r.customerName) }} />
+                      <button
+                        onClick={() => router.push(j.customerId ? `/contacts?customer=${j.customerId}` : "/contacts")}
+                        className="block w-full min-w-0 text-left"
+                        title="View customer"
+                      >
+                        <span className="block truncate font-semibold leading-tight text-foreground group-hover:text-[#4361EE]">{r.customerName || "—"}</span>
+                        {r.contact && <span className="block truncate text-[11px] font-medium leading-tight text-zinc-500 tnum">{r.contact}</span>}
+                      </button>
+                    </td>
+
+                    {/* MODEL — the specific ticket device (multi-device aware).
+                        Nudged 5px left (pl-[7px]) with its strip, per request. */}
+                    <td className="relative py-4 pr-3 pl-[7px] text-left align-middle">
+                      <span className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-full" style={{ backgroundColor: accentColor(r.model) }} />
+                      <div className="min-w-0">
+                        <span className="block truncate font-semibold leading-tight text-foreground">{r.model || "N/A"}</span>
+                        {r.modelDetail && <span className="block truncate text-[11px] font-medium leading-tight text-zinc-500">{r.modelDetail}</span>}
+                      </div>
+                    </td>
+
+                    {/* TICKET ID — opens the existing View Ticket (nudged 31px left) */}
+                    <td className="py-4 pr-3 pl-[7px] text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                      <span className="inline-block -ml-[31px]">
+                        {r.ticket ? (
+                          <button onClick={() => router.push(`/tickets/${r.ticket!.id}`)} className="whitespace-nowrap font-medium text-[#4361EE] hover:underline tnum">
+                            {r.ticketNo}
+                          </button>
+                        ) : <span className="text-zinc-300">—</span>}
+                      </span>
+                    </td>
+
+                    {/* SERVICE STATUS — interactive pill (valid transitions only) */}
+                    <td className="px-3 py-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex justify-center">
+                        <StatusPill
+                          job={j}
+                          canEdit={can("manage_field_jobs") || can("assign_ninja")}
+                          onSelect={(next) => transition(j.id, next)}
+                        />
+                      </div>
+                    </td>
+
+                    {/* INVOICE ID — opens the existing View Invoice */}
+                    <td className="px-3 py-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                      {r.invoice ? (
+                        <button onClick={() => router.push(`/invoice/${r.invoice!.id}`)} className="whitespace-nowrap font-medium text-[#4361EE] hover:underline tnum">
+                          {r.invoiceId}
                         </button>
                       ) : <span className="text-zinc-300">—</span>}
                     </td>
 
-                    {/* ACTIONS */}
-                    <td className="px-4 py-3 text-right align-middle" onClick={(e) => e.stopPropagation()}>
-                      <button onClick={() => setDetailJob(j)} title="Open field job"
-                        className="ml-auto grid h-7 w-7 place-items-center rounded-lg text-zinc-400 transition hover:bg-[#EEF1FD] hover:text-[#4361EE]">
-                        <Eye className="h-3.5 w-3.5" />
-                      </button>
+                    {/* INVOICE AMOUNT — live from the linked invoice (right-aligned, tabular) */}
+                    <td className="px-3 py-4 text-right align-middle tnum">
+                      {r.invoiceAmount != null ? (
+                        <span className="whitespace-nowrap font-semibold text-zinc-800">{formatInvoiceAmount(r.invoiceAmount)}</span>
+                      ) : <span className="text-zinc-300">—</span>}
+                    </td>
+
+                    {/* ACTION — fixed column, icon centred, always visible */}
+                    <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex justify-center">
+                        <button onClick={() => setDetailJob(j)} title="Open field job"
+                          className="grid h-7 w-7 place-items-center rounded-lg text-zinc-500 transition hover:bg-[#EEF1FD] hover:text-[#4361EE]">
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </motion.tr>
                 );
@@ -572,22 +656,29 @@ export default function FieldPage() {
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {paged.map((j) => {
           const delayed = isDelayed(j);
-          const p = fmtPickup(j.pickupDate, j.pickupTime);
+          const r = resolveFieldRow(j, resolveSrc);
+          const p = fmtPickup(j.pickupDate || j.dropDate, j.pickupTime || j.dropTime);
+          const lt = normaliseLeadType(j.leadType);
           return (
             <button key={j.id} onClick={() => setDetailJob(j)} className={cn("w-full rounded-2xl border border-border bg-card p-4 text-left shadow-card", delayed && "border-rose-200 bg-rose-50/40")}>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
-                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#EEF1FD] text-[11px] font-bold text-[#4361EE]">{initials(j.customer)}</span>
+                  <span className="grid h-9 w-9 place-items-center rounded-full bg-[#EEF1FD] text-[11px] font-bold text-[#4361EE]">{initials(r.customerName)}</span>
                   <div>
-                    <p className="font-semibold">{j.customer || "—"}</p>
+                    <p className="font-semibold">{r.customerName || "—"}</p>
                     <p className="text-[11px] text-muted-foreground">{j.jobNo}{j.leadNo ? ` · ${j.leadNo}` : ""}</p>
                   </div>
                 </div>
                 <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[j.status])}>{FIELD_STATUS_LABEL[j.status]}</span>
               </div>
+              <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", FIELD_LEAD_TYPE_TONE[lt])}>{FIELD_LEAD_TYPE_LABEL[lt]}</span>
+                {r.ticketNo && <span className="inline-flex rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">{r.ticketNo}</span>}
+                {r.invoiceAmount != null && <span className="inline-flex rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">{formatInvoiceAmount(r.invoiceAmount)}</span>}
+              </div>
               <div className="mt-3 flex items-center gap-2 border-t border-border pt-3 text-[12px] text-zinc-600">
-                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: accentColor(j.device) }} /> {j.device || "N/A"}</span>
-                {j.pickupDate && <span className={cn("ml-auto inline-flex items-center gap-1", delayed && "font-semibold text-rose-600")}><Clock className="h-3 w-3" /> {p.day}</span>}
+                <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ backgroundColor: accentColor(r.model) }} /> {r.model || "N/A"}</span>
+                {p.day !== "—" && <span className={cn("ml-auto inline-flex items-center gap-1", delayed && "font-semibold text-rose-600")}><Clock className="h-3 w-3" /> {p.day}</span>}
               </div>
             </button>
           );
@@ -661,6 +752,56 @@ function ViewPicker({ queue, onChange, counts }: {
                 </button>
               );
             })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+/* Service Status pill. Read-only chip by default; when the user can edit and
+   the current status has valid next states, it becomes a dropdown that exposes
+   ONLY those guarded transitions (prevents illegal jumps like Pending →
+   Completed). Selecting one calls the context transition (persists + logs +
+   the table/history update via the live jobs state). */
+function StatusPill({ job, canEdit, onSelect }: {
+  job: FieldJob;
+  canEdit: boolean;
+  onSelect: (next: FieldJobStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const nexts = useMemo(() => allowedFieldTransitions(job.status, normaliseLeadType(job.leadType)), [job.status, job.leadType]);
+  const editable = canEdit && nexts.length > 0;
+
+  const chip = (
+    <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[job.status])}>
+      {FIELD_STATUS_LABEL[job.status]}
+      {editable && <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />}
+    </span>
+  );
+
+  if (!editable) return chip;
+
+  return (
+    <div className="relative inline-block">
+      <button onClick={() => setOpen((o) => !o)} title="Update service status" className="outline-none">
+        {chip}
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
+          <div className="absolute left-0 top-full z-40 mt-1 w-52 rounded-xl border border-border bg-card p-1.5 shadow-xl">
+            <p className="px-2 pb-1 pt-0.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-400">Update status</p>
+            {nexts.map((s) => (
+              <button
+                key={s}
+                onClick={() => { onSelect(s); setOpen(false); }}
+                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[12.5px] text-zinc-700 transition hover:bg-muted"
+              >
+                <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-inset", FIELD_STATUS_TONE[s])} />
+                {FIELD_STATUS_LABEL[s]}
+              </button>
+            ))}
           </div>
         </>
       )}

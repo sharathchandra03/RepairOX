@@ -321,6 +321,9 @@ export function deriveTicketStatus(devices: DeviceRecord[]): TicketStatus {
 
 export type Ticket = {
   id: string;
+  /** Owning store (branch) id. Present on DB rows; used to filter the
+   *  consolidated All-Shops view by store. Null = org-wide / unscoped. */
+  branchId?: string | null;
   customer: string;
   phone: string;
   company?: string;
@@ -408,6 +411,10 @@ export type ExpandableNavGroup = {
 
 export const navItems: NavItem[] = [
   // Shop Management
+  // NOTE: The Owner / Master multi-store dashboard is deliberately NOT a Shop
+  // module. It is reached through the global Store Context selector in the
+  // header (see components/layout/store-selector.tsx), so the Shop panel stays
+  // focused on per-store operations.
   { href: "/dashboard",        label: "Dashboard",     icon: "Home", permission: "view_dashboard" },
   { href: "/tickets",          label: "Tickets",       icon: "Ticket", permission: ["view_only", "manage_repair_jobs"] },
   { href: "/shop/technicians", label: "Employees",     icon: "Users", permission: ["assign_technicians", "manage_repair_jobs"] },
@@ -810,6 +817,8 @@ export function getInvoiceDevices(invoice: Invoice): InvoiceDeviceRecord[] {
 
 export type Invoice = {
   id: string;
+  /** Owning store (branch) id — used to filter the All-Shops view by store. */
+  branchId?: string | null;
   /** @deprecated Legacy CORP-XXXX reference number. No longer generated or shown.
    *  Kept optional only so existing DB rows with a `reference` value still map
    *  cleanly. The meaningful relationship is now `ticketId` (Linked Ticket). */
@@ -967,6 +976,8 @@ export function isWalkInWon(w: Pick<WalkIn, "status" | "linkedTicketId">): boole
 
 export type WalkIn = {
   id: string;
+  /** Owning store (branch) id — used to filter the All-Shops view by store. */
+  branchId?: string | null;
   /** Human-readable sequential business identifier, e.g. "WK-001". */
   walkInNumber?: string;
   date: string;

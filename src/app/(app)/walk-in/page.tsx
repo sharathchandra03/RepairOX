@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { StoreFilter } from "@/components/common/store-filter";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -82,6 +83,7 @@ export default function WalkInPage() {
 
   // Filters
   const [q, setQ] = useState("");
+  const [storeFilter, setStoreFilter] = useState<string>(""); // "" = All Stores
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -169,6 +171,7 @@ export default function WalkInPage() {
   /* ── The single filtered dataset (table + report share this) ── */
   const filtered = useMemo(() => {
     const rows = walkIns.filter((w) => {
+      if (storeFilter && w.branchId !== storeFilter) return false;
       if (!isWalkInInDateRange(w.date, dateRange, customFrom, customTo)) return false;
       if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
       if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
@@ -215,7 +218,7 @@ export default function WalkInPage() {
     const pinned = ordered.filter((w) => w.pinnedAt);
     const normal = ordered.filter((w) => !w.pinnedAt);
     return [...pinned, ...normal];
-  }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, issueFilter, conversionFilter, q]);
+  }, [walkIns, storeFilter, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, followUpFilter, followUpAttemptFilter, followUpOutcomeFilter, issueFilter, conversionFilter, q]);
 
   /* Dataset for the Follow-Up view. It is synced with the top date strip, but
      the range applies to the FOLLOW-UP date (not the walk-in creation date) —
@@ -591,8 +594,9 @@ export default function WalkInPage() {
                 <Filter className="h-3.5 w-3.5" /> Filters{anyFilterActive ? " ·" : ""}
               </Button>
             )}
+            <StoreFilter value={storeFilter} onChange={setStoreFilter} />
             <div className="w-56 sm:w-72">
-              <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search ID, name, contact, model, issue…" iconLeft={<Search className="h-4 w-4" />} />
+              <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search walk-ins…" iconLeft={<Search className="h-4 w-4" />} />
             </div>
           </div>
         )}

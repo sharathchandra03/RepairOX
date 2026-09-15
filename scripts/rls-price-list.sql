@@ -1,3 +1,10 @@
+-- ⚠️ DEPRECATED — DO NOT APPLY DIRECTLY.
+--    Superseded by supabase/migrations/0001_initial_schema.sql (permission-gated
+--    price_list_* policies) and 0022_consolidate_price_list_rls.sql, which REMOVES
+--    the permissionless "catalog_*" policies and the duplicate get_user_org_id()
+--    function this file created. The database is migration-managed — see
+--    supabase/README.md. Kept for history only.
+--
 -- ============================================================
 -- RLS policies for price_list_* tables
 -- Run this in Supabase SQL Editor (one-time setup).

@@ -27,6 +27,7 @@ import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
 import { resolveCustomer } from "@/lib/field-linking";
 import { normaliseRoute, FIELD_STATUS_LABEL, FIELD_STATUS_TONE } from "@/lib/field-data";
+import { resolveFieldRow, formatInvoiceAmount } from "@/lib/field-resolve";
 import { genWalkInId, nextWalkInNumber, walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
 import type { Lead } from "@/lib/leads-data";
@@ -36,13 +37,18 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
   const router = useRouter();
   const { updateLead } = useLeads();
   const { getJob } = useField();
-  const { customers, addCustomer, walkIns, addWalkIn } = useStore();
+  const { customers, addCustomer, walkIns, addWalkIn, tickets, invoices } = useStore();
   const [routeOpen, setRouteOpen] = useState(false);
   const [converting, setConverting] = useState(false);
 
   const route = normaliseRoute(lead.fulfilmentRoute);
   const linkedJob = lead.linkedFieldJobId ? getJob(lead.linkedFieldJobId) : undefined;
   const existingWalkIn = lead.linkedWalkInId ? walkIns.find((w) => w.id === lead.linkedWalkInId) : undefined;
+
+  /* Close the loop for Sales: resolve the Ticket / Invoice / revenue produced by
+     the field job so the lead owner can SEE the outcome of their converted lead
+     (their revenue depends on it) without leaving Lead Management. */
+  const outcome = linkedJob ? resolveFieldRow(linkedJob, { tickets, invoices, customers }) : null;
 
   /* Store hand-off: create a Walk-In prefilled from this Lead (no retyping),
      linked back by customerId + originating lead. Dedupe: if a Walk-In already
@@ -156,17 +162,57 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
             <Truck className="h-3.5 w-3.5" /> Pickup &amp; Drop
           </div>
           {linkedJob ? (
-            <div className="flex items-center justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate text-[13px] font-medium text-zinc-800">{linkedJob.jobNo}</p>
-                <span className={cn("mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[linkedJob.status])}>
-                  {FIELD_STATUS_LABEL[linkedJob.status]}
-                </span>
+            <>
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-[13px] font-medium text-zinc-800">{linkedJob.jobNo}</p>
+                  <span className={cn("mt-0.5 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[linkedJob.status])}>
+                    {FIELD_STATUS_LABEL[linkedJob.status]}
+                  </span>
+                </div>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => router.push(`/field?job=${linkedJob.id}`)}>
+                  Open Field Job <ExternalLink className="h-3.5 w-3.5" />
+                </Button>
               </div>
-              <Button size="sm" variant="outline" className="gap-1.5" onClick={() => router.push(`/field?job=${linkedJob.id}`)}>
-                Open Field Job <ExternalLink className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+
+              {/* Full-circle outcome: the Ticket + Invoice + revenue this lead
+                  produced. Resolved LIVE, so Sales always sees the result even
+                  after the device leaves their hands. */}
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  onClick={() => outcome?.ticket && router.push(`/tickets/${outcome.ticket.id}`)}
+                  disabled={!outcome?.ticket}
+                  className={cn(
+                    "rounded-xl border px-2.5 py-2 text-left transition",
+                    outcome?.ticket ? "border-[#4361EE]/30 bg-[#EEF1FD] hover:bg-[#E0E6FC]" : "border-border bg-muted/30",
+                  )}
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Ticket</p>
+                  <p className={cn("truncate text-[13px] font-bold", outcome?.ticket ? "text-[#4361EE]" : "text-zinc-300")}>
+                    {outcome?.ticketNo || "—"}
+                  </p>
+                </button>
+                <button
+                  onClick={() => outcome?.invoice && router.push(`/invoice/${outcome.invoice.id}`)}
+                  disabled={!outcome?.invoice}
+                  className={cn(
+                    "rounded-xl border px-2.5 py-2 text-left transition",
+                    outcome?.invoice ? "border-[#4361EE]/30 bg-[#EEF1FD] hover:bg-[#E0E6FC]" : "border-border bg-muted/30",
+                  )}
+                >
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Invoice</p>
+                  <p className={cn("truncate text-[13px] font-bold", outcome?.invoice ? "text-[#4361EE]" : "text-zinc-300")}>
+                    {outcome?.invoiceId || "—"}
+                  </p>
+                </button>
+                <div className={cn("rounded-xl border px-2.5 py-2", outcome?.invoiceAmount != null ? "border-emerald-200 bg-emerald-50" : "border-border bg-muted/30")}>
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Revenue</p>
+                  <p className={cn("truncate text-[13px] font-bold", outcome?.invoiceAmount != null ? "text-emerald-700" : "text-zinc-300")}>
+                    {outcome?.invoiceAmount != null ? formatInvoiceAmount(outcome.invoiceAmount) : "—"}
+                  </p>
+                </div>
+              </div>
+            </>
           ) : (
             <p className="text-[12px] text-zinc-500">A Field Job is being set up. Track pickup and drop progress in Field.</p>
           )}

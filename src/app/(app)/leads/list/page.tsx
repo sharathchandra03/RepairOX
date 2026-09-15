@@ -265,19 +265,35 @@ export default function LeadsListPage() {
       )}
 
       {/* Desktop Table */}
-      <div className="hidden rounded-2xl border border-border bg-card shadow-card md:block">
-        <table className="w-full text-sm">
+      <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-card md:block">
+        {/* table-fixed + a single shared <colgroup> so every header sits exactly
+            over its content and the available width is distributed deliberately
+            (proportional to each column's information) instead of content-driven
+            auto widths that leave uneven gaps. */}
+        <table className="w-full table-fixed text-sm">
+          <colgroup>
+            <col className="w-[19%]" />  {/* Lead (name + id · number) */}
+            <col className="w-[9%]" />   {/* Date */}
+            <col className="w-[9%]" />   {/* Source */}
+            <col className="w-[13%]" />  {/* Owner (assign menu) */}
+            <col className="w-[9%]" />   {/* Device */}
+            <col className="w-[11%]" />  {/* Category (+ route badge) */}
+            <col className="w-[10%]" />  {/* Status */}
+            <col className="w-[8%]" />   {/* Priority */}
+            <col className="w-[10%]" />  {/* Follow-up */}
+            <col className="w-[104px]" />{/* Actions — fixed, fits the 3 base icons + hover set */}
+          </colgroup>
           <thead className="bg-[#EEF1FD]">
-            <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
-              <th className="px-4 py-3">Lead</th>
-              <th className="px-3 py-3">Date</th>
-              <th className="px-3 py-3">Source</th>
-              <th className="px-3 py-3">Owner</th>
-              <th className="px-3 py-3">Device</th>
-              <th className="px-3 py-3">Category</th>
-              <th className="px-3 py-3">Status</th>
-              <th className="px-3 py-3">Priority</th>
-              <th className="px-3 py-3">Follow-up</th>
+            <tr className="text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
+              <th className="px-4 py-3 text-left">Lead</th>
+              <th className="px-3 py-3 text-left">Date</th>
+              <th className="px-3 py-3 text-left">Source</th>
+              <th className="px-3 py-3 text-left">Owner</th>
+              <th className="px-3 py-3 text-left">Device</th>
+              <th className="px-3 py-3 text-left">Category</th>
+              <th className="px-3 py-3 text-left">Status</th>
+              <th className="px-3 py-3 text-left">Priority</th>
+              <th className="px-3 py-3 text-left">Follow-up</th>
               <th className="px-4 py-3 text-right">Actions</th>
             </tr>
           </thead>
@@ -293,7 +309,7 @@ export default function LeadsListPage() {
                   followUpTone(followUpState(lead.followUpDate)).rowTint,
                 )}
               >
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 align-middle">
                   <div className="flex items-center gap-2.5">
                     <Avatar name={lead.name || lead.leadNo} size={32} />
                     <div className="min-w-0">
@@ -301,24 +317,24 @@ export default function LeadsListPage() {
                         {lead.pinnedAt && <Pin className="h-3 w-3 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
                         {lead.name || "—"}
                       </p>
-                      <p className="text-[11px] text-muted-foreground">{lead.leadNo} · {lead.number || "no number"}</p>
+                      <p className="truncate text-[11px] font-medium text-zinc-500 tnum">{lead.leadNo} · {lead.number || "no number"}</p>
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-3"><span className="text-[12px] text-zinc-600">{lead.date || "—"}</span></td>
-                <td className="px-3 py-3"><span className="text-zinc-700">{lead.source || "—"}</span></td>
-                <td className="px-3 py-3">
+                <td className="px-3 py-3 align-middle"><span className="whitespace-nowrap text-[12px] text-zinc-600 tnum">{lead.date || "—"}</span></td>
+                <td className="px-3 py-3 align-middle"><span className="block truncate text-zinc-700">{lead.source || "—"}</span></td>
+                <td className="px-3 py-3 align-middle">
                   {canAssign ? <AssignMenu lead={lead} /> : <AssignBadge lead={lead} />}
                 </td>
-                <td className="px-3 py-3"><span className="text-zinc-700">{lead.device || "—"}</span></td>
-                <td className="px-3 py-3">
-                  <span className="text-zinc-600">{lead.leadCategory || "—"}</span>
-                  <FulfilmentRouteBadge lead={lead} className="mt-1" />
+                <td className="px-3 py-3 align-middle"><span className="block truncate text-zinc-700">{lead.device || "—"}</span></td>
+                <td className="px-3 py-3 align-middle">
+                  <span className="block truncate text-zinc-600">{lead.leadCategory || "—"}</span>
+                  <div className="mt-1"><FulfilmentRouteBadge lead={lead} /></div>
                 </td>
-                <td className="px-3 py-3">{lead.status ? <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
-                <td className="px-3 py-3">{lead.priority ? <span className={cn("inline-flex items-center gap-1 text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
-                <td className="px-3 py-3"><FollowUpCell lead={lead} /></td>
-                <td className="px-4 py-3">
+                <td className="px-3 py-3 align-middle">{lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td className="px-3 py-3 align-middle">{lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td className="px-3 py-3 align-middle"><FollowUpCell lead={lead} /></td>
+                <td className="px-4 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
                   <LeadActionsMenu lead={lead} onAction={handleAction} />
                 </td>
               </motion.tr>

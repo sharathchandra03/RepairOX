@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { UniversalSearch } from "@/components/layout/universal-search";
+import { StoreSelector } from "@/components/layout/store-selector";
 import { useRouter } from "next/navigation";
 import { navGroups } from "@/lib/mock-data";
 import {
@@ -107,6 +108,13 @@ export function Topbar({
               {meta.label}
             </span>
           )}
+        </div>
+
+        {/* Store context selector — shows the current store / All Shops and
+            lets authorized users switch. Sits beside the module switcher so the
+            two context selectors read together (see design reference). */}
+        <div className="shrink-0">
+          <StoreSelector />
         </div>
 
         {/* Universal Search */}

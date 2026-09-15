@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, Mail, Phone, ShieldCheck, Building2, UserPlus, Check,
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select, NumericInput } from "@/components/ui/input";
 import { WORKSPACE_MAP } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStoreContext } from "@/lib/store-context";
 import {
   BRANCHES, SALARY_TYPES, validatePassword, PASSWORD_MIN_LENGTH,
 } from "@/lib/auth";
@@ -19,6 +20,14 @@ import { cn } from "@/lib/utils";
 export default function AddStaffPage() {
   const router = useRouter();
   const { allRoles, addStaff, landingForRole } = usePermissions();
+  // Real stores from the organization (falls back to the legacy static list in
+  // local/demo mode). The chosen store NAME is sent to /api/staff, which
+  // resolves it to the store's branch_id — so the new employee is truly scoped
+  // to that store's data.
+  const { stores } = useStoreContext();
+  const storeOptions = stores.length > 0
+    ? stores.map((s) => ({ label: s.name, value: s.name }))
+    : BRANCHES.map((b) => ({ label: b, value: b }));
 
   // Reception is a sensible default for a first hire.
   const defaultRole = allRoles.find((r) => r.id === "reception")?.id ?? allRoles[0].id;
@@ -36,6 +45,14 @@ export default function AddStaffPage() {
   const [salaryAmount, setSalaryAmount] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  // Default the store to the first real store once the list loads (so we never
+  // submit a stale placeholder that doesn't match an actual store).
+  useEffect(() => {
+    if (stores.length > 0 && !stores.some((s) => s.name === branch)) {
+      setBranch(stores[0].name);
+    }
+  }, [stores]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const role = allRoles.find((r) => r.id === roleId) ?? allRoles[0];
   const landingLabel = useMemo(() => {
@@ -202,12 +219,12 @@ export default function AddStaffPage() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="branch">Branch</Label>
+                <Label htmlFor="branch">Store</Label>
                 <Select
                   id="branch"
                   value={branch}
                   onChange={(e) => setBranch(e.target.value)}
-                  options={BRANCHES.map((b) => ({ label: b, value: b }))}
+                  options={storeOptions}
                 />
               </div>
             </div>

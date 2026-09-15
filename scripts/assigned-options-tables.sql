@@ -1,3 +1,8 @@
+-- ⚠️ DEPRECATED — DO NOT APPLY DIRECTLY.
+--    This file is a historical duplicate of supabase/migration-assigned-options.sql,
+--    now folded into the versioned migration supabase/migrations/0004_assigned_options.sql.
+--    The database is migration-managed — see supabase/README.md. Kept for history only.
+--
 -- ═══════════════════════════════════════════════════════════════════════════
 -- RepairOX — "Assigned By" & "Assigned To" master-list tables
 --

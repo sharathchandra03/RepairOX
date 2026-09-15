@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStoreContext } from "@/lib/store-context";
 
 /* ──────────────────────────────────────────────────────────────────────────
-   useMonthlyTarget — Manages per-user monthly revenue target.
+   useMonthlyTarget — Manages the monthly revenue target, per user PER STORE.
 
    Dual-mode persistence (mirrors useDashboardOrder architecture):
    • Supabase mode: reads/writes via /api/dashboard-preferences.
@@ -20,15 +21,20 @@ const LOCAL_STORAGE_PREFIX = "repairox-monthly-target-";
 
 export function useMonthlyTarget() {
   const { currentUser } = usePermissions();
+  const { activeStoreId, ready: storeReady } = useStoreContext();
   const [target, setTarget] = useState<number>(DEFAULT_TARGET);
   const [isLoading, setIsLoading] = useState(true);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const localKey = currentUser?.id ? `${LOCAL_STORAGE_PREFIX}${currentUser.id}` : null;
+  const storeBucket = activeStoreId ?? "all";
+  const localKey = currentUser?.id
+    ? `${LOCAL_STORAGE_PREFIX}${currentUser.id}::${storeBucket}`
+    : null;
 
-  // ── Load saved target on mount / user change ──
+  // ── Load saved target on mount / user change / store change ──
   useEffect(() => {
     let cancelled = false;
+    if (!storeReady) return;
 
     async function load() {
       setIsLoading(true);
@@ -38,9 +44,10 @@ export function useMonthlyTarget() {
           const { data: session } = await supabase.auth.getSession();
           const token = session?.session?.access_token;
           if (token) {
-            const res = await fetch("/api/dashboard-preferences", {
-              headers: { Authorization: `Bearer ${token}` },
-            });
+            const res = await fetch(
+              `/api/dashboard-preferences?section=monthly_target&store=${encodeURIComponent(storeBucket)}`,
+              { headers: { Authorization: `Bearer ${token}` } }
+            );
             if (res.ok) {
               const json = await res.json();
               if (!cancelled && json.ok && json.preferences?.monthlyTarget) {
@@ -83,7 +90,7 @@ export function useMonthlyTarget() {
 
     load();
     return () => { cancelled = true; };
-  }, [localKey]);
+  }, [localKey, storeReady, storeBucket]);
 
   // ── Save helper (debounced) ──
   const persist = useCallback(
@@ -100,7 +107,7 @@ export function useMonthlyTarget() {
           }
         }
 
-        // Persist to Supabase if configured
+        // Persist to Supabase if configured (scoped to the active store)
         if (isSupabaseConfigured && supabase) {
           try {
             const { data: session } = await supabase.auth.getSession();
@@ -112,7 +119,7 @@ export function useMonthlyTarget() {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ monthlyTarget: value }),
+                body: JSON.stringify({ monthlyTarget: value, section: "monthly_target", store: storeBucket }),
               });
             }
           } catch {
@@ -121,7 +128,7 @@ export function useMonthlyTarget() {
         }
       }, 300);
     },
-    [localKey]
+    [localKey, storeBucket]
   );
 
   // ── Update handler (optimistic) ──

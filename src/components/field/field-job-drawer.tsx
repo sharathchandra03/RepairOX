@@ -15,12 +15,12 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Truck, User, Phone, MapPin, Package, Clock, Check, ExternalLink, Ticket as TicketIcon,
+  Truck, User, Phone, MapPin, Package, Clock, Check, Ticket as TicketIcon,
   UserCheck, PackageCheck, Send, XCircle, Wrench, CalendarClock, ShieldCheck,
+  FileText, Tag, Radio, History,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
-import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -28,10 +28,13 @@ import { useSession } from "@/lib/use-session";
 import { useField } from "@/lib/field-context";
 import { useStore } from "@/lib/store";
 import { StaffPicker } from "@/components/field/ninja-picker";
+import { useActivityLog, formatWhen } from "@/lib/activity-log";
 import {
-  FIELD_STATUS_LABEL, FIELD_STATUS_TONE, isPickupLeg, isDropLeg,
+  FIELD_STATUS_LABEL, FIELD_STATUS_TONE, isPickupLeg, isDropLeg, accentColor,
+  FIELD_LEAD_TYPE_LABEL, FIELD_SOURCE_LABEL, classifySource, normaliseLeadType,
   type FieldJob, type FieldProof,
 } from "@/lib/field-data";
+import { resolveFieldRow, formatInvoiceAmount } from "@/lib/field-resolve";
 
 type PanelMode = "none" | "assign_ninja" | "assign_drop" | "pickup_proof" | "drop_proof";
 
@@ -47,7 +50,8 @@ export function FieldJobDrawer({ job, open, onClose }: {
     assignNinja, assignDropNinja, transition, confirmPickup, receiveAtStore,
     markReadyForDrop, confirmDelivery, cancelJob,
   } = useField();
-  const { tickets } = useStore();
+  const { tickets, invoices, customers } = useStore();
+  const activity = useActivityLog();
 
   const [mode, setMode] = useState<PanelMode>("none");
   const [schedDate, setSchedDate] = useState("");
@@ -58,12 +62,23 @@ export function FieldJobDrawer({ job, open, onClose }: {
   const [proofNotes, setProofNotes] = useState("");
 
   const { name: currentUserName } = useSession();
-  const linkedTicket = useMemo(
-    () => (job?.linkedTicketId ? tickets.find((t) => t.id === job.linkedTicketId) : undefined),
-    [tickets, job],
+
+  /* Resolve the live linked records (Customer / Ticket + device / Invoice) so
+     the drawer shows the same source-of-truth values as the table. */
+  const resolved = useMemo(
+    () => (job ? resolveFieldRow(job, { tickets, invoices, customers }) : null),
+    [job, tickets, invoices, customers],
+  );
+  const linkedTicket = resolved?.ticket ?? undefined;
+
+  /* Operational timeline for THIS job — every Field audit entry references the
+     job's business number (jobNo). Newest first. */
+  const timeline = useMemo(
+    () => (job ? activity.filter((e) => e.module === "Field" && e.reference === job.jobNo) : []),
+    [activity, job],
   );
 
-  if (!job) return null;
+  if (!job || !resolved) return null;
 
   const reset = () => { setMode("none"); setSchedDate(""); setSchedTime(""); setPickNinjaId(""); setPickNinjaName(""); setProofCondition(""); setProofNotes(""); };
   const close = () => { reset(); onClose(); };
@@ -85,22 +100,67 @@ export function FieldJobDrawer({ job, open, onClose }: {
   }
 
   // The single primary action for the current status, with its permission.
+  // The wording/flow adapts to the trip TYPE: On-Site jobs are repaired at the
+  // customer's location (no store hand-off / no drop leg), Pickup/Drop jobs run
+  // the full pickup → store → repair → drop cycle.
+  const ticketBtn = (
+    <Can permission={["manage_field_jobs", "manage_repair_jobs"]}>
+      <Button className="w-full gap-1.5" onClick={() => router.push(`/tickets/new?fromFieldJob=${job!.id}&from=field`)}>
+        <TicketIcon className="h-4 w-4" /> {job!.linkedTicketId ? "Open Ticket" : "Create repair Ticket"}
+      </Button>
+    </Can>
+  );
+
   function renderStageAction() {
     const s = job!.status;
     if (s === "cancelled" || s === "completed") return null;
 
-    // Field Manager assigns pickup ninja
+    const lt = normaliseLeadType(job!.leadType);
+    const onSite = lt === "onsite" || lt === "warranty_onsite";
+
+    // Field Manager assigns a Ninja (pickup OR on-site — both need a Ninja).
     if (s === "pending_assignment") {
       return (
         <Can permission="assign_ninja">
-          <Button className="w-full gap-1.5" onClick={() => setMode("assign_ninja")}><UserCheck className="h-4 w-4" /> Assign Ninja for pickup</Button>
+          <Button className="w-full gap-1.5" onClick={() => setMode("assign_ninja")}>
+            <UserCheck className="h-4 w-4" /> {onSite ? "Assign Ninja for on-site visit" : "Assign Ninja for pickup"}
+          </Button>
         </Can>
       );
     }
-    // Ninja pickup leg progression
+    // Ninja leg progression — start the trip.
     if (s === "assigned" || s === "pickup_scheduled") {
-      return <Can permission="update_pickup"><Button className="w-full gap-1.5" onClick={() => transition(job!.id, "out_for_pickup")}><Send className="h-4 w-4" /> Start pickup</Button></Can>;
+      return <Can permission="update_pickup"><Button className="w-full gap-1.5" onClick={() => transition(job!.id, "out_for_pickup")}><Send className="h-4 w-4" /> {onSite ? "Start on-site visit" : "Start pickup"}</Button></Can>;
     }
+
+    // ── On-Site branch: repair at the customer, then complete on site ──
+    if (onSite) {
+      if (s === "out_for_pickup") {
+        // Ninja has reached the customer: create the repair Ticket on site.
+        return (
+          <div className="space-y-2">
+            {ticketBtn}
+            <Can permission="update_pickup">
+              <Button variant="outline" className="w-full gap-1.5" onClick={() => transition(job!.id, "in_repair")}>
+                <Wrench className="h-4 w-4" /> Mark repair started (on site)
+              </Button>
+            </Can>
+          </div>
+        );
+      }
+      if (s === "in_repair") {
+        return (
+          <div className="space-y-2">
+            {!job!.linkedTicketId && ticketBtn}
+            <Can permission="update_drop">
+              <Button className="w-full gap-1.5" onClick={() => setMode("drop_proof")}><ShieldCheck className="h-4 w-4" /> Complete on-site job</Button>
+            </Can>
+          </div>
+        );
+      }
+    }
+
+    // ── Pickup & Drop branch: pickup → store → repair → drop ──
     if (s === "out_for_pickup") {
       return <Can permission="update_pickup"><Button className="w-full gap-1.5" onClick={() => setMode("pickup_proof")}><PackageCheck className="h-4 w-4" /> Confirm pickup</Button></Can>;
     }
@@ -108,21 +168,16 @@ export function FieldJobDrawer({ job, open, onClose }: {
       return <Can permission="receive_store_handoff"><Button className="w-full gap-1.5" onClick={() => receiveAtStore(job!.id)}><Package className="h-4 w-4" /> Receive device at store</Button></Can>;
     }
     if (s === "at_store") {
-      return (
-        <div className="space-y-2">
-          <Can permission={["manage_field_jobs", "manage_repair_jobs"]}>
-            <Button className="w-full gap-1.5" onClick={() => router.push(`/tickets/new?fromFieldJob=${job!.id}&from=field`)}>
-              <TicketIcon className="h-4 w-4" /> {job!.linkedTicketId ? "Open Ticket" : "Create repair Ticket"}
-            </Button>
-          </Can>
-        </div>
-      );
+      return <div className="space-y-2">{ticketBtn}</div>;
     }
     if (s === "in_repair") {
       return (
-        <Can permission="manage_field_jobs">
-          <Button className="w-full gap-1.5" onClick={() => markReadyForDrop(job!.id)}><Wrench className="h-4 w-4" /> Mark repair complete · Ready for drop</Button>
-        </Can>
+        <div className="space-y-2">
+          {!job!.linkedTicketId && ticketBtn}
+          <Can permission="manage_field_jobs">
+            <Button className="w-full gap-1.5" onClick={() => markReadyForDrop(job!.id)}><Wrench className="h-4 w-4" /> Mark repair complete · Ready for drop</Button>
+          </Can>
+        </div>
       );
     }
     if (s === "ready_for_drop") {
@@ -147,12 +202,12 @@ export function FieldJobDrawer({ job, open, onClose }: {
       width="max-w-lg"
     >
       <div className="space-y-4">
-        {/* Status + links header */}
+        {/* Status + links header — colour strip (no avatar), consistent w/ table */}
         <div className="flex items-center justify-between gap-3 rounded-2xl border border-border bg-muted/30 p-4">
-          <div className="flex items-center gap-3">
-            <Avatar name={job.customer || job.jobNo} size={42} />
+          <div className="flex min-w-0 items-stretch gap-3">
+            <span className="w-1.5 shrink-0 self-stretch rounded-full" style={{ backgroundColor: accentColor(resolved.customerName || job.customer || job.jobNo) }} />
             <div className="min-w-0">
-              <p className="font-display text-base font-bold">{job.customer || "—"}</p>
+              <p className="truncate font-display text-base font-bold">{resolved.customerName || job.customer || "—"}</p>
               <p className="text-[12px] text-muted-foreground">{job.leadNo ? `From ${job.leadNo}` : "Field Job"}{job.branch ? ` · ${job.branch}` : ""}</p>
             </div>
           </div>
@@ -167,15 +222,39 @@ export function FieldJobDrawer({ job, open, onClose }: {
           {linkedTicket && <button onClick={() => router.push(`/tickets/${linkedTicket.id}`)} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"><TicketIcon className="h-3.5 w-3.5" /> Ticket {linkedTicket.ticketNo || ""}</button>}
         </div>
 
-        {/* Details grid */}
+        {/* Trip / classification */}
         <section className="rounded-2xl border border-border bg-card p-4">
           <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-            <Cell icon={Package} label="Device">{job.device || "—"}</Cell>
-            <Cell icon={Wrench} label="Issue">{job.issue || "—"}</Cell>
+            <Cell icon={Tag} label="Lead Type">{FIELD_LEAD_TYPE_LABEL[normaliseLeadType(job.leadType)]}</Cell>
+            <Cell icon={Radio} label="Source">{job.source || FIELD_SOURCE_LABEL[classifySource(job.source)]}</Cell>
+            <Cell icon={Package} label="Model">{resolved.model || "—"}</Cell>
+            <Cell icon={Wrench} label="Issue">{resolved.modelDetail || job.issue || "—"}</Cell>
             <Cell icon={User} label="Sales">{job.salesPersonName || "—"}</Cell>
             <Cell icon={UserCheck} label="Field Manager">{job.fieldManagerName || "—"}</Cell>
             <Cell icon={Truck} label="Pickup Ninja">{job.ninjaName || "—"}</Cell>
             <Cell icon={Truck} label="Drop Ninja">{job.dropNinjaName || "—"}</Cell>
+          </div>
+        </section>
+
+        {/* Ticket + Invoice (resolved live — never duplicated onto the job) */}
+        <section className="rounded-2xl border border-border bg-card p-4">
+          <div className="grid grid-cols-3 gap-x-4 gap-y-3">
+            <div>
+              <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"><TicketIcon className="h-3 w-3" /> Ticket</p>
+              {resolved.ticket ? (
+                <button onClick={() => router.push(`/tickets/${resolved.ticket!.id}`)} className="mt-0.5 text-[13px] font-semibold text-[#4361EE] hover:underline">{resolved.ticketNo}</button>
+              ) : <p className="mt-0.5 text-[13px] text-zinc-300">—</p>}
+            </div>
+            <div>
+              <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"><FileText className="h-3 w-3" /> Invoice</p>
+              {resolved.invoice ? (
+                <button onClick={() => router.push(`/invoice/${resolved.invoice!.id}`)} className="mt-0.5 text-[13px] font-semibold text-[#4361EE] hover:underline">{resolved.invoiceId}</button>
+              ) : <p className="mt-0.5 text-[13px] text-zinc-300">—</p>}
+            </div>
+            <div>
+              <p className="flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground"><FileText className="h-3 w-3" /> Amount</p>
+              <p className={cn("mt-0.5 text-[13px] font-semibold", resolved.invoiceAmount != null ? "text-zinc-800" : "text-zinc-300")}>{formatInvoiceAmount(resolved.invoiceAmount)}</p>
+            </div>
           </div>
         </section>
 
@@ -194,6 +273,23 @@ export function FieldJobDrawer({ job, open, onClose }: {
             <p className="text-[13px] text-zinc-700">{job.dropAddress || job.pickupAddress || "Same as pickup"}</p>
             {(job.dropDate || job.dropTime) && <p className="mt-1 inline-flex items-center gap-1 text-[12px] text-zinc-500"><CalendarClock className="h-3 w-3" /> {job.dropDate} {job.dropTime}</p>}
             {job.dropProof && <p className="mt-1.5 text-[11px] text-emerald-600">Delivered{job.dropProof.byName ? ` by ${job.dropProof.byName}` : ""}</p>}
+          </section>
+        )}
+
+        {/* Activity timeline — operational history (who did what, when). */}
+        {timeline.length > 0 && (
+          <section className="rounded-2xl border border-border bg-card p-4">
+            <p className="mb-3 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-zinc-500"><History className="h-3.5 w-3.5" /> Activity Timeline</p>
+            <ol className="relative space-y-3 border-l border-border pl-4">
+              {timeline.map((e) => (
+                <li key={e.id} className="relative">
+                  <span className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full bg-[#4361EE] ring-2 ring-white" />
+                  <p className="text-[12.5px] font-medium text-zinc-800">{e.action}</p>
+                  {e.description && <p className="text-[11.5px] text-zinc-500">{e.description}</p>}
+                  <p className="mt-0.5 text-[10.5px] text-zinc-400">{formatWhen(e.ts)}{e.actor ? ` · ${e.actor}` : ""}</p>
+                </li>
+              ))}
+            </ol>
           </section>
         )}
 

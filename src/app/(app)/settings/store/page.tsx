@@ -1,13 +1,12 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import {
-  Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X,
-} from "lucide-react";
+import { Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X, Hash } from "lucide-react";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
+import { StoreNumberingSection } from "@/components/settings/store-numbering-section";
 
 function Field({ label, children, span }: { label: string; children: React.ReactNode; span?: boolean }) {
   return (
@@ -159,6 +158,11 @@ export default function StoreSettingsPage() {
           </Field>
         </div>
       </SettingsSection>
+
+      {/* Store-specific document numbering prefixes (KOR-T-0001, KOR-INV001…).
+          Only shown when operating inside a specific store; saves to that
+          store's branch_settings independently of the fields above. */}
+      <StoreNumberingSection />
 
       {/* Printing configuration lives under Store → Printing (a single place for
           Store, Ticket and Invoice print terms). */}

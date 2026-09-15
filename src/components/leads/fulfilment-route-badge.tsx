@@ -17,14 +17,13 @@ export function FulfilmentRouteBadge({ lead, className }: { lead: Lead; classNam
   return (
     <span
       className={cn(
-        "inline-flex w-fit items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset",
+        "inline-flex w-fit max-w-full items-center gap-1 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold leading-none ring-1 ring-inset",
         isStore ? "bg-sky-50 text-sky-700 ring-sky-200" : "bg-violet-50 text-violet-700 ring-violet-200",
-        "block",
         className,
       )}
       title={isStore ? "Store-to-Store" : "Pickup & Drop"}
     >
-      <Icon className="h-2.5 w-2.5" />
+      <Icon className="h-2.5 w-2.5 shrink-0" />
       {isStore ? "Store" : "Pickup"}
     </span>
   );

@@ -43,6 +43,99 @@ export function normaliseRoute(v: string | null | undefined): FulfilmentRoute | 
   return "";
 }
 
+/* ─── Field Job TYPE (the "Lead Type" column in the prototype) ─────────────
+   The operational nature of the trip. Distinct from the FulfilmentRoute (which
+   only says "this lead is a pickup & drop") — the type tells the field team
+   WHICH leg pattern to run (pure pickup, on-site repair, pure drop, or a
+   warranty variant). Stored on the FieldJob so the workflow/labels adapt. */
+
+export type FieldLeadType =
+  | "pickup"
+  | "onsite"
+  | "drop"
+  | "warranty_pickup"
+  | "warranty_onsite";
+
+export const FIELD_LEAD_TYPE_LABEL: Record<FieldLeadType, string> = {
+  pickup: "Pickup",
+  onsite: "On-Site",
+  drop: "Drop",
+  warranty_pickup: "Warranty Pickup",
+  warranty_onsite: "Warranty On-Site",
+};
+
+/** Tailwind chip tones per lead type (kept subtle — not a status colour). */
+export const FIELD_LEAD_TYPE_TONE: Record<FieldLeadType, string> = {
+  pickup:          "bg-sky-50 text-sky-700 ring-sky-200",
+  onsite:          "bg-violet-50 text-violet-700 ring-violet-200",
+  drop:            "bg-teal-50 text-teal-700 ring-teal-200",
+  warranty_pickup: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  warranty_onsite: "bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200",
+};
+
+export const FIELD_LEAD_TYPES: { value: FieldLeadType; label: string }[] =
+  (Object.keys(FIELD_LEAD_TYPE_LABEL) as FieldLeadType[]).map((v) => ({ value: v, label: FIELD_LEAD_TYPE_LABEL[v] }));
+
+/** True for warranty variants — used to apply warranty context in the workflow. */
+export function isWarrantyType(t: FieldLeadType): boolean {
+  return t === "warranty_pickup" || t === "warranty_onsite";
+}
+
+/** True when the type has a customer→store pickup leg (everything except a pure Drop). */
+export function typeHasPickup(t: FieldLeadType): boolean {
+  return t !== "drop";
+}
+
+/** True when the type has a store→customer drop leg (everything except a pure pickup-only
+ *  or an on-site job where the device never leaves — here On-Site keeps a return step). */
+export function typeHasDrop(t: FieldLeadType): boolean {
+  return t !== "onsite" ? true : true; // all current types end with the device back at customer
+}
+
+/** Normalise any stored/legacy value to a stable FieldLeadType. Defaults to
+ *  "pickup" (the historical behaviour — every Field Job was a pickup & drop). */
+export function normaliseLeadType(v: string | null | undefined): FieldLeadType {
+  const s = String(v ?? "").trim().toLowerCase().replace(/[\s&]+/g, "_");
+  if (s === "onsite" || s === "on_site" || s === "on-site") return "onsite";
+  if (s === "drop") return "drop";
+  if (s === "warranty_pickup" || s === "warranty" ) return "warranty_pickup";
+  if (s === "warranty_onsite" || s === "warranty_on_site") return "warranty_onsite";
+  return "pickup";
+}
+
+/* ─── Field Job SOURCE (the "Source" column) ───────────────────────────────
+   Where the field job originated. Mapped from the originating Lead / Walk-In
+   source where available; free enough to hold the sales team's own vocabulary.
+   We keep a small canonical set for colouring but preserve the raw string. */
+
+export type FieldSource = "store" | "marketing" | "reference" | "other";
+
+export const FIELD_SOURCE_LABEL: Record<FieldSource, string> = {
+  store: "Store",
+  marketing: "Marketing",
+  reference: "Reference",
+  other: "Other",
+};
+
+/** Bucket a raw source string (from a Lead/Walk-In) into a canonical source. */
+export function classifySource(raw: string | null | undefined): FieldSource {
+  const s = String(raw ?? "").trim().toLowerCase();
+  if (!s) return "other";
+  if (s.includes("store") || s.includes("walk")) return "store";
+  if (s.includes("market") || s.includes("meta") || s.includes("insta") || s.includes("google") ||
+      s.includes("website") || s.includes("form") || s.includes("whatsapp") || s.includes("ad")) return "marketing";
+  if (s.includes("refer")) return "reference";
+  return "other";
+}
+
+/** Tone for the canonical source bucket. */
+export const FIELD_SOURCE_TONE: Record<FieldSource, string> = {
+  store:     "bg-amber-50 text-amber-700 ring-amber-200",
+  marketing: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  reference: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  other:     "bg-zinc-100 text-zinc-600 ring-zinc-200",
+};
+
 /* ─── Field Job status — its OWN lifecycle (distinct from Ticket status) ── */
 
 export type FieldJobStatus =
@@ -142,7 +235,12 @@ export interface FieldJob {
   leadNo: string;          // cached Lead business no for display
   customerId: string;      // Customer Master id — never duplicated
   linkedTicketId: string;  // repair Ticket id once created ("" until then)
-  linkedInvoiceId: string; // cached for display convenience ("" until billed)
+  linkedTicketDeviceId: string; // specific DeviceRecord.id on the ticket (multi-device)
+  linkedInvoiceId: string; // repair Invoice id ("" until billed) — amount resolved live
+
+  /* ── Operational classification (the prototype's LEAD TYPE + SOURCE) ── */
+  leadType: FieldLeadType; // Pickup / On-Site / Drop / Warranty * — drives the leg workflow
+  source: string;          // raw origin (mapped from Lead/Walk-In source; e.g. "Store", "Marketing")
 
   /* ── Denormalised display fields (cached; master data stays source of truth) ── */
   customer: string;        // customer name
@@ -195,19 +293,70 @@ export type FieldJobDraft = Partial<Omit<FieldJob, "id" | "jobNo" | "createdAt" 
 
 /* ─── ID helpers ──────────────────────────────────────────────────────── */
 
-export function formatFieldJobNo(seq: number): string {
-  return `FJ-${String(seq).padStart(3, "0")}`;
+/** Normalize a store prefix ("KOR", "KOR-", " kor ") into the canonical
+ *  uppercase, dash-terminated form used inside a Field Job number ("KOR-"),
+ *  or null when there is no prefix. Mirrors the ticket/invoice prefix helper. */
+export function fieldPrefixSep(prefix?: string | null): string | null {
+  const raw = (prefix ?? "").trim().toUpperCase().replace(/-+$/, "");
+  return raw ? `${raw}-` : null;
 }
 
-export function fieldJobSeq(jobNo: string): number {
-  const m = /(\d+)\s*$/.exec(jobNo || "");
+/** Format a Field Job number: `<PREFIX>FJ-001`. Default (no prefix) → `FJ-001`.
+ *  A store prefix like "KOR" yields `KOR-FJ-001`. */
+export function formatFieldJobNo(seq: number, prefix?: string | null): string {
+  const p = fieldPrefixSep(prefix) ?? "";
+  return `${p}FJ-${String(seq).padStart(3, "0")}`;
+}
+
+/** Extract the numeric sequence from a Field Job number. When a prefix is
+ *  supplied, only numbers carrying that exact prefix are counted so per-store
+ *  sequences never interfere with each other. */
+export function fieldJobSeq(jobNo: string, prefix?: string | null): number {
+  const v = String(jobNo || "");
+  const p = fieldPrefixSep(prefix);
+  const re = p
+    ? new RegExp(`^${p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}FJ-(\\d+)$`)
+    : /(\d+)\s*$/;
+  const m = re.exec(v);
   return m ? Number(m[1]) : 0;
 }
 
-/** Next business number given the existing jobs (max + 1). */
-export function nextFieldJobNo(existing: FieldJob[]): string {
-  const max = existing.reduce((acc, j) => Math.max(acc, fieldJobSeq(j.jobNo)), 0);
-  return formatFieldJobNo(max + 1);
+/** Next business number given the existing jobs (max + 1). LOCAL/fallback only —
+ *  the DB-backed generator below is the source of truth in Supabase mode. */
+export function nextFieldJobNo(existing: FieldJob[], prefix?: string | null): string {
+  const max = existing.reduce((acc, j) => Math.max(acc, fieldJobSeq(j.jobNo, prefix)), 0);
+  return formatFieldJobNo(max + 1, prefix);
+}
+
+/**
+ * Compute the next Field Job number STRAIGHT FROM THE DATABASE, scoped to a
+ * store (branch_id) so each store keeps an independent FJ sequence and numbers
+ * never collide across stores. Mirrors nextTicketIdFromDb().
+ *
+ *   • storeId set   → count only that store's field jobs (per-store sequence).
+ *   • storeId null  → count within the caller's RLS-visible set (fallback).
+ *
+ * The number is `highest existing (for this prefix) + 1`. Cancelled/soft-deleted
+ * jobs KEEP their job_no, so their numbers are still counted here and never
+ * reused. Concurrency is handled by the caller (retry on the unique index).
+ */
+export async function nextFieldJobNoFromDb(
+  storeId?: string | null,
+  prefix?: string | null
+): Promise<string> {
+  // Lazy import to keep this module usable in pure/local contexts.
+  const { supabase } = await import("@/lib/supabase");
+  let maxNum = 0;
+  if (supabase) {
+    let q = supabase.from("field_jobs").select("job_no").is("deleted_at", null);
+    if (storeId) q = q.eq("branch_id", storeId);
+    const { data } = await q;
+    maxNum = (data ?? []).reduce(
+      (acc: number, r: { job_no?: string }) => Math.max(acc, fieldJobSeq(r.job_no ?? "", prefix)),
+      0
+    );
+  }
+  return formatFieldJobNo(maxNum + 1, prefix);
 }
 
 export function genFieldJobId(): string {
@@ -245,6 +394,64 @@ export function isDelayed(job: FieldJob, now: Date = new Date()): boolean {
 export function ninjaActionable(status: FieldJobStatus): boolean {
   return ["assigned", "pickup_scheduled", "out_for_pickup",
           "drop_scheduled", "out_for_drop"].includes(status);
+}
+
+/* ─── Guarded status transitions (prototype §21–23) ───────────────────────
+   The Service Status pill only exposes VALID next states so the operational
+   team can't jump the flow (e.g. Pending Assignment → Completed). The allowed
+   set is a function of the CURRENT status; cancel is always available while the
+   job is live. The sequence follows the pickup → store → repair → drop lifecycle. */
+
+const BASE_TRANSITIONS: Record<FieldJobStatus, FieldJobStatus[]> = {
+  pending_assignment: ["assigned", "pickup_scheduled"],
+  assigned:           ["pickup_scheduled", "out_for_pickup"],
+  pickup_scheduled:   ["out_for_pickup"],
+  out_for_pickup:     ["picked_up", "failed_pickup"],
+  failed_pickup:      ["pickup_scheduled", "out_for_pickup"],
+  picked_up:          ["at_store"],
+  at_store:           ["in_repair", "ready_for_drop"],
+  in_repair:          ["ready_for_drop"],
+  ready_for_drop:     ["drop_scheduled", "out_for_drop"],
+  drop_scheduled:     ["out_for_drop"],
+  out_for_drop:       ["delivered", "failed_drop"],
+  failed_drop:        ["drop_scheduled", "out_for_drop"],
+  delivered:          ["completed"],
+  completed:          [],
+  cancelled:          [],
+};
+
+/**
+ * Valid next statuses from the current one, optionally tailored to the job's
+ * lead type. A pure Drop job skips the pickup leg; an On-Site job may go
+ * straight to repair on arrival. Terminal statuses return an empty set (no
+ * further field action). Cancel is offered separately by the UI.
+ */
+export function allowedFieldTransitions(status: FieldJobStatus, leadType?: FieldLeadType): FieldJobStatus[] {
+  if (isTerminal(status)) return [];
+  let next = [...(BASE_TRANSITIONS[status] ?? [])];
+  const t = leadType ? normaliseLeadType(leadType) : undefined;
+
+  // Pure Drop: the device is already at the store — from pending assignment the
+  // team schedules a DROP, not a pickup.
+  if (t === "drop" && status === "pending_assignment") {
+    next = ["ready_for_drop", "drop_scheduled"];
+  }
+
+  // On-Site (incl. warranty on-site): the Ninja repairs AT the customer — the
+  // device never travels to the store. Once the Ninja has reached the customer
+  // (out_for_pickup = "on the way / on site"), the job moves straight into
+  // repair, then is completed on site (no drop leg needed).
+  if ((t === "onsite" || t === "warranty_onsite")) {
+    if (status === "out_for_pickup") next = ["in_repair", "failed_pickup"];
+    if (status === "in_repair") next = ["completed"];
+    if (status === "picked_up") next = ["in_repair"]; // safety: if a pickup was recorded
+  }
+  return next;
+}
+
+/** True when moving from `from` → `to` is a permitted transition for the type. */
+export function canTransition(from: FieldJobStatus, to: FieldJobStatus, leadType?: FieldLeadType): boolean {
+  return allowedFieldTransitions(from, leadType).includes(to);
 }
 
 /* ─── Field Job queues (operational views) ────────────────────────────── */
@@ -302,10 +509,13 @@ export interface FieldJobFilters {
   leg: "" | "pickup" | "drop";
   delayed: boolean;
   hasTicket: "" | "yes" | "no";
+  leadType: FieldLeadType | "";
+  source: FieldSource | "";
 }
 
 export const EMPTY_FIELD_FILTERS: FieldJobFilters = {
   query: "", status: "", branch: "", fieldManagerId: "", ninjaId: "", leg: "", delayed: false, hasTicket: "",
+  leadType: "", source: "",
 };
 
 export function searchFieldJob(job: FieldJob, q: string): boolean {
@@ -313,7 +523,8 @@ export function searchFieldJob(job: FieldJob, q: string): boolean {
   const needle = q.trim().toLowerCase();
   const hay = [
     job.jobNo, job.leadNo, job.customer, job.phone, job.device,
-    job.linkedTicketId, job.ninjaName, job.fieldManagerName,
+    job.linkedTicketId, job.linkedInvoiceId, job.ninjaName, job.fieldManagerName,
+    job.source, FIELD_LEAD_TYPE_LABEL[normaliseLeadType(job.leadType)],
   ].filter(Boolean).join(" ").toLowerCase();
   return hay.includes(needle);
 }
@@ -330,12 +541,14 @@ export function applyFieldFilters(jobs: FieldJob[], filters: FieldJobFilters, no
     if (filters.delayed && !isDelayed(j, now)) return false;
     if (filters.hasTicket === "yes" && !j.linkedTicketId) return false;
     if (filters.hasTicket === "no" && j.linkedTicketId) return false;
+    if (filters.leadType && normaliseLeadType(j.leadType) !== filters.leadType) return false;
+    if (filters.source && classifySource(j.source) !== filters.source) return false;
     return true;
   });
 }
 
 export function hasActiveFieldFilters(f: FieldJobFilters): boolean {
-  return !!(f.query || f.status || f.branch || f.fieldManagerId || f.ninjaId || f.leg || f.delayed || f.hasTicket);
+  return !!(f.query || f.status || f.branch || f.fieldManagerId || f.ninjaId || f.leg || f.delayed || f.hasTicket || f.leadType || f.source);
 }
 
 /* ─── Visual helpers (deterministic accent colours) ───────────────────── */

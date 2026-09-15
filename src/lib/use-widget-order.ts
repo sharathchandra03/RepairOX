@@ -3,13 +3,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStoreContext } from "@/lib/store-context";
 import type { LayoutItem } from "react-grid-layout";
 
 /* ──────────────────────────────────────────────────────────────────────────
-   useGridLayout — Persists the full react-grid-layout per user (email).
+   useGridLayout — Persists the full react-grid-layout per user, PER STORE.
 
-   Reads from localStorage SYNCHRONOUSLY on first render to avoid flash.
-   Then optionally syncs with Supabase in the background.
+   The layout is independent for each store (and the All-Shops bucket). Reads
+   from localStorage SYNCHRONOUSLY on first render to avoid flash, then syncs
+   with Supabase in the background (scoped to the active store).
    ────────────────────────────────────────────────────────────────────────── */
 
 const LOCAL_STORAGE_PREFIX = "repairox-grid-layout-";
@@ -29,10 +31,13 @@ function readLocalSync(key: string | null): Record<string, LayoutItem[]> | null 
 
 export function useGridLayout() {
   const { currentUser } = usePermissions();
+  const { activeStoreId } = useStoreContext();
 
-  // Key by email for per-user isolation (falls back to id if no email)
+  // Store bucket: a concrete branch id, or "all" for the consolidated view.
+  const storeBucket = activeStoreId ?? "all";
+  // Key by email for per-user isolation (falls back to id) PER STORE.
   const userKey = currentUser?.email || currentUser?.id || null;
-  const localKey = userKey ? `${LOCAL_STORAGE_PREFIX}${userKey}` : null;
+  const localKey = userKey ? `${LOCAL_STORAGE_PREFIX}${userKey}::${storeBucket}` : null;
 
   // Initialize state synchronously from localStorage — no flash
   const [savedLayouts, setSavedLayouts] = useState<Record<string, LayoutItem[]> | null>(
@@ -66,9 +71,10 @@ export function useGridLayout() {
         const token = session?.session?.access_token;
         if (!token) return;
 
-        const res = await fetch("/api/dashboard-preferences?section=grid_layout", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch(
+          `/api/dashboard-preferences?section=grid_layout&store=${encodeURIComponent(storeBucket)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         if (!res.ok) return;
 
         const json = await res.json();
@@ -91,7 +97,7 @@ export function useGridLayout() {
 
     syncFromSupabase();
     return () => { cancelled = true; };
-  }, [localKey]);
+  }, [localKey, storeBucket]);
 
   // ── Persist (debounced — only after drop/resize ends) ──
   const persistLayout = useCallback(
@@ -118,14 +124,14 @@ export function useGridLayout() {
                   "Content-Type": "application/json",
                   Authorization: `Bearer ${token}`,
                 },
-                body: JSON.stringify({ section: "grid_layout", cardOrder: [serialized] }),
+                body: JSON.stringify({ section: "grid_layout", cardOrder: [serialized], store: storeBucket }),
               });
             }
           } catch { /* */ }
         }
       }, 500);
     },
-    [localKey]
+    [localKey, storeBucket]
   );
 
   return { savedLayouts, persistLayout, isLoading };

@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStoreContext } from "@/lib/store-context";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -67,8 +68,10 @@ function writeLocal(key: string, settings: PersistedSettings) {
 
 export function DashboardSettingsProvider({ children }: { children: ReactNode }) {
   const { currentUser } = usePermissions();
+  const { activeStoreId } = useStoreContext();
+  const storeBucket = activeStoreId ?? "all";
   const userKey = currentUser?.email || currentUser?.id || "_default";
-  const localKey = `${LOCAL_KEY_PREFIX}${userKey}`;
+  const localKey = `${LOCAL_KEY_PREFIX}${userKey}::${storeBucket}`;
 
   const [settings, setSettings] = useState<PersistedSettings>({ resizeEnabled: false, reorderEnabled: false });
   const [isSaving, setIsSaving] = useState(false);
@@ -97,9 +100,10 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
         const token = session?.session?.access_token;
         if (!token) return;
 
-        const res = await fetch("/api/dashboard-preferences?section=dashboard_settings", {
-          headers: { Authorization: `Bearer ${token}` },
-        });
+        const res = await fetch(
+          `/api/dashboard-preferences?section=dashboard_settings&store=${encodeURIComponent(storeBucket)}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
         if (!res.ok) return;
 
         const json = await res.json();
@@ -122,7 +126,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
 
     syncFromSupabase();
     return () => { cancelled = true; };
-  }, [localKey]);
+  }, [localKey, storeBucket]);
 
   const setResizeEnabled = useCallback((v: boolean) => {
     setSettings((prev) => ({ ...prev, resizeEnabled: v }));
@@ -155,6 +159,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
             body: JSON.stringify({
               section: "dashboard_settings",
               cardOrder: [JSON.stringify(current)],
+              store: storeBucket,
             }),
           });
         }
@@ -162,7 +167,7 @@ export function DashboardSettingsProvider({ children }: { children: ReactNode })
     }
 
     setIsSaving(false);
-  }, [localKey]);
+  }, [localKey, storeBucket]);
 
   return (
     <DashboardSettingsContext.Provider

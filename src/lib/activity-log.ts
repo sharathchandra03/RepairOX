@@ -13,7 +13,7 @@
 
 import { useSyncExternalStore } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
-import { CURRENT_USER, currentRole } from "./permissions";
+import { currentRole } from "./permissions";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -41,7 +41,10 @@ export interface ActivityEntry {
   description: string;
   actor: string;
   role?: string;
+  /** Store (branch) display name — shown for differentiation, esp. in All Shops. */
   branch?: string;
+  /** Store (branch) id — used to scope the feed per store. */
+  branchId?: string | null;
   changes?: ActivityChange[];
   reason?: string;
   meta?: Record<string, string>;
@@ -62,15 +65,44 @@ let mode: "db" | "local" = isSupabaseConfigured ? "db" : "local";
 const listeners = new Set<() => void>();
 let _counter = 0;
 
-/* ─── Dynamic actor override ─────────────────────────────────────── */
+/* ─── Dynamic actor + active-store context ───────────────────────── */
 let _currentActor: string | null = null;
 let _currentBranch: string | null = null;
+// Active store scope: the branch id (null = All Shops) + its display name.
+let _activeStoreId: string | null = null;
+let _activeStoreName: string | null = null;
+// True once the store context has told us the initial active store. Until then
+// the feed hasn't been scoped yet.
+let _storeInitialised = false;
 
 /** Call this from the permissions context whenever the signed-in user changes.
- *  logActivity() will then use this name instead of the hardcoded CURRENT_USER fallback. */
+ *  logActivity() uses this REAL account name (set when the user was created)
+ *  instead of any hardcoded fallback — no manual re-editing needed. */
 export function setCurrentActor(name: string | null, branch?: string | null) {
   _currentActor = name;
   _currentBranch = branch ?? null;
+}
+
+/** Call this from the store context whenever the active store changes. It:
+ *   • scopes the activity feed to the active store (individual per store),
+ *   • leaves it consolidated (org-wide) in All-Shops mode (branchId null),
+ *   • stamps client-logged entries with the active store's branch_id + name.
+ *  Re-hydrates the feed so switching stores immediately re-scopes it. */
+export function setCurrentStore(branchId: string | null, storeName?: string | null) {
+  const changed = _activeStoreId !== branchId || !_storeInitialised;
+  _activeStoreId = branchId;
+  _activeStoreName = storeName ?? null;
+  _storeInitialised = true;
+  // Re-scope the feed whenever the store changes. In DB mode this re-queries
+  // audit_log filtered by the new store; we hydrate here even if a component
+  // hasn't subscribed yet so the FIRST render already shows the right store
+  // (avoids a flash of "all stores" before the first switch).
+  if (changed && isSupabaseConfigured && supabase) {
+    mode = "db";
+    hydrated = true;
+    hydrateFromDb();
+    ensureRealtimeChannel();
+  }
 }
 
 function genId(): string {
@@ -99,6 +131,7 @@ function rowToActivity(r: any): ActivityEntry {
     actor: r.actor ?? "System",
     role: r.role ?? undefined,
     branch: r.branch ?? undefined,
+    branchId: r.branch_id ?? null,
     changes: r.changes ?? undefined,
     reason: r.reason ?? undefined,
     meta: r.meta ?? undefined,
@@ -108,15 +141,43 @@ function rowToActivity(r: any): ActivityEntry {
 /** Load from DB or localStorage. */
 async function hydrateFromDb() {
   if (!supabase) return;
-  const { data } = await supabase
+  let query = supabase
     .from("audit_log")
     .select("*")
     .order("created_at", { ascending: false })
     .limit(MAX_ENTRIES);
-  if (data && data.length > 0) {
-    entries = data.map(rowToActivity);
-    emit();
-  }
+  // Store-to-store: individual. A concrete active store filters the feed to
+  // that store. All Shops (null) leaves it consolidated (org-wide via RLS).
+  if (_activeStoreId) query = query.eq("branch_id", _activeStoreId);
+  const { data } = await query;
+  // Replace the buffer with this store's slice (even when empty, so switching
+  // to a store with no activity doesn't show the previous store's entries).
+  entries = (data ?? []).map(rowToActivity);
+  emit();
+}
+
+// Ensure the realtime channel exists exactly once (db mode). Independent of the
+// `hydrated` flag so it's set up regardless of whether hydration was triggered
+// by a subscribing component or by setCurrentStore().
+let _channelReady = false;
+function ensureRealtimeChannel() {
+  if (_channelReady || !supabase) return;
+  _channelReady = true;
+  const channel = supabase.channel("audit-log-realtime")
+    .on("postgres_changes" as any, { event: "INSERT", schema: "public", table: "audit_log" }, (payload: any) => {
+      if (!payload.new) return;
+      const entry = rowToActivity(payload.new);
+      // Store isolation on the live path: when a concrete store is active,
+      // ignore entries from other stores. In All-Shops mode (null) keep all.
+      if (_activeStoreId && entry.branchId && entry.branchId !== _activeStoreId) return;
+      // Avoid duplicates (from our own writes).
+      if (!entries.some((e) => e.id === entry.id)) {
+        entries = [entry, ...entries].slice(0, MAX_ENTRIES);
+        emit();
+      }
+    })
+    .subscribe();
+  (globalThis as any).__auditChannel = channel;
 }
 
 function ensureHydrated() {
@@ -126,19 +187,7 @@ function ensureHydrated() {
   if (isSupabaseConfigured && supabase) {
     mode = "db";
     hydrateFromDb();
-    // Realtime subscription for new audit entries.
-    const channel = supabase.channel("audit-log-realtime")
-      .on("postgres_changes" as any, { event: "INSERT", schema: "public", table: "audit_log" }, (payload: any) => {
-        if (!payload.new) return;
-        const entry = rowToActivity(payload.new);
-        // Avoid duplicates (from our own writes).
-        if (!entries.some((e) => e.id === entry.id)) {
-          entries = [entry, ...entries].slice(0, MAX_ENTRIES);
-          emit();
-        }
-      })
-      .subscribe();
-    (globalThis as any).__auditChannel = channel;
+    ensureRealtimeChannel();
   } else {
     mode = "local";
     try {
@@ -153,6 +202,14 @@ function ensureHydrated() {
 export function logActivity(input: ActivityInput): ActivityEntry {
   ensureHydrated();
   const role = currentRole();
+  // Actor = the REAL signed-in account name (from staff, via setCurrentActor).
+  // Never fall back to a hardcoded/mock person — use "System" when unknown so
+  // the log is always truthful about who acted.
+  const actor = input.actor ?? _currentActor ?? "System";
+  // Store name for display: the active store's name (concrete store), else the
+  // user's own branch label. branchId scopes the entry to a store.
+  const branchName = input.branch ?? _activeStoreName ?? _currentBranch ?? undefined;
+  const branchId = _activeStoreId ?? null;
   const entry: ActivityEntry = {
     id: genId(),
     ts: input.ts ?? Date.now(),
@@ -162,9 +219,10 @@ export function logActivity(input: ActivityInput): ActivityEntry {
     entity: input.entity,
     reference: input.reference,
     description: input.description,
-    actor: input.actor ?? _currentActor ?? CURRENT_USER.name,
+    actor,
     role: input.role ?? role?.label,
-    branch: input.branch ?? _currentBranch ?? CURRENT_USER.branch,
+    branch: branchName,
+    branchId,
     changes: input.changes?.filter((c) => c.from !== c.to),
     reason: input.reason,
     meta: input.meta,
@@ -189,6 +247,7 @@ export function logActivity(input: ActivityInput): ActivityEntry {
       actor: entry.actor,
       role: entry.role ?? null,
       branch: entry.branch ?? null,
+      branch_id: entry.branchId ?? null,
     }).then(({ error }) => {
       if (error) console.warn("[activity-log] insert failed:", error.message);
     });
