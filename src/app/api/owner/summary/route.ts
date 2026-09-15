@@ -49,7 +49,7 @@ export async function GET(req: Request) {
   // Stores in this org.
   const { data: branches, error: bErr } = await admin
     .from("branches")
-    .select("id, name, code, address, is_active, created_at")
+    .select("id, name, code, address, is_active, environment, created_at")
     .eq("organization_id", orgId)
     .order("created_at", { ascending: true });
   if (bErr) return NextResponse.json({ ok: false, error: bErr.message }, { status: 400 });
@@ -134,6 +134,7 @@ export async function GET(req: Request) {
       code: b.code,
       address: b.address,
       isActive: b.is_active,
+      environment: (b.environment ?? "live") as "demo" | "live",
       tickets: a.tickets,
       walkIns: a.walkIns,
       invoices: a.invoices,

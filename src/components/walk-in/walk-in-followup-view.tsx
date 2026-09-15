@@ -23,9 +23,10 @@ import { motion } from "framer-motion";
 import { Pencil, History as HistoryIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
-  type WalkIn, type WalkInStatus, WALKIN_TYPE_BAR, FOLLOWUP_OUTCOME_LABEL,
+  type WalkIn, WALKIN_TYPE_BAR, FOLLOWUP_OUTCOME_LABEL,
+  WALKIN_FINAL_STATUS_LABEL, WALKIN_FINAL_STATUS_TONE, walkInFinalStatus,
 } from "@/lib/mock-data";
-import { pendingFollowUps, walkInDisplayId, ordinal } from "@/lib/walk-in-data";
+import { pendingFollowUps, walkInDisplayId, ordinal, followUpState } from "@/lib/walk-in-data";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { WalkInFollowUpCell } from "@/components/walk-in/walk-in-followup-cell";
 
@@ -44,8 +45,6 @@ export function WalkInFollowUpView({
   historyCount,
   currentUserId,
   currentUserName,
-  statusLabel,
-  statusTone,
   onOpen,
   onUpdate,
   onConvert,
@@ -58,15 +57,17 @@ export function WalkInFollowUpView({
   historyCount: number;
   currentUserId?: string;
   currentUserName?: string;
-  statusLabel: Record<WalkInStatus, string>;
-  statusTone: Record<WalkInStatus, string>;
   onOpen: (w: WalkIn) => void;
   onUpdate: (w: WalkIn, patch: Partial<WalkIn>) => void;
   onConvert: (w: WalkIn) => void;
 }) {
   const now = new Date();
-  // Active view orders by urgency; history view keeps the caller's recency order.
-  const list = mode === "active" ? pendingFollowUps(rows, now) : rows;
+  // Active view orders by urgency but keeps EVERY active walk-in — including
+  // ones with no currently-scheduled follow-up (fresh Enquiry/Visitor, or a
+  // walk-in mid-cycle between attempts). Walk-ins with a scheduled follow-up
+  // (via pendingFollowUps: overdue → today → upcoming) float to the top; the
+  // rest follow in recency order. History keeps the caller's recency order.
+  const list = mode === "active" ? sortActive(rows, now) : rows;
 
   return (
     <div className="-mt-5 space-y-3">
@@ -85,10 +86,9 @@ export function WalkInFollowUpView({
               <col className="w-[92px]" />{/* ID */}
               <col className="w-[16%]" />{/* Customer */}
               <col className="w-[124px]" />{/* Contact */}
-              <col className="w-[13%]" />{/* Model */}
-              <col className="w-[15%]" />{/* Issue */}
+              <col className="w-[22%]" />{/* Model (+ issue underneath) */}
               <col className="w-[184px]" />{/* Follow-Up / Last Outcome */}
-              <col className="w-[128px]" />{/* Final Status */}
+              <col className="w-[132px]" />{/* Final Status */}
               <col className="w-[96px]" />{/* Action */}
             </colgroup>
             <thead className="bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
@@ -98,7 +98,6 @@ export function WalkInFollowUpView({
                 <th className="pl-4 py-4">Customer</th>
                 <th className="pl-4 py-4">Contact</th>
                 <th className="pl-4 py-4">Model</th>
-                <th className="pl-4 py-4">Issue</th>
                 <th className="pl-4 py-4">{mode === "history" ? "Last Outcome" : "Follow-Up"}</th>
                 <th className="pl-4 py-4">Final Status</th>
                 <th className="px-4 py-4 text-right">Action</th>
@@ -129,9 +128,17 @@ export function WalkInFollowUpView({
                       </div>
                     </td>
                     <td className="pl-4 py-4 pr-4 text-[13px] whitespace-nowrap tabular-nums">{w.phone || "—"}</td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] truncate max-w-[150px]">{w.model || "—"}</td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
-                      {w.issue || (w.reasons || []).join(", ") || "—"}
+                    {/* MODEL — device model as primary text, reported issue as
+                        secondary text underneath (no standalone Issue column). */}
+                    <td className="pl-4 py-4 pr-4 text-[13px]">
+                      <div className="min-w-0">
+                        <span className="block truncate font-medium text-foreground">{w.model || "—"}</span>
+                        {(w.issue || (w.reasons || []).join(", ")) ? (
+                          <span className="mt-0.5 block truncate text-[12px] text-muted-foreground" title={w.issue || (w.reasons || []).join(", ")}>
+                            {w.issue || (w.reasons || []).join(", ")}
+                          </span>
+                        ) : null}
+                      </div>
                     </td>
                     <td className="pl-4 py-4 pr-4" onClick={(e) => e.stopPropagation()}>
                       {mode === "history" && last ? (
@@ -149,11 +156,18 @@ export function WalkInFollowUpView({
                         />
                       )}
                     </td>
+                    {/* FINAL STATUS — the DERIVED outcome (N/A / Lost / Won),
+                        consistent with the main Walk-In table. */}
                     <td className="pl-4 py-4 pr-4">
-                      <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium ring-1 ring-inset whitespace-nowrap", statusTone[w.status])}>
-                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                        {statusLabel[w.status]}
-                      </span>
+                      {(() => {
+                        const fs = walkInFinalStatus(w);
+                        return (
+                          <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-medium ring-1 ring-inset whitespace-nowrap", WALKIN_FINAL_STATUS_TONE[fs])}>
+                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                            {WALKIN_FINAL_STATUS_LABEL[fs]}
+                          </span>
+                        );
+                      })()}
                     </td>
                     <td className="px-4 py-4" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-1">
@@ -188,6 +202,22 @@ export function WalkInFollowUpView({
       </div>
     </div>
   );
+}
+
+/**
+ * Order the ACTIVE list: walk-ins with a scheduled follow-up first (by urgency
+ * via {@link pendingFollowUps}: overdue → today → upcoming, nearest due first),
+ * followed by active walk-ins with no scheduled follow-up in recency order. No
+ * active walk-in is ever dropped — a follow-up schedule is not required to be
+ * Active (Enquiry / Visitor with N/A remain active per spec §6/§22).
+ */
+function sortActive(rows: WalkIn[], now: Date): WalkIn[] {
+  const scheduled = pendingFollowUps(rows, now);
+  const scheduledIds = new Set(scheduled.map((w) => w.id));
+  const rest = rows
+    .filter((w) => !scheduledIds.has(w.id))
+    .sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return [...scheduled, ...rest];
 }
 
 function SubTab({ label, count, active, onClick, icon: Icon }: { label: string; count: number; active: boolean; onClick: () => void; icon?: any }) {

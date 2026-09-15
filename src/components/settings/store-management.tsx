@@ -26,11 +26,18 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { cn } from "@/lib/utils";
 
+type StoreEnvironment = "demo" | "live";
+
 interface StoreRow {
   id: string; name: string; code: string | null; address: string | null;
-  isActive: boolean; createdAt?: string; staffCount: number; ticketCount: number;
+  isActive: boolean; environment: StoreEnvironment; createdAt?: string; staffCount: number; ticketCount: number;
   manager?: string | null;
 }
+
+/** The preferred default role for a store's first login, IF it exists in the
+ *  organization's Roles & Permissions. We never invent it — if it's absent we
+ *  fall back to the first available role and require an explicit choice. */
+const PREFERRED_MANAGER_ROLE = "shop_owner_branch_manager";
 
 const TIMEZONES = [
   { label: "Asia/Kolkata (IST)", value: "Asia/Kolkata" },
@@ -39,14 +46,30 @@ const TIMEZONES = [
   { label: "Europe/London (GMT)", value: "Europe/London" },
 ];
 
-const emptyForm = { name: "", code: "", address: "", city: "", state: "", postalCode: "", country: "India", phone: "", email: "", timezone: "Asia/Kolkata", isActive: true };
+const emptyForm = { name: "", code: "", address: "", city: "", state: "", postalCode: "", country: "India", phone: "", email: "", timezone: "Asia/Kolkata", isActive: true, environment: "live" as StoreEnvironment };
 
 export function StoreManagement() {
   const router = useRouter();
-  const { apiFetch, authReady, can } = usePermissions();
+  const { apiFetch, authReady, can, allRoles } = usePermissions();
   const { setActiveStore, refreshStores } = useStoreContext();
 
   const canManage = can("manage_branches") || can("full_access");
+
+  // Role options come straight from the organization's Roles & Permissions
+  // (Settings → Roles & Permissions) — the single source of truth. We never
+  // hardcode a duplicate list here. `allRoles` already merges built-in and
+  // custom roles for the current org.
+  const roleOptions = useMemo(
+    () => allRoles.map((r) => ({ label: r.label, value: r.id })),
+    [allRoles]
+  );
+  // Default to Store Manager only if that role actually exists; otherwise the
+  // first available role (and we require the owner to confirm the choice).
+  const defaultRoleId = useMemo(() => {
+    if (allRoles.some((r) => r.id === PREFERRED_MANAGER_ROLE)) return PREFERRED_MANAGER_ROLE;
+    return allRoles[0]?.id ?? "";
+  }, [allRoles]);
+  const hasRoles = roleOptions.length > 0;
 
   const [stores, setStores] = useState<StoreRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -60,12 +83,12 @@ export function StoreManagement() {
 
   // Optional store login (only on create).
   const [createLogin, setCreateLogin] = useState(false);
-  const [mgr, setMgr] = useState({ name: "", email: "", password: "" });
+  const [mgr, setMgr] = useState({ name: "", email: "", password: "", roleId: "" });
 
   // Dedicated "add login to an existing store" drawer.
   const [loginDrawerStore, setLoginDrawerStore] = useState<StoreRow | null>(null);
   const [loginSaving, setLoginSaving] = useState(false);
-  const [loginForm, setLoginForm] = useState({ name: "", email: "", password: "", roleId: "shop_owner_branch_manager" });
+  const [loginForm, setLoginForm] = useState({ name: "", email: "", password: "", roleId: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,7 +113,7 @@ export function StoreManagement() {
     setEditingId(null);
     setForm({ ...emptyForm });
     setCreateLogin(false);
-    setMgr({ name: "", email: "", password: "" });
+    setMgr({ name: "", email: "", password: "", roleId: defaultRoleId });
     setDrawerOpen(true);
   }
 
@@ -102,6 +125,7 @@ export function StoreManagement() {
       code: s.code ?? "",
       address: s.address ?? "",
       isActive: s.isActive,
+      environment: s.environment ?? "live",
     });
     setCreateLogin(false);
     setDrawerOpen(true);
@@ -116,7 +140,7 @@ export function StoreManagement() {
       setSaving(true);
       const res = await apiFetch(`/api/owner/stores/${editingId}`, {
         method: "PATCH",
-        body: JSON.stringify({ name: form.name.trim(), code: form.code.trim(), address: form.address.trim(), isActive: form.isActive }),
+        body: JSON.stringify({ name: form.name.trim(), code: form.code.trim(), address: form.address.trim(), isActive: form.isActive, environment: form.environment }),
       });
       setSaving(false);
       if (!res.ok || !res.json?.ok) { toast.error(res.json?.error ?? "Could not update store"); return; }
@@ -129,9 +153,11 @@ export function StoreManagement() {
 
     // ── Create new store (+ optional manager login) ──
     if (createLogin) {
+      if (!hasRoles) { toast.error("No roles available. Create a role in Roles & Permissions first."); return; }
       if (!mgr.name.trim()) { toast.error("Store manager name is required"); return; }
       if (!mgr.email.trim()) { toast.error("Store manager email is required"); return; }
       if (mgr.password.trim().length < 6) { toast.error("Manager password must be at least 6 characters"); return; }
+      if (!mgr.roleId || !allRoles.some((r) => r.id === mgr.roleId)) { toast.error("Select a valid role for the store login"); return; }
     }
 
     setSaving(true);
@@ -149,16 +175,20 @@ export function StoreManagement() {
         method: "POST",
         body: JSON.stringify({
           name: mgr.name.trim(), email: mgr.email.trim(), hasLogin: true,
-          password: mgr.password, roleId: "shop_owner_branch_manager",
+          password: mgr.password, roleId: mgr.roleId,
           // Bind by the real store id (robust) AND the name (client match).
           storeId: newStoreId, branch: form.name.trim(),
         }),
       });
       setSaving(false);
       if (!staffRes.ok || !staffRes.json?.ok) {
-        toast.error(staffRes.json?.reason === "duplicate_email"
-          ? "Store created, but that manager email is already in use"
-          : "Store created, but the manager login could not be created");
+        const reason = staffRes.json?.reason;
+        toast.error(
+          reason === "duplicate_email" ? "Store created, but that manager email is already in use"
+          : reason === "forbidden_role" ? "Store created, but you're not allowed to assign that role"
+          : reason === "invalid_role" ? "Store created, but the selected role no longer exists"
+          : "Store created, but the manager login could not be created"
+        );
         setDrawerOpen(false);
         await load(); await refreshStores();
         return;
@@ -188,15 +218,17 @@ export function StoreManagement() {
 
   function openLoginDrawer(s: StoreRow) {
     setLoginDrawerStore(s);
-    setLoginForm({ name: "", email: "", password: "", roleId: "shop_owner_branch_manager" });
+    setLoginForm({ name: "", email: "", password: "", roleId: defaultRoleId });
   }
 
   async function submitLogin() {
     const s = loginDrawerStore;
     if (!s) return;
+    if (!hasRoles) { toast.error("No roles available. Create a role in Roles & Permissions first."); return; }
     if (!loginForm.name.trim()) { toast.error("User name is required"); return; }
     if (!loginForm.email.trim()) { toast.error("Login email is required"); return; }
     if (loginForm.password.trim().length < 6) { toast.error("Password must be at least 6 characters"); return; }
+    if (!loginForm.roleId || !allRoles.some((r) => r.id === loginForm.roleId)) { toast.error("Select a valid role"); return; }
 
     setLoginSaving(true);
     const res = await apiFetch("/api/staff", {
@@ -215,10 +247,12 @@ export function StoreManagement() {
     setLoginSaving(false);
 
     if (!res.ok || !res.json?.ok) {
+      const reason = res.json?.reason;
       toast.error(
-        res.json?.reason === "duplicate_email"
-          ? "That login email is already in use"
-          : (res.json?.error ?? "Could not create the store login")
+        reason === "duplicate_email" ? "That login email is already in use"
+        : reason === "forbidden_role" ? "You're not allowed to assign that role"
+        : reason === "invalid_role" ? "The selected role no longer exists"
+        : (res.json?.error ?? "Could not create the store login")
       );
       return;
     }
@@ -286,10 +320,11 @@ export function StoreManagement() {
                   </span>
                   <div>
                     <p className="text-sm font-bold leading-tight">{b.name}</p>
-                    <div className="mt-1 flex items-center gap-1.5">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5">
                       {b.isActive
                         ? <Badge tone="success" dot>Active</Badge>
                         : <Badge tone="warning" dot>Inactive</Badge>}
+                      {b.environment === "demo" && <Badge tone="warning">Demo</Badge>}
                       {b.code && <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">{b.code}</span>}
                     </div>
                   </div>
@@ -414,8 +449,27 @@ export function StoreManagement() {
                 </label>
                 {createLogin && (
                   <div className="mt-3 space-y-3 border-t border-border pt-3">
-                    <div><Label htmlFor="m-name">Manager name *</Label><Input id="m-name" value={mgr.name} placeholder="e.g. Rahul Sharma" onChange={(e) => setMgr((m) => ({ ...m, name: e.target.value }))} /></div>
+                    <div><Label htmlFor="m-name">Store Manager name *</Label><Input id="m-name" value={mgr.name} placeholder="e.g. Rahul Sharma" onChange={(e) => setMgr((m) => ({ ...m, name: e.target.value }))} /></div>
                     <div><Label htmlFor="m-email">Login email *</Label><Input id="m-email" type="email" value={mgr.email} placeholder="koramangala@repairox.com" onChange={(e) => setMgr((m) => ({ ...m, email: e.target.value }))} /></div>
+                    <div>
+                      <Label htmlFor="m-role">Role *</Label>
+                      {hasRoles ? (
+                        <Select id="m-role" value={mgr.roleId} placeholder="Select a role"
+                          onChange={(e) => setMgr((m) => ({ ...m, roleId: e.target.value }))}
+                          options={roleOptions}
+                          className="h-[34px] px-3 text-[13px]" />
+                      ) : (
+                        <div className="mt-1 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
+                          No roles available.{" "}
+                          <button type="button" onClick={() => router.push("/settings/roles-permissions")} className="font-semibold text-[#4361EE] hover:underline">
+                            Create a role in Roles &amp; Permissions
+                          </button>{" "}first.
+                        </div>
+                      )}
+                      {hasRoles && (
+                        <p className="mt-1 text-[11px] text-muted-foreground">The role defines what this user can do; their access is scoped to this store.</p>
+                      )}
+                    </div>
                     <div>
                       <Label htmlFor="m-pass">Temporary password *</Label>
                       <Input id="m-pass" type="text" value={mgr.password} placeholder="At least 6 characters" onChange={(e) => setMgr((m) => ({ ...m, password: e.target.value }))} />
@@ -427,33 +481,56 @@ export function StoreManagement() {
             </section>
           )}
 
-          {/* Status */}
+          {/* Environment (DEMO | LIVE) — the store's kind. Distinct from the
+              operational Active/Inactive status. A real branch defaults to
+              Live; a demonstration/test store is Demo. */}
           <section className="space-y-3">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Status</p>
+            <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Environment</p>
             <div className="flex items-center gap-2">
-              {(["active", "inactive"] as const).map((st) => {
-                const active = form.isActive === (st === "active");
+              {(["demo", "live"] as const).map((env) => {
+                const active = form.environment === env;
                 return (
                   <button
-                    key={st}
+                    key={env}
                     type="button"
-                    onClick={() => setForm((f) => ({ ...f, isActive: st === "active" }))}
+                    onClick={() => setForm((f) => ({ ...f, environment: env }))}
                     className={cn(
                       "rounded-full border px-3 py-1.5 text-[12px] font-semibold capitalize transition",
                       active ? "border-[#4361EE] bg-[#4361EE] text-white" : "border-border bg-card text-zinc-600 hover:bg-muted"
                     )}
                   >
-                    {st}
+                    {env}
                   </button>
                 );
               })}
             </div>
           </section>
 
-          {!editingId && (
-            <p className="rounded-lg bg-[#EEF1FD] px-3 py-2 text-[12px] text-[#3A4DBB]">
-              The new store starts empty — no tickets, invoices, walk-ins or inventory are copied from other stores.
-            </p>
+          {/* Status (ACTIVE | INACTIVE) — operational activation. Shown only in
+              edit mode, where a store can be deactivated; new stores are created
+              active by default. */}
+          {editingId && (
+            <section className="space-y-3">
+              <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Status</p>
+              <div className="flex items-center gap-2">
+                {(["active", "inactive"] as const).map((st) => {
+                  const active = form.isActive === (st === "active");
+                  return (
+                    <button
+                      key={st}
+                      type="button"
+                      onClick={() => setForm((f) => ({ ...f, isActive: st === "active" }))}
+                      className={cn(
+                        "rounded-full border px-3 py-1.5 text-[12px] font-semibold capitalize transition",
+                        active ? "border-[#4361EE] bg-[#4361EE] text-white" : "border-border bg-card text-zinc-600 hover:bg-muted"
+                      )}
+                    >
+                      {st}
+                    </button>
+                  );
+                })}
+              </div>
+            </section>
           )}
         </div>
       </Drawer>
@@ -494,18 +571,24 @@ export function StoreManagement() {
             <p className="mt-1 text-[11px] text-muted-foreground">Share this with the user; they can change it after first login.</p>
           </div>
           <div>
-            <Label htmlFor="l-role">Role</Label>
-            <Select id="l-role" value={loginForm.roleId}
-              onChange={(e) => setLoginForm((f) => ({ ...f, roleId: e.target.value }))}
-              options={[
-                { label: "Store Manager", value: "shop_owner_branch_manager" },
-                { label: "Reception", value: "reception" },
-                { label: "Technician", value: "technician" },
-                { label: "Sales Executive", value: "sales_executive" },
-                { label: "Inventory Manager", value: "inventory_manager" },
-              ]}
-            />
-            <p className="mt-1 text-[11px] text-muted-foreground">Store-scoped roles only — these users cannot switch or view other stores.</p>
+            <Label htmlFor="l-role">Role *</Label>
+            {hasRoles ? (
+              <Select id="l-role" value={loginForm.roleId} placeholder="Select a role"
+                onChange={(e) => setLoginForm((f) => ({ ...f, roleId: e.target.value }))}
+                options={roleOptions}
+                className="h-[34px] px-3 text-[13px]"
+              />
+            ) : (
+              <div className="mt-1 rounded-lg border border-border bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
+                No roles available.{" "}
+                <button type="button" onClick={() => router.push("/settings/roles-permissions")} className="font-semibold text-[#4361EE] hover:underline">
+                  Create a role in Roles &amp; Permissions
+                </button>{" "}first.
+              </div>
+            )}
+            {hasRoles && (
+              <p className="mt-1 text-[11px] text-muted-foreground">Roles come from Roles &amp; Permissions. Access is scoped to this store.</p>
+            )}
           </div>
         </div>
       </Drawer>

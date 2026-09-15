@@ -13,6 +13,7 @@ export interface StaffRow {
   avatar_url: string | null;
   role_id: string | null;
   branch: string | null;
+  branch_id: string | null;
   status: string | null;
   login_enabled: boolean | null;
   salary_type: string | null;
@@ -35,6 +36,7 @@ export function rowToStaff(r: StaffRow): TeamMember {
     avatarUrl: r.avatar_url ?? undefined,
     roleId: r.role_id ?? "",
     branch: r.branch ?? "",
+    branchId: r.branch_id ?? null,
     status: (r.status as StaffStatus) ?? "active",
     loginEnabled: Boolean(r.login_enabled),
     salaryType: (r.salary_type as SalaryType) ?? undefined,

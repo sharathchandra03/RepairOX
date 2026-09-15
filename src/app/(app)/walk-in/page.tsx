@@ -41,6 +41,7 @@ import { useStore } from "@/lib/store";
 import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
   WALKIN_FINAL_STATUSES, type WalkIn, type WalkInStatus, isWalkInWon, hasActiveFollowUp,
+  WALKIN_FINAL_STATUS_LABEL, WALKIN_FINAL_STATUS_TONE, walkInFinalStatus, walkInIsHistory,
   FOLLOWUP_OUTCOME_LABEL,
 } from "@/lib/mock-data";
 import {
@@ -141,8 +142,10 @@ export default function WalkInPage() {
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
   // Target for the SAFE follow-up completion dialog (outcome + next action).
   const [completeTarget, setCompleteTarget] = useState<WalkIn | null>(null);
-  // Pending inline Final-Status change awaiting user confirmation.
+  // Pending inline Walk-In Status change awaiting user confirmation.
   const [statusChange, setStatusChange] = useState<{ walkIn: WalkIn; next: WalkInStatus } | null>(null);
+  // Pending inline Final Status change (Lost / reopen to N/A) awaiting confirmation.
+  const [finalChange, setFinalChange] = useState<{ walkIn: WalkIn; next: "lost" | "na" } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const openedDeepLinkRef = useRef(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
@@ -227,12 +230,17 @@ export default function WalkInPage() {
      consistent with the toolbar. */
   const followUpRows = useMemo(() => {
     return walkIns.filter((w) => {
-      // Only walk-ins with an ACTIVE follow-up (scheduled, not completed, not
-      // converted / terminal) — the single shared definition (spec §26/§27).
-      if (!hasActiveFollowUp(w)) return false;
-      // The date strip applies to the FOLLOW-UP scheduled date here (spec §48),
-      // NOT the walk-in creation date. "All" shows every active follow-up.
-      if (!isWalkInInDateRange(w.followUpDate!, dateRange, customFrom, customTo)) return false;
+      // ACTIVE = the Walk-In has NOT reached a final outcome (not Won / not
+      // Lost). This is THE rule (spec §8/§21): a walk-in stays Active through
+      // every follow-up attempt (1st/2nd/3rd) and while still Enquiry/Visitor
+      // with N/A final status — completing a follow-up NEVER moves it away.
+      if (walkInIsHistory(w)) return false;
+      // The date strip applies to the FOLLOW-UP scheduled date when one exists
+      // (a follow-up is about WHEN to contact); walk-ins that are active but
+      // have no scheduled follow-up (e.g. fresh Enquiry/Visitor, or mid-cycle
+      // between attempts) fall back to the walk-in date so they never vanish.
+      const anchorDate = w.followUpDate || w.date;
+      if (!isWalkInInDateRange(anchorDate, dateRange, customFrom, customTo)) return false;
       if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
       if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
       if (statusFilter !== "all" && w.status !== statusFilter) return false;
@@ -245,17 +253,17 @@ export default function WalkInPage() {
     });
   }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
 
-  /* History dataset for the Follow-Up → History sub-view: walk-ins that have at
-     least one COMPLETED follow-up attempt. Nothing is deleted on completion, so
-     this is the permanent audit trail. The date strip applies to the most recent
-     completed attempt's date; toolbar filters + search still apply. Ordered by
-     most-recently-completed first. */
+  /* History dataset for the Follow-Up → History sub-view: ONLY walk-ins that
+     have reached a FINAL OUTCOME — Won Customer (converted to a ticket) or Lost
+     Customer. A completed follow-up attempt does NOT put a walk-in here (spec
+     §8/§9/§21); the follow-up history is preserved on the record regardless. The
+     date strip applies to the walk-in date; toolbar filters + search still
+     apply. Ordered most-recent first. */
   const followUpHistoryRows = useMemo(() => {
     const rows = walkIns.filter((w) => {
-      const hist = w.followUpHistory ?? [];
-      if (hist.length === 0) return false;
-      const lastDate = hist[hist.length - 1]?.scheduledDate || w.date;
-      if (!isWalkInInDateRange(lastDate, dateRange, customFrom, customTo)) return false;
+      if (!walkInIsHistory(w)) return false;
+      const anchorDate = w.convertedAt?.slice(0, 10) || w.date;
+      if (!isWalkInInDateRange(anchorDate, dateRange, customFrom, customTo)) return false;
       if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
       if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
       if (statusFilter !== "all" && w.status !== statusFilter) return false;
@@ -267,8 +275,8 @@ export default function WalkInPage() {
       return true;
     });
     return rows.sort((a, b) => {
-      const la = a.followUpHistory?.[a.followUpHistory.length - 1]?.completedAt || "";
-      const lb = b.followUpHistory?.[b.followUpHistory.length - 1]?.completedAt || "";
+      const la = a.convertedAt || a.followUpHistory?.[a.followUpHistory.length - 1]?.completedAt || a.date || "";
+      const lb = b.convertedAt || b.followUpHistory?.[b.followUpHistory.length - 1]?.completedAt || b.date || "";
       return lb.localeCompare(la);
     });
   }, [walkIns, dateRange, customFrom, customTo, typeFilter, sourceFilter, statusFilter, salesFilter, q]);
@@ -335,8 +343,10 @@ export default function WalkInPage() {
       onChange: setIssueFilter,
     },
     {
-      id: "status", label: "Final Status", type: "select", value: statusFilter,
-      options: [{ label: "All Statuses", value: "all" }, ...WALKIN_FINAL_STATUSES.map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))],
+      // Filters on the Walk-In Status (journey stage) — the record's `status`.
+      // Final Status (N/A/Lost/Won) is derived and filtered via "Conversion".
+      id: "status", label: "Walk-In Status", type: "select", value: statusFilter,
+      options: [{ label: "All Stages", value: "all" }, ...WALKIN_FINAL_STATUSES.map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))],
       onChange: setStatusFilter,
     },
     {
@@ -478,14 +488,43 @@ export default function WalkInPage() {
       patch.followUpReadAt = w.followUpReadAt || new Date().toISOString();
     }
     updateWalkIn(w.id, patch);
-    showToast(`Status updated to ${WALKIN_STATUS_LABEL[next]}.`);
+    showToast(`Walk-In Status updated to ${WALKIN_STATUS_LABEL[next]}.`);
   }, [handleConvert, updateWalkIn, showToast]);
 
-  /* ── Follow-up notification actions ── */
-  const handleFollowUpRead = useCallback((w: WalkIn) => {
-    if (w.followUpReadAt) return;
-    updateWalkIn(w.id, { followUpReadAt: new Date().toISOString() });
-  }, [updateWalkIn]);
+  /* Final Status change (the ACTUAL OUTCOME). Only two transitions are ever
+     initiated from the UI:
+       • "lost" → mark the opportunity permanently lost. The walk-in becomes
+         HISTORY. Any active follow-up reminder is cancelled (history preserved).
+       • "na"   → REOPEN a previously-lost walk-in back to an active state. The
+         status returns to "enquiry" so it re-enters the Active list with its
+         full follow-up history intact (spec §18).
+     "won" is NEVER set here — it happens only through ticket conversion, which
+     is why there is no manual "Won Customer" option. */
+  const handleFinalStatusChange = useCallback((w: WalkIn, next: "lost" | "na") => {
+    if (next === "lost") {
+      if (w.status === "lost") return;
+      const patch: Partial<WalkIn> = { status: "lost" };
+      // Cancel any active follow-up reminder so no future notification fires;
+      // the follow-up HISTORY is preserved untouched (spec §17/§25).
+      if (hasActiveFollowUp(w)) {
+        patch.followUpStatus = "done";
+        patch.followUpDate = undefined;
+        patch.followUpTime = undefined;
+        patch.followUpAttempt = undefined;
+        patch.followUpComments = undefined;
+        patch.followUpReadAt = w.followUpReadAt || new Date().toISOString();
+      }
+      updateWalkIn(w.id, patch);
+      showToast(`${walkInDisplayId(w)} marked as Lost Customer.`);
+      return;
+    }
+    // Reopen: only meaningful for a lost/closed walk-in (never un-converts a won
+    // ticket — that stays linked). Return to "enquiry" so it is active again.
+    if (w.status === "lost" || w.status === "closed") {
+      updateWalkIn(w.id, { status: "enquiry" });
+      showToast(`${walkInDisplayId(w)} reopened — now active.`);
+    }
+  }, [updateWalkIn, showToast]);
 
   /* Persist any follow-up lifecycle change emitted by the Follow-Up cell
      (schedule / reschedule / mark contacted / complete+outcome / cancel /
@@ -581,7 +620,6 @@ export default function WalkInPage() {
               walkIns={walkIns}
               displayId={walkInDisplayId}
               onOpenWalkIn={(w) => setViewTarget(w)}
-              onMarkRead={handleFollowUpRead}
               onCompleteFollowUp={(w) => setCompleteTarget(w)}
             />
             {view === "table" && (
@@ -733,8 +771,6 @@ export default function WalkInPage() {
           historyCount={followUpHistoryRows.length}
           currentUserId={sessionUserId}
           currentUserName={sessionUserName}
-          statusLabel={WALKIN_STATUS_LABEL}
-          statusTone={WALKIN_STATUS_TONE}
           onOpen={(w) => setEditTarget(w)}
           onUpdate={handleFollowUpUpdate}
           onConvert={handleConvert}
@@ -770,11 +806,11 @@ export default function WalkInPage() {
                 <col className="w-[92px]" />{/* ID */}
                 <col className="w-[96px]" />{/* Type */}
                 <col className="w-[104px]" />{/* Source */}
-                <col className="w-[20%]" />{/* Name (+ contact underneath) — flexible */}
-                <col className="w-[16%]" />{/* Model — flexible */}
-                <col className="w-[19%]" />{/* Issue — flexible */}
+                <col className="w-[22%]" />{/* Name (+ contact underneath) — flexible */}
+                <col className="w-[24%]" />{/* Model (+ issue underneath) — flexible, absorbs the removed Issue column */}
+                <col className="w-[150px]" />{/* Walk-In Status — current journey stage */}
                 <col className="w-[150px]" />{/* Follow-Up — wide enough for "2nd Follow-Up · Today" */}
-                <col className="w-[136px]" />{/* Final Status */}
+                <col className="w-[128px]" />{/* Final Status — N/A / Lost / Won */}
                 <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
               </colgroup>
               <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
@@ -795,7 +831,7 @@ export default function WalkInPage() {
                   <th className="py-4 pl-[14px]">Source</th>
                   <th className="pl-4 py-4"><span className="inline-block pl-[17px]">Name</span></th>
                   <th className="pl-4 py-4">Model</th>
-                  <th className="pl-4 py-4">Issue</th>
+                  <th className="pl-4 py-4">Walk-In Status</th>
                   <th className="pl-4 py-4">Follow-Up</th>
                   <th className="pl-[5px] py-4">Final Status</th>
                   <th className="px-4 py-4 text-right">Action</th>
@@ -881,20 +917,47 @@ export default function WalkInPage() {
                         </div>
                       </div>
                     </td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] max-w-[150px]">
-                      {w.model ? (
-                        <button
-                          type="button"
-                          onClick={() => setEditTarget(w)}
-                          title={`Edit ${walkInDisplayId(w)}`}
-                          className="block max-w-full cursor-pointer truncate rounded text-left transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
-                        >
-                          {w.model}
-                        </button>
-                      ) : "—"}
+                    {/* MODEL — primary text is the device model; the reported
+                        ISSUE now lives here as secondary text underneath (the
+                        standalone Issue column has been removed). Both truncate
+                        so the row height never grows. */}
+                    <td className="pl-4 py-4 pr-4 text-[13px]">
+                      {(() => {
+                        const issueText = w.issue || (w.reasons || []).join(", ");
+                        return (
+                          <div className="min-w-0">
+                            {w.model ? (
+                              <button
+                                type="button"
+                                onClick={() => setEditTarget(w)}
+                                title={`Edit ${walkInDisplayId(w)}`}
+                                className="block max-w-full cursor-pointer truncate rounded text-left font-medium text-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                              >
+                                {w.model}
+                              </button>
+                            ) : (
+                              <span className="block text-muted-foreground">—</span>
+                            )}
+                            {issueText ? (
+                              <span className="mt-0.5 block truncate text-[12px] text-muted-foreground" title={issueText}>
+                                {issueText}
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })()}
                     </td>
-                    <td className="pl-4 py-4 pr-4 text-[13px] text-muted-foreground truncate max-w-[190px]" title={w.issue || (w.reasons || []).join(", ")}>
-                      {w.issue || (w.reasons || []).join(", ") || "—"}
+                    {/* WALK-IN STATUS — the customer's CURRENT journey stage
+                        (Enquiry / Visitor / Converted to Ticket). This is the
+                        authoritative display of the record's `status`. It is
+                        distinct from Follow-Up (next contact) and Final Status
+                        (final outcome). Restrained tones + a small status dot. */}
+                    <td className="pl-4 py-4 pr-4" onClick={(e) => e.stopPropagation()}>
+                      <WalkInStatusCell
+                        walkIn={w}
+                        onSelect={(next) => { if (next !== w.status) setStatusChange({ walkIn: w, next }); }}
+                        ticketNoFor={ticketNoFor}
+                      />
                     </td>
                     {/* Follow-Up — interactive compact pill managing the multi-stage
                         lifecycle. Sits immediately before Final Status. */}
@@ -907,49 +970,19 @@ export default function WalkInPage() {
                         onConvert={handleConvert}
                       />
                     </td>
+                    {/* FINAL STATUS — the ACTUAL OUTCOME, restricted to exactly
+                        three DERIVED values: N/A / Lost Customer / Won Customer.
+                        • Won is never selectable manually — it happens only when
+                          the Walk-In is converted into a Ticket.
+                        • Lost is set via the explicit "Lost Customer" workflow.
+                        • N/A reopens a previously-lost Walk-In (back to active). */}
                     <td className="py-4 pr-4 pl-0 [&>*:first-child]:-ml-[4px]" onClick={(e) => e.stopPropagation()}>
-                      <Dropdown
-                        align="left"
-                        width="w-52"
-                        trigger={({ toggle }) => (
-                          <button
-                            onClick={toggle}
-                            title="Change status"
-                            className={cn(
-                              "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
-                              WALKIN_STATUS_TONE[w.status],
-                              w.status === "converted_ticket" && "-ml-[2px]",
-                            )}
-                          >
-                            <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                            {WALKIN_STATUS_LABEL[w.status]}
-                            <ChevronDown className="h-3 w-3 opacity-70" />
-                          </button>
-                        )}
-                      >
-                        {(close) => (
-                          <>
-                            {WALKIN_FINAL_STATUSES.map((s) => (
-                              <MenuItem
-                                key={s}
-                                onClick={() => { if (s !== w.status) setStatusChange({ walkIn: w, next: s }); close(); }}
-                              >
-                                <span className="flex items-center gap-2">
-                                  <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_STATUS_TONE[s])} />
-                                  <span className={cn(s === w.status && "font-semibold text-[#4361EE]")}>{WALKIN_STATUS_LABEL[s]}</span>
-                                  {s === "converted_ticket" && !w.linkedTicketId && (
-                                    <span className="ml-auto text-[10px] text-muted-foreground">Push to Ticket</span>
-                                  )}
-                                  {s === w.status && <Check className="ml-auto h-3.5 w-3.5 text-[#4361EE]" />}
-                                </span>
-                              </MenuItem>
-                            ))}
-                          </>
-                        )}
-                      </Dropdown>
-                      {w.linkedTicketId && (
-                        <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
-                      )}
+                      <WalkInFinalStatusCell
+                        walkIn={w}
+                        onMarkLost={() => setFinalChange({ walkIn: w, next: "lost" })}
+                        onReopen={() => setFinalChange({ walkIn: w, next: "na" })}
+                        ticketNoFor={ticketNoFor}
+                      />
                     </td>
                     <td className="px-4 py-4">
                       <div className="flex items-center justify-end gap-1">
@@ -1110,6 +1143,23 @@ export default function WalkInPage() {
         danger={false}
       />
 
+      {/* Final Status confirm — Lost Customer / Reopen to N/A */}
+      <ConfirmDialog
+        open={!!finalChange}
+        onClose={() => setFinalChange(null)}
+        onConfirm={() => { if (finalChange) handleFinalStatusChange(finalChange.walkIn, finalChange.next); }}
+        title={finalChange?.next === "lost" ? "Mark as Lost Customer?" : "Reopen this Walk-In?"}
+        description={
+          finalChange
+            ? finalChange.next === "lost"
+              ? `Mark ${walkInDisplayId(finalChange.walkIn)} as Lost Customer? The opportunity will be closed and moved to History. Its follow-up history is preserved and it can be reopened later.`
+              : `Reopen ${walkInDisplayId(finalChange.walkIn)}? Final Status returns to N/A and the Walk-In becomes active again, keeping its full follow-up history.`
+            : undefined
+        }
+        confirmLabel={finalChange?.next === "lost" ? "Mark Lost" : "Reopen"}
+        danger={finalChange?.next === "lost"}
+      />
+
       {/* Toast */}
       {toast && (
         <motion.div
@@ -1125,6 +1175,168 @@ export default function WalkInPage() {
         </motion.div>
       )}
     </div>
+  );
+}
+
+/* ─── Walk-In Status cell (current journey stage) ─────────────────────────────
+   Shows the customer's CURRENT stage — Enquiry / Visitor / Converted to Ticket —
+   as a restrained pill with a small status dot. Enquiry and Visitor are freely
+   selectable; "Converted to Ticket" is not chosen here (a ticket must be created
+   via Push to Ticket), so it is shown only as the current, non-selectable state.
+   Once converted, the stage is locked (the ticket link is the source of truth). */
+function WalkInStatusCell({
+  walkIn, onSelect, ticketNoFor,
+}: {
+  walkIn: WalkIn;
+  onSelect: (next: WalkInStatus) => void;
+  ticketNoFor: (id?: string) => string | undefined;
+}) {
+  const w = walkIn;
+  const converted = w.status === "converted_ticket" || !!w.linkedTicketId;
+  // Selectable journey stages (Converted is never selected manually here).
+  const selectable: WalkInStatus[] = ["enquiry", "visitor"];
+
+  const pill = (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap",
+        WALKIN_STATUS_TONE[w.status],
+      )}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {WALKIN_STATUS_LABEL[w.status]}
+    </span>
+  );
+
+  // Converted → static pill + the linked ticket number (no dropdown).
+  if (converted) {
+    return (
+      <div>
+        {pill}
+        {w.linkedTicketId && (
+          <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <Dropdown
+      align="left"
+      width="w-48"
+      trigger={({ toggle }) => (
+        <button
+          onClick={toggle}
+          title="Change Walk-In stage"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+            WALKIN_STATUS_TONE[w.status],
+          )}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          {WALKIN_STATUS_LABEL[w.status]}
+          <ChevronDown className="h-3 w-3 opacity-70" />
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          {selectable.map((s) => (
+            <MenuItem key={s} onClick={() => { onSelect(s); close(); }}>
+              <span className="flex items-center gap-2">
+                <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_STATUS_TONE[s])} />
+                <span className={cn(s === w.status && "font-semibold text-[#4361EE]")}>{WALKIN_STATUS_LABEL[s]}</span>
+                {s === w.status && <Check className="ml-auto h-3.5 w-3.5 text-[#4361EE]" />}
+              </span>
+            </MenuItem>
+          ))}
+        </>
+      )}
+    </Dropdown>
+  );
+}
+
+/* ─── Final Status cell (actual outcome: N/A / Lost / Won) ─────────────────────
+   Exactly three DERIVED values. Won is never manually selectable (it happens
+   only via ticket conversion). From N/A the only action is "Lost Customer";
+   from Lost the only action is "Reopen" (back to N/A). Won is a static pill with
+   the linked ticket number. Restrained tones + a small status dot throughout. */
+function WalkInFinalStatusCell({
+  walkIn, onMarkLost, onReopen, ticketNoFor,
+}: {
+  walkIn: WalkIn;
+  onMarkLost: () => void;
+  onReopen: () => void;
+  ticketNoFor: (id?: string) => string | undefined;
+}) {
+  const w = walkIn;
+  const fs = walkInFinalStatus(w);
+
+  const pill = (interactive: boolean) => (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap",
+        WALKIN_FINAL_STATUS_TONE[fs],
+        interactive && "transition hover:brightness-95",
+      )}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+      {WALKIN_FINAL_STATUS_LABEL[fs]}
+      {interactive && <ChevronDown className="h-3 w-3 opacity-70" />}
+    </span>
+  );
+
+  // Won — static, with the linked ticket number. Never reversible from here.
+  if (fs === "won") {
+    return (
+      <div>
+        {pill(false)}
+        {w.linkedTicketId && (
+          <p className="mt-1 text-[12px] font-semibold text-emerald-700">→ {ticketNoFor(w.linkedTicketId)}</p>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <Dropdown
+      align="left"
+      width="w-44"
+      trigger={({ toggle }) => (
+        <button
+          onClick={toggle}
+          title="Set final outcome"
+          className={cn(
+            "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+            WALKIN_FINAL_STATUS_TONE[fs],
+          )}
+        >
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+          {WALKIN_FINAL_STATUS_LABEL[fs]}
+          <ChevronDown className="h-3 w-3 opacity-70" />
+        </button>
+      )}
+    >
+      {(close) => (
+        <>
+          {fs === "na" ? (
+            <MenuItem onClick={() => { onMarkLost(); close(); }}>
+              <span className="flex items-center gap-2">
+                <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_FINAL_STATUS_TONE.lost)} />
+                <span>Lost Customer</span>
+              </span>
+            </MenuItem>
+          ) : (
+            <MenuItem onClick={() => { onReopen(); close(); }}>
+              <span className="flex items-center gap-2">
+                <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_FINAL_STATUS_TONE.na)} />
+                <span>Reopen (N/A)</span>
+              </span>
+            </MenuItem>
+          )}
+        </>
+      )}
+    </Dropdown>
   );
 }
 

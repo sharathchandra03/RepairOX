@@ -120,7 +120,14 @@ export function StoreSelector() {
                         {(s.code || s.name).slice(0, 2).toUpperCase()}
                       </span>
                       <span>
-                        <span className="block font-semibold">{s.name}</span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="font-semibold">{s.name}</span>
+                          {s.environment === "demo" && (
+                            <span className="rounded bg-amber-100 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">
+                              Demo
+                            </span>
+                          )}
+                        </span>
                         {!s.isActive && (
                           <span className="block text-[11px] font-normal text-amber-600">Inactive</span>
                         )}

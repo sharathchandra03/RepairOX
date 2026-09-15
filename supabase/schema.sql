@@ -49,13 +49,15 @@ create table if not exists public.branches (
   name            text not null,
   code            text,
   address         text,
-  is_active       boolean not null default true,
+  is_active       boolean not null default true,   -- ACTIVE | INACTIVE (can the store operate?)
+  environment     text not null default 'live' check (environment in ('demo','live')), -- DEMO | LIVE (what kind of store?)
   created_at      timestamptz not null default now(),
   updated_at      timestamptz not null default now(),
   unique (organization_id, name)
 );
 
 create index if not exists branches_org_idx on public.branches(organization_id);
+create index if not exists branches_org_environment_idx on public.branches(organization_id, environment);
 
 
 -- ############################################################################

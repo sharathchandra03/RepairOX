@@ -59,7 +59,10 @@ export interface StoreBranch {
   name: string;
   code: string | null;
   address: string | null;
+  /** ACTIVE | INACTIVE — whether the store can operate. */
   isActive: boolean;
+  /** DEMO | LIVE — the store's environment/kind (distinct from isActive). */
+  environment: "demo" | "live";
 }
 
 /** Sentinel used in the selector for the consolidated "All Shops" context. */
@@ -120,6 +123,7 @@ function rowToStore(r: any): StoreBranch {
     code: r.code ?? null,
     address: r.address ?? null,
     isActive: r.is_active ?? true,
+    environment: r.environment === "demo" ? "demo" : "live",
   };
 }
 
@@ -131,6 +135,7 @@ const LOCAL_STORE: StoreBranch = {
   code: "MAIN",
   address: null,
   isActive: true,
+  environment: "live",
 };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -163,7 +168,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Every branch in the org (RLS lets any member read branches).
     const { data: branchRows, error } = await supabase
       .from("branches")
-      .select("id, organization_id, name, code, address, is_active")
+      .select("id, organization_id, name, code, address, is_active, environment")
       .order("created_at", { ascending: true });
     if (error || !branchRows) return [];
 
@@ -177,9 +182,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Otherwise: the user's own branch + any explicit user_stores grants.
     const allowedIds = new Set<string>();
 
-    // 1) The staff row's assigned branch (resolve by name → id).
+    // 1) The staff row's assigned branch. Prefer the ROBUST relational
+    //    branch_id (never stale); fall back to matching the branch NAME only
+    //    when no id is present (legacy rows).
+    const myBranchId = currentUser?.branchId ?? null;
     const myBranchName = currentUser?.branch ?? null;
-    if (myBranchName) {
+    if (myBranchId && all.some((s) => s.id === myBranchId)) {
+      allowedIds.add(myBranchId);
+    } else if (myBranchName) {
       const mine = all.find((s) => s.name === myBranchName);
       if (mine) allowedIds.add(mine.id);
     }
@@ -203,7 +213,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // fall back to the first store so the app stays usable (RLS still guards
     // the data itself server-side).
     return sortStores(scoped.length > 0 ? scoped : all.slice(0, 1));
-  }, [canCrossBranch, currentUser?.branch, currentUser?.id]);
+  }, [canCrossBranch, currentUser?.branch, currentUser?.branchId, currentUser?.id]);
+
+  /* Resolve the signed-in user's OWN assigned store id from the store list,
+     using the robust branch_id first and the branch name as a fallback. This is
+     the store an owner should land on by default (their home store), rather
+     than an arbitrary alphabetical pick. Returns null if it can't be resolved. */
+  const resolveHomeStoreId = useCallback(
+    (list: StoreBranch[]): string | null => {
+      const byId = currentUser?.branchId ?? null;
+      if (byId && list.some((s) => s.id === byId)) return byId;
+      const byName = currentUser?.branch ?? null;
+      if (byName) {
+        const mine = list.find((s) => s.name === byName);
+        if (mine) return mine.id;
+      }
+      return null;
+    },
+    [currentUser?.branchId, currentUser?.branch]
+  );
 
   const loadPrefixes = useCallback(async (): Promise<Record<string, StorePrefixes>> => {
     if (!isSupabaseConfigured || !supabase) return {};
@@ -263,10 +291,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Single-store users always land directly inside their store.
         initial = next[0].id;
       } else if (canCrossBranch) {
-        // Owners default to All Shops for the consolidated overview.
-        initial = null;
+        // Owners land in THEIR OWN assigned store (resolved by branch_id) so the
+        // default context is their home branch — not an arbitrary store. Only
+        // fall back to All Shops when their home store can't be resolved.
+        initial = resolveHomeStoreId(next);
       } else {
-        initial = next[0]?.id ?? null;
+        // Other multi-store users: their home store, else the first accessible.
+        initial = resolveHomeStoreId(next) ?? next[0]?.id ?? null;
       }
       setActiveStoreId(initial);
       // Reflect the resolved selection in the URL so the address bar always
@@ -275,7 +306,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setReady(true);
     })();
     return () => { active = false; };
-  }, [authReady, currentUser?.id, loadStores, loadPrefixes, storageKey, canCrossBranch]);
+  }, [authReady, currentUser?.id, loadStores, loadPrefixes, storageKey, canCrossBranch, resolveHomeStoreId]);
 
   /* ── Persist the selection so it survives refresh + navigation ──
      localStorage is a per-user fallback for tabs opened WITHOUT a ?store=

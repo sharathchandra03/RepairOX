@@ -530,7 +530,10 @@ export type TeamMember = {
   /** Profile picture — a data URL (self-uploaded) or a storage URL. */
   avatarUrl?: string;
   roleId: string;
+  /** Assigned store NAME (display/legacy label). May be stale — prefer branchId. */
   branch: string;
+  /** Assigned store id (robust relational binding to branches.id). */
+  branchId?: string | null;
   status: StaffStatus;
 
   /* ── Auth account ── */
@@ -972,6 +975,69 @@ export const WALKIN_TYPE_BAR: Record<WalkInType, string> = {
  */
 export function isWalkInWon(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
   return w.status === "converted_ticket";
+}
+
+/* ─── Final Status (actual OUTCOME of the Walk-In) ────────────────────────────
+   FINAL STATUS answers "how did this Walk-In ultimately end?" and is DISTINCT
+   from Walk-In Status (the current journey stage: Enquiry / Visitor / Converted
+   to Ticket) and from the Follow-Up schedule. It has EXACTLY three values and is
+   DERIVED from the record — never a free-form/manually-set field — so it can
+   never drift out of sync with the real state:
+
+     • "won"  → the Walk-In was successfully converted into a Ticket
+                (status === "converted_ticket"). Never set by a manual dropdown.
+     • "lost" → the opportunity is permanently closed without conversion
+                (status === "lost" / legacy "closed").
+     • "na"   → the Walk-In has not reached a final outcome yet (still ACTIVE):
+                Enquiry / Visitor, with or without a scheduled follow-up.
+
+   Won is authoritative only through the conversion flow (which links a Ticket);
+   Lost is set through the dedicated "mark as lost" workflow. Everything else is
+   N/A and remains ACTIVE. */
+export type WalkInFinalStatus = "na" | "lost" | "won";
+
+export const WALKIN_FINAL_STATUS_LABEL: Record<WalkInFinalStatus, string> = {
+  na: "N/A",
+  lost: "Lost Customer",
+  won: "Won Customer",
+};
+
+/** Restrained semantic tones (bg / text / ring) — one neutral, one muted red,
+ *  one muted green. Deliberately low-saturation so the row never overloads on
+ *  colour. Paired with a small status dot at the call site. */
+export const WALKIN_FINAL_STATUS_TONE: Record<WalkInFinalStatus, string> = {
+  na: "bg-slate-50 text-slate-500 ring-slate-200",
+  lost: "bg-rose-50 text-rose-600 ring-rose-200",
+  won: "bg-emerald-50 text-emerald-600 ring-emerald-200",
+};
+
+/**
+ * The single, DERIVED Final Status for a Walk-In. Won when converted to a
+ * ticket; Lost when the opportunity was closed as lost/closed; otherwise N/A
+ * (still active). This is the authoritative outcome used by the table, the
+ * Active/History split and the report.
+ */
+export function walkInFinalStatus(w: Pick<WalkIn, "status" | "linkedTicketId">): WalkInFinalStatus {
+  if (isWalkInWon(w)) return "won";
+  if (w.status === "lost" || w.status === "closed") return "lost";
+  return "na";
+}
+
+/**
+ * THE Active-vs-History rule for the whole Walk-In module. A Walk-In enters
+ * HISTORY *only* when it reaches a FINAL outcome — Won Customer or Lost
+ * Customer. It NEVER moves to History merely because a follow-up attempt was
+ * completed, a notification was actioned, or the attempt counter increased.
+ * Enquiry / Visitor (with or without follow-ups, at any attempt number) stay
+ * ACTIVE until the final outcome is decided.
+ */
+export function walkInIsHistory(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
+  return walkInFinalStatus(w) !== "na";
+}
+
+/** Convenience inverse of {@link walkInIsHistory} — still an ACTIVE opportunity. */
+export function walkInIsActive(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
+  return !walkInIsHistory(w);
 }
 
 export type WalkIn = {

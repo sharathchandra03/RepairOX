@@ -34,6 +34,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (typeof body?.code === "string") patch.code = body.code.trim() || null;
   if (typeof body?.address === "string") patch.address = body.address.trim() || null;
   if (typeof body?.isActive === "boolean") patch.is_active = body.isActive;
+  // Environment (DEMO | LIVE) — only accept the two valid values.
+  if (typeof body?.environment === "string") {
+    const env = body.environment.trim().toLowerCase();
+    if (env === "demo" || env === "live") patch.environment = env;
+  }
 
   if (Object.keys(patch).length === 0) {
     return NextResponse.json({ ok: false, error: "Nothing to update." }, { status: 400 });
@@ -43,7 +48,7 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     .from("branches")
     .update(patch)
     .eq("id", params.id)
-    .select("id, name, code, address, is_active, created_at")
+    .select("id, name, code, address, is_active, environment, created_at")
     .single();
   if (error || !updated) {
     return NextResponse.json({ ok: false, error: error?.message ?? "Update failed." }, { status: 400 });
@@ -51,6 +56,6 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 
   return NextResponse.json({ ok: true, store: {
     id: updated.id, name: updated.name, code: updated.code, address: updated.address,
-    isActive: updated.is_active, createdAt: updated.created_at,
+    isActive: updated.is_active, environment: updated.environment ?? "live", createdAt: updated.created_at,
   } });
 }

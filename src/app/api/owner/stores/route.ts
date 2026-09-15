@@ -28,7 +28,7 @@ export async function GET(req: Request) {
 
   const { data: branches, error } = await admin
     .from("branches")
-    .select("id, name, code, address, is_active, created_at")
+    .select("id, name, code, address, is_active, environment, created_at")
     .eq("organization_id", orgId)
     .order("created_at", { ascending: true });
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
@@ -50,7 +50,7 @@ export async function GET(req: Request) {
     ]);
     return {
       id: b.id, name: b.name, code: b.code, address: b.address,
-      isActive: b.is_active, createdAt: b.created_at,
+      isActive: b.is_active, environment: b.environment ?? "live", createdAt: b.created_at,
       staffCount: staffCount ?? 0, ticketCount: ticketCount ?? 0,
       manager: mgr && mgr[0] ? mgr[0].name : null,
     };
@@ -71,6 +71,10 @@ export async function POST(req: Request) {
   const phone = String(body?.phone ?? "").trim() || null;
   const email = String(body?.email ?? "").trim() || null;
   const timezone = String(body?.timezone ?? "").trim() || null;
+  // Environment (DEMO | LIVE) is a distinct concept from is_active
+  // (ACTIVE | INACTIVE). A real branch defaults to LIVE (production); only an
+  // explicit "demo" makes it a demonstration/test store.
+  const environment = String(body?.environment ?? "").trim().toLowerCase() === "demo" ? "demo" : "live";
 
   if (!name) return NextResponse.json({ ok: false, reason: "missing_name" }, { status: 400 });
 
@@ -88,8 +92,8 @@ export async function POST(req: Request) {
 
   const { data: created, error } = await admin
     .from("branches")
-    .insert({ organization_id: orgId, name, code, address, is_active: true })
-    .select("id, name, code, address, is_active, created_at")
+    .insert({ organization_id: orgId, name, code, address, is_active: true, environment })
+    .select("id, name, code, address, is_active, environment, created_at")
     .single();
   if (error || !created) {
     return NextResponse.json({ ok: false, error: error?.message ?? "Create failed." }, { status: 400 });
@@ -115,6 +119,7 @@ export async function POST(req: Request) {
 
   return NextResponse.json({ ok: true, store: {
     id: created.id, name: created.name, code: created.code, address: created.address,
-    isActive: created.is_active, createdAt: created.created_at, staffCount: 0, ticketCount: 0,
+    isActive: created.is_active, environment: created.environment ?? "live",
+    createdAt: created.created_at, staffCount: 0, ticketCount: 0,
   } });
 }

@@ -7,6 +7,27 @@ import { ensureOrganization, ensureBranches, orgIdForAuthUser, resolveBranchId, 
 
 export const dynamic = "force-dynamic";
 
+/* Roles that carry organization-wide administration and therefore MUST NOT be
+   assignable by anyone other than a true org/platform administrator. This is
+   the backend guard against privilege escalation: a Store Manager assigning
+   users to their store can never mint another Owner / org-admin, no matter what
+   roleId the browser sends (the client dropdown hides these, but we never trust
+   the client). */
+const ORG_ADMIN_ROLES = new Set([
+  "master_shop_owner",
+  "platform_owner",
+  "developer_admin",
+]);
+
+/* The roles that may GRANT an org-admin role. Only a true org/platform admin
+   may create another org-admin-level user. A branch-scoped Store Manager
+   (shop_owner_branch_manager) is intentionally excluded. */
+const CAN_GRANT_ORG_ADMIN = new Set([
+  "master_shop_owner",
+  "platform_owner",
+  "developer_admin",
+]);
+
 /* POST /api/staff — create a staff member and (optionally) their login account.
    Admin-only. Uses the service-role key to create the auth user. */
 export async function POST(req: Request) {
@@ -25,6 +46,20 @@ export async function POST(req: Request) {
   if (!name?.trim()) return NextResponse.json({ ok: false, reason: "missing_name" }, { status: 400 });
   if (hasLogin && !email) return NextResponse.json({ ok: false, reason: "missing_email" }, { status: 400 });
   if (hasLogin && !password) return NextResponse.json({ ok: false, reason: "missing_password" }, { status: 400 });
+  if (!roleId || typeof roleId !== "string") return NextResponse.json({ ok: false, reason: "missing_role" }, { status: 400 });
+
+  // ── Role integrity: the assigned role MUST be a real role from the single
+  //    source of truth (the roles table / Settings → Roles & Permissions). We
+  //    never invent or hardcode permissions here. ──
+  const { data: roleRow } = await admin.from("roles").select("id").eq("id", roleId).maybeSingle();
+  if (!roleRow) return NextResponse.json({ ok: false, reason: "invalid_role" }, { status: 400 });
+
+  // ── Privilege-escalation guard: only a true org/platform admin may assign an
+  //    org-wide administration role. A Store Manager cannot mint an Owner, even
+  //    by tampering with the request. ──
+  if (ORG_ADMIN_ROLES.has(roleId) && !CAN_GRANT_ORG_ADMIN.has(guard.roleId)) {
+    return NextResponse.json({ ok: false, reason: "forbidden_role" }, { status: 403 });
+  }
 
   // Duplicate email check (whenever an email is supplied).
   if (email) {
@@ -125,7 +160,10 @@ export async function POST(req: Request) {
           organization_id: orgId,
           staff_id: inserted.id,
           branch_id: branchId,
-          role_id: null,
+          // Persist the assigned role on the grant too, so the user↔store↔role
+          // relationship is fully relational (roleId, not text). This is the
+          // per-store role for this user's access to this store.
+          role_id: roleId,
           is_default: true,
           status: "active",
           created_by: (await orgStaffId(admin, user.id)) ?? null,

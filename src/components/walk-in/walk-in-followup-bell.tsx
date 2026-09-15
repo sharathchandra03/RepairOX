@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bell, X, Check, CheckCheck, ExternalLink, Clock } from "lucide-react";
+import { Bell, X, CheckCheck, ExternalLink, Clock } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { type WalkIn, followUpDueAt } from "@/lib/mock-data";
 import { useFollowUpClock, dueFollowUps } from "@/lib/walk-in-followup-engine";
@@ -31,13 +31,11 @@ export function WalkInFollowUpBell({
   walkIns,
   displayId,
   onOpenWalkIn,
-  onMarkRead,
   onCompleteFollowUp,
 }: {
   walkIns: WalkIn[];
   displayId: (w: WalkIn) => string;
   onOpenWalkIn: (w: WalkIn) => void;
-  onMarkRead: (w: WalkIn) => void;
   /** Open the SAFE completion dialog (outcome + next action) — never a silent close. */
   onCompleteFollowUp: (w: WalkIn) => void;
 }) {
@@ -162,14 +160,9 @@ export function WalkInFollowUpBell({
                         >
                           <ExternalLink className="h-3 w-3" /> Open
                         </button>
-                        {!w.followUpReadAt && (
-                          <button
-                            onClick={() => onMarkRead(w)}
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground"
-                          >
-                            <Check className="h-3 w-3" /> Mark read
-                          </button>
-                        )}
+                        {/* "Mark read" removed as a Walk-In follow-up action —
+                            reading a notification is not a follow-up outcome. The
+                            completion workflow below is the only action. */}
                         <button
                           onClick={() => { onCompleteFollowUp(w); setOpen(false); }}
                           title="Record the outcome of this follow-up attempt"

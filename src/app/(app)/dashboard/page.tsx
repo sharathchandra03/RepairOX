@@ -6,7 +6,7 @@ import {
   ChevronUp, ChevronDown, Inbox, Ticket,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RevenueChart } from "@/components/dashboard/revenue-chart";
 import { TicketsDonut } from "@/components/dashboard/donut";
@@ -80,8 +80,29 @@ export default function Dashboard() {
   // Always default to "Today" on every login/visit. The Critical Tasks card
   // reads the full store (see criticalTickets) so priority changes still show
   // there regardless of this range; the range only scopes time-based sections.
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "this_month" | "this_year" | "all" | "custom">("today");
-  const [customRange, setCustomRange] = useState<DateRange>({ start: null, end: null });
+  //
+  // Exception: when arriving from the Owner Dashboard's "View Reports" action,
+  // the active owner date window travels via ?dateRange=&from=&to= so the store
+  // report opens with the SAME range the owner was looking at (not silently
+  // reset to Today). Read once on mount via a lazy initializer.
+  const searchParams = useSearchParams();
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "this_month" | "this_year" | "all" | "custom">(() => {
+    const raw = searchParams.get("dateRange");
+    const valid = ["today", "yesterday", "this_month", "this_year", "all", "custom"];
+    return (raw && valid.includes(raw) ? raw : "today") as "today" | "yesterday" | "this_month" | "this_year" | "all" | "custom";
+  });
+  const [customRange, setCustomRange] = useState<DateRange>(() => {
+    if (searchParams.get("dateRange") === "custom") {
+      const from = searchParams.get("from");
+      const to = searchParams.get("to");
+      if (from && to) {
+        const start = new Date(from); start.setHours(0, 0, 0, 0);
+        const end = new Date(to); end.setHours(23, 59, 59, 999);
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) return { start, end };
+      }
+    }
+    return { start: null, end: null };
+  });
   const [showDatePicker, setShowDatePicker] = useState(false);
   const { tickets, invoices, inventory } = useStore();
   const router = useRouter();

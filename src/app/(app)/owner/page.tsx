@@ -24,7 +24,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Building2, Ticket, ShoppingBag, ReceiptText, Wallet, Package,
-  ChevronRight, TrendingUp, ArrowRight, Store as StoreIcon, CalendarDays,
+  ChevronRight, TrendingUp, Store as StoreIcon, CalendarDays,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { KpiCard } from "@/components/dashboard/kpi-card";
@@ -71,7 +71,7 @@ function resolveRange(preset: PresetId, from?: string, to?: string): { from: str
 }
 
 interface StoreMetrics {
-  id: string; name: string; code: string | null; address: string | null; isActive: boolean;
+  id: string; name: string; code: string | null; address: string | null; isActive: boolean; environment: "demo" | "live";
   tickets: number; walkIns: number; invoices: number; pickup: number; onsite: number;
   totalSales: number; paymentReceived: number; outstanding: number; stockValue: number; avgPerDay: number;
 }
@@ -82,9 +82,13 @@ interface SummaryTotals {
 
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
-/** Softer tone for zero values so active data stands out at a glance, without
- *  hiding the zero (meaning is preserved). */
-const zeroMuted = (n: number) => (n === 0 ? "text-slate-300" : "");
+/** Zero values are REAL business information (a store with 0 activity still
+ *  exists and matters), so they must stay clearly READABLE — never faded or
+ *  disabled-looking. We only step the WEIGHT down (semibold → medium) and use a
+ *  normal readable secondary ink (slate-500), not a pale/low-opacity treatment.
+ *  Non-zero values keep their stronger colour + weight, so the hierarchy is
+ *  subtle rather than "available vs unavailable". */
+const zeroTone = (n: number) => (n === 0 ? "font-medium !text-slate-500" : "");
 
 export default function OwnerDashboardPage() {
   const router = useRouter();
@@ -151,8 +155,11 @@ export default function OwnerDashboardPage() {
   }, [isAllShops, totals, visibleRows]);
 
   function enterStore(id: string) {
+    // "View Reports" opens the INDIVIDUAL store's Reports (not its operational
+    // dashboard). Set the active store first so /reports is scoped to it via the
+    // global store context, then navigate.
     setActiveStore(id);
-    router.push("/dashboard");
+    router.push("/reports");
   }
 
   const contextLabel = isAllShops ? "All Shops" : stores.find((s) => s.id === activeStoreId)?.name ?? "Store";
@@ -162,7 +169,7 @@ export default function OwnerDashboardPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-4">
       <PageHeader
         eyebrow="Organization / Overview"
         title="Owner Dashboard"
@@ -212,8 +219,9 @@ export default function OwnerDashboardPage() {
         </div>
       )}
 
-      {/* Consolidated KPIs */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      {/* Consolidated KPIs — tighter gap so the Store Performance table rises
+          into the initial viewport without cramping the cards. */}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         <KpiCard title="Total Sales" value={shownTotals.totalSales} format={inr} tone="blue" icon={TrendingUp}
           hint={`${visibleRows.length} store${visibleRows.length !== 1 ? "s" : ""}`} />
         <KpiCard title="Payment Received" value={shownTotals.paymentReceived} format={inr} tone="emerald" icon={Wallet} />
@@ -223,38 +231,62 @@ export default function OwnerDashboardPage() {
         <KpiCard title="Stock Value" value={shownTotals.stockValue} format={inr} tone="amber" icon={Package} />
       </div>
 
-      {/* Store comparison table */}
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
-        <div className="flex items-center justify-between border-b border-border px-5 py-3.5">
-          <div className="flex items-center gap-2">
+      {/* ── Store Performance — the PRIMARY multi-store comparison surface ──
+          A single enterprise data-table: sharp column grid, sticky header AND
+          sticky total footer, with the store rows scrolling INTERNALLY so the
+          page itself stays short and the header + totals are always in view no
+          matter how many stores exist. The old duplicate store-card grid below
+          it has been removed — this table is now the one place stores are
+          compared. Horizontal scroll is confined to the table (never the page)
+          so nothing clips at higher browser zoom. */}
+      <div className="overflow-hidden border-2 border-zinc-200 bg-card shadow-card">
+        <div className="flex items-center justify-between gap-3 border-b-2 border-zinc-200 px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
             <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
               <Building2 className="h-4 w-4" />
             </span>
             <div>
-              <h3 className="font-display text-[15px] font-bold leading-tight">Store Performance</h3>
-              <p className="text-[11.5px] text-muted-foreground">Click any store to open its dashboard</p>
+              <h3 className="font-display text-[15px] font-bold leading-tight text-slate-900">Store Performance</h3>
+              <p className="text-[11.5px] text-muted-foreground">Compare every store, then open one with View Reports</p>
             </div>
           </div>
+          {!loading && visibleRows.length > 0 && (
+            <span className="hidden shrink-0 rounded-full bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-semibold text-[#3A4DBB] sm:inline-block">
+              {visibleRows.length} store{visibleRows.length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[920px] table-fixed text-left">
-            {/* Fixed column grid so every metric aligns vertically row-to-row,
-                with generous width for currency so values never collide. */}
+        {/* The scroll container owns BOTH axes: vertical scroll for long store
+            lists and horizontal scroll on narrow screens. The <thead>/<tfoot>
+            are position:sticky against THIS container, so the header pins to the
+            top and the Total pins to the bottom while rows scroll between them.
+
+            Height is VIEWPORT-RELATIVE, not a hardcoded pixel value: it fills
+            the space that remains after the topbar, page header, date strip,
+            KPI cards and padding (~320px reserved), so the table lands inside
+            the initial viewport on any screen. A min floor keeps a few rows +
+            sticky header + sticky total usable on short laptops; a max ceiling
+            stops it dominating very tall monitors. clamp() adapts automatically
+            across small laptop / tablet / large monitor without media queries. */}
+        <div className="overflow-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [max-height:clamp(280px,calc(100vh-320px),620px)]">
+          <table className="w-full min-w-[940px] table-fixed border-collapse text-left">
+            {/* One shared column grid used by header, every row and the footer,
+                so metrics line up perfectly. STORE is widest (identity + action);
+                counts are compact; currency columns are wider. */}
             <colgroup>
-              <col className="w-[20%]" />
+              <col className="w-[22%]" />
               <col className="w-[8%]" />
               <col className="w-[8%]" />
               <col className="w-[8%]" />
               <col className="w-[8%]" />
               <col className="w-[13%]" />
               <col className="w-[13%]" />
-              <col className="w-[10%]" />
-              <col className="w-[12%]" />
-              <col className="w-[44px]" />
+              <col className="w-[9%]" />
+              <col className="w-[11%]" />
             </colgroup>
             <thead>
-              <tr className="border-b border-border bg-[#F7F8FE] text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500">
+              <tr className="text-[12px] font-bold uppercase tracking-wider text-[#4361EE] [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:border-b-2 [&>th]:border-[#4361EE]/25 [&>th]:bg-[#D6DDFB]">
                 <th className="px-5 py-3.5 text-left">Store</th>
                 <th className="px-3 py-3.5 text-center">Tickets</th>
                 <th className="px-3 py-3.5 text-center">Pickup</th>
@@ -264,104 +296,89 @@ export default function OwnerDashboardPage() {
                 <th className="px-4 py-3.5 text-right">Payment Received</th>
                 <th className="px-4 py-3.5 text-right">Avg / Day</th>
                 <th className="px-4 py-3.5 text-right">Outstanding</th>
-                <th className="px-4 py-3.5"></th>
               </tr>
             </thead>
             <tbody>
               {loading && (
-                <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">Loading store metrics…</td></tr>
+                <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">Loading store metrics…</td></tr>
               )}
               {!loading && visibleRows.length === 0 && (
-                <tr><td colSpan={10} className="px-5 py-10 text-center text-muted-foreground">No stores to show.</td></tr>
+                <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">No stores to show.</td></tr>
               )}
               {!loading && visibleRows.map((s, i) => {
-                const hasActivity = s.tickets > 0 || s.walkIns > 0 || s.totalSales > 0;
                 return (
                 <motion.tr
                   key={s.id}
-                  initial={{ opacity: 0, y: 6 }}
+                  initial={{ opacity: 0, y: 3 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: 0.03 * i }}
+                  transition={{ delay: Math.min(0.02 * i, 0.2) }}
                   onClick={() => enterStore(s.id)}
-                  className={cn(
-                    "group cursor-pointer border-b border-border/60 transition-colors hover:bg-[#F5F7FF]",
-                    // Stores that actually have data get a very light tint so
-                    // they read as the meaningful rows; empty stores stay clean.
-                    hasActivity && "bg-[#FAFBFF]"
-                  )}
+                  className="group cursor-pointer border-t border-border align-middle transition hover:bg-muted/40"
                 >
-                  {/* STORE — strongest hierarchy in the row */}
-                  <td className="px-5 py-4">
+                  {/* STORE — strongest hierarchy: name (primary) + View Reports
+                      (secondary actionable link). Compact but comfortable height. */}
+                  <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
                       <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">
                         {(s.code || s.name).slice(0, 2).toUpperCase()}
                       </span>
                       <div className="min-w-0">
-                        <p className="truncate text-[15px] font-bold leading-tight text-slate-800 group-hover:text-[#3A4DBB]">{s.name}</p>
-                        <p className="mt-0.5 text-[11px] font-medium text-muted-foreground">{s.isActive ? "Active" : "Inactive"}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate text-[15px] font-bold leading-tight text-slate-900 group-hover:text-[#3A4DBB]">{s.name}</p>
+                          {s.environment === "demo" && (
+                            <span className="shrink-0 rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-amber-700">
+                              Demo
+                            </span>
+                          )}
+                        </div>
+                        <span
+                          role="link"
+                          tabIndex={0}
+                          onClick={(e) => { e.stopPropagation(); enterStore(s.id); }}
+                          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); enterStore(s.id); } }}
+                          className="mt-1 inline-flex items-center gap-1 rounded text-[12px] font-semibold text-[#4361EE] underline-offset-2 transition-colors hover:text-[#3A4DBB] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                        >
+                          View Reports
+                          <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />
+                        </span>
                       </div>
                     </div>
                   </td>
-                  {/* OPERATIONAL COUNTS — bold, centered, zeros softened */}
-                  <td className={cn("px-3 py-4 text-center text-[15px] font-bold tabular-nums text-slate-800", zeroMuted(s.tickets))}>{s.tickets}</td>
-                  <td className={cn("px-3 py-4 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroMuted(s.pickup))}>{s.pickup}</td>
-                  <td className={cn("px-3 py-4 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroMuted(s.onsite))}>{s.onsite}</td>
-                  <td className={cn("px-3 py-4 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroMuted(s.walkIns))}>{s.walkIns}</td>
+                  {/* OPERATIONAL COUNTS — non-zero prominent, zero still readable */}
+                  <td className={cn("px-3 py-3 text-center text-[15px] font-bold tabular-nums text-slate-900", zeroTone(s.tickets))}>{s.tickets}</td>
+                  <td className={cn("px-3 py-3 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroTone(s.pickup))}>{s.pickup}</td>
+                  <td className={cn("px-3 py-3 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroTone(s.onsite))}>{s.onsite}</td>
+                  <td className={cn("px-3 py-3 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroTone(s.walkIns))}>{s.walkIns}</td>
                   {/* FINANCIALS — strongest numeric weight, right-aligned, semantic colour */}
-                  <td className={cn("px-4 py-4 text-right text-[15px] font-bold tabular-nums text-slate-900", zeroMuted(s.totalSales))}>{inr(s.totalSales)}</td>
-                  <td className={cn("px-4 py-4 text-right text-[15px] font-bold tabular-nums text-emerald-700", zeroMuted(s.paymentReceived))}>{inr(s.paymentReceived)}</td>
-                  <td className={cn("px-4 py-4 text-right text-[14px] font-semibold tabular-nums text-slate-600", zeroMuted(s.avgPerDay))}>{inr(s.avgPerDay)}</td>
-                  <td className={cn("px-4 py-4 text-right text-[15px] font-bold tabular-nums text-[#C4506B]", zeroMuted(s.outstanding))}>{inr(s.outstanding)}</td>
-                  <td className="px-4 py-4 text-right">
-                    <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#4361EE]" />
-                  </td>
+                  <td className={cn("px-4 py-3 text-right text-[15px] font-bold tabular-nums text-slate-900", zeroTone(s.totalSales))}>{inr(s.totalSales)}</td>
+                  <td className={cn("px-4 py-3 text-right text-[15px] font-bold tabular-nums text-emerald-700", zeroTone(s.paymentReceived))}>{inr(s.paymentReceived)}</td>
+                  <td className={cn("px-4 py-3 text-right text-[14px] font-semibold tabular-nums text-slate-700", zeroTone(s.avgPerDay))}>{inr(s.avgPerDay)}</td>
+                  <td className={cn("px-4 py-3 text-right text-[15px] font-bold tabular-nums text-[#C4506B]", zeroTone(s.outstanding))}>{inr(s.outstanding)}</td>
                 </motion.tr>
                 );
               })}
             </tbody>
             {!loading && visibleRows.length > 0 && (
               <tfoot>
-                <tr className="border-t-2 border-[#B3BFF6]/60 bg-[#EEF1FD] text-[#3A4DBB]">
-                  <td className="px-5 py-4 text-[13px] font-extrabold uppercase tracking-wide">Total</td>
-                  <td className="px-3 py-4 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.tickets}</td>
-                  <td className="px-3 py-4 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.pickup}</td>
-                  <td className="px-3 py-4 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.onsite}</td>
-                  <td className="px-3 py-4 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.walkIns}</td>
-                  <td className="px-4 py-4 text-right text-[15px] font-extrabold tabular-nums">{inr(shownTotals.totalSales)}</td>
-                  <td className="px-4 py-4 text-right text-[15px] font-extrabold tabular-nums">{inr(shownTotals.paymentReceived)}</td>
-                  <td className="px-4 py-4 text-right text-[14px] font-bold tabular-nums">{inr(shownTotals.avgPerDay)}</td>
-                  <td className="px-4 py-4 text-right text-[15px] font-extrabold tabular-nums">{inr(shownTotals.outstanding)}</td>
-                  <td className="px-4 py-4"></td>
+                {/* Sticky bottom Total — a real table footer aligned to the same
+                    column grid (not a floating card). Stronger blue-tint, bold
+                    type, top divider + subtle lift so it reads as the summary. */}
+                <tr className="text-[#33409E] [&>td]:sticky [&>td]:bottom-0 [&>td]:z-10 [&>td]:border-t-2 [&>td]:border-[#4361EE]/30 [&>td]:bg-[#D6DDFB]">
+                  <td className="px-5 py-3 text-[13px] font-extrabold uppercase tracking-wide">Total</td>
+                  <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.tickets}</td>
+                  <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.pickup}</td>
+                  <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.onsite}</td>
+                  <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.walkIns}</td>
+                  <td className="px-4 py-3 text-right text-[15px] font-extrabold tabular-nums">{inr(shownTotals.totalSales)}</td>
+                  <td className="px-4 py-3 text-right text-[15px] font-extrabold tabular-nums text-emerald-800">{inr(shownTotals.paymentReceived)}</td>
+                  <td className="px-4 py-3 text-right text-[14px] font-bold tabular-nums">{inr(shownTotals.avgPerDay)}</td>
+                  <td className="px-4 py-3 text-right text-[15px] font-extrabold tabular-nums text-[#B34464]">{inr(shownTotals.outstanding)}</td>
                 </tr>
               </tfoot>
             )}
           </table>
         </div>
       </div>
-
-      {/* Store quick-enter cards (mobile-friendly drill-in) */}
-      {isAllShops && !loading && visibleRows.length > 0 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {visibleRows.map((s) => (
-            <button
-              key={s.id}
-              onClick={() => enterStore(s.id)}
-              className="group flex items-center justify-between rounded-2xl border border-border bg-card p-4 text-left shadow-card transition hover:-translate-y-0.5 hover:border-[#4361EE]/40 hover:shadow-card-hover"
-            >
-              <div className="flex items-center gap-3">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
-                  <StoreIcon className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-[14px] font-bold">{s.name}</p>
-                  <p className="text-[12px] text-muted-foreground">{s.tickets} tickets · {inr(s.totalSales)}</p>
-                </div>
-              </div>
-              <ArrowRight className="h-4 w-4 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:text-[#4361EE]" />
-            </button>
-          ))}
-        </div>
-      )}
     </div>
   );
 }
