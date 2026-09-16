@@ -18,7 +18,9 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { Drawer } from "@/components/ui/drawer";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
+import { StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import {
   STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE,
@@ -137,7 +139,8 @@ export default function TicketDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { tickets, invoices, deleteTicket, updateTicket, deductPartsForTicket } = useStore();
+  const { tickets, invoices, deleteTicket, updateTicket, updateDeviceStatus, deductPartsForTicket } = useStore();
+  const { settings } = useStoreSettings();
   const ticketId = params.id as string;
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesDraft, setNotesDraft] = useState("");
@@ -412,10 +415,20 @@ export default function TicketDetailPage() {
                       <div className="flex items-center gap-2 mb-3">
                         <span className="grid h-6 w-6 place-items-center rounded-md bg-indigo-100 text-[10px] font-bold text-indigo-700">{idx + 1}</span>
                         <span className="text-sm font-semibold">{[dev.brand, dev.model].filter(Boolean).join(" ") || "Untitled Device"}</span>
-                        <span className={`ml-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[dev.status]}`}>
-                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                          {STATUS_LABEL[dev.status]}
-                        </span>
+                        {/* Independent per-device status control. Reuses the canonical
+                            status pill + dropdown (same colours, rules, animation) but
+                            scoped to THIS device — changing it never affects the other
+                            devices. The store recomputes the ticket's aggregate status. */}
+                        <div className="ml-auto">
+                          <StatusPillDropdown
+                            status={dev.status}
+                            onSelect={(next) => updateDeviceStatus(ticket.id, dev.id, next)}
+                            statusColors={settings.statusColors}
+                            hasInvoice={invoices.some((inv) => inv.ticketId === ticket.id)}
+                            size="sm"
+                            ariaLabel={[dev.brand, dev.model].filter(Boolean).join(" ") || "Device"}
+                          />
+                        </div>
                       </div>
                       <div className="grid grid-cols-1 gap-x-8 gap-y-2 sm:grid-cols-2">
                         <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : "—"} />

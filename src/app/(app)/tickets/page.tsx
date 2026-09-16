@@ -41,7 +41,7 @@ import { pinnableToApplied } from "@/lib/filter-utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 import { readDateFilterParams, isInListDateRange } from "@/lib/date-filter";
-import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
+import { InlineStatusDropdown, StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 
 /* ─── Column Definition ──────────────────────────────────────────────────
    Column catalog, ids, and defaults now live in the shared single source of
@@ -144,7 +144,7 @@ function fmtDate(iso: string): string {
 
 export default function TicketsPage() {
   const router = useRouter();
-  const { tickets, invoices, bulkUpdateStatus, deleteTicket, updateTicket, deductPartsForTicket, pinTicket } = useStore();
+  const { tickets, invoices, bulkUpdateStatus, deleteTicket, updateTicket, updateDeviceStatus, deductPartsForTicket, pinTicket } = useStore();
   const { settings } = useStoreSettings();
   const {
     downloadTicket,
@@ -992,7 +992,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`))}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus)}
                       </td>
                     ))}
                   </motion.tr>
@@ -1221,6 +1221,7 @@ function renderCell(
   hasInvoice: boolean,
   onOpenDeviceDetails: (ticket: Ticket) => void,
   navigateToSection: (ticketId: string, section: "billing") => void,
+  onDeviceStatusChange: (ticketId: string, deviceId: string, status: TicketStatus) => void,
 ) {
   switch (colId) {
     case "checkbox":
@@ -1341,10 +1342,40 @@ function renderCell(
         </div>
       );
     }
-    case "status":
+    case "status": {
+      const statusDevices = getTicketDevices(t);
+      // Single-device tickets keep the canonical ticket-level control — no
+      // extra complexity. Multi-device tickets get ONE independent status
+      // control PER DEVICE, stacked in the same row, so each device's status
+      // can be changed directly from the table without affecting the others.
+      if (statusDevices.length <= 1) {
+        return (
+          <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={hasInvoice} />
+        );
+      }
       return (
-        <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={hasInvoice} />
+        <div className="flex flex-col gap-2" role="group" aria-label="Per-device status">
+          {statusDevices.map((dev) => {
+            const deviceName = dev.model || dev.brand || "Device";
+            return (
+              <div key={dev.id} className="flex flex-col gap-0.5">
+                <span className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground" title={deviceName}>
+                  {deviceName}
+                </span>
+                <StatusPillDropdown
+                  status={dev.status}
+                  onSelect={(next) => onDeviceStatusChange(t.id, dev.id, next)}
+                  statusColors={statusColors}
+                  hasInvoice={hasInvoice}
+                  size="sm"
+                  ariaLabel={deviceName}
+                />
+              </div>
+            );
+          })}
+        </div>
       );
+    }
     case "dueDate":
       // Clicking the Due Date opens an inline calendar/time popover (reusing the
       // RepairOX branded calendar styling) that saves the new due date/time

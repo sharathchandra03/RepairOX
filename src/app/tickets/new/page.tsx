@@ -26,7 +26,7 @@ import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
-import type { Ticket, TicketStatus, WalkIn } from "@/lib/mock-data";
+import { deriveTicketStatus, type Ticket, type TicketStatus, type WalkIn } from "@/lib/mock-data";
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
@@ -143,6 +143,9 @@ type WizardDevice = {
   parts: WizardPartData[];
   qc: Record<string, "ok" | "no" | "na" | undefined>;
   category?: string;
+  /** Existing per-device operational status, carried through on EDIT so it is
+   *  never reset. Undefined for brand-new devices (they take the default). */
+  status?: TicketStatus;
 };
 
 function createWizardDevice(category?: string): WizardDevice {
@@ -246,6 +249,9 @@ function ticketToWizard(t: Ticket): WizardData {
       parts: dr.parts ? dr.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
       qc: dr.qc || {},
       category: dr.category || category,
+      // Carry the saved per-device status through EDIT so it is preserved
+      // (not reset to the ticket default) when the wizard saves.
+      status: dr.status,
     }));
 
     return {
@@ -295,6 +301,8 @@ function ticketToWizard(t: Ticket): WizardData {
     parts: t.parts ? t.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
     qc: {},
     category,
+    // Legacy single-device ticket inherits the ticket's status as its device status.
+    status: t.status,
   };
 
   return {
@@ -559,9 +567,12 @@ function NewTicketWizard() {
       estimate: Number(wd.job.estimate) || wd.parts.reduce((s, p) => s + p.total, 0) || 0,
       parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
       qc: wd.qc,
-      // New tickets start at the configured default status (Settings → Tickets
-      // → Workflow). Existing tickets keep their stored status on edit.
-      status: defaultStatus,
+      // Per-device status. A device that already has a saved status (existing
+      // ticket being edited) KEEPS it — so editing a multi-device ticket never
+      // resets Device 2's independent status. Brand-new devices (and every
+      // device on a brand-new ticket) start at the configured default status
+      // (Settings → Tickets → Workflow).
+      status: wd.status ?? defaultStatus,
     }));
 
     // Total amount across all devices (estimate + parts, matching quotation logic)
@@ -608,7 +619,12 @@ function NewTicketWizard() {
         service: wd.job.issue || "Repair",
       })),
       parts: allParts.length > 0 ? allParts.map((p) => ({ ...p, status: "planned" as const })) : undefined,
-      status: (isEdit ? (tickets.find((t) => t.id === editId)?.status || defaultStatus) : defaultStatus) as TicketStatus,
+      // Ticket-level status is the AGGREGATE of the per-device statuses. For a
+      // brand-new ticket every device is at the default, so this equals the
+      // default (no behaviour change). On edit it reflects the preserved
+      // per-device statuses, keeping the parent ticket consistent with its
+      // devices (single source of aggregation: deriveTicketStatus).
+      status: deriveTicketStatus(deviceRecords) as TicketStatus,
       priority: (primaryDevice.job.priority as any) || "normal",
       technician: primaryDevice.device.assignedTo || "Unassigned",
       createdAt,

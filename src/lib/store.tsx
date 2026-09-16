@@ -24,6 +24,7 @@ import {
   TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS,
   STATUS_LABEL, type Ticket, type TicketStatus, type TicketPart,
   type TeamMember, type Invoice, type WalkIn,
+  deriveTicketStatus, getTicketDevices,
 } from "@/lib/mock-data";
 import {
   inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS,
@@ -85,6 +86,7 @@ interface StoreActions {
   updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
   deleteTicket: (id: string) => Promise<void>;
   bulkUpdateStatus: (ids: string[], status: TicketStatus) => Promise<void>;
+  updateDeviceStatus: (ticketId: string, deviceId: string, status: TicketStatus) => Promise<void>;
   addInvoice: (invoice: Invoice) => Promise<string>;
   updateInvoice: (id: string, updates: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
@@ -1645,6 +1647,116 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /**
+   * Update the operational status of a SINGLE device inside a multi-device
+   * ticket, independently of the ticket's other devices.
+   *
+   * This is the device-level counterpart to updateTicket({ status }). It:
+   *   1. Writes the new status onto that one device record only (other devices
+   *      are untouched — statuses stay fully independent).
+   *   2. Recomputes the PARENT ticket's aggregate status from all device
+   *      statuses via deriveTicketStatus(), so the ticket list / dashboard /
+   *      reports keep a single consistent high-level status.
+   *   3. Persists both the devices array and the recomputed ticket status.
+   *   4. Mirrors the aggregate onto any linked invoice's repairStatus (shared
+   *      status system) — reusing the exact same sync the ticket path uses.
+   *   5. Records a DEVICE-IDENTIFIED activity entry (which device changed,
+   *      old → new status).
+   *
+   * Business rule reuse: a device may only reach "Repaired & Collected" once an
+   * invoice exists for the ticket (same rule updateTicket enforces). This keeps
+   * the collected/billing state honest at the device level too.
+   */
+  const updateDeviceStatus = useCallback(async (ticketId: string, deviceId: string, status: TicketStatus) => {
+    const ticket = stateRef.current.tickets.find((t) => t.id === ticketId);
+    if (!ticket) return;
+
+    // Resolve the current device list (synthesizes one for legacy single-device
+    // tickets so this path works uniformly).
+    const currentDevices = getTicketDevices(ticket);
+    const target = currentDevices.find((d) => d.id === deviceId);
+    if (!target) return;
+    if (target.status === status) return; // no-op
+
+    // ── Business rule: block a device moving to "Repaired & Collected" without
+    // an invoice — mirrors the ticket-level rule so it can't be bypassed here.
+    if (status === "repaired_collected" && !syncingIdsRef.current.has(ticketId)) {
+      const hasInvoice = stateRef.current.invoices.some((inv) => inv.ticketId === ticketId);
+      if (!hasInvoice) {
+        toast.error("Create an invoice first", {
+          description: "A device can only be marked \u201cRepaired & Collected\u201d after an invoice has been generated for the ticket.",
+        });
+        return;
+      }
+    }
+
+    const prevDeviceStatus = target.status;
+    const nextDevices = currentDevices.map((d) => (d.id === deviceId ? { ...d, status } : d));
+    const nextTicketStatus = deriveTicketStatus(nextDevices);
+
+    if (shouldUseDb()) {
+      // Persist the devices array (device-level status) AND the recomputed
+      // aggregate ticket status in a single update. Reuse ticketToRow's device
+      // serialization so the {records, ...meta} shape is preserved.
+      const devicesJson = ticketToRow({ ...ticket, devices: nextDevices }).devices;
+      let currentRow: Record<string, unknown> = { devices: devicesJson, status: nextTicketStatus };
+      let { error } = await db.from("tickets").update(currentRow).eq("id", ticketId);
+      // Schema-drift resilience (mirrors updateTicket).
+      let heal = 0;
+      while (error && isUndefinedColumnError(error) && Object.keys(currentRow).length > 0 && heal < 4) {
+        heal += 1;
+        const col = extractMissingColumn(error);
+        currentRow = omitKeys(currentRow, col ? [col] : ["status"]);
+        if (Object.keys(currentRow).length === 0) break;
+        const retry = await db.from("tickets").update(currentRow).eq("id", ticketId);
+        error = retry.error;
+      }
+      if (error) {
+        console.error("[store] updateDeviceStatus failed:", error.code, error.message, error);
+        toast.error("Device status not saved", { description: `DB error [${error.code ?? "?"}]: ${error.message ?? "unknown"}` });
+        return;
+      }
+    }
+
+    setState((s) => ({
+      ...s,
+      tickets: s.tickets.map((t) => (t.id === ticketId ? { ...t, devices: nextDevices, status: nextTicketStatus } : t)),
+    }));
+
+    // Mirror the recomputed aggregate onto linked invoices' repairStatus so both
+    // records stay in sync (same behaviour as the ticket status path).
+    if (!syncingIdsRef.current.has(ticketId)) {
+      const linkedInvoices = stateRef.current.invoices.filter((inv) => inv.ticketId === ticketId && inv.repairStatus !== nextTicketStatus);
+      for (const inv of linkedInvoices) {
+        syncingIdsRef.current.add(inv.id);
+        try {
+          if (shouldUseDb()) {
+            const invDevicesJson = invoiceToRow({ ...inv, repairStatus: nextTicketStatus }).devices;
+            const { error } = await db.from("invoices").update({ devices: invDevicesJson }).eq("id", inv.id);
+            if (error) console.error("[store] device→invoice sync failed:", error.message);
+          }
+          setState((s) => ({ ...s, invoices: s.invoices.map((i) => (i.id === inv.id ? { ...i, repairStatus: nextTicketStatus } : i)) }));
+        } finally {
+          syncingIdsRef.current.delete(inv.id);
+        }
+      }
+    }
+
+    // Device-identified activity entry — names the affected device, not just the ticket.
+    const deviceName = [target.brand, target.model].filter(Boolean).join(" ") || target.model || target.brand || "Device";
+    const severity: ActivitySeverity = status === "repaired" || status === "repaired_collected" ? "success" : "info";
+    logActivity({
+      module: "Ticket",
+      action: "Device Status Changed",
+      severity,
+      entity: "Ticket",
+      reference: ticket.ticketNo || ticket.id,
+      description: `${deviceName} status changed to ${STATUS_LABEL[status]} on ticket ${ticket.ticketNo ?? ticket.id}.`,
+      changes: [{ field: `${deviceName} Status`, from: STATUS_LABEL[prevDeviceStatus] ?? prevDeviceStatus, to: STATUS_LABEL[status] ?? status }],
+      meta: { Device: deviceName, "Overall Status": STATUS_LABEL[nextTicketStatus] ?? nextTicketStatus },
+    });
+  }, []);
+
+  /**
    * Push an invoice's repairStatus onto its linked ticket so BOTH records share
    * the same persisted status. Tickets and Invoices use ONE status system
    * (TicketStatus). Guarded by syncingIdsRef so it never triggers the reverse
@@ -2504,6 +2616,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateTicket,
     deleteTicket,
     bulkUpdateStatus,
+    updateDeviceStatus,
     pinTicket,
     pinInvoice,
     addInvoice,

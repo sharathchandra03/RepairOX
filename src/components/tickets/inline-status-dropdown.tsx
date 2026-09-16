@@ -8,15 +8,26 @@
  * use this exact component). It renders the status pill as a button and, on
  * click, a portal-positioned menu of the available statuses.
  *
+ * The control is split into two layers:
+ *   • `StatusPillDropdown` — the reusable, scope-agnostic pill + portal menu.
+ *     It operates on a plain `status` value and an `onSelect(status)` callback,
+ *     so it can drive EITHER a ticket status OR a single device's status inside
+ *     a multi-device ticket. Colours, drop-up positioning, framer-motion
+ *     animation, and the locked / blocked business rules all live here so every
+ *     scope shares one visual language and one set of rules.
+ *   • `InlineStatusDropdown` — a thin wrapper that binds the reusable control to
+ *     a `Ticket` (reads `ticket.status`, dispatches `onStatusChange(ticket.id,
+ *     …)`). Existing call sites keep their exact props.
+ *
  * Business rules preserved here (not re-implemented per call site):
- *   • "Repaired & Collected" is unavailable until an invoice exists for the
- *     ticket (also enforced in the store so it can't be bypassed).
+ *   • "Repaired & Collected" is unavailable until an invoice exists (also
+ *     enforced in the store so it can't be bypassed).
  *   • The control stops click propagation so an inline status change never
  *     also triggers the row's navigation/onClick.
  *
- * The mutation itself (updateTicket + parts deduction on "repaired") is owned
- * by the caller via `onStatusChange`, keeping ticket lifecycle logic in one
- * place.
+ * The mutation itself (updateTicket / updateDeviceStatus + any parts deduction)
+ * is owned by the caller via the select callback, keeping lifecycle logic in
+ * one place.
  */
 
 import { useState, useRef, useEffect } from "react";
@@ -26,10 +37,10 @@ import { STATUS_LABEL, type TicketStatus, type Ticket } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 
 /**
- * A ticket's status is LOCKED (read-only) once it has reached a collected /
+ * A status is LOCKED (read-only) once it has reached a collected /
  * billing-completed state AND an invoice exists for it. This mirrors the real
- * business state — a ticket that has been collected and invoiced must not have
- * its status arbitrarily walked backwards. The "has invoice" check is the same
+ * business state — a job that has been collected and invoiced must not have its
+ * status arbitrarily walked backwards. The "has invoice" check is the same
  * linked-invoice rule the store enforces (invoices.some(inv.ticketId === id)),
  * surfaced here via the `hasInvoice` prop.
  */
@@ -48,20 +59,41 @@ const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
   { label: "Returned & Collected", value: "return_collected" },
 ];
 
-export function InlineStatusDropdown({
-  ticket,
-  onStatusChange,
+/** Compact size variant used inside device cards; `md` matches the list row. */
+type PillSize = "sm" | "md";
+
+const PILL_SIZE: Record<PillSize, string> = {
+  sm: "px-2 py-0.5 text-[10px]",
+  md: "px-2.5 py-1 text-[11px]",
+};
+
+/**
+ * StatusPillDropdown — reusable, scope-agnostic status pill + menu.
+ *
+ * Renders `status` as a coloured pill (using `statusColors`) and, on click,
+ * opens the shared portal menu of statuses. Calls `onSelect(nextStatus)` when
+ * the user picks one. Used for both ticket-level and device-level status.
+ */
+export function StatusPillDropdown({
+  status,
+  onSelect,
   statusColors,
   hasInvoice,
+  size = "md",
+  ariaLabel,
 }: {
-  ticket: Ticket;
-  onStatusChange: (ticketId: string, status: TicketStatus) => void;
+  status: TicketStatus;
+  onSelect: (status: TicketStatus) => void;
   statusColors: Record<string, string>;
   hasInvoice: boolean;
+  size?: PillSize;
+  /** Optional accessible label prefix, e.g. a device name, for screen readers. */
+  ariaLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const [hoveredBlocked, setHoveredBlocked] = useState<TicketStatus | null>(null);
+  const [lockTip, setLockTip] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -81,22 +113,18 @@ export function InlineStatusDropdown({
       const rect = btnRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
       const dropUp = spaceBelow < 300;
-      setPos({
-        top: dropUp ? rect.top : rect.bottom + 6,
-        left: rect.left,
-        dropUp,
-      });
+      setPos({ top: dropUp ? rect.top : rect.bottom + 6, left: rect.left, dropUp });
     }
     setOpen(!open);
   };
 
-  const activeColor = statusColors[ticket.status] || "#71717A";
+  const activeColor = statusColors[status] || "#71717A";
+  const labelPrefix = ariaLabel ? `${ariaLabel} — ` : "";
 
-  // Locked after invoicing a collected ticket — the pill stays visible (using
-  // the same visual language) but is read-only, with a subtle lock affordance
-  // and an explanatory tooltip. No status change is possible from here.
-  const locked = isStatusLocked(ticket.status, hasInvoice);
-  const [lockTip, setLockTip] = useState(false);
+  // Locked after invoicing a collected job — the pill stays visible (using the
+  // same visual language) but is read-only, with a subtle lock affordance and
+  // an explanatory tooltip. No status change is possible from here.
+  const locked = isStatusLocked(status, hasInvoice);
 
   if (locked) {
     return (
@@ -108,11 +136,14 @@ export function InlineStatusDropdown({
       >
         <span
           role="status"
-          aria-label={`${STATUS_LABEL[ticket.status]} — status locked after invoice creation`}
+          aria-label={`${labelPrefix}${STATUS_LABEL[status]} — status locked after invoice creation`}
           tabIndex={0}
           onFocus={() => setLockTip(true)}
           onBlur={() => setLockTip(false)}
-          className="inline-flex cursor-default items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap"
+          className={cn(
+            "inline-flex cursor-default items-center gap-1.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap",
+            PILL_SIZE[size]
+          )}
           style={{
             backgroundColor: `${activeColor}15`,
             color: activeColor,
@@ -120,7 +151,7 @@ export function InlineStatusDropdown({
           }}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeColor }} />
-          {STATUS_LABEL[ticket.status]}
+          {STATUS_LABEL[status]}
           <Lock className="h-3 w-3 opacity-60" aria-hidden />
         </span>
         {lockTip && (
@@ -143,7 +174,11 @@ export function InlineStatusDropdown({
       <button
         ref={btnRef}
         onClick={handleOpen}
-        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm"
+        aria-label={ariaLabel ? `${labelPrefix}status: ${STATUS_LABEL[status]}` : undefined}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm",
+          PILL_SIZE[size]
+        )}
         style={{
           backgroundColor: `${activeColor}15`,
           color: activeColor,
@@ -151,7 +186,7 @@ export function InlineStatusDropdown({
         }}
       >
         <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeColor }} />
-        {STATUS_LABEL[ticket.status]}
+        {STATUS_LABEL[status]}
         <ChevronDown className="h-3 w-3 opacity-60" />
       </button>
       <AnimatePresence>
@@ -174,9 +209,9 @@ export function InlineStatusDropdown({
               {STATUS_OPTIONS.map((s) => {
                 const sColor = statusColors[s.value] || "#71717A";
                 // "Repaired & Collected" stays visible but is unavailable until
-                // an invoice exists for this ticket. The rule is also enforced in
-                // the store so it can't be bypassed from any other path.
-                const isBlocked = s.value === "repaired_collected" && !hasInvoice && ticket.status !== "repaired_collected";
+                // an invoice exists. The rule is also enforced in the store so
+                // it can't be bypassed from any other path.
+                const isBlocked = s.value === "repaired_collected" && !hasInvoice && status !== "repaired_collected";
                 return (
                   <div
                     key={s.value}
@@ -186,19 +221,19 @@ export function InlineStatusDropdown({
                   >
                     <button
                       disabled={isBlocked}
-                      onClick={() => { if (isBlocked) return; onStatusChange(ticket.id, s.value); setOpen(false); }}
+                      onClick={() => { if (isBlocked) return; onSelect(s.value); setOpen(false); }}
                       className={cn(
                         "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
                         isBlocked
                           ? "cursor-not-allowed opacity-45"
-                          : ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
+                          : status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
                       )}
                     >
                       <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
                       {s.label}
                       {isBlocked ? (
                         <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable — needs invoice" />
-                      ) : ticket.status === s.value ? (
+                      ) : status === s.value ? (
                         <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>
                       ) : null}
                     </button>
@@ -222,5 +257,32 @@ export function InlineStatusDropdown({
         )}
       </AnimatePresence>
     </div>
+  );
+}
+
+/**
+ * InlineStatusDropdown — ticket-scoped wrapper around StatusPillDropdown.
+ * Keeps the original props/behaviour for all existing call sites (Tickets
+ * table, Dashboard Critical Tasks).
+ */
+export function InlineStatusDropdown({
+  ticket,
+  onStatusChange,
+  statusColors,
+  hasInvoice,
+}: {
+  ticket: Ticket;
+  onStatusChange: (ticketId: string, status: TicketStatus) => void;
+  statusColors: Record<string, string>;
+  hasInvoice: boolean;
+}) {
+  return (
+    <StatusPillDropdown
+      status={ticket.status}
+      onSelect={(s) => onStatusChange(ticket.id, s)}
+      statusColors={statusColors}
+      hasInvoice={hasInvoice}
+      size="md"
+    />
   );
 }
