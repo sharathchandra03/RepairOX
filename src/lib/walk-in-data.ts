@@ -265,9 +265,11 @@ function fmtShortDate(due: Date, now: Date): string {
 }
 
 /**
- * Build the compact Follow-Up pill descriptor for a walk-in. Examples:
- *   No Follow-Up / 1st Follow-Up · Today / 2nd Follow-Up · 13 Sep /
- *   Overdue · 1st / Completed.
+ * Build the compact Follow-Up pill descriptor for a walk-in. The label is kept
+ * SHORT so it always fits inside a single pill (no truncation): the redundant
+ * word "Follow-Up" is dropped — the column header already says Follow-Up — so we
+ * only show the attempt ordinal + the timing. Examples:
+ *   No Follow-Up / 1st · Today / 2nd · 13 Sep / Overdue · 1st / Completed.
  */
 export function followUpPill(w: WalkIn, now: Date = new Date()): FollowUpPill {
   const state = followUpState(w, now);
@@ -279,12 +281,13 @@ export function followUpPill(w: WalkIn, now: Date = new Date()): FollowUpPill {
 
   const due = followUpDueAt(w);
   const when = due ? fmtShortDate(due, now) : "";
-  const ord = attempt ? `${ordinal(attempt)} Follow-Up` : "Follow-Up";
+  // Compact: just the ordinal (e.g. "1st"), not "1st Follow-Up".
+  const ord = attempt ? ordinal(attempt) : "Follow-Up";
 
   if (state === "overdue") {
     return { state, tone, label: attempt ? `Overdue · ${ordinal(attempt)}` : "Overdue" };
   }
-  // today / upcoming → "1st Follow-Up · Today" / "2nd Follow-Up · 13 Sep"
+  // today / upcoming → "1st · Today" / "2nd · 13 Sep"
   return { state, tone, label: when ? `${ord} · ${when}` : ord };
 }
 

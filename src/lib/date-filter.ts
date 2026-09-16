@@ -116,3 +116,112 @@ export function readDateFilterParams(
   }
   return { preset };
 }
+
+/* ────────────────────────────────────────────────────────────────────────
+ * SHARED DATE-RANGE BOUNDARY LOGIC — single source of truth
+ *
+ * This is the ONE place that decides what each destination (Tickets / Invoice)
+ * preset MEANS in terms of concrete date boundaries. Both the Tickets module
+ * and the Dashboard "Critical Tasks" card call `isInListDateRange` so a given
+ * window (e.g. "1 Month") resolves to the EXACT same set of records on both
+ * pages. Do not re-implement this math anywhere else — import this instead.
+ *
+ * Contract:
+ *   • The date field compared is the record's CREATED date (createdAt). This
+ *     mirrors the Tickets module, which has always filtered on createdAt.
+ *   • Boundaries are computed in the browser's local timezone (IST for this
+ *     app) via startOfDay(), matching the Tickets module exactly.
+ *   • Ranges are inclusive of both boundaries where a boundary applies.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+/** Local-timezone start-of-day (00:00:00.000). */
+function startOfDay(date: Date): Date {
+  const d = new Date(date);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+/**
+ * Return true when `createdAt` falls inside the given destination-page date
+ * `preset`. This is the canonical boundary logic shared by the Tickets module
+ * and the Dashboard Critical Tasks card.
+ *
+ * @param createdAt  ISO string of the record's created date.
+ * @param preset     A {@link ListDatePreset} value.
+ * @param customFrom For "custom": inclusive lower bound (YYYY-MM-DD or ISO).
+ * @param customTo   For "custom": inclusive upper bound (YYYY-MM-DD or ISO).
+ */
+export function isInListDateRange(
+  createdAt: string,
+  preset: ListDatePreset,
+  customFrom?: string,
+  customTo?: string
+): boolean {
+  if (preset === "all") return true;
+  const created = new Date(createdAt).getTime();
+  if (isNaN(created)) return true;
+  const now = new Date();
+  const todayStart = startOfDay(now).getTime();
+  switch (preset) {
+    case "today":
+      return created >= todayStart;
+    case "yesterday":
+      return created >= todayStart - 86_400_000 && created < todayStart;
+    case "7days":
+      return created >= todayStart - 7 * 86_400_000;
+    case "1month": {
+      // Rolling one month relative to today.
+      const from = new Date(now);
+      from.setMonth(from.getMonth() - 1);
+      return created >= startOfDay(from).getTime();
+    }
+    case "lastmonth": {
+      // Previous calendar month (e.g. today in Sep → all of August).
+      const start = startOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)).getTime();
+      const end = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime();
+      return created >= start && created < end;
+    }
+    case "1year": {
+      const from = new Date(now);
+      from.setFullYear(from.getFullYear() - 1);
+      return created >= startOfDay(from).getTime();
+    }
+    case "custom": {
+      if (!customFrom && !customTo) return true;
+      const from = customFrom ? startOfDay(new Date(customFrom)).getTime() : -Infinity;
+      const to = customTo ? startOfDay(new Date(customTo)).getTime() + 86_400_000 - 1 : Infinity;
+      return created >= from && created <= to;
+    }
+    default:
+      return true;
+  }
+}
+
+/**
+ * Convenience: apply a DASHBOARD preset (this_month / this_year / …) using the
+ * SAME boundary logic as the destination pages, by first mapping it to the
+ * canonical {@link ListDatePreset}. This is what the Dashboard Critical Tasks
+ * card uses so its window matches the Tickets module exactly.
+ *
+ * @param createdAt   ISO string of the record's created date.
+ * @param preset      A {@link DashboardDatePreset} value.
+ * @param customRange For "custom": {start, end} Date objects (or nulls).
+ */
+export function isInDashboardDateRange(
+  createdAt: string,
+  preset: DashboardDatePreset,
+  customRange?: { start: Date | null; end: Date | null }
+): boolean {
+  if (preset === "custom") {
+    // A custom range needs an explicit start/end; incomplete → match all so the
+    // card doesn't blank out while the user is still picking dates.
+    if (!customRange?.start || !customRange?.end) return true;
+    return isInListDateRange(
+      createdAt,
+      "custom",
+      customRange.start.toISOString(),
+      customRange.end.toISOString()
+    );
+  }
+  return isInListDateRange(createdAt, mapDashboardRangeToListPreset(preset));
+}

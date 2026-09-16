@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
+import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import {
   type Expense,
   type PaymentMode,
@@ -221,6 +222,15 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
           exit={{ opacity: 0, height: 0 }}
           className="rounded-xl border border-border bg-card p-4 shadow-sm"
         >
+          {/* Canonical filter-panel header — mandatory close (×) + Clear all
+              (Design System v2 §3g). */}
+          <RoxFilterPanelHeader
+            title="Filters"
+            onClose={() => setShowFilters(false)}
+            onReset={clearFilters}
+            resetLabel="Clear all"
+            showReset={hasActiveFilters}
+          />
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             <div className="space-y-1">
               <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground flex items-center gap-1">
@@ -259,14 +269,7 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
               />
             </div>
           </div>
-          {hasActiveFilters && (
-            <button
-              onClick={clearFilters}
-              className="mt-3 inline-flex items-center gap-1 text-[11px] font-medium text-rose-600 hover:text-rose-700 transition"
-            >
-              <X className="h-3 w-3" /> Clear all filters
-            </button>
-          )}
+
         </motion.div>
       )}
 

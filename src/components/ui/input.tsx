@@ -27,7 +27,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={combinedRef}
           className={cn(
-            "flex h-[34px] w-full rounded-xl border border-border bg-card px-3 py-1.5 text-[13px] placeholder:text-muted-foreground transition-all duration-150",
+            "flex h-[34px] w-full rounded-xl border border-input bg-card px-3 py-1.5 text-[13px] placeholder:text-muted-foreground transition-all duration-150",
             "hover:border-[#4361EE]/40",
             "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none",
             iconLeft && "pl-9",
@@ -55,7 +55,7 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTML
     <textarea
       ref={ref}
       className={cn(
-        "min-h-[80px] w-full rounded-xl border border-border bg-card px-3 py-2 text-[13px] placeholder:text-muted-foreground transition-all duration-150 resize-none",
+        "min-h-[80px] w-full rounded-xl border border-input bg-card px-3 py-2 text-[13px] placeholder:text-muted-foreground transition-all duration-150 resize-none",
         "hover:border-[#4361EE]/40",
         "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none",
         className
@@ -150,8 +150,8 @@ export function Select({ value, defaultValue, onChange, options, className, plac
           "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
           open
             ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
-            : "border-border hover:border-[#4361EE]/40",
-          disabled && "cursor-not-allowed opacity-50 hover:border-border",
+            : "border-input hover:border-[#4361EE]/40",
+          disabled && "cursor-not-allowed opacity-50 hover:border-input",
           className
         )}
       >
@@ -246,7 +246,7 @@ export function NumericInput({
           if (raw === "" || raw === ".") onChange(min ?? 0);
         }}
         className={cn(
-          "flex h-11 w-full rounded-xl border border-border bg-card px-3.5 py-2.5 text-sm placeholder:text-muted-foreground transition",
+          "flex h-11 w-full rounded-xl border border-input bg-card px-3.5 py-2.5 text-sm placeholder:text-muted-foreground transition",
           "focus:border-brand-400 focus:ring-2 focus:ring-brand-200/40 focus:outline-none",
           iconLeft && "pl-9",
           className

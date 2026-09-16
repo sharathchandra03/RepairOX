@@ -999,7 +999,9 @@ export type WalkInFinalStatus = "na" | "lost" | "won";
 export const WALKIN_FINAL_STATUS_LABEL: Record<WalkInFinalStatus, string> = {
   na: "N/A",
   lost: "Lost Customer",
-  won: "Won Customer",
+  // A won Walk-In is one that was successfully converted into a Ticket, so the
+  // outcome reads "Converted Ticket" rather than a generic "Won Customer".
+  won: "Converted Ticket",
 };
 
 /** Restrained semantic tones (bg / text / ring) — one neutral, one muted red,
@@ -1008,7 +1010,9 @@ export const WALKIN_FINAL_STATUS_LABEL: Record<WalkInFinalStatus, string> = {
 export const WALKIN_FINAL_STATUS_TONE: Record<WalkInFinalStatus, string> = {
   na: "bg-slate-50 text-slate-500 ring-slate-200",
   lost: "bg-rose-50 text-rose-600 ring-rose-200",
-  won: "bg-emerald-50 text-emerald-600 ring-emerald-200",
+  // Converted Ticket — reuse the SAME blue/indigo treatment as the original
+  // `converted_ticket` status pill (WALKIN_STATUS_TONE.converted_ticket).
+  won: "bg-indigo-100 text-indigo-700 ring-indigo-300",
 };
 
 /**

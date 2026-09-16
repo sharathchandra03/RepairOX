@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings,
   Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
-  Pin, PinOff, Check, Ban,
+  Pin, PinOff, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ import { Can } from "@/components/common/can";
 import { StoreFilter } from "@/components/common/store-filter";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
+import { DueDateCell } from "@/components/tickets/due-date-cell";
 import {
   TransferTicketDrawer, CommentDrawer,
   CheckoutDrawer, EmailReceiptDrawer, WhatsAppReceiptDrawer, PrintDrawer,
@@ -35,9 +36,12 @@ import { formatINR, cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
+import { ActiveFiltersBar } from "@/components/ui/rox-filter";
+import { pinnableToApplied } from "@/lib/filter-utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
-import { readDateFilterParams } from "@/lib/date-filter";
+import { readDateFilterParams, isInListDateRange } from "@/lib/date-filter";
+import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
 
 /* ─── Column Definition ──────────────────────────────────────────────────
    Column catalog, ids, and defaults now live in the shared single source of
@@ -130,46 +134,11 @@ function fmtDate(iso: string): string {
   return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
 }
 
-function startOfDay(date: Date): Date {
-  const d = new Date(date);
-  d.setHours(0, 0, 0, 0);
-  return d;
-}
-
-function isInDateRange(createdAt: string, range: DateRange, customFrom?: string, customTo?: string): boolean {
-  if (range === "all") return true;
-  const created = new Date(createdAt).getTime();
-  if (isNaN(created)) return true;
-  const now = new Date();
-  const todayStart = startOfDay(now).getTime();
-  switch (range) {
-    case "today": return created >= todayStart;
-    case "yesterday": return created >= todayStart - 86_400_000 && created < todayStart;
-    case "7days": return created >= todayStart - 7 * 86_400_000;
-    case "1month": {
-      // Last 1 month (rolling) relative to today.
-      const from = new Date(now); from.setMonth(from.getMonth() - 1);
-      return created >= startOfDay(from).getTime();
-    }
-    case "lastmonth": {
-      // Previous calendar month, e.g. if today is in Sep → all of August.
-      const start = startOfDay(new Date(now.getFullYear(), now.getMonth() - 1, 1)).getTime();
-      const end = startOfDay(new Date(now.getFullYear(), now.getMonth(), 1)).getTime(); // first of this month
-      return created >= start && created < end;
-    }
-    case "1year": {
-      const from = new Date(now); from.setFullYear(from.getFullYear() - 1);
-      return created >= startOfDay(from).getTime();
-    }
-    case "custom": {
-      if (!customFrom && !customTo) return true;
-      const from = customFrom ? startOfDay(new Date(customFrom)).getTime() : -Infinity;
-      const to = customTo ? startOfDay(new Date(customTo)).getTime() + 86_400_000 - 1 : Infinity;
-      return created >= from && created <= to;
-    }
-    default: return true;
-  }
-}
+// Date-range boundary logic lives in the shared `date-filter.ts` module so the
+// Tickets list and the Dashboard "Critical Tasks" card resolve every preset
+// (Today / 1 Month / Last Month / …) to the EXACT same window. `DateRange` here
+// is the same vocabulary as the shared `ListDatePreset`, so `isInListDateRange`
+// is called directly with `dateRange`.
 
 /* ─── Page Component ─────────────────────────────────────────────────── */
 
@@ -448,7 +417,7 @@ export default function TicketsPage() {
       const filtered = tickets.filter((t) => {
         const okStore = !storeFilter || t.branchId === storeFilter;
         const okStatus = statusFilter === "all" || t.status === statusFilter;
-        const okDate = isInDateRange(t.createdAt, dateRange, customFrom, customTo);
+        const okDate = isInListDateRange(t.createdAt, dateRange, customFrom, customTo);
         const okPriority =
           priorityFilter === "all" ||
           (overdueOnly
@@ -724,6 +693,13 @@ export default function TicketsPage() {
         onUnpin={unpin}
       />
 
+      {/* Applied filters — each individually removable via × (Design System v2 §3g).
+          Complements the pinned bar (unpin ≠ clear) and the panel Reset. */}
+      <ActiveFiltersBar
+        filters={pinnableToApplied(pinnableFilters)}
+        onClearAll={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); setStatusFilter("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); }}
+      />
+
       {/* Filter Panel */}
       <AnimatePresence>
         {showFilterPanel && (
@@ -954,10 +930,10 @@ export default function TicketsPage() {
           already fits its container, so clipping never hides columns. */}
       {/* Straight (square) card — flat bordered header and flat bottom, so
           nothing bleeds through corner gaps while the header is frozen. */}
-      <div className="hidden -mt-5 border-2 border-zinc-200 bg-card shadow-card md:block">
+      <div className="hidden -mt-5 border-2 border-zinc-300 bg-card shadow-card md:block">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
-            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 {activeColumns.map((col) => (
                   <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
@@ -998,7 +974,7 @@ export default function TicketsPage() {
                       // and the 3-line Device/Service content (name / issue /
                       // IMEI-Serial) has comfortable vertical room. Height only —
                       // column and table widths are untouched.
-                      "group h-[76px] border-b border-zinc-200 transition-colors align-middle cursor-pointer",
+                      "group h-[76px] border-b border-zinc-500 transition-colors align-middle cursor-pointer",
                       isWaiting && "bg-red-50/80",
                       isSelected && !isWaiting && "bg-indigo-50/40",
                       !isWaiting && !isSelected && "hover:bg-[#EEF1FD]/50"
@@ -1229,129 +1205,6 @@ export default function TicketsPage() {
   );
 }
 
-/* ─── Inline Status Dropdown ─────────────────────────────────────────── */
-
-function InlineStatusDropdown({ ticket, onStatusChange, statusColors, hasInvoice }: { ticket: Ticket; onStatusChange: (ticketId: string, status: TicketStatus) => void; statusColors: Record<string, string>; hasInvoice: boolean }) {
-  const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
-  const [hoveredBlocked, setHoveredBlocked] = useState<TicketStatus | null>(null);
-  const btnRef = useRef<HTMLButtonElement>(null);
-  const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // Themed tooltip appears quickly (0.3s) instead of the native ~1.5s browser delay.
-  const showTooltip = (s: TicketStatus) => {
-    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
-    tooltipTimer.current = setTimeout(() => setHoveredBlocked(s), 300);
-  };
-  const hideTooltip = () => {
-    if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
-    setHoveredBlocked(null);
-  };
-  useEffect(() => () => { if (tooltipTimer.current) clearTimeout(tooltipTimer.current); }, []);
-
-  const handleOpen = () => {
-    if (!open && btnRef.current) {
-      const rect = btnRef.current.getBoundingClientRect();
-      const spaceBelow = window.innerHeight - rect.bottom;
-      const dropUp = spaceBelow < 300;
-      setPos({
-        top: dropUp ? rect.top : rect.bottom + 6,
-        left: rect.left,
-        dropUp,
-      });
-    }
-    setOpen(!open);
-  };
-
-  const activeColor = statusColors[ticket.status] || "#71717A";
-
-  return (
-    <div className="relative flex justify-start" onClick={(e) => e.stopPropagation()}>
-      <button
-        ref={btnRef}
-        onClick={handleOpen}
-        className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm"
-        style={{
-          backgroundColor: `${activeColor}15`,
-          color: activeColor,
-          boxShadow: `inset 0 0 0 1px ${activeColor}30`,
-        }}
-      >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeColor }} />
-        {STATUS_LABEL[ticket.status]}
-        <ChevronDown className="h-3 w-3 opacity-60" />
-      </button>
-      <AnimatePresence>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
-            <motion.div
-              initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
-              transition={{ duration: 0.15 }}
-              style={{
-                position: "fixed",
-                top: pos.dropUp ? undefined : pos.top,
-                bottom: pos.dropUp ? (window.innerHeight - pos.top + 6) : undefined,
-                left: pos.left,
-              }}
-              className="z-[70] w-[200px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
-            >
-              {STATUS_OPTIONS.map((s) => {
-                const sColor = statusColors[s.value] || "#71717A";
-                // "Repaired & Collected" stays visible but is unavailable until
-                // an invoice exists for this ticket. The rule is also enforced in
-                // the store so it can't be bypassed from any other path.
-                const isBlocked = s.value === "repaired_collected" && !hasInvoice && ticket.status !== "repaired_collected";
-                return (
-                  <div
-                    key={s.value}
-                    className="relative"
-                    onMouseEnter={() => isBlocked && showTooltip(s.value)}
-                    onMouseLeave={() => isBlocked && hideTooltip()}
-                  >
-                    <button
-                      disabled={isBlocked}
-                      onClick={() => { if (isBlocked) return; onStatusChange(ticket.id, s.value); setOpen(false); }}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
-                        isBlocked
-                          ? "cursor-not-allowed opacity-45"
-                          : ticket.status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
-                      )}
-                    >
-                      <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
-                      {s.label}
-                      {isBlocked ? (
-                        <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable — needs invoice" />
-                      ) : ticket.status === s.value ? (
-                        <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>
-                      ) : null}
-                    </button>
-                    {isBlocked && hoveredBlocked === s.value && (
-                      <div
-                        role="tooltip"
-                        className="pointer-events-none absolute left-full top-1/2 z-[80] ml-2 w-max max-w-[210px] -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
-                      >
-                        <div className="relative flex items-center gap-2 rounded-xl border border-[#4361EE]/20 bg-card px-3 py-2 text-[11px] font-medium leading-snug text-foreground shadow-lg ring-1 ring-black/[0.02]">
-                          <Ban className="h-3.5 w-3.5 shrink-0 text-rose-500" />
-                          <span>Create an invoice before selecting Repaired &amp; Collected</span>
-                          <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-b border-l border-[#4361EE]/20 bg-card" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </motion.div>
-          </>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
-
 /* ─── Cell Renderer ──────────────────────────────────────────────────── */
 
 function renderCell(
@@ -1367,7 +1220,7 @@ function renderCell(
   statusColors: Record<string, string>,
   hasInvoice: boolean,
   onOpenDeviceDetails: (ticket: Ticket) => void,
-  navigateToSection: (ticketId: string, section: "job" | "billing") => void,
+  navigateToSection: (ticketId: string, section: "billing") => void,
 ) {
   switch (colId) {
     case "checkbox":
@@ -1493,20 +1346,10 @@ function renderCell(
         <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={hasInvoice} />
       );
     case "dueDate":
-      return t.dueDate ? (
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); navigateToSection(t.id, "job"); }}
-          title="Open Job Details"
-          className={cn(
-            "-mx-1 rounded-md px-1 py-0.5 text-left text-[12px] transition hover:bg-[#EEF1FD]",
-            isOverdue(t) ? "text-[#922B21] font-semibold" : "text-[#922B21]/70",
-          )}
-        >
-          <p>{new Date(t.dueDate).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
-          <p className="text-[11px]">{new Date(t.dueDate).toLocaleTimeString("en-IN", { timeStyle: "short" })}</p>
-        </button>
-      ) : <span className="text-[12px] text-muted-foreground">—</span>;
+      // Clicking the Due Date opens an inline calendar/time popover (reusing the
+      // RepairOX branded calendar styling) that saves the new due date/time
+      // immediately — it no longer opens Edit Ticket or navigates away.
+      return <DueDateCell ticket={t} overdue={isOverdue(t)} />;
     case "created":
       return (
         <div className="text-[12px] text-muted-foreground">

@@ -8,6 +8,10 @@ const config: Config = {
     extend: {
       colors: {
         border: "hsl(var(--border))",
+        // Slightly darker idle border for data-entry controls (inputs, selects,
+        // textareas). Same geometry as `border`; only more contrast. Use via
+        // `border-input`. Card/table/divider borders keep `border`.
+        input: "hsl(var(--input-border))",
         ring: "hsl(var(--ring))",
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",

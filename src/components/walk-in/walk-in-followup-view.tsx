@@ -75,7 +75,7 @@ export function WalkInFollowUpView({
           making the full audit trail retrievable (never deletes data). */}
       <div className="flex items-center gap-1 rounded-full bg-muted p-1 w-fit">
         <SubTab label="Active" count={activeCount} active={mode === "active"} onClick={() => onModeChange("active")} />
-        <SubTab label="History" count={historyCount} active={mode === "history"} onClick={() => onModeChange("history")} icon={HistoryIcon} />
+        <SubTab label="Walkin History" count={historyCount} active={mode === "history"} onClick={() => onModeChange("history")} icon={HistoryIcon} />
       </div>
 
       <div className="border-2 border-zinc-200 bg-card shadow-card">

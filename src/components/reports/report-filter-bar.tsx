@@ -10,7 +10,7 @@
    still narrows the exact same underlying dataset as before.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, X } from "lucide-react";
 import { RSelect } from "@/components/ui/rselect";
 import { activeFilterCount } from "@/lib/reports/filters";
 import type { ReportFilters, FilterOptionSet } from "@/lib/reports/types";
@@ -20,9 +20,11 @@ interface Props {
   options: FilterOptionSet;
   onChange: (next: ReportFilters) => void;
   onReset: () => void;
+  /** Close the filter drawer — the × is a Design System v2 §3g requirement. */
+  onClose?: () => void;
 }
 
-export function ReportFilterBar({ filters, options, onChange, onReset }: Props) {
+export function ReportFilterBar({ filters, options, onChange, onReset, onClose }: Props) {
   const count = activeFilterCount(filters);
   const set = (patch: Partial<ReportFilters>) => onChange({ ...filters, ...patch });
   const withAll = (opts: { label: string; value: string }[], allLabel: string) =>
@@ -30,8 +32,9 @@ export function ReportFilterBar({ filters, options, onChange, onReset }: Props) 
 
   return (
     <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
-      <div className="mb-3 flex items-center justify-between">
+      <div className="mb-3 flex items-center justify-between gap-3">
         <p className="text-[12px] font-semibold text-foreground">Refine this view</p>
+        <div className="flex items-center gap-2.5">
         {count > 0 && (
           <button
             onClick={onReset}
@@ -40,6 +43,17 @@ export function ReportFilterBar({ filters, options, onChange, onReset }: Props) 
             <RotateCcw className="h-3.5 w-3.5" /> Reset {count} filter{count > 1 ? "s" : ""}
           </button>
         )}
+        {onClose && (
+          <button
+            onClick={onClose}
+            aria-label="Close filters"
+            title="Close filters"
+            className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
+        </div>
       </div>
 
       <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">

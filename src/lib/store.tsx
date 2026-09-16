@@ -953,6 +953,32 @@ function saveToStorage(state: StoreState, storageKey?: string) {
   try { localStorage.setItem(key, JSON.stringify(state)); } catch { /* noop */ }
 }
 
+/* ─── Shared Issue Master persistence ──────────────────────────────────────
+   The Issue Master (issueLibrary) is a single client-side list shared by the
+   Ticket AND Walk-In forms. There is no dedicated DB table for it, so — in EVERY
+   mode, including the Supabase-backed one — it is durably persisted to this one
+   standalone localStorage key. This guarantees an issue added from the Walk-In
+   form (or the Ticket form) survives reloads and is immediately available in the
+   other module, using the same master. */
+const ISSUE_LIBRARY_KEY = "repairox-issue-library";
+
+/** Read the persisted shared Issue Master, or null when absent/unreadable. */
+function loadIssueLibrary(): string[] | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(ISSUE_LIBRARY_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) && parsed.every((x) => typeof x === "string") ? parsed : null;
+  } catch { return null; }
+}
+
+/** Persist the shared Issue Master so it survives reloads in all modes. */
+function saveIssueLibrary(list: string[]) {
+  if (typeof window === "undefined") return;
+  try { localStorage.setItem(ISSUE_LIBRARY_KEY, JSON.stringify(list)); } catch { /* noop */ }
+}
+
 /* ─── Provider ───────────────────────────────────────────────────────── */
 
 export function StoreProvider({ children }: { children: ReactNode }) {
@@ -1140,7 +1166,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         deviceModels: (models ?? []).map(rowToDeviceModel),
         assignedByOptions: (abOpts ?? []).map(rowToAssignedByOption),
         assignedToOptions: (atOpts ?? []).map(rowToAssignedToOption),
-        issueLibrary: DEFAULT_ISSUES,
+        // The Issue Master has no DB table — load the durably-persisted shared
+        // list (localStorage) so issues added from Walk-In / Ticket survive
+        // reloads, falling back to the seed defaults on a fresh install.
+        issueLibrary: loadIssueLibrary() ?? DEFAULT_ISSUES,
         hydrated: true,
       }));
 
@@ -2453,15 +2482,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => {
       const exists = s.issueLibrary.some((i) => i.toLowerCase() === trimmed.toLowerCase());
       if (exists) return s;
-      return { ...s, issueLibrary: [...s.issueLibrary, trimmed] };
+      const next = [...s.issueLibrary, trimmed];
+      // Durably persist the shared master so the new issue survives reloads and
+      // is immediately available in BOTH the Walk-In and Ticket forms.
+      saveIssueLibrary(next);
+      return { ...s, issueLibrary: next };
     });
   }, []);
 
   const deleteIssueFromStore = useCallback((issue: string) => {
-    setState((s) => ({
-      ...s,
-      issueLibrary: s.issueLibrary.filter((i) => i.toLowerCase() !== issue.trim().toLowerCase()),
-    }));
+    setState((s) => {
+      const next = s.issueLibrary.filter((i) => i.toLowerCase() !== issue.trim().toLowerCase());
+      saveIssueLibrary(next);
+      return { ...s, issueLibrary: next };
+    });
   }, []);
 
   const store: Store = {

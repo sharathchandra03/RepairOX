@@ -238,9 +238,10 @@ export function WalkInFormDrawer({
             className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           >
             <div
-              /* Defined graphite boundary so the form reads as a distinct card
-                 against the dimmed backdrop — keeps the RepairOX radius + shadow. */
-              className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border-2 border-zinc-300 ring-1 ring-zinc-900/5 bg-card shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
+              /* Thin black outer boundary so the form reads as a crisp, distinct
+                 card against the dimmed backdrop — keeps the RepairOX radius +
+                 shadow. Thin (1px) line, not a heavy frame. */
+              className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-black ring-1 ring-black/10 bg-card shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
               role="dialog" aria-modal="true"
               onClick={(e) => e.stopPropagation()}
             >
@@ -272,6 +273,9 @@ export function WalkInFormDrawer({
                 max={new Date().toISOString().slice(0, 10)}
                 onChange={(e: any) => set({ date: e.target.value })}
                 title="Defaults to today — click to pick an earlier date"
+                /* Match the Type Select's height + fill the grid column so the
+                   Date and Type controls read as equal-width in this row. */
+                className="h-11 w-full"
               />
             </div>
             <div className="space-y-1">

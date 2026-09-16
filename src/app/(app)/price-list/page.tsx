@@ -1405,6 +1405,19 @@ function PartsAndPricing({
           >
             {(close) => (
               <div className="p-1">
+                {/* Canonical filter-panel header — mandatory close (×)
+                    (Design System v2 §3g). */}
+                <div className="mb-1 flex items-center justify-between gap-3 px-2.5 pt-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Filters</p>
+                  <button
+                    onClick={close}
+                    aria-label="Close filters"
+                    title="Close filters"
+                    className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
                 <MenuLabel>Sort by</MenuLabel>
                 {([["none", "Default"], ["price-asc", "Price: Low to High"], ["price-desc", "Price: High to Low"], ["name", "Name (A–Z)"]] as const).map(([v, l]) => (
                   <button

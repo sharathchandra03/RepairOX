@@ -15,6 +15,7 @@ import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Printer, FileSpreadsheet, SlidersHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { cn } from "@/lib/utils";
 
 import { ReportsNav, type ReportsTabId } from "../reports-nav";
@@ -83,6 +84,8 @@ export function FieldCockpit() {
             className="overflow-hidden"
           >
             <div className="rounded-2xl border border-dashed border-border bg-muted/30 p-5">
+              {/* Mandatory close (×) — Design System v2 §3g. */}
+              <RoxFilterPanelHeader title="Filters" onClose={() => setFiltersOpen(false)} />
               <p className="text-[12px] font-medium text-muted-foreground">
                 Filters will be available here once the Field data engine is connected.
                 The layout mirrors the Shop Management filter bar — date range, technician, route, zone, service type, SLA status.

@@ -17,12 +17,16 @@ import { OrdersStatusWidget } from "@/components/dashboard/orders-status-widget"
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
+import { ActiveFiltersBar, RoxFilterPanelHeader, type AppliedFilter } from "@/components/ui/rox-filter";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { useState, useMemo, useRef, useCallback } from "react";
-import { STATUS_LABEL, STATUS_TONE, getTicketType, TICKET_TYPE_LABEL } from "@/lib/mock-data";
+import { STATUS_LABEL, getTicketType, TICKET_TYPE_LABEL, type TicketStatus, type TicketPriority } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
+import { useStoreSettings } from "@/lib/store-settings";
+import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
+import { InlinePriorityDropdown } from "@/components/tickets/inline-priority-dropdown";
 import { formatINR, cn } from "@/lib/utils";
 import { toCSV, downloadCSV } from "@/lib/csv-utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
@@ -32,7 +36,7 @@ import { useGridLayout } from "@/lib/use-widget-order";
 import { useMonthlyTarget } from "@/lib/use-monthly-target";
 import { usePermissions } from "@/lib/permissions-context";
 import { useActivityCollapse } from "@/lib/use-activity-collapse";
-import { appendDateFilterParams } from "@/lib/date-filter";
+import { appendDateFilterParams, isInDashboardDateRange } from "@/lib/date-filter";
 
 /* ── Device breakdown — computed from store data in component ── */
 
@@ -104,7 +108,8 @@ export default function Dashboard() {
     return { start: null, end: null };
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const { tickets, invoices, inventory } = useStore();
+  const { tickets, invoices, inventory, updateTicket, deductPartsForTicket } = useStore();
+  const { settings } = useStoreSettings();
   const router = useRouter();
   // Critical Tasks card — local filters (Filter button). These narrow the
   // critical/high list further; the global date range above still scopes it.
@@ -191,33 +196,9 @@ export default function Dashboard() {
     let list = tickets;
     // Filter by status
     if (filterBy !== "all") list = list.filter((t) => t.status === filterBy);
-    // Filter by date
-    const now = new Date();
-    const todayStart = new Date(now); todayStart.setHours(0,0,0,0);
-    const ts = todayStart.getTime();
-    list = list.filter((t) => {
-      const created = new Date(t.createdAt).getTime();
-      switch (dateRange) {
-        case "today": return created >= ts;
-        case "yesterday": return created >= ts - 86_400_000 && created < ts;
-        case "this_month": {
-          const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-          return created >= monthStart;
-        }
-        case "this_year": {
-          const yearStart = new Date(now.getFullYear(), 0, 1).getTime();
-          return created >= yearStart;
-        }
-        case "all": return true;
-        case "custom": {
-          if (!customRange.start || !customRange.end) return true;
-          const s = new Date(customRange.start); s.setHours(0,0,0,0);
-          const e = new Date(customRange.end); e.setHours(23,59,59,999);
-          return created >= s.getTime() && created <= e.getTime();
-        }
-        default: return true;
-      }
-    });
+    // Filter by date — uses the SAME shared boundary logic as the Critical
+    // Tasks card and the Tickets module, so every preset resolves identically.
+    list = list.filter((t) => isInDashboardDateRange(t.createdAt, dateRange, customRange));
     // Sort
     list = [...list].sort((a, b) => {
       switch (sortBy) {
@@ -248,37 +229,18 @@ export default function Dashboard() {
   // tickets. Any ticket whose priority/status changes anywhere in the app flows
   // straight back in because this is a useMemo keyed on `tickets`.
   const criticalTickets = useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date(now); todayStart.setHours(0, 0, 0, 0);
-    const ts = todayStart.getTime();
-    const inDateRange = (createdAt: string) => {
-      const created = new Date(createdAt).getTime();
-      if (isNaN(created)) return true;
-      switch (dateRange) {
-        case "today": return created >= ts;
-        case "yesterday": return created >= ts - 86_400_000 && created < ts;
-        case "this_month": return created >= new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-        case "this_year": return created >= new Date(now.getFullYear(), 0, 1).getTime();
-        case "all": return true;
-        case "custom": {
-          if (!customRange.start || !customRange.end) return true;
-          const s = new Date(customRange.start); s.setHours(0, 0, 0, 0);
-          const e = new Date(customRange.end); e.setHours(23, 59, 59, 999);
-          return created >= s.getTime() && created <= e.getTime();
-        }
-        default: return true;
-      }
-    };
-
     return tickets
       .filter((t) => {
-        // Base: critical/high only, exclude fully closed/collected.
+        // Base rule: Critical + High priority only (the card's business rule).
+        // Same priority enum values the Tickets module uses ("critical"/"high").
         const isCriticalHigh = t.priority === "critical" || t.priority === "high";
         if (!isCriticalHigh) return false;
-        if (t.status === "repaired_collected" || t.status === "return_collected") return false;
-        // Global dashboard date range.
-        if (!inDateRange(t.createdAt)) return false;
-        // Card filters.
+        // Global dashboard date range — resolved through the SHARED boundary
+        // logic (isInDashboardDateRange → isInListDateRange) so this window is
+        // byte-for-byte identical to what the Tickets module computes for the
+        // equivalent preset. This is what keeps the two lists in sync.
+        if (!isInDashboardDateRange(t.createdAt, dateRange, customRange)) return false;
+        // Card filters — same values/logic as the Tickets module.
         if (ctPriority !== "all" && t.priority !== ctPriority) return false;
         if (ctStatus !== "all" && t.status !== ctStatus) return false;
         if (ctType !== "all" && getTicketType(t) !== ctType) return false;
@@ -294,6 +256,51 @@ export default function Dashboard() {
   }, [tickets, dateRange, customRange, ctPriority, ctStatus, ctType, ctTech]);
 
   const criticalFilterActive = ctPriority !== "all" || ctStatus !== "all" || ctType !== "all" || ctTech !== "all";
+
+  // Ticket IDs that already have an invoice — used to enforce the same
+  // "Repaired & Collected needs an invoice" rule the Tickets module applies to
+  // the inline status control. Derived from the DB-backed invoice relationship.
+  const ticketsWithInvoice = useMemo(
+    () => new Set(invoices.map((inv) => inv.ticketId).filter(Boolean) as string[]),
+    [invoices]
+  );
+
+  // Inline status change from a Critical Tasks row. Reuses the SAME lifecycle
+  // logic as the Tickets module (updateTicket + parts deduction when a ticket
+  // becomes "repaired"). The store owns the Ticket↔Invoice status sync and the
+  // "Repaired & Collected" guard, so no business rule is duplicated here.
+  const handleCriticalStatusChange = useCallback((ticketId: string, status: TicketStatus) => {
+    updateTicket(ticketId, { status });
+    if (status === "repaired") {
+      const t = tickets.find((tk) => tk.id === ticketId);
+      if (t?.parts?.some((p) => p.status === "planned")) {
+        deductPartsForTicket(ticketId);
+      }
+    }
+  }, [updateTicket, tickets, deductPartsForTicket]);
+
+  // Inline priority change from a Critical Tasks row. Reuses the EXACT Ticket
+  // priority pathway (`updateTicket(id, { priority })`), which persists to the
+  // DB and logs the "Priority Changed" activity. Because `criticalTickets` is a
+  // useMemo over the store `tickets`, changing a ticket to Normal drops it from
+  // the Critical+High list and the count updates automatically. Returns the
+  // promise so the pill can roll back its optimistic value if the write fails.
+  const handleCriticalPriorityChange = useCallback(
+    (ticketId: string, priority: TicketPriority) => updateTicket(ticketId, { priority }),
+    [updateTicket]
+  );
+
+  /* Applied Critical-Tasks filters as individually-removable chips
+     (Design System v2 §3g) — each active filter gets its own ×. */
+  const criticalAppliedFilters: AppliedFilter[] = useMemo(() => {
+    const out: AppliedFilter[] = [];
+    if (ctPriority !== "all") out.push({ id: "ctPriority", label: "Priority", value: CT_PRIORITY_OPTIONS.find((o) => o.value === ctPriority)?.label ?? ctPriority, onClear: () => setCtPriority("all") });
+    if (ctStatus !== "all") out.push({ id: "ctStatus", label: "Status", value: CT_STATUS_OPTIONS.find((o) => o.value === ctStatus)?.label ?? ctStatus, onClear: () => setCtStatus("all") });
+    if (ctType !== "all") out.push({ id: "ctType", label: "Type", value: CT_TYPE_OPTIONS.find((o) => o.value === ctType)?.label ?? ctType, onClear: () => setCtType("all") });
+    if (ctTech !== "all") out.push({ id: "ctTech", label: "Technician", value: ctTech, onClear: () => setCtTech("all") });
+    return out;
+  }, [ctPriority, ctStatus, ctType, ctTech]);
+  const resetCriticalFilters = useCallback(() => { setCtPriority("all"); setCtStatus("all"); setCtType("all"); setCtTech("all"); }, []);
 
   // Export ONLY the currently-visible critical/high rows (respects global date
   // range + card filters). Reuses the shared csv-utils infrastructure.
@@ -812,15 +819,15 @@ export default function Dashboard() {
               className="border-t border-border"
             >
               <div className="p-5 sm:px-6">
-                <div className="mb-3 flex items-center justify-between">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Filter Critical Tasks</p>
-                  <button
-                    onClick={() => { setCtPriority("all"); setCtStatus("all"); setCtType("all"); setCtTech("all"); }}
-                    className="text-[11px] font-medium text-[#4361EE] hover:underline"
-                  >
-                    Reset Filters
-                  </button>
-                </div>
+                {/* Canonical filter-panel header — mandatory close (×) + Reset
+                    (Design System v2 §3g). */}
+                <RoxFilterPanelHeader
+                  title="Filter Critical Tasks"
+                  onClose={() => setShowCriticalFilter(false)}
+                  onReset={resetCriticalFilters}
+                  resetLabel="Reset Filters"
+                  showReset={criticalFilterActive}
+                />
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
                   <div className="space-y-1">
                     <label className="text-[11px] font-medium text-muted-foreground">Priority</label>
@@ -844,6 +851,14 @@ export default function Dashboard() {
           )}
         </AnimatePresence>
 
+        {/* Applied filters — each individually removable via × (Design System v2
+            §3g), shown even when the panel is collapsed. */}
+        {criticalAppliedFilters.length > 0 && (
+          <div className="px-5 pb-4 sm:px-6">
+            <ActiveFiltersBar filters={criticalAppliedFilters} onClearAll={resetCriticalFilters} />
+          </div>
+        )}
+
         {criticalTickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">
             <div className="grid h-12 w-12 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]">
@@ -858,8 +873,8 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
-              <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[90px] px-5 py-2.5">Ticket</th><th className="py-2.5">Customer</th><th className="py-2.5">Device</th><th className="py-2.5 w-[80px]">Priority</th><th className="w-[140px] py-2.5">Status</th><th className="w-[100px] py-2.5">Waiting</th><th className="w-[100px] py-2.5 pr-5 text-right">Amount</th></tr></thead>
+            <table className="w-full min-w-[760px] table-fixed text-sm">
+              <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[10%] px-5 py-2.5">Ticket</th><th className="w-[18%] py-2.5">Customer</th><th className="w-[18%] py-2.5">Device</th><th className="w-[13%] py-2.5">Priority</th><th className="w-[17%] py-2.5 pl-[38px]">Status</th><th className="w-[12%] py-2.5 pl-[10px]">Waiting</th><th className="w-[12%] py-2.5 pr-5 text-right">Amount</th></tr></thead>
               <tbody>
                 {criticalTickets.slice(0, 8).map((t, i) => (
                   <motion.tr
@@ -874,11 +889,11 @@ export default function Dashboard() {
                     className="group cursor-pointer border-t border-border transition hover:bg-[#EEF1FD]/50 focus:bg-[#EEF1FD]/50 focus:outline-none"
                   >
                     <td className="px-5 py-3 whitespace-nowrap font-medium">{t.ticketNo ?? t.id}</td>
-                    <td className="py-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} ticketType={getTicketType(t)} /><span className="whitespace-nowrap">{t.customer}</span></div></td>
-                    <td className="py-3 whitespace-nowrap text-muted-foreground">{t.model}</td>
-                    <td className="py-3"><span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", t.priority === "critical" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-amber-50 text-amber-700 ring-amber-200")}>{t.priority === "critical" ? "Critical" : "High"}</span></td>
-                    <td className="py-3"><span className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[t.status]}`}><span className="h-1.5 w-1.5 rounded-full bg-current" />{STATUS_LABEL[t.status]}</span></td>
-                    <td className="py-3 text-[12px] text-muted-foreground whitespace-nowrap">{(() => { const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000); if (mins < 60) return `${mins}m`; if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`; return `${Math.floor(mins/1440)}d`; })()}</td>
+                    <td className="py-3 pr-3"><div className="flex items-center gap-2"><Avatar name={t.customer} size={28} ticketType={getTicketType(t)} /><span className="truncate">{t.customer}</span></div></td>
+                    <td className="py-3 pr-3 truncate text-muted-foreground">{t.model}</td>
+                    <td className="py-3"><InlinePriorityDropdown ticket={t} onPriorityChange={handleCriticalPriorityChange} /></td>
+                    <td className="py-3"><InlineStatusDropdown ticket={t} onStatusChange={handleCriticalStatusChange} statusColors={settings.statusColors} hasInvoice={ticketsWithInvoice.has(t.id)} /></td>
+                    <td className="py-3 pl-[30px] text-[12px] text-muted-foreground whitespace-nowrap">{(() => { const mins = Math.floor((Date.now() - new Date(t.createdAt).getTime()) / 60000); if (mins < 60) return `${mins}m`; if (mins < 1440) return `${Math.floor(mins/60)}h ${mins%60}m`; return `${Math.floor(mins/1440)}d`; })()}</td>
                     <td className="py-3 pr-5 text-right font-semibold tnum whitespace-nowrap">{formatINR(t.amount)}</td>
                   </motion.tr>
                 ))}

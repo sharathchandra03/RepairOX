@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
+import { useRoxStickyHeader } from "@/components/ui/rox-table";
+import { ActiveFiltersBar, RoxFilterPanelHeader, type AppliedFilter } from "@/components/ui/rox-filter";
 import { Can } from "@/components/common/can";
 import { cn } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
@@ -115,6 +117,9 @@ export default function LeadsListPage() {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  // Canonical sticky-header offset (Design System v2). Measures the app topbar
+  // so the table header pins flush beneath it — same behaviour as Walk-In/Ticket.
+  const { wrapRef: stickyWrapRef, theadTop } = useRoxStickyHeader();
   const [showFilters, setShowFilters] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [editLead, setEditLead] = useState<Lead | null>(null);
@@ -173,6 +178,41 @@ export default function LeadsListPage() {
 
   const activeFilters = hasActiveLeadFilters(filters);
 
+  /* Applied filters as individually-removable chips (Design System v2 §3g).
+     Every active filter gets its own × — including the leading date-range /
+     follow-up selects that previously had no clear affordance. */
+  const appliedFilters: AppliedFilter[] = useMemo(() => {
+    const out: AppliedFilter[] = [];
+    if (filters.dateRange !== "all") {
+      out.push({
+        id: "dateRange",
+        label: "Date",
+        value: DATE_RANGES.find((d) => d.value === filters.dateRange)?.label ?? filters.dateRange,
+        onClear: () => setFilters((f) => ({ ...f, dateRange: "all" })),
+      });
+    }
+    if (filters.followUp !== "any") {
+      out.push({
+        id: "followUp",
+        label: "Follow-up",
+        value: FOLLOWUP_FILTERS.find((d) => d.value === filters.followUp)?.label ?? filters.followUp,
+        onClear: () => setFilters((f) => ({ ...f, followUp: "any" })),
+      });
+    }
+    for (const f of FILTER_FIELDS) {
+      const v = filters.fields[f.key];
+      if (v) {
+        out.push({
+          id: f.key,
+          label: f.label,
+          value: v,
+          onClear: () => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [f.key]: "" } })),
+        });
+      }
+    }
+    return out;
+  }, [filters, setFilters]);
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -230,6 +270,14 @@ export default function LeadsListPage() {
           initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
           className="rounded-2xl border border-border bg-card p-4 shadow-card"
         >
+          {/* Canonical panel header — mandatory close (×) + Reset (Design System v2 §3g). */}
+          <RoxFilterPanelHeader
+            title="Filters"
+            onClose={() => setShowFilters(false)}
+            onReset={clearFilters}
+            resetLabel="Clear all"
+            showReset={activeFilters}
+          />
           <div className="flex flex-wrap items-center gap-2">
             {/* Date range */}
             <select
@@ -257,20 +305,30 @@ export default function LeadsListPage() {
                 onChange={(v) => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [f.key]: v } }))}
               />
             ))}
-            {activeFilters && (
-              <button onClick={clearFilters} className="text-[12px] font-medium text-[#4361EE] hover:underline">Clear all</button>
-            )}
           </div>
         </motion.div>
       )}
 
-      {/* Desktop Table */}
-      <div className="hidden overflow-hidden rounded-2xl border border-border bg-card shadow-card md:block">
+      {/* Applied filters — always individually removable via × (Design System
+          v2 §3g), shown even when the panel is collapsed. */}
+      <ActiveFiltersBar filters={appliedFilters} onClearAll={clearFilters} />
+
+      {/* Zero-height sentinel measured by useRoxStickyHeader so the table header
+          pins flush below the app topbar (no persistent sticky filter row here). */}
+      <div ref={stickyWrapRef} className="h-0" />
+
+      {/* Desktop Table — RepairOX Design System v2 canonical table language:
+          sharp visible 2px frame (.rox-table-card), [overflow-x:clip] wrapper so
+          the sticky <thead> freeze works, table-fixed + shared <colgroup>. Only
+          the visual/interaction foundation is standardized; lead business
+          columns/data are unchanged. */}
+      <div className="rox-table-card shadow-card hidden md:block">
+        <div className="[overflow-x:clip]">
         {/* table-fixed + a single shared <colgroup> so every header sits exactly
             over its content and the available width is distributed deliberately
             (proportional to each column's information) instead of content-driven
             auto widths that leave uneven gaps. */}
-        <table className="w-full table-fixed text-sm">
+        <table className="w-full table-fixed text-[14px]">
           <colgroup>
             <col className="w-[19%]" />  {/* Lead (name + id · number) */}
             <col className="w-[9%]" />   {/* Date */}
@@ -283,18 +341,18 @@ export default function LeadsListPage() {
             <col className="w-[10%]" />  {/* Follow-up */}
             <col className="w-[104px]" />{/* Actions — fixed, fits the 3 base icons + hover set */}
           </colgroup>
-          <thead className="bg-[#EEF1FD]">
-            <tr className="text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
-              <th className="px-4 py-3 text-left">Lead</th>
-              <th className="px-3 py-3 text-left">Date</th>
-              <th className="px-3 py-3 text-left">Source</th>
-              <th className="px-3 py-3 text-left">Owner</th>
-              <th className="px-3 py-3 text-left">Device</th>
-              <th className="px-3 py-3 text-left">Category</th>
-              <th className="px-3 py-3 text-left">Status</th>
-              <th className="px-3 py-3 text-left">Priority</th>
-              <th className="px-3 py-3 text-left">Follow-up</th>
-              <th className="px-4 py-3 text-right">Actions</th>
+          <thead style={{ top: theadTop }} className="rox-table-head sticky z-[5]">
+            <tr className="text-left text-[12px] font-bold uppercase tracking-wider">
+              <th className="px-4 py-4 text-left">Lead</th>
+              <th className="px-3 py-4 text-left">Date</th>
+              <th className="px-3 py-4 text-left">Source</th>
+              <th className="px-3 py-4 text-left">Owner</th>
+              <th className="px-3 py-4 text-left">Device</th>
+              <th className="px-3 py-4 text-left">Category</th>
+              <th className="px-3 py-4 text-left">Status</th>
+              <th className="px-3 py-4 text-left">Priority</th>
+              <th className="px-3 py-4 text-left">Follow-up</th>
+              <th className="px-4 py-4 text-right">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -304,12 +362,12 @@ export default function LeadsListPage() {
                 initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(0.02 * i, 0.3) }}
                 onClick={() => setDetailLead(lead)}
                 className={cn(
-                  "group cursor-pointer border-t border-border transition hover:bg-muted/30",
+                  "rox-table-row group h-[68px] cursor-pointer transition hover:bg-muted/40",
                   lead.pinnedAt && "bg-[#7C5CFC]/[0.04]",
                   followUpTone(followUpState(lead.followUpDate)).rowTint,
                 )}
               >
-                <td className="px-4 py-3 align-middle">
+                <td className="px-4 py-4 align-middle">
                   <div className="flex items-center gap-2.5">
                     <Avatar name={lead.name || lead.leadNo} size={32} />
                     <div className="min-w-0">
@@ -321,26 +379,27 @@ export default function LeadsListPage() {
                     </div>
                   </div>
                 </td>
-                <td className="px-3 py-3 align-middle"><span className="whitespace-nowrap text-[12px] text-zinc-600 tnum">{lead.date || "—"}</span></td>
-                <td className="px-3 py-3 align-middle"><span className="block truncate text-zinc-700">{lead.source || "—"}</span></td>
-                <td className="px-3 py-3 align-middle">
+                <td className="px-3 py-4 align-middle"><span className="whitespace-nowrap text-[12px] text-zinc-600 tnum">{lead.date || "—"}</span></td>
+                <td className="px-3 py-4 align-middle"><span className="block truncate text-zinc-700">{lead.source || "—"}</span></td>
+                <td className="px-3 py-4 align-middle">
                   {canAssign ? <AssignMenu lead={lead} /> : <AssignBadge lead={lead} />}
                 </td>
-                <td className="px-3 py-3 align-middle"><span className="block truncate text-zinc-700">{lead.device || "—"}</span></td>
-                <td className="px-3 py-3 align-middle">
+                <td className="px-3 py-4 align-middle"><span className="block truncate text-zinc-700">{lead.device || "—"}</span></td>
+                <td className="px-3 py-4 align-middle">
                   <span className="block truncate text-zinc-600">{lead.leadCategory || "—"}</span>
                   <div className="mt-1"><FulfilmentRouteBadge lead={lead} /></div>
                 </td>
-                <td className="px-3 py-3 align-middle">{lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
-                <td className="px-3 py-3 align-middle">{lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
-                <td className="px-3 py-3 align-middle"><FollowUpCell lead={lead} /></td>
-                <td className="px-4 py-3 align-middle" onClick={(e) => e.stopPropagation()}>
+                <td className="px-3 py-4 align-middle">{lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td className="px-3 py-4 align-middle">{lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td className="px-3 py-4 align-middle"><FollowUpCell lead={lead} /></td>
+                <td className="px-4 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
                   <LeadActionsMenu lead={lead} onAction={handleAction} />
                 </td>
               </motion.tr>
             ))}
           </tbody>
         </table>
+        </div>
         {hydrated && filteredLeads.length === 0 && (
           <div className="flex flex-col items-center gap-2 p-12 text-center">
             <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground"><User className="h-6 w-6" /></div>

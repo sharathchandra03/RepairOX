@@ -230,7 +230,7 @@ export function ReportsCockpit() {
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="overflow-hidden"
           >
-            <ReportFilterBar filters={filters} options={options} onChange={setFilters} onReset={() => setFilters({ preset: filters.preset })} />
+            <ReportFilterBar filters={filters} options={options} onChange={setFilters} onReset={() => setFilters({ preset: filters.preset })} onClose={() => setFiltersOpen(false)} />
           </motion.div>
         )}
       </AnimatePresence>

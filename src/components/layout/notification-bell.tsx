@@ -11,12 +11,12 @@
 
 import { useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Check, Truck, Store, Package, CheckCircle2, Clock } from "lucide-react";
+import { Bell, Check, Truck, Store, Package, CheckCircle2, Clock, Trash2, X } from "lucide-react";
 import { Dropdown } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
-import { useNotificationsFor, markRead, markAllRead, type NotificationKind } from "@/lib/notifications";
+import { useNotificationsFor, markRead, markAllRead, clearAllForRecipient, type NotificationKind } from "@/lib/notifications";
 
 const KIND_ICON: Partial<Record<NotificationKind, React.ComponentType<{ className?: string }>>> = {
   lead_routed: Store,
@@ -72,13 +72,34 @@ export function NotificationBell() {
     >
       {(close) => (
         <>
-          <div className="flex items-center justify-between px-3 py-2">
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
             <p className="text-[13px] font-semibold text-zinc-800">Notifications</p>
-            {unread > 0 && (
-              <button onClick={() => markAllRead(userId, role?.id)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
-                <Check className="h-3 w-3" /> Mark all read
+            <div className="flex items-center gap-1.5">
+              {unread > 0 && (
+                <button onClick={() => markAllRead(userId, role?.id)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
+                  <Check className="h-3 w-3" /> Mark all read
+                </button>
+              )}
+              {items.length > 0 && (
+                /* Clear all — removes every notification addressed to this
+                   user/role from the feed (not just marks them read). */
+                <button
+                  onClick={() => clearAllForRecipient(userId, role?.id)}
+                  title="Clear all notifications"
+                  className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-rose-600"
+                >
+                  <Trash2 className="h-3 w-3" /> Clear all
+                </button>
+              )}
+              <button
+                onClick={close}
+                title="Close"
+                aria-label="Close notifications"
+                className="grid h-6 w-6 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
               </button>
-            )}
+            </div>
           </div>
           <div className="my-1 h-px bg-border" />
           <div className="max-h-[360px] overflow-y-auto">

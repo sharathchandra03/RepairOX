@@ -2,6 +2,8 @@
 
 A production-grade Next.js + TypeScript + Tailwind + Framer Motion redesign of the RepairOX CRM. Every one of the 15 source screens has been rebuilt with refined visual hierarchy, motion, accessibility, and responsive recomposition — preserving the original workflow while elevating UX, craft, and feel.
 
+> 🎨 **UI/UX work must follow [`docs/REPAIROX-DESIGN-SYSTEM.md`](../docs/REPAIROX-DESIGN-SYSTEM.md)** — the canonical RepairOX Design System (v2). New tables use the shared table foundation (`src/components/ui/rox-table.tsx`); new full create/edit forms use the centered form foundation (`src/components/ui/rox-centered-form.tsx`). Do not reinvent table/form styles.
+
 ## ✨ Highlights
 
 - **Stack:** Next.js 14 (App Router) · React 18 · TypeScript · Tailwind CSS v3 · Framer Motion · Recharts · Lucide.

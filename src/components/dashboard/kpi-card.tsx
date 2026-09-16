@@ -99,7 +99,7 @@ export function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       onClick={onCardClick}
       className={cn(
-        "group relative overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-5 pl-[22px] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
+        "group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-5 pl-[22px] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
         onCardClick && "cursor-pointer"
       )}
       // Establish a size container so the value can scale to the card's OWN
@@ -126,7 +126,10 @@ export function KpiCard({
         )}
       </div>
 
-      <div className="relative mt-3 flex items-center gap-2.5">
+      {/* min-h-8 matches the icon box height so the value row is the same height
+          on every card whether or not it has a leading icon — this keeps the
+          hint pill and everything below it vertically aligned across all KPIs. */}
+      <div className="relative mt-3 flex min-h-8 items-center gap-2.5">
         {Icon && (
           <span
             className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-xl ring-1 ring-inset"
@@ -154,9 +157,12 @@ export function KpiCard({
         </p>
       )}
 
-      {/* Progress indicator — gradient fill, tone-tinted track, glowing end-cap. */}
+      {/* Progress indicator — gradient fill, tone-tinted track, glowing end-cap.
+          `mt-auto` pins the whole progress block to the bottom of the card so it
+          aligns across every KPI (matching the taller Tickets card), while the
+          min top gap preserves the original spacing on the tallest card. */}
       {progress && (
-        <div className={cn("relative", barThickness === "2x" ? "mt-[6px]" : "mt-3")}>
+        <div className={cn("relative mt-auto", barThickness === "2x" ? "pt-[6px]" : "pt-3")}>
           {progress.label && (
             <div className="mb-1.5 flex items-center justify-between">
               <span className="text-[10px] font-medium text-slate-500">{progress.label}</span>

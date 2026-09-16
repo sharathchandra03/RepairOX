@@ -110,7 +110,7 @@ function ConfigurableSelect({
         onClick={toggle}
         className={cn(
           "flex h-[38px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all",
-          open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-border hover:border-[#4361EE]/40",
+          open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-input hover:border-[#4361EE]/40",
         )}
       >
         <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value || placeholder || "Select…"}</span>
@@ -192,8 +192,10 @@ function Field({ label, required, error, children, className }: { label: string;
 
 const inputCls = (invalid?: boolean) =>
   cn(
+    // RepairOX Design System v2 canonical field border: `border-input` idle
+    // (a touch darker than --border — colour, not thickness), brand-blue focus.
     "h-[38px] w-full rounded-xl border bg-card px-3 text-[13px] outline-none transition-all placeholder:text-muted-foreground",
-    invalid ? "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-200/40" : "border-border hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15",
+    invalid ? "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-200/40" : "border-input hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15",
   );
 
 /* ─── Stage config ────────────────────────────────────────────────────── */
@@ -301,7 +303,9 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       >
         <div
-          className="relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
+          /* RepairOX Design System v2 canonical centered-form panel — thin crisp
+             boundary + RepairOX radius + soft deep shadow (matches New Walk-In). */
+          className="rox-form-panel relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden ring-1 ring-black/10 shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
           role="dialog" aria-modal="true"
           onClick={(e) => e.stopPropagation()}
         >
@@ -404,13 +408,13 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Estimate" error={touched ? validation.errors.estimate : undefined}>
                       <div className="flex">
-                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-border bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
+                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
                         <input className={cn(inputCls(touched && !!validation.errors.estimate), "rounded-l-none")} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
                       </div>
                     </Field>
                     <Field label="Discount" error={touched ? validation.errors.discount : undefined}>
                       <div className="flex">
-                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-border bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
+                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
                         <input className={cn(inputCls(touched && !!validation.errors.discount), "rounded-l-none")} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
                       </div>
                     </Field>

@@ -58,10 +58,25 @@ function rescheduleTimer() {
  * Feed the engine the current set of pending follow-up due instants so it can
  * schedule a precise timer to the soonest one. Called by the headless watcher
  * whenever the walk-in dataset changes. Idempotent.
+ *
+ * Besides scheduling the precise FUTURE timer, this also emits an immediate
+ * clock tick whenever the set changes. That guarantees a follow-up scheduled for
+ * a time that is ALREADY PAST (e.g. picking "today" with an earlier time — very
+ * common on a 2nd/3rd attempt) is evaluated right away instead of silently
+ * sitting until some later future tick. Without this, only follow-ups set for a
+ * strictly-future time (typically the 1st attempt) would ever fire.
  */
+let lastSynced: string | null = null;
 export function syncFollowUpDueInstants(instants: number[]) {
   dueInstants = instants;
   rescheduleTimer();
+  // Emit an immediate tick when the set of due instants actually changed, so the
+  // watcher re-evaluates now and catches any already-due (past/now) follow-up.
+  const sig = [...instants].sort((a, b) => a - b).join(",");
+  if (sig !== lastSynced) {
+    lastSynced = sig;
+    emitClock();
+  }
 }
 
 function ensureRunning() {

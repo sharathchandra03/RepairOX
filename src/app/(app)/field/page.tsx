@@ -26,6 +26,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { Pagination } from "@/components/ui/pagination";
+import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -413,6 +414,15 @@ export default function FieldPage() {
         {/* Advanced filters (Field Manager, Pickup/Drop leg, Delayed, Ticket, Custom date). */}
         {showFilters && (
           <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }} className="rounded-2xl border border-border bg-card p-4 shadow-card">
+            {/* Canonical filter-panel header — mandatory close (×) + Reset
+                (Design System v2 §3g). */}
+            <RoxFilterPanelHeader
+              title="Filters"
+              onClose={() => setShowFilters(false)}
+              onReset={resetAll}
+              resetLabel="Reset"
+              showReset={activeFilters || !!filters.query || queue !== "all"}
+            />
             <div className="flex flex-wrap items-end gap-3">
               {!isNinja && (
                 <Field label="Field Manager">
@@ -459,7 +469,7 @@ export default function FieldPage() {
           [overflow-x:clip] (not auto) + table-fixed w-full means the table always
           fits its container (header & body aligned, no column lost), and lets the
           thead FREEZE (an overflow:auto ancestor would trap the sticky header). */}
-      <div className="hidden -mt-3 border-2 border-zinc-200 bg-card shadow-card md:block">
+      <div className="hidden -mt-3 border-2 border-zinc-300 bg-card shadow-card md:block">
         {/* [overflow-x:clip] (NOT auto) + table-fixed w-full: the table always
             fits its container so the frozen thead survives and no column is
             ever lost/hidden at any zoom (same technique as Tickets/Invoices).
@@ -484,7 +494,7 @@ export default function FieldPage() {
               <col className="w-[7%]" />   {/* Invoice Amt */}
               <col className="w-[64px]" /> {/* Action — fixed, always visible */}
             </colgroup>
-            <thead style={{ top: theadTop }} className="sticky z-[5] border-b-2 border-[#4361EE]/25 bg-[#D6DDFB]">
+            <thead style={{ top: theadTop }} className="sticky z-[5] border-b-2 border-[#4361EE]/40 bg-[#D6DDFB]">
               {/* Header alignment matches the data type of each column
                   (left for text, center for compact IDs/pill, right for money). */}
               <tr className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
@@ -517,7 +527,7 @@ export default function FieldPage() {
                     initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(0.015 * i, 0.25) }}
                     onClick={() => setDetailJob(j)}
                     className={cn(
-                      "group h-[84px] cursor-pointer border-b border-zinc-200 transition-colors",
+                      "group h-[84px] cursor-pointer border-b border-zinc-500 transition-colors",
                       delayed ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-[#EEF1FD]/50",
                     )}
                   >

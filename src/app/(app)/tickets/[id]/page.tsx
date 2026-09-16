@@ -158,20 +158,20 @@ export default function TicketDetailPage() {
   >(null);
   const [showQCDrawer, setShowQCDrawer] = useState(false);
 
-  // Deep-link support: /tickets/[id]?section=job|billing[&edit=1] scrolls the
-  // targeted section into view once the ticket has rendered, and (optionally)
-  // opens that section's editor. Used by the Tickets table Due Date → Job
-  // Details and Amount → Billing quick navigations.
+  // Deep-link support: /tickets/[id]?section=billing[&edit=1] scrolls the
+  // Billing section into view once the ticket has rendered, and (optionally)
+  // opens its editor. Used by the Tickets table Amount → Billing quick
+  // navigation. (Due Date is now edited inline in the table via a calendar
+  // popover — it no longer deep-links into the Job Details editor here.)
   useEffect(() => {
     if (!ticket) return;
     const section = searchParams.get("section");
-    if (section !== "job" && section !== "billing") return;
-    const anchorId = section === "job" ? "section-job" : "section-billing";
+    if (section !== "billing") return;
     const wantsEdit = searchParams.get("edit") === "1";
     // Wait a frame so the section is in the DOM before scrolling.
     const t = setTimeout(() => {
-      document.getElementById(anchorId)?.scrollIntoView({ behavior: "smooth", block: "start" });
-      if (wantsEdit) setActiveEditor(section === "job" ? "job" : "billing");
+      document.getElementById("section-billing")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      if (wantsEdit) setActiveEditor("billing");
     }, 120);
     return () => clearTimeout(t);
     // Depend on ticket presence + the raw query so re-navigation re-triggers.

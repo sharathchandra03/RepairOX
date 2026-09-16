@@ -716,10 +716,10 @@ export default function InvoicePage() {
           (not auto) on the inner wrapper — an overflow:auto/hidden ancestor would
           trap the sticky thead and break the freeze. Flat bordered header and
           flat bottom so nothing bleeds through corner gaps while frozen. */}
-      <div className="-mt-6 border border-border bg-card shadow-card">
+      <div className="-mt-6 border-2 border-zinc-300 bg-card shadow-card">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm">
-            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="w-10 px-3 py-3">
                   <input type="checkbox"
@@ -738,7 +738,7 @@ export default function InvoicePage() {
               {paged.map((inv, i) => (
                 <motion.tr key={inv.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 * i }}
                   onClick={() => router.push(`/invoice/${inv.id}`)}
-                  className={cn("group cursor-pointer border-t border-border transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
+                  className={cn("group cursor-pointer border-t border-zinc-500 transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
                 >
                   <td className="w-10 px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(inv.id)}
@@ -765,7 +765,7 @@ export default function InvoicePage() {
         )}
         {/* Footer — user-selectable page size (10/20/50/100); pinned invoices
             stay at the top of page 1. LEFT: size selector + count, RIGHT: pages. */}
-        <div className="border-t border-border px-5 py-3">
+        <div className="border-t border-zinc-500 px-5 py-3">
           <Pagination
             page={currentPage}
             totalPages={totalPages}

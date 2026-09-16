@@ -35,12 +35,14 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
+import { ActiveFiltersBar, type AppliedFilter } from "@/components/ui/rox-filter";
+import { pinnableToApplied } from "@/lib/filter-utils";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
-  WALKIN_FINAL_STATUSES, type WalkIn, type WalkInStatus, isWalkInWon, hasActiveFollowUp,
+  WALKIN_FINAL_STATUSES, type WalkIn, isWalkInWon, hasActiveFollowUp,
   WALKIN_FINAL_STATUS_LABEL, WALKIN_FINAL_STATUS_TONE, walkInFinalStatus, walkInIsHistory,
   FOLLOWUP_OUTCOME_LABEL,
 } from "@/lib/mock-data";
@@ -142,8 +144,6 @@ export default function WalkInPage() {
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
   // Target for the SAFE follow-up completion dialog (outcome + next action).
   const [completeTarget, setCompleteTarget] = useState<WalkIn | null>(null);
-  // Pending inline Walk-In Status change awaiting user confirmation.
-  const [statusChange, setStatusChange] = useState<{ walkIn: WalkIn; next: WalkInStatus } | null>(null);
   // Pending inline Final Status change (Lost / reopen to N/A) awaiting confirmation.
   const [finalChange, setFinalChange] = useState<{ walkIn: WalkIn; next: "lost" | "na" } | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -462,35 +462,6 @@ export default function WalkInPage() {
     router.push(`/tickets/new?fromWalkIn=${encodeURIComponent(w.id)}&from=walk-in`);
   }, [router]);
 
-  /* ── Inline Final Status change (from the table pill dropdown) ──
-     Picking "Converted Ticket" on a walk-in that has NOT been converted yet does
-     NOT silently flip the status — a ticket must actually be created first, so
-     we route into the existing push-to-ticket flow (handleConvert). The status
-     becomes "converted_ticket" only when that wizard completes and links a
-     ticket back. Every other status change persists immediately via the store. */
-  const handleStatusChange = useCallback((w: WalkIn, next: WalkInStatus) => {
-    if (next === w.status) return;
-    if (next === "converted_ticket" && !w.linkedTicketId) {
-      handleConvert(w);
-      return;
-    }
-    // Terminal outcomes (Lost / Closed) close any active follow-up: the pending
-    // reminder is cancelled so no future notification fires, while the follow-up
-    // history is preserved (spec §25/§46).
-    const terminal = next === "lost" || next === "closed";
-    const patch: Partial<WalkIn> = { status: next };
-    if (terminal && hasActiveFollowUp(w)) {
-      patch.followUpStatus = "done";
-      patch.followUpDate = undefined;
-      patch.followUpTime = undefined;
-      patch.followUpAttempt = undefined;
-      patch.followUpComments = undefined;
-      patch.followUpReadAt = w.followUpReadAt || new Date().toISOString();
-    }
-    updateWalkIn(w.id, patch);
-    showToast(`Walk-In Status updated to ${WALKIN_STATUS_LABEL[next]}.`);
-  }, [handleConvert, updateWalkIn, showToast]);
-
   /* Final Status change (the ACTUAL OUTCOME). Only two transitions are ever
      initiated from the UI:
        • "lost" → mark the opportunity permanently lost. The walk-in becomes
@@ -525,6 +496,17 @@ export default function WalkInPage() {
       showToast(`${walkInDisplayId(w)} reopened — now active.`);
     }
   }, [updateWalkIn, showToast]);
+
+  /* Bulk "Mark all read" from the notification bell — clears the unread badge
+     on every currently-due follow-up at once. This ONLY marks notifications as
+     seen (stamps followUpReadAt); it never completes a follow-up, sets a final
+     status, or moves a Walk-In to History. */
+  const handleMarkAllRead = useCallback((rows: WalkIn[]) => {
+    const now = new Date().toISOString();
+    rows.forEach((w) => {
+      if (!w.followUpReadAt) updateWalkIn(w.id, { followUpReadAt: now });
+    });
+  }, [updateWalkIn]);
 
   /* Persist any follow-up lifecycle change emitted by the Follow-Up cell
      (schedule / reschedule / mark contacted / complete+outcome / cancel /
@@ -620,6 +602,7 @@ export default function WalkInPage() {
               walkIns={walkIns}
               displayId={walkInDisplayId}
               onOpenWalkIn={(w) => setViewTarget(w)}
+              onMarkAllRead={handleMarkAllRead}
               onCompleteFollowUp={(w) => setCompleteTarget(w)}
             />
             {view === "table" && (
@@ -671,6 +654,15 @@ export default function WalkInPage() {
       {/* Pinned filters bar — the filters the user chose to keep visible. */}
       {view === "table" && (
         <PinnedFilterBar filters={pinnableFilters} pinnedIds={pinnedIds} onUnpin={unpin} />
+      )}
+
+      {/* Applied filters — each individually removable via × (Design System v2 §3g).
+          Complements the pinned bar (unpin ≠ clear) and the panel Reset. */}
+      {view === "table" && (
+        <ActiveFiltersBar
+          filters={pinnableToApplied(pinnableFilters)}
+          onClearAll={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setFollowUpFilter("all"); setFollowUpAttemptFilter("all"); setFollowUpOutcomeFilter("all"); setIssueFilter("all"); setConversionFilter("all"); setDateRange("all"); }}
+        />
       )}
 
       {/* Advanced filters */}
@@ -780,7 +772,7 @@ export default function WalkInPage() {
            Straight (square) card with a flat bordered header — identical edge
            treatment to the Tickets/Invoice tables. No overflow-hidden on the
            card; the inner wrapper below documents the responsive strategy. */
-        <div className="-mt-5 border-2 border-zinc-200 bg-card shadow-card">
+        <div className="-mt-5 border-2 border-zinc-300 bg-card shadow-card">
           {/* Same responsive architecture as the Tickets/Invoice tables:
              `table-fixed` + `w-full` makes the table lay out to EXACTLY its
              container width and honour the fixed column widths below, so as the
@@ -806,14 +798,13 @@ export default function WalkInPage() {
                 <col className="w-[92px]" />{/* ID */}
                 <col className="w-[96px]" />{/* Type */}
                 <col className="w-[104px]" />{/* Source */}
-                <col className="w-[22%]" />{/* Name (+ contact underneath) — flexible */}
-                <col className="w-[24%]" />{/* Model (+ issue underneath) — flexible, absorbs the removed Issue column */}
-                <col className="w-[150px]" />{/* Walk-In Status — current journey stage */}
+                <col className="w-[24%]" />{/* Name (+ contact underneath) — flexible */}
+                <col className="w-[28%]" />{/* Model (+ issue underneath) — flexible, absorbs the removed Issue column */}
                 <col className="w-[150px]" />{/* Follow-Up — wide enough for "2nd Follow-Up · Today" */}
-                <col className="w-[128px]" />{/* Final Status — N/A / Lost / Won */}
+                <col className="w-[136px]" />{/* Final Status — N/A / Lost / Converted Ticket */}
                 <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
               </colgroup>
-              <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+              <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
                 <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
                   <th className="pl-5 pr-2 py-4">
                     <input
@@ -831,8 +822,7 @@ export default function WalkInPage() {
                   <th className="py-4 pl-[14px]">Source</th>
                   <th className="pl-4 py-4"><span className="inline-block pl-[17px]">Name</span></th>
                   <th className="pl-4 py-4">Model</th>
-                  <th className="pl-4 py-4">Walk-In Status</th>
-                  <th className="pl-4 py-4">Follow-Up</th>
+                  <th className="pl-[3px] py-4">Follow-Up</th>
                   <th className="pl-[5px] py-4">Final Status</th>
                   <th className="px-4 py-4 text-right">Action</th>
                 </tr>
@@ -844,7 +834,7 @@ export default function WalkInPage() {
                     initial={{ opacity: 0, y: 3 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(0.015 * i, 0.2) }}
-                    className={cn("group h-[68px] border-t border-border align-middle transition", selected.has(w.id) ? "bg-indigo-50/40" : w.pinnedAt ? "bg-amber-50/40" : "hover:bg-muted/40")}
+                    className={cn("group h-[68px] border-t border-zinc-500 align-middle transition", selected.has(w.id) ? "bg-indigo-50/40" : w.pinnedAt ? "bg-amber-50/40" : "hover:bg-muted/40")}
                   >
                     <td className="pl-5 pr-2 py-4" onClick={(e) => e.stopPropagation()}>
                       <input
@@ -947,21 +937,12 @@ export default function WalkInPage() {
                         );
                       })()}
                     </td>
-                    {/* WALK-IN STATUS — the customer's CURRENT journey stage
-                        (Enquiry / Visitor / Converted to Ticket). This is the
-                        authoritative display of the record's `status`. It is
-                        distinct from Follow-Up (next contact) and Final Status
-                        (final outcome). Restrained tones + a small status dot. */}
-                    <td className="pl-4 py-4 pr-4" onClick={(e) => e.stopPropagation()}>
-                      <WalkInStatusCell
-                        walkIn={w}
-                        onSelect={(next) => { if (next !== w.status) setStatusChange({ walkIn: w, next }); }}
-                        ticketNoFor={ticketNoFor}
-                      />
-                    </td>
+
                     {/* Follow-Up — interactive compact pill managing the multi-stage
-                        lifecycle. Sits immediately before Final Status. */}
-                    <td className="pl-4 py-4 pr-4" onClick={(e) => e.stopPropagation()}>
+                        lifecycle. Sits immediately before Final Status. The
+                        heading stays put; only the pill CONTENT is nudged a
+                        further 10px left via a negative margin on the wrapper. */}
+                    <td className="pl-[3px] py-4 pr-4 [&>*:first-child]:-ml-[10px]" onClick={(e) => e.stopPropagation()}>
                       <WalkInFollowUpCell
                         walkIn={w}
                         currentUserId={sessionUserId}
@@ -1055,7 +1036,7 @@ export default function WalkInPage() {
             </div>
           )}
 
-          <div className="border-t border-border px-5 py-4">
+          <div className="border-t border-zinc-500 px-5 py-4">
             <Pagination
               page={currentPage}
               totalPages={totalPages}
@@ -1126,23 +1107,6 @@ export default function WalkInPage() {
         danger
       />
 
-      {/* Inline status-change confirm */}
-      <ConfirmDialog
-        open={!!statusChange}
-        onClose={() => setStatusChange(null)}
-        onConfirm={() => { if (statusChange) handleStatusChange(statusChange.walkIn, statusChange.next); }}
-        title="Change status?"
-        description={
-          statusChange
-            ? statusChange.next === "converted_ticket" && !statusChange.walkIn.linkedTicketId
-              ? `Do you want to change ${walkInDisplayId(statusChange.walkIn)} to “${WALKIN_STATUS_LABEL[statusChange.next]}”? A ticket will be created first via Push to Ticket.`
-              : `Do you want to change ${walkInDisplayId(statusChange.walkIn)} to “${WALKIN_STATUS_LABEL[statusChange.next]}”?`
-            : undefined
-        }
-        confirmLabel="Change Status"
-        danger={false}
-      />
-
       {/* Final Status confirm — Lost Customer / Reopen to N/A */}
       <ConfirmDialog
         open={!!finalChange}
@@ -1175,84 +1139,6 @@ export default function WalkInPage() {
         </motion.div>
       )}
     </div>
-  );
-}
-
-/* ─── Walk-In Status cell (current journey stage) ─────────────────────────────
-   Shows the customer's CURRENT stage — Enquiry / Visitor / Converted to Ticket —
-   as a restrained pill with a small status dot. Enquiry and Visitor are freely
-   selectable; "Converted to Ticket" is not chosen here (a ticket must be created
-   via Push to Ticket), so it is shown only as the current, non-selectable state.
-   Once converted, the stage is locked (the ticket link is the source of truth). */
-function WalkInStatusCell({
-  walkIn, onSelect, ticketNoFor,
-}: {
-  walkIn: WalkIn;
-  onSelect: (next: WalkInStatus) => void;
-  ticketNoFor: (id?: string) => string | undefined;
-}) {
-  const w = walkIn;
-  const converted = w.status === "converted_ticket" || !!w.linkedTicketId;
-  // Selectable journey stages (Converted is never selected manually here).
-  const selectable: WalkInStatus[] = ["enquiry", "visitor"];
-
-  const pill = (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap",
-        WALKIN_STATUS_TONE[w.status],
-      )}
-    >
-      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-      {WALKIN_STATUS_LABEL[w.status]}
-    </span>
-  );
-
-  // Converted → static pill + the linked ticket number (no dropdown).
-  if (converted) {
-    return (
-      <div>
-        {pill}
-        {w.linkedTicketId && (
-          <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <Dropdown
-      align="left"
-      width="w-48"
-      trigger={({ toggle }) => (
-        <button
-          onClick={toggle}
-          title="Change Walk-In stage"
-          className={cn(
-            "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
-            WALKIN_STATUS_TONE[w.status],
-          )}
-        >
-          <span className="h-1.5 w-1.5 rounded-full bg-current" />
-          {WALKIN_STATUS_LABEL[w.status]}
-          <ChevronDown className="h-3 w-3 opacity-70" />
-        </button>
-      )}
-    >
-      {(close) => (
-        <>
-          {selectable.map((s) => (
-            <MenuItem key={s} onClick={() => { onSelect(s); close(); }}>
-              <span className="flex items-center gap-2">
-                <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_STATUS_TONE[s])} />
-                <span className={cn(s === w.status && "font-semibold text-[#4361EE]")}>{WALKIN_STATUS_LABEL[s]}</span>
-                {s === w.status && <Check className="ml-auto h-3.5 w-3.5 text-[#4361EE]" />}
-              </span>
-            </MenuItem>
-          ))}
-        </>
-      )}
-    </Dropdown>
   );
 }
 
@@ -1292,7 +1178,7 @@ function WalkInFinalStatusCell({
       <div>
         {pill(false)}
         {w.linkedTicketId && (
-          <p className="mt-1 text-[12px] font-semibold text-emerald-700">→ {ticketNoFor(w.linkedTicketId)}</p>
+          <p className="mt-1 text-[12px] font-semibold text-indigo-700">→ {ticketNoFor(w.linkedTicketId)}</p>
         )}
       </div>
     );

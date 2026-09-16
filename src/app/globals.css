@@ -23,6 +23,12 @@
   --popover-foreground: 228 25% 12%;
 
   --border: 228 20% 88%;
+  /* Form-input idle border — deliberately a touch DARKER than the generic
+     --border so data-entry controls read with better definition/contrast,
+     WITHOUT affecting card/table/divider borders (which keep --border). Same
+     thickness/radius/shape; only the colour is darker. Hover/focus/error keep
+     their existing RepairOX treatments. */
+  --input-border: 228 16% 76%;
   --ring: 231 80% 57%;
 
   --primary: 231 80% 57%;
@@ -47,6 +53,28 @@
   --info-foreground: 0 0% 100%;
 
   --radius: 16px;
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     REPAIROX DESIGN SYSTEM v2 — CANONICAL TABLE + FORM TOKENS
+     ───────────────────────────────────────────────────────────────────────
+     Single source of truth for the finalized Walk-In / Ticket table and the
+     Walk-In centered-form language. The shared RepairOxTable and
+     RepairOxCenteredForm foundations (components/ui) consume these, so any
+     NEW table/form that uses the foundation inherits the standard for free.
+     See docs/REPAIROX-DESIGN-SYSTEM.md. Do NOT hand-pick new values per page.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  /* Table — sharp, clean, visible. Canonical = Walk-In / Ticket. */
+  --rox-table-border: 228 14% 78%;        /* outer card frame (2px) */
+  --rox-table-divider: 228 10% 66%;       /* row separators — clearly visible */
+  --rox-table-head-bg: 231 80% 91%;       /* #D6DDFB — sticky header fill */
+  --rox-table-head-accent: 231 80% 57%;   /* #4361EE — header text + underline */
+  --rox-table-row-h: 68px;                /* default row height */
+  --rox-table-cell-py: 1rem;              /* py-4 — vertical cell padding */
+
+  /* Form — canonical = Walk-In centered modal. */
+  --rox-form-radius: 1rem;                /* rounded-2xl equivalent */
+  --rox-form-border: 0 0% 0%;             /* thin crisp outer boundary */
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -73,6 +101,7 @@
   --popover-foreground: 210 24% 94%;
 
   --border: 223 16% 20%;           /* soft, low-contrast gray/blue borders */
+  --input-border: 223 16% 32%;     /* form-input idle border — a touch darker */
   --ring: 231 85% 66%;             /* focus ring — bright RepairOX blue */
 
   /* Primary — keep the RepairOX royal blue, brightened slightly for contrast */
@@ -98,6 +127,13 @@
 
   --info: 210 85% 60%;
   --info-foreground: 210 40% 10%;
+
+  /* Design System v2 canonical table/form tokens — dark remaps. */
+  --rox-table-border: 223 16% 26%;
+  --rox-table-divider: 223 14% 34%;
+  --rox-table-head-bg: 231 40% 22%;
+  --rox-table-head-accent: 231 85% 74%;
+  --rox-form-border: 223 16% 30%;
 }
 
 * {
@@ -217,6 +253,44 @@ body {
   backdrop-filter: saturate(140%) blur(8px);
   background: hsl(var(--background) / 0.72);
   border: 1px solid hsl(var(--border));
+}
+
+/* ═════════════════════════════════════════════════════════════════════════
+   REPAIROX DESIGN SYSTEM v2 — CANONICAL TABLE + FORM UTILITIES
+   ─────────────────────────────────────────────────────────────────────────
+   Class helpers that read the --rox-* tokens above. Prefer the shared
+   RepairOxTable / RepairOxCenteredForm foundations (components/ui); these
+   classes exist for hand-written tables/forms that adopt the standard
+   incrementally. See docs/REPAIROX-DESIGN-SYSTEM.md.
+   ═════════════════════════════════════════════════════════════════════════ */
+
+/* Outer table card frame — sharp (square) corners, 2px visible border. */
+.rox-table-card {
+  border: 2px solid hsl(var(--rox-table-border));
+  background: hsl(var(--card));
+}
+/* Sticky table header — light indigo fill + brand underline. */
+.rox-table-head {
+  background: hsl(var(--rox-table-head-bg));
+  border-bottom: 2px solid hsl(var(--rox-table-head-accent) / 0.4);
+  color: hsl(var(--rox-table-head-accent));
+}
+/* Row separator — clearly visible, never a faint hairline. */
+.rox-table-row {
+  border-top: 1px solid hsl(var(--rox-table-divider));
+}
+/* Zero-value data ( 0 / ₹0 ) is VALID — never dim it. Apply to numeric cells
+   that must always read as real data regardless of value. */
+.rox-data {
+  color: hsl(var(--foreground));
+  opacity: 1;
+}
+
+/* Canonical centered-form panel — thin crisp boundary + RepairOX radius. */
+.rox-form-panel {
+  border: 1px solid hsl(var(--rox-form-border));
+  border-radius: var(--rox-form-radius);
+  background: hsl(var(--card));
 }
 
 /* Dark-mode surface shadows: the light theme's blue-tinted shadows vanish on

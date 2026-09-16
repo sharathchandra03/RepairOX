@@ -147,6 +147,19 @@ export function clearNotification(id: string) {
   if (items.length !== before) { persist(); emitChange(); }
 }
 
+/**
+ * Remove ALL notifications addressed to the given user/role at once (a "clear
+ * all" for the bell feed). Broadcast notifications (no recipient) are cleared
+ * too, matching what {@link isForRecipient} shows the user. Notifications for
+ * OTHER recipients are left untouched.
+ */
+export function clearAllForRecipient(recipientId?: string, recipientRole?: string) {
+  hydrate();
+  const before = items.length;
+  items = items.filter((n) => !isForRecipient(n, recipientId, recipientRole));
+  if (items.length !== before) { persist(); emitChange(); }
+}
+
 /** True when a notification is addressed to the given user id or role. */
 export function isForRecipient(n: AppNotification, recipientId?: string, recipientRole?: string): boolean {
   // A notification with neither target is broadcast (visible to everyone).
