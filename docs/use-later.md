@@ -186,3 +186,91 @@ const ticketTotal = subtotal + ticketSgst + ticketCgst;
 - `gstRate: number` (default 18 in DEFAULT)
 - `customGstRate?: boolean`
 - `gstNumber: string`
+
+---
+
+## Active Applied-Filter Chips Bar (`ActiveFiltersBar`) — Removed from list pages
+
+The "FILTERS  |  Date Range: Today ×" applied-filter chips bar was removed from
+the list/table pages per product decision. The shared components are **kept
+intact** in `src/components/ui/rox-filter.tsx` (`ActiveFiltersBar`,
+`ActiveFilterChip`, and the still-used `RoxFilterPanelHeader`) so the pattern can
+be re-enabled later — only the *usages* were removed.
+
+Note: this intentionally deviates from Design System v2 §3g (which mandates an
+applied-filter bar). Re-enable by re-adding `<ActiveFiltersBar .../>` on each
+page below. The filter panels + per-control selects/pills remain the active
+filter affordances in the meantime.
+
+### Removed from these pages (each previously rendered `<ActiveFiltersBar>`):
+
+- **Tickets** (`src/app/(app)/tickets/page.tsx`) — fed by `pinnableToApplied(pinnableFilters)`:
+  ```tsx
+  import { ActiveFiltersBar } from "@/components/ui/rox-filter";
+  import { pinnableToApplied } from "@/lib/filter-utils";
+
+  <ActiveFiltersBar
+    filters={pinnableToApplied(pinnableFilters)}
+    onClearAll={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); setStatusFilter("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); }}
+  />
+  ```
+
+- **Walk-In** (`src/app/(app)/walk-in/page.tsx`) — table view only:
+  ```tsx
+  {view === "table" && (
+    <ActiveFiltersBar
+      filters={pinnableToApplied(pinnableFilters)}
+      onClearAll={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setFollowUpFilter("all"); setFollowUpAttemptFilter("all"); setFollowUpOutcomeFilter("all"); setIssueFilter("all"); setConversionFilter("all"); setDateRange("all"); }}
+    />
+  )}
+  ```
+
+- **Dashboard → Critical Tasks** (`src/app/(app)/dashboard/page.tsx`) — the
+  `criticalAppliedFilters` memo was removed (rebuild it from
+  `ctPriority/ctStatus/ctType/ctTech` + their option lists):
+  ```tsx
+  const criticalAppliedFilters: AppliedFilter[] = useMemo(() => {
+    const out: AppliedFilter[] = [];
+    if (ctPriority !== "all") out.push({ id: "ctPriority", label: "Priority", value: CT_PRIORITY_OPTIONS.find((o) => o.value === ctPriority)?.label ?? ctPriority, onClear: () => setCtPriority("all") });
+    if (ctStatus !== "all") out.push({ id: "ctStatus", label: "Status", value: CT_STATUS_OPTIONS.find((o) => o.value === ctStatus)?.label ?? ctStatus, onClear: () => setCtStatus("all") });
+    if (ctType !== "all") out.push({ id: "ctType", label: "Type", value: CT_TYPE_OPTIONS.find((o) => o.value === ctType)?.label ?? ctType, onClear: () => setCtType("all") });
+    if (ctTech !== "all") out.push({ id: "ctTech", label: "Technician", value: ctTech, onClear: () => setCtTech("all") });
+    return out;
+  }, [ctPriority, ctStatus, ctType, ctTech]);
+  // render: {criticalAppliedFilters.length > 0 && (<div className="px-5 pb-4 sm:px-6"><ActiveFiltersBar filters={criticalAppliedFilters} onClearAll={resetCriticalFilters} /></div>)}
+  ```
+
+- **Activity** (`src/app/(app)/activity/page.tsx`) — the `appliedFilters` memo
+  was removed (rebuild from `search/moduleFilter/userFilter/dateRange/severity`):
+  ```tsx
+  const appliedFilters: AppliedFilter[] = useMemo(() => {
+    const out: AppliedFilter[] = [];
+    if (search.trim()) out.push({ id: "search", label: "Search", value: search.trim(), onClear: () => setSearch("") });
+    if (moduleFilter !== "all") out.push({ id: "module", label: "Module", value: moduleFilter, onClear: () => setModuleFilter("all") });
+    if (userFilter !== "all") out.push({ id: "user", label: "User", value: userFilter, onClear: () => setUserFilter("all") });
+    if (dateRange !== "all") out.push({ id: "date", label: "Date", value: DATE_LABEL[dateRange], onClear: () => setDateRange("all") });
+    if (severity !== "all") out.push({ id: "severity", label: "Severity", value: severity, onClear: () => setSeverity("all") });
+    return out;
+  }, [search, moduleFilter, userFilter, dateRange, severity]);
+  // render: <ActiveFiltersBar filters={appliedFilters} onClearAll={clearFilters} />
+  ```
+
+- **Leads list** (`src/app/(app)/leads/list/page.tsx`) — the `appliedFilters`
+  memo was removed (rebuild from `filters.dateRange`, `filters.followUp`, and
+  `FILTER_FIELDS` → `filters.fields[...]`):
+  ```tsx
+  const appliedFilters: AppliedFilter[] = useMemo(() => {
+    const out: AppliedFilter[] = [];
+    if (filters.dateRange !== "all") out.push({ id: "dateRange", label: "Date", value: DATE_RANGES.find((d) => d.value === filters.dateRange)?.label ?? filters.dateRange, onClear: () => setFilters((f) => ({ ...f, dateRange: "all" })) });
+    if (filters.followUp !== "any") out.push({ id: "followUp", label: "Follow-up", value: FOLLOWUP_FILTERS.find((d) => d.value === filters.followUp)?.label ?? filters.followUp, onClear: () => setFilters((f) => ({ ...f, followUp: "any" })) });
+    for (const f of FILTER_FIELDS) { const v = filters.fields[f.key]; if (v) out.push({ id: f.key, label: f.label, value: v, onClear: () => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [f.key]: "" } })) }); }
+    return out;
+  }, [filters, setFilters]);
+  // render: <ActiveFiltersBar filters={appliedFilters} onClearAll={clearFilters} />
+  ```
+
+### NOT removed
+- **Owner console** (`src/app/(app)/owner/page.tsx`) keeps its `ActiveFiltersBar`
+  used as the "Comparing: <store> ×" multi-store comparison indicator — that is
+  a functional store-comparison affordance, not a list/table filter bar.
+- `RoxFilterPanelHeader` (the panel close × / Reset) is unrelated and stays.

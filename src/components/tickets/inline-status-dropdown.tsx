@@ -32,21 +32,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, Ban, Lock } from "lucide-react";
+import { ChevronDown, Ban } from "lucide-react";
 import { STATUS_LABEL, type TicketStatus, type Ticket } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
-
-/**
- * A status is LOCKED (read-only) once it has reached a collected /
- * billing-completed state AND an invoice exists for it. This mirrors the real
- * business state — a job that has been collected and invoiced must not have its
- * status arbitrarily walked backwards. The "has invoice" check is the same
- * linked-invoice rule the store enforces (invoices.some(inv.ticketId === id)),
- * surfaced here via the `hasInvoice` prop.
- */
-export function isStatusLocked(status: TicketStatus, hasInvoice: boolean): boolean {
-  return hasInvoice && (status === "repaired_collected" || status === "return_collected");
-}
 
 /** The selectable statuses, in the same order the Tickets module presents them. */
 const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
@@ -93,7 +81,6 @@ export function StatusPillDropdown({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const [hoveredBlocked, setHoveredBlocked] = useState<TicketStatus | null>(null);
-  const [lockTip, setLockTip] = useState(false);
   const btnRef = useRef<HTMLButtonElement>(null);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -121,53 +108,11 @@ export function StatusPillDropdown({
   const activeColor = statusColors[status] || "#71717A";
   const labelPrefix = ariaLabel ? `${ariaLabel} — ` : "";
 
-  // Locked after invoicing a collected job — the pill stays visible (using the
-  // same visual language) but is read-only, with a subtle lock affordance and
-  // an explanatory tooltip. No status change is possible from here.
-  const locked = isStatusLocked(status, hasInvoice);
-
-  if (locked) {
-    return (
-      <div
-        className="relative flex justify-start"
-        onClick={(e) => e.stopPropagation()}
-        onMouseEnter={() => setLockTip(true)}
-        onMouseLeave={() => setLockTip(false)}
-      >
-        <span
-          role="status"
-          aria-label={`${labelPrefix}${STATUS_LABEL[status]} — status locked after invoice creation`}
-          tabIndex={0}
-          onFocus={() => setLockTip(true)}
-          onBlur={() => setLockTip(false)}
-          className={cn(
-            "inline-flex cursor-default items-center gap-1.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap",
-            PILL_SIZE[size]
-          )}
-          style={{
-            backgroundColor: `${activeColor}15`,
-            color: activeColor,
-            boxShadow: `inset 0 0 0 1px ${activeColor}30`,
-          }}
-        >
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeColor }} />
-          {STATUS_LABEL[status]}
-          <Lock className="h-3 w-3 opacity-60" aria-hidden />
-        </span>
-        {lockTip && (
-          <div
-            role="tooltip"
-            className="pointer-events-none absolute left-0 top-full z-[80] mt-1.5 w-max max-w-[220px] animate-in fade-in-0 zoom-in-95 duration-150"
-          >
-            <div className="flex items-center gap-2 rounded-xl border border-[#4361EE]/20 bg-card px-3 py-2 text-[11px] font-medium leading-snug text-foreground shadow-lg ring-1 ring-black/[0.02]">
-              <Lock className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
-              <span>Status is locked after invoice creation.</span>
-            </div>
-          </div>
-        )}
-      </div>
-    );
-  }
+  // NOTE: The status is intentionally NOT locked after invoice creation. Users
+  // may still change a device/ticket status after an invoice exists (e.g. a
+  // correction, a return, or moving a collected job onward). The only remaining
+  // guard is that "Repaired & Collected" cannot be selected UNTIL an invoice
+  // exists (see isBlocked below) — which no longer applies once invoiced.
 
   return (
     <div className="relative flex justify-start" onClick={(e) => e.stopPropagation()}>

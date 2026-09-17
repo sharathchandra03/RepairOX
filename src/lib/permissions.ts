@@ -238,7 +238,152 @@ export type PermissionKey =
   | "assign_ninja"
   | "update_pickup"
   | "update_drop"
-  | "view_field_reports";
+  | "view_field_reports"
+  /* ── EXPANDED CAPABILITY REGISTRY (v2) ──────────────────────────────────
+     Additive keys. Existing keys above are retained and remain valid; the new
+     keys give finer-grained, per-action control and make owner/multi-store
+     capabilities individually selectable. See docs/authorization-capabilities-final.md. */
+  /* Owner Dashboard & Organization */
+  | "owner_dashboard_view"
+  | "owner_performance_view"
+  | "owner_consolidated_reports_view"
+  | "owner_export"
+  /* Multi-store / store context */
+  | "stores_list_view"
+  | "stores_switch"
+  | "stores_view_all"
+  | "stores_multi_select"
+  | "stores_reports_view"
+  | "stores_create"
+  | "stores_edit"
+  | "stores_deactivate"
+  | "stores_delete"
+  | "stores_environment_set"
+  | "stores_prefixes_manage"
+  | "stores_settings_manage"
+  | "stores_credentials_manage"
+  | "stores_users_view"
+  | "stores_users_assign"
+  | "stores_users_remove"
+  | "stores_roles_assign"
+  | "stores_roles_assign_per_store"
+  /* Tickets — finer actions */
+  | "ticket_device_status_change"
+  | "change_ticket_priority"
+  | "edit_internal_notes"
+  | "pin_ticket"
+  | "ticket_send_comms"
+  /* Invoices — finer actions */
+  | "create_partial_invoice"
+  | "cancel_invoice"
+  | "change_invoice_status"
+  | "apply_invoice_discount"
+  | "export_invoices"
+  | "duplicate_invoice"
+  /* Payments */
+  | "void_payment"
+  | "reconcile_payment"
+  /* Walk-In (module had zero keys) */
+  | "walkin_view"
+  | "walkin_create"
+  | "walkin_edit"
+  | "walkin_delete"
+  | "walkin_bulk_delete"
+  | "walkin_convert_to_ticket"
+  | "walkin_pin"
+  | "walkin_import"
+  | "walkin_export"
+  | "walkin_final_status_change"
+  | "walkin_followup_create"
+  | "walkin_followup_reschedule"
+  | "walkin_followup_complete"
+  | "walkin_followup_cancel"
+  | "walkin_followup_notifications"
+  | "walkin_reports_view"
+  /* Leads — granular */
+  | "leads_view"
+  | "leads_create"
+  | "leads_edit"
+  | "leads_delete"
+  | "leads_assign"
+  | "leads_stage_change"
+  | "leads_priority_change"
+  | "leads_pin"
+  | "leads_convert"
+  | "leads_import"
+  | "leads_export"
+  | "leads_options_manage"
+  | "leads_smart_lists_manage"
+  | "leads_map_view"
+  | "leads_inbox_view"
+  | "leads_campaigns_manage"
+  /* Deals & quotations */
+  | "deals_view"
+  | "deals_create"
+  | "deals_edit"
+  | "deals_delete"
+  | "quotations_view"
+  | "quotations_create"
+  | "quotations_send"
+  | "quotations_convert_to_invoice"
+  /* Companies & contacts */
+  | "companies_view"
+  | "companies_create"
+  | "companies_edit"
+  | "companies_delete"
+  | "contacts_view"
+  | "contacts_create"
+  | "contacts_manage"
+  /* Communications — granular */
+  | "comms_call_log"
+  | "comms_email_send"
+  | "comms_whatsapp_send"
+  | "comms_tasks_manage"
+  | "comms_meetings_manage"
+  | "comms_activities_view"
+  /* Field — leg granularity */
+  | "field_pickup_status_change"
+  | "field_drop_status_change"
+  /* Inventory — finer actions */
+  | "inventory_item_duplicate"
+  | "inventory_reject"
+  | "inventory_print_labels"
+  | "inventory_bulk_update"
+  /* Purchasing */
+  | "purchases_approve"
+  | "purchases_receive"
+  | "inventory_transfer_receive"
+  /* Catalog */
+  | "catalog_reset"
+  /* Reports — finer */
+  | "reports_print"
+  | "reports_builder_use"
+  | "reports_comparison_use"
+  | "reports_saved_manage"
+  | "reports_scheduled_manage"
+  /* Settings — split per section */
+  | "settings_qc_configure"
+  | "settings_workflow_configure"
+  | "settings_walkin_fields_configure"
+  | "settings_inventory_edit"
+  | "settings_customer_edit"
+  | "settings_financial_edit"
+  | "settings_device_categories_manage"
+  | "settings_device_colours_manage"
+  | "settings_barcode_edit"
+  | "settings_feature_visibility_manage"
+  | "settings_system_manage"
+  | "settings_dashboard_configure"
+  /* Account security (self-service, now selectable) */
+  | "account_sessions_manage"
+  | "account_pin_manage"
+  | "account_password_change"
+  /* Notifications & audit */
+  | "notifications_view"
+  | "notifications_mark_read"
+  | "audit_export"
+  /* Payroll */
+  | "export_payroll";
 
 export interface PermissionDef {
   key: PermissionKey;
@@ -518,6 +663,189 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "access_api", label: "Access API" },
       { key: "backup_restore", label: "Backup & Restore" },
       { key: "system_administrator", label: "System Administrator" },
+    ],
+  },
+
+  /* ── EXPANDED GROUPS (v2) — additive. These surface the new fine-grained and
+     owner/multi-store capabilities as their own selectable toggles. ────────── */
+  {
+    id: "owner",
+    label: "Owner Dashboard & Organization",
+    description: "Consolidated multi-store overview and organization-level views",
+    permissions: [
+      { key: "owner_dashboard_view", label: "View Owner Dashboard" },
+      { key: "owner_performance_view", label: "View Store Performance" },
+      { key: "owner_consolidated_reports_view", label: "View Consolidated Reports" },
+      { key: "owner_export", label: "Export Owner Data" },
+    ],
+  },
+  {
+    id: "stores",
+    label: "Multi-Store & Store Management",
+    description: "Store switching, All Shops, store creation and store administration",
+    permissions: [
+      { key: "stores_list_view", label: "View Store List" },
+      { key: "stores_switch", label: "Switch Store" },
+      { key: "stores_view_all", label: "View All Shops (Consolidated)" },
+      { key: "stores_multi_select", label: "Select Multiple Stores" },
+      { key: "stores_reports_view", label: "View Store Reports" },
+      { key: "stores_create", label: "Create Store" },
+      { key: "stores_edit", label: "Edit Store" },
+      { key: "stores_deactivate", label: "Activate / Deactivate Store" },
+      { key: "stores_delete", label: "Delete Store" },
+      { key: "stores_environment_set", label: "Set Store Environment (Demo/Live)" },
+      { key: "stores_prefixes_manage", label: "Manage Store Numbering Prefixes" },
+      { key: "stores_settings_manage", label: "Manage Per-Store Settings" },
+      { key: "stores_credentials_manage", label: "Manage Store Logins" },
+      { key: "stores_users_view", label: "View Store Members" },
+      { key: "stores_users_assign", label: "Assign Users to Stores" },
+      { key: "stores_users_remove", label: "Remove Users from Stores" },
+      { key: "stores_roles_assign", label: "Assign Roles to Users" },
+      { key: "stores_roles_assign_per_store", label: "Assign Per-Store Role Override" },
+    ],
+  },
+  {
+    id: "walkin",
+    label: "Walk-In",
+    description: "Walk-in enquiries, conversions and follow-ups",
+    permissions: [
+      { key: "walkin_view", label: "View Walk-Ins" },
+      { key: "walkin_create", label: "Create Walk-In" },
+      { key: "walkin_edit", label: "Edit Walk-In" },
+      { key: "walkin_delete", label: "Delete Walk-In" },
+      { key: "walkin_bulk_delete", label: "Bulk Delete Walk-Ins" },
+      { key: "walkin_convert_to_ticket", label: "Convert to Ticket" },
+      { key: "walkin_pin", label: "Pin Walk-In" },
+      { key: "walkin_import", label: "Import Walk-Ins" },
+      { key: "walkin_export", label: "Export Walk-Ins" },
+      { key: "walkin_final_status_change", label: "Change Final Status (Won/Lost)" },
+      { key: "walkin_followup_create", label: "Set / Schedule Follow-Up" },
+      { key: "walkin_followup_reschedule", label: "Reschedule Follow-Up" },
+      { key: "walkin_followup_complete", label: "Complete Follow-Up" },
+      { key: "walkin_followup_cancel", label: "Cancel Follow-Up" },
+      { key: "walkin_followup_notifications", label: "Follow-Up Notifications" },
+      { key: "walkin_reports_view", label: "View Walk-In Reports" },
+    ],
+  },
+  {
+    id: "leads_crm",
+    label: "Leads & Sales CRM",
+    description: "Lead lifecycle, pipeline, deals, quotations and CRM records",
+    permissions: [
+      { key: "leads_view", label: "View Leads" },
+      { key: "leads_create", label: "Create Lead" },
+      { key: "leads_edit", label: "Edit Lead" },
+      { key: "leads_delete", label: "Delete Lead" },
+      { key: "leads_assign", label: "Assign Lead" },
+      { key: "leads_stage_change", label: "Change Stage (Kanban)" },
+      { key: "leads_priority_change", label: "Change Lead Priority" },
+      { key: "leads_pin", label: "Pin Lead" },
+      { key: "leads_convert", label: "Convert Lead" },
+      { key: "leads_import", label: "Import Leads" },
+      { key: "leads_export", label: "Export Leads" },
+      { key: "leads_options_manage", label: "Manage Lead Options" },
+      { key: "leads_smart_lists_manage", label: "Manage Smart Lists" },
+      { key: "leads_map_view", label: "View Map" },
+      { key: "leads_inbox_view", label: "View Inbox" },
+      { key: "leads_campaigns_manage", label: "Manage Campaigns" },
+      { key: "deals_view", label: "View Deals" },
+      { key: "deals_create", label: "Create Deal" },
+      { key: "deals_edit", label: "Edit Deal" },
+      { key: "deals_delete", label: "Delete Deal" },
+      { key: "quotations_view", label: "View Quotations" },
+      { key: "quotations_create", label: "Create / Edit Quotation" },
+      { key: "quotations_send", label: "Send Quotation" },
+      { key: "quotations_convert_to_invoice", label: "Convert Quote to Invoice" },
+      { key: "companies_view", label: "View Companies" },
+      { key: "companies_create", label: "Create Company" },
+      { key: "companies_edit", label: "Edit Company" },
+      { key: "companies_delete", label: "Delete / Merge Company" },
+      { key: "contacts_view", label: "View Contacts" },
+      { key: "contacts_create", label: "Create Contact" },
+      { key: "contacts_manage", label: "Manage Contacts" },
+      { key: "comms_call_log", label: "Log Calls" },
+      { key: "comms_email_send", label: "Send Email" },
+      { key: "comms_whatsapp_send", label: "Send WhatsApp" },
+      { key: "comms_tasks_manage", label: "Manage Tasks" },
+      { key: "comms_meetings_manage", label: "Manage Meetings" },
+      { key: "comms_activities_view", label: "View Activities" },
+    ],
+  },
+  {
+    id: "account",
+    label: "Account Security",
+    description: "Self-service session, PIN and password controls",
+    permissions: [
+      { key: "account_sessions_manage", label: "Manage Own Sessions" },
+      { key: "account_pin_manage", label: "Manage Access PIN" },
+      { key: "account_password_change", label: "Change Own Password" },
+    ],
+  },
+  {
+    id: "extras",
+    label: "Additional Fine-Grained Actions",
+    description: "Extra per-action toggles across tickets, invoices, inventory, reports and settings",
+    permissions: [
+      /* Tickets */
+      { key: "ticket_device_status_change", label: "Change Per-Device Status" },
+      { key: "change_ticket_priority", label: "Change Ticket Priority" },
+      { key: "edit_internal_notes", label: "Edit Internal Notes" },
+      { key: "pin_ticket", label: "Pin Ticket" },
+      { key: "ticket_send_comms", label: "Send Ticket Receipt (WhatsApp/Email)" },
+      /* Invoices */
+      { key: "create_partial_invoice", label: "Create Partial / Selective Invoice" },
+      { key: "cancel_invoice", label: "Cancel Invoice" },
+      { key: "change_invoice_status", label: "Change Invoice Status" },
+      { key: "apply_invoice_discount", label: "Apply Discount / Override Price" },
+      { key: "export_invoices", label: "Export Invoices" },
+      { key: "duplicate_invoice", label: "Duplicate Invoice" },
+      /* Payments */
+      { key: "void_payment", label: "Void Payment" },
+      { key: "reconcile_payment", label: "Reconcile Payment" },
+      /* Field legs */
+      { key: "field_pickup_status_change", label: "Advance Pickup Status" },
+      { key: "field_drop_status_change", label: "Advance Drop Status" },
+      /* Inventory */
+      { key: "inventory_item_duplicate", label: "Duplicate Item" },
+      { key: "inventory_reject", label: "Reject Inventory Document" },
+      { key: "inventory_print_labels", label: "Print Labels" },
+      { key: "inventory_bulk_update", label: "Bulk Update Items" },
+      { key: "purchases_approve", label: "Approve Purchase Order" },
+      { key: "purchases_receive", label: "Receive Purchase Order" },
+      { key: "inventory_transfer_receive", label: "Receive Parts Transfer" },
+      /* Catalog */
+      { key: "catalog_reset", label: "Reset Catalog (Destructive)" },
+      /* Reports */
+      { key: "reports_print", label: "Print / PDF Reports" },
+      { key: "reports_builder_use", label: "Use Report Builder" },
+      { key: "reports_comparison_use", label: "Use Comparison Engine" },
+      { key: "reports_saved_manage", label: "Manage Saved Reports" },
+      { key: "reports_scheduled_manage", label: "Manage Scheduled Reports" },
+      /* Payroll */
+      { key: "export_payroll", label: "Export Payroll" },
+      /* Notifications & audit */
+      { key: "notifications_view", label: "View Notifications" },
+      { key: "notifications_mark_read", label: "Mark Notifications Read" },
+      { key: "audit_export", label: "Export Audit Log" },
+    ],
+  },
+  {
+    id: "settings_v2",
+    label: "Settings (Per-Section)",
+    description: "Fine-grained settings sections, split from the catch-all Manage Settings",
+    permissions: [
+      { key: "settings_qc_configure", label: "Configure Quality Check" },
+      { key: "settings_workflow_configure", label: "Configure Ticket Workflow" },
+      { key: "settings_walkin_fields_configure", label: "Configure Walk-In Fields" },
+      { key: "settings_inventory_edit", label: "Edit Inventory Settings" },
+      { key: "settings_customer_edit", label: "Edit Customer Settings" },
+      { key: "settings_financial_edit", label: "Edit Financial Settings" },
+      { key: "settings_device_categories_manage", label: "Manage Device Categories" },
+      { key: "settings_device_colours_manage", label: "Manage Device Colours" },
+      { key: "settings_barcode_edit", label: "Edit Barcode Settings" },
+      { key: "settings_feature_visibility_manage", label: "Manage Feature Visibility" },
+      { key: "settings_system_manage", label: "Manage System Settings" },
+      { key: "settings_dashboard_configure", label: "Configure Dashboard" },
     ],
   },
 ];

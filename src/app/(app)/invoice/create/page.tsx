@@ -280,7 +280,14 @@ function InvoiceWizard() {
             return createFormDevice({
               // Durable link to the originating ticket device (selective invoicing).
               ticketDeviceId: dev.ticketDeviceId || undefined,
-              repairStatus: (dev.status as TicketStatus) || undefined,
+              // Match the standalone invoice flow: a pushed invoice defaults to
+              // "Repaired & Collected" rather than inheriting the ticket's live
+              // (usually "in_progress") status. Leaving this seeded to the ticket
+              // status made the Pricing step's `activeDevice?.repairStatus ??
+              // d.repairStatus` fallback resolve to in_progress and mirror it
+              // back onto the invoice. Seed repaired_collected so the invoice
+              // default applies exactly like creating an invoice individually.
+              repairStatus: "repaired_collected",
               category: dev.category || "",
               brand: dev.brand || "",
               model: dev.model || "",

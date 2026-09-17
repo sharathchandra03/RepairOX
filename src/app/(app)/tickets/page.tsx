@@ -37,8 +37,6 @@ import { formatINR, cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
-import { ActiveFiltersBar } from "@/components/ui/rox-filter";
-import { pinnableToApplied } from "@/lib/filter-utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 import { readDateFilterParams, isInListDateRange } from "@/lib/date-filter";
@@ -709,12 +707,8 @@ export default function TicketsPage() {
         onUnpin={unpin}
       />
 
-      {/* Applied filters — each individually removable via × (Design System v2 §3g).
-          Complements the pinned bar (unpin ≠ clear) and the panel Reset. */}
-      <ActiveFiltersBar
-        filters={pinnableToApplied(pinnableFilters)}
-        onClearAll={() => { setPriorityFilter("all"); setTechFilter("all"); setCustomerTypeFilter("all"); setTypeFilter("all"); setStatusFilter("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); }}
-      />
+      {/* Applied-filter chips bar intentionally removed (see docs/use-later.md).
+          The pinned filter bar + filter panel remain the filter affordances. */}
 
       {/* Filter Panel */}
       <AnimatePresence>

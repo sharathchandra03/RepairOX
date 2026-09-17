@@ -157,12 +157,21 @@ const CONVERSATIONS: Record<string, ChatMessage[]> = {
   ],
 };
 
+/** Total unread across all workspaces — surfaced on the topbar chat icon so
+ *  the badge stays a single source of truth with the panel. */
+export const CHAT_UNREAD_TOTAL = WORKSPACES.reduce((sum, w) => sum + w.unread, 0);
+
 /* ─────────────────────────────────────────────
    Main Component
 ───────────────────────────────────────────── */
 
-export function InternalChat() {
-  const [open, setOpen] = useState(false);
+export function InternalChat({
+  open,
+  onOpenChange,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
   const [messages, setMessages] = useState<Record<string, ChatMessage[]>>(CONVERSATIONS);
   const [input, setInput] = useState("");
@@ -199,30 +208,9 @@ export function InternalChat() {
 
   const currentWorkspace = WORKSPACES.find((w) => w.id === activeWorkspace);
   const currentMessages = activeWorkspace ? messages[activeWorkspace] || [] : [];
-  const totalUnread = WORKSPACES.reduce((sum, w) => sum + w.unread, 0);
 
   return (
     <>
-      {/* ─── Floating Trigger Button ─── */}
-      <motion.button
-        onClick={() => setOpen(!open)}
-        className={cn(
-          "fixed bottom-6 right-6 z-50 grid h-14 w-14 place-items-center rounded-full shadow-lg transition-colors",
-          open
-            ? "bg-zinc-800 text-white hover:bg-zinc-700"
-            : "brand-gradient text-white hover:scale-105 shadow-glow"
-        )}
-        whileTap={{ scale: 0.92 }}
-        aria-label="Internal team chat"
-      >
-        {open ? <X className="h-5 w-5" /> : <MessageCircle className="h-5 w-5" />}
-        {!open && totalUnread > 0 && (
-          <span className="absolute -top-1 -right-1 flex h-5 w-5 items-center justify-center rounded-full bg-rose-500 text-[10px] font-bold text-white ring-2 ring-white">
-            {totalUnread}
-          </span>
-        )}
-      </motion.button>
-
       {/* ─── Chat Panel ─── */}
       <AnimatePresence>
         {open && (
@@ -231,7 +219,7 @@ export function InternalChat() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ type: "spring", stiffness: 300, damping: 28 }}
-            className="fixed bottom-24 right-6 z-50 flex h-[720px] w-[540px] max-h-[calc(100vh-7rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_25px_60px_-12px_rgba(0,0,0,0.15),0_0_0_1px_rgba(20,30,80,0.04)]"
+            className="fixed top-[72px] right-4 sm:right-6 z-50 flex h-[720px] w-[540px] max-h-[calc(100vh-6rem)] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-2xl border border-border/60 bg-card shadow-[0_25px_60px_-12px_rgba(0,0,0,0.15),0_0_0_1px_rgba(20,30,80,0.04)]"
           >
             <AnimatePresence mode="wait">
               {!activeWorkspace ? (
@@ -239,6 +227,7 @@ export function InternalChat() {
                   key="selector"
                   workspaces={WORKSPACES}
                   onSelect={setActiveWorkspace}
+                  onClose={() => onOpenChange(false)}
                 />
               ) : (
                 <ChatView
@@ -249,6 +238,7 @@ export function InternalChat() {
                   setInput={setInput}
                   sendMessage={sendMessage}
                   onBack={handleBack}
+                  onClose={() => onOpenChange(false)}
                   scrollRef={scrollRef}
                 />
               )}
@@ -267,9 +257,11 @@ export function InternalChat() {
 function WorkspaceSelector({
   workspaces,
   onSelect,
+  onClose,
 }: {
   workspaces: Workspace[];
   onSelect: (id: string) => void;
+  onClose: () => void;
 }) {
   return (
     <motion.div
@@ -287,10 +279,17 @@ function WorkspaceSelector({
           <div className="grid h-10 w-10 place-items-center rounded-xl bg-white/[0.12] ring-1 ring-white/20 backdrop-blur-sm">
             <MessageCircle className="h-[18px] w-[18px] text-white" />
           </div>
-          <div>
+          <div className="flex-1">
             <h2 className="text-[15px] font-semibold tracking-[-0.01em] text-white">Team Communication</h2>
             <p className="mt-0.5 text-[12px] text-white/60 font-medium">Choose where you&apos;d like to start a conversation.</p>
           </div>
+          <button
+            onClick={onClose}
+            className="relative grid h-8 w-8 place-items-center rounded-lg text-white/70 transition hover:bg-white/[0.12] hover:text-white"
+            aria-label="Close chat"
+          >
+            <X className="h-4 w-4" />
+          </button>
         </div>
       </div>
 
@@ -366,6 +365,7 @@ function ChatView({
   setInput,
   sendMessage,
   onBack,
+  onClose,
   scrollRef,
 }: {
   workspace: Workspace;
@@ -374,6 +374,7 @@ function ChatView({
   setInput: (v: string) => void;
   sendMessage: () => void;
   onBack: () => void;
+  onClose: () => void;
   scrollRef: React.RefObject<HTMLDivElement>;
 }) {
   return (
@@ -408,6 +409,13 @@ function ChatView({
         </button>
         <button className="relative grid h-8 w-8 place-items-center rounded-lg text-white/60 transition hover:bg-white/[0.1] hover:text-white">
           <MoreVertical className="h-4 w-4" />
+        </button>
+        <button
+          onClick={onClose}
+          className="relative grid h-8 w-8 place-items-center rounded-lg text-white/60 transition hover:bg-white/[0.1] hover:text-white"
+          aria-label="Close chat"
+        >
+          <X className="h-4 w-4" />
         </button>
       </div>
 

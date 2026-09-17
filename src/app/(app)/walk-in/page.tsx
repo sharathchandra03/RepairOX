@@ -35,8 +35,6 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
-import { ActiveFiltersBar, type AppliedFilter } from "@/components/ui/rox-filter";
-import { pinnableToApplied } from "@/lib/filter-utils";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
@@ -659,14 +657,8 @@ export default function WalkInPage() {
         <PinnedFilterBar filters={pinnableFilters} pinnedIds={pinnedIds} onUnpin={unpin} />
       )}
 
-      {/* Applied filters — each individually removable via × (Design System v2 §3g).
-          Complements the pinned bar (unpin ≠ clear) and the panel Reset. */}
-      {view === "table" && (
-        <ActiveFiltersBar
-          filters={pinnableToApplied(pinnableFilters)}
-          onClearAll={() => { setTypeFilter("all"); setSourceFilter("all"); setStatusFilter("all"); setSalesFilter("all"); setFollowUpFilter("all"); setFollowUpAttemptFilter("all"); setFollowUpOutcomeFilter("all"); setIssueFilter("all"); setConversionFilter("all"); setDateRange("all"); }}
-        />
-      )}
+      {/* Applied-filter chips bar intentionally removed (see docs/use-later.md).
+          The pinned filter bar + advanced filter panel remain. */}
 
       {/* Advanced filters */}
       {view === "table" && showFilters && (

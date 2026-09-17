@@ -89,12 +89,36 @@ interface SummaryTotals {
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
 /** Zero values are REAL business information (a store with 0 activity still
- *  exists and matters), so they must stay clearly READABLE — never faded or
- *  disabled-looking. We only step the WEIGHT down (semibold → medium) and use a
- *  normal readable secondary ink (slate-500), not a pale/low-opacity treatment.
- *  Non-zero values keep their stronger colour + weight, so the hierarchy is
- *  subtle rather than "available vs unavailable". */
-const zeroTone = (n: number) => (n === 0 ? "font-medium !text-slate-500" : "");
+ *  exists and matters), so per the RepairOX design system (§3b) they must render
+ *  as normal, readable data — NEVER auto-dimmed to a disabled look. We keep the
+ *  full cell weight and only shift a zero to a calm neutral ink (slate-500) so it
+ *  reads as clean, real data (matching the reference) without competing with the
+ *  meaningful non-zero figures. Semantic colours (emerald payment, blue
+ *  projection) only apply once the value is non-zero, so a plain neutral ₹0 never
+ *  masquerades as a positive metric. */
+const zeroTone = (n: number) => (n === 0 ? "!text-slate-500" : "");
+
+/** Store avatar palette — each store gets its OWN colour tile (matching the
+ *  reference), instead of every avatar being the same brand blue. Soft tinted
+ *  background + a strong readable ink from the same hue keeps it clean and on
+ *  brand. Colour is chosen deterministically from the store id, so a given
+ *  store always keeps the same colour across renders / filters. */
+const STORE_AVATAR_COLORS = [
+  "bg-[#EEF1FD] text-[#4361EE]", // blue
+  "bg-[#E9F9F0] text-[#16A34A]", // green
+  "bg-[#FFF1E6] text-[#EA580C]", // orange
+  "bg-[#F3EEFE] text-[#7C3AED]", // violet
+  "bg-[#FDECEF] text-[#E11D48]", // rose
+  "bg-[#E7F6FB] text-[#0891B2]", // cyan
+  "bg-[#FEF6E7] text-[#CA8A04]", // amber
+  "bg-[#EDF0FF] text-[#4F46E5]", // indigo
+];
+
+function storeAvatarColor(id: string): string {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) hash = (hash * 31 + id.charCodeAt(i)) | 0;
+  return STORE_AVATAR_COLORS[Math.abs(hash) % STORE_AVATAR_COLORS.length];
+}
 
 export default function OwnerDashboardPage() {
   const router = useRouter();
@@ -295,10 +319,10 @@ export default function OwnerDashboardPage() {
                   <button
                     type="button"
                     onClick={() => setSelectedStoreIds(new Set())}
-                    className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] transition hover:bg-muted"
+                    className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left text-[15px] transition hover:bg-muted"
                   >
                     <span className={cn(
-                      "grid h-4 w-4 place-items-center rounded border",
+                      "grid h-[18px] w-[18px] place-items-center rounded border",
                       selectedStoreIds.size === 0 ? "border-[#4361EE] bg-[#4361EE] text-white" : "border-zinc-300"
                     )}>
                       {selectedStoreIds.size === 0 && <Check className="h-3 w-3" strokeWidth={3} />}
@@ -312,18 +336,15 @@ export default function OwnerDashboardPage() {
                         key={s.id}
                         type="button"
                         onClick={() => toggleStore(s.id)}
-                        className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left text-[13px] transition hover:bg-muted"
+                        className="flex w-full items-center gap-3 rounded-lg px-2 py-2.5 text-left text-[15px] transition hover:bg-muted"
                       >
                         <span className={cn(
-                          "grid h-4 w-4 place-items-center rounded border",
+                          "grid h-[18px] w-[18px] place-items-center rounded border",
                           checked ? "border-[#4361EE] bg-[#4361EE] text-white" : "border-zinc-300"
                         )}>
                           {checked && <Check className="h-3 w-3" strokeWidth={3} />}
                         </span>
-                        <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[9px] font-bold text-[#4361EE]">
-                          {(s.code || s.name).slice(0, 2).toUpperCase()}
-                        </span>
-                        <span className="truncate text-slate-800">{s.name}</span>
+                        <span className="truncate font-medium text-slate-900">{s.name}</span>
                       </button>
                     );
                   })}
@@ -416,21 +437,23 @@ export default function OwnerDashboardPage() {
         className="overflow-hidden bg-card shadow-card"
         style={{ border: "2px solid hsl(var(--rox-table-border))" }}
       >
-        <div
-          className="flex items-center justify-between gap-3 px-5 py-3.5"
-          style={{ borderBottom: "2px solid hsl(var(--rox-table-border))" }}
-        >
-          <div className="flex items-center gap-2.5">
-            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-              <Building2 className="h-4 w-4" />
+        {/* Distinctive header band — refined RepairOX blue gradient that lifts
+            the section title off the neutral table below (per the reference
+            direction). Icon sits in a translucent tile; the live store count
+            rides on the right in a soft capsule. Kept flat/clean — no decorative
+            graphics — so it still reads as RepairOX, not a template. */}
+        <div className="flex items-center justify-between gap-3 bg-gradient-to-r from-[#4361EE] via-[#4A5CF0] to-[#6366F1] px-5 py-4">
+          <div className="flex items-center gap-3">
+            <span className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 text-white ring-1 ring-white/20">
+              <Building2 className="h-[18px] w-[18px]" />
             </span>
             <div>
-              <h3 className="font-display text-[15px] font-bold leading-tight text-slate-900">Store Performance</h3>
-              <p className="text-[11.5px] text-muted-foreground">Compare every store, then open one with View Reports</p>
+              <h3 className="font-display text-[16px] font-bold leading-tight text-white">Store Performance</h3>
+              <p className="mt-0.5 text-[12px] font-medium text-white/70">Compare every store, then open one with View Reports</p>
             </div>
           </div>
           {!loading && visibleRows.length > 0 && (
-            <span className="shrink-0 rounded-full bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-semibold text-[#3A4DBB] sm:inline-block">
+            <span className="shrink-0 rounded-full bg-white/15 px-3 py-1.5 text-[12px] font-semibold text-white ring-1 ring-white/20 sm:inline-block">
               {visibleRows.length} store{visibleRows.length !== 1 ? "s" : ""}
             </span>
           )}
@@ -503,7 +526,7 @@ export default function OwnerDashboardPage() {
                       (secondary actionable link). Compact but comfortable height. */}
                   <td className="px-5 py-3">
                     <div className="flex items-center gap-3">
-                      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">
+                      <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg text-[10px] font-bold", storeAvatarColor(s.id))}>
                         {(s.code || s.name).slice(0, 2).toUpperCase()}
                       </span>
                       <div className="min-w-0">
@@ -520,7 +543,7 @@ export default function OwnerDashboardPage() {
                           tabIndex={0}
                           onClick={(e) => { e.stopPropagation(); enterStore(s.id); }}
                           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); enterStore(s.id); } }}
-                          className="mt-1 inline-flex items-center gap-1 rounded text-[12px] font-semibold text-[#4361EE] underline-offset-2 transition-colors hover:text-[#3A4DBB] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                          className="mt-1 inline-flex items-center gap-1 rounded text-[12px] font-semibold text-[#7C3AED] underline-offset-2 transition-colors hover:text-[#6D28D9] hover:underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7C3AED]/40"
                         >
                           View Reports
                           <ChevronRight className="h-3.5 w-3.5 transition-transform group-hover:translate-x-0.5" />

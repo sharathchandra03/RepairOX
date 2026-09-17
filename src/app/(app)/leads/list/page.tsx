@@ -13,7 +13,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { useRoxStickyHeader } from "@/components/ui/rox-table";
-import { ActiveFiltersBar, RoxFilterPanelHeader, type AppliedFilter } from "@/components/ui/rox-filter";
+import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { Can } from "@/components/common/can";
 import { cn } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
@@ -178,40 +178,8 @@ export default function LeadsListPage() {
 
   const activeFilters = hasActiveLeadFilters(filters);
 
-  /* Applied filters as individually-removable chips (Design System v2 §3g).
-     Every active filter gets its own × — including the leading date-range /
-     follow-up selects that previously had no clear affordance. */
-  const appliedFilters: AppliedFilter[] = useMemo(() => {
-    const out: AppliedFilter[] = [];
-    if (filters.dateRange !== "all") {
-      out.push({
-        id: "dateRange",
-        label: "Date",
-        value: DATE_RANGES.find((d) => d.value === filters.dateRange)?.label ?? filters.dateRange,
-        onClear: () => setFilters((f) => ({ ...f, dateRange: "all" })),
-      });
-    }
-    if (filters.followUp !== "any") {
-      out.push({
-        id: "followUp",
-        label: "Follow-up",
-        value: FOLLOWUP_FILTERS.find((d) => d.value === filters.followUp)?.label ?? filters.followUp,
-        onClear: () => setFilters((f) => ({ ...f, followUp: "any" })),
-      });
-    }
-    for (const f of FILTER_FIELDS) {
-      const v = filters.fields[f.key];
-      if (v) {
-        out.push({
-          id: f.key,
-          label: f.label,
-          value: v,
-          onClear: () => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [f.key]: "" } })),
-        });
-      }
-    }
-    return out;
-  }, [filters, setFilters]);
+  // Applied-filter chips (appliedFilters) intentionally removed — see
+  // docs/use-later.md. The filter panel (with its Clear all) remains.
 
   return (
     <div className="space-y-5">
@@ -309,9 +277,7 @@ export default function LeadsListPage() {
         </motion.div>
       )}
 
-      {/* Applied filters — always individually removable via × (Design System
-          v2 §3g), shown even when the panel is collapsed. */}
-      <ActiveFiltersBar filters={appliedFilters} onClearAll={clearFilters} />
+      {/* Applied-filter chips bar intentionally removed (see docs/use-later.md). */}
 
       {/* Zero-height sentinel measured by useRoxStickyHeader so the table header
           pins flush below the app topbar (no persistent sticky filter row here). */}

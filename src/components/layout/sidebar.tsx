@@ -38,11 +38,18 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
   comingSoon?: boolean;
 }) {
   const Icon = ICONS[item.icon] ?? Home;
-  const href = comingSoon ? `/coming-soon?from=${encodeURIComponent(item.href)}` : item.href;
+  // New-tab items (e.g. Leads → Price List) point at their canonical target
+  // route and open in a new browser tab, so they never take a "coming soon"
+  // redirect and never carry an active state in this sidebar.
+  const href = item.newTab
+    ? (item.targetHref ?? item.href)
+    : comingSoon
+      ? `/coming-soon?from=${encodeURIComponent(item.href)}`
+      : item.href;
   // Exact match for module root pages (e.g. /operations, /lead-management) to
   // avoid them staying "active" when a sibling sub-route like /operations/reports is open.
   const isModuleRoot = item.href === "/operations" || item.href === "/lead-management" || item.href === "/dashboard";
-  const active = !comingSoon && (isModuleRoot
+  const active = !item.newTab && !comingSoon && (isModuleRoot
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(item.href + "/"));
   return (
@@ -56,6 +63,8 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
     >
       <Link
         href={href}
+        target={item.newTab ? "_blank" : undefined}
+        rel={item.newTab ? "noopener noreferrer" : undefined}
         title={collapsed ? item.label : undefined}
         className={cn(
           "group relative flex items-center rounded-xl text-sm font-medium transition-colors",

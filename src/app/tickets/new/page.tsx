@@ -1824,8 +1824,8 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               <RSelect value={d.source} onChange={(v) => set("source", v)} placeholder="Select source" options={[
                 { label: "Google", value: "Google" },
                 { label: "Meta", value: "Meta" },
-                { label: "GMB", value: "GMB" },
                 { label: "YouTube", value: "YouTube" },
+                { label: "GMB", value: "GMB" },
                 { label: "Organic", value: "Organic" },
                 { label: "Reference", value: "Reference" },
               ]} />

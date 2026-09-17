@@ -397,6 +397,15 @@ export type NavItem = {
   label: string;
   icon: string;
   permission?: PermissionKey | PermissionKey[];
+  /** When true, the item opens in a new browser tab (via target="_blank").
+   *  Used for cross-module access points that must not replace the current
+   *  workspace tab — e.g. the Leads → Price List mirror. */
+  newTab?: boolean;
+  /** Optional navigation target that differs from `href`. `href` acts only as
+   *  the unique nav key; the link actually points at `targetHref`. This lets a
+   *  second entry point (Leads → Price List) reuse the canonical route
+   *  (/price-list) without colliding with the primary Shop nav item. */
+  targetHref?: string;
 };
 
 /** Expandable nav group — a parent item that collapses/expands to reveal children.
@@ -453,6 +462,13 @@ export const navItems: NavItem[] = [
   // Leads
   { href: "/lead-management",  label: "Dashboard",    icon: "Home", permission: "view_dashboard" },
   { href: "/leads/list",       label: "Leads",        icon: "Users", permission: "manage_sales" },
+  // Price List — NOT a duplicate. This is a Leads-owned ACCESS POINT that opens
+  // the STANDALONE Price List route (/leads-price-list) in a new browser tab.
+  // That route renders the SAME canonical Price List page + live catalog as
+  // Shop → Price List (single source of truth) but as a clean full-screen page
+  // with no shell chrome. `href` is the stable nav key (drives permission +
+  // feature-visibility); `targetHref` is where the new tab actually points.
+  { href: "/leads/price-list", label: "Price List",   icon: "ClipboardList", permission: "manage_sales", newTab: true, targetHref: "/leads-price-list" },
   { href: "/leads/kanban",     label: "Kanban",       icon: "ClipboardList", permission: "manage_sales" },
   { href: "/leads/contacts",   label: "Contacts",     icon: "BookUser", permission: "manage_customers" },
   { href: "/leads/companies",  label: "Companies",    icon: "Store", permission: "manage_customers" },
@@ -1365,7 +1381,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     { label: "GENERAL",    items: ["/operations/reports", "/settings"] },
   ],
   leads: [
-    { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
+    { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/campaigns"] },

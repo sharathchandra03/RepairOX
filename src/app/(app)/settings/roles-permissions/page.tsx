@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
-  ShieldCheck, ChevronRight, Search, RotateCcw, Save, Info, Eye,
+  ShieldCheck, ChevronRight, ChevronDown, Search, RotateCcw, Save, Info, Eye,
   CheckCircle2, UserPlus, Trash2, Users, Building2, Wrench, Package,
   TrendingUp, Wallet, Crown, Code2, LayoutGrid, SlidersHorizontal,
   Mail, UserCog, Plus, MapPin, KeyRound, MoreHorizontal, Power, Ban, Phone,
-  Sparkles,
+  Sparkles, Home, Ticket, FileText, Footprints, ClipboardList, Truck,
+  BookUser, UsersRound, IndianRupee, BarChart3, Settings, Lock, Pencil,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,11 @@ import {
   type PermissionKey, type RoleDef, type WorkspaceId,
 } from "@/lib/permissions";
 import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
+import {
+  PERMISSION_MODULES, ACCESS_LEVELS, ROLE_PRESETS,
+  levelToKeys, allModuleKeys, supportedLevels, keysToLevel, presetToKeys,
+  type AccessLevel, type ModuleDef,
+} from "@/lib/permission-levels";
 import type { TeamMember } from "@/lib/mock-data";
 import { cn } from "@/lib/utils";
 import {
@@ -687,8 +693,271 @@ function RoleMembersPanel({
 /* ─────────────────────────────────────────────────────────────────────────
    TAB 2 — Permission Matrix
    The editable grid where an administrator grants exactly what each role can
-   see and do, then saves. Ported from the old settings/permissions page.
+   see and do, then saves. Redesigned as a 3-level experience:
+     1. Pick a template (preset).
+     2. Set an access LEVEL per module (None → View → Work → Manage → Full).
+     3. Open "Advanced" for exact per-capability toggles.
    ───────────────────────────────────────────────────────────────────────── */
+
+/** Icon per preset (by the icon name stored on the preset). */
+const PRESET_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  Crown, Store: Building2, Footprints, Wrench, TrendingUp, Package, Truck, Wallet, Eye,
+};
+
+/** Icon per module (by the icon name on the module def). */
+const MODULE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
+  Home, Ticket, FileText, Footprints, Users, Truck, Package, ClipboardList,
+  BookUser, UsersRound, IndianRupee, BarChart3, Building2, ShieldCheck, Settings, UserCog,
+};
+
+/** Icon shown inside each access-level option button (icon-only, tooltip on hover). */
+const LEVEL_ICON: Record<AccessLevel, React.ComponentType<{ className?: string }>> = {
+  full: CheckCircle2,
+  none: Ban,
+  view: Eye,
+  work: Pencil,
+  manage: Settings, // retained for typing/back-compat; not shown as an option
+};
+
+/** Options shown per row, in order. "Manage" is intentionally omitted — for
+ *  most modules it equals Full, which was confusing. Full covers everything. */
+const LEVEL_OPTION_ORDER: AccessLevel[] = ["full", "none", "view", "work"];
+
+/** Soft tint per module icon tile — keeps the list colourful & scannable
+ *  like the reference, without leaving the RepairOX palette. */
+const MODULE_TILE_TINT: Record<string, string> = {
+  dashboard: "bg-[#EEF1FD] text-[#4361EE]",
+  tickets: "bg-violet-100 text-violet-600",
+  invoices: "bg-emerald-100 text-emerald-600",
+  walkin: "bg-amber-100 text-amber-600",
+  leads: "bg-sky-100 text-sky-600",
+  field: "bg-teal-100 text-teal-600",
+  inventory: "bg-indigo-100 text-indigo-600",
+  catalog: "bg-rose-100 text-rose-600",
+  customers: "bg-cyan-100 text-cyan-600",
+  employees: "bg-fuchsia-100 text-fuchsia-600",
+  accounts: "bg-lime-100 text-lime-700",
+  reports: "bg-orange-100 text-orange-600",
+  stores: "bg-blue-100 text-blue-600",
+  employees_admin: "bg-purple-100 text-purple-600",
+  settings: "bg-slate-100 text-slate-600",
+  account: "bg-zinc-100 text-zinc-600",
+};
+
+/** Right-hand status chip descriptor for a resolved level. */
+function statusChip(level: AccessLevel | "custom"): { label: string; dot: string; text: string; bg: string } {
+  switch (level) {
+    case "full": return { label: "Full Access", dot: "bg-emerald-500", text: "text-emerald-600", bg: "bg-emerald-50" };
+    case "manage": return { label: "Full Access", dot: "bg-emerald-500", text: "text-emerald-600", bg: "bg-emerald-50" };
+    case "work": return { label: "Work Access", dot: "bg-[#4361EE]", text: "text-[#3347D6]", bg: "bg-[#EEF1FD]" };
+    case "view": return { label: "View Only", dot: "bg-[#4361EE]", text: "text-[#3347D6]", bg: "bg-[#EEF1FD]" };
+    case "custom": return { label: "Custom", dot: "bg-amber-500", text: "text-amber-600", bg: "bg-amber-50" };
+    default: return { label: "No Access", dot: "bg-zinc-300", text: "text-zinc-400", bg: "bg-muted" };
+  }
+}
+
+/* ─── Reusable pill switch (design-system blue) ─────────────────────────── */
+function FullAccessToggle({
+  checked, onChange, ariaLabel, disabled,
+}: {
+  checked: boolean;
+  onChange: (next: boolean) => void;
+  ariaLabel: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={ariaLabel}
+      disabled={disabled}
+      onClick={() => !disabled && onChange(!checked)}
+      className={cn(
+        "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors",
+        checked ? "bg-[#4361EE]" : "bg-zinc-300",
+        disabled && "opacity-50 cursor-not-allowed"
+      )}
+    >
+      <span
+        className={cn(
+          "inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform",
+          checked ? "translate-x-[22px]" : "translate-x-0.5"
+        )}
+      />
+    </button>
+  );
+}
+
+/* ─── One module row: label + level segmented control + Advanced drawer ─── */
+function ModuleAccessRow({
+  module, granted, disabled, expanded, onToggleExpanded, onSetLevel, onToggleKey,
+}: {
+  module: ModuleDef;
+  granted: Set<PermissionKey>;
+  disabled: boolean;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onSetLevel: (level: AccessLevel) => void;
+  onToggleKey: (key: PermissionKey) => void;
+}) {
+  const Icon = MODULE_ICON[module.icon] ?? SlidersHorizontal;
+  const levels = supportedLevels(module);
+  const current = keysToLevel(module, granted);
+  const moduleKeys = allModuleKeys(module);
+  const grantedInModule = moduleKeys.filter((k) => granted.has(k)).length;
+
+  // The individual capabilities of this module, grouped for the Advanced view.
+  const advancedGroups = useMemo(() => {
+    const keySet = new Set(moduleKeys);
+    return PERMISSION_GROUPS
+      .map((g) => ({ ...g, permissions: g.permissions.filter((p) => keySet.has(p.key)) }))
+      .filter((g) => g.permissions.length > 0);
+  }, [module.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // "Full" means EVERY capability in this module is granted — regardless of
+  // whether the module defines a distinct `full` tier. This makes the Full
+  // option meaningful and highlighted for every row.
+  const isFullGranted = moduleKeys.length > 0 && grantedInModule === moduleKeys.length;
+  // The level to render as selected. Full wins when everything is granted.
+  // "manage" is not a shown option, so any non-full manage-level state is
+  // surfaced as "custom" rather than silently matching no button.
+  const resolved = isFullGranted ? "full" : current;
+  const effective: AccessLevel | "custom" = resolved === "manage" ? "custom" : resolved;
+
+  // Always offer Full + No Access, then View/Work if the module supports them.
+  // "Manage" is intentionally excluded (it equals Full for most modules).
+  const options: AccessLevel[] = LEVEL_OPTION_ORDER.filter(
+    (l) => l === "full" || l === "none" || levels.includes(l)
+  );
+  const chip = statusChip(effective);
+  const tileTint = MODULE_TILE_TINT[module.id] ?? "bg-[#EEF1FD] text-[#4361EE]";
+
+  return (
+    <div className="rounded-2xl border-2 border-zinc-300 bg-card shadow-card">
+      <div className="flex flex-col gap-4 p-4 lg:flex-row lg:items-center lg:justify-between">
+        {/* Left: icon tile + label + blurb */}
+        <div className="flex items-start gap-3 lg:w-[240px] lg:shrink-0">
+          <span className={cn("grid h-11 w-11 shrink-0 place-items-center rounded-xl", tileTint)}>
+            <Icon className="h-5 w-5" />
+          </span>
+          <div className="min-w-0">
+            <p className="text-[14px] font-bold leading-tight">{module.label}</p>
+            <p className="mt-0.5 text-[11.5px] leading-snug text-muted-foreground">{module.blurb}</p>
+          </div>
+        </div>
+
+        {/* Middle: round icon-only option buttons + Advanced beneath */}
+        <div className={cn("flex-1", disabled && "opacity-60 pointer-events-none")}>
+          <div className="flex items-center gap-2">
+            {options.map((lvl) => {
+              const meta = ACCESS_LEVELS.find((a) => a.id === lvl)!;
+              const OptIcon = LEVEL_ICON[lvl];
+              const isActive = effective === lvl;
+              return (
+                <button
+                  key={lvl}
+                  onClick={() => onSetLevel(lvl)}
+                  title={`${meta.label} — ${meta.hint}`}
+                  aria-label={meta.label}
+                  aria-pressed={isActive}
+                  className={cn(
+                    "grid h-10 w-10 shrink-0 place-items-center rounded-full border transition",
+                    isActive
+                      ? "border-[#4361EE] bg-[#4361EE] text-white shadow-[0_6px_18px_-8px_rgba(67,97,238,0.7)]"
+                      : "border-zinc-300 bg-card text-zinc-400 hover:border-[#B3BFF6] hover:text-zinc-700"
+                  )}
+                >
+                  <OptIcon className="h-4 w-4" />
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Advanced + Custom indicator on their own line beneath. */}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              onClick={onToggleExpanded}
+              className={cn(
+                "inline-flex items-center gap-1 rounded-full border px-3 py-1.5 text-[11.5px] font-semibold transition",
+                expanded ? "border-[#B3BFF6] bg-[#EEF1FD] text-[#3347D6]" : "border-zinc-300 text-zinc-500 hover:bg-muted"
+              )}
+              title="Show every individual capability in this module"
+            >
+              Advanced
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-180")} />
+            </button>
+            {current === "custom" && !isFullGranted && (
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11.5px] font-semibold text-amber-700">
+                <SlidersHorizontal className="h-3.5 w-3.5" /> Custom mix
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Right: status chip + divider (matches the reference) */}
+        <div className="flex items-center gap-4 lg:w-[170px] lg:shrink-0 lg:justify-end">
+          <span className="hidden h-10 w-px bg-zinc-200 lg:block" />
+          <span className={cn(
+            "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px] font-bold",
+            chip.bg, chip.text
+          )}>
+            <span className={cn("h-2 w-2 rounded-full", chip.dot)} />
+            {chip.label}
+          </span>
+        </div>
+      </div>
+
+      {/* LEVEL 3 — Advanced fine-grained toggles */}
+      <AnimatePresence initial={false}>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="border-t border-zinc-500/40 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  Individual capabilities
+                </p>
+                <Badge tone={grantedInModule > 0 ? "brand" : "neutral"}>
+                  {grantedInModule}/{moduleKeys.length}
+                </Badge>
+              </div>
+              {advancedGroups.map((g) => (
+                <div key={g.id} className="mb-3 last:mb-0">
+                  <p className="mb-1 text-[11.5px] font-semibold text-zinc-500">{g.label}</p>
+                  <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                    {g.permissions.map((p) => {
+                      const checked = granted.has(p.key);
+                      return (
+                        <label
+                          key={p.key}
+                          className={cn(
+                            "flex items-center gap-2.5 rounded-xl px-3 py-2 text-[13px] transition",
+                            disabled ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-muted",
+                            checked && !disabled && "bg-[#F5F7FF]"
+                          )}
+                        >
+                          <Checkbox checked={checked} onChange={() => !disabled && onToggleKey(p.key)} aria-label={p.label} />
+                          <span className={cn("font-medium", checked ? "text-zinc-900" : "text-zinc-600")}>{p.label}</span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 function MatrixTab({
   savedGrants, saveGrants, enterPreview, allRoles, addRole,
   isCustomRole, canDeleteRole, deleteRole, membersInRole, activeRoleId, setActiveRoleId,
@@ -711,9 +980,15 @@ function MatrixTab({
   const [query, setQuery] = useState("");
   const [dirty, setDirty] = useState(false);
   const [justSaved, setJustSaved] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [addRoleOpen, setAddRoleOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletedToast, setDeletedToast] = useState<string | null>(null);
+  /** Which module rows have their Advanced fine-grained toggles expanded. */
+  const [expandedModules, setExpandedModules] = useState<Set<string>>(new Set());
+  /** Which preset (if any) was last applied — purely cosmetic highlight. */
+  const [appliedPreset, setAppliedPreset] = useState<string | null>(null);
 
   // Backfill drafts for any role created elsewhere without clobbering edits.
   useEffect(() => {
@@ -756,14 +1031,6 @@ function MatrixTab({
     setTimeout(() => setDeletedToast(null), 2600);
   }
 
-  const filteredGroups = useMemo(() => {
-    if (!query.trim()) return PERMISSION_GROUPS;
-    const q = query.toLowerCase();
-    return PERMISSION_GROUPS
-      .map((g) => ({ ...g, permissions: g.permissions.filter((p) => p.label.toLowerCase().includes(q)) }))
-      .filter((g) => g.permissions.length > 0);
-  }, [query]);
-
   function toggle(key: PermissionKey) {
     if (isPlatformOwner) return;
     setGrants((prev) => {
@@ -788,6 +1055,57 @@ function MatrixTab({
     setDirty(true);
   }
 
+  /** Set a whole module to an access level: clears the module's keys, then adds
+   *  the cumulative bundle for the chosen level. Keeps everything else intact. */
+  function setModuleLevel(mod: ModuleDef, level: AccessLevel) {
+    if (isPlatformOwner) return;
+    const moduleKeys = allModuleKeys(mod);
+    const grantKeys = levelToKeys(mod, level);
+    setGrants((prev) => {
+      const nextSet = new Set(prev[activeRoleId]);
+      for (const k of moduleKeys) nextSet.delete(k);
+      for (const k of grantKeys) nextSet.add(k);
+      return { ...prev, [activeRoleId]: nextSet };
+    });
+    setAppliedPreset(null);
+    setDirty(true);
+  }
+
+  /** Master switch — grant or revoke EVERY capability across ALL modules. */
+  function setAllFull(nextFull: boolean) {
+    if (isPlatformOwner) return;
+    setGrants((prev) => {
+      if (!nextFull) return { ...prev, [activeRoleId]: new Set<PermissionKey>() };
+      const everything = new Set<PermissionKey>();
+      everything.add("full_access");
+      for (const mod of PERMISSION_MODULES) {
+        for (const k of allModuleKeys(mod)) everything.add(k);
+      }
+      return { ...prev, [activeRoleId]: everything };
+    });
+    setAppliedPreset(null);
+    setDirty(true);
+  }
+
+  /** Apply a ready-made preset — replaces the whole role's grant set. */
+  function applyPreset(presetId: string) {
+    if (isPlatformOwner) return;
+    const preset = ROLE_PRESETS.find((p) => p.id === presetId);
+    if (!preset) return;
+    setGrants((prev) => ({ ...prev, [activeRoleId]: new Set(presetToKeys(preset.levels)) }));
+    setAppliedPreset(presetId);
+    setDirty(true);
+  }
+
+  function toggleExpanded(moduleId: string) {
+    setExpandedModules((prev) => {
+      const next = new Set(prev);
+      if (next.has(moduleId)) next.delete(moduleId);
+      else next.add(moduleId);
+      return next;
+    });
+  }
+
   function resetRole() {
     setGrants((prev) => ({
       ...prev,
@@ -798,8 +1116,16 @@ function MatrixTab({
     setDirty(false);
   }
 
-  function saveChanges() {
-    saveGrants(activeRoleId, Array.from(grants[activeRoleId] ?? []));
+  async function saveChanges() {
+    setSaving(true);
+    setSaveError(null);
+    const result = await saveGrants(activeRoleId, Array.from(grants[activeRoleId] ?? []));
+    setSaving(false);
+    if (!result.ok) {
+      // Keep the form dirty so the user can retry; surface why it didn't save.
+      setSaveError(result.error ?? "Could not save. Please try again.");
+      return;
+    }
     setDirty(false);
     setJustSaved(true);
     setTimeout(() => setJustSaved(false), 2200);
@@ -808,13 +1134,42 @@ function MatrixTab({
   const grantedSet = grants[activeRoleId] ?? new Set<PermissionKey>();
   const grantedCount = grantedSet.size;
 
+  // True when EVERY capability of EVERY module is granted (drives the master
+  // toggle). Same definition as each row's per-section "Full" switch.
+  const allModulesFull = useMemo(
+    () => PERMISSION_MODULES.every((m) => {
+      const keys = allModuleKeys(m);
+      return keys.length > 0 && keys.every((k) => grantedSet.has(k));
+    }),
+    [grantedSet]
+  );
+
+  // Which modules match the search (by module label OR any capability label).
+  const visibleModules = useMemo(() => {
+    if (!query.trim()) return PERMISSION_MODULES;
+    const q = query.toLowerCase();
+    return PERMISSION_MODULES.filter((m) => {
+      if (m.label.toLowerCase().includes(q) || m.blurb.toLowerCase().includes(q)) return true;
+      const moduleKeys = new Set(allModuleKeys(m));
+      const labels = PERMISSION_GROUPS.flatMap((g) => g.permissions)
+        .filter((p) => moduleKeys.has(p.key))
+        .map((p) => p.label.toLowerCase());
+      return labels.some((l) => l.includes(q));
+    });
+  }, [query]);
+
   return (
     <div className="space-y-6">
-      {/* Matrix toolbar */}
+      {/* Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[13px] text-muted-foreground">
-          Assign exactly what each role can see and do.
-        </p>
+        <div>
+          <p className="text-[13px] font-medium text-zinc-700">
+            What can <span className="font-bold text-[#3347D6]">{activeRole.label}</span> do?
+          </p>
+          <p className="text-[12px] text-muted-foreground">
+            Pick a starting template, then fine-tune each area. Simple by default — open &ldquo;Advanced&rdquo; for exact control.
+          </p>
+        </div>
         <div className="flex flex-wrap items-center gap-2">
           <Can permission="manage_roles">
             <Button variant="outline" size="md" className="gap-1.5 whitespace-nowrap rounded-full" onClick={() => setAddRoleOpen(true)}>
@@ -828,11 +1183,11 @@ function MatrixTab({
             onClick={() => enterPreview(activeRoleId)}
             title="Rebuild the entire CRM using this role's currently saved permissions"
           >
-            <Eye className="h-4 w-4" /> Preview Role
+            <Eye className="h-4 w-4" /> Preview
           </Button>
           <Can permission="manage_roles">
-            <Button size="md" className="gap-1.5 whitespace-nowrap rounded-full" disabled={!dirty} onClick={saveChanges}>
-              <Save className="h-4 w-4" /> Save changes
+            <Button size="md" className="gap-1.5 whitespace-nowrap rounded-full" disabled={!dirty || saving} loading={saving} onClick={saveChanges}>
+              <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save changes"}
             </Button>
           </Can>
         </div>
@@ -850,8 +1205,17 @@ function MatrixTab({
         style={{ display: justSaved ? "flex" : "none" }}
       >
         <CheckCircle2 className="h-4 w-4" />
-        Saved. Click &quot;Preview Role&quot; to see {activeRole.label} exactly as they will.
+        Saved. Click &quot;Preview&quot; to experience the app exactly as {activeRole.label}.
       </motion.div>
+
+      {/* Save error — kept visible until the next successful save so a failed
+          write is never mistaken for a successful one. */}
+      {saveError && (
+        <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-2.5 text-[12.5px] font-medium text-rose-700">
+          <Ban className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>Couldn&apos;t save changes: {saveError}</span>
+        </div>
+      )}
 
       {/* Role selector */}
       <div className="overflow-x-auto pb-1">
@@ -859,7 +1223,7 @@ function MatrixTab({
           {allRoles.map((r) => (
             <button
               key={r.id}
-              onClick={() => setActiveRoleId(r.id)}
+              onClick={() => { setActiveRoleId(r.id); setAppliedPreset(null); }}
               className={cn(
                 "relative whitespace-nowrap rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition-colors",
                 r.id === activeRoleId ? "bg-[#4361EE] text-white shadow-[0_6px_20px_-8px_rgba(67,97,238,0.5)]" : "text-zinc-500 hover:text-zinc-800"
@@ -871,133 +1235,148 @@ function MatrixTab({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
-        {/* Permission groups */}
-        <div className="space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <Input
-              iconLeft={<Search className="h-4 w-4" />}
-              placeholder="Search capabilities..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              className="h-10 max-w-xs"
-            />
-            {isPlatformOwner && (
-              <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-amber-700">
-                <Info className="h-3.5 w-3.5" /> Platform Owner always has full access
-              </span>
-            )}
+      {isPlatformOwner && (
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] font-medium text-amber-700">
+          <Lock className="h-4 w-4" /> Platform Owner always has full access — its permissions can&apos;t be edited.
+        </div>
+      )}
+
+      {/* ── LEVEL 1 — Start from a template ─────────────────────────────── */}
+      {!isPlatformOwner && (
+        <section className="rounded-2xl border-2 border-zinc-300 bg-card p-4 shadow-card">
+          <div className="flex flex-wrap items-center gap-2">
+            <Sparkles className="h-4 w-4 text-[#4361EE]" />
+            <h3 className="text-[13.5px] font-bold">Start from a template</h3>
+            <span className="text-[11px] text-muted-foreground">One click sets sensible access — then adjust below.</span>
           </div>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+            {ROLE_PRESETS.map((p) => {
+              const Icon = PRESET_ICON[p.icon] ?? ShieldCheck;
+              const active = appliedPreset === p.id;
+              return (
+                <button
+                  key={p.id}
+                  onClick={() => applyPreset(p.id)}
+                  title={p.summary}
+                  className={cn(
+                    "group flex flex-col items-start gap-1.5 rounded-xl border px-3 py-3 text-left transition",
+                    active
+                      ? "border-[#4361EE] bg-[#EEF1FD] shadow-[0_0_0_1px_rgba(67,97,238,0.25)]"
+                      : "border-zinc-200 bg-card hover:border-[#B3BFF6] hover:bg-[#F5F7FF]/60"
+                  )}
+                >
+                  <span className={cn(
+                    "grid h-8 w-8 place-items-center rounded-lg",
+                    active ? "bg-[#4361EE] text-white" : "bg-[#EEF1FD] text-[#4361EE]"
+                  )}>
+                    <Icon className="h-4 w-4" />
+                  </span>
+                  <span className="text-[12.5px] font-semibold leading-tight">{p.label}</span>
+                  <span className="line-clamp-2 text-[10.5px] leading-snug text-muted-foreground">{p.summary}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
-          {/* Grant Full Access toggle */}
-          {!isPlatformOwner && (
-            <label className={cn(
-              "flex cursor-pointer items-center gap-3 rounded-2xl border px-5 py-4 transition",
-              grantedCount === ALL_PERMISSIONS.length
-                ? "border-[#4361EE] bg-[#F5F7FF] shadow-[0_0_0_1px_rgba(67,97,238,0.2)]"
-                : "border-border bg-card hover:border-[#B3BFF6] hover:bg-[#F5F7FF]/50"
+      {/* ── MASTER TOGGLE — full access to every section at once ────────── */}
+      {!isPlatformOwner && (
+        <div className={cn(
+          "flex items-center justify-between gap-3 rounded-2xl border-2 px-5 py-4 shadow-card transition",
+          allModulesFull ? "border-[#4361EE] bg-[#EEF1FD]" : "border-zinc-300 bg-card"
+        )}>
+          <div className="flex items-center gap-3">
+            <span className={cn(
+              "grid h-9 w-9 place-items-center rounded-lg",
+              allModulesFull ? "bg-[#4361EE] text-white" : "bg-muted text-zinc-500"
             )}>
-              <Checkbox
-                checked={grantedCount === ALL_PERMISSIONS.length}
-                indeterminate={grantedCount > 0 && grantedCount < ALL_PERMISSIONS.length}
-                onChange={(next) => {
-                  setGrants((prev) => ({
-                    ...prev,
-                    [activeRoleId]: next
-                      ? new Set(ALL_PERMISSIONS.map((p) => p.key))
-                      : new Set<PermissionKey>(),
-                  }));
-                  setDirty(true);
-                }}
-                aria-label="Grant full access"
-              />
-              <div>
-                <p className="text-[13.5px] font-semibold leading-tight">Grant Full Access</p>
-                <p className="mt-0.5 text-[11.5px] text-muted-foreground">Select all {ALL_PERMISSIONS.length} capabilities at once</p>
-              </div>
-            </label>
+              <ShieldCheck className="h-4 w-4" />
+            </span>
+            <div>
+              <p className="text-[13.5px] font-bold leading-tight">Full access to everything</p>
+              <p className="text-[11.5px] text-muted-foreground">Turn on to grant this role every capability in every section.</p>
+            </div>
+          </div>
+          <FullAccessToggle checked={allModulesFull} onChange={setAllFull} ariaLabel="Grant full access to all sections" />
+        </div>
+      )}
+
+      {/* Search */}
+      <div className="flex items-center justify-between gap-3">
+        <Input
+          iconLeft={<Search className="h-4 w-4" />}
+          placeholder="Search a module or capability…"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          className="h-10 max-w-sm"
+        />
+        <span className="hidden text-[12px] text-muted-foreground sm:inline">
+          {grantedCount} capabilit{grantedCount === 1 ? "y" : "ies"} granted
+        </span>
+      </div>
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[1fr_300px]">
+        {/* ── LEVEL 2 + 3 — per-module access level, with Advanced drawer ── */}
+        <div className="space-y-3">
+          {visibleModules.map((mod) => (
+            <ModuleAccessRow
+              key={mod.id}
+              module={mod}
+              granted={grantedSet}
+              disabled={isPlatformOwner}
+              expanded={expandedModules.has(mod.id)}
+              onToggleExpanded={() => toggleExpanded(mod.id)}
+              onSetLevel={(lvl) => setModuleLevel(mod, lvl)}
+              onToggleKey={(k) => toggle(k)}
+            />
+          ))}
+          {visibleModules.length === 0 && (
+            <div className="rounded-2xl border-2 border-dashed border-zinc-300 bg-card px-5 py-10 text-center text-[13px] text-muted-foreground">
+              No modules or capabilities match &ldquo;{query}&rdquo;.
+            </div>
           )}
-
-          {filteredGroups.map((g, gi) => {
-            const groupKeys = g.permissions.map((p) => p.key);
-            const groupGrantedCount = groupKeys.filter((k) => grantedSet.has(k)).length;
-            const allChecked = groupGrantedCount === groupKeys.length;
-            const someChecked = groupGrantedCount > 0 && !allChecked;
-
-            return (
-              <motion.div
-                key={g.id}
-                initial={{ opacity: 0, y: 8 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.03 * gi }}
-                className="rounded-2xl border border-border bg-card shadow-card"
-              >
-                <div className="flex items-center justify-between gap-3 border-b border-border p-4">
-                  <div className="flex items-center gap-3">
-                    <Checkbox
-                      checked={allChecked}
-                      indeterminate={someChecked}
-                      onChange={(next) => toggleGroup(groupKeys, next)}
-                      aria-label={`Toggle all ${g.label}`}
-                      className={isPlatformOwner ? "opacity-50 pointer-events-none" : ""}
-                    />
-                    <div>
-                      <p className="text-[13.5px] font-semibold leading-tight">{g.label}</p>
-                      <p className="text-[11px] text-muted-foreground">{g.description}</p>
-                    </div>
-                  </div>
-                  <Badge tone={groupGrantedCount > 0 ? "brand" : "neutral"}>
-                    {groupGrantedCount}/{groupKeys.length}
-                  </Badge>
-                </div>
-
-                <div className="grid grid-cols-1 gap-1 p-3 sm:grid-cols-2">
-                  {g.permissions.map((p) => {
-                    const checked = grantedSet.has(p.key);
-                    return (
-                      <label
-                        key={p.key}
-                        className={cn(
-                          "flex items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm transition",
-                          isPlatformOwner ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-muted",
-                          checked && !isPlatformOwner && "bg-[#F5F7FF]"
-                        )}
-                      >
-                        <Checkbox checked={checked} onChange={() => toggle(p.key)} aria-label={p.label} />
-                        <span className={cn("font-medium", checked ? "text-zinc-900" : "text-zinc-600")}>{p.label}</span>
-                      </label>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            );
-          })}
         </div>
 
         {/* Summary sidebar */}
         <div className="space-y-4 lg:sticky lg:top-[72px] lg:self-start">
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+          <div className="rounded-2xl border-2 border-zinc-300 bg-card p-5 shadow-card">
             <div className="flex items-center gap-2.5">
               <span className="grid h-9 w-9 place-items-center rounded-lg brand-gradient text-white shadow-glow">
                 <ShieldCheck className="h-4 w-4" />
               </span>
               <div>
                 <p className="text-sm font-bold leading-tight">{activeRole.label}</p>
-                <p className="text-[11px] text-muted-foreground">{grantedCount}/{ALL_PERMISSIONS.length} capabilities granted</p>
+                <p className="text-[11px] text-muted-foreground">{grantedCount} capabilities granted</p>
               </div>
             </div>
             <p className="mt-3 text-[12.5px] leading-relaxed text-zinc-600">{activeRole.summary}</p>
 
-            <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-muted">
-              <motion.div
-                className="h-full rounded-full bg-[linear-gradient(90deg,#4361EE,#3B54E8)]"
-                initial={{ width: 0 }}
-                animate={{ width: `${(grantedCount / ALL_PERMISSIONS.length) * 100}%` }}
-                transition={{ type: "spring", stiffness: 90, damping: 22 }}
-              />
+            {/* Plain-English summary of what this role can do, by module. */}
+            <div className="mt-4 border-t border-zinc-200 pt-3">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">In plain English</p>
+              <ul className="mt-2 space-y-1">
+                {PERMISSION_MODULES.map((mod) => {
+                  const lvl = keysToLevel(mod, grantedSet);
+                  if (lvl === "none") return null;
+                  const label = lvl === "custom" ? "Custom" : ACCESS_LEVELS.find((a) => a.id === lvl)?.label ?? lvl;
+                  return (
+                    <li key={mod.id} className="flex items-center justify-between gap-2 text-[12px]">
+                      <span className="text-zinc-600">{mod.label}</span>
+                      <span className={cn(
+                        "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-semibold",
+                        lvl === "custom" ? "bg-amber-100 text-amber-700" : "bg-[#EEF1FD] text-[#3347D6]"
+                      )}>{label}</span>
+                    </li>
+                  );
+                })}
+                {PERMISSION_MODULES.every((m) => keysToLevel(m, grantedSet) === "none") && (
+                  <li className="text-[12px] text-muted-foreground">No access granted yet.</li>
+                )}
+              </ul>
             </div>
 
-            <div className="mt-4 flex items-center justify-between">
+            <div className="mt-4 flex items-center justify-between border-t border-zinc-200 pt-3">
               <button
                 onClick={resetRole}
                 disabled={isPlatformOwner}
@@ -1016,10 +1395,10 @@ function MatrixTab({
             </div>
           </div>
 
-          <div className="mt-6 rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
+          <div className="rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
             <p className="text-[13px] font-semibold text-[#3347D6]">Workspace access</p>
             <p className="mt-0.5 text-[11px] leading-relaxed text-[#3347D6]/70">
-              Which modules this role can reach. Changes save immediately.
+              Which top-level workspaces this role can reach. Saves immediately.
             </p>
             <div className="mt-3 space-y-1.5">
               {WORKSPACES.map((w) => {
@@ -1050,14 +1429,6 @@ function MatrixTab({
                 );
               })}
             </div>
-          </div>
-
-          <div className="mt-2 rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD] p-4">
-            <p className="text-[13px] font-semibold text-[#3347D6]">Access levels</p>
-            <p className="mt-0.5 text-[11px] leading-relaxed text-[#3347D6]/70">
-              View, Create, Edit, Delete, Assign, Approve and Export sit under the
-              Access Levels group above and apply across every module this role can reach.
-            </p>
           </div>
         </div>
       </div>

@@ -91,6 +91,7 @@ function FeatureGate({ pathname, getVisibilityByHref, router, children }: {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   const [open, setOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
   const { allowedWorkspaces: allowed, currentUser, authReady, getVisibilityByHref, isDemoMode } = usePermissions();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(allowed[0]?.id ?? "shop");
   const pathname = usePathname();
@@ -171,6 +172,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             onMenu={() => setOpen(true)}
             activeWorkspace={activeWorkspace}
             setActiveWorkspace={setActiveWorkspace}
+            chatOpen={chatOpen}
+            onToggleChat={() => setChatOpen((v) => !v)}
           />
         </div>
         <motion.main
@@ -185,7 +188,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </FeatureGate>
         </motion.main>
       </div>
-      <InternalChat />
+      <InternalChat open={chatOpen} onOpenChange={setChatOpen} />
     </div>
     </ReportContextProvider>
   );

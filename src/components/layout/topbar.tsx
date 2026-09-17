@@ -2,7 +2,7 @@
 
 import {
   HelpCircle, MoreHorizontal, ChevronDown, Menu,
-  ShoppingBag, Check, LayoutGrid, LogOut,
+  ShoppingBag, Check, LayoutGrid, LogOut, MessageCircle,
 } from "lucide-react";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { Avatar } from "@/components/ui/avatar";
@@ -18,15 +18,20 @@ import {
 } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
 import { Can } from "@/components/common/can";
+import { CHAT_UNREAD_TOTAL } from "@/components/common/internal-chat";
 
 export function Topbar({
   onMenu,
   activeWorkspace,
   setActiveWorkspace,
+  chatOpen,
+  onToggleChat,
 }: {
   onMenu: () => void;
   activeWorkspace: WorkspaceId;
   setActiveWorkspace: (id: WorkspaceId) => void;
+  chatOpen: boolean;
+  onToggleChat: () => void;
 }) {
   const router = useRouter();
   const meta = WORKSPACE_MAP[activeWorkspace];
@@ -134,6 +139,27 @@ export function Topbar({
             <span className="relative z-10">POS</span>
           </button>
         </Can>
+
+        {/* Chat with Team — opens the internal team chat panel */}
+        <button
+          onClick={onToggleChat}
+          title="Chat with Team"
+          aria-label="Chat with Team"
+          aria-pressed={chatOpen}
+          className={cn(
+            "relative grid h-9 w-9 place-items-center rounded-xl transition",
+            chatOpen
+              ? "bg-[#4361EE]/10 text-[#4361EE]"
+              : "text-zinc-400 hover:bg-muted hover:text-zinc-700"
+          )}
+        >
+          <MessageCircle className="h-[22px] w-[22px]" strokeWidth={1.75} />
+          {CHAT_UNREAD_TOTAL > 0 && (
+            <span className="absolute -top-1 -right-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-card">
+              {CHAT_UNREAD_TOTAL}
+            </span>
+          )}
+        </button>
 
         {/* Icon actions */}
         <div className="flex items-center gap-0.5">

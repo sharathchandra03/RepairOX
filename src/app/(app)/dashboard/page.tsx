@@ -17,7 +17,7 @@ import { OrdersStatusWidget } from "@/components/dashboard/orders-status-widget"
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
-import { ActiveFiltersBar, RoxFilterPanelHeader, type AppliedFilter } from "@/components/ui/rox-filter";
+import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
@@ -290,16 +290,8 @@ export default function Dashboard() {
     [updateTicket]
   );
 
-  /* Applied Critical-Tasks filters as individually-removable chips
-     (Design System v2 §3g) — each active filter gets its own ×. */
-  const criticalAppliedFilters: AppliedFilter[] = useMemo(() => {
-    const out: AppliedFilter[] = [];
-    if (ctPriority !== "all") out.push({ id: "ctPriority", label: "Priority", value: CT_PRIORITY_OPTIONS.find((o) => o.value === ctPriority)?.label ?? ctPriority, onClear: () => setCtPriority("all") });
-    if (ctStatus !== "all") out.push({ id: "ctStatus", label: "Status", value: CT_STATUS_OPTIONS.find((o) => o.value === ctStatus)?.label ?? ctStatus, onClear: () => setCtStatus("all") });
-    if (ctType !== "all") out.push({ id: "ctType", label: "Type", value: CT_TYPE_OPTIONS.find((o) => o.value === ctType)?.label ?? ctType, onClear: () => setCtType("all") });
-    if (ctTech !== "all") out.push({ id: "ctTech", label: "Technician", value: ctTech, onClear: () => setCtTech("all") });
-    return out;
-  }, [ctPriority, ctStatus, ctType, ctTech]);
+  // Applied-filter chips (criticalAppliedFilters) intentionally removed — see
+  // docs/use-later.md. The panel Reset below still clears all critical filters.
   const resetCriticalFilters = useCallback(() => { setCtPriority("all"); setCtStatus("all"); setCtType("all"); setCtTech("all"); }, []);
 
   // Export ONLY the currently-visible critical/high rows (respects global date
@@ -851,13 +843,7 @@ export default function Dashboard() {
           )}
         </AnimatePresence>
 
-        {/* Applied filters — each individually removable via × (Design System v2
-            §3g), shown even when the panel is collapsed. */}
-        {criticalAppliedFilters.length > 0 && (
-          <div className="px-5 pb-4 sm:px-6">
-            <ActiveFiltersBar filters={criticalAppliedFilters} onClearAll={resetCriticalFilters} />
-          </div>
-        )}
+        {/* Applied-filter chips bar intentionally removed (see docs/use-later.md). */}
 
         {criticalTickets.length === 0 ? (
           <div className="flex flex-col items-center justify-center gap-2 px-6 py-16 text-center">

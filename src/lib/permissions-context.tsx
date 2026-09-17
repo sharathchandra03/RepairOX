@@ -206,7 +206,7 @@ export interface DeleteMemberResult {
 
 interface PermissionsContextValue {
   grants: GrantMap;
-  saveGrants: (roleId: string, keys: PermissionKey[]) => void;
+  saveGrants: (roleId: string, keys: PermissionKey[]) => Promise<{ ok: boolean; error?: string }>;
 
   allRoles: RoleDef[];
   getRoleById: (roleId: string) => RoleDef | undefined;
@@ -496,11 +496,21 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   );
 
   /* ── Grant edits ── */
-  const saveGrants = useCallback((roleId: string, keys: PermissionKey[]) => {
+  const saveGrants = useCallback(async (roleId: string, keys: PermissionKey[]): Promise<{ ok: boolean; error?: string }> => {
+    // Optimistically reflect the change locally (also the source of truth in
+    // local/demo mode, where it's persisted to localStorage by an effect).
     setGrants((prev) => ({ ...prev, [roleId]: keys }));
-    if (isSupabaseConfigured) {
-      apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify({ permissions: keys }) });
+    if (!isSupabaseConfigured) return { ok: true };
+    // Supabase mode: the DB is authoritative — await the write and report the
+    // real result so the UI never shows "Saved" for a write that didn't land.
+    const res = await apiFetch(`/api/roles/${roleId}`, {
+      method: "PATCH",
+      body: JSON.stringify({ permissions: keys }),
+    });
+    if (!res.ok || res.json?.ok === false) {
+      return { ok: false, error: res.json?.error ?? `Save failed (status ${res.status}).` };
     }
+    return { ok: true };
   }, [apiFetch]);
 
   const addRole = useCallback(({ label, summary, workspaces, permissions = [] }: AddRoleInput) => {

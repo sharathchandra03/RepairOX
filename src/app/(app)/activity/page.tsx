@@ -7,7 +7,6 @@ import { PageHeader } from "@/components/layout/page-header";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Button } from "@/components/ui/button";
-import { ActiveFiltersBar, type AppliedFilter } from "@/components/ui/rox-filter";
 import { cn } from "@/lib/utils";
 import {
   useActivityLog, ALL_MODULES, timeGroup, type ActivityEntry,
@@ -104,17 +103,8 @@ export default function ActivityLogPage() {
     setModuleFilter("all"); setSeverity("all"); setUserFilter("all"); setDateRange("all"); setSearch("");
   }
 
-  /* Applied filters as individually-removable chips (Design System v2 §3g) —
-     each active filter gets its own × instead of only a global Clear. */
-  const appliedFilters: AppliedFilter[] = useMemo(() => {
-    const out: AppliedFilter[] = [];
-    if (search.trim()) out.push({ id: "search", label: "Search", value: search.trim(), onClear: () => setSearch("") });
-    if (moduleFilter !== "all") out.push({ id: "module", label: "Module", value: moduleFilter, onClear: () => setModuleFilter("all") });
-    if (userFilter !== "all") out.push({ id: "user", label: "User", value: userFilter, onClear: () => setUserFilter("all") });
-    if (dateRange !== "all") out.push({ id: "date", label: "Date", value: DATE_LABEL[dateRange], onClear: () => setDateRange("all") });
-    if (severity !== "all") out.push({ id: "severity", label: "Severity", value: severity, onClear: () => setSeverity("all") });
-    return out;
-  }, [search, moduleFilter, userFilter, dateRange, severity]);
+  // Applied-filter chips (appliedFilters) intentionally removed — see
+  // docs/use-later.md. The Clear control + per-control chips below remain.
 
   const chip = "inline-flex items-center gap-1.5 rounded-full border bg-card px-3.5 py-1.5 text-[12px] font-medium transition";
   const chipIdle = "border-border text-zinc-600 hover:bg-[#EEF1FD] hover:text-[#4361EE] hover:border-[#B3BFF6]/50";
@@ -221,8 +211,7 @@ export default function ActivityLogPage() {
         </div>
       </div>
 
-      {/* Applied filters — each individually removable via × (Design System v2 §3g). */}
-      <ActiveFiltersBar filters={appliedFilters} onClearAll={clearFilters} />
+      {/* Applied-filter chips bar intentionally removed (see docs/use-later.md). */}
 
       {/* Timeline */}
       <div className="rounded-2xl border border-border/70 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
