@@ -42,6 +42,14 @@ const STEPS = [
 /** A device entry within the invoice form */
 type InvoiceFormDevice = {
   id: string;
+  /** The originating Ticket DeviceRecord.id (when pushed from a ticket). This
+   *  is the durable link that keeps selective / partial invoicing traceable and
+   *  lets the per-device Repair Status control update the real ticket device. */
+  ticketDeviceId?: string;
+  /** The device's current repair status (carried from the ticket device) so the
+   *  device-grouped Pricing step can show + change it. Uses the ticket status
+   *  vocabulary. */
+  repairStatus?: TicketStatus;
   category: string;
   brand: string;
   model: string;
@@ -81,6 +89,8 @@ type InvoiceFormData = {
 function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDevice {
   return {
     id: `ifd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    ticketDeviceId: undefined,
+    repairStatus: undefined,
     category: "",
     brand: "",
     model: "",
@@ -128,12 +138,19 @@ function genInvoiceId(type: InvoiceType, existingInvoices: Invoice[], cfg?: Numb
   const digits = cfg?.digits && cfg.digits > 0 ? cfg.digits : 3;
   const startNumber = cfg?.startNumber && cfg.startNumber > 0 ? cfg.startNumber : 1;
   const existing = existingInvoices.filter((i) => i.invoiceType === type);
+  // Only count ids that match this series' canonical shape `<prefix><digits>`
+  // (optionally with a store prefix like "KOR-INV054"). Off-series / malformed
+  // ids (e.g. a duplicated invoice with a random suffix "INV-5483") are ignored
+  // so they can never poison the running max and jump the whole series forward.
+  // Match the trailing number ONLY when it directly follows the prefix with no
+  // separator: "INV054" ✓, "KOR-INV054" ✓, but "INV-5483" ✗.
+  const seriesRe = new RegExp(`(?:^|[A-Za-z]+-)${prefix}(\\d+)$`);
   const maxNum = existing.reduce((max, i) => {
-    const match = i.id.match(/\d+$/);
-    return match ? Math.max(max, parseInt(match[0], 10)) : max;
+    const canonical = seriesRe.exec(i.id);
+    return canonical ? Math.max(max, parseInt(canonical[1], 10)) : max;
   }, 0);
   // First invoice in a fresh series honours the configured start number.
-  const next = existing.length === 0 ? startNumber : maxNum + 1;
+  const next = maxNum === 0 ? startNumber : maxNum + 1;
   return `${prefix}${String(next).padStart(digits, "0")}`;
 }
 
@@ -240,22 +257,30 @@ function InvoiceWizard() {
               total: p.total || ((p.qty || 1) * (p.unitPrice || p.price || 0)),
             }));
 
-            // Add service/labour line if estimate exceeds parts total
+            // Add a service/labour line ONLY when there is a real amount to
+            // charge for it (estimate exceeds parts total). If the ticket had
+            // no parts AND no chargeable labour, we deliberately leave the item
+            // list empty — the Issue must NOT be auto-added as a line item.
             const partsTotal = parts.reduce((s, p2) => s + p2.total, 0);
             const labourAmount = (dev.estimate || 0) - partsTotal;
-            if (labourAmount > 0 || parts.length === 0) {
+            if (labourAmount > 0) {
               parts.push({
                 id: `li-${Date.now()}-${idx}-labour`,
-                name: dev.issue || "Repair Service",
-                description: [dev.brand, dev.model].filter(Boolean).join(" "),
+                // The line is a service charge for the estimate — it must NOT be
+                // named after the Issue. Keep the Issue on the description only.
+                name: "Repair Service",
+                description: [dev.issue, dev.brand, dev.model].filter(Boolean).join(" — "),
                 qty: 1,
-                price: Math.max(labourAmount, dev.estimate || 0),
+                price: labourAmount,
                 discount: 0,
-                total: Math.max(labourAmount, dev.estimate || 0),
+                total: labourAmount,
               });
             }
 
             return createFormDevice({
+              // Durable link to the originating ticket device (selective invoicing).
+              ticketDeviceId: dev.ticketDeviceId || undefined,
+              repairStatus: (dev.status as TicketStatus) || undefined,
               category: dev.category || "",
               brand: dev.brand || "",
               model: dev.model || "",
@@ -293,8 +318,10 @@ function InvoiceWizard() {
         if (amount > 0) {
           const parts: InvoiceLineItem[] = [{
             id: `li-${Date.now()}`,
-            name: service || "Repair Service",
-            description: [brand, device, serial ? `SN: ${serial}` : ""].filter(Boolean).join(" — "),
+            // Neutral service label — the Issue/service text stays in the
+            // description, never as the Item name.
+            name: "Repair Service",
+            description: [service, brand, device, serial ? `SN: ${serial}` : ""].filter(Boolean).join(" — "),
             qty: 1,
             price: amount,
             discount: 0,
@@ -400,6 +427,9 @@ function InvoiceWizard() {
     const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
     const invoiceDevices: InvoiceDeviceRecord[] = hasDevices ? form.devices.map((d) => ({
       id: d.id,
+      // Persist the durable link back to the ticket device so the invoice stays
+      // traceable (partial invoicing, duplicate-billing prevention, coverage).
+      ticketDeviceId: d.ticketDeviceId || undefined,
       category: d.category || "",
       brand: d.brand,
       model: d.model,
@@ -481,7 +511,14 @@ function InvoiceWizard() {
       // locally generated one if it collided with an existing (or soft-deleted)
       // invoice, so the print/share links point at a real, retrievable record.
       const savedId = await addInvoice(invoice);
-      setCreatedInvoiceId(savedId || invoice.id);
+      // The store returns "" when creation is rejected (e.g. a device was
+      // already invoiced by another tab/user). Keep the user on the form —
+      // addInvoice already surfaced the reason via a toast.
+      if (!savedId) {
+        setDirty(true);
+        return;
+      }
+      setCreatedInvoiceId(savedId);
       setShowSuccessAnimation(true);
     }
   }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router]);
@@ -520,9 +557,34 @@ function InvoiceWizard() {
     }
   }, [savingDraft, buildInvoice, isEdit, editId, draftId, addInvoice, updateInvoice]);
 
-  // Step navigation
-  const goNext = () => setStep((s) => Math.min(s + 1, 6));
-  const goBack = () => setStep((s) => Math.max(s - 1, 1));
+  // Step navigation. On the Products step (3) with multiple devices, "Next"
+  // walks through the devices one at a time (fill device 1 → Next → device 2 …)
+  // and only advances to Pricing after the LAST device. "Back" mirrors this,
+  // stepping backwards through the devices before returning to the previous
+  // step. Single-device invoices behave exactly as before.
+  // Steps that page THROUGH devices before advancing: Products (3) and
+  // Pricing (4). On these, with multiple devices, Next/Back move device-by-
+  // device first, and only then change step. When entering Pricing we reset to
+  // the first device so the user reviews each device's pricing in order.
+  const isDeviceStep = step === 3 || step === 4;
+  const goNext = () => {
+    if (isDeviceStep && form.devices.length > 1 && form.activeDeviceIndex < form.devices.length - 1) {
+      updateForm((f) => ({ ...f, activeDeviceIndex: f.activeDeviceIndex + 1 }));
+      return;
+    }
+    // Reset to the first device when advancing INTO the Pricing step.
+    if (step === 3 && form.devices.length > 1) {
+      updateForm((f) => ({ ...f, activeDeviceIndex: 0 }));
+    }
+    setStep((s) => Math.min(s + 1, 6));
+  };
+  const goBack = () => {
+    if (isDeviceStep && form.devices.length > 1 && form.activeDeviceIndex > 0) {
+      updateForm((f) => ({ ...f, activeDeviceIndex: f.activeDeviceIndex - 1 }));
+      return;
+    }
+    setStep((s) => Math.max(s - 1, 1));
+  };
   // Direct step navigation — jump to ANY step from the stepper. The whole flow
   // shares a single `form` state (updateForm), so switching steps never loses
   // or resets entered values. Validation is only enforced at the final Create
@@ -648,7 +710,9 @@ function InvoiceWizard() {
           <div className="mx-auto flex w-full max-w-6xl items-center justify-end px-4 pt-2 pb-6 sm:px-6 lg:px-8">
             {step < 6 ? (
               <Button size="md" onClick={goNext} className="mr-[145px]">
-                Next <ArrowRight className="h-4 w-4" />
+                {(step === 3 || step === 4) && form.devices.length > 1 && form.activeDeviceIndex < form.devices.length - 1
+                  ? <>Next Device ({form.activeDeviceIndex + 2}/{form.devices.length})</>
+                  : <>Next</>} <ArrowRight className="h-4 w-4" />
               </Button>
             ) : (
               <Button size="md" onClick={handleSubmit} className="mr-[145px]">
@@ -681,6 +745,8 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
   const devices: InvoiceFormDevice[] = inv.devices && inv.devices.length > 0
     ? inv.devices.map((d) => createFormDevice({
         id: d.id,
+        ticketDeviceId: d.ticketDeviceId || undefined,
+        repairStatus: inv.repairStatus,
         category: d.category || "",
         brand: d.brand,
         model: d.model,
@@ -1347,6 +1413,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
 function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number } }) {
   const { settings } = useStoreSettings();
+  const { updateDeviceStatus, invoices } = useStore();
   const gstPresets = settings.invoiceGstRates?.length ? settings.invoiceGstRates : [0, 12, 18];
   const paymentModeOptions = [
     { label: "Select payment mode…", value: "" },
@@ -1357,10 +1424,72 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
   const [customGst, setCustomGst] = useState(!gstPresets.includes(p.gstRate));
   const [customRaw, setCustomRaw] = useState(String(p.gstRate));
   const [customFocused, setCustomFocused] = useState(false);
+
+  // Per-device pricing context. The device pills mirror the Products step so
+  // the user can switch devices here and set each device's Repair Status; the
+  // Repair Status control edits the ACTIVE device only. Status / Payment / GST
+  // and the Grand Total remain invoice-level. Single-device invoices behave
+  // exactly as before (the pills row simply isn't rendered).
+  const multiDevice = form.devices.length > 1;
+  const activeIdx = form.activeDeviceIndex;
+  const activeDevice = form.devices[activeIdx] || form.devices[0];
+  const activeDeviceSubtotal = activeDevice ? activeDevice.parts.reduce((s, li) => s + li.total, 0) : 0;
+  const activeDeviceLabel = activeDevice
+    ? ([activeDevice.brand, activeDevice.model].filter(Boolean).join(" ") || `Device ${activeIdx + 1}`)
+    : "";
+  const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
+  const ticketId = form.details.ticketId;
+  const ticketHasInvoice = !!ticketId && invoices.some((inv) => inv.ticketId === ticketId);
+  // Effective Repair Status for the active device (falls back to the invoice
+  // default when the device hasn't got its own yet).
+  const activeStatus: TicketStatus = activeDevice?.repairStatus ?? d.repairStatus;
+  // Set the active device's Repair Status: mirror on the form AND update the
+  // real ticket device (so the ticket, activity log + linked invoices sync).
+  const setActiveStatus = (next: TicketStatus) => {
+    updateForm((f) => ({
+      ...f,
+      details: { ...f.details, repairStatus: next },
+      devices: f.devices.map((x, i) => (i === activeIdx ? { ...x, repairStatus: next } : x)),
+    }));
+    if (ticketId && activeDevice?.ticketDeviceId) {
+      void updateDeviceStatus(ticketId, activeDevice.ticketDeviceId, next);
+    }
+  };
+
   return (
     <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8 max-w-2xl mx-auto">
       <h2 className="font-display text-lg font-bold mb-1">Pricing & Payment</h2>
       <p className="text-sm text-muted-foreground mb-6">Discount, tax, payment mode, and status.</p>
+
+      {/* Device pills — same pattern as the Products step. Lets the user switch
+          devices and set each device's Repair Status. Read-only switching (add /
+          remove devices lives in the Products step). */}
+      {multiDevice && (
+        <div className="mb-5 -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1">
+          <p className="shrink-0 pr-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Device</p>
+          {form.devices.map((dev, idx) => {
+            const label = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+            const isActive = idx === activeIdx;
+            return (
+              <button
+                key={dev.id}
+                type="button"
+                onClick={() => switchDevice(idx)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] font-medium transition-all",
+                  isActive
+                    ? "bg-[#4361EE] text-white shadow-sm"
+                    : "bg-white border border-border text-muted-foreground hover:border-[#B3BFF6] hover:text-foreground"
+                )}
+              >
+                <span className={cn("grid h-5 w-5 place-items-center rounded-full text-[10px] font-bold", isActive ? "bg-white/20 text-white" : "bg-muted text-muted-foreground")}>{idx + 1}</span>
+                <span className="max-w-[110px] truncate">{label}</span>
+              </button>
+            );
+          })}
+        </div>
+      )}
+
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
           <Label>Status</Label>
@@ -1375,10 +1504,12 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
         </div>
         <div className="space-y-1.5"><Label>Discount (flat amount)</Label><NumericInput value={p.discount} onChange={(v) => updateForm((f) => ({ ...f, pricing: { ...f.pricing, discount: v } }))} iconLeft={<span className="text-[13px]">₹</span>} /></div>
         <div className="space-y-1.5">
-          <Label>Repair Status</Label>
+          <Label>{multiDevice ? `Repair Status — ${activeDeviceLabel}` : "Repair Status"}</Label>
           <StatusPillSelect
-            value={d.repairStatus}
-            onChange={(v) => updateForm((f) => ({ ...f, details: { ...f.details, repairStatus: v } }))}
+            value={activeStatus}
+            onChange={(v) => setActiveStatus(v)}
+            blockedStatuses={!ticketHasInvoice && activeStatus !== "repaired_collected" ? ["repaired_collected"] : undefined}
+            blockedReason="Create an invoice before selecting Repaired & Collected"
           />
         </div>
         <div className="space-y-1.5">
@@ -1441,11 +1572,14 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
       {/* Summary */}
       <div className="mt-6 rounded-xl border border-border bg-gradient-to-b from-indigo-50/40 to-white p-5">
         <div className="space-y-2 text-sm">
-          <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums font-medium">{formatINR(totals.subtotal)}</span></div>
+          {multiDevice && activeDevice && (
+            <div className="flex justify-between border-b border-border/60 pb-2"><span className="text-muted-foreground">{activeDeviceLabel} subtotal</span><span className="tabular-nums font-medium">{formatINR(activeDeviceSubtotal)}</span></div>
+          )}
+          <div className="flex justify-between"><span className="text-muted-foreground">{multiDevice ? "Invoice Subtotal" : "Subtotal"}</span><span className="tabular-nums font-medium">{formatINR(totals.subtotal)}</span></div>
           {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
           {totals.sgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div>}
           {totals.cgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">CGST ({totals.cgstRate}%)</span><span className="tabular-nums">{formatINR(totals.cgst)}</span></div>}
-          <div className="flex justify-between border-t border-border pt-2 text-base font-bold"><span>Total</span><span className="tabular-nums brand-gradient-text">{formatINR(totals.total)}</span></div>
+          <div className="flex justify-between border-t border-border pt-2 text-base font-bold"><span>{multiDevice ? "Grand Total" : "Total"}</span><span className="tabular-nums brand-gradient-text">{formatINR(totals.total)}</span></div>
         </div>
       </div>
     </div>

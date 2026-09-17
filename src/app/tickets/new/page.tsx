@@ -40,6 +40,7 @@ import { type PermissionKey } from "@/lib/permissions";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
 import { loadQCConfig, getCachedQCConfig, activeCategories as qcActiveCategories, type QCConfig } from "@/lib/qc-config";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
+import { nextWalkInNumber, genWalkInId, ticketSourceToWalkInType, canonicalizeSource } from "@/lib/walk-in-data";
 
 /* Wrap the page in Suspense to support useSearchParams during static generation */
 export default function NewTicketPage() {
@@ -343,7 +344,7 @@ function NewTicketWizard() {
   // land on Device Details, exactly like a Walk-In conversion.
   const fromFieldJobId = searchParams.get("fromFieldJob");
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
-  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, updateWalkIn } = useStore();
+  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
   const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
   const { updateLead } = useLeads();
   const { settings } = useStoreSettings();
@@ -471,8 +472,22 @@ function NewTicketWizard() {
     else setInitialLoaded(true);
   }, [data]);
 
-  const next = () => setStep((s) => Math.min(s + 1, 11));
+  // On the Device Details step (3) with multiple devices, "Next" walks through
+  // the devices one at a time (fill device 1 → Next → device 2 …) and only
+  // advances to the next step after the LAST device. Single-device tickets
+  // behave exactly as before.
+  const next = () => {
+    if (step === 3 && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1) {
+      setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex + 1 }));
+      return;
+    }
+    setStep((s) => Math.min(s + 1, 11));
+  };
   const back = () => {
+    if (step === 3 && data.devices.length > 1 && data.activeDeviceIndex > 0) {
+      setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex - 1 }));
+      return;
+    }
     if (step === 1) {
       attemptNav(closeTarget);
     } else {
@@ -729,6 +744,89 @@ function NewTicketWizard() {
           await updateLead(job.leadId, { linkedTicketId: linkId });
         }
       }
+      // ── Ticket Type = Walk-In → auto-create/link ONE Walk-In record ──
+      //
+      // PATH B (spec §6/§14/§40): a Ticket created with Type = Walk-In must
+      // produce the corresponding Walk-In record as part of the SAME business
+      // transaction — the user never creates a separate Walk-In by hand.
+      //
+      // Guards (spec §7/§13/§21):
+      //   • Only when the primary device's Type is "walkin". Pick-Up / On-Site
+      //     never create a Walk-In (§21/§42/§43).
+      //   • Skipped when this ticket was itself converted FROM a Walk-In
+      //     (`fromWalkInId`) — that record was already linked above, so creating
+      //     another here would duplicate it (§12/§13/§41).
+      //   • Skipped for Field-Job conversions (Pick-Up route).
+      //   • The Walk-In is only created HERE — after the ticket is saved — never
+      //     when the user merely selects the type in the form (§7).
+      //
+      // Data flow (spec §8/§9/§10/§11): reuse the SAME customer (finalCustomerId),
+      // the ticket's device model/id, the job issue, the exact canonical source,
+      // and the ticket id. Walk-In Type is derived from the source mapping while
+      // the EXACT source is preserved separately (§4/§5/§37).
+      const primaryType = primaryDevice.device.type;
+      if (primaryType === "walkin" && !fromWalkInId && !fromFieldJobId) {
+        const linkId = newId || ticketData.id;
+        // The exact source, canonicalised (Google/Meta/GMB/YouTube/Organic/Reference).
+        const exactSource = canonicalizeSource(primaryDevice.device.source) || "Organic";
+        // Source → Walk-In Type (Marketing for paid channels, else Organic).
+        const walkInType = ticketSourceToWalkInType(exactSource);
+        const nowIso = new Date().toISOString();
+        // Duplicate protection (spec §13): if a walk-in already points at this
+        // ticket (e.g. re-save / retry), UPDATE it instead of creating a second.
+        const existing = walkIns.find(
+          (w) => w.linkedTicketId === linkId || w.ticketId === linkId,
+        );
+        if (existing) {
+          await updateWalkIn(existing.id, {
+            type: walkInType,
+            source: exactSource,
+            customerId: finalCustomerId || existing.customerId,
+            customer: customerName,
+            phone: ticketData.phone,
+            email: ticketData.email,
+            model: primaryDevice.device.model || ticketData.model,
+            modelId: primaryDevice.device.modelId || undefined,
+            issue: ticketData.issue,
+            status: "converted_ticket",
+            linkedTicketId: linkId,
+            ticketId: linkId,
+            convertedAt: existing.convertedAt || nowIso,
+          });
+        } else {
+          // Create the linked Walk-In. It is born already Converted to Ticket
+          // (Status = Converted Ticket → derived Final Status = Won Customer,
+          // spec §17/§18/§40), participating in the SAME Walk-In reporting as a
+          // direct entry (§16/§38) — no separate "Ticket Walk-Ins" category.
+          const walkInRecord: WalkIn = {
+            id: genWalkInId(),
+            walkInNumber: nextWalkInNumber(walkIns),
+            // Ticket-created date drives the Walk-In date (§8).
+            date: (ticketData.createdAt || nowIso).slice(0, 10),
+            time: new Date(ticketData.createdAt || nowIso).toTimeString().slice(0, 5),
+            type: walkInType,
+            customer: customerName,
+            phone: ticketData.phone,
+            email: ticketData.email,
+            source: exactSource,
+            category: primaryDevice.category || data.category || "",
+            model: primaryDevice.device.model || ticketData.model || "",
+            modelId: primaryDevice.device.modelId || undefined,
+            issue: ticketData.issue || "",
+            reasons: [],
+            status: "converted_ticket",
+            // SAME centralized customer (§9) — no second customer is created.
+            customerId: finalCustomerId || undefined,
+            // Stable FK link both ways (§6/§23/§31).
+            linkedTicketId: linkId,
+            ticketId: linkId,
+            convertedAt: nowIso,
+            invoiceValue: 0,
+            businessValue: 0,
+          };
+          await addWalkIn(walkInRecord);
+        }
+      }
       // Update customer stats (totalTickets, lastVisit)
       if (finalCustomerId) {
         const cust = customers.find((c) => c.id === finalCustomerId);
@@ -801,7 +899,9 @@ function NewTicketWizard() {
               Save Changes
             </Button>
             <Button variant="outline" size="md" onClick={next} disabled={step >= 11}>
-              Next <ArrowRight className="h-4 w-4" />
+              {step === 3 && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1
+                ? <>Next Device ({data.activeDeviceIndex + 2}/{data.devices.length})</>
+                : <>Next</>} <ArrowRight className="h-4 w-4" />
             </Button>
           </div>
         ) : undefined}
@@ -1716,12 +1816,18 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
               ]} />
             </Field>
             <Field label="Source">
+              {/* Ticket SOURCE = where the customer came from (marketing/origin
+                  channel). This is DISTINCT from Type (Walk-In/Pick-Up/On-Site,
+                  how the repair is handled). "Walk-In" is a Type, never a Source,
+                  so it is intentionally NOT listed here. These six values are the
+                  single canonical source set shared with the Walk-In module. */}
               <RSelect value={d.source} onChange={(v) => set("source", v)} placeholder="Select source" options={[
-                { label: "Google", value: "google" },
-                { label: "Meta", value: "meta" },
-                { label: "YouTube", value: "youtube" },
-                { label: "Walk-in", value: "walk-in" },
-                { label: "Reference", value: "ref" },
+                { label: "Google", value: "Google" },
+                { label: "Meta", value: "Meta" },
+                { label: "GMB", value: "GMB" },
+                { label: "YouTube", value: "YouTube" },
+                { label: "Organic", value: "Organic" },
+                { label: "Reference", value: "Reference" },
               ]} />
             </Field>
             <Field label="Assigned By">
@@ -1773,7 +1879,11 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
           )}
         </motion.button>
         {!isEdit && (
-          <Button size="sm" onClick={onNext}>Next <ArrowRight className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" onClick={onNext}>
+            {data.devices.length > 1 && activeIdx < data.devices.length - 1
+              ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
+              : <>Next</>} <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
         )}
       </div>
 

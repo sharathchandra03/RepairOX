@@ -398,7 +398,12 @@ export default function InvoicePage() {
   }, [list]);
 
   const handleDuplicate = useCallback((inv: Invoice) => {
-    addInvoice({ ...inv, id: `INV-${Math.floor(1000 + Math.random() * 9000)}`, status: "draft", createdAt: new Date().toISOString(), paidAmount: 0 });
+    // Keep the SAME id as the source so it deliberately collides on insert —
+    // addInvoice then regenerates the next SEQUENTIAL id from the series
+    // (nextInvoiceIdFromDb). Never mint a random off-series id here: a random
+    // suffix (e.g. "INV-5483") would poison the running max and jump the whole
+    // invoice sequence forward.
+    addInvoice({ ...inv, status: "draft", createdAt: new Date().toISOString(), paidAmount: 0 });
   }, [addInvoice]);
 
   return (

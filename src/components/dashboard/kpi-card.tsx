@@ -65,7 +65,7 @@ const TONES: Record<
 };
 
 export function KpiCard({
-  title, value, format, hint, delta, tone = "rose", progress, onCardClick, icon: Icon, barThickness = "default",
+  title, value, format, hint, delta, tone = "rose", progress, onCardClick, icon: Icon, barThickness = "default", sharp = false,
 }: {
   title: string;
   value: number;
@@ -84,6 +84,11 @@ export function KpiCard({
    *  (e.g. the lucide `Ticket` icon used across the Tickets module). Omit to keep
    *  the card icon-free, exactly as the other KPI cards render today. */
   icon?: ComponentType<{ className?: string }>;
+  /** Sharper, more structured corner treatment for dense management consoles
+   *  (Owner Dashboard). Steps the default rounded-2xl down to rounded-lg — still
+   *  RepairOX (never fully square), just tighter. Other pages keep the softer
+   *  default by omitting this prop. */
+  sharp?: boolean;
 }) {
   const t = TONES[tone] ?? TONES.rose;
   const pct = Math.max(0, Math.min(100, progress?.value ?? 0));
@@ -99,7 +104,11 @@ export function KpiCard({
       animate={{ opacity: 1, y: 0 }}
       onClick={onCardClick}
       className={cn(
-        "group relative flex h-full flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-5 pl-[22px] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
+        "group relative flex h-full flex-col overflow-hidden border border-[#B3BFF6]/50 bg-card p-5 pl-[22px] shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 will-change-transform hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
+        // Sharper (rounded-lg) for the Owner management console; softer
+        // (rounded-2xl) default everywhere else. Never fully square — keeps the
+        // RepairOX identity while reading more structured/professional.
+        sharp ? "rounded-lg" : "rounded-2xl",
         onCardClick && "cursor-pointer"
       )}
       // Establish a size container so the value can scale to the card's OWN

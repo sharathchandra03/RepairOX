@@ -81,10 +81,70 @@ export function walkInTypeToCustomerSource(t: WalkInType | undefined): "direct_w
   return t === "sales" ? "sales" : "direct_walkin";
 }
 
+/* ─── Canonical source vocabulary + Source → Walk-In Type mapping ─────────────
+   TYPE and SOURCE are two DIFFERENT concepts and must stay separate:
+     • Ticket Type    = HOW the repair is handled (Walk-In / Pick-Up / On-Site).
+     • Ticket Source  = WHERE the customer came from (the six values below).
+     • Walk-In Type   = Organic / Marketing classification (for reporting).
+     • Walk-In Source = the EXACT source value (never collapsed to Organic/Marketing).
+
+   There is exactly ONE canonical set of source values shared by Ticket and
+   Walk-In. "Walk-In" is NEVER a source — it is a handling/service type.
+
+   The stored Walk-In Type value stays "direct"/"sales" for backward-compat
+   (legacy rows keep working); only the DISPLAY label changed Direct → Organic.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/** The single canonical set of source values used across Ticket + Walk-In. */
+export const CANONICAL_SOURCES = ["Google", "Meta", "GMB", "YouTube", "Organic", "Reference"] as const;
+export type CanonicalSource = (typeof CANONICAL_SOURCES)[number];
+
+/**
+ * Normalize any historical / free-typed source string to a canonical value when
+ * it clearly matches one (case- and variation-insensitive: "google ads",
+ * "GOOGLE", "meta ads" → Google / Meta …). Unknown values are returned verbatim
+ * (title-cased trim) so no historical data is ever lost or silently dropped.
+ */
+export function canonicalizeSource(raw: string | undefined | null): string {
+  const v = (raw || "").trim();
+  if (!v) return "";
+  const key = v.toLowerCase().replace(/[\s_\-.]+/g, "");
+  const table: Record<string, CanonicalSource> = {
+    google: "Google", googleads: "Google", googlead: "Google", adwords: "Google",
+    meta: "Meta", metaads: "Meta", facebook: "Meta", fb: "Meta", instagram: "Meta", insta: "Meta",
+    gmb: "GMB", googlemybusiness: "GMB", googlebusiness: "GMB", maps: "GMB", googlemaps: "GMB",
+    youtube: "YouTube", yt: "YouTube", youtubeads: "YouTube",
+    organic: "Organic", direct: "Organic", walkin: "Organic", walkins: "Organic", direct_walkin: "Organic", directwalkin: "Organic",
+    reference: "Reference", ref: "Reference", referral: "Reference", referred: "Reference", wordofmouth: "Reference",
+  };
+  return table[key] ?? v;
+}
+
+/**
+ * DEFAULT source→Walk-In-Type mapping (spec §5 / §37). Marketing = paid/media
+ * channels; Organic = free / word-of-mouth channels. The EXACT source is stored
+ * separately in Walk-In Source — this only decides the reporting TYPE bucket.
+ *
+ *   Google   → Marketing        GMB       → Organic
+ *   Meta     → Marketing        Organic   → Organic
+ *   YouTube  → Marketing        Reference → Organic
+ *
+ * Returns a stored WalkInType value ("sales" = Marketing, "direct" = Organic)
+ * so it drops straight into the existing Walk-In data model.
+ */
+export function ticketSourceToWalkInType(source: string | undefined | null): WalkInType {
+  const canon = canonicalizeSource(source);
+  const marketing: string[] = ["Google", "Meta", "YouTube"];
+  return marketing.includes(canon) ? "sales" : "direct";
+}
+
 /* ─── Source master (configurable, historically safe) ────────────────────── */
 
 const SOURCES_STORAGE_KEY = "repairox-walkin-sources";
-export const DEFAULT_WALKIN_SOURCES = ["GMB", "META", "REFERENCE", "Other"];
+// Canonical six-source set shared with the Ticket Source dropdown. Kept in the
+// same order so both surfaces read identically. Administrators can still add
+// custom sources; archiving one only affects NEW records (history is safe).
+export const DEFAULT_WALKIN_SOURCES = [...CANONICAL_SOURCES];
 
 function loadSources(): string[] {
   if (typeof window === "undefined") return [...DEFAULT_WALKIN_SOURCES];
@@ -293,10 +353,14 @@ export function followUpPill(w: WalkIn, now: Date = new Date()): FollowUpPill {
 
 /* ─── Import normalization ───────────────────────────────────────────────── */
 
-/** Normalize a raw TYPE cell to Direct / Sales. Defaults to "direct". */
+/**
+ * Normalize a raw TYPE cell to the stored WalkInType. "sales"/"marketing" →
+ * "sales" (Marketing); everything else (including the new "organic" label and
+ * the legacy "direct") → "direct" (Organic). Defaults to "direct".
+ */
 export function normalizeWalkInType(raw: string | undefined | null): WalkInType {
   const v = (raw || "").trim().toLowerCase();
-  if (v === "sales" || v === "sale") return "sales";
+  if (v === "sales" || v === "sale" || v === "marketing") return "sales";
   return "direct";
 }
 
@@ -763,7 +827,7 @@ export function parseWalkInCsv(text: string, knownSources: string[]): {
 
     const rawType = at(cols, "type");
     const type = normalizeWalkInType(rawType);
-    const unknownType = Boolean(rawType) && !["direct", "sales"].includes(rawType.trim().toLowerCase());
+    const unknownType = Boolean(rawType) && !["direct", "organic", "sales", "sale", "marketing"].includes(rawType.trim().toLowerCase());
 
     const rawSource = at(cols, "source");
     const srcResult = normalizeWalkInSource(rawSource, knownSources);

@@ -19,6 +19,7 @@
    identically from either place. Clicking a row opens the existing Edit Walk-In.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
 import { Pencil, History as HistoryIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -28,7 +29,10 @@ import {
 } from "@/lib/mock-data";
 import { pendingFollowUps, walkInDisplayId, ordinal, followUpState } from "@/lib/walk-in-data";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
+import { Pagination } from "@/components/ui/pagination";
 import { WalkInFollowUpCell } from "@/components/walk-in/walk-in-followup-cell";
+
+const FOLLOWUP_PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 function fmtDate(iso: string): string {
   if (!iso) return "—";
@@ -48,6 +52,7 @@ export function WalkInFollowUpView({
   onOpen,
   onUpdate,
   onConvert,
+  theadTop,
 }: {
   mode: "active" | "history";
   onModeChange: (m: "active" | "history") => void;
@@ -60,6 +65,9 @@ export function WalkInFollowUpView({
   onOpen: (w: WalkIn) => void;
   onUpdate: (w: WalkIn, patch: Partial<WalkIn>) => void;
   onConvert: (w: WalkIn) => void;
+  /** Runtime-measured sticky offset (topbar + sticky filter block) so the
+   *  <thead> freezes flush below them — identical to the main Walk-In table. */
+  theadTop?: number;
 }) {
   const now = new Date();
   // Active view orders by urgency but keeps EVERY active walk-in — including
@@ -67,7 +75,19 @@ export function WalkInFollowUpView({
   // walk-in mid-cycle between attempts). Walk-ins with a scheduled follow-up
   // (via pendingFollowUps: overdue → today → upcoming) float to the top; the
   // rest follow in recency order. History keeps the caller's recency order.
-  const list = mode === "active" ? sortActive(rows, now) : rows;
+  const list = useMemo(() => (mode === "active" ? sortActive(rows, now) : rows), [mode, rows]);
+
+  // Pagination — mirrors the main Walk-In / Ticket table (10 / 20 / 50 / 100).
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const totalPages = Math.max(1, Math.ceil(list.length / pageSize));
+  const currentPage = Math.min(page, totalPages);
+  // Reset to page 1 when the sub-view or the dataset size changes.
+  useEffect(() => { setPage(1); }, [mode, list.length]);
+  const paged = useMemo(
+    () => list.slice((currentPage - 1) * pageSize, currentPage * pageSize),
+    [list, currentPage, pageSize],
+  );
 
   return (
     <div className="-mt-5 space-y-3">
@@ -78,7 +98,11 @@ export function WalkInFollowUpView({
         <SubTab label="Walkin History" count={historyCount} active={mode === "history"} onClick={() => onModeChange("history")} icon={HistoryIcon} />
       </div>
 
-      <div className="border-2 border-zinc-200 bg-card shadow-card">
+      {/* Canonical RepairOX table card — SAME as the main Walk-In / Ticket table:
+          a soft 2px outer frame (border-zinc-300) with the brighter detail on the
+          INSIDE row separators (border-zinc-500), not on the outer frame. No
+          overflow-hidden so the sticky <thead> is never clipped. */}
+      <div className="border-2 border-zinc-300 bg-card shadow-card">
         <div className="[overflow-x:clip]">
           <table className="w-full table-fixed text-[14px]">
             <colgroup>
@@ -91,7 +115,9 @@ export function WalkInFollowUpView({
               <col className="w-[132px]" />{/* Final Status */}
               <col className="w-[96px]" />{/* Action */}
             </colgroup>
-            <thead className="bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
+            {/* Frozen header — pins flush below the topbar + sticky filter block
+                via the measured theadTop, same as the main table. */}
+            <thead style={theadTop != null ? { top: theadTop } : undefined} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="py-4"><span className="inline-block pl-5">Date</span></th>
                 <th className="py-4">ID</th>
@@ -104,7 +130,7 @@ export function WalkInFollowUpView({
               </tr>
             </thead>
             <tbody>
-              {list.map((w, i) => {
+              {paged.map((w, i) => {
                 const last = w.followUpHistory?.[w.followUpHistory.length - 1];
                 return (
                   <motion.tr
@@ -113,7 +139,7 @@ export function WalkInFollowUpView({
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(0.015 * i, 0.2) }}
                     onClick={() => onOpen(w)}
-                    className="group h-[68px] cursor-pointer border-t border-border align-middle transition hover:bg-muted/40"
+                    className="group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition hover:bg-muted/40"
                   >
                     <td className="py-4 pl-5 pr-4 whitespace-nowrap text-[13px] text-muted-foreground">{fmtDate(w.date)}</td>
                     <td className="py-4 pr-4 whitespace-nowrap">
@@ -197,6 +223,23 @@ export function WalkInFollowUpView({
                 ? "Walk-ins with a scheduled follow-up will appear here, ordered by what needs attention first."
                 : "Completed follow-up attempts will appear here so you can review the full customer journey."}
             </p>
+          </div>
+        )}
+
+        {/* Pagination footer — same shared <Pagination> + divider as the main
+            Walk-In / Ticket table. Only shown when there are rows to page. */}
+        {list.length > 0 && (
+          <div className="border-t border-zinc-500 px-5 py-4">
+            <Pagination
+              page={currentPage}
+              totalPages={totalPages}
+              onPageChange={setPage}
+              totalItems={list.length}
+              pageSize={pageSize}
+              pageSizeOptions={FOLLOWUP_PAGE_SIZE_OPTIONS}
+              onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+              itemLabel="walk-in"
+            />
           </div>
         )}
       </div>

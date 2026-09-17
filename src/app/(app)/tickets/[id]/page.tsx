@@ -26,7 +26,9 @@ import {
   STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE,
   type Ticket, type TicketStatus, type TicketPriority, type DeviceRecord,
   getTicketDevices, formatDeviceColour,
+  ticketInvoiceCoverage, findInvoiceForTicketDevice,
 } from "@/lib/mock-data";
+import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -150,9 +152,25 @@ export default function TicketDetailPage() {
   useEffect(() => { loadDeviceCategories().catch(() => {}); }, []);
 
   const ticket = useMemo(() => tickets.find((t) => t.id === ticketId), [tickets, ticketId]);
-  const linkedInvoice = useMemo(() => invoices.find((inv) => inv.ticketId === ticketId), [invoices, ticketId]);
+  // Every invoice created from this ticket (a ticket may have several — one per
+  // device or device group — while staying ONE ticket).
+  const linkedInvoices = useMemo(
+    () => ticket ? invoices.filter((inv) => inv.ticketId && (inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo)) : [],
+    [invoices, ticket],
+  );
+  const linkedInvoice = linkedInvoices[0];
+  // Invoicing coverage of this ticket's devices: none / partial / full.
+  const coverage = useMemo(
+    () => ticket ? ticketInvoiceCoverage(ticket, invoices) : "none",
+    [ticket, invoices],
+  );
+  // A ticket is fully billed once every eligible device is invoiced — only then
+  // is Push to Invoice truly exhausted. Partially-invoiced tickets can still
+  // push their remaining devices.
+  const fullyInvoiced = coverage === "full";
   const timeline = useMemo(() => ticket ? generateTimeline(ticket) : [], [ticket]);
 
+  const [showPushDialog, setShowPushDialog] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
   const [showPriorityMenu, setShowPriorityMenu] = useState(false);
@@ -212,9 +230,15 @@ export default function TicketDetailPage() {
     }
   }, [ticket, updateTicket]);
 
-  const handlePushToInvoice = useCallback(() => {
+  // Build the invoice-create URL for the SELECTED ticket devices and navigate.
+  // Only the chosen devices are billed (selective / partial invoicing); each
+  // carries its Ticket DeviceRecord id so the invoice remains traceable.
+  const pushSelectedToInvoice = useCallback((selectedDeviceIds: string[]) => {
     if (!ticket) return;
-    const devices = getTicketDevices(ticket);
+    const allDevices = getTicketDevices(ticket);
+    const devices = selectedDeviceIds.length > 0
+      ? allDevices.filter((d) => selectedDeviceIds.includes(d.id))
+      : allDevices;
     // Encode ticket data as query params for the invoice create page
     const params = new URLSearchParams();
     params.set("fromTicket", ticket.id);
@@ -236,6 +260,8 @@ export default function TicketDetailPage() {
 
     // Pass full device structure as JSON for multi-device invoice support
     const invoiceDevices = devices.map((dev) => ({
+      // Durable link back to the originating ticket device.
+      ticketDeviceId: dev.id,
       category: dev.category || (dev as any).categoryId || "",
       brand: dev.brand,
       model: dev.model,
@@ -254,6 +280,7 @@ export default function TicketDetailPage() {
       technician: dev.assignedTo,
       notes: dev.notes,
       estimate: dev.estimate,
+      status: dev.status,
       parts: dev.parts.map((p) => ({ name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total })),
     }));
     params.set("devices", JSON.stringify(invoiceDevices));
@@ -266,6 +293,10 @@ export default function TicketDetailPage() {
 
     router.push(`/invoice/create?${params.toString()}`);
   }, [ticket, router]);
+
+  // The Push to Invoice button opens the device-selection popup rather than
+  // creating an invoice directly.
+  const handlePushToInvoice = useCallback(() => setShowPushDialog(true), []);
 
   if (!ticket) {
     return (
@@ -317,8 +348,8 @@ export default function TicketDetailPage() {
             <Button variant="outline" size="sm" className="rounded-full" onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)}>
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
-            <Button size="sm" className="rounded-full" onClick={handlePushToInvoice} disabled={!!linkedInvoice}>
-              <Receipt className="h-3.5 w-3.5" /> {linkedInvoice ? "Invoice Linked" : "Push to Invoice"}
+            <Button size="sm" className="rounded-full" onClick={handlePushToInvoice} disabled={fullyInvoiced}>
+              <Receipt className="h-3.5 w-3.5" /> {fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining" : "Push to Invoice"}
             </Button>
             {/* More actions */}
             <Dropdown
@@ -697,16 +728,70 @@ export default function TicketDetailPage() {
               {ticket.gstNumber && <DetailField label="GST Number" value={ticket.gstNumber} />}
               <DetailField label="Payment State" value={ticket.status === "repaired_collected" || ticket.status === "return_collected" ? "Paid" : "Pending"} />
               <div>
-                <p className="text-[11px] font-medium text-muted-foreground mb-1">Related Invoice</p>
-                {linkedInvoice ? (
-                  <Link href={`/invoice/${linkedInvoice.id}`} className="text-sm font-medium text-[#4361EE] hover:underline">
-                    {linkedInvoice.id}
-                  </Link>
-                ) : (
-                  <span className="text-sm text-muted-foreground">None</span>
-                )}
+                <p className="text-[11px] font-medium text-muted-foreground mb-1">Invoicing</p>
+                <span className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                  coverage === "full" ? "bg-[#4361EE]/10 text-[#4361EE] ring-[#4361EE]/20"
+                    : coverage === "partial" ? "bg-amber-50 text-amber-700 ring-amber-200"
+                    : "bg-muted text-muted-foreground ring-border",
+                )}>
+                  {coverage === "full" ? "Fully invoiced" : coverage === "partial" ? "Partially invoiced" : "Not invoiced"}
+                </span>
               </div>
             </div>
+
+            {/* Per-device invoice linkage — which invoice bills each device, or
+                "Not yet invoiced". A multi-device ticket may have several
+                invoices while staying ONE ticket. */}
+            {(() => {
+              const devices = getTicketDevices(ticket);
+              if (devices.length === 0) return null;
+              return (
+                <div className="mt-4 space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices &amp; Invoices</p>
+                  <div className="overflow-hidden rounded-xl border border-border">
+                    {devices.map((dev, i) => {
+                      const inv = findInvoiceForTicketDevice(ticket, dev.id, invoices);
+                      const devName = [dev.brand, dev.model].filter(Boolean).join(" ") || `Device ${i + 1}`;
+                      return (
+                        <div key={dev.id} className={cn("flex items-center justify-between gap-3 px-4 py-2.5", i > 0 && "border-t border-zinc-500/30")}>
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{devName}</p>
+                            {dev.issue && <p className="truncate text-[11px] text-muted-foreground">{dev.issue}</p>}
+                          </div>
+                          {inv ? (
+                            <Link href={`/invoice/${inv.id}`} className="shrink-0 text-sm font-medium text-[#4361EE] hover:underline">
+                              {inv.id}
+                            </Link>
+                          ) : (
+                            <span className="shrink-0 text-[11px] text-muted-foreground">Not yet invoiced</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Invoice history — every invoice created from this ticket. */}
+            {linkedInvoices.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice History ({linkedInvoices.length})</p>
+                <div className="space-y-1.5">
+                  {linkedInvoices.map((inv) => (
+                    <Link
+                      key={inv.id}
+                      href={`/invoice/${inv.id}`}
+                      className="flex items-center justify-between gap-3 rounded-lg border border-border px-3.5 py-2 transition hover:border-[#4361EE] hover:bg-indigo-50/40"
+                    >
+                      <span className="text-sm font-medium text-[#4361EE]">{inv.id}</span>
+                      <span className="text-[11px] text-muted-foreground">{fmtDateShort(inv.createdAt)} · {formatINR(inv.total)}</span>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
           </DetailSection>
         </div>
 
@@ -718,20 +803,20 @@ export default function TicketDetailPage() {
             <div className="space-y-2">
               <button
                 onClick={handlePushToInvoice}
-                disabled={!!linkedInvoice}
+                disabled={fullyInvoiced}
                 className={cn(
                   "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition",
-                  linkedInvoice
+                  fullyInvoiced
                     ? "border-emerald-200 bg-emerald-50/50 cursor-default"
                     : "border-border hover:border-[#4361EE] hover:bg-indigo-50/40"
                 )}
               >
-                <span className={cn("grid h-9 w-9 place-items-center rounded-lg", linkedInvoice ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-[#4361EE]")}>
+                <span className={cn("grid h-9 w-9 place-items-center rounded-lg", fullyInvoiced ? "bg-emerald-100 text-emerald-700" : coverage === "partial" ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-[#4361EE]")}>
                   <Receipt className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">{linkedInvoice ? "Invoice Linked" : "Push to Invoice"}</p>
-                  <p className="text-[11px] text-muted-foreground">{linkedInvoice ? `Linked to ${linkedInvoice.id}` : "Create invoice from ticket"}</p>
+                  <p className="text-sm font-semibold">{fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining Devices" : "Push to Invoice"}</p>
+                  <p className="text-[11px] text-muted-foreground">{fullyInvoiced ? `${linkedInvoices.length} invoice${linkedInvoices.length > 1 ? "s" : ""} linked` : coverage === "partial" ? "Some devices still pending" : "Create invoice from ticket"}</p>
                 </div>
               </button>
               <button
@@ -1109,6 +1194,18 @@ export default function TicketDetailPage() {
         confirmLabel="Delete Ticket"
         cancelLabel="Cancel"
         danger
+      />
+
+      {/* ─── Push to Invoice — device selection ───────────────────────── */}
+      <PushToInvoiceDialog
+        open={showPushDialog}
+        ticket={ticket}
+        invoices={invoices}
+        onClose={() => setShowPushDialog(false)}
+        onContinue={(deviceIds) => {
+          setShowPushDialog(false);
+          pushSelectedToInvoice(deviceIds);
+        }}
       />
     </div>
   );

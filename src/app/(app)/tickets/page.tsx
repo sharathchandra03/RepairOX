@@ -26,7 +26,8 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage } from "@/lib/mock-data";
+import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -394,9 +395,12 @@ export default function TicketsPage() {
   // Set of ticket IDs that have at least one invoice generated from them.
   // Derived from the actual DB-backed invoice relationship (invoice.ticketId),
   // so it stays correct across reload, login, search, filter, edit and view.
-  const ticketsWithInvoice = useMemo(
-    () => new Set(invoices.map((inv) => inv.ticketId).filter(Boolean) as string[]),
-    [invoices]
+  // Coverage is derived from the invoice-eligible DEVICES of each ticket (via
+  // ticketInvoiceCoverage), not merely "does an invoice exist", so partial vs
+  // full invoicing is accurate for multi-device tickets.
+  const coverageFor = useCallback(
+    (t: Ticket): TicketInvoiceCoverage => ticketInvoiceCoverage(t, invoices),
+    [invoices],
   );
 
   // Filtered list — pinned records float to the top while preserving the
@@ -554,11 +558,14 @@ export default function TicketsPage() {
     setActiveDrawer(action);
   }, [router, deleteTicket, downloadTicket, pinTicket]);
 
-  // Existing Push to Invoice flow — unchanged data-preservation logic, extracted
-  // so it can run after the confirmation dialog is accepted.
-  const pushTicketToInvoice = useCallback((ticket: Ticket) => {
+  // Existing Push to Invoice flow — unchanged data-preservation logic, extended
+  // so it can run after the device-selection popup returns the SELECTED ticket
+  // devices. Only the chosen devices are carried into the invoice; each device
+  // keeps its Ticket DeviceRecord id so the invoice stays traceable to it.
+  const pushTicketToInvoice = useCallback((ticket: Ticket, selectedDeviceIds?: string[]) => {
       const p = new URLSearchParams();
       p.set("fromTicket", ticket.id);
+      if (ticket.ticketNo) p.set("ticketNo", ticket.ticketNo);
       p.set("customer", ticket.customer);
       p.set("phone", ticket.phone);
       if (ticket.email) p.set("email", ticket.email);
@@ -571,9 +578,17 @@ export default function TicketsPage() {
       if (ticket.gstRate != null) p.set("gstRate", String(ticket.gstRate));
       if (ticket.gstNumber) p.set("gstNumber", ticket.gstNumber);
 
-      // Pass full device structure for multi-device invoice support
-      const devices = getTicketDevices(ticket);
+      // Pass full device structure for multi-device invoice support. When a
+      // selection is provided, only those devices are billed (partial /
+      // selective invoicing); otherwise all devices are included.
+      const allDevices = getTicketDevices(ticket);
+      const devices = selectedDeviceIds && selectedDeviceIds.length > 0
+        ? allDevices.filter((d) => selectedDeviceIds.includes(d.id))
+        : allDevices;
       const invoiceDevices = devices.map((dev) => ({
+        // Durable link back to the originating ticket device — enables partial
+        // invoicing, duplicate-billing prevention and coverage tracking.
+        ticketDeviceId: dev.id,
         category: dev.category || (dev as any).categoryId || "",
         brand: dev.brand,
         model: dev.model,
@@ -591,6 +606,7 @@ export default function TicketsPage() {
         technician: dev.assignedTo,
         notes: dev.notes,
         estimate: dev.estimate,
+        status: dev.status,
         parts: (dev.parts || []).map((pt) => ({ name: pt.name, sku: pt.sku, qty: pt.qty, unitPrice: pt.unitPrice, total: pt.total })),
       }));
       p.set("devices", JSON.stringify(invoiceDevices));
@@ -992,7 +1008,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, ticketsWithInvoice.has(t.id), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus)}
                       </td>
                     ))}
                   </motion.tr>
@@ -1024,11 +1040,7 @@ export default function TicketsPage() {
                       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                         {t.pinnedAt && <Pin className="h-3 w-3 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
                         <span>{t.ticketNo ?? t.id}</span>
-                        {ticketsWithInvoice.has(t.id) && (
-                          <span className="grid h-3.5 w-3.5 place-items-center rounded-full text-white" style={{ background: "linear-gradient(135deg, #16A34A 0%, #15803D 100%)" }} title="Invoice generated" aria-label="Invoice generated">
-                            <Check className="h-2 w-2" strokeWidth={3} />
-                          </span>
-                        )}
+                        <InvoiceCoverageCheck coverage={coverageFor(t)} size="xs" />
                         <span>· <span className="font-medium text-[#5B6FC0]">{t.phone}</span></span>
                       </p>
                     </div>
@@ -1086,7 +1098,7 @@ export default function TicketsPage() {
                   <span className="font-semibold tabular-nums text-sm">{formatINR(t.amount)}</span>
                   {isWaiting && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-[#922B21] ring-1 ring-inset ring-red-200/60"><Clock className="h-2.5 w-2.5" />{elapsed}m+</span>}
                 </div>
-                <TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={ticketsWithInvoice.has(t.id)} />
+                <TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={coverageFor(t) === "full"} />
               </div>
             </motion.div>
           );
@@ -1115,20 +1127,19 @@ export default function TicketsPage() {
       <WhatsAppReceiptDrawer open={activeDrawer === "whatsapp-receipt"} onClose={closeDrawer} ticket={activeTicket} />
       <PrintDrawer open={activeDrawer === "print"} onClose={closeDrawer} ticket={activeTicket} />
 
-      {/* Push to Invoice Confirmation — non-destructive. On confirm it runs the
-          existing push-to-invoice flow (pushTicketToInvoice); on cancel it just
-          closes with no changes. */}
-      <ConfirmDialog
+      {/* Push to Invoice — device-selection popup. The user picks WHICH devices
+          to bill (selective / partial invoicing); already-invoiced devices are
+          shown disabled to prevent duplicate billing. On Continue the selected
+          Ticket DeviceRecord ids are threaded into the existing invoice flow. */}
+      <PushToInvoiceDialog
         open={!!pushInvoiceTarget}
+        ticket={pushInvoiceTarget}
+        invoices={invoices}
         onClose={() => setPushInvoiceTarget(null)}
-        onConfirm={() => {
-          if (pushInvoiceTarget) pushTicketToInvoice(pushInvoiceTarget);
+        onContinue={(deviceIds) => {
+          if (pushInvoiceTarget) pushTicketToInvoice(pushInvoiceTarget, deviceIds);
+          setPushInvoiceTarget(null);
         }}
-        title="Push this ticket to invoice?"
-        description="Are you sure you want to create an invoice from this ticket?"
-        confirmLabel="Yes, Push to Invoice"
-        cancelLabel="Cancel"
-        danger={false}
       />
 
       {/* Delete Confirmation */}
@@ -1207,6 +1218,38 @@ export default function TicketsPage() {
 
 /* ─── Cell Renderer ──────────────────────────────────────────────────── */
 
+/**
+ * InvoiceCoverageCheck — the small circular check next to a Ticket ID that
+ * signals how much of a multi-device ticket has been invoiced:
+ *   • "full"    → BLUE check   — every eligible device is invoiced.
+ *   • "partial" → AMBER check  — some, but not all, eligible devices invoiced.
+ *   • "none"    → nothing rendered.
+ * Same check shape/size as before — only the semantic colour + tooltip change.
+ */
+function InvoiceCoverageCheck({ coverage, size = "sm" }: { coverage: TicketInvoiceCoverage; size?: "sm" | "xs" }) {
+  if (coverage === "none") return null;
+  const partial = coverage === "partial";
+  const dim = size === "xs" ? "h-3.5 w-3.5" : "h-4 w-4";
+  const glyph = size === "xs" ? "h-2 w-2" : "h-2.5 w-2.5";
+  const label = partial
+    ? "Partially invoiced — some devices still pending"
+    : "Fully invoiced — all devices invoiced";
+  return (
+    <span
+      className={cn("grid shrink-0 place-items-center rounded-full text-white", dim)}
+      style={{
+        background: partial
+          ? "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)"
+          : "linear-gradient(135deg, #4361EE 0%, #3049C6 100%)",
+      }}
+      title={label}
+      aria-label={label}
+    >
+      <Check className={glyph} strokeWidth={3} />
+    </span>
+  );
+}
+
 function renderCell(
   colId: ColumnId,
   t: Ticket,
@@ -1218,7 +1261,7 @@ function renderCell(
   handleAction: (action: TicketAction, ticket: Ticket) => void,
   onStatusChange: (ticketId: string, status: TicketStatus) => void,
   statusColors: Record<string, string>,
-  hasInvoice: boolean,
+  coverage: TicketInvoiceCoverage,
   onOpenDeviceDetails: (ticket: Ticket) => void,
   navigateToSection: (ticketId: string, section: "billing") => void,
   onDeviceStatusChange: (ticketId: string, deviceId: string, status: TicketStatus) => void,
@@ -1239,18 +1282,10 @@ function renderCell(
             <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />
           )}
           <span className="font-semibold text-foreground whitespace-nowrap">{t.ticketNo ?? t.id}</span>
-          {/* Invoice-generated indicator — subtle green circular check.
-              Reserved space via shrink-0 so it never pushes the id. */}
-          {hasInvoice && (
-            <span
-              className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-white"
-              style={{ background: "linear-gradient(135deg, #16A34A 0%, #15803D 100%)" }}
-              title="Invoice generated"
-              aria-label="Invoice generated"
-            >
-              <Check className="h-2.5 w-2.5" strokeWidth={3} />
-            </span>
-          )}
+          {/* Invoicing-coverage indicator — BLUE = fully invoiced, AMBER =
+              partially invoiced (some devices still pending), nothing when not
+              invoiced. Reserved space via shrink-0 so it never pushes the id. */}
+          <InvoiceCoverageCheck coverage={coverage} />
         </div>
       );
     case "customer":
@@ -1265,18 +1300,67 @@ function renderCell(
         </div>
       );
     case "device": {
-      // Always surface the FIRST device's basic details at a glance:
-      //   Device Name · Issue · IMEI/Serial. Reads the real saved device
-      //   records (getTicketDevices) — same source the overlay uses — so it
-      //   never falls back to "Apple + 1 more" style summaries.
+      // Reads the real saved device records (getTicketDevices) — same source
+      // the overlay + status column use.
       const devices = getTicketDevices(t);
       const first = devices[0];
-      const extraCount = Math.max(0, devices.length - 1);
       // Model-first identity: show ONLY the model when present, else the brand,
-      // else "Unknown Device". e.g. { brand: "Apple", model: "iPhone 12" } →
-      // "iPhone 12". Underlying brand/model data is unchanged — display only.
-      const deviceName = first?.model || first?.brand || t.model || "Unknown Device";
-      const issueText = (first ? parseIssueString(first.issue).join(", ") : "") || first?.description || t.service || t.issue || "";
+      // else "Unknown Device". Display rule only — underlying data unchanged.
+      const nameOf = (d: typeof first | undefined) => d?.model || d?.brand || t.model || "Unknown Device";
+      const issueOf = (d: typeof first | undefined) =>
+        (d ? parseIssueString(d.issue).join(", ") : "") || d?.description || "";
+
+      // ── Multi-device: one device block PER DEVICE (name + issue), stacked
+      //    with the SAME vertical rhythm as the Status column so each device
+      //    lines up row-for-row with its own status pill. No more "1 device
+      //    shown vs 2 statuses" mismatch. ──
+      if (devices.length > 1) {
+        return (
+          <div
+            className="group/device relative flex cursor-pointer items-start gap-1 py-0.5 pr-7"
+            role="button"
+            tabIndex={0}
+            aria-label="View device and service details"
+            onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onOpenDeviceDetails(t); } }}
+          >
+            {/* Priority marker — aligned with the first device name. */}
+            <div className="w-3 shrink-0 flex flex-col items-center pt-[6px]">
+              {t.priority !== "normal" ? (
+                <span className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")} title={t.priority === "critical" ? "Critical" : "High Priority"} />
+              ) : (
+                <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
+              )}
+            </div>
+            {/* Per-device blocks — gap-2 matches the Status column so the two
+                columns align device-for-device. Each block reserves a min
+                height equal to the status label + pill stack. */}
+            <div className="min-w-0 flex-1 flex flex-col gap-2">
+              {devices.map((dev, i) => {
+                const issueText = issueOf(dev);
+                return (
+                  <div key={dev.id} className={cn("min-w-0 flex min-h-[40px] flex-col justify-center", i < devices.length - 1 && "border-b border-zinc-300 pb-2")}>
+                    <p className="truncate text-[13px] font-semibold leading-snug text-foreground">{nameOf(dev)}</p>
+                    <p className="truncate text-[11px] leading-snug text-zinc-600">{issueText || "—"}</p>
+                  </div>
+                );
+              })}
+            </div>
+            <button
+              type="button"
+              aria-label="View device and service details"
+              onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
+              className="absolute right-0 top-1/2 -translate-y-1/2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-400 opacity-70 transition hover:bg-indigo-50 hover:text-[#4361EE] group-hover/device:opacity-100"
+            >
+              <ChevronDown className="h-4 w-4" />
+            </button>
+          </div>
+        );
+      }
+
+      // ── Single device: rich 3-line layout (name / issue / IMEI-Serial). ──
+      const deviceName = nameOf(first);
+      const issueText = issueOf(first) || t.service || t.issue || "";
       const idLabel = first?.imeiType === "serial" ? "Serial" : "IMEI";
       const idValue = first?.imei || t.items?.[0]?.serial || "";
       return (
@@ -1322,11 +1406,6 @@ function renderCell(
                 <span className="font-mono tracking-tight">{idValue}</span>
               </p>
             )}
-            {extraCount > 0 && (
-              <span className="mt-0.5 inline-flex items-center rounded-full bg-indigo-50 px-2 py-0.5 text-[10px] font-medium text-[#4361EE] ring-1 ring-inset ring-indigo-200">
-                + {extraCount} more device{extraCount > 1 ? "s" : ""}
-              </span>
-            )}
           </div>
           {/* Expand chevron — opens the device-details overlay. Absolutely
               positioned in the cell's right gutter so it never changes the
@@ -1346,27 +1425,24 @@ function renderCell(
       const statusDevices = getTicketDevices(t);
       // Single-device tickets keep the canonical ticket-level control — no
       // extra complexity. Multi-device tickets get ONE independent status
-      // control PER DEVICE, stacked in the same row, so each device's status
-      // can be changed directly from the table without affecting the others.
+      // control PER DEVICE, stacked in the same row, aligned one-for-one with
+      // the Device column's per-device blocks so name/issue and status line up.
       if (statusDevices.length <= 1) {
         return (
-          <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={hasInvoice} />
+          <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={coverage !== "none"} />
         );
       }
       return (
         <div className="flex flex-col gap-2" role="group" aria-label="Per-device status">
-          {statusDevices.map((dev) => {
+          {statusDevices.map((dev, i) => {
             const deviceName = dev.model || dev.brand || "Device";
             return (
-              <div key={dev.id} className="flex flex-col gap-0.5">
-                <span className="truncate text-[10px] font-medium uppercase tracking-wide text-muted-foreground" title={deviceName}>
-                  {deviceName}
-                </span>
+              <div key={dev.id} className={cn("flex min-h-[40px] items-center", i < statusDevices.length - 1 && "border-b border-transparent pb-2")}>
                 <StatusPillDropdown
                   status={dev.status}
                   onSelect={(next) => onDeviceStatusChange(t.id, dev.id, next)}
                   statusColors={statusColors}
-                  hasInvoice={hasInvoice}
+                  hasInvoice={coverage !== "none"}
                   size="sm"
                   ariaLabel={deviceName}
                 />
@@ -1400,7 +1476,7 @@ function renderCell(
         </button>
       );
     case "actions":
-      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={hasInvoice} /></div>;
+      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={coverage === "full"} /></div>;
     default:
       return null;
   }

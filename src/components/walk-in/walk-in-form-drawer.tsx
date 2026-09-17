@@ -503,7 +503,9 @@ export function WalkInFormDrawer({
                 (form.status && !WALKIN_FINAL_STATUSES.includes(form.status)
                   ? [form.status, ...WALKIN_FINAL_STATUSES]
                   : WALKIN_FINAL_STATUSES
-                ).map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))
+                )
+                  .filter((s) => s !== "visitor")
+                  .map((s) => ({ label: WALKIN_STATUS_LABEL[s], value: s }))
               }
             />
             {form.status === "converted_ticket" && !form.linkedTicketId && (

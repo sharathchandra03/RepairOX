@@ -24,7 +24,7 @@ import {
   TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS,
   STATUS_LABEL, type Ticket, type TicketStatus, type TicketPart,
   type TeamMember, type Invoice, type WalkIn,
-  deriveTicketStatus, getTicketDevices,
+  deriveTicketStatus, getTicketDevices, getInvoicedTicketDeviceIds,
 } from "@/lib/mock-data";
 import {
   inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS,
@@ -395,18 +395,55 @@ async function nextInvoiceIdFromDb(type: string, storeId?: string | null, storeP
 
     // STORE-AWARE: scope the running max to the active store so each store's
     // invoice series is independent and never collides across stores.
-    let invQ = supabase.from("invoices").select("id").eq("invoice_type", type);
-    if (storeId) invQ = invQ.eq("branch_id", storeId);
-    const { data } = await invQ;
-    maxNum = (data ?? []).reduce((max: number, r: { id: string }) => {
-      const match = String(r.id).match(/\d+$/);
-      return match ? Math.max(max, parseInt(match[0], 10)) : max;
+    // We read TWO things:
+    //   1. VISIBLE (non-deleted) ids → to compute the running sequence max.
+    //   2. ALL ids (incl. soft-deleted) → the set of primary keys already
+    //      physically taken. A soft-deleted row still occupies its pkey, so the
+    //      next id must SKIP over any taken key or the insert dies with a
+    //      duplicate-key (23505) error in an infinite retry loop.
+    const scoped = (q: any) => (storeId ? q.eq("branch_id", storeId) : q);
+    const [{ data: visibleData }, { data: allData }] = await Promise.all([
+      scoped(supabase.from("invoices").select("id").eq("invoice_type", type).is("deleted_at", null)),
+      scoped(supabase.from("invoices").select("id").eq("invoice_type", type)),
+    ]);
+    // Only count ids that match THIS series' canonical shape:
+    //   [storePrefix]<prefix><digits>   e.g. "INV054", "KOR-INV054".
+    // Off-series / malformed ids (e.g. a duplicated invoice with a random suffix
+    // "INV-5483") never contribute to the running max.
+    maxNum = (visibleData ?? []).reduce((max: number, r: { id: string }) => {
+      const num = seriesNumberOf(String(r.id), sp, prefix);
+      return num != null ? Math.max(max, num) : max;
     }, 0);
-    const next = maxNum === 0 ? startNumber : maxNum + 1;
+    // Every primary key already in the table (deleted or not) — the id we hand
+    // back must not be one of these.
+    const takenIds = new Set((allData ?? []).map((r: { id: string }) => String(r.id)));
+    let next = maxNum === 0 ? startNumber : maxNum + 1;
+    // Advance to the first number whose id is genuinely free (guard bounded).
+    for (let guard = 0; guard < 100000; guard += 1) {
+      const candidate = `${sp ?? ""}${prefix}${String(next).padStart(digits, "0")}`;
+      if (!takenIds.has(candidate)) return candidate;
+      next += 1;
+    }
     return `${sp ?? ""}${prefix}${String(next).padStart(digits, "0")}`;
   }
   // No backend: honour the configured start number for a fresh series.
   return `${sp ?? ""}${prefix}${String(maxNum === 0 ? startNumber : maxNum + 1).padStart(digits, "0")}`;
+}
+
+/**
+ * Parse the sequence number out of an invoice id IF it matches this series'
+ * canonical shape `[storePrefix]<prefix><digits>` (e.g. "INV054" or
+ * "KOR-INV054"). Returns null for ids that don't match — so off-series or
+ * malformed ids (e.g. a duplicated invoice with a random suffix "INV-5483")
+ * are ignored when computing the next number and can't corrupt the sequence.
+ */
+function seriesNumberOf(id: string, storeSep: string | null, prefix: string): number | null {
+  const head = `${storeSep ?? ""}${prefix}`;
+  if (!id.startsWith(head)) return null;
+  const rest = id.slice(head.length);
+  // The remainder must be ONLY digits (no separators, no extra text).
+  if (!/^\d+$/.test(rest)) return null;
+  return parseInt(rest, 10);
 }
 
 /** Format a ticket sequence number as `T-001` (zero-padded to at least 3 digits,
@@ -1765,11 +1802,53 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * (so the DEFAULT "Repaired & Collected" propagates even when the user never
    * touches the status) and manual invoice status edits.
    */
-  const syncTicketStatusFromInvoice = useCallback(async (ticketId: string | undefined, repairStatus: TicketStatus | undefined) => {
+  const syncTicketStatusFromInvoice = useCallback(async (ticketId: string | undefined, repairStatus: TicketStatus | undefined, billedDeviceIds?: string[]) => {
     if (!ticketId || !repairStatus) return;
     if (syncingIdsRef.current.has(ticketId)) return;
     const ticket = stateRef.current.tickets.find((t) => t.id === ticketId);
-    if (!ticket || ticket.status === repairStatus) return;
+    if (!ticket) return;
+
+    // ── Multi-device tickets: only the BILLED devices move ──
+    // An invoice bills SOME devices (selective invoicing), so pushing the
+    // invoice's repair status onto EVERY device would destroy per-device
+    // independence. Instead we apply the invoice's repairStatus to exactly the
+    // devices this invoice billed (billedDeviceIds — their Ticket DeviceRecord
+    // ids), leave the other devices untouched, and recompute the ticket's
+    // aggregate from the result. When no billed ids are known (e.g. a legacy
+    // invoice) we fall back to recomputing the aggregate from the current
+    // device statuses without changing any device.
+    const isMultiDevice = (ticket.devices?.length ?? 0) > 1;
+    if (isMultiDevice) {
+      const billed = new Set(billedDeviceIds ?? []);
+      // Promote a billed device to the invoice's repair status ONLY if it is
+      // still at the initial "in_progress" state. If the user already set a
+      // specific per-device status in the Pricing step (persisted via
+      // updateDeviceStatus), that explicit choice is preserved — we never walk
+      // it back to the invoice's default.
+      const nextDevices = (ticket.devices ?? []).map((d) =>
+        billed.has(d.id) && d.status === "in_progress" && repairStatus !== "in_progress"
+          ? { ...d, status: repairStatus }
+          : d,
+      );
+      const aggregate = deriveTicketStatus(nextDevices);
+      const devicesChanged = billed.size > 0 && nextDevices.some((d, i) => d.status !== (ticket.devices ?? [])[i].status);
+      if (!devicesChanged && ticket.status === aggregate) return; // nothing to reconcile
+      syncingIdsRef.current.add(ticket.id);
+      try {
+        if (shouldUseDb()) {
+          const devicesJson = ticketToRow({ ...ticket, devices: nextDevices }).devices;
+          const { error } = await db.from("tickets").update({ devices: devicesJson, status: aggregate }).eq("id", ticket.id);
+          if (error) console.error("[store] invoice→ticket device sync failed:", error.message);
+        }
+        setState((s) => ({ ...s, tickets: s.tickets.map((t) => (t.id === ticket.id ? { ...t, devices: nextDevices, status: aggregate } : t)) }));
+      } finally {
+        syncingIdsRef.current.delete(ticket.id);
+      }
+      return;
+    }
+
+    // ── Single-device / legacy tickets: preserve the original behaviour ──
+    if (ticket.status === repairStatus) return;
     syncingIdsRef.current.add(ticket.id);
     try {
       if (shouldUseDb()) {
@@ -1782,6 +1861,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       syncingIdsRef.current.delete(ticket.id);
     }
   }, []);
+
+  /** Extract the billed Ticket DeviceRecord ids from an invoice's devices. */
+  const billedTicketDeviceIds = (inv: Invoice): string[] =>
+    (inv.devices ?? []).map((d) => d.ticketDeviceId).filter((id): id is string => !!id);
 
   /**
    * Resolve an invoice's `ticketId` to a REAL tickets primary key before it is
@@ -1814,6 +1897,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Normalize the ticket link so a ticket NUMBER (or stale reference) can never
     // trigger a foreign-key violation that discards the invoice.
     const invoice: Invoice = { ...invoiceInput, ticketId: resolveTicketId(invoiceInput.ticketId) };
+
+    // ── Duplicate-billing guard (concurrency-safe revalidation) ──
+    // Before creating the invoice, re-check that none of its ticket devices are
+    // ALREADY billed on another invoice for the same ticket. This protects
+    // against a double-click, two open tabs, a stale device-selection popup, or
+    // another user having invoiced a device after the popup opened. The
+    // in-memory `invoices` reflect the latest DB/realtime state, so this is the
+    // authoritative check at write time. Cancelled invoices don't reserve
+    // devices. Skipped for edits/updates (handled by updateInvoice).
+    if (invoice.ticketId) {
+      const linkedDeviceIds = (invoice.devices ?? [])
+        .map((d) => d.ticketDeviceId)
+        .filter((id): id is string => !!id);
+      if (linkedDeviceIds.length > 0) {
+        const ticket = stateRef.current.tickets.find(
+          (t) => t.id === invoice.ticketId || t.ticketNo === invoice.ticketId,
+        );
+        if (ticket) {
+          // Only OTHER, non-cancelled invoices reserve devices.
+          const others = stateRef.current.invoices.filter(
+            (inv) => inv.id !== invoice.id && inv.status !== "cancelled",
+          );
+          const alreadyInvoiced = getInvoicedTicketDeviceIds(ticket, others);
+          const clash = linkedDeviceIds.filter((id) => alreadyInvoiced.has(id));
+          if (clash.length > 0) {
+            toast.error("Some devices are already invoiced", {
+              description: "One or more selected devices have already been billed on another invoice for this ticket. Refresh and invoice only the remaining devices.",
+            });
+            return "";
+          }
+        }
+      }
+    }
+
     if (shouldUseDb()) {
       // Single insert attempt. Retries once without the optional columns in case
       // an older DB is missing them.
@@ -1863,8 +1980,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // survive a reload, but avoids data loss mid-session.)
         setState((s) => ({ ...s, invoices: [current, ...s.invoices] }));
         logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: current.reference || current.id, description: `Generated invoice for ${current.customer}.`, meta: { Total: inr(current.total) } });
-        // Sync the (possibly default) repairStatus onto the linked ticket.
-        await syncTicketStatusFromInvoice(current.ticketId, current.repairStatus);
+        // Sync the (possibly default) repairStatus onto the linked ticket's
+        // BILLED devices (selective invoicing).
+        await syncTicketStatusFromInvoice(current.ticketId, current.repairStatus, billedTicketDeviceIds(current));
         return current.id;
       }
 
@@ -1875,14 +1993,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       setState((s) => ({ ...s, invoices: [saved, ...s.invoices] }));
       logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved.reference || saved.id, description: `Generated invoice for ${saved.customer}.`, meta: { Total: inr(saved.total) } });
       // CRITICAL: propagate the invoice's repairStatus (defaults to
-      // "Repaired & Collected") back to the originating ticket immediately, even
-      // when the user never manually changed the invoice status.
-      await syncTicketStatusFromInvoice(saved.ticketId, saved.repairStatus);
+      // "Repaired & Collected") back to the originating ticket's BILLED devices
+      // immediately, even when the user never manually changed the invoice status.
+      await syncTicketStatusFromInvoice(saved.ticketId, saved.repairStatus, billedTicketDeviceIds(saved));
       return saved.id;
     }
     setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
     logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
-    await syncTicketStatusFromInvoice(invoice.ticketId, invoice.repairStatus);
+    await syncTicketStatusFromInvoice(invoice.ticketId, invoice.repairStatus, billedTicketDeviceIds(invoice));
     return invoice.id;
   }, [syncTicketStatusFromInvoice, resolveTicketId]);
 

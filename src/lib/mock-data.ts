@@ -674,6 +674,13 @@ export const INVOICE_TYPE_LABEL: Record<InvoiceType, string> = {
  */
 export type InvoiceDeviceRecord = {
   id: string;
+  /** The originating Ticket DeviceRecord.id this invoice device was billed from.
+   *  This is the durable device→invoice link that makes selective / partial
+   *  invoicing traceable: it answers "which invoice contains this ticket
+   *  device?" and "which devices of this ticket are still uninvoiced?" without
+   *  ever creating a second ticket. Optional so legacy invoices (created before
+   *  this link existed, or from-scratch invoices with no ticket) keep working. */
+  ticketDeviceId?: string;
   /** Device identity */
   brand: string;
   model: string;
@@ -714,6 +721,7 @@ export type InvoiceDeviceRecord = {
 export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecord>): InvoiceDeviceRecord {
   return {
     id: `IDEV-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    ticketDeviceId: undefined,
     brand: "",
     model: "",
     brandId: undefined,
@@ -772,6 +780,9 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
 
   return {
     id: `IDEV-${dev.id}`,
+    // Preserve the durable link back to the originating ticket device so the
+    // invoice remains traceable to the exact device it billed.
+    ticketDeviceId: dev.id,
     brand: dev.brand,
     model: dev.model,
     // Inherit the durable relationship ids from the ticket device — do NOT
@@ -886,6 +897,101 @@ function daysAgo(days: number): string {
 
 export const invoices: Invoice[] = [];
 
+/* ─── Ticket ⇄ Invoice Device Coverage ───────────────────────────────────
+   Selective / partial invoicing: a single ticket can be invoiced device-by-
+   device across multiple invoices while remaining ONE ticket. These helpers
+   are the single source of truth for "which devices are already invoiced" and
+   whether a ticket is not / partially / fully invoiced. They read the durable
+   InvoiceDeviceRecord.ticketDeviceId link (falling back sensibly for legacy
+   invoices that predate it). Never count invoices — count invoice-eligible
+   DEVICES, because one invoice may bill several devices. */
+
+/** Coverage state of a ticket's invoice-eligible devices. */
+export type TicketInvoiceCoverage = "none" | "partial" | "full";
+
+/**
+ * The set of Ticket DeviceRecord ids that already appear on at least one
+ * invoice for the given ticket. Uses the explicit `ticketDeviceId` link when
+ * present. For a legacy invoice with no device-level link (older data), the
+ * whole ticket is treated as invoiced (all its device ids), preserving the
+ * previous "one invoice = ticket invoiced" behaviour for those records.
+ */
+export function getInvoicedTicketDeviceIds(
+  ticket: Ticket,
+  allInvoices: Invoice[],
+): Set<string> {
+  const invoiced = new Set<string>();
+  const ticketDevices = getTicketDevices(ticket);
+  const ticketDeviceIds = ticketDevices.map((d) => d.id);
+  const linked = allInvoices.filter(
+    (inv) => inv.ticketId && (inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo),
+  );
+  for (const inv of linked) {
+    const invDevices = inv.devices ?? [];
+    const explicit = invDevices
+      .map((d) => d.ticketDeviceId)
+      .filter((id): id is string => !!id);
+    if (explicit.length > 0) {
+      // Modern, device-linked invoice — mark exactly the billed devices.
+      explicit.forEach((id) => invoiced.add(id));
+    } else {
+      // Legacy invoice with no device-level link → treat the ticket as fully
+      // invoiced (all its devices), so historical records don't regress to a
+      // "partial" state or become re-billable.
+      ticketDeviceIds.forEach((id) => invoiced.add(id));
+    }
+  }
+  return invoiced;
+}
+
+/**
+ * Classify a ticket's invoicing coverage from its invoice-eligible devices:
+ *   - "none"    → no eligible device invoiced (no indicator).
+ *   - "partial" → some, but not all, eligible devices invoiced (yellow ✓).
+ *   - "full"    → every eligible device invoiced (blue ✓).
+ * A single-device ticket is never "partial": it is either none or full.
+ */
+export function ticketInvoiceCoverage(
+  ticket: Ticket,
+  allInvoices: Invoice[],
+): TicketInvoiceCoverage {
+  const devices = getTicketDevices(ticket);
+  if (devices.length === 0) return "none";
+  const invoiced = getInvoicedTicketDeviceIds(ticket, allInvoices);
+  if (invoiced.size === 0) return "none";
+  const invoicedEligible = devices.filter((d) => invoiced.has(d.id)).length;
+  if (invoicedEligible === 0) return "none";
+  if (invoicedEligible >= devices.length) return "full";
+  return "partial";
+}
+
+/** True when this specific ticket device has already been billed on an invoice. */
+export function isTicketDeviceInvoiced(
+  ticket: Ticket,
+  deviceId: string,
+  allInvoices: Invoice[],
+): boolean {
+  return getInvoicedTicketDeviceIds(ticket, allInvoices).has(deviceId);
+}
+
+/**
+ * The invoice that bills a given ticket device (if any). Prefers the explicit
+ * ticketDeviceId link; falls back to any linked invoice for legacy records.
+ */
+export function findInvoiceForTicketDevice(
+  ticket: Ticket,
+  deviceId: string,
+  allInvoices: Invoice[],
+): Invoice | undefined {
+  const linked = allInvoices.filter(
+    (inv) => inv.ticketId && (inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo),
+  );
+  const explicit = linked.find((inv) => (inv.devices ?? []).some((d) => d.ticketDeviceId === deviceId));
+  if (explicit) return explicit;
+  // Legacy fallback: an invoice with no device link covers the whole ticket.
+  return linked.find((inv) => !(inv.devices ?? []).some((d) => d.ticketDeviceId));
+}
+
 /* ─── Walk-In Types & Seed Data ──────────────────────────────────────── */
 
 /* ──────────────────────────────────────────────────────────────────────────
@@ -947,8 +1053,12 @@ export const WALKIN_STATUS_TONE: Record<WalkInStatus, string> = {
 export type WalkInType = "direct" | "sales";
 
 export const WALKIN_TYPE_LABEL: Record<WalkInType, string> = {
-  direct: "Direct",
+  // Display label only — the stored value stays "direct" for backward-compat, so
+  // every legacy "Direct" record automatically reads as "Organic" with no data
+  // migration. Organic = free / word-of-mouth channels (GMB, Organic, Reference).
+  direct: "Organic",
   // Display label only — the stored value stays "sales" for backward-compat.
+  // Marketing = paid / media channels (Google, Meta, YouTube).
   sales: "Marketing",
 };
 
@@ -992,12 +1102,18 @@ export function isWalkInWon(w: Pick<WalkIn, "status" | "linkedTicketId">): boole
                 Enquiry / Visitor, with or without a scheduled follow-up.
 
    Won is authoritative only through the conversion flow (which links a Ticket);
-   Lost is set through the dedicated "mark as lost" workflow. Everything else is
-   N/A and remains ACTIVE. */
-export type WalkInFinalStatus = "na" | "lost" | "won";
+   Lost is set through the dedicated "mark as lost" workflow. "In Pipeline" is a
+   DERIVED, non-terminal state (an active follow-up is scheduled but no final
+   outcome has been reached yet); "N/A" is the resting state when there is no
+   follow-up scheduled and no final outcome. Neither Pipeline nor N/A is ever
+   chosen manually — they are computed from the follow-up schedule. */
+export type WalkInFinalStatus = "na" | "pipeline" | "lost" | "won";
 
 export const WALKIN_FINAL_STATUS_LABEL: Record<WalkInFinalStatus, string> = {
   na: "N/A",
+  // Auto-derived: a follow-up is scheduled and not yet completed → the
+  // opportunity is being actively worked (still ACTIVE, not a final outcome).
+  pipeline: "In Pipeline",
   lost: "Lost Customer",
   // A won Walk-In is one that was successfully converted into a Ticket, so the
   // outcome reads "Converted Ticket" rather than a generic "Won Customer".
@@ -1009,6 +1125,9 @@ export const WALKIN_FINAL_STATUS_LABEL: Record<WalkInFinalStatus, string> = {
  *  colour. Paired with a small status dot at the call site. */
 export const WALKIN_FINAL_STATUS_TONE: Record<WalkInFinalStatus, string> = {
   na: "bg-slate-50 text-slate-500 ring-slate-200",
+  // In Pipeline — soft amber/blue "working" tone (distinct from the neutral N/A
+  // and from the terminal lost/won tones).
+  pipeline: "bg-sky-50 text-sky-700 ring-sky-200",
   lost: "bg-rose-50 text-rose-600 ring-rose-200",
   // Converted Ticket — reuse the SAME blue/indigo treatment as the original
   // `converted_ticket` status pill (WALKIN_STATUS_TONE.converted_ticket).
@@ -1016,31 +1135,43 @@ export const WALKIN_FINAL_STATUS_TONE: Record<WalkInFinalStatus, string> = {
 };
 
 /**
- * The single, DERIVED Final Status for a Walk-In. Won when converted to a
- * ticket; Lost when the opportunity was closed as lost/closed; otherwise N/A
- * (still active). This is the authoritative outcome used by the table, the
- * Active/History split and the report.
+ * The single, DERIVED Final Status for a Walk-In:
+ *   • Won      → converted into a Ticket (status === "converted_ticket").
+ *   • Lost     → closed as lost/closed.
+ *   • Pipeline → NOT terminal, but an active follow-up is scheduled (the
+ *                opportunity is being worked). Auto-derived from the schedule.
+ *   • N/A      → resting/idle: no follow-up scheduled and no final outcome.
+ * This is the authoritative outcome used by the table, the Active/History split
+ * and the report. Pipeline and N/A are BOTH still ACTIVE (not History).
  */
-export function walkInFinalStatus(w: Pick<WalkIn, "status" | "linkedTicketId">): WalkInFinalStatus {
+export function walkInFinalStatus(
+  w: Pick<WalkIn, "status" | "linkedTicketId" | "followUpDate" | "followUpStatus">,
+): WalkInFinalStatus {
   if (isWalkInWon(w)) return "won";
   if (w.status === "lost" || w.status === "closed") return "lost";
+  if (hasActiveFollowUp(w)) return "pipeline";
   return "na";
 }
 
 /**
  * THE Active-vs-History rule for the whole Walk-In module. A Walk-In enters
- * HISTORY *only* when it reaches a FINAL outcome — Won Customer or Lost
+ * HISTORY *only* when it reaches a FINAL/terminal outcome — Won Customer or Lost
  * Customer. It NEVER moves to History merely because a follow-up attempt was
  * completed, a notification was actioned, or the attempt counter increased.
  * Enquiry / Visitor (with or without follow-ups, at any attempt number) stay
- * ACTIVE until the final outcome is decided.
+ * ACTIVE — including the derived "In Pipeline" and "N/A" states.
  */
-export function walkInIsHistory(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
-  return walkInFinalStatus(w) !== "na";
+export function walkInIsHistory(
+  w: Pick<WalkIn, "status" | "linkedTicketId" | "followUpDate" | "followUpStatus">,
+): boolean {
+  const fs = walkInFinalStatus(w);
+  return fs === "won" || fs === "lost";
 }
 
 /** Convenience inverse of {@link walkInIsHistory} — still an ACTIVE opportunity. */
-export function walkInIsActive(w: Pick<WalkIn, "status" | "linkedTicketId">): boolean {
+export function walkInIsActive(
+  w: Pick<WalkIn, "status" | "linkedTicketId" | "followUpDate" | "followUpStatus">,
+): boolean {
   return !walkInIsHistory(w);
 }
 

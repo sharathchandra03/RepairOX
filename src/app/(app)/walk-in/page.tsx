@@ -146,6 +146,9 @@ export default function WalkInPage() {
   const [completeTarget, setCompleteTarget] = useState<WalkIn | null>(null);
   // Pending inline Final Status change (Lost / reopen to N/A) awaiting confirmation.
   const [finalChange, setFinalChange] = useState<{ walkIn: WalkIn; next: "lost" | "na" } | null>(null);
+  // Pending "push to Ticket" conversion awaiting confirmation (from the Won
+  // Customer option OR the shortcut push-to-ticket button).
+  const [convertTarget, setConvertTarget] = useState<WalkIn | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const openedDeepLinkRef = useRef(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
@@ -765,7 +768,8 @@ export default function WalkInPage() {
           currentUserName={sessionUserName}
           onOpen={(w) => setEditTarget(w)}
           onUpdate={handleFollowUpUpdate}
-          onConvert={handleConvert}
+          onConvert={(w) => setConvertTarget(w)}
+          theadTop={theadTop}
         />
       ) : (
         /* ── TABLE VIEW ──
@@ -961,6 +965,7 @@ export default function WalkInPage() {
                       <WalkInFinalStatusCell
                         walkIn={w}
                         onMarkLost={() => setFinalChange({ walkIn: w, next: "lost" })}
+                        onMarkWon={() => setConvertTarget(w)}
                         onReopen={() => setFinalChange({ walkIn: w, next: "na" })}
                         ticketNoFor={ticketNoFor}
                       />
@@ -981,7 +986,7 @@ export default function WalkInPage() {
                           </button>
                         ) : (
                           <button
-                            onClick={() => handleConvert(w)}
+                            onClick={() => setConvertTarget(w)}
                             title="Convert Walk-In to Ticket"
                             aria-label="Convert Walk-In to Ticket"
                             className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-[#4361EE] transition hover:bg-[#EEF1FD]"
@@ -1006,7 +1011,7 @@ export default function WalkInPage() {
                               <MenuItem icon={Eye} onClick={() => { setViewTarget(w); close(); }}>View</MenuItem>
                               <MenuItem icon={Pencil} onClick={() => { setEditTarget(w); close(); }}>Edit</MenuItem>
                               {!w.linkedTicketId && (
-                                <MenuItem icon={TicketIcon} onClick={() => { handleConvert(w); close(); }}>Convert to Ticket</MenuItem>
+                                <MenuItem icon={TicketIcon} onClick={() => { setConvertTarget(w); close(); }}>Convert to Ticket</MenuItem>
                               )}
                               <MenuItem icon={w.pinnedAt ? PinOff : Pin} onClick={() => { pinWalkIn(w.id, !w.pinnedAt); close(); }}>
                                 {w.pinnedAt ? "Unpin" : "Pin to top"}
@@ -1062,7 +1067,7 @@ export default function WalkInPage() {
       />
 
       {/* View drawer */}
-      <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); handleConvert(w); }} />
+      <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); setConvertTarget(w); }} />
 
       {/* Safe follow-up completion dialog — opened from the Walk-In bell. Requires
           an outcome + optional comment, then an explicit next action. Never a
@@ -1117,11 +1122,30 @@ export default function WalkInPage() {
           finalChange
             ? finalChange.next === "lost"
               ? `Mark ${walkInDisplayId(finalChange.walkIn)} as Lost Customer? The opportunity will be closed and moved to History. Its follow-up history is preserved and it can be reopened later.`
-              : `Reopen ${walkInDisplayId(finalChange.walkIn)}? Final Status returns to N/A and the Walk-In becomes active again, keeping its full follow-up history.`
+              : `Reopen ${walkInDisplayId(finalChange.walkIn)}? The Walk-In becomes active again (In Pipeline if a follow-up is scheduled, otherwise N/A), keeping its full follow-up history.`
             : undefined
         }
         confirmLabel={finalChange?.next === "lost" ? "Mark Lost" : "Reopen"}
         danger={finalChange?.next === "lost"}
+      />
+
+      {/* Push to Ticket confirm — shown before any conversion (Won Customer
+          option, the shortcut push-to-ticket button, the row/drawer "Convert to
+          Ticket" actions). Converting opens the ticket wizard prefilled from
+          this Walk-In; the Walk-In becomes Won (Converted Ticket) only once the
+          ticket is actually created. */}
+      <ConfirmDialog
+        open={!!convertTarget}
+        onClose={() => setConvertTarget(null)}
+        onConfirm={() => { if (convertTarget) handleConvert(convertTarget); }}
+        title="Push to Ticket?"
+        description={
+          convertTarget
+            ? `Convert ${walkInDisplayId(convertTarget)} into a repair Ticket? This opens the ticket form prefilled from this Walk-In. The Walk-In is marked Won (Converted Ticket) once the ticket is created — no duplicate customer or Walk-In is created.`
+            : undefined
+        }
+        confirmLabel="Push to Ticket"
+        danger={false}
       />
 
       {/* Toast */}
@@ -1142,16 +1166,24 @@ export default function WalkInPage() {
   );
 }
 
-/* ─── Final Status cell (actual outcome: N/A / Lost / Won) ─────────────────────
-   Exactly three DERIVED values. Won is never manually selectable (it happens
-   only via ticket conversion). From N/A the only action is "Lost Customer";
-   from Lost the only action is "Reopen" (back to N/A). Won is a static pill with
-   the linked ticket number. Restrained tones + a small status dot throughout. */
+/* ─── Final Status cell (actual outcome: N/A / In Pipeline / Lost / Won) ───────
+   FOUR DERIVED values, TWO of them user-selectable:
+     • "N/A"         → resting state: no follow-up scheduled, no final outcome.
+     • "In Pipeline" → AUTO-derived: an active follow-up is scheduled (being
+                       worked). Never chosen manually — set by the schedule.
+     • "Lost Customer" → user-selectable terminal outcome.
+     • "Won Customer"  → user-selectable; selecting it runs the push-to-ticket
+                       conversion (handleConvert) rather than flipping a flag,
+                       so a real linked Ticket is always created.
+   From an ACTIVE state (N/A or In Pipeline) the menu offers Won Customer +
+   Lost Customer. From Lost the only action is Reopen (back to active). Won is a
+   static pill with the linked ticket number. */
 function WalkInFinalStatusCell({
-  walkIn, onMarkLost, onReopen, ticketNoFor,
+  walkIn, onMarkLost, onMarkWon, onReopen, ticketNoFor,
 }: {
   walkIn: WalkIn;
   onMarkLost: () => void;
+  onMarkWon: () => void;
   onReopen: () => void;
   ticketNoFor: (id?: string) => string | undefined;
 }) {
@@ -1184,10 +1216,13 @@ function WalkInFinalStatusCell({
     );
   }
 
+  // Active (N/A or In Pipeline) → the two selectable outcomes: Won + Lost.
+  const isActive = fs === "na" || fs === "pipeline";
+
   return (
     <Dropdown
       align="left"
-      width="w-44"
+      width="w-48"
       trigger={({ toggle }) => (
         <button
           onClick={toggle}
@@ -1205,18 +1240,26 @@ function WalkInFinalStatusCell({
     >
       {(close) => (
         <>
-          {fs === "na" ? (
-            <MenuItem onClick={() => { onMarkLost(); close(); }}>
-              <span className="flex items-center gap-2">
-                <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_FINAL_STATUS_TONE.lost)} />
-                <span>Lost Customer</span>
-              </span>
-            </MenuItem>
+          {isActive ? (
+            <>
+              <MenuItem onClick={() => { onMarkWon(); close(); }}>
+                <span className="flex items-center gap-2">
+                  <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_FINAL_STATUS_TONE.won)} />
+                  <span>Won Customer</span>
+                </span>
+              </MenuItem>
+              <MenuItem onClick={() => { onMarkLost(); close(); }}>
+                <span className="flex items-center gap-2">
+                  <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_FINAL_STATUS_TONE.lost)} />
+                  <span>Lost Customer</span>
+                </span>
+              </MenuItem>
+            </>
           ) : (
             <MenuItem onClick={() => { onReopen(); close(); }}>
               <span className="flex items-center gap-2">
                 <span className={cn("inline-block h-2 w-2 rounded-full ring-1 ring-inset", WALKIN_FINAL_STATUS_TONE.na)} />
-                <span>Reopen (N/A)</span>
+                <span>Reopen (Active)</span>
               </span>
             </MenuItem>
           )}

@@ -8,7 +8,7 @@
    ┌──────────────────────────────┬────────────────────────────────┐
    │  Date-wise Breakdown (~58%)  │  Metrics / Insights (~42%)      │
    │  (sharp business table)      │  · Period comparison (MoM/YoY)  │
-   │  DATE·DIRECT·MKT·TOT·WON·SR  │  · Best source · Conversion     │
+   │  DATE·ORGANIC·MKT·TOT·WON·SR │  · Best source · Conversion     │
    │                              │  · Trend insight                │
    └──────────────────────────────┴────────────────────────────────┘
    BOTTOM (FULL width — one connected analytics workspace):
@@ -131,7 +131,7 @@ export function WalkInReport({
     <div className="-mt-1 space-y-5">
       {/* ── KPI cards ── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        <KpiCard icon={UserCheck} label="Direct" value={kpis.direct} tone="sky" share={kpis.total ? kpis.direct / kpis.total : 0} />
+        <KpiCard icon={UserCheck} label="Organic" value={kpis.direct} tone="sky" share={kpis.total ? kpis.direct / kpis.total : 0} />
         <KpiCard icon={Megaphone} label="Marketing" value={kpis.marketing} tone="violet" share={kpis.total ? kpis.marketing / kpis.total : 0} />
         <KpiCard icon={Layers} label="Total" value={kpis.total} tone="brand" share={1} />
         <KpiCard icon={Trophy} label="Won" value={kpis.won} tone="emerald" share={kpis.total ? kpis.won / kpis.total : 0} />
@@ -294,7 +294,7 @@ function BreakdownTable({
       <div className="flex items-baseline justify-between gap-3 border-b border-border px-4 py-3">
         <div>
           <h3 className="text-sm font-semibold text-foreground">Date-wise Breakdown</h3>
-          <p className="text-[11px] text-muted-foreground">Direct + Marketing = Total per day · SR = Won ÷ Total × 100</p>
+          <p className="text-[11px] text-muted-foreground">Organic + Marketing = Total per day · SR = Won ÷ Total × 100</p>
         </div>
       </div>
 
@@ -311,7 +311,7 @@ function BreakdownTable({
           <thead className="bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
             <tr className="text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
               <th className="px-4 py-3 text-left">Date</th>
-              <th className="px-2 py-3 text-right">Direct</th>
+              <th className="px-2 py-3 text-right">Organic</th>
               <th className="px-2 py-3 text-right">Mkt</th>
               <th className="px-2 py-3 text-right">Total</th>
               <th className="px-2 py-3 text-right">Won</th>
@@ -434,7 +434,7 @@ function ComparisonCard({
   const hasPrev = previous !== null && previous.total > 0;
   const rows: { label: string; cur: number; prev: number; pp?: boolean }[] = [
     { label: "Total", cur: current.total, prev: previous?.total ?? 0 },
-    { label: "Direct", cur: current.direct, prev: previous?.direct ?? 0 },
+    { label: "Organic", cur: current.direct, prev: previous?.direct ?? 0 },
     { label: "Marketing", cur: current.marketing, prev: previous?.marketing ?? 0 },
     { label: "Won", cur: current.won, prev: previous?.won ?? 0 },
     { label: "Success Rate", cur: current.sr, prev: previous?.sr ?? 0, pp: true },
@@ -554,7 +554,7 @@ function SourceComparison({ direct, marketing }: { direct: number; marketing: nu
     );
   }
   const bars = [
-    { label: "Direct", value: direct, bar: "bg-sky-500", track: "bg-sky-100" },
+    { label: "Organic", value: direct, bar: "bg-sky-500", track: "bg-sky-100" },
     { label: "Marketing", value: marketing, bar: "bg-violet-500", track: "bg-violet-100" },
   ];
   return (
@@ -690,7 +690,7 @@ function BestSourceCard({ rows, kpis }: { rows: WalkIn[]; kpis: Metrics }) {
     const directRows = rows.filter((w) => (w.type ?? "direct") === "direct");
     const marketingRows = rows.filter((w) => w.type === "sales");
     const stats = [
-      { label: "Direct", total: directRows.length, won: directRows.filter(isWalkInWon).length },
+      { label: "Organic", total: directRows.length, won: directRows.filter(isWalkInWon).length },
       { label: "Marketing", total: marketingRows.length, won: marketingRows.filter(isWalkInWon).length },
     ].filter((s) => s.total > 0);
     if (stats.length === 0) return null;
