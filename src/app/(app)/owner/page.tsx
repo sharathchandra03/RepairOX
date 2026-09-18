@@ -21,7 +21,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
 import {
   Building2, Ticket, ShoppingBag, ReceiptText, Wallet, Package,
   ChevronRight, TrendingUp, Store as StoreIcon, CalendarDays, Check, ChevronDown,
@@ -120,6 +119,27 @@ function storeAvatarColor(id: string): string {
   return STORE_AVATAR_COLORS[Math.abs(hash) % STORE_AVATAR_COLORS.length];
 }
 
+/* ONE shared column grid, rendered identically inside the header table, the
+   scrolling body table AND the footer table. Because the three tables are
+   separate DOM elements (so the header/total can sit OUTSIDE the scroll region
+   and never move with macOS trackpad momentum), they must share this exact
+   colgroup + the same `table-fixed` width so every column lines up perfectly. */
+function StorePerfCols() {
+  return (
+    <colgroup>
+      <col className="w-[22%]" />
+      <col className="w-[8%]" />
+      <col className="w-[8%]" />
+      <col className="w-[8%]" />
+      <col className="w-[8%]" />
+      <col className="w-[13%]" />
+      <col className="w-[13%]" />
+      <col className="w-[9%]" />
+      <col className="w-[11%]" />
+    </colgroup>
+  );
+}
+
 export default function OwnerDashboardPage() {
   const router = useRouter();
   const { can, apiFetch, authReady, currentUser } = usePermissions();
@@ -144,9 +164,37 @@ export default function OwnerDashboardPage() {
   const [storeMenuOpen, setStoreMenuOpen] = useState(false);
   const storeMenuRef = useRef<HTMLDivElement>(null);
 
-  const isOwner = can("manage_branches") || can("full_access");
+  /* ── Viewport-constrained scroll body (design system §3a "frozen header" +
+     the owner-table brief) ────────────────────────────────────────────────
+     The Store Performance table is a viewport-bounded component: its ROWS
+     scroll internally while the section header, the table <thead> AND the
+     Total <tfoot> stay pinned in view — the page itself must never grow tall
+     just because more stores exist. Rather than trusting a fragile hardcoded
+     reserve (e.g. calc(100vh - 320px)), we MEASURE the scroll container's live
+     distance from the top of the viewport and give it exactly the space that
+     remains below it, minus a small bottom breathing gap. This recalculates on
+     window resize AND browser zoom (both fire resize / reflow), on the filter
+     strip wrapping to more lines, and whenever the row set changes — so the
+     footer stays visible at every zoom level and on every screen size. */
+  const scrollBodyRef = useRef<HTMLDivElement>(null);
+  /* The Total footer is a SEPARATE table below the scroll body, so the body's
+     max-height must leave room for it too — otherwise the footer lands just
+     below the fold (it "went down"). We measure the footer's live height and
+     subtract it from the available space. */
+  const footerRef = useRef<HTMLDivElement>(null);
+  const [bodyMaxH, setBodyMaxH] = useState<number | null>(null);
+  /* Width of the body's vertical scrollbar (0 on overlay-scrollbar systems).
+     The header + footer tables live OUTSIDE the scroll region, so when the body
+     shows a scrollbar it becomes narrower than them; we pad the header/footer by
+     this width so all three column grids stay perfectly aligned. */
+  const [scrollbarW, setScrollbarW] = useState(0);
 
-  // Access guard: only owners / cross-branch managers may view this page.
+  // Owner Dashboard is a consolidated multi-store view — gate it on the
+  // multi-store / owner capability (matches the server guard on
+  // /api/owner/summary), not on store-admin. `full_access` still implies it.
+  const isOwner = can("owner_dashboard_view") || can("multi_store_access") || can("full_access");
+
+  // Access guard: only multi-store / owner users may view this page.
   useEffect(() => {
     if (authReady && currentUser && !isOwner) router.replace("/dashboard");
   }, [authReady, currentUser, isOwner, router]);
@@ -246,6 +294,38 @@ export default function OwnerDashboardPage() {
     document.addEventListener("keydown", onKey);
     return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
   }, [storeMenuOpen]);
+
+  /* Measure the space between the top of the scroll body and the bottom of the
+     viewport, then cap the body to it. min-height:0 on the body (below) lets it
+     actually shrink; a small floor keeps a few rows + header + total usable on
+     very short windows, and we never exceed the natural content height so a
+     small store list is not forced into an empty scroll region (§13/§28). */
+  useEffect(() => {
+    const el = scrollBodyRef.current;
+    if (!el) return;
+    const BOTTOM_GAP = 24;   // breathing space below the table
+    const MIN_BODY = 220;    // floor: header + a couple rows + total stay usable
+    const measure = () => {
+      const top = el.getBoundingClientRect().top;
+      // Reserve space for the Total footer table (it sits BELOW the body, so it
+      // must fit within the viewport too) plus a small bottom breathing gap.
+      const footerH = footerRef.current?.offsetHeight ?? 0;
+      const avail = window.innerHeight - top - footerH - BOTTOM_GAP;
+      setBodyMaxH(Math.max(MIN_BODY, Math.round(avail)));
+      // offsetWidth includes the scrollbar; clientWidth does not. The difference
+      // is the live scrollbar width (0 when there's no scrollbar / overlay bars).
+      setScrollbarW(el.offsetWidth - el.clientWidth);
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    // The strip above the table (filters/KPIs) can change height (wrapping,
+    // active-filter chips appearing) without a window resize — observe it too.
+    // Also observe the footer so its height is re-reserved if it wraps.
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    if (footerRef.current) ro.observe(footerRef.current);
+    return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
+  }, [loading, visibleRows.length, multiSelectActive, preset]);
 
   function enterStore(id: string) {
     // "View Reports" opens the INDIVIDUAL store's Reports (not its operational
@@ -426,13 +506,12 @@ export default function OwnerDashboardPage() {
       </div>
 
       {/* ── Store Performance — the PRIMARY multi-store comparison surface ──
-          A single enterprise data-table: sharp column grid, sticky header AND
-          sticky total footer, with the store rows scrolling INTERNALLY so the
-          page itself stays short and the header + totals are always in view no
-          matter how many stores exist. The old duplicate store-card grid below
-          it has been removed — this table is now the one place stores are
-          compared. Horizontal scroll is confined to the table (never the page)
-          so nothing clips at higher browser zoom. */}
+          An enterprise data-table with a FROZEN header + FROZEN total footer
+          (rendered as separate tables outside the vertical scroll region) and
+          the store rows scrolling INTERNALLY, so the page stays short and the
+          header + totals are always in view no matter how many stores exist.
+          Horizontal scroll is confined to the table (never the page) so nothing
+          clips at higher browser zoom. */}
       <div
         className="overflow-hidden bg-card shadow-card"
         style={{ border: "2px solid hsl(var(--rox-table-border))" }}
@@ -459,40 +538,34 @@ export default function OwnerDashboardPage() {
           )}
         </div>
 
-        {/* The scroll container owns BOTH axes: vertical scroll for long store
-            lists and horizontal scroll on narrow screens. The <thead>/<tfoot>
-            are position:sticky against THIS container, so the header pins to the
-            top and the Total pins to the bottom while rows scroll between them.
+        {/* ── THREE-TABLE LAYOUT ───────────────────────────────────────────
+            The header and the Total footer are their OWN tables that sit
+            OUTSIDE the vertical scroll region, so they physically cannot move.
+            Only the middle body table scrolls VERTICALLY. This beats
+            position:sticky, which on macOS still detaches during trackpad
+            momentum / elastic overscroll (the "gap" you saw).
 
-            Height is VIEWPORT-RELATIVE, not a hardcoded pixel value: it fills
-            the space that remains after the topbar, page header, date strip,
-            KPI cards and padding (~320px reserved), so the table lands inside
-            the initial viewport on any screen. A min floor keeps a few rows +
-            sticky header + sticky total usable on short laptops; a max ceiling
-            stops it dominating very tall monitors. clamp() adapts automatically
-            across small laptop / tablet / large monitor without media queries. */}
-        <div className="overflow-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300 [max-height:clamp(280px,calc(100vh-320px),620px)]">
-          <table className="w-full min-w-[940px] table-fixed border-collapse text-left">
-            {/* One shared column grid used by header, every row and the footer,
-                so metrics line up perfectly. STORE is widest (identity + action);
-                counts are compact; currency columns are wider. */}
-            <colgroup>
-              <col className="w-[22%]" />
-              <col className="w-[8%]" />
-              <col className="w-[8%]" />
-              <col className="w-[8%]" />
-              <col className="w-[8%]" />
-              <col className="w-[13%]" />
-              <col className="w-[13%]" />
-              <col className="w-[9%]" />
-              <col className="w-[11%]" />
-            </colgroup>
+            Height is VIEWPORT-RELATIVE (runtime-measured, see the effect above),
+            so the table always fits the visible area on any screen / zoom.
+
+            HORIZONTAL scroll is shared: all three tables sit inside ONE
+            overflow-x-auto wrapper so on narrow screens they scroll sideways
+            TOGETHER and stay column-aligned. All three share <StorePerfCols/> +
+            the same table-fixed min-width; the header/footer get right padding
+            equal to the body's live scrollbar width so the grids stay aligned
+            when the body's vertical scrollbar appears. */}
+        <div className="overflow-x-auto [scrollbar-width:thin]">
+
+        {/* FIXED HEADER TABLE (outside the vertical scroll region) */}
+        <div style={{ paddingRight: scrollbarW }}>
+          <table className="w-full min-w-[940px] table-fixed border-separate border-spacing-0 text-left">
+            <StorePerfCols />
             <thead>
               {/* Clean light-grey header (not the previous blue fill), dark bold
                   text for strong readability, a firm bottom border to separate it
                   from the body, and 1px vertical dividers between every column so
                   columns are easy to scan. */}
-              <tr className="text-[12px] font-bold uppercase tracking-wider text-slate-700 [&>th]:sticky [&>th]:top-0 [&>th]:z-10 [&>th]:border-b-2 [&>th]:border-b-slate-400 [&>th]:bg-slate-100 [&>th+th]:border-l [&>th+th]:border-l-slate-200">
+              <tr className="text-[12px] font-bold uppercase tracking-wider text-slate-700 [&>th]:border-b-2 [&>th]:border-b-slate-400 [&>th]:bg-slate-100 [&>th+th]:border-l [&>th+th]:border-l-slate-200">
                 <th className="px-5 py-3.5 text-left">Store</th>
                 <th className="px-3 py-3.5 text-center">Tickets</th>
                 <th className="px-3 py-3.5 text-center">Pickup</th>
@@ -504,6 +577,28 @@ export default function OwnerDashboardPage() {
                 <th className="px-4 py-3.5 text-right">Projection</th>
               </tr>
             </thead>
+          </table>
+        </div>
+
+        {/* SCROLLING BODY TABLE — the ONLY part that scrolls VERTICALLY.
+            overflow-x is hidden (not auto) so the shared OUTER wrapper owns
+            horizontal scroll and header/body/footer move sideways together and
+            stay aligned. The div stretches to the table's min-width inside that
+            wrapper, so nothing is clipped horizontally. */}
+        <div
+          ref={scrollBodyRef}
+          className="min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
+          style={{
+            // Runtime-measured available height (see the measure effect above).
+            // Until the first measurement resolves, fall back to a viewport
+            // calc so the body is never briefly unbounded on first paint.
+            maxHeight: bodyMaxH != null ? `${bodyMaxH}px` : "calc(100vh - 320px)",
+            overscrollBehavior: "contain",
+            overflowAnchor: "none",
+          }}
+        >
+          <table className="w-full min-w-[940px] table-fixed border-separate border-spacing-0 text-left">
+            <StorePerfCols />
             <tbody>
               {loading && (
                 <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">Loading store metrics…</td></tr>
@@ -511,16 +606,14 @@ export default function OwnerDashboardPage() {
               {!loading && visibleRows.length === 0 && (
                 <tr><td colSpan={9} className="px-5 py-10 text-center text-muted-foreground">No stores to show.</td></tr>
               )}
-              {!loading && visibleRows.map((s, i) => {
+              {!loading && visibleRows.map((s) => {
                 return (
-                <motion.tr
+                // Plain <tr> — no per-row entrance transform (a transform would
+                // repaint against the frozen header/footer during fast scroll).
+                <tr
                   key={s.id}
-                  initial={{ opacity: 0, y: 3 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: Math.min(0.02 * i, 0.2) }}
                   onClick={() => enterStore(s.id)}
-                  style={{ borderTop: "1px solid hsl(var(--rox-table-divider))" }}
-                  className="group cursor-pointer align-middle transition hover:bg-muted/40 [&>td+td]:border-l [&>td+td]:border-slate-200"
+                  className="group cursor-pointer align-middle transition hover:bg-muted/40 [&>td]:border-t [&>td]:border-t-[hsl(var(--rox-table-divider))] [&>td+td]:border-l [&>td+td]:border-l-slate-200"
                 >
                   {/* STORE — strongest hierarchy: name (primary) + View Reports
                       (secondary actionable link). Compact but comfortable height. */}
@@ -563,20 +656,26 @@ export default function OwnerDashboardPage() {
                   {/* PROJECTION — this store's own normalized monthly figure:
                       its avg/day for the selected period × 31. Real data only. */}
                   <td className={cn("px-4 py-3 text-right text-[15px] font-bold tabular-nums text-[#4361EE]", zeroTone(projection(s.avgPerDay)))}>{inr(projection(s.avgPerDay))}</td>
-                </motion.tr>
+                </tr>
                 );
               })}
             </tbody>
-            {!loading && visibleRows.length > 0 && (
+          </table>
+        </div>
+
+        {/* FIXED TOTAL FOOTER TABLE (outside the scroll region) — a real table
+            sharing the same colgroup so every column aligns with the header +
+            body; padded right by the scrollbar width to match the body. */}
+        {!loading && visibleRows.length > 0 && (
+          <div ref={footerRef} style={{ paddingRight: scrollbarW }}>
+            <table className="w-full min-w-[940px] table-fixed border-separate border-spacing-0 text-left">
+              <StorePerfCols />
               <tfoot>
-                {/* Sticky bottom Total — a real table footer aligned to the same
-                    column grid (not a floating card). Stronger blue-tint, bold
-                    type, top divider + subtle lift so it reads as the summary. */}
                 {/* Total footer — same light-grey visual family as the header,
                     a firm top border to lift it off the body, bold readable
                     values, matching vertical column dividers, and semantic
                     colours preserved (emerald Payment Received, blue Projection). */}
-                <tr className="text-slate-900 [&>td]:sticky [&>td]:bottom-0 [&>td]:z-10 [&>td]:border-t-2 [&>td]:border-t-slate-400 [&>td]:bg-slate-100 [&>td+td]:border-l [&>td+td]:border-l-slate-200">
+                <tr className="text-slate-900 [&>td]:border-t-2 [&>td]:border-t-slate-400 [&>td]:bg-slate-100 [&>td+td]:border-l [&>td+td]:border-l-slate-200">
                   <td className="px-5 py-3 text-[13px] font-extrabold uppercase tracking-wide">Total</td>
                   <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.tickets}</td>
                   <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.pickup}</td>
@@ -589,9 +688,11 @@ export default function OwnerDashboardPage() {
                   <td className="px-4 py-3 text-right text-[15px] font-extrabold tabular-nums text-[#4361EE]">{inr(totalProjection)}</td>
                 </tr>
               </tfoot>
-            )}
-          </table>
-        </div>
+            </table>
+          </div>
+        )}
+
+        </div>{/* /shared horizontal-scroll wrapper */}
       </div>
     </div>
   );

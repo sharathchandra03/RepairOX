@@ -6,6 +6,7 @@ import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
+import { TimePicker } from "@/components/ui/time-picker";
 import { cn } from "@/lib/utils";
 import { TASK_PRIORITIES, type Task, type TaskInput, type TaskPriority } from "@/lib/tasks";
 
@@ -138,7 +139,7 @@ function TaskFormInner({ onClose, onSave, initial, assignees }: TaskFormDrawerPr
           </div>
           <div className="space-y-1.5">
             <Label>Due Time <span className="text-muted-foreground/60">(optional)</span></Label>
-            <Input type="time" value={dueTime} onChange={(e) => setDueTime(e.target.value)} />
+            <TimePicker value={dueTime} onChange={setDueTime} />
           </div>
         </div>
 

@@ -47,3 +47,56 @@ export async function requireAdmin(req: Request): Promise<AdminGuard> {
   }
   return { ok: true, admin, user: data.user, roleId: staff.role_id };
 }
+
+export type PermissionGuard =
+  | { ok: true; admin: SupabaseClient; user: User; roleId: string; permissions: Set<string> }
+  | { ok: false; status: number; error: string };
+
+/* Central permission-based server guard.
+
+   Resolves the caller's EFFECTIVE permissions LIVE from `role_permissions`
+   (never a snapshot), so a role change takes effect on the very next request
+   with no cache to invalidate. Passes when the caller's role grants ANY of the
+   required keys, or the wildcards `*` / `full_access`, or the caller is a
+   built-in admin role. Use this — not scattered `role === "..."` checks — for
+   every protected server operation. */
+export async function requirePermission(
+  req: Request,
+  anyOf: string | string[]
+): Promise<PermissionGuard> {
+  const header = req.headers.get("authorization") ?? "";
+  const token = header.toLowerCase().startsWith("bearer ") ? header.slice(7) : "";
+  if (!token) return { ok: false, status: 401, error: "Not signed in." };
+
+  let admin: SupabaseClient;
+  try {
+    admin = createAdminClient();
+  } catch (e: any) {
+    return { ok: false, status: 500, error: e?.message ?? "Server not configured: missing service-role key." };
+  }
+  const { data, error } = await admin.auth.getUser(token);
+  if (error || !data.user) return { ok: false, status: 401, error: "Invalid session." };
+
+  const { data: staff } = await admin
+    .from("staff")
+    .select("role_id")
+    .eq("auth_user_id", data.user.id)
+    .maybeSingle();
+  if (!staff?.role_id) return { ok: false, status: 403, error: "You don't have permission to do that." };
+
+  const { data: rows } = await admin
+    .from("role_permissions")
+    .select("permission_key")
+    .eq("role_id", staff.role_id);
+  const permissions = new Set<string>((rows ?? []).map((r) => r.permission_key as string));
+
+  const required = Array.isArray(anyOf) ? anyOf : [anyOf];
+  const allowed =
+    ADMIN_ROLES.includes(staff.role_id) ||
+    permissions.has("*") ||
+    permissions.has("full_access") ||
+    required.some((k) => permissions.has(k));
+
+  if (!allowed) return { ok: false, status: 403, error: "You don't have permission to do that." };
+  return { ok: true, admin, user: data.user, roleId: staff.role_id, permissions };
+}

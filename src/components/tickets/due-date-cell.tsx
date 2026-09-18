@@ -24,6 +24,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
+import { TimePicker } from "@/components/ui/time-picker";
 import type { Ticket } from "@/lib/mock-data";
 
 /* ─── Local-time ISO helpers ──────────────────────────────────────────────
@@ -235,14 +236,10 @@ function DueDatePopover({
 
         {/* Time */}
         <div className="flex items-center gap-2 border-t border-border/60 px-4 py-2">
-          <label className="text-[12px] font-semibold text-foreground" htmlFor="due-time">Time</label>
-          <input
-            id="due-time"
-            type="time"
-            value={time}
-            onChange={(e) => setTime(e.target.value)}
-            className="ml-auto rounded-lg border border-border bg-background px-2.5 py-1 text-[13px] font-medium text-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/20"
-          />
+          <label className="text-[12px] font-semibold text-foreground">Time</label>
+          <div className="ml-auto w-[140px]">
+            <TimePicker value={time} onChange={setTime} />
+          </div>
         </div>
 
         {/* Actions */}

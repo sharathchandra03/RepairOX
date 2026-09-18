@@ -22,6 +22,7 @@ import {
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Can } from "@/components/common/can";
+import { TimePicker } from "@/components/ui/time-picker";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
@@ -368,7 +369,7 @@ function AssignPanel({ title, children, date, time, setDate, setTime, onCancel, 
         </div>
         <div>
           <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-zinc-500">Time</label>
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} className="w-full rounded-lg border border-border bg-card px-2 py-1.5 text-[12px]" />
+          <TimePicker value={time} onChange={setTime} />
         </div>
       </div>
       <div className="mt-3 flex items-center justify-end gap-2">

@@ -251,7 +251,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         "stores_list_view", "stores_switch", "stores_reports_view", "stores_users_view",
       ],
       work: [
-        "stores_view_all", "stores_multi_select", "owner_dashboard_view",
+        "multi_store_access", "stores_view_all", "stores_multi_select", "owner_dashboard_view",
         "owner_performance_view", "owner_consolidated_reports_view", "owner_export",
       ],
       manage: [

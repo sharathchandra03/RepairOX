@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { orgIdForAuthUser } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -34,7 +34,10 @@ function inRange(iso: string | null | undefined, from?: string | null, to?: stri
 }
 
 export async function GET(req: Request) {
-  const guard = await requireAdmin(req);
+  // Consolidated multi-store metrics — require the multi-store / owner-dashboard
+  // capability (permission-based, resolved live from role_permissions), so
+  // hiding the UI is backed by real server enforcement (§ backend enforcement).
+  const guard = await requirePermission(req, ["multi_store_access", "owner_dashboard_view"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin, user } = guard;
 

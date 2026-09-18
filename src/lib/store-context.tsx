@@ -15,7 +15,7 @@
      • A store IS a `branches` row (the DB already scopes every business record
        to organization_id + branch_id and enforces isolation via RLS).
      • The user's ACCESSIBLE stores are resolved as:
-         - cross-branch role (manage_branches) or admin → every store in the org
+         - multi-store role (multi_store_access / full_access) → every store in the org
          - everyone else → their own staff branch + any active `user_stores`
            grants (the grants table is optional; absence degrades gracefully).
      • `activeStoreId`:
@@ -151,10 +151,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // branch_settings (optional table — absence just means no prefixes).
   const [prefixMap, setPrefixMap] = useState<Record<string, StorePrefixes>>({});
 
-  // A user who can manage branches (owner / master shop owner / admin) can see
-  // every store and the consolidated All-Shops view. Everyone else is limited
-  // to the store(s) they are assigned to.
-  const canCrossBranch = can("manage_branches") || can("full_access");
+  // Multi-store access is a CENTRAL capability (§ RepairOX multi-store default
+  // policy). It is OFF by default for every role except Master Shop Owner and
+  // Platform Owner (who receive `multi_store_access`; `full_access` also
+  // implies it). A user WITHOUT this capability:
+  //   • sees only the store(s) they are assigned to (their branch + explicit
+  //     user_stores grants) — never the whole org,
+  //   • can NEVER enter the consolidated All-Shops view, and
+  //   • gets no multi-store selection controls.
+  // The header selector, store-list breadth and All-Shops guards all key off
+  // this ONE signal so UI and behaviour can't disagree.
+  const canMultiStore = can("multi_store_access") || can("full_access");
+  // `canCrossBranch` (used below for store-list breadth + All-Shops guards) is
+  // now the multi-store capability. `manage_branches` alone (store admin) no
+  // longer implies cross-store visibility unless multi-store access is granted.
+  const canCrossBranch = canMultiStore;
 
   const storageKey = currentUser?.id
     ? `${STORAGE_PREFIX}${currentUser.id}`

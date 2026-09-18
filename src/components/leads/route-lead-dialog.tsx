@@ -18,6 +18,7 @@ import { useMemo, useState } from "react";
 import { Store, Truck, ArrowRight, Check, MapPin, Building2, AlertTriangle } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
+import { TimePicker } from "@/components/ui/time-picker";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { useField } from "@/lib/field-context";
@@ -252,8 +253,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
               </div>
               <div>
                 <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Preferred Time</label>
-                <input type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)}
-                  className="w-full rounded-xl border border-border bg-card px-3 py-2 text-sm focus:border-[#4361EE] focus:outline-none" />
+                <TimePicker value={pickupTime} onChange={setPickupTime} />
               </div>
             </div>
             <p className="text-[11px] text-zinc-500">Pickup date is a logistics schedule — separate from the Lead follow-up date.</p>

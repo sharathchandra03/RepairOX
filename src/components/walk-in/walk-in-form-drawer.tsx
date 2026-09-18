@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Select, Label, Textarea } from "@/components/ui/input";
 import { loadDeviceCategories, getCachedCategories, type DeviceCategoryItem } from "@/lib/device-categories";
 import { loadDeviceColours, getCachedColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
+import { TimePicker } from "@/components/ui/time-picker";
 import { Avatar } from "@/components/ui/avatar";
 import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, type CustomerType } from "@/lib/customer-data";
@@ -731,11 +732,10 @@ export function WalkInFormDrawer({
                   })
                 }
               />
-              <Input
-                type="time"
+              <TimePicker
                 value={form.followUpTime || ""}
                 disabled={isConverted || !form.followUpDate}
-                onChange={(e: any) => set({ followUpTime: e.target.value })}
+                onChange={(v) => set({ followUpTime: v })}
               />
             </div>
             {isConverted ? (

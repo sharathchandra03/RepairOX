@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X, Hash } from "lucide-react";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { TimePicker } from "@/components/ui/time-picker";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
 import { StoreNumberingSection } from "@/components/settings/store-numbering-section";
@@ -151,10 +152,10 @@ export default function StoreSettingsPage() {
             ]} />
           </Field>
           <Field label="Start Time">
-            <Input type="time" value={draft.startTime} onChange={(e) => set("startTime", e.target.value)} />
+            <TimePicker value={draft.startTime} onChange={(v) => set("startTime", v)} />
           </Field>
           <Field label="End Time">
-            <Input type="time" value={draft.endTime} onChange={(e) => set("endTime", e.target.value)} />
+            <TimePicker value={draft.endTime} onChange={(v) => set("endTime", v)} />
           </Field>
         </div>
       </SettingsSection>

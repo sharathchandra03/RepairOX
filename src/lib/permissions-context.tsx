@@ -414,9 +414,55 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange(async (_event, session) => {
       const email = session?.user?.email ?? null;
       setCurrentUserEmail(email);
-      if (email) await refreshTeamFromDb();
+      if (email) {
+        // Re-read BOTH the staff directory AND the role→permission grants on
+        // every auth event (login / token refresh / user switch) so a session
+        // that was signed in before an admin changed a role picks up the new
+        // effective permissions without a hard reload.
+        await Promise.all([refreshTeamFromDb(), loadAccessFromDb()]);
+      }
     });
-    return () => { active = false; sub.subscription.unsubscribe(); };
+
+    /* ── Live permission propagation ──────────────────────────────────────
+       An admin changing a role writes to `roles` / `role_permissions` in
+       Postgres. Every OTHER signed-in session must converge on that change
+       without a manual reload. We subscribe to Postgres changes on both
+       tables and re-read the authoritative grants map whenever they change.
+       Realtime must be enabled for these tables in Supabase; if it isn't,
+       the focus/visibility revalidation below is the guaranteed fallback. */
+    let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+    const scheduleGrantsRefresh = () => {
+      if (refreshTimer) clearTimeout(refreshTimer);
+      // Debounce: a single role save fires several row events (DELETE + INSERTs).
+      refreshTimer = setTimeout(() => { if (active) loadAccessFromDb(); }, 250);
+    };
+
+    // Local non-null handle (this branch only runs when supabase is configured)
+    // so the cleanup closure can call removeChannel without a null check.
+    const sb = supabase;
+    const channel = sb
+      .channel("repairox-access-sync")
+      .on("postgres_changes", { event: "*", schema: "public", table: "role_permissions" }, scheduleGrantsRefresh)
+      .on("postgres_changes", { event: "*", schema: "public", table: "roles" }, scheduleGrantsRefresh)
+      .subscribe();
+
+    /* ── Revalidate on focus / tab visibility ─────────────────────────────
+       Guaranteed fallback that does NOT depend on realtime being enabled:
+       whenever the user returns to the tab, re-pull the grants so a stale
+       snapshot can never survive a context switch. Cheap (two small selects)
+       and only runs on focus, not on a timer. */
+    const revalidate = () => { if (active && document.visibilityState === "visible") loadAccessFromDb(); };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", revalidate);
+
+    return () => {
+      active = false;
+      sub.subscription.unsubscribe();
+      if (refreshTimer) clearTimeout(refreshTimer);
+      sb.removeChannel(channel);
+      window.removeEventListener("focus", revalidate);
+      document.removeEventListener("visibilitychange", revalidate);
+    };
   }, [loadAccessFromDb, refreshTeamFromDb]);
 
   // Persist local-mode state only (Supabase mode is authoritative in the DB).
@@ -510,8 +556,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     if (!res.ok || res.json?.ok === false) {
       return { ok: false, error: res.json?.error ?? `Save failed (status ${res.status}).` };
     }
+    // The DB is now authoritative — re-read the full grants map so the editing
+    // admin's in-memory state matches exactly what landed (and so any derived
+    // state converges on the persisted truth rather than the optimistic array).
+    // Other signed-in sessions converge via the realtime subscription + focus
+    // revalidation wired in the hydration effect below.
+    await loadAccessFromDb();
     return { ok: true };
-  }, [apiFetch]);
+  }, [apiFetch, loadAccessFromDb]);
 
   const addRole = useCallback(({ label, summary, workspaces, permissions = [] }: AddRoleInput) => {
     const base = slugify(label);
@@ -531,10 +583,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       apiFetch("/api/roles", {
         method: "POST",
         body: JSON.stringify({ id, label: newRole.label, summary: newRole.summary, workspaces: newRole.workspaces, permissions }),
-      });
+      }).then(() => loadAccessFromDb());
     }
     return id;
-  }, [customRoles, apiFetch]);
+  }, [customRoles, apiFetch, loadAccessFromDb]);
 
   const updateRoleWorkspaces = useCallback((roleId: string, workspaces: WorkspaceId[]) => {
     // Update built-in roles by moving them to custom (override) or update existing custom role.
@@ -551,9 +603,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       return prev;
     });
     if (isSupabaseConfigured) {
-      apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify({ workspaces }) });
+      apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify({ workspaces }) })
+        .then(() => loadAccessFromDb());
     }
-  }, [apiFetch]);
+  }, [apiFetch, loadAccessFromDb]);
 
   const membersInRole = useCallback((roleId: string) => team.filter((m) => m.roleId === roleId), [team]);
   const getStaffById = useCallback((id: string) => team.find((m) => m.id === id), [team]);
@@ -582,10 +635,15 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     setPreviewRoleId((prev) => (prev === roleId ? null : prev));
     if (isSupabaseConfigured) {
       const q = reassignTo ? `?reassignTo=${encodeURIComponent(reassignTo)}` : "";
-      apiFetch(`/api/roles/${roleId}${q}`, { method: "DELETE" }).then(() => refreshTeamFromDb());
+      apiFetch(`/api/roles/${roleId}${q}`, { method: "DELETE" }).then(() => {
+        // Re-read staff (reassignment) AND grants (the deleted role's rows are
+        // gone) so no session keeps resolving against a removed role.
+        refreshTeamFromDb();
+        loadAccessFromDb();
+      });
     }
     return { ok: true };
-  }, [adminRoleId, team, apiFetch, refreshTeamFromDb]);
+  }, [adminRoleId, team, apiFetch, refreshTeamFromDb, loadAccessFromDb]);
 
   const deleteMember = useCallback((email: string): DeleteMemberResult => {
     const selfEmail = currentUser?.email ?? CURRENT_USER.email;

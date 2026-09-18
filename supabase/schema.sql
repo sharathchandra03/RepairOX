@@ -412,7 +412,13 @@ $$;
 
 create or replace function public.auth_can_cross_branch()
 returns boolean language sql stable security definer set search_path = public as $$
-  select public.auth_has_any(array['manage_branches']);
+  -- Cross-store data visibility is the MULTI-STORE capability, not store admin.
+  -- A user may only read/write across branches when their role grants
+  -- `multi_store_access` (Master Shop Owner / Platform Owner by default; also
+  -- covered by `full_access` / `*` inside auth_has_any). `manage_branches`
+  -- alone (store administration) no longer widens data visibility, so the DB
+  -- enforces the same boundary the UI shows (UI = backend = DB).
+  select public.auth_has_any(array['multi_store_access']);
 $$;
 
 create or replace function public.auth_member_of_org(org uuid)
@@ -1533,8 +1539,11 @@ using (
 do $$
 declare
   t text;
+    -- roles + role_permissions are published so an admin's permission change
+    -- streams live to every other signed-in session (which re-reads its
+    -- effective permissions with no manual reload).
   tables text[] := array[
-    'organizations','branches','staff','audit_log',
+    'organizations','branches','staff','audit_log','roles','role_permissions',
     'customers','tickets','invoices','walk_ins','inventory_items','stock_movements',
     'brands','device_models','assigned_by_options','assigned_to_options',
     'price_list_categories','price_list_brands','price_list_models','price_list_parts',

@@ -38,6 +38,7 @@ import {
   isFollowUpTerminated,
 } from "@/lib/mock-data";
 import { followUpPill, followUpState, ordinal } from "@/lib/walk-in-data";
+import { TimePicker } from "@/components/ui/time-picker";
 import { cn } from "@/lib/utils";
 
 type Mode = "menu" | "schedule" | "reschedule" | "complete" | "schedule-next" | "history";
@@ -423,8 +424,7 @@ function ScheduleView({
         </div>
         <div className="space-y-1">
           <label className="text-[10.5px] font-medium text-muted-foreground">Time</label>
-          <input type="time" value={time} onChange={(e) => setTime(e.target.value)} disabled={!date}
-            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20 disabled:opacity-50" />
+          <TimePicker value={time} onChange={setTime} disabled={!date} />
         </div>
       </div>
       <div className="space-y-1">

@@ -861,9 +861,13 @@ export default function WalkInPage() {
                         <StoreContextCell store={getStore(w.branchId)} mode="stacked" />
                       </td>
                     )}
-                    {/* ID — moved to sit immediately after Store; content nudged 3px left. */}
-                    <td className="py-4 pr-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5 -ml-[3px]">
+                    {/* ID — sits immediately after Store (or the checkbox in
+                        single-store view). Header + content share the SAME 5px
+                        left offset so the WK number lines up under "ID" in BOTH
+                        single-store and multi-store layouts (no negative margin
+                        that only looked right when Store was present). */}
+                    <td className="py-4 pr-4 pl-[5px] whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
                         <button
                           type="button"
                           onClick={() => setEditTarget(w)}

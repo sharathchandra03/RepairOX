@@ -249,6 +249,7 @@ export type PermissionKey =
   | "owner_consolidated_reports_view"
   | "owner_export"
   /* Multi-store / store context */
+  | "multi_store_access"
   | "stores_list_view"
   | "stores_switch"
   | "stores_view_all"
@@ -684,6 +685,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
     label: "Multi-Store & Store Management",
     description: "Store switching, All Shops, store creation and store administration",
     permissions: [
+      { key: "multi_store_access", label: "Multi-Store Access (see All Shops / switch stores)" },
       { key: "stores_list_view", label: "View Store List" },
       { key: "stores_switch", label: "Switch Store" },
       { key: "stores_view_all", label: "View All Shops (Consolidated)" },
@@ -932,6 +934,8 @@ export const ROLES: RoleDef[] = [
       "print_documents", "upload_files",
       "view_field_jobs", "manage_field_jobs", "route_leads", "receive_store_handoff",
       "assign_field_manager", "assign_ninja", "update_pickup", "update_drop", "view_field_reports",
+      // Multi-store: Master Shop Owner sees All Shops + can switch stores by default.
+      "multi_store_access", "stores_list_view", "stores_switch", "stores_view_all", "stores_multi_select",
     ],
   },
   {

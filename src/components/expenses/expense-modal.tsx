@@ -7,6 +7,7 @@ import { X, Plus, Upload, Receipt, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, NumericInput } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import { RSelect } from "@/components/ui/rselect";
 import {
   type Expense,
@@ -322,12 +323,7 @@ export function ExpenseModal({ open, onClose, editExpense, onSuccess }: ExpenseM
                   </div>
                   <div className="space-y-1.5">
                     <Label>Time *</Label>
-                    <input
-                      type="time"
-                      value={time}
-                      onChange={(e) => setTime(e.target.value)}
-                      className="flex h-11 w-full rounded-xl border border-border bg-card px-3.5 text-sm transition-all duration-150 hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none"
-                    />
+                    <TimePicker value={time} onChange={setTime} className="h-11" />
                   </div>
                 </div>
 
