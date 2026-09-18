@@ -26,7 +26,7 @@ import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
-import { deriveTicketStatus, type Ticket, type TicketStatus, type WalkIn } from "@/lib/mock-data";
+import { deriveTicketStatus, createWalkInDevice, getWalkInDevices, type Ticket, type TicketStatus, type WalkIn, type WalkInDevice } from "@/lib/mock-data";
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
@@ -383,27 +383,41 @@ function NewTicketWizard() {
     if (!w) return; // walk-ins may still be hydrating; effect re-runs when they load
     walkInPrefilledRef.current = true;
 
-    // Resolve the catalog model record (by id, else exact name match).
-    const modelRec = w.modelId
-      ? deviceModels.find((m) => m.id === w.modelId)
-      : (w.model ? deviceModels.find((m) => m.name.toLowerCase() === w.model.toLowerCase()) : undefined);
-    // Category: catalog record → walk-in category → inferred from model name.
-    const categoryId = modelRec?.categoryId || w.category || (w.model ? inferCategoryFromName(w.model) : undefined);
-    const brandRec = modelRec ? brands.find((b) => b.id === modelRec.brandId) : undefined;
+    // Map EVERY Walk-In device → its own wizard device (spec §13/§45). A
+    // multi-device Walk-In converts into a multi-device Ticket with NO device
+    // lost. getWalkInDevices synthesizes Device 1 for legacy single-device rows,
+    // so single-device conversions behave exactly as before.
+    const wDevices = getWalkInDevices(w);
+    const wizardDevices = wDevices.map((wd) => {
+      // Resolve the catalog model record (by id, else exact name match).
+      const modelRec = wd.modelId
+        ? deviceModels.find((m) => m.id === wd.modelId)
+        : (wd.model ? deviceModels.find((m) => m.name.toLowerCase() === wd.model.toLowerCase()) : undefined);
+      const catId = modelRec?.categoryId || wd.category || (wd.model ? inferCategoryFromName(wd.model) : undefined);
+      const brandRec = modelRec ? brands.find((b) => b.id === modelRec.brandId) : undefined;
+      const dev = createWizardDevice(catId);
+      dev.device.model = wd.model || "";
+      dev.device.modelId = modelRec?.id;
+      // Prefer the walk-in device's own brand text; else the resolved catalog brand.
+      dev.device.brand = wd.brand || brandRec?.name || "";
+      dev.device.brandId = wd.brandId || brandRec?.id;
+      dev.device.imei = wd.imei || "";
+      dev.device.imeiType = wd.imeiType === "serial" ? "serial" : "imei";
+      dev.device.source = w.source || "";
+      dev.job.deviceColour = wd.deviceColour || "";
+      dev.job.issue = wd.issue || "";
+      return dev;
+    });
+    // Primary device category drives the wizard's global category default.
+    const primaryCategoryId = wizardDevices[0]?.category
+      || (w.model ? inferCategoryFromName(w.model) : undefined);
 
     const nameParts = (w.customer || "").trim().split(/\s+/);
-    const dev = createWizardDevice(categoryId);
-    dev.device.model = w.model || "";
-    dev.device.modelId = modelRec?.id;
-    dev.device.brand = brandRec?.name || "";
-    dev.device.brandId = brandRec?.id;
-    dev.device.source = w.source || "";
-    dev.job.issue = w.issue || (w.reasons || []).join(", ") || "";
 
     setData({
       ...DEFAULT,
-      category: categoryId,
-      devices: [dev],
+      category: primaryCategoryId,
+      devices: wizardDevices.length > 0 ? wizardDevices : [createWizardDevice(primaryCategoryId)],
       activeDeviceIndex: 0,
       contactType: "personal",
       customer: {
@@ -772,6 +786,37 @@ function NewTicketWizard() {
         // Source → Walk-In Type (Marketing for paid channels, else Organic).
         const walkInType = ticketSourceToWalkInType(exactSource);
         const nowIso = new Date().toISOString();
+
+        // ── Map EVERY ticket device → a Walk-In device (spec §9/§10/§12/§29) ──
+        // The critical fix: build the WHOLE device array from `deviceRecords`
+        // (all devices on the ticket), NEVER just the primary device. Each
+        // ticket device maps 1:1 to its own Walk-In device record, in order, so
+        // Device 1 → Walk-In Device 1, Device 2 → Walk-In Device 2, … with no
+        // overwrite. `deviceRecords` was built above from ALL data.devices.
+        const walkInDevices: WalkInDevice[] = deviceRecords.map((dr) =>
+          createWalkInDevice({
+            model: dr.model || "",
+            modelId: dr.modelId || undefined,
+            brand: dr.brand || undefined,
+            brandId: dr.brandId || undefined,
+            category: dr.category || undefined,
+            imei: dr.imei || undefined,
+            imeiType: dr.imeiType === "serial" ? "serial" : (dr.imei ? "imei" : undefined),
+            deviceColour: dr.deviceColour || undefined,
+            issue: dr.issue || "",
+          }),
+        );
+        const walkInPrimary = walkInDevices[0];
+        // Only store the array when there is genuinely more than one device, so
+        // single-device ticket→walk-in rows stay byte-identical to before.
+        const walkInDevicesField = walkInDevices.length > 1 ? walkInDevices : undefined;
+        // Primary issue for the flat/summary field (matches Walk-In's own
+        // summary convention: "N devices — <primary issue>").
+        const walkInPrimaryIssue = walkInPrimary?.issue || primaryDevice.job.issue || "";
+        const walkInFlatIssue = walkInDevices.length > 1
+          ? `${walkInDevices.length} devices — ${walkInPrimaryIssue || "Repair"}`
+          : walkInPrimaryIssue;
+
         // Duplicate protection (spec §13): if a walk-in already points at this
         // ticket (e.g. re-save / retry), UPDATE it instead of creating a second.
         const existing = walkIns.find(
@@ -785,9 +830,13 @@ function NewTicketWizard() {
             customer: customerName,
             phone: ticketData.phone,
             email: ticketData.email,
-            model: primaryDevice.device.model || ticketData.model,
-            modelId: primaryDevice.device.modelId || undefined,
-            issue: ticketData.issue,
+            // ALL devices carried over (spec §9/§44) — plus the primary mirrored
+            // onto the flat fields for search + summary display.
+            devices: walkInDevicesField,
+            category: walkInPrimary?.category || existing.category || "",
+            model: walkInPrimary?.model || primaryDevice.device.model || ticketData.model,
+            modelId: walkInPrimary?.modelId || primaryDevice.device.modelId || undefined,
+            issue: walkInFlatIssue,
             status: "converted_ticket",
             linkedTicketId: linkId,
             ticketId: linkId,
@@ -809,10 +858,13 @@ function NewTicketWizard() {
             phone: ticketData.phone,
             email: ticketData.email,
             source: exactSource,
-            category: primaryDevice.category || data.category || "",
-            model: primaryDevice.device.model || ticketData.model || "",
-            modelId: primaryDevice.device.modelId || undefined,
-            issue: ticketData.issue || "",
+            // ALL devices copied from the ticket (spec §9/§12/§44). Flat fields
+            // mirror the primary device for search + summary.
+            devices: walkInDevicesField,
+            category: walkInPrimary?.category || primaryDevice.category || data.category || "",
+            model: walkInPrimary?.model || primaryDevice.device.model || ticketData.model || "",
+            modelId: walkInPrimary?.modelId || primaryDevice.device.modelId || undefined,
+            issue: walkInFlatIssue || "",
             reasons: [],
             status: "converted_ticket",
             // SAME centralized customer (§9) — no second customer is created.

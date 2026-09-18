@@ -22,6 +22,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { UserPlus, Search, Check, Phone, Mail, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Label, Textarea } from "@/components/ui/input";
+import { loadDeviceCategories, getCachedCategories, type DeviceCategoryItem } from "@/lib/device-categories";
+import { loadDeviceColours, getCachedColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import { Avatar } from "@/components/ui/avatar";
 import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, type CustomerType } from "@/lib/customer-data";
@@ -33,10 +35,14 @@ import { FollowUpHistoryTimeline } from "@/components/walk-in/walk-in-followup-c
 import {
   type WalkIn,
   type WalkInType,
+  type WalkInDevice,
   WALKIN_TYPE_LABEL,
   WALKIN_FINAL_STATUSES,
   WALKIN_STATUS_LABEL,
+  createWalkInDevice,
+  getWalkInDevices,
 } from "@/lib/mock-data";
+import { Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function WalkInFormDrawer({
@@ -54,12 +60,26 @@ export function WalkInFormDrawer({
   requireSalesPerson: boolean;
   onSaved: (data: Partial<WalkIn>, editingId: string | null) => void;
 }) {
-  const { customers, customerGroups, addCustomer, team, deviceModels } = useStore();
+  const { customers, customerGroups, addCustomer, team, deviceModels, brands } = useStore();
+  // Device Categories + Colours masters (same sources as the Ticket wizard).
+  const [categories, setCategories] = useState<DeviceCategoryItem[]>(() => getCachedCategories() ?? []);
+  const [colours, setColours] = useState<DeviceColourItem[]>(() => getCachedColours() ?? DEFAULT_COLOURS);
+  useEffect(() => {
+    if (!open) return;
+    loadDeviceCategories().then(setCategories).catch(() => {});
+    loadDeviceColours().then(setColours).catch(() => {});
+  }, [open]);
   const isEdit = !!walkIn;
   // Once converted to a ticket, the follow-up schedule is locked (business rule).
   const isConverted = !!walkIn?.linkedTicketId;
 
   const [form, setForm] = useState<Partial<WalkIn>>({});
+  // Multi-device state — a Walk-In captures ONE customer visit that may involve
+  // MULTIPLE devices (spec §2/§3). Device 1 always exists; "+ Add Device" pushes
+  // more. Each device independently stores Model + Issue (spec §4/§27/§33).
+  const [devices, setDevices] = useState<WalkInDevice[]>([createWalkInDevice()]);
+  // Which device's model autocomplete dropdown is open (index), or null.
+  const [modelOpenIndex, setModelOpenIndex] = useState<number | null>(null);
   // Customer Type for a NEW customer created from this walk-in (Personal/Business).
   // Independent of the walk-in Type (direct/sales). When an existing customer is
   // linked, this mirrors that customer's type for display only.
@@ -78,6 +98,10 @@ export function WalkInFormDrawer({
     setError(null);
     if (walkIn) {
       setForm({ ...walkIn });
+      // Restore the multi-device array. getWalkInDevices synthesizes Device 1
+      // from the flat fields for legacy single-device records, so editing an
+      // old Walk-In shows exactly one device with no migration (spec §7/§8).
+      setDevices(getWalkInDevices(walkIn).map((d) => ({ ...d })));
       setCustQuery(walkIn.customer || "");
       setSalesQuery(walkIn.salesPersonName || "");
       const linked = walkIn.customerId ? customers.find((c) => c.id === walkIn.customerId) : undefined;
@@ -98,12 +122,15 @@ export function WalkInFormDrawer({
         invoiceValue: 0,
         businessValue: 0,
       });
+      // New Walk-In always opens with a single blank Device 1 (spec §6).
+      setDevices([createWalkInDevice()]);
       setCustQuery("");
       setSalesQuery("");
       setContactType("personal");
     }
     setCustOpen(false);
     setSalesOpen(false);
+    setModelOpenIndex(null);
   }, [open, walkIn, sources, customers]);
 
   // Close the dropdowns when clicking outside them.
@@ -161,15 +188,31 @@ export function WalkInFormDrawer({
     setSalesOpen(false);
   }
 
-  /* ── Model suggestions from the shared Device Catalog ── */
-  const modelSuggestions = useMemo(() => {
-    const q = (form.model || "").trim().toLowerCase();
+  /* ── Model suggestions from the shared Device Catalog (per-device) ── */
+  const activeModels = useMemo(
+    () => deviceModels.filter((m) => !m.archived),
+    [deviceModels],
+  );
+  function modelSuggestionsFor(query: string) {
+    const q = (query || "").trim().toLowerCase();
     if (!q) return [];
-    return deviceModels
-      .filter((m) => !m.archived && m.name.toLowerCase().includes(q))
-      .slice(0, 6);
-  }, [deviceModels, form.model]);
-  const [modelOpen, setModelOpen] = useState(false);
+    return activeModels.filter((m) => m.name.toLowerCase().includes(q)).slice(0, 6);
+  }
+
+  /* ── Device card helpers (add / remove / patch one device) ──
+     Each mutation is INDEPENDENT: editing Device 2 never touches Device 1 or 3,
+     and removing Device 2 leaves the others intact (spec §10/§27). */
+  function patchDevice(index: number, patch: Partial<WalkInDevice>) {
+    setDevices((ds) => ds.map((d, i) => (i === index ? { ...d, ...patch } : d)));
+  }
+  function addDevice() {
+    setDevices((ds) => [...ds, createWalkInDevice()]);
+  }
+  function removeDevice(index: number) {
+    // Device 1 is the anchor and can never be removed — always keep >= 1 device.
+    setDevices((ds) => (ds.length <= 1 ? ds : ds.filter((_, i) => i !== index)));
+    setModelOpenIndex(null);
+  }
 
   function handleSave() {
     setError(null);
@@ -205,10 +248,36 @@ export function WalkInFormDrawer({
       }
     }
 
+    // Normalise the device array — drop trailing fully-empty cards so an
+    // accidental "+ Add Device" with nothing typed doesn't persist a blank
+    // device, but ALWAYS keep at least Device 1 (spec §6/§33).
+    const cleaned = devices
+      .map((d) => ({
+        ...d,
+        model: (d.model || "").trim(),
+        brand: (d.brand || "").trim() || undefined,
+        imei: (d.imei || "").trim() || undefined,
+        issue: (d.issue || "").trim(),
+      }))
+      // Keep Device 1 always; drop later cards only when COMPLETELY empty
+      // (no model, issue, brand, imei, category or colour).
+      .filter((d, i) => i === 0 || d.model || d.issue || d.brand || d.imei || d.category || d.deviceColour);
+    const finalDevices = cleaned.length > 0 ? cleaned : [createWalkInDevice()];
+    const primary = finalDevices[0];
+
     const payload: Partial<WalkIn> = {
       ...form,
       customer: name,
       customerId,
+      // Multi-device source of truth. The flat model/modelId/category/issue
+      // mirror the PRIMARY device for backward-compat, search and summary
+      // display (spec §5/§16/§39). Only stored when >1 device to keep legacy
+      // single-device rows byte-identical to before.
+      devices: finalDevices.length > 1 ? finalDevices : undefined,
+      model: primary.model,
+      modelId: primary.modelId,
+      category: primary.category ?? form.category,
+      issue: primary.issue,
       // Clear the sales assignment when the type is not Sales.
       salesPersonId: form.type === "sales" ? form.salesPersonId : undefined,
       salesPersonName: form.type === "sales" ? form.salesPersonName : undefined,
@@ -440,43 +509,157 @@ export function WalkInFormDrawer({
           <PanelHeading step={2} title="Device & Enquiry" />
 
           <div className="space-y-1">
-            <Label>Model</Label>
-            <div className="relative">
-              <Input
-                value={form.model || ""}
-                iconLeft={<Search className="h-4 w-4" />}
-                placeholder="Device model (leave blank if unknown)"
-                onChange={(e: any) => { set({ model: e.target.value, modelId: undefined }); setModelOpen(true); }}
-                onFocus={() => setModelOpen(true)}
-                onBlur={() => setTimeout(() => setModelOpen(false), 150)}
-              />
-              {modelOpen && modelSuggestions.length > 0 && (
-                <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-border bg-card shadow-lg">
-                  {modelSuggestions.map((m) => (
-                    <button
-                      key={m.id}
-                      type="button"
-                      onMouseDown={() => { set({ model: m.name, modelId: m.id }); setModelOpen(false); }}
-                      className="block w-full px-3 py-2 text-left text-[13px] transition hover:bg-muted"
-                    >
-                      {m.name}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+            {/* ── Device Cards — one per device (spec §3/§4/§34) ──
+                A single Walk-In visit may involve multiple devices. Device 1 is
+                always shown; "+ Add Device" appends more. Each card independently
+                captures Model + Issue and reuses the SAME controls (catalog model
+                autocomplete + shared IssueSelector) as before, so a single-device
+                Walk-In feels unchanged. Cards stack vertically and never overflow
+                horizontally (spec §35). */}
+            <div className="space-y-3">
+              {devices.map((dev, i) => {
+                const suggestions = modelSuggestionsFor(dev.model);
+                const isOpen = modelOpenIndex === i;
+                return (
+                  <div
+                    key={dev.id}
+                    className="space-y-3 rounded-xl border border-border bg-muted/20 p-3"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
+                        <span className="grid h-5 w-5 place-items-center rounded-full bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60">
+                          {i + 1}
+                        </span>
+                        Device {i + 1}
+                      </span>
+                      {/* Device 1 has no remove — it is the anchor (spec §10). */}
+                      {i > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => removeDevice(i)}
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-rose-600 transition hover:bg-rose-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" /> Remove
+                        </button>
+                      )}
+                    </div>
 
-          {/* Issue — reuses the shared Issue Master (same control + data source
-              as the Ticket Issue field). Search existing, select one or more, or
-              add a new issue that becomes immediately available everywhere. */}
-          <div className="space-y-1">
-            <Label>Issue</Label>
-            <IssueSelector
-              value={form.issue || ""}
-              onChange={(v) => set({ issue: v })}
-              placeholder="Search issues e.g. Display… or add a new one"
-            />
+                    {/* Category + Brand — the top of the Category → Brand → Model
+                        hierarchy. Both optional at the enquiry stage; selecting a
+                        catalog Model auto-fills them. */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>Category</Label>
+                        <Select
+                          value={dev.category || ""}
+                          onChange={(e: any) => patchDevice(i, { category: e.target.value })}
+                          className="h-[34px] px-3 text-[13px]"
+                          options={[
+                            { label: "Select…", value: "" },
+                            ...categories.map((c) => ({ label: c.label, value: c.id })),
+                          ]}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Brand</Label>
+                        <Input
+                          value={dev.brand || ""}
+                          placeholder="e.g. Apple"
+                          onChange={(e: any) => patchDevice(i, { brand: e.target.value, brandId: undefined })}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Model — device catalog autocomplete (per device). */}
+                    <div className="space-y-1">
+                      <Label>Model</Label>
+                      <div className="relative">
+                        <Input
+                          value={dev.model || ""}
+                          iconLeft={<Search className="h-4 w-4" />}
+                          placeholder="Device model (leave blank if unknown)"
+                          onChange={(e: any) => { patchDevice(i, { model: e.target.value, modelId: undefined }); setModelOpenIndex(i); }}
+                          onFocus={() => setModelOpenIndex(i)}
+                          onBlur={() => setTimeout(() => setModelOpenIndex((cur) => (cur === i ? null : cur)), 150)}
+                        />
+                        {isOpen && suggestions.length > 0 && (
+                          <div className="absolute z-30 mt-1 w-full overflow-hidden rounded-xl border border-border bg-card shadow-lg">
+                            {suggestions.map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                onMouseDown={() => {
+                                  // Selecting a catalog model auto-fills the
+                                  // durable ids + resolves Brand + Category so
+                                  // the whole hierarchy is captured in one pick.
+                                  const brandRec = brands.find((b) => b.id === m.brandId);
+                                  patchDevice(i, {
+                                    model: m.name,
+                                    modelId: m.id,
+                                    brand: brandRec?.name || dev.brand,
+                                    brandId: brandRec?.id || m.brandId,
+                                    category: m.categoryId || brandRec?.categoryId || dev.category,
+                                  });
+                                  setModelOpenIndex(null);
+                                }}
+                                className="block w-full px-3 py-2 text-left text-[13px] transition hover:bg-muted"
+                              >
+                                {m.name}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* IMEI / Serial + Device Colour — device identity. Both
+                        optional; captured so the ticket inherits them on convert. */}
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <Label>IMEI / Serial</Label>
+                        <Input
+                          value={dev.imei || ""}
+                          placeholder="IMEI or serial no."
+                          onChange={(e: any) => patchDevice(i, { imei: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Device Colour</Label>
+                        <Select
+                          value={dev.deviceColour || ""}
+                          onChange={(e: any) => patchDevice(i, { deviceColour: e.target.value })}
+                          className="h-[34px] px-3 text-[13px]"
+                          options={[
+                            { label: "Select…", value: "" },
+                            ...colours.map((c) => ({ label: c.label, value: c.value })),
+                          ]}
+                        />
+                      </div>
+                    </div>
+
+                    {/* Issue — reuses the shared Issue Master (same control +
+                        data source as the Ticket Issue field). Per device. */}
+                    <div className="space-y-1">
+                      <Label>Issue</Label>
+                      <IssueSelector
+                        value={dev.issue || ""}
+                        onChange={(v) => patchDevice(i, { issue: v })}
+                        placeholder="Search issues e.g. Display… or add a new one"
+                      />
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* + Add Device — appends a fresh Device Card (spec §3). */}
+              <button
+                type="button"
+                onClick={addDevice}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[#B3BFF6] px-3 py-2 text-[12px] font-semibold text-[#4361EE] transition hover:bg-[#EEF1FD]"
+              >
+                <Plus className="h-4 w-4" /> Add Device
+              </button>
+            </div>
           </div>
 
           {/* Customer Comments — free text capturing what the CUSTOMER said

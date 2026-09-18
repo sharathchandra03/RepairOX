@@ -14,7 +14,7 @@
    no columns are lost at any zoom level.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -47,6 +47,8 @@ import {
   type FieldQueue, type FieldJob, type FieldJobStatus, type FieldDateRange, type FieldSource,
 } from "@/lib/field-data";
 import { resolveFieldRow, formatInvoiceAmount, type FieldResolveSources } from "@/lib/field-resolve";
+import { StoreContextCell } from "@/components/common/store-context-cell";
+import { useStoreContext, type StoreBranch } from "@/lib/store-context";
 
 const PAGE_SIZES = [10, 20, 50, 100];
 
@@ -90,6 +92,26 @@ export default function FieldPage() {
   const { id: currentUserId } = useSession();
   const { jobs, hydrated, filters, setFilters, clearFilters, getJob, transition } = useField();
   const { tickets, invoices, customers } = useStore();
+
+  /* Active-store context — drives the context-aware Store column (§3h). Field
+     jobs carry the owning store as a NAME (job.branch, one of BRANCHES), so we
+     resolve it to the authoritative store row by name from the user's
+     authorized store list. Shown only in multi-store / All-Shops mode. */
+  const { isAllShops, stores } = useStoreContext();
+  const multiStore = isAllShops && stores.length > 1;
+  const resolveJobStore = useCallback(
+    (branchName: string | null | undefined): StoreBranch | null => {
+      const name = branchName?.trim();
+      if (!name) return null;
+      const match = stores.find((s) => s.name === name);
+      if (match) return match; // authoritative store row
+      // The job references a store not in the resolved list — still show the
+      // name (never invent an id-driven identity); StoreContextCell only uses
+      // name/code/id for display, so a light synthetic row is safe here.
+      return { id: name, organizationId: null, name, code: null, address: null, isActive: true, environment: "live" };
+    },
+    [stores],
+  );
 
   /* Live source-of-truth records the resolver reads from (Customer Master,
      linked Ticket + Ticket Device, linked Invoice) — nothing is duplicated. */
@@ -481,6 +503,7 @@ export default function FieldPage() {
                 exactly over its content. Widths are proportional to how much
                 information each column carries (not uniform). */}
             <colgroup>
+              {multiStore && <col className="w-[9%]" />}{/* Store (multi-store only) */}
               <col className="w-[8%]" />   {/* Date */}
               <col className="w-[9%]" />   {/* Trip ID — widened so FJ-001 never wraps */}
               <col className="w-[9%]" />   {/* Lead Type */}
@@ -498,6 +521,7 @@ export default function FieldPage() {
               {/* Header alignment matches the data type of each column
                   (left for text, center for compact IDs/pill, right for money). */}
               <tr className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
+                {multiStore && <th className="px-3 py-3 text-left">Store</th>}
                 <th className="px-3 py-3 text-left">Date</th>
                 <th className="px-3 py-3 text-left">Trip ID</th>
                 <th className="px-3 py-3 text-left">Lead Type</th>
@@ -531,6 +555,12 @@ export default function FieldPage() {
                       delayed ? "bg-rose-50/70 hover:bg-rose-50" : "hover:bg-[#EEF1FD]/50",
                     )}
                   >
+                    {/* STORE — owning store (multi-store / All-Shops only). */}
+                    {multiStore && (
+                      <td className="px-3 py-4 text-left align-middle" onClick={(e) => e.stopPropagation()}>
+                        <StoreContextCell store={resolveJobStore(j.branch)} mode="stacked" />
+                      </td>
+                    )}
                     {/* DATE — the field trip date (scheduled pickup, else drop). */}
                     <td className="px-3 py-4 text-left align-middle">
                       {p.day !== "—" ? (
@@ -681,6 +711,11 @@ export default function FieldPage() {
                 </div>
                 <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[j.status])}>{FIELD_STATUS_LABEL[j.status]}</span>
               </div>
+              {multiStore && (
+                <div className="mt-2">
+                  <StoreContextCell store={resolveJobStore(j.branch)} mode="inline" />
+                </div>
+              )}
               <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
                 <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", FIELD_LEAD_TYPE_TONE[lt])}>{FIELD_LEAD_TYPE_LABEL[lt]}</span>
                 {r.ticketNo && <span className="inline-flex rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">{r.ticketNo}</span>}
@@ -700,10 +735,9 @@ export default function FieldPage() {
         )}
       </div>
 
-      {/* Pagination */}
-      <div className="rounded-2xl border border-border bg-card px-4 py-3 shadow-card">
-        <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filtered.length} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="job" />
-      </div>
+      {/* Pagination — DETACHED below the table frame (matches the Tickets table):
+          bare footer, no wrapping card, separated by the page's root spacing. */}
+      <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filtered.length} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="job" />
 
       <FieldJobDrawer job={detailJob} open={!!detailJob} onClose={() => setDetailJob(null)} />
       {/* New Field Job routing is initiated from a Lead; guide the user there. */}

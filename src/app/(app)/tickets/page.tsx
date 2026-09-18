@@ -31,7 +31,9 @@ import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
-import { ALL_COLUMNS, DEFAULT_ORDER, DEFAULT_VISIBLE, type ColumnId } from "@/lib/ticket-columns";
+import { ALL_COLUMNS, CONTEXT_COLUMNS, DEFAULT_ORDER, DEFAULT_VISIBLE, getColumn, type ColumnId } from "@/lib/ticket-columns";
+import { useStoreContext, type StoreBranch } from "@/lib/store-context";
+import { StoreContextCell } from "@/components/common/store-context-cell";
 import { rememberOrigin } from "@/lib/settings-origin";
 import { formatINR, cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
@@ -145,6 +147,15 @@ export default function TicketsPage() {
   const router = useRouter();
   const { tickets, invoices, bulkUpdateStatus, deleteTicket, updateTicket, updateDeviceStatus, deductPartsForTicket, pinTicket } = useStore();
   const { settings } = useStoreSettings();
+  // Active-store context — the single source of truth for "am I looking at one
+  // store or many?". `getStore` resolves a ticket's authoritative store row
+  // (Ticket.branchId → Store) from the already-loaded store list, so rendering
+  // the Store column is a pure in-memory lookup — no per-row query (no N+1).
+  const { isAllShops, stores, getStore } = useStoreContext();
+  // Multi-store mode = the consolidated All-Shops context AND the user can
+  // actually see more than one store. In single-store mode the Store column is
+  // hidden because the store is already obvious (avoids redundant info).
+  const multiStore = isAllShops && stores.length > 1;
   const {
     downloadTicket,
     startBulkTicketDownload,
@@ -253,7 +264,10 @@ export default function TicketsPage() {
     const order = (settings.ticketColumnOrder?.length ? settings.ticketColumnOrder : DEFAULT_ORDER) as ColumnId[];
     // Guard against catalog drift: keep only known ids, then append any known
     // ids the saved order is missing (e.g. a newly-added column) in catalog order.
-    const known = new Set(ALL_COLUMNS.map((c) => c.id));
+    // CONTEXT_COLUMNS (e.g. `store`) are deliberately excluded here — they are
+    // not user-configurable and are injected at a fixed position only when the
+    // table is operating in multi-store mode (see activeColumns below).
+    const known = new Set(ALL_COLUMNS.filter((c) => !CONTEXT_COLUMNS.includes(c.id)).map((c) => c.id));
     const cleaned = order.filter((id) => known.has(id));
     for (const id of DEFAULT_ORDER) if (!cleaned.includes(id)) cleaned.push(id);
     return cleaned;
@@ -262,8 +276,10 @@ export default function TicketsPage() {
   const visibleColumns = useMemo<Set<ColumnId>>(() => {
     const vis = (settings.ticketVisibleColumns?.length ? settings.ticketVisibleColumns : DEFAULT_VISIBLE) as ColumnId[];
     const set = new Set<ColumnId>(vis.filter((id) => ALL_COLUMNS.some((c) => c.id === id)));
-    // Structural + required columns are always visible regardless of stored prefs.
-    for (const c of ALL_COLUMNS) if (c.locked) set.add(c.id);
+    // Structural + required columns are always visible regardless of stored
+    // prefs — except CONTEXT_COLUMNS (`store`), whose visibility is driven by
+    // the multi-store mode toggle, not the saved column preferences.
+    for (const c of ALL_COLUMNS) if (c.locked && !CONTEXT_COLUMNS.includes(c.id)) set.add(c.id);
     set.add("ticket");
     set.add("status");
     return set;
@@ -484,11 +500,25 @@ export default function TicketsPage() {
     setPage(1);
   }, []);
 
-  // Ordered & visible columns
-  const activeColumns = useMemo(
-    () => columnOrder.filter((id) => visibleColumns.has(id)).map((id) => ALL_COLUMNS.find((c) => c.id === id)!),
-    [columnOrder, visibleColumns]
-  );
+  // Ordered & visible columns. In multi-store mode the context-aware `store`
+  // column is injected at a FIXED position — immediately after the selection
+  // checkbox and before Ticket — so the structure is:
+  //   [ ] | STORE | TICKET | CUSTOMER | DEVICE | STATUS | …
+  // It participates in the SAME table grid (one <colgroup>/header/body), so
+  // alignment, sticky header and zoom behaviour are unchanged.
+  const activeColumns = useMemo(() => {
+    const cols = columnOrder
+      .filter((id) => visibleColumns.has(id))
+      .map((id) => ALL_COLUMNS.find((c) => c.id === id)!);
+    if (multiStore) {
+      const storeCol = getColumn("store")!;
+      const idx = cols.findIndex((c) => c.id === "checkbox");
+      // Insert right after the checkbox (or at the very front if, for some
+      // reason, the checkbox column is not present).
+      cols.splice(idx >= 0 ? idx + 1 : 0, 0, storeCol);
+    }
+    return cols;
+  }, [columnOrder, visibleColumns, multiStore]);
 
   /* Selection handlers */
   const allSelected = list.length > 0 && list.every((t) => selected.has(t.id));
@@ -957,9 +987,14 @@ export default function TicketsPage() {
                         aria-label="Select all tickets"
                       />
                     ) : col.id === "status" ? (
-                      // Nudge ONLY the Status heading text 4px left, without
-                      // affecting the cell width or the body cells beneath it.
-                      <span className="inline-block -translate-x-[11px]">{col.label}</span>
+                      // Nudge ONLY the Status heading text left, without affecting
+                      // the cell width or the body cells beneath it. All-Shops
+                      // shifts a bit further (16px) to sit over its pills.
+                      <span className={cn("inline-block", multiStore ? "-translate-x-[16px]" : "-translate-x-[11px]")}>{col.label}</span>
+                    ) : col.id === "customer" && multiStore ? (
+                      // All-Shops only: nudge the Customer heading text 35px right
+                      // (heading only — cell width + body cells untouched).
+                      <span className="inline-block translate-x-[35px]">{col.label}</span>
                     ) : col.label}
                   </th>
                 ))}
@@ -1002,7 +1037,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId))}
                       </td>
                     ))}
                   </motion.tr>
@@ -1037,6 +1072,13 @@ export default function TicketsPage() {
                         <InvoiceCoverageCheck coverage={coverageFor(t)} size="xs" />
                         <span>· <span className="font-medium text-[#5B6FC0]">{t.phone}</span></span>
                       </p>
+                      {/* Store context — mirrors the desktop STORE column so the
+                          owner can identify a card's store in multi-store mode. */}
+                      {multiStore && (
+                        <div className="mt-1">
+                          <StoreContextCell store={getStore(t.branchId)} mode="inline" />
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1259,8 +1301,15 @@ function renderCell(
   onOpenDeviceDetails: (ticket: Ticket) => void,
   navigateToSection: (ticketId: string, section: "billing") => void,
   onDeviceStatusChange: (ticketId: string, deviceId: string, status: TicketStatus) => void,
+  store?: StoreBranch | null,
 ) {
   switch (colId) {
+    case "store":
+      // Context-aware STORE identity — DATA-DRIVEN from Ticket.branchId → Store
+      // (resolved via getStore in the caller), never from the ID prefix, the
+      // current selection or the URL. Reuses the shared StoreContextCell so the
+      // avatar/code + name matches the Owner Dashboard store identity exactly.
+      return <StoreContextCell store={store} mode="stacked" />;
     case "checkbox":
       return (
         <input type="checkbox" checked={isSelected} onChange={toggleOne}

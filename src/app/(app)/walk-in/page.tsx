@@ -27,6 +27,8 @@ import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { StoreFilter } from "@/components/common/store-filter";
+import { StoreContextCell } from "@/components/common/store-context-cell";
+import { useStoreContext } from "@/lib/store-context";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -42,7 +44,7 @@ import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
   WALKIN_FINAL_STATUSES, type WalkIn, isWalkInWon, hasActiveFollowUp,
   WALKIN_FINAL_STATUS_LABEL, WALKIN_FINAL_STATUS_TONE, walkInFinalStatus, walkInIsHistory,
-  FOLLOWUP_OUTCOME_LABEL,
+  FOLLOWUP_OUTCOME_LABEL, getWalkInDevices,
 } from "@/lib/mock-data";
 import {
   useWalkInSources, useWalkInRequireSalesPerson, nextWalkInNumber, genWalkInId, walkInDisplayId,
@@ -57,6 +59,7 @@ import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
 import { WalkInFollowUpBell } from "@/components/walk-in/walk-in-followup-bell";
 import { WalkInFollowUpView } from "@/components/walk-in/walk-in-followup-view";
 import { WalkInFollowUpCell, WalkInFollowUpCompleteModal } from "@/components/walk-in/walk-in-followup-cell";
+import { WalkInDeviceDetailsOverlay } from "@/components/walk-in/walk-in-device-details-overlay";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -71,6 +74,10 @@ function fmtDate(iso: string): string {
 export default function WalkInPage() {
   const router = useRouter();
   const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary } = useStore();
+  // Active-store context — drives the context-aware Store column (§3h). Shown
+  // only in multi-store / All-Shops mode; hidden inside a single store.
+  const { isAllShops, stores, getStore } = useStoreContext();
+  const multiStore = isAllShops && stores.length > 1;
   const { can } = usePermissions();
   const { id: sessionUserId, name: sessionUserName } = useSession();
   const { sources } = useWalkInSources();
@@ -139,6 +146,8 @@ export default function WalkInPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [editTarget, setEditTarget] = useState<WalkIn | null>(null);
   const [viewTarget, setViewTarget] = useState<WalkIn | null>(null);
+  // Walk-In whose multi-device details overlay is open (spec §17/§18/§19).
+  const [deviceDetailsTarget, setDeviceDetailsTarget] = useState<WalkIn | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<WalkIn | null>(null);
   // Target for the SAFE follow-up completion dialog (outcome + next action).
   const [completeTarget, setCompleteTarget] = useState<WalkIn | null>(null);
@@ -423,10 +432,14 @@ export default function WalkInPage() {
         phone: data.phone || "",
         email: data.email || "",
         source: data.source || "",
-        category: "",
+        category: data.category || "",
         model: data.model || "",
         modelId: data.modelId,
         issue: data.issue || "",
+        // Multi-device: persist the full device array when the form captured
+        // more than one device. The flat model/issue above mirror the primary
+        // device for search + summary (spec §2/§15/§16).
+        devices: data.devices,
         customerComments: data.customerComments || "",
         reasons: [],
         status: data.status || "visitor",
@@ -790,11 +803,12 @@ export default function WalkInPage() {
                   fixed width so its icons never collapse or wrap. */}
               <colgroup>
                 <col className="w-9" />{/* checkbox */}
+                {multiStore && <col className="w-[132px]" />}{/* Store (multi-store only) */}
+                <col className="w-[92px]" />{/* ID — moved next to Store */}
                 <col className="w-[104px]" />{/* Date */}
-                <col className="w-[92px]" />{/* ID */}
                 <col className="w-[96px]" />{/* Type */}
-                <col className="w-[104px]" />{/* Source */}
-                <col className="w-[24%]" />{/* Name (+ contact underneath) — flexible */}
+                <col className="w-[96px]" />{/* Source */}
+                <col className="w-[26%]" />{/* Name (+ contact underneath) — flexible; wide enough for a full +91 number on one line */}
                 <col className="w-[28%]" />{/* Model (+ issue underneath) — flexible, absorbs the removed Issue column */}
                 <col className="w-[150px]" />{/* Follow-Up — wide enough for "2nd Follow-Up · Today" */}
                 <col className="w-[136px]" />{/* Final Status — N/A / Lost / Converted Ticket */}
@@ -812,11 +826,12 @@ export default function WalkInPage() {
                       aria-label="Select all walk-ins"
                     />
                   </th>
-                  <th className="px-2 py-4 whitespace-nowrap">Date</th>
-                  <th className="py-4 whitespace-nowrap"><span className="inline-block pl-[8px]">ID</span></th>
-                  <th className="py-4"><span className="inline-block pl-[17px]">Type</span></th>
-                  <th className="py-4 pl-[14px]">Source</th>
-                  <th className="pl-4 py-4"><span className="inline-block pl-[17px]">Name</span></th>
+                  {multiStore && <th className="px-2 py-4 whitespace-nowrap">Store</th>}
+                  <th className="py-4 whitespace-nowrap"><span className="inline-block pl-[5px]">ID</span></th>
+                  <th className="pl-[5px] pr-2 py-4 whitespace-nowrap">Date</th>
+                  <th className="py-4"><span className="inline-block pl-[14px]">Type</span></th>
+                  <th className="py-4 pl-[8px]">Source</th>
+                  <th className="pl-2 py-4"><span className="inline-block pl-[8px]">Name</span></th>
                   <th className="pl-4 py-4">Model</th>
                   <th className="pl-[3px] py-4">Follow-Up</th>
                   <th className="pl-[5px] py-4">Final Status</th>
@@ -841,14 +856,14 @@ export default function WalkInPage() {
                         aria-label={`Select walk-in ${walkInDisplayId(w)}`}
                       />
                     </td>
-                    <td className="px-2 py-4 whitespace-nowrap text-[13px] text-muted-foreground">
-                      <div className="flex items-center gap-1.5">
-                        {w.pinnedAt && <Pin className="h-3.5 w-3.5 text-amber-500" />}
-                        {fmtDate(w.date)}
-                      </div>
-                    </td>
+                    {multiStore && (
+                      <td className="px-2 py-4 align-middle">
+                        <StoreContextCell store={getStore(w.branchId)} mode="stacked" />
+                      </td>
+                    )}
+                    {/* ID — moved to sit immediately after Store; content nudged 3px left. */}
                     <td className="py-4 pr-4 whitespace-nowrap">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 -ml-[3px]">
                         <button
                           type="button"
                           onClick={() => setEditTarget(w)}
@@ -871,29 +886,41 @@ export default function WalkInPage() {
                         )}
                       </div>
                     </td>
-                    <td className="py-4 pr-4 pl-[2px]">
-                      <span className={cn("inline-flex min-w-[76px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
+                    {/* Date — now follows ID; nudged 3px left (px-2 → pl-[5px]). */}
+                    <td className="pl-[5px] pr-2 py-4 whitespace-nowrap text-[13px] text-muted-foreground">
+                      <div className="flex items-center gap-1.5">
+                        {w.pinnedAt && <Pin className="h-3.5 w-3.5 text-amber-500" />}
+                        {fmtDate(w.date)}
+                      </div>
+                    </td>
+                    {/* Type — pill nudged 3px left via wrapper margin. */}
+                    <td className="py-4 pr-4 pl-0">
+                      <span className={cn("ml-[-1px] inline-flex min-w-[76px] items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", WALKIN_TYPE_TONE[w.type ?? "direct"])}>
                         {WALKIN_TYPE_LABEL[w.type ?? "direct"]}
                       </span>
                       {w.type === "sales" && w.salesPersonName && (
                         <p className="mt-0.5 text-[11px] text-muted-foreground truncate max-w-[120px]">{w.salesPersonName}</p>
                       )}
                     </td>
-                    <td className="py-4 pr-4 pl-[19px] text-[13px]">{w.source || "—"}</td>
-                    <td className="pl-4 py-4 pr-4">
-                      <div className="flex min-w-0 items-center gap-2.5">
+                    {/* Source — nudged a further 3px left (pl-[16px] → pl-[13px])
+                        to match the header shift. */}
+                    <td className="py-4 pr-4 pl-[13px] text-[13px]">{w.source || "—"}</td>
+                    <td className="pl-2 py-4 pr-3">
+                      <div className="flex min-w-0 items-center gap-2">
                         {/* Thin type-coloured bar — same hue as the Type pill for uniformity. */}
                         <span className={cn("h-8 w-1 shrink-0 rounded-full", WALKIN_TYPE_BAR[w.type ?? "direct"])} />
                         <div className="min-w-0">
                           <span className="block truncate text-[14px] font-medium">{w.customer}</span>
                           {/* Contact moved under the name to save a whole column.
-                              Still clickable → opens Edit, same as before. */}
+                              Still clickable → opens Edit, same as before.
+                              whitespace-nowrap keeps the number on ONE line so it
+                              never breaks the row rhythm. */}
                           {w.phone ? (
                             <button
                               type="button"
                               onClick={() => setEditTarget(w)}
                               title={`Edit ${walkInDisplayId(w)}`}
-                              className="cursor-pointer rounded text-[12px] tabular-nums text-muted-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                              className="cursor-pointer whitespace-nowrap rounded text-[12px] tabular-nums text-muted-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
                             >
                               {w.phone}
                             </button>
@@ -903,23 +930,53 @@ export default function WalkInPage() {
                         </div>
                       </div>
                     </td>
-                    {/* MODEL — primary text is the device model; the reported
-                        ISSUE now lives here as secondary text underneath (the
-                        standalone Issue column has been removed). Both truncate
-                        so the row height never grows. */}
+                    {/* MODEL — primary text is the PRIMARY device model; the
+                        reported ISSUE lives here as secondary text underneath.
+                        Multi-device Walk-Ins keep ONE row: the secondary line
+                        becomes "N devices — <issue>" and a chevron opens the
+                        Device & Service Details overlay (spec §15/§16/§17/§20 —
+                        same compact style as the Ticket table). Single-device
+                        rows are byte-identical to before. */}
                     <td className="pl-4 py-4 pr-4 text-[13px]">
                       {(() => {
-                        const issueText = w.issue || (w.reasons || []).join(", ");
+                        const wDevices = getWalkInDevices(w);
+                        const multi = wDevices.length > 1;
+                        const primary = wDevices[0];
+                        const primaryModel = primary?.model || w.model || "";
+                        const issueText = multi
+                          ? `${wDevices.length} devices — ${primary?.issue || w.issue || "Repair"}`
+                          : (w.issue || (w.reasons || []).join(", "));
+                        if (multi) {
+                          return (
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setDeviceDetailsTarget(w); }}
+                              title="View device & service details"
+                              aria-label={`View ${wDevices.length} devices for ${walkInDisplayId(w)}`}
+                              className="group/dev flex w-full min-w-0 items-start gap-1 rounded text-left transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+                            >
+                              <span className="min-w-0 flex-1">
+                                <span className="block max-w-full truncate font-medium text-foreground">
+                                  {primaryModel || "Device"}
+                                </span>
+                                <span className="mt-0.5 block truncate text-[12px] text-muted-foreground" title={issueText}>
+                                  {issueText}
+                                </span>
+                              </span>
+                              <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-zinc-400 transition group-hover/dev:text-[#4361EE]" />
+                            </button>
+                          );
+                        }
                         return (
                           <div className="min-w-0">
-                            {w.model ? (
+                            {primaryModel ? (
                               <button
                                 type="button"
                                 onClick={() => setEditTarget(w)}
                                 title={`Edit ${walkInDisplayId(w)}`}
                                 className="block max-w-full cursor-pointer truncate rounded text-left font-medium text-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
                               >
-                                {w.model}
+                                {primaryModel}
                               </button>
                             ) : (
                               <span className="block text-muted-foreground">—</span>
@@ -1032,20 +1089,22 @@ export default function WalkInPage() {
               <p className="text-sm text-muted-foreground">Adjust your filters or record a new walk-in.</p>
             </div>
           )}
-
-          <div className="border-t border-zinc-500 px-5 py-4">
-            <Pagination
-              page={currentPage}
-              totalPages={totalPages}
-              onPageChange={setPage}
-              totalItems={filtered.length}
-              pageSize={pageSize}
-              pageSizeOptions={PAGE_SIZE_OPTIONS}
-              onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
-              itemLabel="walk-in"
-            />
-          </div>
         </div>
+      )}
+
+      {/* Pagination — DETACHED below the table frame (matches the Tickets table):
+          bare footer, no wrapping card, separated by the page's root spacing. */}
+      {view === "table" && (
+        <Pagination
+          page={currentPage}
+          totalPages={totalPages}
+          onPageChange={setPage}
+          totalItems={filtered.length}
+          pageSize={pageSize}
+          pageSizeOptions={PAGE_SIZE_OPTIONS}
+          onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
+          itemLabel="walk-in"
+        />
       )}
 
       {/* Create / Edit drawer */}
@@ -1060,6 +1119,15 @@ export default function WalkInPage() {
 
       {/* View drawer */}
       <WalkInViewDrawer walkIn={viewTarget} ticketNoFor={ticketNoFor} onClose={() => setViewTarget(null)} onEdit={(w) => { setViewTarget(null); setEditTarget(w); }} onConvert={(w) => { setViewTarget(null); setConvertTarget(w); }} />
+
+      {/* Multi-device details overlay — reuses the Ticket "Device & Service
+          Details" interaction (spec §17/§18). Opened from the Model column
+          chevron on multi-device Walk-Ins. */}
+      <WalkInDeviceDetailsOverlay
+        walkIn={deviceDetailsTarget}
+        open={!!deviceDetailsTarget}
+        onClose={() => setDeviceDetailsTarget(null)}
+      />
 
       {/* Safe follow-up completion dialog — opened from the Walk-In bell. Requires
           an outcome + optional comment, then an explicit next action. Never a
@@ -1416,21 +1484,66 @@ function WalkInViewDrawer({
         )}
 
         {/* ── Walk-In details ── */}
-        <div className="overflow-hidden rounded-2xl border border-border">
-          <ViewRow label="Walk-In ID"><span className="font-semibold">{walkInDisplayId(w)}</span></ViewRow>
-          <ViewRow label="Date">{fmtDate(w.date)}</ViewRow>
-          <ViewRow label="Source">{w.source || "—"}</ViewRow>
-          <ViewRow label="Model">{w.model || "—"}</ViewRow>
-          <ViewRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</ViewRow>
-          {w.customerComments && <ViewRow label="Customer Comments">{w.customerComments}</ViewRow>}
-          {w.type === "sales" && <ViewRow label="Marketing Person">{w.salesPersonName || "—"}</ViewRow>}
-          {w.linkedTicketId && (
-            <ViewRow label="Linked Ticket"><span className="font-semibold text-indigo-700">{ticketNoFor(w.linkedTicketId)}</span></ViewRow>
-          )}
-          <ViewRow label="Won">
-            <span className={cn("font-semibold", isWalkInWon(w) ? "text-emerald-600" : "text-muted-foreground")}>{isWalkInWon(w) ? "Yes" : "No"}</span>
-          </ViewRow>
-        </div>
+        {(() => {
+          const viewDevices = getWalkInDevices(w);
+          const multiDevice = viewDevices.length > 1;
+          return (
+            <>
+              <div className="overflow-hidden rounded-2xl border border-border">
+                <ViewRow label="Walk-In ID"><span className="font-semibold">{walkInDisplayId(w)}</span></ViewRow>
+                <ViewRow label="Date">{fmtDate(w.date)}</ViewRow>
+                <ViewRow label="Source">{w.source || "—"}</ViewRow>
+                {/* Single-device: keep the flat Model / Issue rows exactly as
+                    before. Multi-device: show a device COUNT here and render the
+                    full per-device breakdown below. */}
+                {multiDevice ? (
+                  <ViewRow label="Devices"><span className="font-semibold">{viewDevices.length} devices</span></ViewRow>
+                ) : (
+                  <>
+                    <ViewRow label="Model">{w.model || "—"}</ViewRow>
+                    <ViewRow label="Issue">{w.issue || (w.reasons || []).join(", ") || "—"}</ViewRow>
+                  </>
+                )}
+                {w.customerComments && <ViewRow label="Customer Comments">{w.customerComments}</ViewRow>}
+                {w.type === "sales" && <ViewRow label="Marketing Person">{w.salesPersonName || "—"}</ViewRow>}
+                {w.linkedTicketId && (
+                  <ViewRow label="Linked Ticket"><span className="font-semibold text-indigo-700">{ticketNoFor(w.linkedTicketId)}</span></ViewRow>
+                )}
+                <ViewRow label="Won">
+                  <span className={cn("font-semibold", isWalkInWon(w) ? "text-emerald-600" : "text-muted-foreground")}>{isWalkInWon(w) ? "Yes" : "No"}</span>
+                </ViewRow>
+              </div>
+
+              {/* ── Devices — one card per device (spec §17/§18). Only shown for
+                  multi-device Walk-Ins; single-device keeps the compact flat
+                  rows above so the existing view is unchanged. ── */}
+              {multiDevice && (
+                <div className="space-y-2">
+                  <p className="px-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices</p>
+                  {viewDevices.map((dev, i) => (
+                    <div key={dev.id || i} className="overflow-hidden rounded-2xl border border-border">
+                      <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2.5">
+                        <span className="grid h-6 w-6 place-items-center rounded-lg bg-[#EEF1FD] text-[11px] font-bold text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60">
+                          {i + 1}
+                        </span>
+                        <span className="text-[13px] font-semibold text-foreground">
+                          Device {i + 1}
+                          {dev.model && <span className="ml-1.5 font-medium text-muted-foreground">{dev.model}</span>}
+                        </span>
+                      </div>
+                      {dev.brand && <ViewRow label="Brand">{dev.brand}</ViewRow>}
+                      <ViewRow label="Model">{dev.model || "—"}</ViewRow>
+                      {dev.category && <ViewRow label="Category">{dev.category}</ViewRow>}
+                      {dev.imei && <ViewRow label={dev.imeiType === "serial" ? "Serial No." : "IMEI"}>{dev.imei}</ViewRow>}
+                      {dev.deviceColour && <ViewRow label="Device Colour">{dev.deviceColour}</ViewRow>}
+                      <ViewRow label="Issue">{dev.issue || "—"}</ViewRow>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          );
+        })()}
 
         {w.notes && (
           <div className="rounded-2xl border border-border p-4">

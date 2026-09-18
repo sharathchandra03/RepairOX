@@ -1191,6 +1191,76 @@ export function walkInIsActive(
   return !walkInIsHistory(w);
 }
 
+/* ─── Walk-In Device (multi-device support) ──────────────────────────────
+ * A Walk-In captures a single CUSTOMER VISIT that may involve MULTIPLE devices.
+ * Each device is an independent record with its own Model + Issue, mirroring
+ * the Ticket `DeviceRecord` pattern (one Ticket → many devices). Customer,
+ * source, follow-up, status etc. stay at the Walk-In level and are NEVER
+ * duplicated per device (see design-system + spec §5/§14/§21/§22).
+ *
+ * Kept intentionally lean: a Walk-In is a lightweight pre-repair enquiry, so a
+ * device only needs identity (model) + the reported problem (issue). When the
+ * Walk-In is converted to a Ticket, each Walk-In device maps 1:1 into a full
+ * Ticket DeviceRecord that then gains the repair-level fields. This is the
+ * subset of DeviceRecord that Walk-In actually owns. */
+export type WalkInDevice = {
+  id: string;
+  /** Device model text (display source of truth). */
+  model: string;
+  /** Optional durable link to the device catalog model record. */
+  modelId?: string;
+  /** Optional brand text (carried over from a Ticket device, or resolved from
+   *  the catalog). Lets the overlay show Brand even without a catalog match. */
+  brand?: string;
+  /** Optional durable brand id. */
+  brandId?: string;
+  /** Optional category (Category → Brand → Model master). */
+  category?: string;
+  /** Optional device identifier (IMEI / serial). */
+  imei?: string;
+  /** Identifier type for `imei` — "imei" or "serial". */
+  imeiType?: "imei" | "serial";
+  /** Optional device colour value (e.g. "black") from the Device Colours master. */
+  deviceColour?: string;
+  /** Reported issue (may be a multi-issue string, same format as Tickets). */
+  issue: string;
+};
+
+/** Create a blank WalkInDevice with defaults. */
+export function createWalkInDevice(overrides?: Partial<WalkInDevice>): WalkInDevice {
+  return {
+    id: `WKD-${Math.floor(1000 + Math.random() * 9000)}`,
+    model: "",
+    modelId: undefined,
+    category: undefined,
+    issue: "",
+    ...overrides,
+  };
+}
+
+/**
+ * Unified accessor: returns WalkInDevice[] for any walk-in.
+ * If the walk-in has devices[], returns those. Otherwise synthesizes a single
+ * device from the legacy flat fields (model / modelId / category / issue) so
+ * historical single-device records keep working with zero migration — the
+ * existing device is simply treated as Device 1 (spec §8/§32/§40).
+ */
+export function getWalkInDevices(walkIn: WalkIn): WalkInDevice[] {
+  if (walkIn.devices && walkIn.devices.length > 0) {
+    return walkIn.devices;
+  }
+  // Legacy single-device walk-in — synthesize one device from flat fields.
+  return [
+    createWalkInDevice({
+      id: `WKD-legacy-${walkIn.id}`,
+      model: walkIn.model || "",
+      modelId: walkIn.modelId,
+      category: walkIn.category || undefined,
+      issue: walkIn.issue || (walkIn.reasons || []).join(", ") || "",
+    }),
+  ];
+}
+
 export type WalkIn = {
   id: string;
   /** Owning store (branch) id — used to filter the All-Shops view by store. */
@@ -1214,6 +1284,14 @@ export type WalkIn = {
   modelId?: string;
   /** Free-text reported issue. */
   issue?: string;
+  /**
+   * Multi-device support — when present, each device has its own record.
+   * ONE Walk-In → MANY devices (spec §2). The flat `model`/`modelId`/`category`
+   * /`issue` fields above mirror the PRIMARY device (index 0) for backward-compat
+   * and summary display; `devices[]` is the source of truth when populated.
+   * Read via `getWalkInDevices()` which synthesizes Device 1 for legacy rows.
+   */
+  devices?: WalkInDevice[];
   /** Legacy multi-tag reasons — kept for backward-compat & search. */
   reasons: string[];
   status: WalkInStatus;

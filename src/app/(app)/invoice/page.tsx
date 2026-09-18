@@ -16,6 +16,8 @@ import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
 import { StoreFilter } from "@/components/common/store-filter";
+import { StoreContextCell } from "@/components/common/store-context-cell";
+import { useStoreContext, type StoreBranch } from "@/lib/store-context";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -36,7 +38,7 @@ import { readDateFilterParams } from "@/lib/date-filter";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
-type InvColumnId = "id" | "ticket" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
+type InvColumnId = "store" | "id" | "ticket" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
 
 type InvColumnDef = {
   id: InvColumnId;
@@ -61,6 +63,12 @@ const INV_ALL_COLUMNS: InvColumnDef[] = [
 const INV_DEFAULT_ORDER: InvColumnId[] = INV_ALL_COLUMNS.map((c) => c.id);
 const INV_DEFAULT_VISIBLE: InvColumnId[] = INV_ALL_COLUMNS.map((c) => c.id);
 const INV_REQUIRED_IDS = new Set<InvColumnId>(["id", "status"]);
+
+/* Context-aware STORE column (RepairOX multi-store table standard §3h). It is
+   deliberately NOT part of INV_ALL_COLUMNS / defaults / Column Settings — it is
+   injected at the FRONT (right after the standalone checkbox) only when the
+   invoice table is operating in multi-store / All-Shops mode. */
+const INV_STORE_COLUMN: InvColumnDef = { id: "store", label: "Store", locked: true };
 
 /* ─── Constants ──────────────────────────────────────────────────────── */
 
@@ -141,6 +149,10 @@ function isInDateRange(createdAt: string, range: DateRange, customFrom?: string,
 export default function InvoicePage() {
   const router = useRouter();
   const { invoices, tickets, deleteInvoice, addInvoice, updateInvoice, pinInvoice } = useStore();
+  // Active-store context — drives the context-aware Store column (§3h). In
+  // multi-store / All-Shops mode each row shows which store owns the invoice.
+  const { isAllShops, stores, getStore } = useStoreContext();
+  const multiStore = isAllShops && stores.length > 1;
   const { settings } = useStoreSettings();
   const invoiceStatusColors = settings.invoiceStatusColors;
   // Map ticket id → saved ticket Type (Walk-In/Pick-Up/On-Site) so invoices can
@@ -291,10 +303,15 @@ export default function InvoicePage() {
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
 
-  const activeInvCols = useMemo(
-    () => invColumnOrder.filter((id) => invVisibleCols.has(id)).map((id) => INV_ALL_COLUMNS.find((c) => c.id === id)!),
-    [invColumnOrder, invVisibleCols]
-  );
+  const activeInvCols = useMemo(() => {
+    const cols = invColumnOrder
+      .filter((id) => invVisibleCols.has(id))
+      .map((id) => INV_ALL_COLUMNS.find((c) => c.id === id)!);
+    // Multi-store: prepend the context-aware Store column so the structure is
+    // [ ] | STORE | ID | … (the checkbox is a standalone th/td here).
+    if (multiStore) cols.unshift(INV_STORE_COLUMN);
+    return cols;
+  }, [invColumnOrder, invVisibleCols, multiStore]);
 
   const list = useMemo(() => {
     // When navigated from Universal Search, show only the exact record
@@ -735,7 +752,7 @@ export default function InvoicePage() {
                   />
                 </th>
                 {activeInvCols.map((col) => (
-                  <th key={col.id} className={cn("py-3 px-3", col.id === "id" && "pl-5", col.id === "actions" && "pr-[55px]", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
+                  <th key={col.id} className={cn("py-3 px-3", col.id === "store" && "pl-5 w-[132px]", col.id === "id" && "pl-5", col.id === "actions" && "pr-[55px]", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -752,8 +769,8 @@ export default function InvoicePage() {
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
-                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), inv.ticketId ? ticketNoById.get(inv.ticketId) : undefined, inv.ticketId ? () => router.push(`/tickets/${inv.ticketId}`) : undefined, invoiceStatusColors)}
+                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), inv.ticketId ? ticketNoById.get(inv.ticketId) : undefined, inv.ticketId ? () => router.push(`/tickets/${inv.ticketId}`) : undefined, invoiceStatusColors, getStore(inv.branchId))}
                     </td>
                   ))}
                 </motion.tr>
@@ -768,21 +785,20 @@ export default function InvoicePage() {
             <p className="text-sm text-muted-foreground">No invoices have been created today.</p>
           </div>
         )}
-        {/* Footer — user-selectable page size (10/20/50/100); pinned invoices
-            stay at the top of page 1. LEFT: size selector + count, RIGHT: pages. */}
-        <div className="border-t border-zinc-500 px-5 py-3">
-          <Pagination
-            page={currentPage}
-            totalPages={totalPages}
-            onPageChange={setPage}
-            totalItems={list.length}
-            pageSize={pageSize}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            onPageSizeChange={handlePageSizeChange}
-            itemLabel="invoice"
-          />
-        </div>
       </div>
+
+      {/* Pagination — DETACHED below the table frame (matches the Tickets table):
+          bare footer, no wrapping card, separated by the page's root spacing. */}
+      <Pagination
+        page={currentPage}
+        totalPages={totalPages}
+        onPageChange={setPage}
+        totalItems={list.length}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZE_OPTIONS}
+        onPageSizeChange={handlePageSizeChange}
+        itemLabel="invoice"
+      />
 
       {/* Delete Confirm */}
       <ConfirmDialog open={!!deleteTarget} onClose={() => setDeleteTarget(null)} onConfirm={() => { if (deleteTarget) deleteInvoice(deleteTarget.id); }}
@@ -978,9 +994,15 @@ function renderInvCell(
   linkedTicketNo?: string,
   onOpenTicket?: () => void,
   statusColors?: Record<string, string>,
+  store?: StoreBranch | null,
 ) {
   const statusHex = statusColors?.[inv.status];
   switch (colId) {
+    case "store":
+      // Context-aware STORE identity — DATA-DRIVEN from Invoice.branchId → Store
+      // (resolved via getStore in the caller). Shared component so it matches
+      // the Ticket / Walk-In / Field store cell exactly.
+      return <StoreContextCell store={store} mode="stacked" />;
     case "id": return (
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
         {inv.pinnedAt && <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}

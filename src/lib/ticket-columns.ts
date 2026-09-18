@@ -9,6 +9,7 @@
 
 export type ColumnId =
   | "checkbox"
+  | "store"
   | "ticket"
   | "customer"
   | "device"
@@ -28,6 +29,12 @@ export type ColumnDef = {
 
 export const ALL_COLUMNS: ColumnDef[] = [
   { id: "checkbox", label: "", width: "w-9", locked: true },
+  // STORE — a CONTEXT-AWARE column. It is intentionally NOT part of
+  // DEFAULT_ORDER / DEFAULT_VISIBLE below, so a normal single-store table is
+  // completely unchanged. The Tickets page injects it (right after the
+  // checkbox, before Ticket) ONLY when the table is operating in multi-store /
+  // All-Shops mode. Compact: enough for the code avatar + store name.
+  { id: "store", label: "Store", width: "w-[132px]", locked: true },
   { id: "ticket", label: "Ticket", width: "w-[112px]" },
   { id: "customer", label: "Customer", width: "w-[33%]" },
   { id: "device", label: "Device / Service", width: "w-[33%]" },
@@ -38,11 +45,22 @@ export const ALL_COLUMNS: ColumnDef[] = [
   { id: "actions", label: "Actions", width: "w-[108px]", align: "center", locked: true },
 ];
 
-/** Default column order — every column, in catalog order. */
-export const DEFAULT_ORDER: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
+/** Columns that are NOT part of the normal (single-store) table. `store` is a
+ *  context-aware column injected only in multi-store / All-Shops mode, so it is
+ *  excluded from the default order, default visibility, and the user-facing
+ *  Column Settings UI (its position is fixed: right after the checkbox). */
+export const CONTEXT_COLUMNS: ColumnId[] = ["store"];
+
+/** Catalog columns that participate in the configurable (single-store) table. */
+export const CONFIGURABLE_COLUMNS: ColumnDef[] = ALL_COLUMNS.filter(
+  (c) => !CONTEXT_COLUMNS.includes(c.id)
+);
+
+/** Default column order — every configurable column, in catalog order. */
+export const DEFAULT_ORDER: ColumnId[] = CONFIGURABLE_COLUMNS.map((c) => c.id);
 
 /** Default visible columns — everything visible by default. */
-export const DEFAULT_VISIBLE: ColumnId[] = ALL_COLUMNS.map((c) => c.id);
+export const DEFAULT_VISIBLE: ColumnId[] = CONFIGURABLE_COLUMNS.map((c) => c.id);
 
 /** Columns the user cannot hide (always visible when present). */
 export const REQUIRED_COLUMNS: ColumnId[] = ["ticket", "status"];

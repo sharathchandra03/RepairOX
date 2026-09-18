@@ -572,7 +572,7 @@ const WALKIN_META_MARKER = "\n\u241F::walkin-meta::";
 type WalkInMeta = Partial<
   Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "customerId" | "modelId" | "pinnedAt"
     | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt" | "linkedLeadId"
-    | "customerComments" | "followUpAttempt" | "followUpComments" | "followUpHistory">
+    | "customerComments" | "followUpAttempt" | "followUpComments" | "followUpHistory" | "devices">
 >;
 
 function encodeWalkInNotes(w: WalkIn): string | null {
@@ -596,6 +596,10 @@ function encodeWalkInNotes(w: WalkIn): string | null {
   if (w.followUpAttempt) meta.followUpAttempt = w.followUpAttempt;
   if (w.followUpComments) meta.followUpComments = w.followUpComments;
   if (w.followUpHistory && w.followUpHistory.length) meta.followUpHistory = w.followUpHistory;
+  // Multi-device: persist the full device array in the meta envelope so no DB
+  // migration is required (mirrors how Tickets store devices as JSON). The flat
+  // `model`/`issue` columns keep the primary device for search/backward-compat.
+  if (w.devices && w.devices.length) meta.devices = w.devices;
   const human = (w.notes || "").split(WALKIN_META_MARKER)[0].trimEnd();
   if (Object.keys(meta).length === 0) return human || null;
   return `${human}${WALKIN_META_MARKER}${JSON.stringify(meta)}`;
@@ -633,6 +637,9 @@ function rowToWalkIn(r: any): WalkIn {
     model: r.model ?? "",
     modelId: r.model_id ?? meta.modelId ?? undefined,
     issue: r.issue ?? meta.issue ?? "",
+    // Multi-device array (from the meta envelope). Undefined for legacy rows —
+    // getWalkInDevices() then synthesizes Device 1 from the flat fields.
+    devices: meta.devices ?? undefined,
     reasons: r.reasons ?? [],
     status: r.status ?? "visitor",
     salesPersonId: r.sales_person_id ?? meta.salesPersonId ?? undefined,
@@ -2172,7 +2179,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("businessValue" in updates) row.business_value = updates.businessValue ?? 0;
       if ("reasons" in updates) row.reasons = updates.reasons ?? [];
       // Any change to a notes-envelope field (or notes itself) re-encodes notes.
-      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "customerId", "modelId", "pinnedAt", "convertedAt", "followUpDate", "followUpTime", "followUpStatus", "followUpReadAt", "customerComments", "followUpAttempt", "followUpComments", "followUpHistory"];
+      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "customerId", "modelId", "pinnedAt", "convertedAt", "followUpDate", "followUpTime", "followUpStatus", "followUpReadAt", "customerComments", "followUpAttempt", "followUpComments", "followUpHistory", "devices"];
       if (merged && envelopeKeys.some((k) => k in updates)) {
         row.notes = encodeWalkInNotes(merged);
       }
