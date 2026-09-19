@@ -20,7 +20,9 @@ export function generateInsights(full: ReportDataset, filters: ReportFilters): I
   const pm = applyFilters(full, filters, prev);
 
   const insights: Insight[] = [];
-  const live = (arr: typeof cur.invoices) => arr.filter((i) => i.status !== "cancelled" && i.status !== "draft");
+  // Proformas are non-revenue documents — excluded from every revenue insight
+  // alongside cancelled/draft invoices.
+  const live = (arr: typeof cur.invoices) => arr.filter((i) => (i.documentType ?? "invoice") !== "proforma" && i.status !== "cancelled" && i.status !== "draft");
 
   /* Revenue movement */
   const curRev = live(cur.invoices).reduce((s, i) => s + (i.total || 0), 0);
@@ -126,7 +128,7 @@ export function generateInsights(full: ReportDataset, filters: ReportFilters): I
   /* Outstanding / overdue movement */
   const now = Date.now();
   const overdue = cur.invoices
-    .filter((i) => i.status !== "cancelled" && i.status !== "paid" && i.dueDate && new Date(i.dueDate).getTime() < now)
+    .filter((i) => (i.documentType ?? "invoice") !== "proforma" && i.status !== "cancelled" && i.status !== "paid" && i.dueDate && new Date(i.dueDate).getTime() < now)
     .reduce((s, i) => s + Math.max(0, (i.total || 0) - (i.paidAmount || 0)), 0);
   if (overdue > 0) {
     insights.push({

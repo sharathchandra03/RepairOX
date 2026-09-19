@@ -1,6 +1,6 @@
 import type { StoreSettings, CustomPrintTemplate } from "@/lib/store-settings";
 import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
-import { getTicketDevices, getInvoiceDevices, formatDeviceColour } from "@/lib/mock-data";
+import { getTicketDevices, getInvoiceDevices, formatDeviceColour, getRecordType } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
@@ -102,6 +102,9 @@ export type PrintInvoiceInfo = {
   invoiceId: string;
   invoiceType: string;
   status: string;
+  /** Document type — "invoice" (normal) or "proforma". Proforma prints must
+   *  NOT render any financial status pill (Paid/Sent/Overdue…). */
+  documentType?: "invoice" | "proforma";
   createdAt: string;
   dueDate: string;
   items: PrintLineItem[];
@@ -305,6 +308,7 @@ export function buildInvoiceInfo(invoice: Invoice, linkedTicketNo?: string): Pri
     invoiceId: invoice.id,
     invoiceType: invoice.invoiceType,
     status: invoice.status,
+    documentType: invoice.documentType ?? "invoice",
     createdAt: invoice.createdAt,
     dueDate: invoice.dueDate,
     items,
@@ -339,11 +343,15 @@ export function buildTicketPrintData(
   ticket: Ticket,
 ): PrintDocumentData {
   const now = new Date();
+  // Estimate records print as a "Repair Estimate" (spec §38); every other
+  // ticket keeps the existing "Service Report" heading. Only the title
+  // changes — the same captured data + templates are reused.
+  const isEstimateRecord = getRecordType(ticket) === "estimate";
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromTicket(ticket),
     ticket: buildTicketInfo(ticket),
-    printTitle: "Service Report",
+    printTitle: isEstimateRecord ? "Repair Estimate" : "Service Report",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
     printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
     // Ticket documents use Settings → Tickets → Terms & Notes as their source
@@ -360,9 +368,13 @@ export function buildInvoicePrintData(
   linkedTicketNo?: string,
 ): PrintDocumentData {
   const now = new Date();
-  // Determine print title based on invoice type + service category
+  // Determine print title. A PROFORMA always prints as "Proforma Invoice"
+  // regardless of invoice type / category (spec §16) — never "Invoice" or
+  // "Tax Invoice". Normal invoices keep the existing type/category-based title.
   let title: string;
-  if (invoice.invoiceType === "business") {
+  if ((invoice.documentType ?? "invoice") === "proforma") {
+    title = "Proforma Invoice";
+  } else if (invoice.invoiceType === "business") {
     title = "Tax Invoice";
   } else if (invoice.serviceCategory === "accessories") {
     title = "Accessories Invoice";

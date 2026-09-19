@@ -28,7 +28,10 @@ import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { SegmentedTabs } from "@/components/ui/tabs";
-import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, invoiceStatusPillStyle, invoiceIdColorStyle, type Invoice, type InvoiceStatus, type InvoiceType } from "@/lib/mock-data";
+import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, type Invoice, type InvoiceStatus, type InvoiceType, type Ticket } from "@/lib/mock-data";
+import { ProformaNeedsTicketDialog } from "@/components/invoice/proforma-needs-ticket-dialog";
+import { usePermissions } from "@/lib/permissions-context";
+import { toast } from "@/components/ui/toaster";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn, openWhatsApp } from "@/lib/utils";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
@@ -152,6 +155,13 @@ export default function InvoicePage() {
   // Active-store context — drives the context-aware Store column (§3h). In
   // multi-store / All-Shops mode each row shows which store owns the invoice.
   const { isAllShops, stores, getStore } = useStoreContext();
+  const { can } = usePermissions();
+  // Converting a Proforma into a final Invoice requires the same capability as
+  // creating a normal invoice (spec §58).
+  const canConvertProforma = can("create_invoice") || can("manage_invoices");
+  // Pushing a proforma's source estimate to a ticket needs ticket-create rights
+  // (the "needs ticket" step of the Estimate → Ticket → Invoice lineage).
+  const canCreateTicket = can("create_ticket") || can("manage_repair_jobs");
   const multiStore = isAllShops && stores.length > 1;
   const { settings } = useStoreSettings();
   const invoiceStatusColors = settings.invoiceStatusColors;
@@ -169,6 +179,48 @@ export default function InvoicePage() {
     for (const t of tickets) m.set(t.id, t.ticketNo ?? t.id);
     return m;
   }, [tickets]);
+
+  // Resolve which record the TICKET column should point at for an invoice.
+  // Preference: the REAL Ticket produced by the lineage, if any; otherwise the
+  // Estimate the quote came from; otherwise the raw ticketId. This is why a
+  // proforma created from an estimate first shows "E-001", and then shows the
+  // real ticket (e.g. "T-062") once the estimate/proforma has been pushed to a
+  // ticket. Estimate records live in the same `tickets` table, so we tell them
+  // apart via getRecordType.
+  const ticketRefById = useMemo(() => {
+    const byId = new Map(tickets.map((t) => [t.id, t] as const));
+    return (inv: Invoice): { id?: string; label?: string; isEstimate: boolean } => {
+      // 1) A concrete Ticket link (from lineage or the source estimate's
+      //    conversion) always wins over the estimate.
+      const sourceEstimate = inv.sourceEstimateId ? byId.get(inv.sourceEstimateId) : undefined;
+      // A candidate only counts as a TICKET when the referenced row exists AND
+      // is not itself an estimate (older data may have stored the estimate id in
+      // ticketId/sourceTicketId — never treat that as a ticket).
+      const asTicket = (id?: string): string | undefined => {
+        if (!id) return undefined;
+        const rec = byId.get(id);
+        return rec && getRecordType(rec) !== "estimate" ? id : undefined;
+      };
+      const ticketCandidate =
+        asTicket(inv.sourceTicketId) ||
+        (sourceEstimate?.convertedTicketId ? asTicket(sourceEstimate.convertedTicketId) : undefined) ||
+        asTicket(inv.ticketId);
+      if (ticketCandidate) {
+        const t = byId.get(ticketCandidate);
+        return { id: ticketCandidate, label: t?.ticketNo ?? ticketCandidate, isEstimate: false };
+      }
+      // 2) No ticket yet → show the source Estimate (e.g. E-001).
+      const estimateId = inv.sourceEstimateId && byId.has(inv.sourceEstimateId)
+        ? inv.sourceEstimateId
+        : (inv.ticketId && byId.get(inv.ticketId) && getRecordType(byId.get(inv.ticketId)!) === "estimate" ? inv.ticketId : undefined);
+      if (estimateId) {
+        const e = byId.get(estimateId);
+        return { id: estimateId, label: e?.ticketNo ?? estimateId, isEstimate: true };
+      }
+      // 3) Nothing resolvable → whatever ticketId holds (or none).
+      return { id: inv.ticketId || undefined, label: inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : undefined, isEstimate: false };
+    };
+  }, [tickets, ticketNoById]);
   const {
     downloadInvoice,
     startBulkInvoiceDownload,
@@ -185,6 +237,7 @@ export default function InvoicePage() {
   const [statusFilter, setStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const [documentTypeFilter, setDocumentTypeFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -197,7 +250,7 @@ export default function InvoicePage() {
   // Individual filter pinning (own storage key so it doesn't collide with other modules).
   const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-invoice-pinned-filters");
   // True when any filter differs from the defaults (Date=Today, Status=All).
-  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || panelSearch !== "";
+  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || documentTypeFilter !== "all" || panelSearch !== "";
 
   // Pinnable filter definitions — shared by the pinned-filter bar. Bound
   // directly to the same setters as the advanced panel, so a pinned filter
@@ -229,10 +282,21 @@ export default function InvoicePage() {
       ],
       onChange: setCategoryFilter,
     },
-  ], [statusFilter, typeFilter, categoryFilter]);
+    {
+      id: "documentType", label: "Document Type", type: "select", value: documentTypeFilter,
+      options: [
+        { label: "All Documents", value: "all" },
+        { label: "Normal Invoice", value: "invoice" }, { label: "Proforma Invoice", value: "proforma" },
+      ],
+      onChange: setDocumentTypeFilter,
+    },
+  ], [statusFilter, typeFilter, categoryFilter, documentTypeFilter]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
+  // A proforma the user tried to invoice while it has NO linked ticket — we hold
+  // it here to show the "create a ticket first" warning dialog.
+  const [ticketRequiredProforma, setTicketRequiredProforma] = useState<Invoice | null>(null);
 
   // Universal Search filter — shows only a single record when navigated from search
   const searchParams = useSearchParams();
@@ -246,6 +310,7 @@ export default function InvoicePage() {
       setStatusFilter("all");
       setTypeFilter("all");
       setCategoryFilter("all");
+      setDocumentTypeFilter("all");
       setDateRange("all");
       setCustomFrom("");
       setCustomTo("");
@@ -306,6 +371,10 @@ export default function InvoicePage() {
   const activeInvCols = useMemo(() => {
     const cols = invColumnOrder
       .filter((id) => invVisibleCols.has(id))
+      // In the All-Shops (multi-store) view the STORE column is prepended, so we
+      // drop the CATEGORY column there to save horizontal space — the category
+      // is still available through the Advanced Filter → Category.
+      .filter((id) => !(multiStore && id === "category"))
       .map((id) => INV_ALL_COLUMNS.find((c) => c.id === id)!);
     // Multi-store: prepend the context-aware Store column so the structure is
     // [ ] | STORE | ID | … (the checkbox is a standalone th/td here).
@@ -323,24 +392,25 @@ export default function InvoicePage() {
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
+      const okDocumentType = documentTypeFilter === "all" || getDocumentType(inv) === documentTypeFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
       const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
       const haystack = `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase();
       const okQ = !q || haystack.includes(q.toLowerCase());
       // Unified panel search matches across Invoice ID + Customer (+ company).
       const okPanelSearch = !panelSearch || `${inv.id} ${inv.customer} ${inv.company || ""}`.toLowerCase().includes(panelSearch.toLowerCase());
-      return okStore && okStatus && okType && okCategory && okDate && okQ && okPanelSearch;
+      return okStore && okStatus && okType && okCategory && okDocumentType && okDate && okQ && okPanelSearch;
     });
     // Pinned invoices float to the top; order within each group is preserved.
     const pinned = filtered.filter((inv) => inv.pinnedAt);
     const normal = filtered.filter((inv) => !inv.pinnedAt);
     return [...pinned, ...normal];
-  }, [invoices, storeFilter, statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
+  }, [invoices, storeFilter, statusFilter, typeFilter, categoryFilter, documentTypeFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
 
   // Reset to page 1 whenever the filtered result set changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, typeFilter, categoryFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
+  }, [statusFilter, typeFilter, categoryFilter, documentTypeFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
 
   /* ─── Sticky frozen workspace (filters + table header) ───────────────────
      Same formula as the Tickets page: the date pills + status pills live in
@@ -390,21 +460,31 @@ export default function InvoicePage() {
 
   /* KPIs */
   const kpis = useMemo(() => {
-    const totalRevenue = list.reduce((s, i) => s + i.total, 0);
-    const paidAmount = list.reduce((s, i) => s + i.paidAmount, 0);
-    const pending = list.filter((i) => i.status === "sent" || i.status === "partial").reduce((s, i) => s + (i.total - i.paidAmount), 0);
-    const overdue = list.filter((i) => i.status === "overdue").reduce((s, i) => s + (i.total - i.paidAmount), 0);
-    const overdueCount = list.filter((i) => i.status === "overdue").length;
-    const draftCount = list.filter((i) => i.status === "draft").length;
-    const taxCollected = list.filter((i) => i.status === "paid").reduce((s, i) => s + i.tax, 0);
-    const totalInvoices = list.length;
-    return { totalRevenue, paidAmount, pending, overdue, overdueCount, draftCount, taxCollected, totalInvoices };
+    // Proformas are NON-revenue commercial documents — they must NEVER enter
+    // financial KPIs (revenue / paid / pending / overdue / tax). Exclude them at
+    // the source; only realized normal invoices count (spec §36–§40).
+    const financial = list.filter((i) => !isProforma(i));
+    const proformaCount = list.length - financial.length;
+    const totalRevenue = financial.reduce((s, i) => s + i.total, 0);
+    const paidAmount = financial.reduce((s, i) => s + i.paidAmount, 0);
+    const pending = financial.filter((i) => i.status === "sent" || i.status === "partial").reduce((s, i) => s + (i.total - i.paidAmount), 0);
+    const overdue = financial.filter((i) => i.status === "overdue").reduce((s, i) => s + (i.total - i.paidAmount), 0);
+    const overdueCount = financial.filter((i) => i.status === "overdue").length;
+    const draftCount = financial.filter((i) => i.status === "draft").length;
+    const taxCollected = financial.filter((i) => i.status === "paid").reduce((s, i) => s + i.tax, 0);
+    // "Total Invoices" counts realized invoices only (proformas are surfaced via
+    // the Document Type filter, never folded into the financial invoice count).
+    const totalInvoices = financial.length;
+    return { totalRevenue, paidAmount, pending, overdue, overdueCount, draftCount, taxCollected, totalInvoices, proformaCount };
   }, [list]);
 
   /* Invoice status view — presentation only, derived from filtered invoice data */
   const invoiceStatusView = useMemo(() => {
-    const countOf = (s: InvoiceStatus) => list.filter((i) => i.status === s).length;
-    const total = list.length;
+    // Financial status breakdown covers realized invoices only — proformas have
+    // no financial status and are excluded.
+    const financial = list.filter((i) => !isProforma(i));
+    const countOf = (s: InvoiceStatus) => financial.filter((i) => i.status === s).length;
+    const total = financial.length;
     const paidCount = countOf("paid");
     const rows = [
       { key: "overdue", label: "Overdue", count: countOf("overdue"), color: "rose" as const },
@@ -422,6 +502,77 @@ export default function InvoicePage() {
     // invoice sequence forward.
     addInvoice({ ...inv, status: "draft", createdAt: new Date().toISOString(), paidAmount: 0 });
   }, [addInvoice]);
+
+  // Resolve a proforma's existing Ticket (if any) + its source Estimate.
+  //   • ticketId  — the resolved Ticket id, if one exists (from the proforma's
+  //     own sourceTicketId, or the source estimate's convertedTicketId). Used by
+  //     "Push to Ticket" to jump to the existing ticket instead of duplicating.
+  //   • estimate  — the source Estimate record, when the proforma came from one
+  //     (used to route "Push to Ticket" through the estimate prefill).
+  const resolveProformaTicket = useCallback((inv: Invoice): { ticketId?: string; estimate?: Ticket } => {
+    const estimate = inv.sourceEstimateId ? tickets.find((t) => t.id === inv.sourceEstimateId) : undefined;
+    // Prefer an explicit ticket link on the proforma, else the estimate's own
+    // conversion link. Verify the referenced row still exists.
+    const directTicketId = inv.sourceTicketId && tickets.some((t) => t.id === inv.sourceTicketId)
+      ? inv.sourceTicketId
+      : undefined;
+    const estimateTicketId = estimate?.convertedTicketId && tickets.some((t) => t.id === estimate.convertedTicketId)
+      ? estimate.convertedTicketId
+      : undefined;
+    return { ticketId: directTicketId || estimateTicketId, estimate };
+  }, [tickets]);
+
+  // Proforma → Invoice (single quick action). A Proforma must go through a
+  // Ticket before it can be invoiced:
+  //   • Already converted → open the created invoice (handled at the call site).
+  //   • A Ticket IS linked (before/after) → open the Invoice CREATION FLOW,
+  //     prefilled from the proforma, so the user can review/adjust details
+  //     before finalizing (never a silent create).
+  //   • NO Ticket linked → show a warning dialog that blocks invoicing and
+  //     offers a "Push to Ticket" button (carries all the proforma data).
+  const openConvert = useCallback((inv: Invoice) => {
+    if (!canConvertProforma) {
+      toast.error("Not allowed", { description: "You don't have permission to create invoices from proformas." });
+      return;
+    }
+    const { ticketId } = resolveProformaTicket(inv);
+    if (!ticketId) {
+      // No linked ticket — block and prompt to create one first.
+      setTicketRequiredProforma(inv);
+      return;
+    }
+    // Linked ticket exists → open the invoice flow prefilled from the proforma
+    // so details can be edited before creating the final invoice.
+    router.push(`/invoice/create?fromProforma=${encodeURIComponent(inv.id)}`);
+  }, [canConvertProforma, resolveProformaTicket, router]);
+
+  // Proforma → Ticket (the quote-first lifecycle: Estimate → Proforma → Ticket →
+  // Invoice). When the customer agrees to a proforma, create the repair Ticket
+  // from it. If the proforma's source estimate already produced a ticket, jump
+  // to that ticket instead of creating a duplicate. Otherwise open the ticket
+  // wizard prefilled from the proforma (?fromProforma=<invoiceId>). Requires
+  // ticket-create permission (UI half; the ticket write path enforces it too).
+  const pushProformaToTicket = useCallback((inv: Invoice) => {
+    if (!canCreateTicket) {
+      toast.error("Not allowed", { description: "You don't have permission to create tickets." });
+      return;
+    }
+    const { ticketId, estimate } = resolveProformaTicket(inv);
+    // Already has a ticket → open it (never create a duplicate).
+    if (ticketId) {
+      router.push(`/tickets/${ticketId}`);
+      return;
+    }
+    // Prefer routing through the SOURCE ESTIMATE (the richest captured record),
+    // reusing the exact same estimate→ticket prefill. Carry viaProforma so the
+    // new ticket + estimate also link back to this proforma. Fall back to a
+    // direct proforma prefill when the proforma has no source estimate.
+    if (estimate) {
+      router.push(`/tickets/new?fromEstimate=${encodeURIComponent(estimate.id)}&viaProforma=${encodeURIComponent(inv.id)}`);
+    } else {
+      router.push(`/tickets/new?fromProforma=${encodeURIComponent(inv.id)}`);
+    }
+  }, [canCreateTicket, resolveProformaTicket, router]);
 
   return (
     <div className="space-y-6">
@@ -635,16 +786,19 @@ export default function InvoicePage() {
               invoiceStatus={statusFilter}
               invoiceType={typeFilter}
               category={categoryFilter}
+              documentType={documentTypeFilter}
               onChange={(patch) => {
                 if (patch.search !== undefined) setPanelSearch(patch.search);
                 if (patch.invoiceStatus !== undefined) setStatusFilter(patch.invoiceStatus);
                 if (patch.invoiceType !== undefined) setTypeFilter(patch.invoiceType);
                 if (patch.category !== undefined) setCategoryFilter(patch.category);
+                if (patch.documentType !== undefined) setDocumentTypeFilter(patch.documentType);
               }}
               onReset={() => {
                 setStatusFilter("all");
                 setTypeFilter("all");
                 setCategoryFilter("all");
+                setDocumentTypeFilter("all");
                 setPanelSearch("");
                 setDateRange("today");
                 setCustomFrom("");
@@ -752,7 +906,7 @@ export default function InvoicePage() {
                   />
                 </th>
                 {activeInvCols.map((col) => (
-                  <th key={col.id} className={cn("py-3 px-3", col.id === "store" && "pl-5 w-[132px]", col.id === "id" && "pl-5", col.id === "actions" && "pr-[55px]", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
+                  <th key={col.id} className={cn("py-3 px-3", col.id === "store" && "pl-5 w-[132px]", col.id === "id" && "pl-5 w-[130px]", col.id === "actions" && "pr-5 w-[150px]", col.id === "customer" && "pl-[28px] w-[220px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -760,7 +914,7 @@ export default function InvoicePage() {
               {paged.map((inv, i) => (
                 <motion.tr key={inv.id} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.02 * i }}
                   onClick={() => router.push(`/invoice/${inv.id}`)}
-                  className={cn("group cursor-pointer border-t border-zinc-500 transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
+                  className={cn("group h-[76px] cursor-pointer border-t border-zinc-500 align-middle transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
                 >
                   <td className="w-10 px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
                     <input type="checkbox" checked={selected.has(inv.id)}
@@ -769,8 +923,13 @@ export default function InvoicePage() {
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
-                      {renderInvCell(col.id, inv, inv.ticketId ? ticketTypeById.get(inv.ticketId) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), inv.ticketId ? ticketNoById.get(inv.ticketId) : undefined, inv.ticketId ? () => router.push(`/tickets/${inv.ticketId}`) : undefined, invoiceStatusColors, getStore(inv.branchId))}
+                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "store" && "pl-5", col.id === "id" && "pl-5 w-[130px]", col.id === "actions" && "pr-5 w-[150px] whitespace-nowrap", col.id === "customer" && "w-[220px]", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                      {(() => {
+                        // Resolve the TICKET column target: the real linked
+                        // Ticket when one exists, else the source Estimate.
+                        const ref = ticketRefById(inv);
+                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined);
+                      })()}
                     </td>
                   ))}
                 </motion.tr>
@@ -798,6 +957,21 @@ export default function InvoicePage() {
         pageSizeOptions={PAGE_SIZE_OPTIONS}
         onPageSizeChange={handlePageSizeChange}
         itemLabel="invoice"
+      />
+
+      {/* Proforma → Invoice: "create a ticket first" warning. Shown when the
+          user tries to invoice a proforma that has NO linked ticket. Blocks the
+          invoice and offers a direct "Push to Ticket" (carries all data). */}
+      <ProformaNeedsTicketDialog
+        proforma={ticketRequiredProforma}
+        deviceCount={ticketRequiredProforma ? getInvoiceDevices(ticketRequiredProforma).length : 0}
+        canCreateTicket={canCreateTicket}
+        onCancel={() => setTicketRequiredProforma(null)}
+        onPushToTicket={() => {
+          const target = ticketRequiredProforma;
+          setTicketRequiredProforma(null);
+          if (target) pushProformaToTicket(target);
+        }}
       />
 
       {/* Delete Confirm */}
@@ -995,8 +1169,12 @@ function renderInvCell(
   onOpenTicket?: () => void,
   statusColors?: Record<string, string>,
   store?: StoreBranch | null,
+  onConvertProforma?: () => void,
+  onOpenConvertedInvoice?: () => void,
 ) {
   const statusHex = statusColors?.[inv.status];
+  const proforma = isProforma(inv);
+  const alreadyConverted = proforma && !!inv.convertedInvoiceId;
   switch (colId) {
     case "store":
       // Context-aware STORE identity — DATA-DRIVEN from Invoice.branchId → Store
@@ -1007,48 +1185,75 @@ function renderInvCell(
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
         {inv.pinnedAt && <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
         <span
-          className={cn("font-semibold cursor-default", !statusHex && (INVOICE_ID_COLOR[inv.status] || "text-foreground"))}
-          style={statusHex ? invoiceIdColorStyle(statusHex) : undefined}
-          title={`Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}
+          className={cn("font-semibold cursor-default", proforma ? "text-[#3347D6]" : (!statusHex && (INVOICE_ID_COLOR[inv.status] || "text-foreground")))}
+          style={!proforma && statusHex ? invoiceIdColorStyle(statusHex) : undefined}
+          title={proforma ? "Proforma Invoice" : `Status: ${INVOICE_STATUS_LABEL[inv.status] || inv.status}`}
         >
           {inv.id}
         </span>
       </span>
     );
-    case "ticket": return inv.ticketId ? (
-      <button
-        type="button"
-        onClick={(e) => { e.stopPropagation(); onOpenTicket?.(); }}
-        className="whitespace-nowrap text-[13px] font-medium leading-snug text-[#4361EE] transition hover:underline"
-        title="View linked ticket"
-      >
-        {linkedTicketNo || inv.ticketId}
-      </button>
-    ) : (
-      <span className="text-muted-foreground whitespace-nowrap text-[13px] leading-snug">—</span>
-    );
+    case "ticket": {
+      // The caller resolves `linkedTicketNo` to the REAL linked Ticket when one
+      // exists, else the source Estimate (e.g. "E-001"). An estimate label
+      // starts with "E-" (or the record is an estimate); we tint it so it reads
+      // as a quote-stage reference, not a finalized ticket.
+      const refLabel = linkedTicketNo;
+      const looksEstimate = !!refLabel && /(^|-)E-\d/i.test(refLabel);
+      return refLabel ? (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onOpenTicket?.(); }}
+          className={cn(
+            "whitespace-nowrap text-[13px] font-medium leading-snug transition hover:underline",
+            looksEstimate ? "text-amber-700" : "text-[#4361EE]",
+          )}
+          title={looksEstimate ? "View source estimate (no ticket yet)" : "View linked ticket"}
+        >
+          {refLabel}
+        </button>
+      ) : (
+        <span className="text-muted-foreground whitespace-nowrap text-[13px] leading-snug">—</span>
+      );
+    }
     case "customer": return (
       <div className="flex items-center gap-3">
-        <Avatar name={inv.customer} size={30} ticketType={ticketType ?? "na"} />
-        <div className="min-w-0">
-          <p className="text-sm font-medium truncate leading-snug">{inv.customer}</p>
-          {inv.company && <p className="text-[12px] text-muted-foreground truncate leading-snug">{inv.company}</p>}
+        <Avatar name={inv.customer} size={32} ticketType={ticketType ?? "na"} />
+        {/* Cap the name width so long customer names WRAP to a second line
+            (then clamp) instead of widening the column and pushing the whole
+            table sideways. max-w + min-w-0 bound the cell; line-clamp-2 keeps it
+            to at most two lines. */}
+        <div className="min-w-0 max-w-[180px]">
+          <p className="text-sm font-medium leading-snug line-clamp-2 break-words" title={inv.customer}>{inv.customer}</p>
+          {inv.company && <p className="text-[12px] text-muted-foreground leading-snug line-clamp-1 break-words" title={inv.company}>{inv.company}</p>}
         </div>
       </div>
     );
     case "date": return <span className="text-[13px] text-muted-foreground whitespace-nowrap leading-snug">{fmtDate(inv.createdAt)}</span>;
-    case "status": return statusHex ? (
-      <span
-        className="ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap"
-        style={invoiceStatusPillStyle(statusHex)}
-      >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusHex }} />{INVOICE_STATUS_LABEL[inv.status]}
-      </span>
-    ) : (
-      <span className={`ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
-        <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
-      </span>
-    );
+    case "status": {
+      // Proformas NEVER show a financial status — only their non-financial
+      // lifecycle (Proforma / Converted to Invoice).
+      if (proforma) {
+        const ps = inv.proformaStatus ?? (inv.convertedInvoiceId ? "converted" : "open");
+        return (
+          <span className={`ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${PROFORMA_STATUS_TONE[ps]}`}>
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />{PROFORMA_STATUS_LABEL[ps]}
+          </span>
+        );
+      }
+      return statusHex ? (
+        <span
+          className="ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap"
+          style={invoiceStatusPillStyle(statusHex)}
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusHex }} />{INVOICE_STATUS_LABEL[inv.status]}
+        </span>
+      ) : (
+        <span className={`ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
+          <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
+        </span>
+      );
+    }
     case "category": return (
       <span className={`ml-[7px] inline-flex items-center rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${
         (inv.serviceCategory || "service") === "accessories"
@@ -1058,11 +1263,17 @@ function renderInvCell(
         {(inv.serviceCategory || "service") === "accessories" ? "Accessories" : "Service"}
       </span>
     );
-    case "paid": return <span className="tabular-nums text-[13px] font-medium leading-snug">{formatINR(inv.paidAmount)}</span>;
+    case "paid": return proforma
+      ? <span className="text-muted-foreground text-[13px] leading-snug" title="Proforma is non-financial — no payment">—</span>
+      : <span className="tabular-nums text-[13px] font-medium leading-snug">{formatINR(inv.paidAmount)}</span>;
     case "tax": return <span className="tabular-nums text-[13px] text-muted-foreground leading-snug">{formatINR(inv.tax)}</span>;
     case "total": return <span className="font-semibold tabular-nums">{formatINR(inv.total)}</span>;
     case "actions": return (
       <div className="flex items-center justify-end gap-1">
+        {/* NOTE: Proformas do NOT get an extra inline button — the
+            "Push to Invoice" (and "View Invoice" when already converted) action
+            lives in the More (⋯) menu below, so the inline action row stays
+            identical to a normal invoice and the table layout never shifts. */}
         <button
           onClick={onPin}
           className={
@@ -1080,12 +1291,22 @@ function renderInvCell(
           <button onClick={toggle} className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" title="More"><MoreHorizontal className="h-4 w-4" /></button>
         )}>
           {(close) => (<>
+            {/* Proforma → Invoice (single action). When the proforma has NO
+                linked ticket, this opens a warning that requires creating a
+                ticket first (with a Push-to-Ticket button); when a ticket IS
+                linked it opens the invoice creation flow prefilled. Once
+                converted it becomes "View Invoice". */}
+            {proforma && (alreadyConverted ? (
+              <MenuItem icon={Receipt} onClick={() => { onOpenConvertedInvoice?.(); close(); }}>View Invoice ({inv.convertedInvoiceId})</MenuItem>
+            ) : (
+              <MenuItem icon={Receipt} onClick={() => { onConvertProforma?.(); close(); }}>Push to Invoice</MenuItem>
+            ))}
             <MenuItem icon={Pencil} onClick={() => { onEdit(); close(); }}>Edit</MenuItem>
-            <MenuItem icon={Copy} onClick={() => { onDuplicate(); close(); }}>Duplicate</MenuItem>
+            {!proforma && <MenuItem icon={Copy} onClick={() => { onDuplicate(); close(); }}>Duplicate</MenuItem>}
             <MenuItem icon={Printer} onClick={() => { onPrint(); close(); }}>Print</MenuItem>
             <MenuItem icon={FileDown} onClick={() => { onDownloadPdf(); close(); }}>Download PDF</MenuItem>
-            <MenuItem icon={MessageCircle} onClick={() => { openWhatsApp(inv.phone, `Hi ${inv.customer}, here is your invoice ${inv.id} — ${formatINR(inv.total)}.`); close(); }}>WhatsApp Invoice</MenuItem>
-            <MenuItem icon={Mail} onClick={close}>Email Invoice</MenuItem>
+            <MenuItem icon={MessageCircle} onClick={() => { openWhatsApp(inv.phone, `Hi ${inv.customer}, here is your ${proforma ? "proforma" : "invoice"} ${inv.id} — ${formatINR(inv.total)}.`); close(); }}>WhatsApp {proforma ? "Proforma" : "Invoice"}</MenuItem>
+            <MenuItem icon={Mail} onClick={close}>Email {proforma ? "Proforma" : "Invoice"}</MenuItem>
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
           </>)}

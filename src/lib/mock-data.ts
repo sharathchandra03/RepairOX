@@ -319,6 +319,61 @@ export function deriveTicketStatus(devices: DeviceRecord[]): TicketStatus {
   return "in_progress";
 }
 
+/* ─── Record Type (Ticket / Estimate / Warranty) ─────────────────────────
+   Repair Estimate is NOT a separate module — it is a record TYPE stored in the
+   same `tickets` data architecture, distinguished by `Ticket.recordType`. This
+   discriminator is the single source of truth; the id/ticketNo prefix (T-/E-)
+   is a human identifier only. Warranty is reserved for a future flow so the
+   table/filter architecture is extensible without redesign. */
+export type RecordType = "ticket" | "estimate" | "warranty";
+
+export const RECORD_TYPE_LABEL: Record<RecordType, string> = {
+  ticket: "Ticket",
+  estimate: "Estimate",
+  warranty: "Warranty",
+};
+
+/**
+ * Resolve the authoritative record type of a row. Legacy rows (created before
+ * this field existed) have no `recordType` and are ALWAYS treated as "ticket",
+ * so no historical ticket is ever reclassified as an estimate.
+ */
+export function getRecordType(ticket: Pick<Ticket, "recordType">): RecordType {
+  return ticket.recordType ?? "ticket";
+}
+
+/** Convenience predicate — true only for genuine Estimate records. */
+export function isEstimate(ticket: Pick<Ticket, "recordType">): boolean {
+  return getRecordType(ticket) === "estimate";
+}
+
+/* ─── Estimate Status (outcome of the quote/opportunity) ──────────────────
+   DELIBERATELY separate from TicketStatus (device repair lifecycle). An
+   estimate tracks the customer opportunity: it starts Waiting for Approval and
+   ends either Converted (a Ticket was created) or Lost (customer declined). */
+export type EstimateStatus = "waiting_approval" | "converted" | "lost";
+
+export const ESTIMATE_STATUS_LABEL: Record<EstimateStatus, string> = {
+  waiting_approval: "Waiting for Approval",
+  converted: "Converted Ticket",
+  lost: "Lost Customer",
+};
+
+/** Restrained pill styling for estimate statuses — reuses the existing RepairOX
+ *  tone vocabulary (amber = pending, emerald = won, zinc = closed) so no new
+ *  colour system is introduced. */
+export const ESTIMATE_STATUS_TONE: Record<EstimateStatus, string> = {
+  waiting_approval: "bg-warning/10 text-amber-700 ring-warning/30",
+  converted: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+  lost: "bg-zinc-100 text-zinc-600 ring-zinc-200",
+};
+
+export const ESTIMATE_STATUS_OPTIONS: { label: string; value: EstimateStatus }[] = [
+  { label: ESTIMATE_STATUS_LABEL.waiting_approval, value: "waiting_approval" },
+  { label: ESTIMATE_STATUS_LABEL.converted, value: "converted" },
+  { label: ESTIMATE_STATUS_LABEL.lost, value: "lost" },
+];
+
 export type Ticket = {
   id: string;
   /** Owning store (branch) id. Present on DB rows; used to filter the
@@ -375,6 +430,32 @@ export type Ticket = {
    *  the stable database primary key. Displayed everywhere the ticket number is
    *  shown; falls back to `id` when not yet assigned. */
   ticketNo?: string;
+  /** Record type discriminator. The SAME `tickets` table stores repair Tickets
+   *  and Repair Estimates (and, in future, Warranty records). This is the
+   *  AUTHORITATIVE type — never inferred from the id/ticketNo prefix. Absent →
+   *  legacy row → treated as "ticket" (see getRecordType). */
+  recordType?: RecordType;
+  /** Estimate lifecycle outcome. Only meaningful when recordType === "estimate".
+   *  "waiting_approval" (default on creation) → "converted" (a Ticket was
+   *  created from it) → or "lost" (customer declined). Kept SEPARATE from the
+   *  device repair `status` above — an estimate answers "what happened to this
+   *  quote?", not "where is the device in the repair lifecycle?". */
+  estimateStatus?: EstimateStatus;
+  /** When an Estimate is converted, the id of the Ticket created from it. Lets
+   *  the table/view answer "which Ticket came from this Estimate?". */
+  convertedTicketId?: string;
+  /** When a Ticket was created FROM an Estimate, the id of that source Estimate.
+   *  Lets the Ticket view answer "which Estimate created this Ticket?". */
+  convertedFromEstimateId?: string;
+  /** Downstream billing lineage — the id of a Proforma created from this
+   *  record (Estimate or Ticket). Lets View Ticket / View Estimate answer "was
+   *  a Proforma created, and which one?" without a reverse scan. Set when a
+   *  Proforma is generated via Push to Invoice. */
+  proformaId?: string;
+  /** Downstream billing lineage — the id of the FINAL normal Invoice associated
+   *  with this record's commercial history. Lets View Ticket / View Estimate
+   *  answer "was it finally invoiced, and which invoice?". */
+  invoiceId?: string;
 };
 
 /** Helper: generate a createdAt timestamp N minutes ago from now */
@@ -608,6 +689,52 @@ export const TEAM_SEED: TeamMember[] = [
 TEAM_SEED[0].passwordHash = hashPassword("creator123", "EMP-001");
 
 /* ─── Invoice Types & Seed Data ──────────────────────────────────────── */
+
+/* ─── Document Type (Proforma vs Normal Invoice) ─────────────────────────
+   A billing record stored in the `invoices` table is one of two document
+   TYPES. This discriminator is the AUTHORITATIVE source of truth — never
+   inferred from the id/number prefix (the "P-INV" prefix is a human identifier
+   only). A "proforma" is an invoice-shaped COMMERCIAL document that is NOT
+   realized revenue: it must never contribute to sales/payment/outstanding
+   metrics. Absent → legacy row → ALWAYS treated as a normal "invoice", so no
+   historical invoice is ever reclassified. */
+export type DocumentType = "invoice" | "proforma";
+
+export const DOCUMENT_TYPE_LABEL: Record<DocumentType, string> = {
+  invoice: "Normal Invoice",
+  proforma: "Proforma Invoice",
+};
+
+/** Resolve the authoritative document type of a billing record. */
+export function getDocumentType(inv: Pick<Invoice, "documentType">): DocumentType {
+  return inv.documentType ?? "invoice";
+}
+
+/** Convenience predicate — true only for Proforma records. */
+export function isProforma(inv: Pick<Invoice, "documentType">): boolean {
+  return getDocumentType(inv) === "proforma";
+}
+
+/* ─── Proforma Status (non-financial commercial lifecycle) ────────────────
+   Deliberately SEPARATE from the financial InvoiceStatus (draft/sent/paid…).
+   A Proforma is never "Paid" — it tracks whether the quote is still open or has
+   been converted into a real Invoice. Stored in `proformaStatus`; the financial
+   `status` field is forced to a non-financial value ("draft"/"sent") on
+   proformas so it can never imply payment. */
+export type ProformaStatus = "open" | "converted";
+
+export const PROFORMA_STATUS_LABEL: Record<ProformaStatus, string> = {
+  open: "Proforma",
+  converted: "Converted to Invoice",
+};
+
+/** Restrained pill styling for proforma statuses — reuses the RepairOX tone
+ *  vocabulary (indigo = active commercial doc, emerald = converted). NEVER uses
+ *  the paid/overdue financial colours. */
+export const PROFORMA_STATUS_TONE: Record<ProformaStatus, string> = {
+  open: "bg-[#EEF1FD] text-[#3347D6] ring-[#B3BFF6]/60",
+  converted: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+};
 
 export type InvoiceStatus = "draft" | "sent" | "paid" | "partial" | "overdue" | "cancelled";
 
@@ -905,6 +1032,34 @@ export type Invoice = {
   devices?: InvoiceDeviceRecord[];
   /** DB-backed pin marker. Non-null → pinned to the top of the table. */
   pinnedAt?: string;
+
+  /* ─── Document Type + Lineage ──────────────────────────────────────────
+     The SAME `invoices` table stores both normal Invoices and Proformas,
+     discriminated by `documentType` (AUTHORITATIVE — never inferred from the
+     id/number prefix). Absent → legacy row → treated as a normal "invoice".  */
+  /** Document type discriminator: "invoice" (normal, revenue) or "proforma"
+   *  (non-revenue commercial document). See getDocumentType/isProforma. */
+  documentType?: DocumentType;
+  /** Non-financial proforma lifecycle. Only meaningful when
+   *  documentType === "proforma": "open" → "converted" (a normal Invoice was
+   *  created from it). A proforma is NEVER "paid". */
+  proformaStatus?: ProformaStatus;
+
+  /** When this record is a normal Invoice created FROM a Proforma, the id of
+   *  that source Proforma. Lets View Invoice answer "which Proforma created
+   *  this Invoice?". */
+  sourceProformaId?: string;
+  /** When this record (proforma or invoice) originated from a Repair Estimate,
+   *  the id of that Estimate. Carried all the way through the lineage. */
+  sourceEstimateId?: string;
+  /** When this record originated from / relates to a Ticket, the id of that
+   *  Ticket. (`ticketId` is the "Linked Ticket" for billing; `sourceTicketId`
+   *  records the commercial-lineage ticket, usually the same value.) */
+  sourceTicketId?: string;
+  /** When this record is a Proforma that has been converted, the id of the
+   *  normal Invoice created from it. Lets View Proforma answer "was it finally
+   *  invoiced, and which invoice?" and powers duplicate-conversion protection. */
+  convertedInvoiceId?: string;
 };
 
 function daysAgo(days: number): string {
@@ -931,6 +1086,13 @@ export type TicketInvoiceCoverage = "none" | "partial" | "full";
  * present. For a legacy invoice with no device-level link (older data), the
  * whole ticket is treated as invoiced (all its device ids), preserving the
  * previous "one invoice = ticket invoiced" behaviour for those records.
+ *
+ * PROFORMAS ARE EXCLUDED: a proforma is a non-revenue quote document, not a
+ * bill, so it never "reserves"/invoices a ticket device. Counting it here would
+ * (a) mark a ticket as invoiced/partially-invoiced just because a proforma
+ * exists, and (b) make converting that proforma to a real invoice fail the
+ * duplicate-billing guard — since the proforma's own devices would look already
+ * billed. Only real Invoices (documentType !== "proforma") reserve devices.
  */
 export function getInvoicedTicketDeviceIds(
   ticket: Ticket,
@@ -940,7 +1102,7 @@ export function getInvoicedTicketDeviceIds(
   const ticketDevices = getTicketDevices(ticket);
   const ticketDeviceIds = ticketDevices.map((d) => d.id);
   const linked = allInvoices.filter(
-    (inv) => inv.ticketId && (inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo),
+    (inv) => !isProforma(inv) && inv.ticketId && (inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo),
   );
   for (const inv of linked) {
     const invDevices = inv.devices ?? [];

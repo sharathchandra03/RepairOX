@@ -63,14 +63,18 @@ function computeCore(d: ReportDataset, range: DateRange, full: ReportDataset): C
     0
   );
 
-  /* Invoices (exclude cancelled/draft from revenue) */
-  const liveInvoices = d.invoices.filter((i) => !CANCELLED.has(i.status));
+  /* Invoices (exclude cancelled/draft from revenue, and PROFORMAS entirely).
+     A Proforma is a NON-revenue commercial document — it must never enter any
+     realized financial metric (revenue/collected/GST/outstanding/projection).
+     Excluded here at the source so every downstream KPI is proforma-free. */
+  const realizedInvoices = d.invoices.filter((i) => (i.documentType ?? "invoice") !== "proforma");
+  const liveInvoices = realizedInvoices.filter((i) => !CANCELLED.has(i.status));
   const invoiceCount = liveInvoices.length;
   const billed = liveInvoices.reduce((s, i) => s + (i.total || 0), 0);
   const collected = liveInvoices.reduce((s, i) => s + (i.paidAmount || 0), 0);
   const gst = liveInvoices.reduce((s, i) => s + (i.tax || 0), 0);
   const now = Date.now();
-  const overdue = d.invoices
+  const overdue = realizedInvoices
     .filter((i) => {
       if (CANCELLED.has(i.status)) return false;
       if (i.status === "overdue") return true;
@@ -79,7 +83,7 @@ function computeCore(d: ReportDataset, range: DateRange, full: ReportDataset): C
     })
     .reduce((s, i) => s + Math.max(0, (i.total || 0) - (i.paidAmount || 0)), 0);
   const pending = Math.max(0, billed - collected);
-  const cancelledInvoices = d.invoices.filter((i) => i.status === "cancelled").length;
+  const cancelledInvoices = realizedInvoices.filter((i) => i.status === "cancelled").length;
 
   /* Expenses */
   const expenseTotal = d.expenses.reduce((s, e) => s + (e.amount || 0), 0);

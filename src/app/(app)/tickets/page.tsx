@@ -7,7 +7,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings,
   Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
-  Pin, PinOff, Check,
+  Pin, PinOff, Check, TicketCheck,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ import { Input, Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
+import { usePermissions } from "@/lib/permissions-context";
+import { toast } from "@/components/ui/toaster";
 import { StoreFilter } from "@/components/common/store-filter";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
@@ -26,7 +28,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, type RecordType } from "@/lib/mock-data";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
@@ -106,6 +108,17 @@ const TYPE_OPTIONS = [
   { label: TICKET_TYPE_LABEL.onsite, value: "onsite" },
 ];
 
+/** Record-type filter strip — All / Ticket / Estimate / Warranty. This is the
+ *  RECORD kind (Ticket vs Repair Estimate vs future Warranty), NOT the intake
+ *  Type above (Walk-In/Pick-Up/On-Site). "warranty" is reserved for a future
+ *  flow; it shows in the strip so the architecture is visibly extensible. */
+const RECORD_TYPE_FILTERS: { label: string; value: RecordType | "all" }[] = [
+  { label: "All", value: "all" },
+  { label: "Ticket", value: "ticket" },
+  { label: "Estimate", value: "estimate" },
+  { label: "Warranty", value: "warranty" },
+];
+
 const WAITING_THRESHOLD_MINS = 40;
 
 /** Default rows shown per page in the ticket table (user-selectable 10/20/50/100). */
@@ -152,6 +165,11 @@ export default function TicketsPage() {
   // (Ticket.branchId → Store) from the already-loaded store list, so rendering
   // the Store column is a pure in-memory lookup — no per-row query (no N+1).
   const { isAllShops, stores, getStore } = useStoreContext();
+  // Permission gate for the estimate-only "Push to Ticket" conversion. Creating
+  // a Ticket from an Estimate requires ticket-create rights — a user who can
+  // only VIEW estimates must not be able to convert (spec §54/§56/§86).
+  const { can } = usePermissions();
+  const canPushToTicket = can("create_ticket") || can("manage_repair_jobs");
   // Multi-store mode = the consolidated All-Shops context AND the user can
   // actually see more than one store. In single-store mode the Store column is
   // hidden because the store is already obvious (avoids redundant info).
@@ -179,6 +197,10 @@ export default function TicketsPage() {
   // Ticket intake Type filter (Walk-In / Pick-Up / On-Site). Reads the saved
   // ticket Type via getTicketType — the same source as the WK/PD/OS avatar.
   const [typeFilter, setTypeFilter] = useState<string>("all");
+  // Record-type filter (All / Ticket / Estimate / Warranty). Composes with all
+  // existing filters and works immediately (no pinning required). Reads the
+  // authoritative recordType via getRecordType — never the id prefix.
+  const [recordTypeFilter, setRecordTypeFilter] = useState<string>("all");
   const [q, setQ] = useState("");
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   const [page, setPage] = useState(1);
@@ -205,6 +227,7 @@ export default function TicketsPage() {
       setTechFilter("all");
       setCustomerTypeFilter("all");
       setTypeFilter("all");
+      setRecordTypeFilter("all");
       setQ("");
       return;
     }
@@ -297,6 +320,12 @@ export default function TicketsPage() {
 
   // Push to Invoice confirmation
   const [pushInvoiceTarget, setPushInvoiceTarget] = useState<Ticket | null>(null);
+
+  // Push to Ticket (Estimate → Ticket) confirmation. Holds the Estimate being
+  // converted; Continue opens the prefilled Ticket flow. Guarded against
+  // double-clicks via `pushingToTicket`.
+  const [pushTicketTarget, setPushTicketTarget] = useState<Ticket | null>(null);
+  const [pushingToTicket, setPushingToTicket] = useState(false);
 
   // Tick for time-based highlights
   const [, setTick] = useState(0);
@@ -446,12 +475,15 @@ export default function TicketsPage() {
         const okTech = techFilter === "all" || t.technician === techFilter;
         const okCustomerType = customerTypeFilter === "all" || (customerTypeFilter === "personal" ? (t.customerType === "personal" || !t.customerType) : t.customerType === customerTypeFilter);
         const okType = typeFilter === "all" || getTicketType(t) === typeFilter;
+        // Record-type filter — resolves the AUTHORITATIVE type (getRecordType),
+        // so legacy rows without a recordType always count as "ticket".
+        const okRecordType = recordTypeFilter === "all" || getRecordType(t) === recordTypeFilter;
         const okQ =
           !q ||
           `${t.ticketNo ?? ""} ${t.id} ${t.customer} ${t.model} ${t.issue} ${t.phone} ${t.items?.map((i) => `${i.model} ${i.serial} ${i.issue}`).join(" ") || ""}`
             .toLowerCase()
             .includes(q.toLowerCase());
-        return okStore && okStatus && okDate && okPriority && okTech && okCustomerType && okType && okQ;
+        return okStore && okStatus && okDate && okPriority && okTech && okCustomerType && okType && okRecordType && okQ;
       });
       // Overdue Time ordering: oldest-overdue-first (the ticket whose due
       // date/time was crossed longest ago comes first). Tie-break on the
@@ -475,14 +507,14 @@ export default function TicketsPage() {
       const normal = ordered.filter((t) => !t.pinnedAt);
       return [...pinned, ...normal];
     },
-    [tickets, storeFilter, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]
+    [tickets, storeFilter, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, recordTypeFilter, q, searchFilterId]
   );
 
   // Reset to the first page whenever the filtered result set changes so
   // pagination always reflects the current filters/search.
   useEffect(() => {
     setPage(1);
-  }, [storeFilter, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, q, searchFilterId]);
+  }, [storeFilter, statusFilter, dateRange, customFrom, customTo, priorityFilter, techFilter, customerTypeFilter, typeFilter, recordTypeFilter, q, searchFilterId]);
 
   // Pagination — pinned records already float to the top of `list`, so slicing
   // here keeps pinned rows at the top of page 1 while respecting page size.
@@ -564,10 +596,28 @@ export default function TicketsPage() {
     if (action === "edit") { router.push(`/tickets/${ticket.id}`); return; }
     if (action === "print-preview") { router.push(`/print/ticket/${encodeURIComponent(ticket.id)}?format=a4`); return; }
     if (action === "download-pdf") { downloadTicket(ticket); return; }
-    if (action === "invoice") {
-      // Show a confirmation before pushing to invoice. The actual navigation
-      // (existing flow) runs on confirm via pushTicketToInvoice.
+    if (action === "invoice" || action === "push-to-proforma") {
+      // Push to Invoice (Ticket) / Push to Proforma (Estimate) — both open the
+      // device-selection popup, then pushTicketToInvoice runs on confirm. For an
+      // estimate it detects isEstimate and creates a PROFORMA (documentType=
+      // proforma); for a ticket it creates a normal invoice.
       setPushInvoiceTarget(ticket);
+      return;
+    }
+    if (action === "push-to-ticket") {
+      // Estimate → Ticket. If ALREADY converted, never create a second Ticket —
+      // jump to the existing linked Ticket instead (spec §32/§83).
+      if (ticket.estimateStatus === "converted" && ticket.convertedTicketId) {
+        router.push(`/tickets/${ticket.convertedTicketId}`);
+        return;
+      }
+      // Permission gate (UI half; store/backend also enforce it).
+      if (!canPushToTicket) {
+        toast.error("Not allowed", { description: "You don't have permission to create tickets from estimates." });
+        return;
+      }
+      // Show the confirmation popup; the actual conversion runs on Continue.
+      setPushTicketTarget(ticket);
       return;
     }
     if (action === "delete") {
@@ -584,7 +634,7 @@ export default function TicketsPage() {
     }
     setActiveTicket(ticket);
     setActiveDrawer(action);
-  }, [router, deleteTicket, downloadTicket, pinTicket]);
+  }, [router, deleteTicket, downloadTicket, pinTicket, canPushToTicket]);
 
   // Existing Push to Invoice flow — unchanged data-preservation logic, extended
   // so it can run after the device-selection popup returns the SELECTED ticket
@@ -594,6 +644,22 @@ export default function TicketsPage() {
       const p = new URLSearchParams();
       p.set("fromTicket", ticket.id);
       if (ticket.ticketNo) p.set("ticketNo", ticket.ticketNo);
+      // ── Estimate → Proforma ──
+      // When the source is a Repair Estimate, "Push to Invoice" must create a
+      // PROFORMA (a non-revenue commercial document), NOT a normal invoice. We
+      // flag the document type and carry the lineage so the created proforma is
+      // traceable back to the estimate (and any ticket the estimate spawned).
+      if (isEstimate(ticket)) {
+        p.set("documentType", "proforma");
+        p.set("sourceEstimateId", ticket.id);
+        if (ticket.convertedTicketId) p.set("sourceTicketId", ticket.convertedTicketId);
+      } else {
+        // A Ticket's Push to Invoice keeps its existing behaviour (normal
+        // invoice), and records the commercial-lineage ticket + originating
+        // estimate (if this ticket was created from one).
+        p.set("sourceTicketId", ticket.id);
+        if (ticket.convertedFromEstimateId) p.set("sourceEstimateId", ticket.convertedFromEstimateId);
+      }
       p.set("customer", ticket.customer);
       p.set("phone", ticket.phone);
       if (ticket.email) p.set("email", ticket.email);
@@ -680,7 +746,7 @@ export default function TicketsPage() {
               </Button>
             </Can>
             <Can permission="manage_repair_jobs">
-              <Link href="/tickets/new">
+              <Link href="/tickets/new?start=category">
                 <Button size="md" className="rounded-full">
                   <Plus className="h-4 w-4" /> Create Ticket
                 </Button>
@@ -900,6 +966,27 @@ export default function TicketsPage() {
         </div>
       </div>
 
+      {/* Record-Type Strip — All / Ticket / Estimate / Warranty. Sits BELOW the
+          Status strip. Uses the SAME pill styling as the Date strip so it reads
+          as one consistent filter language. Composes with every existing filter
+          (works immediately, no pinning needed). */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        {RECORD_TYPE_FILTERS.map((rt) => (
+          <button
+            key={rt.value}
+            onClick={() => setRecordTypeFilter(rt.value)}
+            className={cn(
+              "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
+              recordTypeFilter === rt.value
+                ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
+                : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground"
+            )}
+          >
+            {rt.label}
+          </button>
+        ))}
+      </div>
+
       {/* Bulk selection bar — sits ABOVE the table header as its own row. */}
       {someSelected && (
         <motion.div
@@ -1037,7 +1124,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId))}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId), t.convertedTicketId ? tickets.find((x) => x.id === t.convertedTicketId)?.ticketNo : undefined, canPushToTicket)}
                       </td>
                     ))}
                   </motion.tr>
@@ -1069,7 +1156,7 @@ export default function TicketsPage() {
                       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                         {t.pinnedAt && <Pin className="h-3 w-3 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
                         <span>{t.ticketNo ?? t.id}</span>
-                        <InvoiceCoverageCheck coverage={coverageFor(t)} size="xs" />
+                        {!isEstimate(t) && <InvoiceCoverageCheck coverage={coverageFor(t)} size="xs" />}
                         <span>· <span className="font-medium text-[#5B6FC0]">{t.phone}</span></span>
                       </p>
                       {/* Store context — mirrors the desktop STORE column so the
@@ -1082,14 +1169,20 @@ export default function TicketsPage() {
                     </div>
                   </div>
                 </div>
-                <span
-                  className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset"
-                  style={{
-                    backgroundColor: `${settings.statusColors[t.status] || "#71717A"}15`,
-                    color: settings.statusColors[t.status] || "#71717A",
-                    boxShadow: `inset 0 0 0 1px ${settings.statusColors[t.status] || "#71717A"}30`,
-                  }}
-                >{STATUS_LABEL[t.status]}</span>
+                {isEstimate(t) ? (
+                  <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", ESTIMATE_STATUS_TONE[t.estimateStatus ?? "waiting_approval"])}>
+                    {ESTIMATE_STATUS_LABEL[t.estimateStatus ?? "waiting_approval"]}
+                  </span>
+                ) : (
+                  <span
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset"
+                    style={{
+                      backgroundColor: `${settings.statusColors[t.status] || "#71717A"}15`,
+                      color: settings.statusColors[t.status] || "#71717A",
+                      boxShadow: `inset 0 0 0 1px ${settings.statusColors[t.status] || "#71717A"}30`,
+                    }}
+                  >{STATUS_LABEL[t.status]}</span>
+                )}
               </div>
               <button
                 type="button"
@@ -1134,7 +1227,7 @@ export default function TicketsPage() {
                   <span className="font-semibold tabular-nums text-sm">{formatINR(t.amount)}</span>
                   {isWaiting && <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-0.5 text-[10px] font-medium text-[#922B21] ring-1 ring-inset ring-red-200/60"><Clock className="h-2.5 w-2.5" />{elapsed}m+</span>}
                 </div>
-                <TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={coverageFor(t) === "full"} />
+                <TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={coverageFor(t) === "full"} canPushToTicket={canPushToTicket} />
               </div>
             </motion.div>
           );
@@ -1177,6 +1270,58 @@ export default function TicketsPage() {
           setPushInvoiceTarget(null);
         }}
       />
+
+      {/* Push to Ticket (Estimate → Ticket) confirmation — small centered popup
+          (spec §20/§66). Continue opens the EXISTING Ticket flow prefilled from
+          the Estimate at Device Details; the Estimate is only marked Converted
+          AFTER the new Ticket is finalized. Double-click protected. */}
+      {pushTicketTarget && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => { if (!pushingToTicket) setPushTicketTarget(null); }}>
+          <motion.div
+            initial={{ scale: 0.95, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-6"
+          >
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
+                <TicketCheck className="h-5 w-5" />
+              </span>
+              <div>
+                <h3 className="text-base font-bold">Create Ticket from Estimate</h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  This will open the Ticket workflow with the information captured in{" "}
+                  <span className="font-semibold text-foreground">{pushTicketTarget.ticketNo ?? pushTicketTarget.id}</span>
+                  {" "}prefilled
+                  {(() => {
+                    const n = getTicketDevices(pushTicketTarget).length;
+                    return n > 1 ? ` (${n} devices)` : "";
+                  })()}. The estimate stays saved until the new ticket is finalized.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <Button variant="outline" size="md" disabled={pushingToTicket} onClick={() => setPushTicketTarget(null)}>
+                Cancel
+              </Button>
+              <Button
+                size="md"
+                disabled={pushingToTicket}
+                onClick={() => {
+                  // Double-click protection — one Estimate must never spawn two
+                  // Tickets. Guard, then navigate to the prefilled Ticket flow.
+                  if (pushingToTicket) return;
+                  setPushingToTicket(true);
+                  const target = pushTicketTarget;
+                  router.push(`/tickets/new?fromEstimate=${encodeURIComponent(target.id)}`);
+                }}
+              >
+                {pushingToTicket ? "Opening…" : "Continue"}
+              </Button>
+            </div>
+          </motion.div>
+        </div>
+      )}
 
       {/* Delete Confirmation */}
       <ConfirmDialog
@@ -1302,6 +1447,12 @@ function renderCell(
   navigateToSection: (ticketId: string, section: "billing") => void,
   onDeviceStatusChange: (ticketId: string, deviceId: string, status: TicketStatus) => void,
   store?: StoreBranch | null,
+  /** For a converted Estimate, the human-readable number of the Ticket it
+   *  produced (resolved by the caller from the ticket list). */
+  convertedTicketNo?: string,
+  /** Whether the user may convert an Estimate to a Ticket (gates the estimate
+   *  "Push to Ticket" quick action). */
+  canPushToTicket?: boolean,
 ) {
   switch (colId) {
     case "store":
@@ -1324,11 +1475,21 @@ function renderCell(
           {t.pinnedAt && (
             <Pin className="h-3 w-3 shrink-0 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />
           )}
-          <span className="font-semibold text-foreground whitespace-nowrap">{t.ticketNo ?? t.id}</span>
+          <div className="min-w-0">
+            <span className="font-semibold text-foreground whitespace-nowrap">{t.ticketNo ?? t.id}</span>
+            {/* Converted-Estimate reference — subtle secondary line linking a
+                converted estimate to the Ticket it produced (design §64). */}
+            {isEstimate(t) && t.estimateStatus === "converted" && t.convertedTicketId && (
+              <p className="text-[10px] font-medium text-emerald-700 whitespace-nowrap">
+                → {convertedTicketNo ?? "Ticket"}
+              </p>
+            )}
+          </div>
           {/* Invoicing-coverage indicator — BLUE = fully invoiced, AMBER =
               partially invoiced (some devices still pending), nothing when not
-              invoiced. Reserved space via shrink-0 so it never pushes the id. */}
-          <InvoiceCoverageCheck coverage={coverage} />
+              invoiced. Reserved space via shrink-0 so it never pushes the id.
+              Estimates are never invoiced directly, so the check is hidden. */}
+          {!isEstimate(t) && <InvoiceCoverageCheck coverage={coverage} />}
         </div>
       );
     case "customer":
@@ -1465,6 +1626,22 @@ function renderCell(
       );
     }
     case "status": {
+      // ── Estimate records show their OWN outcome status (Waiting for Approval
+      //    / Converted Ticket / Lost Customer), NOT the device repair lifecycle.
+      //    These are conceptually different (see design §12). Rendered as a
+      //    restrained pill using the shared estimate tones; the converted link
+      //    is surfaced subtly below when present. ──
+      if (isEstimate(t)) {
+        const es = t.estimateStatus ?? "waiting_approval";
+        return (
+          <div className="flex flex-col items-start gap-0.5">
+            <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset", ESTIMATE_STATUS_TONE[es])}>
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              {ESTIMATE_STATUS_LABEL[es]}
+            </span>
+          </div>
+        );
+      }
       const statusDevices = getTicketDevices(t);
       // Single-device tickets keep the canonical ticket-level control — no
       // extra complexity. Multi-device tickets get ONE independent status
@@ -1519,7 +1696,7 @@ function renderCell(
         </button>
       );
     case "actions":
-      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={coverage === "full"} /></div>;
+      return <div onClick={(e) => e.stopPropagation()}><TicketActionsMenu ticket={t} onAction={handleAction} hasInvoice={coverage === "full"} canPushToTicket={canPushToTicket} /></div>;
     default:
       return null;
   }

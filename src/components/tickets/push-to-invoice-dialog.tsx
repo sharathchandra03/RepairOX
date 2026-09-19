@@ -36,6 +36,7 @@ import {
   getTicketDevices,
   getInvoicedTicketDeviceIds,
   findInvoiceForTicketDevice,
+  isEstimate,
   type Ticket,
   type Invoice,
   type DeviceRecord,
@@ -158,6 +159,11 @@ export function PushToInvoiceDialog({
 
   const isPartial = hasAlreadyInvoiced && eligible.length > 0;
   const ticketLabel = ticket?.ticketNo ?? ticket?.id ?? "";
+  // An Estimate's "Push to Invoice" creates a PROFORMA, so this device-selection
+  // popup relabels itself accordingly. Everything else (real tickets) keeps the
+  // Invoice wording.
+  const estimate = ticket ? isEstimate(ticket) : false;
+  const docNoun = estimate ? "Proforma" : "Invoice";
 
   return (
     <AnimatePresence>
@@ -187,10 +193,10 @@ export function PushToInvoiceDialog({
               </span>
               <div className="min-w-0 flex-1">
                 <h3 id="push-invoice-title" className="font-display text-base font-bold tracking-tight">
-                  {isPartial ? `Create another invoice for ${ticketLabel}` : "Create Invoice"}
+                  {isPartial ? `Create another ${docNoun.toLowerCase()} for ${ticketLabel}` : `Create ${docNoun}`}
                 </h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Select the devices you want to invoice.
+                  {estimate ? "Select the devices for the proforma." : "Select the devices you want to invoice."}
                 </p>
               </div>
               <button

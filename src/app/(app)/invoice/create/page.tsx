@@ -16,7 +16,7 @@ import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
-import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus } from "@/lib/mock-data";
+import type { Invoice, InvoiceLineItem, InvoiceStatus, InvoiceType, InvoiceDeviceRecord, TicketStatus, DocumentType } from "@/lib/mock-data";
 import { createInvoiceDeviceRecord } from "@/lib/mock-data";
 import { loadDeviceCategories, getCachedCategories } from "@/lib/device-categories";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, identifierDisplayLabel, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
@@ -75,7 +75,7 @@ type InvoiceFormDevice = {
 
 type InvoiceFormData = {
   customer: { name: string; phone: string; email: string; company: string; gstNumber: string };
-  details: { dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories" };
+  details: { dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories"; documentType: DocumentType; sourceEstimateId?: string; sourceTicketId?: string; sourceProformaId?: string };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
   /** Multi-device entries */
@@ -115,7 +115,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", email: "", company: "", gstNumber: "" },
-  details: { dueDate: "", employee: "", ticketId: "", ticketNo: "", ticketLocked: false, status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service" },
+  details: { dueDate: "", employee: "", ticketId: "", ticketNo: "", ticketLocked: false, status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service", documentType: "invoice" },
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
@@ -132,12 +132,19 @@ type NumberingCfg = { prefix: string; startNumber: number; digits: number };
  * defaults. The next number always continues from the highest EXISTING invoice in
  * the series, so changing settings never renumbers historical invoices.
  */
-function genInvoiceId(type: InvoiceType, existingInvoices: Invoice[], cfg?: NumberingCfg): string {
+function genInvoiceId(type: InvoiceType, existingInvoices: Invoice[], cfg?: NumberingCfg, documentType: DocumentType = "invoice"): string {
   const fallbackPrefix = type === "business" ? "INVG" : "INV";
-  const prefix = (cfg?.prefix?.trim()) || fallbackPrefix;
+  let prefix = (cfg?.prefix?.trim()) || fallbackPrefix;
   const digits = cfg?.digits && cfg.digits > 0 ? cfg.digits : 3;
-  const startNumber = cfg?.startNumber && cfg.startNumber > 0 ? cfg.startNumber : 1;
-  const existing = existingInvoices.filter((i) => i.invoiceType === type);
+  let startNumber = cfg?.startNumber && cfg.startNumber > 0 ? cfg.startNumber : 1;
+  // PROFORMA gets its OWN series prefixed with "P-" (→ "P-INV"), matching the
+  // DB-side nextInvoiceIdFromDb. This keeps proforma numbers from ever consuming
+  // a normal invoice number. The store re-checks against the DB on insert.
+  const isProformaDoc = documentType === "proforma";
+  if (isProformaDoc) { prefix = `P-${prefix}`; startNumber = 1; }
+  // Only compare within the SAME document type + invoice type so the running
+  // max never mixes proformas with normal invoices.
+  const existing = existingInvoices.filter((i) => i.invoiceType === type && (i.documentType ?? "invoice") === documentType);
   // Only count ids that match this series' canonical shape `<prefix><digits>`
   // (optionally with a store prefix like "KOR-INV054"). Off-series / malformed
   // ids (e.g. a duplicated invoice with a random suffix "INV-5483") are ignored
@@ -216,6 +223,9 @@ function InvoiceWizard() {
   // Tracks the id of a draft persisted from this flow, so repeated Save Draft
   // clicks update the same record instead of creating duplicates.
   const [draftId, setDraftId] = useState<string | null>(null);
+  // When this invoice is being created FROM a proforma (?fromProforma=), the
+  // source proforma id — so on submit we can mark it converted + linked.
+  const [fromProformaId, setFromProformaId] = useState<string | null>(null);
 
   // Pre-fill when editing
   useEffect(() => {
@@ -342,7 +352,38 @@ function InvoiceWizard() {
       setForm((prev) => ({
         ...prev,
         customer: { name: customer, phone, email, company, gstNumber: searchParams.get("gstNumber") || "" },
-        details: { ...prev.details, ticketId: fromTicket, ticketNo: ticketNoForId(fromTicket) || (searchParams.get("ticketNo") || fromTicket), ticketLocked: true, employee, status: "draft", repairStatus: "repaired_collected", invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType },
+        details: (() => {
+          // Distinguish the source of the push. When it comes from an ESTIMATE
+          // (Estimate → Proforma), `fromTicket` is the ESTIMATE id — NOT a
+          // ticket. In that case the proforma must NOT adopt the estimate id as
+          // its `ticketId`/`sourceTicketId` (that made the TICKET column show
+          // the estimate forever). It only records `sourceEstimateId`; the real
+          // ticket link is stamped later, when the estimate/proforma is pushed
+          // to a ticket. A push from a real TICKET keeps the existing behaviour.
+          const isEstimatePush = searchParams.get("documentType") === "proforma";
+          const explicitTicketId = searchParams.get("sourceTicketId") || undefined;
+          return {
+            ...prev.details,
+            // No ticket yet for an estimate push (unless the estimate already
+            // had a converted ticket, passed explicitly).
+            ticketId: isEstimatePush ? (explicitTicketId || "") : fromTicket,
+            ticketNo: isEstimatePush
+              ? (explicitTicketId ? (ticketNoForId(explicitTicketId) || explicitTicketId) : "")
+              : (ticketNoForId(fromTicket) || (searchParams.get("ticketNo") || fromTicket)),
+            ticketLocked: true,
+            employee,
+            status: "draft",
+            repairStatus: "repaired_collected",
+            invoiceType: (searchParams.get("customerType") === "business" ? "business" : "retail") as InvoiceType,
+            // Document type + commercial lineage. When the push originates from
+            // an Estimate the caller sets documentType=proforma so this flow
+            // produces a PROFORMA, not a normal invoice.
+            documentType: (isEstimatePush ? "proforma" : "invoice") as DocumentType,
+            sourceEstimateId: searchParams.get("sourceEstimateId") || undefined,
+            // Only a REAL ticket id — never the estimate id.
+            sourceTicketId: isEstimatePush ? explicitTicketId : (explicitTicketId || fromTicket),
+          };
+        })(),
         items: flatItems,
         devices: formDevices.length > 0 ? formDevices : prev.devices,
         activeDeviceIndex: 0,
@@ -354,13 +395,47 @@ function InvoiceWizard() {
     }
   }, [searchParams, editId, ticketNoForId]);
 
+  // Pre-fill from a PROFORMA (?fromProforma=) — the "Push to Invoice" flow for a
+  // proforma that already has a linked ticket. We reuse the proforma's captured
+  // commercial data (customer / devices / parts / pricing / notes) so the user
+  // can review and adjust before creating the FINAL normal invoice. The created
+  // record is a normal invoice (documentType invoice) linked back to the source
+  // proforma; the proforma is marked converted on submit (see handleSubmit).
+  useEffect(() => {
+    const pid = searchParams.get("fromProforma");
+    if (!pid || editId) return;
+    const proforma = invoices.find((i) => i.id === pid);
+    if (!proforma) return;
+    setFromProformaId(pid);
+    const seeded = invoiceToForm(proforma, ticketNoForId(proforma.ticketId ?? proforma.sourceTicketId));
+    setForm({
+      ...seeded,
+      details: {
+        ...seeded.details,
+        // The NEW record is a NORMAL, revenue-bearing invoice — not a proforma.
+        documentType: "invoice",
+        // Fresh financial lifecycle (proforma statuses never carry over).
+        status: "draft",
+        // Commercial lineage: where this invoice came from.
+        sourceProformaId: proforma.id,
+        sourceEstimateId: proforma.sourceEstimateId,
+        sourceTicketId: proforma.sourceTicketId ?? proforma.ticketId,
+        // Link + lock to the proforma's ticket so the invoice ↔ ticket relation
+        // is preserved (and the field is read-only in the flow).
+        ticketId: proforma.sourceTicketId ?? proforma.ticketId ?? "",
+        ticketNo: ticketNoForId(proforma.sourceTicketId ?? proforma.ticketId) || "",
+        ticketLocked: !!(proforma.sourceTicketId ?? proforma.ticketId),
+      },
+    });
+  }, [searchParams, editId, invoices, ticketNoForId]);
+
   // Seed defaults from Settings → Invoice for brand-new invoices only.
   // Never runs for edits (?edit=) or ticket pushes (?fromTicket=), and only once,
   // so it never overwrites user input or historical invoice values.
   const seededRef = useRef(false);
   useEffect(() => {
     if (seededRef.current) return;
-    if (editId || searchParams.get("fromTicket")) return; // don't touch edits/pushes
+    if (editId || searchParams.get("fromTicket") || searchParams.get("fromProforma")) return; // don't touch edits/pushes
     if (!settingsHydrated) return; // wait for settings to load
     seededRef.current = true;
     const d = settings.invoiceDefaults;
@@ -461,23 +536,32 @@ function InvoiceWizard() {
     // Flat items = all parts from all devices (for backward compat and totals)
     const allItems = hasDevices ? form.devices.flatMap((d) => d.parts) : form.items;
 
+    const isProformaDoc = form.details.documentType === "proforma";
+    // A Proforma is NON-FINANCIAL: its financial `status` is forced to a
+    // non-payment value ("draft") so it can never imply payment; its lifecycle
+    // is tracked separately via `proformaStatus`. The Status/paid overrides in
+    // the wizard never apply to proformas.
+    const finalStatus: InvoiceStatus = isProformaDoc ? "draft" : (statusOverride ?? form.details.status);
     const invoice: Invoice = {
       id: editId || draftId || genInvoiceId(
         form.details.invoiceType as InvoiceType,
         invoices,
         settings.invoiceNumbering[(form.details.invoiceType as InvoiceType) === "business" ? "business" : "retail"],
+        form.details.documentType,
       ),
       invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
       phone: form.customer.phone,
       email: form.customer.email || undefined,
       company: form.customer.company || undefined,
-      status: statusOverride ?? form.details.status,
+      status: finalStatus,
       createdAt: isEdit ? (invoices.find((i) => i.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
       dueDate: form.details.dueDate || new Date(Date.now() + 7 * 86_400_000).toISOString(),
-      paidAmount: isEdit
-        ? (invoices.find((i) => i.id === editId)?.paidAmount || 0)
-        : ((statusOverride ?? form.details.status) === "paid" ? totals.total : 0),
+      paidAmount: isProformaDoc
+        ? 0
+        : isEdit
+          ? (invoices.find((i) => i.id === editId)?.paidAmount || 0)
+          : ((statusOverride ?? form.details.status) === "paid" ? totals.total : 0),
       items: allItems,
       subtotal: totals.subtotal,
       discount: totals.discount,
@@ -499,6 +583,16 @@ function InvoiceWizard() {
       serviceCategory: form.details.serviceCategory || "service",
       gstNumber: form.customer.gstNumber || undefined,
       devices: invoiceDevices.length > 0 ? invoiceDevices : undefined,
+      // Document type + commercial lineage.
+      documentType: form.details.documentType,
+      proformaStatus: isProformaDoc
+        ? (isEdit ? (invoices.find((i) => i.id === editId)?.proformaStatus ?? "open") : "open")
+        : undefined,
+      sourceEstimateId: form.details.sourceEstimateId || undefined,
+      sourceTicketId: form.details.sourceTicketId || undefined,
+      sourceProformaId: form.details.sourceProformaId || undefined,
+      // Preserve an existing proforma→invoice link when editing.
+      convertedInvoiceId: isEdit ? invoices.find((i) => i.id === editId)?.convertedInvoiceId : undefined,
     };
 
     return invoice;
@@ -525,10 +619,16 @@ function InvoiceWizard() {
         setDirty(true);
         return;
       }
+      // If this invoice was created FROM a proforma, mark the proforma as
+      // converted + link it to this new invoice (the proforma stays as the
+      // historical source document; it is never edited/deleted).
+      if (fromProformaId) {
+        await updateInvoice(fromProformaId, { convertedInvoiceId: savedId, proformaStatus: "converted" });
+      }
       setCreatedInvoiceId(savedId);
       setShowSuccessAnimation(true);
     }
-  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router]);
+  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId]);
 
   // Save Draft — persist current form to the DB with status "draft" without
   // finalizing the invoice or leaving the flow. Re-uses the same invoice store
@@ -603,6 +703,7 @@ function InvoiceWizard() {
       <CreationSuccess
         type="invoice"
         id={createdInvoiceId}
+        isProforma={form.details.documentType === "proforma"}
         onComplete={() => {
           setShowSuccessAnimation(false);
           setShowCompletion(true);
@@ -616,6 +717,7 @@ function InvoiceWizard() {
       <CompletionScreen
         type="invoice"
         id={createdInvoiceId}
+        isProforma={form.details.documentType === "proforma"}
         onBack={() => router.push("/invoice")}
         onEdit={() => router.push(`/invoice/${createdInvoiceId}`)}
       />
@@ -643,7 +745,7 @@ function InvoiceWizard() {
           <span>/</span>
           <button onClick={() => attemptNav("/invoice")} className="hover:text-foreground transition">Invoices</button>
           <span>/</span>
-          <span className="text-foreground font-semibold">{isEdit ? `Edit ${editId}` : "Create Invoice"}</span>
+          <span className="text-foreground font-semibold">{isEdit ? `Edit ${editId}` : (form.details.documentType === "proforma" ? "Create Proforma Invoice" : "Create Invoice")}</span>
         </nav>
 
         <div className="flex-1" />
@@ -723,7 +825,10 @@ function InvoiceWizard() {
               </Button>
             ) : (
               <Button size="md" onClick={handleSubmit} className="mr-[145px]">
-                <Save className="h-4 w-4" /> {isEdit ? "Save Invoice" : "Create Invoice"}
+                <Save className="h-4 w-4" /> {(() => {
+                  const noun = form.details.documentType === "proforma" ? "Proforma" : "Invoice";
+                  return isEdit ? `Save ${noun}` : `Create ${noun}`;
+                })()}
               </Button>
             )}
           </div>
@@ -777,7 +882,7 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
 
   return {
     customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "" },
-    details: { dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service" },
+    details: { dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service", documentType: inv.documentType ?? "invoice", sourceEstimateId: inv.sourceEstimateId, sourceTicketId: inv.sourceTicketId, sourceProformaId: inv.sourceProformaId },
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
@@ -1500,10 +1605,19 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <div className="space-y-1.5">
           <Label>Status</Label>
-          <Select value={d.status} onChange={(e: any) => updateForm((f) => ({ ...f, details: { ...f.details, status: e.target.value } }))} options={[
-            { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" }, { label: "Paid", value: "paid" },
-            { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
-          ]} />
+          {d.documentType === "proforma" ? (
+            // A Proforma is a NON-financial commercial document — it never carries
+            // a payment status (Paid/Sent/Overdue…). Show a fixed, read-only label
+            // instead of the financial status selector.
+            <div className="flex h-11 items-center rounded-xl border border-border bg-muted/50 px-3 text-sm font-medium text-[#3347D6]">
+              Proforma Invoice (non-financial)
+            </div>
+          ) : (
+            <Select value={d.status} onChange={(e: any) => updateForm((f) => ({ ...f, details: { ...f.details, status: e.target.value } }))} options={[
+              { label: "Draft", value: "draft" }, { label: "Sent", value: "sent" }, { label: "Paid", value: "paid" },
+              { label: "Partial", value: "partial" }, { label: "Overdue", value: "overdue" }, { label: "Cancelled", value: "cancelled" },
+            ]} />
+          )}
         </div>
         <div className="space-y-1.5">
           <Label>Mode of Payment</Label>
@@ -1625,7 +1739,7 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
           <div className="flex items-center gap-2.5">
             <span className="grid h-8 w-8 place-items-center rounded-xl bg-[#4361EE]/10 text-[#4361EE]"><ClipboardCheck className="h-4 w-4" /></span>
             <div>
-              <h2 className="font-display text-base font-bold leading-tight">Review Invoice</h2>
+              <h2 className="font-display text-base font-bold leading-tight">Review {form.details.documentType === "proforma" ? "Proforma" : "Invoice"}</h2>
               <p className="text-[11px] text-muted-foreground">Confirm the details before {isEdit ? "saving" : "creating"}.</p>
             </div>
           </div>

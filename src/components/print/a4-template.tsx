@@ -91,7 +91,7 @@ function SectionHead({ title }: { title: string }) {
 }
 
 function TicketServiceReport({ data }: { data: PrintDocumentData }) {
-  const { store, customer, ticket } = data;
+  const { store, customer, ticket, printTitle } = data;
   const t = ticket!;
 
   const isBusiness = t.customerType === "business";
@@ -252,9 +252,10 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
             </div>
           </div>
 
-          {/* RIGHT: service report identity */}
+          {/* RIGHT: document identity — "Service Report" for tickets,
+              "Repair Estimate" for estimate records (driven by printTitle). */}
           <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.5, color: BRAND.navy, textTransform: "uppercase" }}>Service Report</div>
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.5, color: BRAND.navy, textTransform: "uppercase" }}>{printTitle}</div>
             {/* Date · Time · Retail/Business — pulled up right under the title */}
             <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, fontSize: 9, color: BRAND.slate }}>
               <span>{createdDate} · {createdTime}</span>
@@ -644,6 +645,11 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
   const createdDate = formatPrintDate(inv.createdAt);
   const createdTime = formatPrintTime(inv.createdAt);
   const statusInfo = INVOICE_STATUS_STYLE[inv.status] || INVOICE_STATUS_STYLE.due;
+  // A Proforma is a NON-financial commercial document — its print MUST NOT show
+  // any financial status label (Paid/Sent/Overdue/Draft) that would imply it is
+  // a payable/paid invoice (spec §17). We suppress every status pill/field and
+  // the payment/balance rows for proformas.
+  const isProformaDoc = (inv.documentType ?? "invoice") === "proforma";
 
   // GST is shown only when tax is actually applied.
   const sgst = inv.sgst || 0;
@@ -763,9 +769,12 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
                 <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", backgroundColor: isBusiness ? "#FEF3C7" : BRAND.band, color: isBusiness ? "#92400E" : BRAND.blue, border: `1px solid ${isBusiness ? "#FCD34D" : BRAND.border}` }}>
                   {isBusiness ? "Business / GST" : "Retail"}
                 </span>
-                <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 4, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", backgroundColor: statusInfo.bg, color: statusInfo.color, border: `1px solid ${statusInfo.border}` }}>
-                  {statusInfo.label}
-                </span>
+                {/* Proforma prints show NO financial status pill. */}
+                {!isProformaDoc && (
+                  <span style={{ display: "inline-block", padding: "2px 10px", borderRadius: 4, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", backgroundColor: statusInfo.bg, color: statusInfo.color, border: `1px solid ${statusInfo.border}` }}>
+                    {statusInfo.label}
+                  </span>
+                )}
               </span>
             </div>
             <div style={{ marginTop: 6, backgroundColor: BRAND.blue, color: BRAND.white, borderRadius: 8, padding: "6px 14px", display: "inline-block", textAlign: "left", minWidth: 150 }}>
@@ -798,13 +807,14 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
             <SectionHead title="Invoice Information" />
             <div style={{ padding: "7px 10px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 14px" }}>
-              <Field label="Invoice Number" value={inv.invoiceId} />
-              <Field label="Invoice Date" value={`${createdDate} (${createdTime})`} />
-              <Field label="Due Date" value={inv.dueDate ? formatPrintDate(inv.dueDate) : "—"} />
+              <Field label={isProformaDoc ? "Proforma Number" : "Invoice Number"} value={inv.invoiceId} />
+              <Field label={isProformaDoc ? "Proforma Date" : "Invoice Date"} value={`${createdDate} (${createdTime})`} />
+              {/* Proforma is non-financial: no Due Date, no Status, no Payment Mode. */}
+              {!isProformaDoc && <Field label="Due Date" value={inv.dueDate ? formatPrintDate(inv.dueDate) : "—"} />}
               <Field label="Type" value={invoiceTypeLabel} />
               <Field label="Category" value={inv.serviceCategory || "service"} />
-              <Field label="Status" value={statusInfo.label} />
-              {inv.paymentMode ? <Field label="Payment Mode" value={inv.paymentMode.replace(/_/g, " ")} /> : null}
+              {!isProformaDoc && <Field label="Status" value={statusInfo.label} />}
+              {!isProformaDoc && inv.paymentMode ? <Field label="Payment Mode" value={inv.paymentMode.replace(/_/g, " ")} /> : null}
               {inv.employee ? <Field label="Salesperson" value={inv.employee} /> : null}
               {inv.ticketId ? <Field label="Ticket Number" value={inv.linkedTicketNo || inv.ticketId} /> : null}
             </div>
@@ -879,7 +889,7 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
         <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 10, marginTop: 7, alignItems: "stretch", ...NO_BREAK }}>
           {/* LEFT: payment / supporting info */}
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
-            <SectionHead title="Payment Details" />
+            <SectionHead title={isProformaDoc ? "Document Details" : "Payment Details"} />
             <div style={{ padding: "7px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
               <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 18px" }}>
                 <span style={{ fontSize: 9.5, color: BRAND.slate }}>
@@ -890,9 +900,11 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
                     <span style={{ fontWeight: 700, color: BRAND.navy }}>Mode: </span>{inv.paymentMode.replace(/_/g, " ")}
                   </span>
                 ) : null}
-                <span style={{ fontSize: 9.5, color: BRAND.slate }}>
-                  <span style={{ fontWeight: 700, color: BRAND.navy }}>Status: </span>{statusInfo.label}
-                </span>
+                {!isProformaDoc && (
+                  <span style={{ fontSize: 9.5, color: BRAND.slate }}>
+                    <span style={{ fontWeight: 700, color: BRAND.navy }}>Status: </span>{statusInfo.label}
+                  </span>
+                )}
                 {inv.ticketId ? (
                   <span style={{ fontSize: 9.5, color: BRAND.slate }}>
                     <span style={{ fontWeight: 700, color: BRAND.navy }}>Ticket: </span>{inv.ticketId}
@@ -941,12 +953,13 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
                 )
               ) : null}
               <div style={{ borderTop: `1px dashed ${BRAND.border}`, margin: "2px 0" }} />
-              <SummaryRow label="Total" value={formatPrintCurrency(inv.total)} strong accent />
-              <SummaryRow label="Total Paid" value={formatPrintCurrency(inv.paidAmount)} />
+              <SummaryRow label={isProformaDoc ? "Grand Total" : "Total"} value={formatPrintCurrency(inv.total)} strong accent />
+              {/* Proforma is non-financial — no paid amount, no balance due. */}
+              {!isProformaDoc && <SummaryRow label="Total Paid" value={formatPrintCurrency(inv.paidAmount)} />}
             </div>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: BRAND.band, borderTop: `1px solid ${BRAND.border}`, padding: "8px 12px" }}>
-              <span style={{ fontSize: 11, fontWeight: 800, color: BRAND.navy }}>Balance Due</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: BRAND.blue }}>{formatPrintCurrency(inv.balance)}</span>
+              <span style={{ fontSize: 11, fontWeight: 800, color: BRAND.navy }}>{isProformaDoc ? "Grand Total" : "Balance Due"}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: BRAND.blue }}>{formatPrintCurrency(isProformaDoc ? inv.total : inv.balance)}</span>
             </div>
           </div>
         </div>

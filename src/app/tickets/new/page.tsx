@@ -26,7 +26,7 @@ import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
-import { deriveTicketStatus, createWalkInDevice, getWalkInDevices, type Ticket, type TicketStatus, type WalkIn, type WalkInDevice } from "@/lib/mock-data";
+import { deriveTicketStatus, createWalkInDevice, getWalkInDevices, getRecordType, getTicketDevices, getInvoiceDevices, type Ticket, type TicketStatus, type WalkIn, type WalkInDevice, type Invoice } from "@/lib/mock-data";
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
@@ -343,15 +343,36 @@ function NewTicketWizard() {
   // Field Job conversion (Pickup & Drop route): prefill from the field job and
   // land on Device Details, exactly like a Walk-In conversion.
   const fromFieldJobId = searchParams.get("fromFieldJob");
+  // Direct-to-Category entry (e.g. Tickets → "Create Ticket"): the process is
+  // already known to be "New Ticket", so skip the Process step and land on
+  // Category (step 2) with process preselected.
+  const skipToCategory = searchParams.get("start") === "category";
+  // Estimate → Ticket conversion: prefill from the source Estimate and land on
+  // Device Details (step 3), exactly like a Walk-In / Field-Job conversion. The
+  // Estimate is only marked "Converted Ticket" AFTER the new Ticket is created.
+  const fromEstimateId = searchParams.get("fromEstimate");
+  // Proforma → Ticket (quote-first lifecycle). Two shapes:
+  //   • viaProforma — the richer path: we routed through the source ESTIMATE
+  //     (fromEstimate) and ALSO link the resulting ticket back to this proforma.
+  //   • fromProforma — the fallback for an estimate-less proforma: prefill the
+  //     ticket directly from the proforma's devices/customer.
+  const viaProformaId = searchParams.get("viaProforma");
+  const fromProformaId = searchParams.get("fromProforma");
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
-  const { tickets, addTicket, updateTicket, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
+  const { tickets, invoices, addTicket, updateTicket, updateInvoice, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
   const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
   const { updateLead } = useLeads();
   const { settings } = useStoreSettings();
 
-  // Start on Device Details (step 3) for edit, walk-in and field-job conversion.
-  const [step, setStep] = useState(editId || fromWalkInId || fromFieldJobId ? 3 : 1);
-  const [data, setData] = useState<WizardData>(DEFAULT);
+  // Start on Device Details (step 3) for edit, walk-in, field-job and
+  // estimate→ticket conversion. Start on Category (step 2) when entering
+  // directly from "Create Ticket".
+  const [step, setStep] = useState(
+    editId || fromWalkInId || fromFieldJobId || fromEstimateId || fromProformaId ? 3 : skipToCategory ? 2 : 1
+  );
+  const [data, setData] = useState<WizardData>(
+    skipToCategory ? { ...DEFAULT, process: "ticket" } : DEFAULT
+  );
   const [submitted, setSubmitted] = useState(false);
   const [showSuccessAnimation, setShowSuccessAnimation] = useState(false);
   const [createdTicketId, setCreatedTicketId] = useState("");
@@ -360,6 +381,23 @@ function NewTicketWizard() {
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [showSaveToast, setShowSaveToast] = useState(false);
   const isEdit = !!editId;
+  // The source Estimate being converted (Push to Ticket). Read from the live
+  // store so all its captured data (devices, customer, etc.) is available for
+  // prefill and so we can link/convert it after the new Ticket is created.
+  const sourceEstimate = fromEstimateId ? tickets.find((t) => t.id === fromEstimateId) : undefined;
+  // The source Proforma being converted to a Ticket (quote-first lifecycle),
+  // referenced by either viaProforma (routed through the estimate) or
+  // fromProforma (estimate-less proforma). Used for prefill + linking on save.
+  const sourceProforma: Invoice | undefined = (viaProformaId || fromProformaId)
+    ? invoices.find((inv) => inv.id === (viaProformaId || fromProformaId))
+    : undefined;
+  // Estimate MODE = we are creating or editing an ESTIMATE record (not a
+  // conversion, which produces a normal Ticket). Drives labels + the record
+  // type stamped on save. When editing, the edited record's own type decides.
+  const editingRecord = editId ? tickets.find((t) => t.id === editId) : undefined;
+  const isEstimateMode = isEdit
+    ? getRecordType(editingRecord ?? { recordType: "ticket" }) === "estimate"
+    : (data.process === "estimate" && !fromEstimateId);
 
   // Pre-fill data when editing
   useEffect(() => {
@@ -370,6 +408,70 @@ function NewTicketWizard() {
       }
     }
   }, [editId, tickets]);
+
+  // Pre-fill from a source Estimate (Push to Ticket). An Estimate is a
+  // ticket-shaped record with the FULL captured data, so we reuse the SAME
+  // ticketToWizard mapping as edit — every device, customer field, part,
+  // price, QC entry and note carries over 1:1 (spec §26/§27/§67). The result
+  // is a brand-new TICKET (process reset to "ticket"), NOT an estimate — the
+  // recordType/estimate metadata is intentionally dropped so the new record is
+  // a normal Ticket. We land on Device Details (step 3, set above) so the user
+  // reviews the prefilled data rather than re-picking Process/Category.
+  const estimatePrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!fromEstimateId || estimatePrefilledRef.current) return;
+    if (!sourceEstimate) return; // tickets may still be hydrating
+    estimatePrefilledRef.current = true;
+    const wizard = ticketToWizard(sourceEstimate);
+    setData({ ...wizard, process: "ticket" });
+  }, [fromEstimateId, sourceEstimate]);
+
+  // Pre-fill directly from a PROFORMA (quote-first lifecycle, estimate-less
+  // fallback). Only used when the proforma has no source estimate to route
+  // through — otherwise the estimate prefill above runs (viaProforma). Maps the
+  // proforma's invoice devices + customer to a new TICKET at Device Details.
+  const proformaPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!fromProformaId || proformaPrefilledRef.current) return;
+    if (!sourceProforma) return; // invoices may still be hydrating
+    proformaPrefilledRef.current = true;
+    const invDevices = getInvoiceDevices(sourceProforma);
+    const wizardDevices: WizardDevice[] = invDevices.map((d) => {
+      const dev = createWizardDevice(d.category || undefined);
+      dev.device.brand = d.brand || "";
+      dev.device.brandId = (d as any).brandId || undefined;
+      dev.device.model = d.model || "";
+      dev.device.modelId = (d as any).modelId || undefined;
+      dev.device.imei = d.imei || "";
+      dev.device.imeiType = d.imeiType === "serial" ? "serial" : "imei";
+      dev.job.issue = d.issue || "";
+      dev.job.description = (d as any).description || "";
+      dev.job.jobType = (d as any).jobType || "service";
+      dev.job.deviceColour = (d as any).deviceColour || "";
+      dev.category = d.category || "";
+      // Carry the proforma's parts/pricing across so the ticket keeps the quote.
+      dev.parts = (d.parts || []).map((p: any) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.price ?? p.unitPrice, total: p.total, uom: p.uom }));
+      return dev;
+    });
+    const nameParts = (sourceProforma.customer || "").trim().split(/\s+/);
+    setData({
+      ...DEFAULT,
+      process: "ticket",
+      category: wizardDevices[0]?.category || undefined,
+      devices: wizardDevices.length > 0 ? wizardDevices : [createWizardDevice()],
+      activeDeviceIndex: 0,
+      contactType: (sourceProforma.company ? "business" : "personal"),
+      customer: {
+        first: nameParts[0] || "",
+        last: nameParts.slice(1).join(" ") || "",
+        phone: sourceProforma.phone || "",
+        email: sourceProforma.email || "",
+        address: "", postal: "", city: "",
+        company: sourceProforma.company || "",
+      },
+      customerId: null,
+    });
+  }, [fromProformaId, sourceProforma]);
 
   // Pre-fill data when converting from a Walk-In. Reuses the SAME prefill
   // mechanism as edit: build a WizardData and setData once. Category/brand are
@@ -502,7 +604,9 @@ function NewTicketWizard() {
       setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex - 1 }));
       return;
     }
-    if (step === 1) {
+    // When entered directly at Category (Process step skipped), Back from
+    // step 2 closes the wizard rather than revealing the skipped Process step.
+    if (step === 1 || (step === 2 && skipToCategory)) {
       attemptNav(closeTarget);
     } else {
       setStep((s) => Math.max(1, s - 1));
@@ -682,6 +786,20 @@ function NewTicketWizard() {
       linkedLeadId: (fromFieldJobId ? getFieldJob(fromFieldJobId)?.leadId : undefined)
         || (fromWalkInId ? walkIns.find((w) => w.id === fromWalkInId)?.linkedLeadId : undefined)
         || (isEdit ? tickets.find((t) => t.id === editId)?.linkedLeadId : undefined) || undefined,
+      // ── Record type + Estimate lifecycle ──
+      // Estimate mode → save as an ESTIMATE record starting at Waiting for
+      // Approval. An edit preserves the existing record's type/status. A normal
+      // ticket (incl. estimate→ticket conversion) is recordType "ticket".
+      recordType: isEstimateMode ? "estimate" : "ticket",
+      estimateStatus: isEstimateMode
+        ? (isEdit ? (editingRecord?.estimateStatus ?? "waiting_approval") : "waiting_approval")
+        : undefined,
+      // Preserve conversion links on edit; the estimate→ticket link is stamped
+      // AFTER creation (see below) since the new ticket id isn't known yet.
+      convertedTicketId: isEdit ? editingRecord?.convertedTicketId : undefined,
+      convertedFromEstimateId: fromEstimateId
+        || (isEdit ? tickets.find((t) => t.id === editId)?.convertedFromEstimateId : undefined)
+        || undefined,
     };
 
     if (isEdit) {
@@ -695,6 +813,29 @@ function NewTicketWizard() {
       // addTicket assigns the real sequential ticket number (T-001, …) from the
       // DB and returns it. Use that id everywhere downstream.
       const newId = await addTicket(ticketData);
+      // ── Estimate → Ticket conversion (atomic, spec §21/§22/§45/§46) ──
+      // Only AFTER the Ticket is successfully created do we mark the source
+      // Estimate "Converted Ticket" and link it to the new Ticket. If addTicket
+      // had failed the estimate would remain Waiting for Approval (no premature
+      // conversion). The Estimate itself is never deleted or overwritten — it
+      // stays as the historical quote record.
+      if (fromEstimateId && sourceEstimate && sourceEstimate.estimateStatus !== "converted") {
+        const linkId = newId || ticketData.id;
+        await updateTicket(fromEstimateId, {
+          estimateStatus: "converted",
+          convertedTicketId: linkId,
+        });
+      }
+      // ── Proforma → Ticket linkage (quote-first lifecycle) ──
+      // When this ticket was created FROM a proforma (directly, or via its
+      // source estimate), stamp the proforma with the resulting ticket so its
+      // "Push to Invoice" now resolves the ticket and its lineage shows the
+      // full Estimate → Proforma → Ticket → Invoice chain. The proforma stays a
+      // proforma (it becomes "converted" only when a real invoice is created).
+      if (sourceProforma) {
+        const linkId = newId || ticketData.id;
+        await updateInvoice(sourceProforma.id, { sourceTicketId: linkId });
+      }
       // Walk-In conversion: link the created ticket back to its source walk-in
       // and mark it converted. This is the ONLY place a walk-in becomes
       // "Converted Ticket" — clicking Convert alone never creates a ticket.
@@ -912,6 +1053,7 @@ function NewTicketWizard() {
       <CreationSuccess
         type="ticket"
         id={createdTicketId}
+        isEstimate={isEstimateMode}
         onComplete={() => {
           setShowSuccessAnimation(false);
           setSubmitted(true);
@@ -925,6 +1067,7 @@ function NewTicketWizard() {
       <CompletionScreen
         type="ticket"
         id={createdTicketId}
+        isEstimate={isEstimateMode}
         onBack={() => router.push("/tickets")}
         onEdit={() => router.push(`/tickets/${createdTicketId}`)}
       />
@@ -939,8 +1082,14 @@ function NewTicketWizard() {
         onStepClick={goToStep}
         onClose={isEdit ? () => attemptNav(`/tickets/${editId}`) : undefined}
         closeHref={isEdit ? undefined : closeTarget}
-        title={isEdit ? `Edit Ticket ${tickets.find((t) => t.id === editId)?.ticketNo ?? editId}` : titleFor(step)}
-        subtitle={isEdit ? "Update ticket details below." : subtitleFor(step)}
+        title={isEdit
+          ? `Edit ${isEstimateMode ? "Estimate" : "Ticket"} ${tickets.find((t) => t.id === editId)?.ticketNo ?? editId}`
+          // On the final Confirmation step in estimate mode, relabel the big
+          // heading "Estimate Confirmation" (matches the Create Estimate CTA).
+          : (isEstimateMode && step === 11 ? "Estimate Confirmation" : titleFor(step))}
+        subtitle={isEdit
+          ? `Update ${isEstimateMode ? "estimate" : "ticket"} details below.`
+          : (isEstimateMode && step === 11 ? "Verify all details before creating the estimate." : subtitleFor(step))}
         isEdit={isEdit}
         footer={isEdit ? (
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
@@ -966,6 +1115,13 @@ function NewTicketWizard() {
                 if (id === "invoice") { router.push("/invoice/create"); return; }
                 if (id === "stock") { router.push("/inventory/add-item"); return; }
                 if (id === "walkin") { router.push("/walk-in"); return; }
+                // Warranty is a reserved future record type — the flow is not
+                // implemented yet, so selecting it does nothing (the card stays
+                // visible for discoverability + the table's future filter).
+                if (id === "warranty") { return; }
+                // "ticket" and "estimate" both use THIS wizard. The process is
+                // stored on the wizard data and stamped as recordType on save
+                // (estimate → recordType "estimate", Waiting for Approval).
                 setData({ ...data, process: id }); setTimeout(next, 180);
               }}
             />
@@ -1000,7 +1156,7 @@ function NewTicketWizard() {
           {step === 8 && <QuoteSummary data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 9 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
           {step === 10 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 11 && <ConfirmationStep onSubmit={handleSubmit} isEdit={isEdit} data={data} />}
+          {step === 11 && <ConfirmationStep onSubmit={handleSubmit} isEdit={isEdit} data={data} isEstimate={isEstimateMode} />}
         </div>
       </WizardShell>
 
@@ -3442,8 +3598,13 @@ function UploadStep({ data, setData, onNext, isEdit }: any) {
 }
 
 /* ---------------- Step 11: Ticket Confirmation ---------------- */
-function ConfirmationStep({ onSubmit, isEdit, data }: { onSubmit: () => void; isEdit: boolean; data: any }) {
+function ConfirmationStep({ onSubmit, isEdit, data, isEstimate = false }: { onSubmit: () => void; isEdit: boolean; data: any; isEstimate?: boolean }) {
   const [confirmed, setConfirmed] = useState(false);
+  // Estimate mode only swaps the wording — the checklist + submit path are
+  // identical, so the normal ticket flow is untouched. `noun` drives every
+  // record-type-specific label below.
+  const noun = isEstimate ? "Estimate" : "Ticket";
+  const nounLower = isEstimate ? "estimate" : "ticket";
   const customerName = `${data.customer.first} ${data.customer.last}`.trim() || "Walk-in Customer";
   const primaryDevice = data.devices[0];
   const hasIssue = !!(primaryDevice?.job?.issue || primaryDevice?.job?.description);
@@ -3457,8 +3618,8 @@ function ConfirmationStep({ onSubmit, isEdit, data }: { onSubmit: () => void; is
           <ShieldCheck className="h-4.5 w-4.5" />
         </span>
         <div>
-          <h3 className="text-sm font-bold">{isEdit ? "Confirm Changes" : "Ticket Confirmation"}</h3>
-          <p className="text-[11px] text-muted-foreground">Verify all details before {isEdit ? "saving" : "creating the ticket"}.</p>
+          <h3 className="text-sm font-bold">{isEdit ? "Confirm Changes" : `${noun} Confirmation`}</h3>
+          <p className="text-[11px] text-muted-foreground">Verify all details before {isEdit ? "saving" : `creating the ${nounLower}`}.</p>
         </div>
       </div>
 
@@ -3480,11 +3641,11 @@ function ConfirmationStep({ onSubmit, isEdit, data }: { onSubmit: () => void; is
             className="h-4.5 w-4.5 rounded border-2 border-border text-[#4361EE] focus:ring-[#4361EE]/20 focus:ring-2 accent-[#4361EE] shrink-0"
           />
           <span className="text-[13px] font-medium text-foreground leading-tight">
-            I confirm all ticket details have been verified.
+            I confirm all {nounLower} details have been verified.
           </span>
         </label>
         <Button size="md" onClick={onSubmit} disabled={!confirmed} className="shrink-0 whitespace-nowrap">
-          <ShieldCheck className="h-3.5 w-3.5" /> {isEdit ? "Save Changes" : "Create Ticket"}
+          <ShieldCheck className="h-3.5 w-3.5" /> {isEdit ? "Save Changes" : `Create ${noun}`}
         </Button>
       </div>
     </div>

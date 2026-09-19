@@ -67,7 +67,9 @@ export async function GET(req: Request) {
       .select("branch_id, status, created_at, deleted_at, source")
       .eq("organization_id", orgId).is("deleted_at", null),
     admin.from("invoices")
-      .select("branch_id, status, total, paid_amount, created_at, deleted_at")
+      // `devices` carries the documentType meta envelope — needed to EXCLUDE
+      // proformas from consolidated financial totals (they are non-revenue).
+      .select("branch_id, status, total, paid_amount, created_at, deleted_at, devices")
       .eq("organization_id", orgId).is("deleted_at", null),
     admin.from("walk_ins")
       .select("branch_id, status, created_at, deleted_at")
@@ -105,6 +107,13 @@ export async function GET(req: Request) {
   }
   for (const r of (invs.data ?? []) as Row[]) {
     if (!inRange(r.created_at, from, to)) continue;
+    // Proformas are NON-revenue commercial documents — never fold them into the
+    // Owner consolidated financial totals (Total Sales / Payment Received /
+    // Outstanding / Avg per Day). documentType is packed in the `devices` JSONB
+    // meta envelope (not a top-level array). Absent → normal invoice.
+    const devMeta = r.devices;
+    const docType = devMeta && !Array.isArray(devMeta) && typeof devMeta === "object" ? devMeta.documentType : undefined;
+    if (docType === "proforma") continue;
     bump(r.branch_id, (a) => {
       a.invoices += 1;
       const total = Number(r.total ?? 0);

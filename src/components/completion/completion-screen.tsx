@@ -36,13 +36,21 @@ type CompletionScreenProps = {
   /** The created document id (e.g. "T-1234" or "INV001") */
   id: string;
   isEdit?: boolean;
+  /** When the created record is a Repair Estimate, relabel the completion
+   *  screen ("Repair Estimate created", "View Estimate", "Create Estimate")
+   *  while reusing the same ticket print data + templates. */
+  isEstimate?: boolean;
+  /** When the created record is a Proforma Invoice, relabel the completion
+   *  screen ("Proforma Invoice created", "View Proforma", "Create Proforma")
+   *  while reusing the same invoice print data + templates. */
+  isProforma?: boolean;
   /** Navigate to the list — ONLY called when the Back link is clicked */
   onBack: () => void;
   /** Navigate to the document edit page — ONLY called on Edit */
   onEdit: () => void;
 };
 
-export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, onEdit }: CompletionScreenProps) {
+export function CompletionScreen({ type, id, isEdit = false, isEstimate = false, isProforma = false, onBack: _onBack, onEdit }: CompletionScreenProps) {
   const router = useRouter();
   const { tickets, invoices } = useStore();
   const { settings } = useStoreSettings();
@@ -51,7 +59,13 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
   // (and all its actions) stay mounted underneath and are restored on close.
   const [showView, setShowView] = useState(false);
 
-  const label = type === "ticket" ? "Ticket" : "Invoice";
+  // An Estimate is a ticket-shaped record and a Proforma is an invoice-shaped
+  // record (type stays "ticket"/"invoice" for print/data) — `isEstimate` /
+  // `isProforma` only change the visible copy, not the data path.
+  // `headingLabel` is the full name used in the big "… created" heading; `label`
+  // is the shorter word used on the action buttons ("View Proforma" etc.).
+  const headingLabel = isProforma ? "Proforma Invoice" : isEstimate ? "Repair Estimate" : type === "ticket" ? "Ticket" : "Invoice";
+  const label = isProforma ? "Proforma" : isEstimate ? "Estimate" : type === "ticket" ? "Ticket" : "Invoice";
 
   /*
    * Build the print data for the read-only View preview from the in-memory
@@ -118,7 +132,7 @@ export function CompletionScreen({ type, id, isEdit = false, onBack: _onBack, on
           <StoreLogo size="xl" />
         </motion.div>
         <motion.h1 initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="font-display mt-6 text-4xl font-extrabold tracking-tight md:text-5xl">
-          {isEdit ? <><span className="brand-gradient-text">{label} updated!</span></> : <>Thank you! <span className="brand-gradient-text">{label} created.</span></>}
+          {isEdit ? <><span className="brand-gradient-text">{headingLabel} updated!</span></> : <>Thank you! <span className="brand-gradient-text">{headingLabel} created.</span></>}
         </motion.h1>
         <motion.p initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }} className="mt-2 max-w-md text-sm text-muted-foreground">
           {isEdit ? `Your changes have been saved. The ${backLabel} list will reflect the updates.` : "A confirmation has been queued for SMS, WhatsApp and email. Choose how you'd like to print or share the receipt."}

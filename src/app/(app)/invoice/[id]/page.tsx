@@ -23,9 +23,11 @@ import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL, invoiceStatusPillStyle,
   type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
-  formatDeviceColour,
+  formatDeviceColour, isProforma, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE,
 } from "@/lib/mock-data";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
+import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
+import { GitBranch } from "lucide-react";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -121,6 +123,41 @@ export default function InvoiceDetailPage() {
   const statusHex = invoice ? settings.invoiceStatusColors[invoice.status] : undefined;
   const linkedTicket = useMemo(() => tickets.find((t) => t.id === invoice?.ticketId), [tickets, invoice]);
   const activity = useMemo(() => (invoice ? generateActivity(invoice, linkedTicket?.ticketNo ?? invoice.ticketId) : []), [invoice, linkedTicket]);
+  const proforma = invoice ? isProforma(invoice) : false;
+  const proformaStatus = invoice?.proformaStatus ?? (invoice?.convertedInvoiceId ? "converted" : "open");
+
+  /* ─── Document lineage (Linked Records) ──────────────────────────────
+     Estimate → Ticket → Proforma → Invoice, resolved from lineage fields.
+     Display numbers come from canonical records (ticketNo for estimate/ticket;
+     id for proforma/invoice) — never inferred from prefixes. */
+  const lineageNodes: LineageNode[] = useMemo(() => {
+    if (!invoice) return [];
+    const nodes: LineageNode[] = [];
+    const ticketLabel = (id?: string) => {
+      if (!id) return undefined;
+      const t = tickets.find((tk) => tk.id === id);
+      return t?.ticketNo ?? id;
+    };
+    if (invoice.sourceEstimateId) {
+      nodes.push({ kind: "estimate", label: ticketLabel(invoice.sourceEstimateId) ?? invoice.sourceEstimateId, href: `/tickets/${invoice.sourceEstimateId}` });
+    }
+    const ticketId = invoice.sourceTicketId ?? invoice.ticketId;
+    if (ticketId && ticketId !== invoice.sourceEstimateId) {
+      nodes.push({ kind: "ticket", label: ticketLabel(ticketId) ?? ticketId, href: `/tickets/${ticketId}` });
+    }
+    if (proforma) {
+      nodes.push({ kind: "proforma", label: invoice.id, current: true });
+      if (invoice.convertedInvoiceId) {
+        nodes.push({ kind: "invoice", label: invoice.convertedInvoiceId, href: `/invoice/${invoice.convertedInvoiceId}` });
+      }
+    } else {
+      if (invoice.sourceProformaId) {
+        nodes.push({ kind: "proforma", label: invoice.sourceProformaId, href: `/invoice/${invoice.sourceProformaId}` });
+      }
+      nodes.push({ kind: "invoice", label: invoice.id, current: true });
+    }
+    return nodes;
+  }, [invoice, tickets, proforma]);
 
   const [showDelete, setShowDelete] = useState(false);
   const [showStatusDrawer, setShowStatusDrawer] = useState(false);
@@ -248,18 +285,38 @@ export default function InvoiceDetailPage() {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-display text-[26px] font-extrabold tracking-tight">{invoice.id}</h1>
-                <span
-                  className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
-                  style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
-                >
-                  <span className="h-1.5 w-1.5 rounded-full" style={statusHex ? { backgroundColor: statusHex } : undefined} />
-                  {INVOICE_STATUS_LABEL[invoice.status]}
-                </span>
-                <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
-                  {invoice.serviceCategory === "accessories"
-                    ? "Accessories Invoice"
-                    : INVOICE_TYPE_LABEL[invoice.invoiceType]}
-                </span>
+                {proforma ? (
+                  <>
+                    {/* Single chip — the "Proforma Invoice" type chip. The
+                        redundant status pill was removed (the chip + the
+                        non-financial view already make the type clear). When the
+                        proforma is converted we still surface that state. */}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#3347D6] ring-1 ring-inset ring-[#B3BFF6]/60">
+                      Proforma Invoice
+                    </span>
+                    {proformaStatus === "converted" && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-300">
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        Converted to Invoice
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <>
+                    <span
+                      className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
+                      style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
+                    >
+                      <span className="h-1.5 w-1.5 rounded-full" style={statusHex ? { backgroundColor: statusHex } : undefined} />
+                      {INVOICE_STATUS_LABEL[invoice.status]}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
+                      {invoice.serviceCategory === "accessories"
+                        ? "Accessories Invoice"
+                        : INVOICE_TYPE_LABEL[invoice.invoiceType]}
+                    </span>
+                  </>
+                )}
                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${
                   (invoice.serviceCategory || "service") === "accessories"
                     ? "bg-violet-50 text-violet-700 ring-violet-200"
@@ -323,9 +380,19 @@ export default function InvoiceDetailPage() {
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <SummaryCard label="Customer" value={invoice.customer} icon={User} />
           <SummaryCard label="Phone" value={invoice.phone} icon={Phone} />
-          <SummaryCard label="Total" value={formatINR(invoice.total)} icon={CreditCard} />
-          <SummaryCard label="Paid" value={formatINR(invoice.paidAmount)} icon={CheckCircle2} />
-          <SummaryCard label="Due Date" value={fmtDateShort(invoice.dueDate)} icon={Calendar} />
+          <SummaryCard label={proforma ? "Grand Total" : "Total"} value={formatINR(invoice.total)} icon={CreditCard} />
+          {/* Proforma is non-financial: replace Paid/Due Date with document type
+              + proforma status instead of implying payment. */}
+          {proforma ? (
+            <SummaryCard label="Document" value="Proforma Invoice" icon={Receipt} />
+          ) : (
+            <SummaryCard label="Paid" value={formatINR(invoice.paidAmount)} icon={CheckCircle2} />
+          )}
+          {proforma ? (
+            <SummaryCard label="Proforma Status" value={PROFORMA_STATUS_LABEL[proformaStatus]} icon={Tag} />
+          ) : (
+            <SummaryCard label="Due Date" value={fmtDateShort(invoice.dueDate)} icon={Calendar} />
+          )}
           <SummaryCard label="Created" value={fmtDateShort(invoice.createdAt)} icon={Tag} />
         </div>
       </div>
@@ -334,6 +401,30 @@ export default function InvoiceDetailPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left Column — 2/3 width */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Linked Records / Document History — Estimate → Ticket → Proforma →
+              Invoice. Only rendered when the record has any lineage. */}
+          {lineageNodes.length > 1 && (
+            <DetailSection title="Linked Records" icon={GitBranch}>
+              <DocumentLineage nodes={lineageNodes} />
+              {proforma && invoice.convertedInvoiceId && (
+                <p className="mt-3 text-[12px] text-muted-foreground">
+                  Converted to Invoice{" "}
+                  <button type="button" onClick={() => router.push(`/invoice/${invoice.convertedInvoiceId}`)} className="font-semibold text-[#4361EE] hover:underline">
+                    {invoice.convertedInvoiceId}
+                  </button>
+                </p>
+              )}
+              {!proforma && invoice.sourceProformaId && (
+                <p className="mt-3 text-[12px] text-muted-foreground">
+                  Created from Proforma{" "}
+                  <button type="button" onClick={() => router.push(`/invoice/${invoice.sourceProformaId}`)} className="font-semibold text-[#4361EE] hover:underline">
+                    {invoice.sourceProformaId}
+                  </button>
+                </p>
+              )}
+            </DetailSection>
+          )}
+
           {/* Customer Information */}
           <DetailSection
             title="Customer Information"
@@ -384,19 +475,26 @@ export default function InvoiceDetailPage() {
               <DetailField label="Due Date" value={fmtDate(invoice.dueDate)} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Status</p>
-                <select
-                  value={invoice.status}
-                  onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
-                  className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center]", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
-                  style={{ ...(statusHex ? invoiceStatusPillStyle(statusHex) : {}), backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
-                >
-                  <option value="draft">Draft</option>
-                  <option value="sent">Sent</option>
-                  <option value="paid">Paid</option>
-                  <option value="partial">Partial</option>
-                  <option value="overdue">Overdue</option>
-                  <option value="cancelled">Cancelled</option>
-                </select>
+                {proforma ? (
+                  // Proforma is non-financial — read-only lifecycle pill only.
+                  <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset", PROFORMA_STATUS_TONE[proformaStatus])}>
+                    {PROFORMA_STATUS_LABEL[proformaStatus]}
+                  </span>
+                ) : (
+                  <select
+                    value={invoice.status}
+                    onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
+                    className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium cursor-pointer appearance-none pr-6 bg-no-repeat bg-[length:12px] bg-[right_6px_center]", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
+                    style={{ ...(statusHex ? invoiceStatusPillStyle(statusHex) : {}), backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 20 20' fill='currentColor'%3E%3Cpath fill-rule='evenodd' d='M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z' clip-rule='evenodd'/%3E%3C/svg%3E")` }}
+                  >
+                    <option value="draft">Draft</option>
+                    <option value="sent">Sent</option>
+                    <option value="paid">Paid</option>
+                    <option value="partial">Partial</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                )}
               </div>
               {/* Repair Status — shares the ticket status system. Changing it keeps
                   the linked ticket in sync (handled by the store's updateInvoice). */}

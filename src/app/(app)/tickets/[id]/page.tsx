@@ -8,7 +8,7 @@ import {
   ArrowRightLeft, MessageSquarePlus, FileText, Clock, Check,
   User, Smartphone, Wrench, CreditCard, AlertTriangle,
   CheckCircle2, Phone, Mail, Building2, MapPin, Shield,
-  Package, Hash, Calendar, Tag, CircleDot, Receipt, Ban,
+  Package, Hash, Calendar, Tag, CircleDot, Receipt, Ban, GitBranch,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -27,7 +27,10 @@ import {
   type Ticket, type TicketStatus, type TicketPriority, type DeviceRecord,
   getTicketDevices, formatDeviceColour,
   ticketInvoiceCoverage, findInvoiceForTicketDevice,
+  isEstimate, getRecordType, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, type EstimateStatus,
+  isProforma,
 } from "@/lib/mock-data";
+import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 
@@ -170,6 +173,65 @@ export default function TicketDetailPage() {
   const fullyInvoiced = coverage === "full";
   const timeline = useMemo(() => ticket ? generateTimeline(ticket) : [], [ticket]);
 
+  /* ─── Document lineage (commercial history) ──────────────────────────
+     Estimate → Ticket → Proforma → Final Invoice, resolved from lineage fields
+     + related invoices (never inferred from id prefixes). Shown on both the
+     Ticket and Estimate views (spec §33/§34/§65). */
+  const lineageNodes: LineageNode[] = useMemo(() => {
+    if (!ticket) return [];
+    const nodes: LineageNode[] = [];
+    const ticketLabel = (id?: string) => {
+      if (!id) return undefined;
+      const t = tickets.find((tk) => tk.id === id);
+      return t?.ticketNo ?? id;
+    };
+    const viewingEstimate = isEstimate(ticket);
+    const relatedProforma = invoices.find((inv) =>
+      isProforma(inv) && (inv.sourceTicketId === ticket.id || inv.sourceEstimateId === ticket.id || inv.ticketId === ticket.id));
+    const relatedInvoice = invoices.find((inv) =>
+      !isProforma(inv) && (inv.sourceTicketId === ticket.id || inv.sourceEstimateId === ticket.id || inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo))
+      ?? (relatedProforma?.convertedInvoiceId ? invoices.find((inv) => inv.id === relatedProforma.convertedInvoiceId) : undefined);
+
+    if (viewingEstimate) {
+      nodes.push({ kind: "estimate", label: ticket.ticketNo ?? ticket.id, current: true });
+      if (ticket.convertedTicketId) {
+        nodes.push({ kind: "ticket", label: ticketLabel(ticket.convertedTicketId) ?? ticket.convertedTicketId, href: `/tickets/${ticket.convertedTicketId}` });
+      }
+    } else {
+      if (ticket.convertedFromEstimateId) {
+        nodes.push({ kind: "estimate", label: ticketLabel(ticket.convertedFromEstimateId) ?? ticket.convertedFromEstimateId, href: `/tickets/${ticket.convertedFromEstimateId}` });
+      }
+      nodes.push({ kind: "ticket", label: ticket.ticketNo ?? ticket.id, current: true });
+    }
+    if (relatedProforma) {
+      nodes.push({ kind: "proforma", label: relatedProforma.id, href: `/invoice/${relatedProforma.id}` });
+    }
+    if (relatedInvoice) {
+      nodes.push({ kind: "invoice", label: relatedInvoice.id, href: `/invoice/${relatedInvoice.id}` });
+    }
+    return nodes;
+  }, [ticket, tickets, invoices]);
+
+  // ── Estimate awareness ──
+  // An Estimate reuses this SAME detail page (spec §36). We only relabel a few
+  // header affordances and swap Push-to-Invoice for Push-to-Ticket; every
+  // section below (Customer / Device / Job / Billing) is reused unchanged.
+  const estimate = ticket ? isEstimate(ticket) : false;
+  const estimateStatus: EstimateStatus = ticket?.estimateStatus ?? "waiting_approval";
+  // The Ticket produced by converting this Estimate (if any) — for the link
+  // and to prevent a duplicate conversion.
+  const convertedTicket = useMemo(
+    () => (ticket?.convertedTicketId ? tickets.find((t) => t.id === ticket.convertedTicketId) : undefined),
+    [tickets, ticket?.convertedTicketId],
+  );
+  // When THIS is a Ticket that was created from an Estimate, the source estimate
+  // (for the "created from" back-link).
+  const sourceEstimate = useMemo(
+    () => (ticket?.convertedFromEstimateId ? tickets.find((t) => t.id === ticket.convertedFromEstimateId) : undefined),
+    [tickets, ticket?.convertedFromEstimateId],
+  );
+  const [showEstimateStatusMenu, setShowEstimateStatusMenu] = useState(false);
+
   const [showPushDialog, setShowPushDialog] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   const [showStatusMenu, setShowStatusMenu] = useState(false);
@@ -298,6 +360,28 @@ export default function TicketDetailPage() {
   // creating an invoice directly.
   const handlePushToInvoice = useCallback(() => setShowPushDialog(true), []);
 
+  // Push to Ticket (Estimate → Ticket). If already converted, open the linked
+  // Ticket instead of creating a duplicate (spec §32). Otherwise open the
+  // prefilled Ticket flow; the Estimate is only marked converted after the new
+  // Ticket is finalized (handled in the wizard's handleSave).
+  const handlePushToTicket = useCallback(() => {
+    if (!ticket) return;
+    if (ticket.estimateStatus === "converted" && ticket.convertedTicketId) {
+      router.push(`/tickets/${ticket.convertedTicketId}`);
+      return;
+    }
+    router.push(`/tickets/new?fromEstimate=${encodeURIComponent(ticket.id)}`);
+  }, [ticket, router]);
+
+  // Change an Estimate's outcome (Waiting for Approval / Lost Customer).
+  // "Converted Ticket" is NOT a manual choice — it is set only by the Push to
+  // Ticket flow — so it's excluded from the manual menu.
+  const handleEstimateStatusChange = useCallback((next: EstimateStatus) => {
+    if (!ticket) return;
+    updateTicket(ticket.id, { estimateStatus: next });
+    setShowEstimateStatusMenu(false);
+  }, [ticket, updateTicket]);
+
   if (!ticket) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -325,16 +409,45 @@ export default function TicketDetailPage() {
               </button>
             </Link>
             <div>
+              {/* Document-type eyebrow — makes an Estimate unmistakable. */}
+              {estimate && (
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">Repair Estimate</p>
+              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-display text-[26px] font-extrabold tracking-tight">{ticket.ticketNo ?? ticket.id}</h1>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  {STATUS_LABEL[ticket.status]}
-                </span>
+                {estimate ? (
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${ESTIMATE_STATUS_TONE[estimateStatus]}`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    {ESTIMATE_STATUS_LABEL[estimateStatus]}
+                  </span>
+                ) : (
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    {STATUS_LABEL[ticket.status]}
+                  </span>
+                )}
                 {ticket.priority !== "normal" && (
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${PRIORITY_TONE[ticket.priority]}`}>
                     {PRIORITY_LABEL[ticket.priority]}
                   </span>
+                )}
+                {/* Estimate → converted Ticket link (spec §31/§64). */}
+                {estimate && convertedTicket && (
+                  <button
+                    onClick={() => router.push(`/tickets/${convertedTicket.id}`)}
+                    className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-medium text-emerald-800 ring-1 ring-inset ring-emerald-300 transition hover:bg-emerald-100"
+                  >
+                    → {convertedTicket.ticketNo ?? convertedTicket.id}
+                  </button>
+                )}
+                {/* Ticket → source Estimate back-link (spec §31). */}
+                {!estimate && sourceEstimate && (
+                  <button
+                    onClick={() => router.push(`/tickets/${sourceEstimate.id}`)}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#4361EE]/20 transition hover:bg-[#E0E6FB]"
+                  >
+                    From {sourceEstimate.ticketNo ?? sourceEstimate.id}
+                  </button>
                 )}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
@@ -348,9 +461,18 @@ export default function TicketDetailPage() {
             <Button variant="outline" size="sm" className="rounded-full" onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)}>
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
-            <Button size="sm" className="rounded-full" onClick={handlePushToInvoice} disabled={fullyInvoiced}>
-              <Receipt className="h-3.5 w-3.5" /> {fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining" : "Push to Invoice"}
-            </Button>
+            {estimate ? (
+              // Estimate → Push to Ticket (or View Ticket once converted).
+              <Button size="sm" className="rounded-full" onClick={handlePushToTicket}>
+                {estimateStatus === "converted"
+                  ? <><Receipt className="h-3.5 w-3.5" /> View Ticket</>
+                  : <><Receipt className="h-3.5 w-3.5" /> Push to Ticket</>}
+              </Button>
+            ) : (
+              <Button size="sm" className="rounded-full" onClick={handlePushToInvoice} disabled={fullyInvoiced}>
+                <Receipt className="h-3.5 w-3.5" /> {fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining" : "Push to Invoice"}
+              </Button>
+            )}
             {/* More actions */}
             <Dropdown
               align="right"
@@ -363,15 +485,21 @@ export default function TicketDetailPage() {
             >
               {(close) => (
                 <>
-                  <MenuItem icon={ArrowRightLeft} onClick={() => { close(); }}>Transfer Ticket</MenuItem>
+                  <MenuItem icon={ArrowRightLeft} onClick={() => { close(); }}>Transfer {estimate ? "Estimate" : "Ticket"}</MenuItem>
                   <MenuItem icon={MessageSquarePlus} onClick={() => { close(); }}>View / Add Comment</MenuItem>
-                  <MenuItem icon={CircleDot} onClick={() => { setShowStatusMenu(true); close(); }}>Mark Status</MenuItem>
+                  {estimate ? (
+                    // Estimate outcome (Waiting for Approval / Lost Customer).
+                    // "Converted Ticket" is set only by Push to Ticket, never here.
+                    <MenuItem icon={CircleDot} onClick={() => { setShowEstimateStatusMenu(true); close(); }}>Change Estimate Status</MenuItem>
+                  ) : (
+                    <MenuItem icon={CircleDot} onClick={() => { setShowStatusMenu(true); close(); }}>Mark Status</MenuItem>
+                  )}
                   <MenuItem icon={AlertTriangle} onClick={() => { setShowPriorityMenu(true); close(); }}>Change Priority</MenuItem>
                   <MenuItem icon={Printer} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=a4`); close(); }}>Print A4</MenuItem>
                   <MenuItem icon={Receipt} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=thermal`); close(); }}>Print Thermal</MenuItem>
                   <MenuItem icon={Tag} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=label`); close(); }}>Print Label</MenuItem>
                   <div className="my-1 border-t border-border" />
-                  <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete Ticket</MenuItem>
+                  <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete {estimate ? "Estimate" : "Ticket"}</MenuItem>
                 </>
               )}
             </Dropdown>
@@ -393,6 +521,15 @@ export default function TicketDetailPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Left Column — 2/3 width */}
         <div className="lg:col-span-2 space-y-6">
+          {/* Linked Records / Document History — full commercial lineage
+              (Estimate → Ticket → Proforma → Invoice), spec §33/§34/§65.
+              Rendered only when a relationship exists. */}
+          {lineageNodes.length > 1 && (
+            <DetailSection title="Linked Records" icon={GitBranch}>
+              <DocumentLineage nodes={lineageNodes} />
+            </DetailSection>
+          )}
+
           {/* Customer Information */}
           <DetailSection
             title="Customer Information"
@@ -801,24 +938,45 @@ export default function TicketDetailPage() {
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>
             <div className="space-y-2">
-              <button
-                onClick={handlePushToInvoice}
-                disabled={fullyInvoiced}
-                className={cn(
-                  "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition",
-                  fullyInvoiced
-                    ? "border-emerald-200 bg-emerald-50/50 cursor-default"
-                    : "border-border hover:border-[#4361EE] hover:bg-indigo-50/40"
-                )}
-              >
-                <span className={cn("grid h-9 w-9 place-items-center rounded-lg", fullyInvoiced ? "bg-emerald-100 text-emerald-700" : coverage === "partial" ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-[#4361EE]")}>
-                  <Receipt className="h-4 w-4" />
-                </span>
-                <div>
-                  <p className="text-sm font-semibold">{fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining Devices" : "Push to Invoice"}</p>
-                  <p className="text-[11px] text-muted-foreground">{fullyInvoiced ? `${linkedInvoices.length} invoice${linkedInvoices.length > 1 ? "s" : ""} linked` : coverage === "partial" ? "Some devices still pending" : "Create invoice from ticket"}</p>
-                </div>
-              </button>
+              {estimate ? (
+                /* Estimate → Push to Ticket (or View Ticket once converted). */
+                <button
+                  onClick={handlePushToTicket}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition",
+                    estimateStatus === "converted"
+                      ? "border-emerald-200 bg-emerald-50/50"
+                      : "border-border hover:border-[#4361EE] hover:bg-indigo-50/40"
+                  )}
+                >
+                  <span className={cn("grid h-9 w-9 place-items-center rounded-lg", estimateStatus === "converted" ? "bg-emerald-100 text-emerald-700" : "bg-indigo-100 text-[#4361EE]")}>
+                    <Receipt className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">{estimateStatus === "converted" ? "View Converted Ticket" : "Push to Ticket"}</p>
+                    <p className="text-[11px] text-muted-foreground">{estimateStatus === "converted" ? `Linked to ${convertedTicket?.ticketNo ?? "Ticket"}` : "Create a ticket from this estimate"}</p>
+                  </div>
+                </button>
+              ) : (
+                <button
+                  onClick={handlePushToInvoice}
+                  disabled={fullyInvoiced}
+                  className={cn(
+                    "flex w-full items-center gap-3 rounded-xl border px-4 py-3 text-left transition",
+                    fullyInvoiced
+                      ? "border-emerald-200 bg-emerald-50/50 cursor-default"
+                      : "border-border hover:border-[#4361EE] hover:bg-indigo-50/40"
+                  )}
+                >
+                  <span className={cn("grid h-9 w-9 place-items-center rounded-lg", fullyInvoiced ? "bg-emerald-100 text-emerald-700" : coverage === "partial" ? "bg-amber-100 text-amber-700" : "bg-indigo-100 text-[#4361EE]")}>
+                    <Receipt className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">{fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining Devices" : "Push to Invoice"}</p>
+                    <p className="text-[11px] text-muted-foreground">{fullyInvoiced ? `${linkedInvoices.length} invoice${linkedInvoices.length > 1 ? "s" : ""} linked` : coverage === "partial" ? "Some devices still pending" : "Create invoice from ticket"}</p>
+                  </div>
+                </button>
+              )}
               <button
                 onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)}
                 className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
@@ -827,26 +985,53 @@ export default function TicketDetailPage() {
                   <Pencil className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">Edit Ticket</p>
-                  <p className="text-[11px] text-muted-foreground">Modify ticket details</p>
+                  <p className="text-sm font-semibold">Edit {estimate ? "Estimate" : "Ticket"}</p>
+                  <p className="text-[11px] text-muted-foreground">Modify {estimate ? "estimate" : "ticket"} details</p>
                 </div>
               </button>
-              <div className="rounded-xl border border-border px-4 py-3">
-                <div className="mb-2 flex items-baseline gap-2">
-                  <p className="text-[11px] font-medium text-muted-foreground">Repair Status</p>
-                  {linkedInvoice && (
-                    <p className="text-[10px] text-muted-foreground">
-                      —&nbsp; Synced with invoice {linkedInvoice.id}
-                    </p>
+              {estimate ? (
+                /* Estimate outcome control (Waiting for Approval / Lost Customer).
+                   Converted is set only by Push to Ticket. */
+                <div className="rounded-xl border border-border px-4 py-3">
+                  <p className="mb-2 text-[11px] font-medium text-muted-foreground">Estimate Status</p>
+                  {estimateStatus === "converted" ? (
+                    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset", ESTIMATE_STATUS_TONE.converted)}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      {ESTIMATE_STATUS_LABEL.converted}
+                    </span>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {ESTIMATE_STATUS_OPTIONS.filter((o) => o.value !== "converted").map((o) => (
+                        <button
+                          key={o.value}
+                          onClick={() => handleEstimateStatusChange(o.value)}
+                          className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition", ESTIMATE_STATUS_TONE[o.value], estimateStatus === o.value ? "ring-2" : "opacity-80 hover:opacity-100")}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                          {o.label}
+                        </button>
+                      ))}
+                    </div>
                   )}
                 </div>
-                <StatusPillSelect
-                  value={ticket.status}
-                  onChange={(v: TicketStatus) => handleStatusChange(v)}
-                  blockedStatuses={!linkedInvoice && ticket.status !== "repaired_collected" ? ["repaired_collected"] : undefined}
-                  blockedReason="Create an invoice before selecting Repaired & Collected"
-                />
-              </div>
+              ) : (
+                <div className="rounded-xl border border-border px-4 py-3">
+                  <div className="mb-2 flex items-baseline gap-2">
+                    <p className="text-[11px] font-medium text-muted-foreground">Repair Status</p>
+                    {linkedInvoice && (
+                      <p className="text-[10px] text-muted-foreground">
+                        —&nbsp; Synced with invoice {linkedInvoice.id}
+                      </p>
+                    )}
+                  </div>
+                  <StatusPillSelect
+                    value={ticket.status}
+                    onChange={(v: TicketStatus) => handleStatusChange(v)}
+                    blockedStatuses={!linkedInvoice && ticket.status !== "repaired_collected" ? ["repaired_collected"] : undefined}
+                    blockedReason="Create an invoice before selecting Repaired & Collected"
+                  />
+                </div>
+              )}
               <button
                 onClick={() => router.push(`/print/ticket/${ticket.id}?format=a4`)}
                 className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
@@ -855,7 +1040,7 @@ export default function TicketDetailPage() {
                   <Printer className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-sm font-semibold">Print Ticket</p>
+                  <p className="text-sm font-semibold">Print {estimate ? "Estimate" : "Ticket"}</p>
                   <p className="text-[11px] text-muted-foreground">A4 / Thermal / Label</p>
                 </div>
               </button>
@@ -983,6 +1168,43 @@ export default function TicketDetailPage() {
                   {ticket.priority === p && <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span>}
                 </button>
               ))}
+            </div>
+          </motion.div>
+        </div>
+      )}
+
+      {/* ─── Estimate Status Dialog (Waiting for Approval / Lost Customer) ──
+          "Converted Ticket" is intentionally absent — it is set only by the
+          Push to Ticket flow, never chosen manually (spec §11/§22/§33). */}
+      {showEstimateStatusMenu && estimate && (
+        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowEstimateStatusMenu(false)}>
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
+            <p className="text-sm font-bold mb-1">Change Estimate Status</p>
+            <p className="text-[11px] text-muted-foreground mb-4">Estimate {ticket.ticketNo ?? ticket.id}</p>
+            <div className="space-y-2">
+              {ESTIMATE_STATUS_OPTIONS
+                // Manual choices only — "converted" is driven by Push to Ticket.
+                .filter((o) => o.value !== "converted")
+                .map((o) => (
+                  <button
+                    key={o.value}
+                    onClick={() => handleEstimateStatusChange(o.value)}
+                    className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", estimateStatus === o.value ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}
+                  >
+                    <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", ESTIMATE_STATUS_TONE[o.value])}>
+                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                      {o.label}
+                    </span>
+                    {estimateStatus === o.value && <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span>}
+                  </button>
+                ))}
+              {/* Show the converted state (read-only) when applicable. */}
+              {estimateStatus === "converted" && (
+                <p className="pt-1 text-[11px] text-emerald-700">
+                  Already converted to {convertedTicket?.ticketNo ?? "a Ticket"}.
+                </p>
+              )}
             </div>
           </motion.div>
         </div>

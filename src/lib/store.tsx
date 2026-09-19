@@ -25,6 +25,7 @@ import {
   STATUS_LABEL, type Ticket, type TicketStatus, type TicketPart,
   type TeamMember, type Invoice, type WalkIn,
   deriveTicketStatus, getTicketDevices, getInvoicedTicketDeviceIds,
+  isProforma, getInvoiceDevices,
 } from "@/lib/mock-data";
 import {
   inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS,
@@ -90,6 +91,11 @@ interface StoreActions {
   addInvoice: (invoice: Invoice) => Promise<string>;
   updateInvoice: (id: string, updates: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
+  /** Convert a Proforma into a NEW normal Invoice. Atomic + idempotent: never
+   *  mutates/deletes the proforma; if already converted, returns the existing
+   *  invoice id. Returns the (new or existing) final Invoice id, or "" on
+   *  failure/permission denial. */
+  convertProformaToInvoice: (proformaId: string) => Promise<string>;
   addWalkIn: (walkIn: WalkIn) => Promise<void>;
   updateWalkIn: (id: string, updates: Partial<WalkIn>) => Promise<void>;
   deleteWalkIn: (id: string) => Promise<void>;
@@ -172,8 +178,39 @@ function rowToTicket(r: any): Ticket {
     linkedWalkInId: meta.linkedWalkInId ?? undefined,
     linkedFieldJobId: meta.linkedFieldJobId ?? undefined,
     linkedLeadId: meta.linkedLeadId ?? undefined,
+    // Record-type + Estimate metadata — packed in the same JSONB envelope so no
+    // DB migration is needed. Absent → legacy row → getRecordType treats it as
+    // a normal "ticket".
+    recordType: meta.recordType ?? undefined,
+    estimateStatus: meta.estimateStatus ?? undefined,
+    convertedTicketId: meta.convertedTicketId ?? undefined,
+    convertedFromEstimateId: meta.convertedFromEstimateId ?? undefined,
     pinnedAt: r.pinned_at ?? undefined,
     ticketNo: r.ticket_no ?? undefined,
+  };
+}
+
+/** Build the `devices` JSONB envelope (multi-device records + ticket-level
+ *  metadata) from a Ticket. Single source of truth used by BOTH ticketToRow
+ *  (insert) and updateTicket (update) so a partial update can never drop the
+ *  packed metadata (recordType / estimateStatus / GST / origin links …). */
+function ticketDevicesEnvelope(t: Partial<Ticket>): Record<string, unknown> {
+  return {
+    records: t.devices ?? [],
+    customerType: t.customerType || null,
+    gstNumber: t.gstNumber || null,
+    gstRate: t.gstRate ?? null,
+    sgstRate: t.sgstRate ?? null,
+    cgstRate: t.cgstRate ?? null,
+    sgst: t.sgst ?? null,
+    cgst: t.cgst ?? null,
+    linkedWalkInId: t.linkedWalkInId || null,
+    linkedFieldJobId: t.linkedFieldJobId || null,
+    linkedLeadId: t.linkedLeadId || null,
+    recordType: t.recordType || null,
+    estimateStatus: t.estimateStatus || null,
+    convertedTicketId: t.convertedTicketId || null,
+    convertedFromEstimateId: t.convertedFromEstimateId || null,
   };
 }
 
@@ -205,19 +242,7 @@ function ticketToRow(t: Ticket): Record<string, unknown> {
     qc_status: t.qcStatus || null,
     customer_id: t.customerId || null,
     pinned_at: t.pinnedAt ?? null,
-    devices: {
-      records: t.devices ?? [],
-      customerType: t.customerType || null,
-      gstNumber: t.gstNumber || null,
-      gstRate: t.gstRate ?? null,
-      sgstRate: t.sgstRate ?? null,
-      cgstRate: t.cgstRate ?? null,
-      sgst: t.sgst ?? null,
-      cgst: t.cgst ?? null,
-      linkedWalkInId: t.linkedWalkInId || null,
-      linkedFieldJobId: t.linkedFieldJobId || null,
-      linkedLeadId: t.linkedLeadId || null,
-    },
+    devices: ticketDevicesEnvelope(t),
   };
 }
 
@@ -262,6 +287,14 @@ function rowToInvoice(r: any): Invoice {
     devices: deviceRecords,
     createdAt: r.created_at ?? new Date().toISOString(),
     pinnedAt: r.pinned_at ?? undefined,
+    // Document-type + lineage — packed in the same JSONB `devices` envelope so
+    // no DB migration is needed. Absent → legacy row → normal "invoice".
+    documentType: meta.documentType ?? undefined,
+    proformaStatus: meta.proformaStatus ?? undefined,
+    sourceProformaId: meta.sourceProformaId ?? undefined,
+    sourceEstimateId: meta.sourceEstimateId ?? undefined,
+    sourceTicketId: meta.sourceTicketId ?? undefined,
+    convertedInvoiceId: meta.convertedInvoiceId ?? undefined,
   };
 }
 
@@ -300,6 +333,14 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
       sgst: inv.sgst ?? null,
       cgst: inv.cgst ?? null,
       gstNumber: inv.gstNumber || null,
+      // Document-type + lineage envelope (see rowToInvoice). Null defaults keep
+      // legacy/normal invoices unchanged.
+      documentType: inv.documentType ?? null,
+      proformaStatus: inv.proformaStatus ?? null,
+      sourceProformaId: inv.sourceProformaId ?? null,
+      sourceEstimateId: inv.sourceEstimateId ?? null,
+      sourceTicketId: inv.sourceTicketId ?? null,
+      convertedInvoiceId: inv.convertedInvoiceId ?? null,
     },
   };
 }
@@ -361,10 +402,11 @@ function isAuthOrRlsError(err: { code?: string; message?: string } | null): bool
  * The in-memory list only holds live invoices, so relying on it can regenerate
  * an id that still belongs to a soft-deleted row and collide on insert.
  */
-async function nextInvoiceIdFromDb(type: string, storeId?: string | null, storePrefix?: string | null): Promise<string> {
+async function nextInvoiceIdFromDb(type: string, storeId?: string | null, storePrefix?: string | null, documentType?: string | null): Promise<string> {
   // Series numbering config lives in Settings → Invoice (organization_settings).
   // Fall back to the legacy INV/INVG · 3-digit defaults when unavailable so the
   // collision-recovery path always produces a valid id.
+  const isProformaDoc = documentType === "proforma";
   let prefix = type === "business" ? "INVG" : "INV";
   let digits = 3;
   let startNumber = 1;
@@ -391,6 +433,15 @@ async function nextInvoiceIdFromDb(type: string, storeId?: string | null, storeP
       }
     } catch {
       /* keep legacy defaults */
+    }
+    // PROFORMA series: a Proforma gets its OWN independent numbering sequence so
+    // it never consumes a normal Invoice number. We mark the series prefix with
+    // a leading "P-" (→ "P-INV" / "KR-P-INV002"). seriesNumberOf/takenIds below
+    // then naturally isolate it from the normal invoice series (a normal "INV002"
+    // never matches the "P-INV" head and vice-versa).
+    if (isProformaDoc) {
+      prefix = `P-${prefix}`;
+      startNumber = 1; // proforma series always starts fresh at its own P-INV001
     }
 
     // STORE-AWARE: scope the running max to the active store so each store's
@@ -446,11 +497,13 @@ function seriesNumberOf(id: string, storeSep: string | null, prefix: string): nu
   return parseInt(rest, 10);
 }
 
-/** Format a ticket sequence number as `T-001` (zero-padded to at least 3 digits,
- *  growing automatically past T-999). */
-function formatTicketNo(n: number, prefix?: string | null): string {
+/** Format a sequence number as `T-001` (zero-padded to at least 3 digits,
+ *  growing automatically past T-999). The `letter` selects the series:
+ *  "T" for Tickets, "E" for Repair Estimates — so `KOR-E-0045` and `KOR-T-0045`
+ *  are independent runs that never consume each other's numbers. */
+function formatTicketNo(n: number, prefix?: string | null, letter: string = "T"): string {
   const p = prefix ? `${prefix}` : "";
-  return `${p}T-${String(n).padStart(3, "0")}`;
+  return `${p}${letter}-${String(n).padStart(3, "0")}`;
 }
 
 /** Normalize a store prefix ("KOR", "KOR-", " kor ") into the canonical
@@ -473,15 +526,17 @@ function genUniqueTicketId(): string {
   return `TK-${time}-${rand}`;
 }
 
-/** Extract the numeric part of a `T-<digits>` value, or 0 if it doesn't match. */
-function ticketSeq(value: string | null | undefined, prefix?: string | null): number {
+/** Extract the numeric part of a `<letter>-<digits>` value, or 0 if it doesn't
+ *  match. The `letter` ("T"/"E") keeps the Ticket and Estimate series
+ *  independent: an `E-0045` value scores 0 against the "T" series and vice
+ *  versa, so counting max+1 per series never collides across record types. */
+function ticketSeq(value: string | null | undefined, prefix?: string | null, letter: string = "T"): number {
   const v = String(value ?? "");
   // Support an optional store prefix (e.g. "BLR-T-0007"). When a prefix is
   // supplied, only count numbers that carry it so per-store sequences don't
   // interfere with each other.
-  const re = prefix
-    ? new RegExp(`^${prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}T-(\\d+)$`)
-    : /^T-(\d+)$/;
+  const p = prefix ? prefix.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") : "";
+  const re = new RegExp(`^${p}${letter}-(\\d+)$`);
   const match = v.match(re);
   return match ? parseInt(match[1], 10) : 0;
 }
@@ -498,21 +553,27 @@ function ticketSeq(value: string | null | undefined, prefix?: string | null): nu
  * next number aligned with the visible T-001…T-NNN run. Falls back to a
  * best-effort value only when Supabase is unavailable.
  */
-export async function nextTicketIdFromDb(storeId?: string | null, prefix?: string | null): Promise<string> {
+export async function nextTicketIdFromDb(storeId?: string | null, prefix?: string | null, letter: string = "T"): Promise<string> {
   let maxNum = 0;
   if (supabase) {
     // STORE-AWARE numbering: when a concrete store is active, the sequence is
     // scoped to that store's branch so each store keeps its own independent
     // T-001, T-002 … run and numbers never collide across stores. In All-Shops
     // mode (no storeId) it falls back to the full visible set for continuity.
+    //
+    // SERIES-AWARE numbering: Tickets ("T") and Estimates ("E") share the same
+    // table + ticket_no column, but ticketSeq(letter) only scores values in the
+    // requested series (a "KOR-E-0045" scores 0 for "T" and vice-versa). So the
+    // max+1 is computed PER SERIES — creating an Estimate never consumes a
+    // Ticket number and creating a Ticket never consumes an Estimate number.
     let q = supabase.from("tickets").select("ticket_no").is("deleted_at", null);
     if (storeId) q = q.eq("branch_id", storeId);
     const { data } = await q;
     maxNum = (data ?? []).reduce((max: number, r: { ticket_no?: string }) => {
-      return Math.max(max, ticketSeq(r.ticket_no, prefix));
+      return Math.max(max, ticketSeq(r.ticket_no, prefix, letter));
     }, 0);
   }
-  return formatTicketNo(maxNum + 1, prefix);
+  return formatTicketNo(maxNum + 1, prefix, letter);
 }
 
 /**
@@ -524,7 +585,7 @@ export async function nextTicketIdFromDb(storeId?: string | null, prefix?: strin
  * state. Safe to run on every load: once everything is sequenced it writes
  * nothing and returns the existing mapping.
  */
-async function resequenceTicketNumbers(storeId?: string | null, prefix?: string | null): Promise<Record<string, string>> {
+async function resequenceTicketNumbers(storeId?: string | null, prefix?: string | null, letter: string = "T"): Promise<Record<string, string>> {
   const mapping: Record<string, string> = {};
   if (!supabase) return mapping;
   // STORE-AWARE: only resequence WITHIN the active store so each store keeps an
@@ -533,17 +594,30 @@ async function resequenceTicketNumbers(storeId?: string | null, prefix?: string 
   // would scramble every store's per-store sequence. The per-store run happens
   // whenever the owner (or a store user) enters that specific store.
   if (!storeId) return mapping;
+  // SERIES-AWARE: read `devices` so we can resolve each row's recordType and
+  // renumber ONLY the rows in the requested series ("T" → Tickets, "E" →
+  // Estimates). Renumbering all rows into one series would clobber the other
+  // series' numbers and merge two independent sequences.
+  const wantRecordType = letter === "E" ? "estimate" : "ticket";
   const { data, error } = await supabase
     .from("tickets")
-    .select("id, ticket_no, created_at")
+    .select("id, ticket_no, created_at, devices")
     .is("deleted_at", null)
     .eq("branch_id", storeId)
     .order("created_at", { ascending: true });
   if (error || !data) return mapping;
 
+  const rowRecordType = (r: { devices?: any }): "ticket" | "estimate" | "warranty" => {
+    const d = r.devices;
+    if (d && !Array.isArray(d) && typeof d === "object" && d.recordType) return d.recordType;
+    return "ticket";
+  };
+  const seriesRows = (data as { id: string; ticket_no?: string; created_at?: string; devices?: any }[])
+    .filter((r) => rowRecordType(r) === wantRecordType);
+
   const updates: { id: string; ticket_no: string }[] = [];
-  data.forEach((row: { id: string; ticket_no?: string; created_at?: string }, idx) => {
-    const desired = formatTicketNo(idx + 1, prefix);
+  seriesRows.forEach((row, idx) => {
+    const desired = formatTicketNo(idx + 1, prefix, letter);
     mapping[row.id] = desired;
     if (row.ticket_no !== desired) updates.push({ id: row.id, ticket_no: desired });
   });
@@ -1063,6 +1137,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // so its own update handler skips propagating the change back.
   const syncingIdsRef = useRef<Set<string>>(new Set());
 
+  // In-flight Proforma → Invoice conversions. Guards against double-click /
+  // rapid re-entry within THIS session while the async create is running (the
+  // durable duplicate protection is the proforma's convertedInvoiceId, checked
+  // against the latest state below).
+  const convertingProformaRef = useRef<Set<string>>(new Set());
+
   // Ref for demo mode so callbacks can access the latest value
   const isDemoRef = useRef(isDemoMode);
   useEffect(() => { isDemoRef.current = isDemoMode; }, [isDemoMode]);
@@ -1222,12 +1302,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Resequence the ACTIVE store's tickets to <PREFIX>T-001, …-002 … by
       // original creation order (idempotent, per-store) and patch the display
       // numbers into local state. Skipped in All-Shops mode (scopeStoreId null).
-      const ticketNoMap = await resequenceTicketNumbers(scopeStoreId, ticketPrefixSep(activePrefixes.ticket));
-      if (active && Object.keys(ticketNoMap).length > 0) {
+      // Estimates ("E" series) are resequenced independently so each store keeps
+      // parallel, gap-free T-… and E-… runs that never consume each other.
+      const storePrefix = ticketPrefixSep(activePrefixes.ticket);
+      const ticketNoMap = await resequenceTicketNumbers(scopeStoreId, storePrefix, "T");
+      const estimateNoMap = await resequenceTicketNumbers(scopeStoreId, storePrefix, "E");
+      const combinedNoMap = { ...ticketNoMap, ...estimateNoMap };
+      if (active && Object.keys(combinedNoMap).length > 0) {
         setState((s) => ({
           ...s,
           tickets: s.tickets.map((t) =>
-            ticketNoMap[t.id] ? { ...t, ticketNo: ticketNoMap[t.id] } : t
+            combinedNoMap[t.id] ? { ...t, ticketNo: combinedNoMap[t.id] } : t
           ),
         }));
       }
@@ -1450,7 +1535,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // persist and vanish on reload. A random/unique id sidesteps this while
       // ticket_no still shows the clean sequence, and resequencing only ever
       // rewrites ticket_no (never id) so FK relationships stay intact.
-      const seq = await nextTicketIdFromDb(activeStoreIdRef.current, ticketPrefixSep(activePrefixesRef.current.ticket));
+      // Series letter: Estimates use the independent "E" run (KOR-E-0045),
+      // everything else the normal "T" run (KOR-T-0045).
+      const seriesLetter = ticket.recordType === "estimate" ? "E" : "T";
+      const seq = await nextTicketIdFromDb(activeStoreIdRef.current, ticketPrefixSep(activePrefixesRef.current.ticket), seriesLetter);
       let current: Ticket = { ...ticket, id: genUniqueTicketId(), ticketNo: seq };
       const insertTicket = async (t: Ticket) => {
         let row = withStore(ticketToRow(t));
@@ -1493,11 +1581,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: saved.ticketNo || saved.id, description: `Created a new repair ticket for ${saved.model || saved.device} (${saved.customer}).`, meta: { Device: saved.device, Technician: saved.technician || "Unassigned", Amount: inr(saved.amount) } });
       return saved.id;
     }
-    // Local/demo mode: derive the next sequential number from in-memory tickets.
+    // Local/demo mode: derive the next sequential number from in-memory tickets,
+    // scoped to the correct series ("E" for estimates, "T" otherwise) so the
+    // two runs stay independent exactly as in DB mode.
+    const localLetter = ticket.recordType === "estimate" ? "E" : "T";
     const localMax = stateRef.current.tickets.reduce((max, t) => {
-      return Math.max(max, ticketSeq(t.ticketNo), ticketSeq(t.id));
+      return Math.max(max, ticketSeq(t.ticketNo, null, localLetter));
     }, 0);
-    const localSeq = formatTicketNo(localMax + 1);
+    const localSeq = formatTicketNo(localMax + 1, null, localLetter);
     const localTicket: Ticket = { ...ticket, id: genUniqueTicketId(), ticketNo: localSeq };
     setState((s) => ({ ...s, tickets: [localTicket, ...s.tickets] }));
     logActivity({ module: "Ticket", action: "Ticket Created", severity: "success", entity: "Ticket", reference: localTicket.ticketNo || localTicket.id, description: `Created a new repair ticket for ${localTicket.model || localTicket.device} (${localTicket.customer}).`, meta: { Device: localTicket.device, Technician: localTicket.technician || "Unassigned", Amount: inr(localTicket.amount) } });
@@ -1568,7 +1659,21 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("imeiType" in updates) row.imei_type = updates.imeiType ?? null;
       if ("qcStatus" in updates) row.qc_status = updates.qcStatus ?? null;
       if ("parts" in updates) row.parts = updates.parts ?? [];
-      if ("devices" in updates) row.devices = updates.devices ?? [];
+      // The `devices` column is a JSONB ENVELOPE (records + ticket-level meta:
+      // GST, origin links, recordType, estimateStatus, converted links). Any
+      // update that touches an envelope field must REWRITE THE WHOLE ENVELOPE
+      // from the merged ticket — writing a bare `updates.devices` array here
+      // would silently drop recordType/estimateStatus/GST and turn an Estimate
+      // back into a plain ticket. Merge prev + updates so untouched meta is
+      // preserved and touched meta is applied.
+      const envelopeKeys = [
+        "devices", "customerType", "gstNumber", "gstRate", "sgstRate", "cgstRate",
+        "sgst", "cgst", "linkedWalkInId", "linkedFieldJobId", "linkedLeadId",
+        "recordType", "estimateStatus", "convertedTicketId", "convertedFromEstimateId",
+      ] as const;
+      if (envelopeKeys.some((k) => k in updates)) {
+        row.devices = ticketDevicesEnvelope({ ...(prev ?? {}), ...updates });
+      }
       if ("items" in updates) row.items = updates.items ?? [];
       if ("email" in updates) row.email = updates.email ?? null;
       if ("address" in updates) row.address = updates.address ?? null;
@@ -1973,7 +2078,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       let guard = 0;
       while (res.error && isDuplicateKeyError(res.error) && guard < 5) {
         guard += 1;
-        const nextId = await nextInvoiceIdFromDb(current.invoiceType, activeStoreIdRef.current, activePrefixesRef.current.invoice);
+        const nextId = await nextInvoiceIdFromDb(current.invoiceType, activeStoreIdRef.current, activePrefixesRef.current.invoice, current.documentType);
         current = { ...current, id: nextId };
         res = await attemptInsert(current);
       }
@@ -2079,7 +2184,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // repairStatus / paymentMode / serviceCategory live in the `devices` meta
       // jsonb. When any of them change, re-serialize the whole devices column so
       // the value is actually persisted (survives reload / logout).
-      if (prev && ("repairStatus" in updates || "paymentMode" in updates || "serviceCategory" in updates || "devices" in updates)) {
+      // documentType + lineage (documentType / proformaStatus / sourceProformaId
+      // / sourceEstimateId / sourceTicketId / convertedInvoiceId) also live in
+      // the `devices` meta jsonb — re-serialize when any of them change so the
+      // proforma→invoice conversion links actually persist.
+      const LINEAGE_KEYS = ["documentType", "proformaStatus", "sourceProformaId", "sourceEstimateId", "sourceTicketId", "convertedInvoiceId"] as const;
+      const lineageTouched = LINEAGE_KEYS.some((k) => k in updates);
+      if (prev && ("repairStatus" in updates || "paymentMode" in updates || "serviceCategory" in updates || "devices" in updates || lineageTouched)) {
         row.devices = (invoiceToRow({ ...prev, ...updates } as Invoice).devices);
       }
       let currentRow = row;
@@ -2145,6 +2256,110 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, invoices: s.invoices.filter((inv) => inv.id !== id) }));
     logActivity({ module: "Invoice", action: "Invoice Deleted", severity: "critical", entity: "Invoice", reference: prev?.reference || id, description: prev ? `Deleted invoice ${prev.reference} for ${prev.customer}.` : `Deleted invoice ${id}.`, meta: prev ? { Total: inr(prev.total) } : undefined });
   }, []);
+
+  /* ── Proforma → Final Invoice conversion (atomic + idempotent) ──
+     Creates a NEW normal Invoice from a Proforma, copying all commercial data
+     and device relationships. Never mutates/deletes the proforma — it only
+     stamps the bidirectional lineage link once the new invoice actually exists.
+     Guards:
+       • Idempotent — if the proforma is ALREADY converted, returns the existing
+         invoice id (no second invoice). This is the durable, multi-user-safe
+         check (backed by the persisted convertedInvoiceId).
+       • Double-click — an in-session in-flight set rejects re-entry.
+       • Same org/store — the new invoice inherits the proforma's branchId, never
+         the currently-selected store.
+       • Only proformas — a normal invoice is never "converted". */
+  const convertProformaToInvoice = useCallback(async (proformaId: string): Promise<string> => {
+    const proforma = stateRef.current.invoices.find((inv) => inv.id === proformaId);
+    if (!proforma) {
+      toast.error("Proforma not found", { description: "This proforma no longer exists." });
+      return "";
+    }
+    if (!isProforma(proforma)) {
+      toast.error("Not a proforma", { description: "Only proforma documents can be pushed to a normal invoice." });
+      return "";
+    }
+    // ── Idempotency: already converted → return the existing invoice. ──
+    if (proforma.convertedInvoiceId) {
+      const existing = stateRef.current.invoices.find((inv) => inv.id === proforma.convertedInvoiceId);
+      if (existing) return existing.id;
+      // Link exists but the invoice was deleted — fall through to recreate.
+    }
+    // ── Double-click / concurrent re-entry guard (this session). ──
+    if (convertingProformaRef.current.has(proformaId)) return "";
+    convertingProformaRef.current.add(proformaId);
+
+    try {
+      // Build the NEW normal Invoice from the proforma's captured commercial
+      // data. A fresh identity: its own id (assigned by addInvoice against the
+      // normal invoice series), createdAt, status lifecycle and payment state.
+      // Devices (and their durable ticketDeviceId links) are copied verbatim.
+      const devices = getInvoiceDevices(proforma);
+      const newInvoice: Invoice = {
+        ...proforma,
+        // Fresh identity — addInvoice assigns the real normal-invoice id.
+        id: "",
+        documentType: "invoice",       // a NORMAL, revenue-bearing invoice
+        proformaStatus: undefined,     // financial invoice has no proforma status
+        status: "draft",               // normal invoice lifecycle starts at draft
+        paidAmount: 0,
+        createdAt: new Date().toISOString(),
+        pinnedAt: undefined,
+        // Lineage — where this invoice came from (queryable both directions).
+        sourceProformaId: proforma.id,
+        sourceEstimateId: proforma.sourceEstimateId,
+        sourceTicketId: proforma.sourceTicketId ?? proforma.ticketId,
+        convertedInvoiceId: undefined,
+        // Keep the same store/customer/devices; branchId flows via ...proforma.
+        branchId: proforma.branchId,
+        devices: devices.map((d) => ({ ...d })),
+      };
+
+      const newId = await addInvoice(newInvoice);
+      if (!newId) {
+        // addInvoice already surfaced the reason (e.g. duplicate-billing guard).
+        return "";
+      }
+
+      // Stamp the proforma as converted (historical source doc, never deleted).
+      await updateInvoice(proformaId, { convertedInvoiceId: newId, proformaStatus: "converted" });
+
+      // Downstream lineage on the originating Ticket / Estimate, when known, so
+      // View Ticket / View Estimate can show the final invoice.
+      const linkTicketId = proforma.sourceTicketId ?? proforma.ticketId;
+      if (linkTicketId) {
+        const t = stateRef.current.tickets.find((tk) => tk.id === linkTicketId);
+        if (t) { try { await updateTicket(t.id, { invoiceId: newId }); } catch { /* non-fatal */ } }
+      }
+      if (proforma.sourceEstimateId) {
+        const e = stateRef.current.tickets.find((tk) => tk.id === proforma.sourceEstimateId);
+        if (e) { try { await updateTicket(e.id, { invoiceId: newId }); } catch { /* non-fatal */ } }
+      }
+
+      logActivity({
+        module: "Invoice",
+        action: "Invoice Created from Proforma",
+        severity: "success",
+        entity: "Invoice",
+        reference: newId,
+        description: `Created invoice ${newId} from proforma ${proforma.id} (${proforma.customer}).`,
+        meta: { Proforma: proforma.id, Total: inr(proforma.total) },
+      });
+      logActivity({
+        module: "Invoice",
+        action: "Proforma Converted to Invoice",
+        severity: "info",
+        entity: "Invoice",
+        reference: proforma.id,
+        description: `Proforma ${proforma.id} converted to invoice ${newId}.`,
+        meta: { Invoice: newId },
+      });
+      toast.success("Invoice created", { description: `${newId} created from proforma ${proforma.id}.` });
+      return newId;
+    } finally {
+      convertingProformaRef.current.delete(proformaId);
+    }
+  }, [addInvoice, updateInvoice, updateTicket]);
 
   /* ── Walk-In actions (DB-first) ── */
   const addWalkIn = useCallback(async (walkIn: WalkIn) => {
@@ -2747,6 +2962,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addInvoice,
     updateInvoice,
     deleteInvoice,
+    convertProformaToInvoice,
     addWalkIn,
     updateWalkIn,
     deleteWalkIn,

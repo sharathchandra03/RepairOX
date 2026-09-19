@@ -23,9 +23,15 @@ type CreationSuccessProps = {
   id: string;
   onComplete: () => void;
   autoAdvanceMs?: number;
+  /** When the created record is a Repair Estimate, show estimate-specific copy
+   *  (heading + subtitle). Visuals/colours are otherwise identical to a ticket. */
+  isEstimate?: boolean;
+  /** When the created record is a Proforma Invoice, show proforma-specific copy.
+   *  Visuals stay identical to a normal invoice — only the wording changes. */
+  isProforma?: boolean;
 };
 
-export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 1800 }: CreationSuccessProps) {
+export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 1800, isEstimate = false, isProforma = false }: CreationSuccessProps) {
   const [phase, setPhase] = useState<"animate" | "done">("animate");
   const { tickets } = useStore();
 
@@ -64,10 +70,18 @@ export function CreationSuccess({ type, id, onComplete, autoAdvanceMs = 1800 }: 
   const badgeBgColor = isInvoice ? "bg-[#F0FDF4]" : "bg-[#F7FAFF]";
   const progressBarColor = isInvoice ? "bg-[#16A34A]/40" : "bg-[#4361EE]/40";
 
-  const title = type === "ticket" ? "Ticket Created" : "Invoice Created";
-  const subtitle = type === "ticket"
-    ? "Your repair ticket is now active and tracked."
-    : "Your invoice is ready to send or print.";
+  const title = isProforma
+    ? "Proforma Invoice Created"
+    : isEstimate
+      ? "Repair Estimate Created"
+      : type === "ticket" ? "Ticket Created" : "Invoice Created";
+  const subtitle = isProforma
+    ? "Your proforma is ready to share or convert to an invoice."
+    : isEstimate
+      ? "Your estimate is saved and waiting for approval."
+      : type === "ticket"
+        ? "Your repair ticket is now active and tracked."
+        : "Your invoice is ready to send or print.";
 
   return (
     <AnimatePresence>

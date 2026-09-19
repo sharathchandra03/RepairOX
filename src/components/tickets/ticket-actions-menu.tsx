@@ -1,9 +1,9 @@
 "use client";
 
-import { Eye, ArrowRightLeft, MessageCircle, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown, Pin, PinOff } from "lucide-react";
+import { Eye, ArrowRightLeft, MessageCircle, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown, Pin, PinOff, TicketCheck } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { PushToInvoiceIcon } from "@/components/tickets/push-to-invoice-icon";
-import type { Ticket } from "@/lib/mock-data";
+import { isEstimate, type Ticket } from "@/lib/mock-data";
 
 export type TicketAction =
   | "view"
@@ -19,23 +19,60 @@ export type TicketAction =
   | "delete"
   | "priority"
   | "pin"
-  | "invoice";
+  | "invoice"
+  /** Estimate-only: convert this Estimate into a new Ticket (opens the
+   *  confirmation popup → prefilled Ticket flow). Never shown for Tickets. */
+  | "push-to-ticket"
+  /** Estimate-only: create a Proforma quote from this Estimate. */
+  | "push-to-proforma";
 
 interface TicketActionsMenuProps {
   ticket: Ticket;
   onAction: (action: TicketAction, ticket: Ticket) => void;
   /** True when this ticket already has a linked invoice (invoice.ticketId === ticket.id). */
   hasInvoice?: boolean;
+  /** True when the current user may create Tickets — gates the estimate-only
+   *  "Push to Ticket" action (UI half of the permission check; the store/backend
+   *  enforces it too). */
+  canPushToTicket?: boolean;
 }
 
-export function TicketActionsMenu({ ticket, onAction, hasInvoice = false }: TicketActionsMenuProps) {
+export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPushToTicket = true }: TicketActionsMenuProps) {
   const isPinned = !!ticket.pinnedAt;
+  // Estimate records get a DIFFERENT quick-action set: they are quotes, not
+  // repair jobs, so "Push to Invoice" is replaced by "Push to Ticket" and the
+  // invoice/coverage affordances are hidden.
+  const estimate = isEstimate(ticket);
   return (
     <div className="flex items-center justify-end gap-2">
-      {/* 1. Push to Invoice — first quick action. Uses the existing "invoice"
-             flow via onAction. Once an invoice exists it reflects that state
-             (disabled + green check) so no duplicate invoice is created. */}
-      {hasInvoice ? (
+      {/* 1. Primary quick action.
+             • Estimate → "Push to Ticket" (convert). Shown only when the user
+               can create tickets. Once converted it reflects that state
+               (disabled + green check) so no duplicate Ticket is created.
+             • Ticket → "Push to Invoice" (existing behaviour). */}
+      {estimate ? (
+        // Estimate primary quick action → "Push to Proforma" (send the quote).
+        // Uses the invoice/receipt icon (NOT the ticket icon) since the natural
+        // next step for a quote is the proforma; "Push to Ticket" also lives in
+        // the dropdown. Once converted to a ticket, show the converted state.
+        ticket.estimateStatus === "converted" ? (
+          <span
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 cursor-default"
+            title="Already converted to a Ticket"
+            aria-label="Already converted to a Ticket"
+          >
+            <TicketCheck className="h-3.5 w-3.5" />
+          </span>
+        ) : (
+          <button
+            onClick={() => onAction("push-to-proforma", ticket)}
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+            title="Push to Proforma"
+          >
+            <PushToInvoiceIcon className="h-3.5 w-3.5" />
+          </button>
+        )
+      ) : hasInvoice ? (
         <span
           className="inline-flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600 cursor-default"
           title="Invoice already generated"
@@ -99,11 +136,34 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false }: Tick
             <MenuItem icon={Pencil} onClick={() => { onAction("edit", ticket); close(); }}>
               Edit
             </MenuItem>
-            {/* 2. Push to Invoice — completed/disabled state preserved by caller;
-                   no duplicate invoice action is created. */}
-            <MenuItem icon={Receipt} onClick={() => { onAction("invoice", ticket); close(); }}>
-              Push to Invoice
-            </MenuItem>
+            {/* 2. Push to Ticket (Estimate) / Push to Invoice (Ticket).
+                   Estimate → shows "Push to Ticket" only when allowed and not
+                   yet converted; Tickets keep "Push to Invoice". */}
+            {estimate ? (
+              // Estimate flows: send a quote (Push to Proforma) OR skip straight
+              // to a repair job (Push to Ticket). Both supported per the two
+              // lifecycles: Estimate→Ticket→Invoice and Estimate→Proforma→Ticket→Invoice.
+              <>
+                {/* Push to Proforma — create the proforma quote from this estimate. */}
+                <MenuItem icon={Receipt} onClick={() => { onAction("push-to-proforma", ticket); close(); }}>
+                  Push to Proforma
+                </MenuItem>
+                {/* Push to Ticket — convert the estimate into a repair ticket. */}
+                {ticket.estimateStatus === "converted" ? (
+                  <MenuItem icon={TicketCheck} onClick={() => { onAction("push-to-ticket", ticket); close(); }}>
+                    View Converted Ticket
+                  </MenuItem>
+                ) : canPushToTicket ? (
+                  <MenuItem icon={TicketCheck} onClick={() => { onAction("push-to-ticket", ticket); close(); }}>
+                    Push to Ticket
+                  </MenuItem>
+                ) : null}
+              </>
+            ) : (
+              <MenuItem icon={Receipt} onClick={() => { onAction("invoice", ticket); close(); }}>
+                Push to Invoice
+              </MenuItem>
+            )}
             {/* 3. Change Priority */}
             <MenuItem icon={AlertTriangle} onClick={() => { onAction("priority", ticket); close(); }}>
               Change Priority

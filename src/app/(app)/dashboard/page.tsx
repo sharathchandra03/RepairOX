@@ -22,7 +22,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { useState, useMemo, useRef, useCallback } from "react";
-import { STATUS_LABEL, getTicketType, TICKET_TYPE_LABEL, type TicketStatus, type TicketPriority } from "@/lib/mock-data";
+import { STATUS_LABEL, getTicketType, TICKET_TYPE_LABEL, isProforma, type TicketStatus, type TicketPriority } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
@@ -427,13 +427,18 @@ export default function Dashboard() {
     return { rangeStart: start, rangeEnd: end, rangeDays: days };
   }, [dateRange, customRange]);
 
+  // Realized (revenue-bearing) invoices only — Proformas are non-revenue
+  // commercial documents and must never enter dashboard financial KPIs
+  // (Total Revenue / Dues / Projection / Collection).
+  const realizedInvoices = useMemo(() => invoices.filter((i) => !isProforma(i)), [invoices]);
+
   // Filtered invoices by date range
   const filteredInvoices = useMemo(() => {
-    return invoices.filter((i) => {
+    return realizedInvoices.filter((i) => {
       const created = new Date(i.createdAt).getTime();
       return created >= rangeStart.getTime() && created <= rangeEnd.getTime();
     });
-  }, [invoices, rangeStart, rangeEnd]);
+  }, [realizedInvoices, rangeStart, rangeEnd]);
 
   // Revenue from invoices within the selected range
   const revenueMetrics = useMemo(() => {

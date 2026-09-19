@@ -42,6 +42,7 @@ export type FilterState = {
   invoiceStatus: string;
   invoiceType: string;
   category: string;
+  documentType: string;
   dateFrom: string;
   dateTo: string;
   dynamicFilters: { id: string; value: string; pinned: boolean }[];
@@ -59,6 +60,7 @@ export function InvoiceFilters({
   invoiceStatus,
   invoiceType,
   category,
+  documentType,
   onChange,
   onReset,
   onClose,
@@ -70,7 +72,8 @@ export function InvoiceFilters({
   invoiceStatus: string;
   invoiceType: string;
   category: string;
-  onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string }>) => void;
+  documentType: string;
+  onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string; documentType: string }>) => void;
   onReset: () => void;
   /** Closes the Advanced Filters panel. Applied filter state persists — closing
    *  only hides the panel, it does not clear the current selections. */
@@ -102,8 +105,8 @@ export function InvoiceFilters({
         </div>
       </div>
 
-      {/* Filter Controls Row — 4 equal-width fields, evenly distributed (live filtering, no button) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 items-end gap-3">
+      {/* Filter Controls Row — equal-width fields, evenly distributed (live filtering, no button) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 items-end gap-3">
         {/* Unified Search — Invoice ID + Customer Name (live, case-insensitive) */}
         <div className="space-y-1.5">
           <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice / Customer</label>
@@ -158,6 +161,21 @@ export function InvoiceFilters({
               { label: "All Categories", value: "all" },
               { label: "Service", value: "service" },
               { label: "Accessories", value: "accessories" },
+            ]}
+          />
+        </div>
+
+        {/* Document Type — Normal Invoice vs Proforma. Works immediately (live),
+            never requires pinning, and combines with every other filter. */}
+        <div className="space-y-1.5">
+          <FieldLabel label="Document Type" filterId="documentType" isPinned={isPinned} onTogglePin={onTogglePin} />
+          <Select
+            value={documentType}
+            onChange={(e: any) => onChange({ documentType: e.target.value })}
+            options={[
+              { label: "All Documents", value: "all" },
+              { label: "Normal Invoice", value: "invoice" },
+              { label: "Proforma Invoice", value: "proforma" },
             ]}
           />
         </div>

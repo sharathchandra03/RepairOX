@@ -26,6 +26,9 @@ function Row({ label, value, bold }: { label: string; value: string; bold?: bool
 export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
   const { store, customer, ticket, invoice } = data;
   const isInvoice = !!invoice;
+  // A Proforma is a NON-financial commercial document — suppress every financial
+  // status badge / paid / balance / change row on the thermal print (spec §17).
+  const isProformaDoc = !!invoice && (invoice.documentType ?? "invoice") === "proforma";
   const isTicket = !!ticket;
 
   const docNumber = isInvoice ? invoice!.invoiceId : ticket?.ticketId || "";
@@ -59,8 +62,8 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
       <div className="text-center">
         <p className="text-[13px] font-bold tracking-wide uppercase">{data.printTitle}</p>
         <p className="text-[10px] font-semibold">#{docNumber}</p>
-        {/* Invoice Payment Status Badge */}
-        {isInvoice && invoice && (
+        {/* Invoice Payment Status Badge — proformas never show a payment status. */}
+        {isInvoice && invoice && !isProformaDoc && (
           <p
             className="mt-1 text-[10px] font-bold uppercase tracking-wider"
             style={
@@ -196,29 +199,32 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
         <>
           {/* Invoice meta */}
           <div className="mb-1">
-            <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">Invoice Details</p>
+            <p className="text-[9px] font-bold uppercase tracking-wide mb-0.5">{isProformaDoc ? "Proforma Details" : "Invoice Details"}</p>
             <div className="space-y-0.5">
               {invoice.ticketId && <Row label="Ticket" value={invoice.linkedTicketNo || invoice.ticketId} />}
-              <Row label="Type" value={invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"} />
+              <Row label="Type" value={isProformaDoc ? "Proforma Invoice" : invoice.serviceCategory === "accessories" ? "Accessories Invoice" : invoice.invoiceType === "business" ? "Tax Invoice" : "Retail Invoice"} />
               <Row label="Category" value={(invoice.serviceCategory || "service").charAt(0).toUpperCase() + (invoice.serviceCategory || "service").slice(1)} />
-              <div className="flex justify-between gap-1 text-[9px] leading-[1.4]">
-                <span className="text-gray-600 shrink-0">Status:</span>
-                <span
-                  className="text-right font-bold"
-                  style={
-                    invoice.status === "paid"
-                      ? { color: "#166534" }
-                      : invoice.status === "overdue"
-                      ? { color: "#991b1b" }
-                      : invoice.status === "partial"
-                      ? { color: "#92400e" }
-                      : { color: "#92400e" }
-                  }
-                >
-                  {invoice.status === "paid" ? "Paid" : invoice.status === "overdue" ? "Overdue" : invoice.status === "partial" ? "Partial" : "Due"}
-                </span>
-              </div>
-              <Row label="Due" value={formatPrintDate(invoice.dueDate)} />
+              {/* Proforma: no financial Status row, no Due date. */}
+              {!isProformaDoc && (
+                <div className="flex justify-between gap-1 text-[9px] leading-[1.4]">
+                  <span className="text-gray-600 shrink-0">Status:</span>
+                  <span
+                    className="text-right font-bold"
+                    style={
+                      invoice.status === "paid"
+                        ? { color: "#166534" }
+                        : invoice.status === "overdue"
+                        ? { color: "#991b1b" }
+                        : invoice.status === "partial"
+                        ? { color: "#92400e" }
+                        : { color: "#92400e" }
+                    }
+                  >
+                    {invoice.status === "paid" ? "Paid" : invoice.status === "overdue" ? "Overdue" : invoice.status === "partial" ? "Partial" : "Due"}
+                  </span>
+                </div>
+              )}
+              {!isProformaDoc && <Row label="Due" value={formatPrintDate(invoice.dueDate)} />}
               {invoice.paymentMode && <Row label="Payment" value={invoice.paymentMode.replace("_", " ")} />}
               {invoice.employee && <Row label="Employee" value={invoice.employee} />}
             </div>
@@ -319,24 +325,29 @@ export function ThermalTemplate({ data }: { data: PrintDocumentData }) {
               </div>
             ) : null}
             <div className="flex justify-between font-bold text-[12px] border-t border-gray-700 pt-1 mt-1">
-              <span>TOTAL</span>
+              <span>{isProformaDoc ? "GRAND TOTAL" : "TOTAL"}</span>
               <span>{formatPrintCurrency(invoice.total)}</span>
             </div>
-            <div className="flex justify-between mt-0.5">
-              <span>Paid</span>
-              <span>{formatPrintCurrency(invoice.paidAmount)}</span>
-            </div>
-            {invoice.balance > 0 && (
-              <div className="flex justify-between font-bold">
-                <span>Balance Due</span>
-                <span>{formatPrintCurrency(invoice.balance)}</span>
-              </div>
-            )}
-            {invoice.paidAmount >= invoice.total && invoice.paidAmount > 0 && (
-              <div className="flex justify-between">
-                <span>Change</span>
-                <span>{formatPrintCurrency(invoice.paidAmount - invoice.total)}</span>
-              </div>
+            {/* Proforma: no Paid / Balance Due / Change rows (non-financial). */}
+            {!isProformaDoc && (
+              <>
+                <div className="flex justify-between mt-0.5">
+                  <span>Paid</span>
+                  <span>{formatPrintCurrency(invoice.paidAmount)}</span>
+                </div>
+                {invoice.balance > 0 && (
+                  <div className="flex justify-between font-bold">
+                    <span>Balance Due</span>
+                    <span>{formatPrintCurrency(invoice.balance)}</span>
+                  </div>
+                )}
+                {invoice.paidAmount >= invoice.total && invoice.paidAmount > 0 && (
+                  <div className="flex justify-between">
+                    <span>Change</span>
+                    <span>{formatPrintCurrency(invoice.paidAmount - invoice.total)}</span>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </>
