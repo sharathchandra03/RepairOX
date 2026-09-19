@@ -88,7 +88,8 @@ interface StoreContextValue {
   activeStore: StoreBranch | null;
   /** True while the user is viewing the consolidated All-Shops context. */
   isAllShops: boolean;
-  /** True when the user may see more than one store (owner / multi-store mgr). */
+  /** True when the user holds `multi_store_access` AND has more than one store.
+   *  Gates the header store switcher — a store-count alone never grants it. */
   canSwitchStores: boolean;
   /** True when the user is allowed to enter the consolidated All-Shops view. */
   canViewAllShops: boolean;
@@ -374,6 +375,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Guard: only allow All Shops for users who can cross branches.
         nextId = canCrossBranch ? null : (stores[0]?.id ?? null);
       } else if (stores.some((s) => s.id === idOrAll)) {
+        // Switching to a DIFFERENT store is a multi-store action. Without the
+        // capability, keep the user pinned to their current/home store even if
+        // extra stores exist in their accessible list.
+        if (!canCrossBranch && idOrAll !== activeStoreId) {
+          return;
+        }
         nextId = idOrAll;
       } else {
         return; // never let a user select a store they cannot access
@@ -383,7 +390,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // and the link stays shareable.
       writeStoreParam(paramForStoreId(nextId, stores));
     },
-    [canCrossBranch, stores]
+    [canCrossBranch, stores, activeStoreId]
   );
 
   const activeStore = useMemo(
@@ -462,7 +469,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       activeStoreId,
       activeStore,
       isAllShops: activeStoreId === null,
-      canSwitchStores: stores.length > 1,
+      // The switch affordance is a CAPABILITY, not a store-count. A user without
+      // multi_store_access must never get a switcher, even if they happen to have
+      // more than one accessible store (branch + explicit user_stores grants).
+      canSwitchStores: canCrossBranch && stores.length > 1,
       canViewAllShops: canCrossBranch && stores.length > 1,
       ready,
       setActiveStore,

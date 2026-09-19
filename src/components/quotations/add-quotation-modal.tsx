@@ -28,6 +28,9 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Input, Textarea, Label, NumericInput } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { useStore } from "@/lib/store";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
+import { toast } from "@/components/ui/toaster";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import type { InventoryItem } from "@/lib/inventory-data";
 import type { Invoice } from "@/lib/mock-data";
@@ -82,6 +85,11 @@ export function AddQuotationModal({
 }) {
   const router = useRouter();
   const { inventory, companies, customers, invoices, addInvoice } = useStore();
+  const { can } = usePermissions();
+  // Converting a quote to an Invoice is an invoice-creation action; sending is a
+  // comms action. Gate with granular keys OR backward-compatible coarse keys.
+  const canConvertToInvoice = allow(can, CAP.quotation.convertToInvoice);
+  const canSendQuote = allow(can, CAP.quotation.send);
 
   const [mounted, setMounted] = React.useState(false);
   const [form, setForm] = React.useState<QuotationFormData>(() => createQuotationForm());
@@ -413,6 +421,10 @@ export function AddQuotationModal({
   };
 
   const handleConvertToInvoice = async () => {
+    if (!canConvertToInvoice) {
+      toast.error("Not allowed", { description: "You don't have permission to create invoices from quotations." });
+      return;
+    }
     const invoiceId = genInvoiceId();
     const invoice: Invoice = quotationToInvoice(form, totals, resolved, invoiceId);
     await addInvoice(invoice);
@@ -587,13 +599,15 @@ export function AddQuotationModal({
                     <div className="flex flex-wrap items-center gap-2">
                       <Button variant="ghost" size="md" onClick={handleClose}>Cancel</Button>
                       <Button variant="outline" size="md" loading={saving} onClick={() => persist("draft")}>Save Draft</Button>
-                      <Button size="md" loading={saving} onClick={() => persist("sent")}>Save &amp; Send</Button>
+                      {canSendQuote && <Button size="md" loading={saving} onClick={() => persist("sent")}>Save &amp; Send</Button>}
                       <Button variant="soft" size="md" disabled={!savedId} onClick={handleGeneratePdf}>
                         <Download className="h-3.5 w-3.5" /> Generate PDF
                       </Button>
+                      {canConvertToInvoice && (
                       <Button variant="outline" size="md" disabled={!savedId} onClick={handleConvertToInvoice}>
                         <FileCheck2 className="h-3.5 w-3.5" /> Convert to Invoice
                       </Button>
+                      )}
                     </div>
                   </div>
                 </>

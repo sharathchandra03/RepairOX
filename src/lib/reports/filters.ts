@@ -9,7 +9,7 @@
      updates everything at once.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { STATUS_LABEL, INVOICE_STATUS_LABEL } from "@/lib/mock-data";
+import { STATUS_LABEL, INVOICE_STATUS_LABEL, isWarranty } from "@/lib/mock-data";
 import type {
   ReportDataset,
   ReportFilters,
@@ -98,6 +98,12 @@ export function applyFilters(
 ): ReportDataset {
   const tickets = d.tickets.filter(
     (t) =>
+      // Warranty records are operational/service events (₹0), NOT normal
+      // repair tickets — they must never contaminate ticket counts, revenue,
+      // success-rate or projections in reports (spec §65/§66). Excluded once
+      // here at the reports chokepoint so every downstream KPI/insight/selector
+      // is warranty-free.
+      !isWarranty(t) &&
       inRange(t.createdAt, range) &&
       eqi(t.technician, f.technician) &&
       eqi(t.customer, f.customer) &&

@@ -185,6 +185,14 @@ function rowToTicket(r: any): Ticket {
     estimateStatus: meta.estimateStatus ?? undefined,
     convertedTicketId: meta.convertedTicketId ?? undefined,
     convertedFromEstimateId: meta.convertedFromEstimateId ?? undefined,
+    // Warranty case metadata — packed in the same JSONB envelope (no migration).
+    parentTicketId: meta.parentTicketId ?? undefined,
+    parentTicketNo: meta.parentTicketNo ?? undefined,
+    warrantyDeviceIds: meta.warrantyDeviceIds ?? undefined,
+    warrantyIssue: meta.warrantyIssue ?? undefined,
+    warrantyStatus: meta.warrantyStatus ?? undefined,
+    createdFromTicketId: meta.createdFromTicketId ?? undefined,
+    createdFromReason: meta.createdFromReason ?? undefined,
     pinnedAt: r.pinned_at ?? undefined,
     ticketNo: r.ticket_no ?? undefined,
   };
@@ -211,6 +219,14 @@ function ticketDevicesEnvelope(t: Partial<Ticket>): Record<string, unknown> {
     estimateStatus: t.estimateStatus || null,
     convertedTicketId: t.convertedTicketId || null,
     convertedFromEstimateId: t.convertedFromEstimateId || null,
+    // Warranty case metadata (see rowToTicket).
+    parentTicketId: t.parentTicketId || null,
+    parentTicketNo: t.parentTicketNo || null,
+    warrantyDeviceIds: t.warrantyDeviceIds ?? null,
+    warrantyIssue: t.warrantyIssue || null,
+    warrantyStatus: t.warrantyStatus || null,
+    createdFromTicketId: t.createdFromTicketId || null,
+    createdFromReason: t.createdFromReason || null,
   };
 }
 
@@ -598,7 +614,7 @@ async function resequenceTicketNumbers(storeId?: string | null, prefix?: string 
   // renumber ONLY the rows in the requested series ("T" → Tickets, "E" →
   // Estimates). Renumbering all rows into one series would clobber the other
   // series' numbers and merge two independent sequences.
-  const wantRecordType = letter === "E" ? "estimate" : "ticket";
+  const wantRecordType = letter === "E" ? "estimate" : letter === "W" ? "warranty" : "ticket";
   const { data, error } = await supabase
     .from("tickets")
     .select("id, ticket_no, created_at, devices")
@@ -1307,7 +1323,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const storePrefix = ticketPrefixSep(activePrefixes.ticket);
       const ticketNoMap = await resequenceTicketNumbers(scopeStoreId, storePrefix, "T");
       const estimateNoMap = await resequenceTicketNumbers(scopeStoreId, storePrefix, "E");
-      const combinedNoMap = { ...ticketNoMap, ...estimateNoMap };
+      // Warranty ("W" series) is resequenced independently too, so each store
+      // keeps a parallel, gap-free W-0001… run (spec §3/§59).
+      const warrantyNoMap = await resequenceTicketNumbers(scopeStoreId, storePrefix, "W");
+      const combinedNoMap = { ...ticketNoMap, ...estimateNoMap, ...warrantyNoMap };
       if (active && Object.keys(combinedNoMap).length > 0) {
         setState((s) => ({
           ...s,
@@ -1536,8 +1555,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // ticket_no still shows the clean sequence, and resequencing only ever
       // rewrites ticket_no (never id) so FK relationships stay intact.
       // Series letter: Estimates use the independent "E" run (KOR-E-0045),
-      // everything else the normal "T" run (KOR-T-0045).
-      const seriesLetter = ticket.recordType === "estimate" ? "E" : "T";
+      // Warranty claims the independent "W" run (KOR-W-0001), everything else
+      // the normal "T" run (KOR-T-0045). Each series is numbered independently.
+      const seriesLetter = ticket.recordType === "estimate" ? "E" : ticket.recordType === "warranty" ? "W" : "T";
       const seq = await nextTicketIdFromDb(activeStoreIdRef.current, ticketPrefixSep(activePrefixesRef.current.ticket), seriesLetter);
       let current: Ticket = { ...ticket, id: genUniqueTicketId(), ticketNo: seq };
       const insertTicket = async (t: Ticket) => {
@@ -1584,7 +1604,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Local/demo mode: derive the next sequential number from in-memory tickets,
     // scoped to the correct series ("E" for estimates, "T" otherwise) so the
     // two runs stay independent exactly as in DB mode.
-    const localLetter = ticket.recordType === "estimate" ? "E" : "T";
+    const localLetter = ticket.recordType === "estimate" ? "E" : ticket.recordType === "warranty" ? "W" : "T";
     const localMax = stateRef.current.tickets.reduce((max, t) => {
       return Math.max(max, ticketSeq(t.ticketNo, null, localLetter));
     }, 0);
@@ -1670,6 +1690,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         "devices", "customerType", "gstNumber", "gstRate", "sgstRate", "cgstRate",
         "sgst", "cgst", "linkedWalkInId", "linkedFieldJobId", "linkedLeadId",
         "recordType", "estimateStatus", "convertedTicketId", "convertedFromEstimateId",
+        "parentTicketId", "parentTicketNo", "warrantyDeviceIds", "warrantyIssue",
+        "warrantyStatus", "createdFromTicketId", "createdFromReason",
       ] as const;
       if (envelopeKeys.some((k) => k in updates)) {
         row.devices = ticketDevicesEnvelope({ ...(prev ?? {}), ...updates });

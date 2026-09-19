@@ -31,6 +31,7 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, type Invoice, type InvoiceStatus, type InvoiceType, type Ticket } from "@/lib/mock-data";
 import { ProformaNeedsTicketDialog } from "@/components/invoice/proforma-needs-ticket-dialog";
 import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn, openWhatsApp } from "@/lib/utils";
@@ -162,6 +163,9 @@ export default function InvoicePage() {
   // Pushing a proforma's source estimate to a ticket needs ticket-create rights
   // (the "needs ticket" step of the Estimate → Ticket → Invoice lineage).
   const canCreateTicket = can("create_ticket") || can("manage_repair_jobs");
+  // Per-action invoice capability gates (granular OR backward-compatible coarse).
+  const canBulkChangeStatus = allow(can, CAP.invoice.changeStatus);
+  const canBulkDelete = allow(can, CAP.invoice.delete);
   const multiStore = isAllShops && stores.length > 1;
   const { settings } = useStoreSettings();
   const invoiceStatusColors = settings.invoiceStatusColors;
@@ -238,6 +242,10 @@ export default function InvoicePage() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [documentTypeFilter, setDocumentTypeFilter] = useState<string>("all");
+  // Proforma lifecycle status (Proforma / Converted to Invoice). Only meaningful
+  // for proformas; applied on top of Document Type so a user can find e.g. all
+  // still-open proformas.
+  const [proformaStatusFilter, setProformaStatusFilter] = useState<string>("all");
   const [dateRange, setDateRange] = useState<DateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -250,7 +258,7 @@ export default function InvoicePage() {
   // Individual filter pinning (own storage key so it doesn't collide with other modules).
   const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-invoice-pinned-filters");
   // True when any filter differs from the defaults (Date=Today, Status=All).
-  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || documentTypeFilter !== "all" || panelSearch !== "";
+  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || documentTypeFilter !== "all" || proformaStatusFilter !== "all" || panelSearch !== "";
 
   // Pinnable filter definitions — shared by the pinned-filter bar. Bound
   // directly to the same setters as the advanced panel, so a pinned filter
@@ -290,7 +298,16 @@ export default function InvoicePage() {
       ],
       onChange: setDocumentTypeFilter,
     },
-  ], [statusFilter, typeFilter, categoryFilter, documentTypeFilter]);
+    {
+      id: "proformaStatus", label: "Proforma Status", type: "select", value: proformaStatusFilter,
+      options: [
+        { label: "All Proforma Statuses", value: "all" },
+        { label: PROFORMA_STATUS_LABEL.open, value: "open" },
+        { label: PROFORMA_STATUS_LABEL.converted, value: "converted" },
+      ],
+      onChange: setProformaStatusFilter,
+    },
+  ], [statusFilter, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter]);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [deleteTarget, setDeleteTarget] = useState<Invoice | null>(null);
@@ -311,6 +328,7 @@ export default function InvoicePage() {
       setTypeFilter("all");
       setCategoryFilter("all");
       setDocumentTypeFilter("all");
+      setProformaStatusFilter("all");
       setDateRange("all");
       setCustomFrom("");
       setCustomTo("");
@@ -393,24 +411,32 @@ export default function InvoicePage() {
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
       const okDocumentType = documentTypeFilter === "all" || getDocumentType(inv) === documentTypeFilter;
+      // Proforma-status filter — only proformas carry a proforma lifecycle, so
+      // when a status is chosen we keep only proformas whose resolved status
+      // matches (open vs converted). "all" applies no constraint. Resolved the
+      // same way the proforma pill does (explicit proformaStatus, else derived
+      // from convertedInvoiceId).
+      const okProformaStatus =
+        proformaStatusFilter === "all" ||
+        (isProforma(inv) && (inv.proformaStatus ?? (inv.convertedInvoiceId ? "converted" : "open")) === proformaStatusFilter);
       const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
       const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
       const haystack = `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase();
       const okQ = !q || haystack.includes(q.toLowerCase());
       // Unified panel search matches across Invoice ID + Customer (+ company).
       const okPanelSearch = !panelSearch || `${inv.id} ${inv.customer} ${inv.company || ""}`.toLowerCase().includes(panelSearch.toLowerCase());
-      return okStore && okStatus && okType && okCategory && okDocumentType && okDate && okQ && okPanelSearch;
+      return okStore && okStatus && okType && okCategory && okDocumentType && okProformaStatus && okDate && okQ && okPanelSearch;
     });
     // Pinned invoices float to the top; order within each group is preserved.
     const pinned = filtered.filter((inv) => inv.pinnedAt);
     const normal = filtered.filter((inv) => !inv.pinnedAt);
     return [...pinned, ...normal];
-  }, [invoices, storeFilter, statusFilter, typeFilter, categoryFilter, documentTypeFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
+  }, [invoices, storeFilter, statusFilter, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
 
   // Reset to page 1 whenever the filtered result set changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, typeFilter, categoryFilter, documentTypeFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
+  }, [statusFilter, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
 
   /* ─── Sticky frozen workspace (filters + table header) ───────────────────
      Same formula as the Tickets page: the date pills + status pills live in
@@ -787,18 +813,21 @@ export default function InvoicePage() {
               invoiceType={typeFilter}
               category={categoryFilter}
               documentType={documentTypeFilter}
+              proformaStatus={proformaStatusFilter}
               onChange={(patch) => {
                 if (patch.search !== undefined) setPanelSearch(patch.search);
                 if (patch.invoiceStatus !== undefined) setStatusFilter(patch.invoiceStatus);
                 if (patch.invoiceType !== undefined) setTypeFilter(patch.invoiceType);
                 if (patch.category !== undefined) setCategoryFilter(patch.category);
                 if (patch.documentType !== undefined) setDocumentTypeFilter(patch.documentType);
+                if (patch.proformaStatus !== undefined) setProformaStatusFilter(patch.proformaStatus);
               }}
               onReset={() => {
                 setStatusFilter("all");
                 setTypeFilter("all");
                 setCategoryFilter("all");
                 setDocumentTypeFilter("all");
+                setProformaStatusFilter("all");
                 setPanelSearch("");
                 setDateRange("today");
                 setCustomFrom("");
@@ -838,12 +867,16 @@ export default function InvoicePage() {
               <Download className="h-3 w-3" /> Download Selected PDFs
             </Button>
           )}
-          <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
-            <RefreshCw className="h-3 w-3" /> Change Status
-          </Button>
-          <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
-            <Trash2 className="h-3 w-3" /> Delete
-          </Button>
+          {canBulkChangeStatus && (
+            <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
+              <RefreshCw className="h-3 w-3" /> Change Status
+            </Button>
+          )}
+          {canBulkDelete && (
+            <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+              <Trash2 className="h-3 w-3" /> Delete
+            </Button>
+          )}
           {showBulkStatus && (
             <>
               {(["draft","sent","paid","partial","overdue","cancelled"] as InvoiceStatus[]).map((s) => {

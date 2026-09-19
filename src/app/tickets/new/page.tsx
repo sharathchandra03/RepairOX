@@ -358,6 +358,11 @@ function NewTicketWizard() {
   //     ticket directly from the proforma's devices/customer.
   const viaProformaId = searchParams.get("viaProforma");
   const fromProformaId = searchParams.get("fromProforma");
+  // Out-of-warranty → normal paid Ticket (spec §25/§26/§28). Prefill from the
+  // ORIGINAL ticket, land on Device Details for review, keep a historical
+  // reference (createdFromTicketId + reason) but produce a normal Ticket ID.
+  const fromTicketId = searchParams.get("fromTicket");
+  const fromTicketReason = searchParams.get("reason") || undefined;
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
   const { tickets, invoices, addTicket, updateTicket, updateInvoice, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
   const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
@@ -368,7 +373,7 @@ function NewTicketWizard() {
   // estimate→ticket conversion. Start on Category (step 2) when entering
   // directly from "Create Ticket".
   const [step, setStep] = useState(
-    editId || fromWalkInId || fromFieldJobId || fromEstimateId || fromProformaId ? 3 : skipToCategory ? 2 : 1
+    editId || fromWalkInId || fromFieldJobId || fromEstimateId || fromProformaId || fromTicketId ? 3 : skipToCategory ? 2 : 1
   );
   const [data, setData] = useState<WizardData>(
     skipToCategory ? { ...DEFAULT, process: "ticket" } : DEFAULT
@@ -385,6 +390,10 @@ function NewTicketWizard() {
   // store so all its captured data (devices, customer, etc.) is available for
   // prefill and so we can link/convert it after the new Ticket is created.
   const sourceEstimate = fromEstimateId ? tickets.find((t) => t.id === fromEstimateId) : undefined;
+  // The ORIGINAL ticket being reused when a warranty was found expired and the
+  // user chose "Create New Ticket" (spec §25/§26). Prefilled like an estimate
+  // conversion, but the result stays a normal Ticket and records its origin.
+  const sourceTicketForNew = fromTicketId ? tickets.find((t) => t.id === fromTicketId) : undefined;
   // The source Proforma being converted to a Ticket (quote-first lifecycle),
   // referenced by either viaProforma (routed through the estimate) or
   // fromProforma (estimate-less proforma). Used for prefill + linking on save.
@@ -425,6 +434,19 @@ function NewTicketWizard() {
     const wizard = ticketToWizard(sourceEstimate);
     setData({ ...wizard, process: "ticket" });
   }, [fromEstimateId, sourceEstimate]);
+
+  // Pre-fill from the ORIGINAL ticket for the expired-warranty → new paid
+  // Ticket flow (spec §26/§28). Reuses ticketToWizard 1:1 so customer + device
+  // history carry over; the user reviews on Device Details before finalizing.
+  // The result is a normal Ticket (process "ticket"); origin is stamped on save.
+  const fromTicketPrefilledRef = useRef(false);
+  useEffect(() => {
+    if (!fromTicketId || fromTicketPrefilledRef.current) return;
+    if (!sourceTicketForNew) return; // tickets may still be hydrating
+    fromTicketPrefilledRef.current = true;
+    const wizard = ticketToWizard(sourceTicketForNew);
+    setData({ ...wizard, process: "ticket" });
+  }, [fromTicketId, sourceTicketForNew]);
 
   // Pre-fill directly from a PROFORMA (quote-first lifecycle, estimate-less
   // fallback). Only used when the proforma has no source estimate to route
@@ -800,6 +822,13 @@ function NewTicketWizard() {
       convertedFromEstimateId: fromEstimateId
         || (isEdit ? tickets.find((t) => t.id === editId)?.convertedFromEstimateId : undefined)
         || undefined,
+      // Expired-warranty → new paid Ticket origin (spec §27). Preserved on edit.
+      createdFromTicketId: fromTicketId
+        || (isEdit ? tickets.find((t) => t.id === editId)?.createdFromTicketId : undefined)
+        || undefined,
+      createdFromReason: (fromTicketId ? fromTicketReason : undefined)
+        || (isEdit ? tickets.find((t) => t.id === editId)?.createdFromReason : undefined)
+        || undefined,
     };
 
     if (isEdit) {
@@ -1115,10 +1144,11 @@ function NewTicketWizard() {
                 if (id === "invoice") { router.push("/invoice/create"); return; }
                 if (id === "stock") { router.push("/inventory/add-item"); return; }
                 if (id === "walkin") { router.push("/walk-in"); return; }
-                // Warranty is a reserved future record type — the flow is not
-                // implemented yet, so selecting it does nothing (the card stays
-                // visible for discoverability + the table's future filter).
-                if (id === "warranty") { return; }
+                // Warranty has its own first step — a search over previous
+                // Tickets to check per-device eligibility before a claim can be
+                // raised (spec §11/§12/§60). It is NOT captured through this
+                // create wizard, so we hand off to the dedicated warranty flow.
+                if (id === "warranty") { router.push("/tickets/warranty"); return; }
                 // "ticket" and "estimate" both use THIS wizard. The process is
                 // stored on the wizard data and stamped as recordType on save
                 // (estimate → recordType "estimate", Waiting for Approval).

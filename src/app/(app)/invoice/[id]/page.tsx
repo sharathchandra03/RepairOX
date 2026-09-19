@@ -17,6 +17,8 @@ import { Drawer } from "@/components/ui/drawer";
 import { Textarea, Select, NumericInput } from "@/components/ui/input";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { useStore } from "@/lib/store";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
@@ -116,6 +118,13 @@ export default function InvoiceDetailPage() {
   const params = useParams();
   const router = useRouter();
   const { invoices, tickets, deleteInvoice, updateInvoice } = useStore();
+  const { can } = usePermissions();
+  // Per-action invoice capability gates (granular OR backward-compatible coarse).
+  const canEditInvoice = allow(can, CAP.invoice.edit);
+  const canDeleteInvoice = allow(can, CAP.invoice.delete);
+  const canDuplicateInvoice = allow(can, CAP.invoice.duplicate);
+  const canUpdatePayment = allow(can, CAP.invoice.updatePayment);
+  const canPrintInvoice = allow(can, CAP.invoice.print);
   const { settings } = useStoreSettings();
   const invoiceId = params.id as string;
 
@@ -335,9 +344,12 @@ export default function InvoiceDetailPage() {
 
           {/* Header Actions */}
           <div className="flex items-center gap-2 flex-wrap">
-            <Button variant="outline" size="sm" className="rounded-full" onClick={() => router.push(`/invoice/create?edit=${invoice.id}`)}>
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </Button>
+            {canEditInvoice && (
+              <Button variant="outline" size="sm" className="rounded-full" onClick={() => router.push(`/invoice/create?edit=${invoice.id}`)}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
+            )}
+            {canPrintInvoice && (
             <Dropdown
               align="right"
               width="w-52"
@@ -354,6 +366,8 @@ export default function InvoiceDetailPage() {
                 </>
               )}
             </Dropdown>
+            )}
+            {(canPrintInvoice || canDuplicateInvoice || canDeleteInvoice) && (
             <Dropdown
               align="right"
               width="w-52"
@@ -365,14 +379,15 @@ export default function InvoiceDetailPage() {
             >
               {(close) => (
                 <>
-                  <MenuItem icon={FileDown} onClick={close}>Download PDF</MenuItem>
-                  <MenuItem icon={Mail} onClick={close}>Send to Customer</MenuItem>
-                  <MenuItem icon={Copy} onClick={close}>Duplicate</MenuItem>
-                  <div className="my-1 border-t border-border" />
-                  <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete Invoice</MenuItem>
+                  {canPrintInvoice && <MenuItem icon={FileDown} onClick={close}>Download PDF</MenuItem>}
+                  {canPrintInvoice && <MenuItem icon={Mail} onClick={close}>Send to Customer</MenuItem>}
+                  {canDuplicateInvoice && <MenuItem icon={Copy} onClick={close}>Duplicate</MenuItem>}
+                  {canDeleteInvoice && <div className="my-1 border-t border-border" />}
+                  {canDeleteInvoice && <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete Invoice</MenuItem>}
                 </>
               )}
             </Dropdown>
+            )}
           </div>
         </div>
 
@@ -656,9 +671,11 @@ export default function InvoiceDetailPage() {
             title="Payment Information"
             icon={CheckCircle2}
             action={
+              canUpdatePayment ? (
               <button onClick={openStatusDrawer} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
                 <Pencil className="h-3 w-3" /> Update
               </button>
+              ) : undefined
             }
           >
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
@@ -749,6 +766,7 @@ export default function InvoiceDetailPage() {
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>
             <div className="space-y-2">
+              {canEditInvoice && (
               <button
                 onClick={() => router.push(`/invoice/create?edit=${invoice.id}`)}
                 className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
@@ -761,6 +779,8 @@ export default function InvoiceDetailPage() {
                   <p className="text-[11px] text-muted-foreground">Modify full invoice details</p>
                 </div>
               </button>
+              )}
+              {canUpdatePayment && (
               <button
                 onClick={openStatusDrawer}
                 className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
@@ -773,6 +793,8 @@ export default function InvoiceDetailPage() {
                   <p className="text-[11px] text-muted-foreground">Change status or record payment</p>
                 </div>
               </button>
+              )}
+              {canPrintInvoice && (
               <button
                 onClick={() => router.push(`/print/invoice/${invoice.id}?format=a4`)}
                 className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
@@ -785,6 +807,7 @@ export default function InvoiceDetailPage() {
                   <p className="text-[11px] text-muted-foreground">A4 / Thermal formats</p>
                 </div>
               </button>
+              )}
 
               {/* Repair Status — shares the ticket status system. Changing it keeps
                   the linked ticket in sync (handled by the store's updateInvoice). */}

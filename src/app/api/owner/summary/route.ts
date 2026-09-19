@@ -64,7 +64,10 @@ export async function GET(req: Request) {
   // only the columns required for the metrics to keep payloads small.
   const [tix, invs, wis, inv] = await Promise.all([
     admin.from("tickets")
-      .select("branch_id, status, created_at, deleted_at, source")
+      // `devices` carries the recordType meta envelope — needed to EXCLUDE
+      // Warranty records from the consolidated ticket COUNT (they are ₹0
+      // service events, not billable repair tickets, spec §65/§66).
+      .select("branch_id, status, created_at, deleted_at, source, devices")
       .eq("organization_id", orgId).is("deleted_at", null),
     admin.from("invoices")
       // `devices` carries the documentType meta envelope — needed to EXCLUDE
@@ -94,6 +97,11 @@ export async function GET(req: Request) {
 
   for (const r of (tix.data ?? []) as Row[]) {
     if (!inRange(r.created_at, from, to)) continue;
+    // Resolve recordType from the `devices` JSONB envelope (there is no
+    // record_type column). Warranty records are excluded from ticket counts.
+    const devMeta = r.devices;
+    const recordType = devMeta && !Array.isArray(devMeta) && typeof devMeta === "object" ? devMeta.recordType : undefined;
+    if (recordType === "warranty") continue;
     bump(r.branch_id, (a) => {
       a.tickets += 1;
       const src = String(r.source ?? "").toLowerCase();

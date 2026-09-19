@@ -61,6 +61,7 @@ export function InvoiceFilters({
   invoiceType,
   category,
   documentType,
+  proformaStatus,
   onChange,
   onReset,
   onClose,
@@ -73,7 +74,8 @@ export function InvoiceFilters({
   invoiceType: string;
   category: string;
   documentType: string;
-  onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string; documentType: string }>) => void;
+  proformaStatus: string;
+  onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string; documentType: string; proformaStatus: string }>) => void;
   onReset: () => void;
   /** Closes the Advanced Filters panel. Applied filter state persists — closing
    *  only hides the panel, it does not clear the current selections. */
@@ -106,7 +108,7 @@ export function InvoiceFilters({
       </div>
 
       {/* Filter Controls Row — equal-width fields, evenly distributed (live filtering, no button) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 items-end gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 items-end gap-3">
         {/* Unified Search — Invoice ID + Customer Name (live, case-insensitive) */}
         <div className="space-y-1.5">
           <label className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Invoice / Customer</label>
@@ -176,6 +178,22 @@ export function InvoiceFilters({
               { label: "All Documents", value: "all" },
               { label: "Normal Invoice", value: "invoice" },
               { label: "Proforma Invoice", value: "proforma" },
+            ]}
+          />
+        </div>
+
+        {/* Proforma Status — the proforma lifecycle (Proforma vs Converted to
+            Invoice). Applies only to proformas; combines with every other
+            filter. Works immediately (live), never requires pinning. */}
+        <div className="space-y-1.5">
+          <FieldLabel label="Proforma Status" filterId="proformaStatus" isPinned={isPinned} onTogglePin={onTogglePin} />
+          <Select
+            value={proformaStatus}
+            onChange={(e: any) => onChange({ proformaStatus: e.target.value })}
+            options={[
+              { label: "All Proforma Statuses", value: "all" },
+              { label: "Proforma", value: "open" },
+              { label: "Converted to Invoice", value: "converted" },
             ]}
           />
         </div>

@@ -133,6 +133,12 @@ export type DeviceRecord = {
   warrantyValue?: number;
   /** Warranty duration unit: "days" | "months" | "years". */
   warrantyUnit?: "days" | "months" | "years";
+  /** Explicit warranty window (spec §9/§10/§55). Stored so eligibility is a
+   *  fixed date comparison rather than a recomputation from a moving "today".
+   *  When absent, deviceWarrantyEligibility() falls back to the original
+   *  ticket's createdAt as the start and computes the end from the duration. */
+  warrantyStartDate?: string;
+  warrantyEndDate?: string;
   /** Selected device colour value (e.g. "black"). Optional so historical
    *  devices without a colour keep working (displayed as blank / N/A). New
    *  devices default to Black. */
@@ -347,6 +353,206 @@ export function isEstimate(ticket: Pick<Ticket, "recordType">): boolean {
   return getRecordType(ticket) === "estimate";
 }
 
+/** Convenience predicate — true only for genuine Warranty records. */
+export function isWarranty(ticket: Pick<Ticket, "recordType">): boolean {
+  return getRecordType(ticket) === "warranty";
+}
+
+/* ─── Warranty Case Status (operational lifecycle of a warranty claim) ─────
+   DELIBERATELY separate from BOTH TicketStatus (device repair lifecycle) and
+   warranty ELIGIBILITY (in/out of warranty at search time — see
+   deviceWarrantyEligibility). This answers "where is this warranty CLAIM in
+   its handling lifecycle?". Kept intentionally small (spec §23): a claim is
+   opened, worked, and then either completed or rejected. "Out of Warranty" is
+   NOT a case status — it is an eligibility state detected BEFORE a claim is
+   ever created, so it never appears here. */
+export type WarrantyStatus = "open" | "in_progress" | "completed" | "rejected";
+
+export const WARRANTY_STATUS_LABEL: Record<WarrantyStatus, string> = {
+  open: "Open",
+  in_progress: "In Progress",
+  completed: "Completed",
+  rejected: "Rejected",
+};
+
+/** Restrained pill styling for warranty case statuses — reuses the existing
+ *  RepairOX tone vocabulary (info = active, amber = working, emerald = done,
+ *  zinc/rose = closed) so no new colour system is introduced. */
+export const WARRANTY_STATUS_TONE: Record<WarrantyStatus, string> = {
+  open: "bg-info/10 text-info ring-info/20",
+  in_progress: "bg-warning/10 text-amber-700 ring-warning/30",
+  completed: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+  rejected: "bg-rose-50 text-rose-700 ring-rose-200",
+};
+
+export const WARRANTY_STATUS_OPTIONS: { label: string; value: WarrantyStatus }[] = [
+  { label: WARRANTY_STATUS_LABEL.open, value: "open" },
+  { label: WARRANTY_STATUS_LABEL.in_progress, value: "in_progress" },
+  { label: WARRANTY_STATUS_LABEL.completed, value: "completed" },
+  { label: WARRANTY_STATUS_LABEL.rejected, value: "rejected" },
+];
+
+/* ─── Warranty Eligibility Engine ──────────────────────────────────────────
+   WARRANTY DATE SOURCE RULE (spec §9/§10/§55 — the authoritative definition):
+
+   In RepairOX the warranty DURATION is captured on the INVOICE, not the ticket
+   (the ticket has no warranty at intake — it is decided at billing/handover).
+   So the authoritative eligibility source is the LINKED INVOICE for the
+   device, resolved via ticketDeviceWarrantyEligibility() below. The warranty
+   window is therefore:
+
+     • START = the INVOICE's createdAt (the date the repair was billed /
+       handed back to the customer). This is the correct clock, not the ticket
+       creation date.
+     • DURATION = the invoice device's warranty (warrantyValue / warrantyUnit,
+       falling back to parsing the legacy `warranty` string).
+     • END   = start + duration.
+
+   The lower-level deviceWarrantyEligibility() below is a generic date engine:
+   given warranty fields + a start date it returns in/out and days
+   remaining/overdue. ticketDeviceWarrantyEligibility() is the invoice-aware
+   wrapper that supplies the invoice's warranty + date. A device with no invoice
+   (never billed / handed back) has no warranty on record.
+
+   Eligibility ("in" vs "out") is a DATE COMPARISON against a reference date
+   (default: now). Because the search UI must never be trusted, the SAME engine
+   runs server-/store-side at creation time to revalidate before a W-XXX record
+   is created (spec §56/§57). */
+
+/** Add a structured warranty duration to a start date, returning the end date. */
+export function computeWarrantyEnd(start: Date, value: number, unit: WarrantyUnit): Date {
+  const end = new Date(start.getTime());
+  if (unit === "days") end.setDate(end.getDate() + value);
+  else if (unit === "months") end.setMonth(end.getMonth() + value);
+  else if (unit === "years") end.setFullYear(end.getFullYear() + value);
+  return end;
+}
+
+export type WarrantyEligibility = {
+  /** True when the device has enough information to have a warranty at all. */
+  hasWarranty: boolean;
+  /** True only when hasWarranty AND the reference date is on/before the end. */
+  inWarranty: boolean;
+  /** Resolved warranty start (ISO), or undefined when unknown. */
+  startDate?: string;
+  /** Resolved warranty end (ISO), or undefined when unknown. */
+  endDate?: string;
+  /** Whole days remaining until expiry (>= 0 when in warranty). */
+  daysRemaining: number;
+  /** Whole days since expiry (>= 1 when out of warranty). */
+  daysOverdue: number;
+  /** Human-readable duration label (e.g. "6 Months"), when known. */
+  durationLabel: string;
+};
+
+/**
+ * Resolve a device's warranty eligibility against a reference date.
+ *
+ * `originalTicketCreatedAt` is the fallback warranty start when the device has
+ * no explicit `warrantyStartDate` (see the DATE SOURCE RULE above). `refDate`
+ * defaults to now, but callers (e.g. server-side revalidation) can pin it.
+ */
+export function deviceWarrantyEligibility(
+  device: Pick<DeviceRecord, "warranty" | "warrantyValue" | "warrantyUnit"> & { warrantyStartDate?: string; warrantyEndDate?: string },
+  originalTicketCreatedAt?: string,
+  refDate: Date = new Date(),
+): WarrantyEligibility {
+  // Resolve the structured duration (falling back to parsing a legacy string).
+  let value = device.warrantyValue;
+  let unit = device.warrantyUnit;
+  if ((!value || !unit) && device.warranty) {
+    const parsed = parseWarrantyString(device.warranty);
+    if (parsed) { value = parsed.value; unit = parsed.unit; }
+  }
+
+  // Resolve start.
+  const startIso = device.warrantyStartDate || originalTicketCreatedAt;
+  const start = startIso ? new Date(startIso) : undefined;
+
+  // Resolve end: explicit end wins; otherwise compute from start + duration.
+  let end: Date | undefined;
+  if (device.warrantyEndDate) {
+    end = new Date(device.warrantyEndDate);
+  } else if (start && value && unit) {
+    end = computeWarrantyEnd(start, value, unit);
+  }
+
+  const durationLabel = formatWarranty(value, unit, device.warranty);
+
+  if (!end || isNaN(end.getTime())) {
+    return { hasWarranty: false, inWarranty: false, startDate: start?.toISOString(), endDate: undefined, daysRemaining: 0, daysOverdue: 0, durationLabel };
+  }
+
+  const MS_PER_DAY = 86_400_000;
+  const diffDays = Math.ceil((end.getTime() - refDate.getTime()) / MS_PER_DAY);
+  const inWarranty = end.getTime() >= refDate.getTime();
+
+  return {
+    hasWarranty: true,
+    inWarranty,
+    startDate: start?.toISOString(),
+    endDate: end.toISOString(),
+    daysRemaining: inWarranty ? Math.max(0, diffDays) : 0,
+    daysOverdue: inWarranty ? 0 : Math.max(1, -diffDays),
+    durationLabel,
+  };
+}
+
+/** Concise human phrasing of eligibility for the search UI (spec §14/§15). */
+export function warrantyEligibilityLabel(e: WarrantyEligibility): string {
+  if (!e.hasWarranty) return "No warranty on record";
+  if (e.inWarranty) {
+    if (e.daysRemaining === 0) return "Expires today";
+    return `${e.daysRemaining} day${e.daysRemaining === 1 ? "" : "s"} remaining`;
+  }
+  return `Expired ${e.daysOverdue} day${e.daysOverdue === 1 ? "" : "s"} ago`;
+}
+
+/**
+ * Resolve a TICKET device's warranty eligibility from its LINKED INVOICE.
+ *
+ * This is the authoritative source (see the DATE SOURCE RULE above): the
+ * warranty duration is captured on the invoice, and the invoice's createdAt is
+ * the warranty start (the billing/handover date). The invoice billing this
+ * exact device is found via findInvoiceForTicketDevice (durable ticketDeviceId
+ * link); its matching invoice device supplies the warranty duration.
+ *
+ * A device that was never invoiced (never billed / handed back) has NO warranty
+ * on record — we cannot claim it is in or out of warranty, so hasWarranty is
+ * false. `refDate` defaults to now; callers pinning it (server-side
+ * revalidation) pass an explicit date.
+ */
+export function ticketDeviceWarrantyEligibility(
+  ticket: Ticket,
+  deviceId: string,
+  allInvoices: Invoice[],
+  refDate: Date = new Date(),
+): WarrantyEligibility {
+  const invoice = findInvoiceForTicketDevice(ticket, deviceId, allInvoices);
+  if (!invoice) {
+    return { hasWarranty: false, inWarranty: false, daysRemaining: 0, daysOverdue: 0, durationLabel: "" };
+  }
+  // Find the invoice device that bills THIS ticket device (durable link), else
+  // fall back to the first invoice device (single-device invoices / legacy).
+  const invDevices = getInvoiceDevices(invoice);
+  const invDevice = invDevices.find((d) => d.ticketDeviceId === deviceId) ?? invDevices[0];
+  if (!invDevice) {
+    return { hasWarranty: false, inWarranty: false, daysRemaining: 0, daysOverdue: 0, durationLabel: "" };
+  }
+  // START = invoice date. DURATION = invoice device's warranty. The generic
+  // engine computes END + in/out from these.
+  return deviceWarrantyEligibility(
+    {
+      warranty: invDevice.warranty,
+      warrantyValue: invDevice.warrantyValue,
+      warrantyUnit: invDevice.warrantyUnit,
+      warrantyStartDate: invoice.createdAt,
+    },
+    invoice.createdAt,
+    refDate,
+  );
+}
+
 /* ─── Estimate Status (outcome of the quote/opportunity) ──────────────────
    DELIBERATELY separate from TicketStatus (device repair lifecycle). An
    estimate tracks the customer opportunity: it starts Waiting for Approval and
@@ -456,6 +662,35 @@ export type Ticket = {
    *  with this record's commercial history. Lets View Ticket / View Estimate
    *  answer "was it finally invoiced, and which invoice?". */
   invoiceId?: string;
+
+  /* ─── Warranty case fields (only meaningful when recordType === "warranty") ─
+     A Warranty record is a ticket-shaped row in the SAME `tickets` architecture
+     linked back to the ORIGINAL completed ticket. The original ticket is never
+     mutated (spec §5/§54) — this record becomes the new operational history. */
+  /** The original completed Ticket this warranty claim was raised against.
+   *  Enables bidirectional navigation (Warranty → Original Ticket, spec §7). */
+  parentTicketId?: string;
+  /** The original ticket's human number (e.g. "KOR-T-0045") captured at
+   *  creation so the link renders instantly without a reverse lookup. */
+  parentTicketNo?: string;
+  /** The DeviceRecord id(s) FROM THE ORIGINAL TICKET this claim covers. A
+   *  ticket may have many devices but only some are under warranty (spec
+   *  §8/§40), so a warranty covers one or more explicitly selected devices —
+   *  never all devices implicitly. */
+  warrantyDeviceIds?: string[];
+  /** The NEW customer-reported issue for this claim. Stored SEPARATELY so the
+   *  original repair's issue is never overwritten (spec §19). */
+  warrantyIssue?: string;
+  /** Operational lifecycle of the claim (Open → In Progress → Completed /
+   *  Rejected). Distinct from the device repair `status` and from eligibility. */
+  warrantyStatus?: WarrantyStatus;
+  /** When an EXPIRED warranty resulted in a normal paid Ticket instead (spec
+   *  §25/§27), the id of that new Ticket is recorded on the ORIGINAL ticket for
+   *  traceability. Set on the NEW ticket: the original it was created from. */
+  createdFromTicketId?: string;
+  /** Reason a ticket was spun off from a warranty check (e.g. "Warranty
+   *  expired") — historical context shown on the new ticket (spec §27). */
+  createdFromReason?: string;
 };
 
 /** Helper: generate a createdAt timestamp N minutes ago from now */

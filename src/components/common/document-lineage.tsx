@@ -57,7 +57,9 @@ export function DocumentLineage({ nodes, className }: { nodes: LineageNode[]; cl
               onClick={clickable ? () => router.push(node.href!) : undefined}
               title={`${meta.title}: ${node.label}`}
               className={cn(
-                "inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-left transition ring-1 ring-inset",
+                // Uniform node size: fixed min-width + fixed height so every
+                // node reads as an equal-sized cell regardless of label length.
+                "inline-flex h-11 min-w-[128px] items-center gap-2 rounded-lg px-3 text-left transition ring-1 ring-inset",
                 node.current
                   ? "bg-[#EEF1FD] text-[#3347D6] ring-[#B3BFF6]/60 cursor-default"
                   : clickable
@@ -66,9 +68,9 @@ export function DocumentLineage({ nodes, className }: { nodes: LineageNode[]; cl
               )}
             >
               <Icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="flex flex-col leading-tight">
-                <span className="text-[9px] font-semibold uppercase tracking-wider opacity-70">{meta.title}</span>
-                <span className="text-[12px] font-semibold">{node.label}</span>
+              <span className="flex min-w-0 flex-col leading-tight">
+                <span className="truncate text-[9px] font-semibold uppercase tracking-wider opacity-70">{meta.title}</span>
+                <span className="truncate text-[12px] font-semibold">{node.label}</span>
               </span>
             </button>
             {i < nodes.length - 1 && (

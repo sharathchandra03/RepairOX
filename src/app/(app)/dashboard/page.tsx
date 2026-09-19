@@ -22,7 +22,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { PageHeader } from "@/components/layout/page-header";
 import { Can } from "@/components/common/can";
 import { useState, useMemo, useRef, useCallback } from "react";
-import { STATUS_LABEL, getTicketType, TICKET_TYPE_LABEL, isProforma, type TicketStatus, type TicketPriority } from "@/lib/mock-data";
+import { STATUS_LABEL, getTicketType, TICKET_TYPE_LABEL, isProforma, isWarranty, type TicketStatus, type TicketPriority } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
 import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
@@ -193,7 +193,10 @@ export default function Dashboard() {
 
   // Apply filters to tickets
   const filteredTickets = useMemo(() => {
-    let list = tickets;
+    // Warranty records are ₹0 service events, not billable repair tickets, so
+    // they must never contaminate the Tickets KPI count, projection, device
+    // breakdown or recent-transactions on the dashboard (spec §65/§66).
+    let list = tickets.filter((t) => !isWarranty(t));
     // Filter by status
     if (filterBy !== "all") list = list.filter((t) => t.status === filterBy);
     // Filter by date — uses the SAME shared boundary logic as the Critical
@@ -231,6 +234,9 @@ export default function Dashboard() {
   const criticalTickets = useMemo(() => {
     return tickets
       .filter((t) => {
+        // Warranty records never appear in Critical Tasks — they are service
+        // events, not repair tickets (spec §65).
+        if (isWarranty(t)) return false;
         // Base rule: Critical + High priority only (the card's business rule).
         // Same priority enum values the Tickets module uses ("critical"/"high").
         const isCriticalHigh = t.priority === "critical" || t.priority === "high";

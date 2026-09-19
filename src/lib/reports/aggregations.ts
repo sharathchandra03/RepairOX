@@ -17,7 +17,7 @@ import type {
 import { bucketKey, bucketLabel, parseDate, autoGranularity } from "./date-ranges";
 import { rangeFromFilters, applyFilters } from "./filters";
 import { DATA_SOURCES } from "./registry";
-import { STATUS_LABEL, INVOICE_STATUS_LABEL } from "@/lib/mock-data";
+import { STATUS_LABEL, INVOICE_STATUS_LABEL, isWarranty, type Ticket } from "@/lib/mock-data";
 
 /* ─── Time series ───────────────────────────────────────────────────────── */
 
@@ -89,7 +89,9 @@ export function topN(series: SeriesPoint[], n: number): SeriesPoint[] {
 /** Records for a data source, already filtered. */
 export function recordsForSource(d: ReportDataset, source: DataSourceId): Record<string, unknown>[] {
   switch (source) {
-    case "tickets": return d.tickets as unknown as Record<string, unknown>[];
+    // Warranty records never appear in ticket-source report tables/exports —
+    // they are service events, not billable repair tickets (spec §65).
+    case "tickets": return (d.tickets as Ticket[]).filter((t) => !isWarranty(t)) as unknown as Record<string, unknown>[];
     case "invoices": return d.invoices as unknown as Record<string, unknown>[];
     case "walkins": return d.walkIns as unknown as Record<string, unknown>[];
     case "inventory": return d.inventory as unknown as Record<string, unknown>[];

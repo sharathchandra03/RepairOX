@@ -4,6 +4,8 @@ import { Eye, ArrowRightLeft, MessageCircle, Mail, Printer, Pencil, MoreHorizont
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { PushToInvoiceIcon } from "@/components/tickets/push-to-invoice-icon";
 import { isEstimate, type Ticket } from "@/lib/mock-data";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 
 export type TicketAction =
   | "view"
@@ -38,6 +40,17 @@ interface TicketActionsMenuProps {
 }
 
 export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPushToTicket = true }: TicketActionsMenuProps) {
+  const { can } = usePermissions();
+  // Per-action capability gates (granular key OR backward-compatible coarse key).
+  const canEdit = allow(can, CAP.ticket.edit);
+  const canPriority = allow(can, CAP.ticket.changePriority);
+  const canPin = allow(can, CAP.ticket.pin);
+  const canPushInvoice = allow(can, CAP.ticket.pushToInvoice);
+  const canPrint = allow(can, CAP.ticket.print);
+  const canComms = allow(can, CAP.ticket.sendComms);
+  const canTransfer = allow(can, CAP.ticket.transfer);
+  const canDownload = allow(can, CAP.ticket.downloadPdf);
+  const canDelete = allow(can, CAP.ticket.delete);
   const isPinned = !!ticket.pinnedAt;
   // Estimate records get a DIFFERENT quick-action set: they are quotes, not
   // repair jobs, so "Push to Invoice" is replaced by "Push to Ticket" and the
@@ -82,7 +95,7 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
               already exists. Black glyph keeps the ₹/arrow clearly visible. */}
           <PushToInvoiceIcon className="h-3.5 w-3.5 text-foreground" />
         </span>
-      ) : (
+      ) : canPushInvoice ? (
         <button
           onClick={() => onAction("invoice", ticket)}
           className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
@@ -90,7 +103,7 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
         >
           <PushToInvoiceIcon className="h-3.5 w-3.5" />
         </button>
-      )}
+      ) : null}
 
       {/* 2. View — opens the ticket (print preview). */}
       <button
@@ -102,6 +115,7 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
       </button>
 
       {/* 3. Pin / Unpin — RepairOX violet accent (distinct from red/blue/green/amber) */}
+      {canPin && (
       <button
         onClick={() => onAction("pin", ticket)}
         className={
@@ -113,6 +127,7 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
       >
         {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
       </button>
+      )}
 
       {/* 4. More options dropdown — Edit still lives here (unchanged). */}
       <Dropdown
@@ -133,9 +148,11 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
             {/* Streamlined menu — View, View/Add Comment, Checkout and Pin to top
                 were removed to keep this list short. */}
             {/* 1. Edit */}
+            {canEdit && (
             <MenuItem icon={Pencil} onClick={() => { onAction("edit", ticket); close(); }}>
               Edit
             </MenuItem>
+            )}
             {/* 2. Push to Ticket (Estimate) / Push to Invoice (Ticket).
                    Estimate → shows "Push to Ticket" only when allowed and not
                    yet converted; Tickets keep "Push to Invoice". */}
@@ -159,40 +176,56 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
                   </MenuItem>
                 ) : null}
               </>
-            ) : (
+            ) : canPushInvoice ? (
               <MenuItem icon={Receipt} onClick={() => { onAction("invoice", ticket); close(); }}>
                 Push to Invoice
               </MenuItem>
-            )}
+            ) : null}
             {/* 3. Change Priority */}
+            {canPriority && (
             <MenuItem icon={AlertTriangle} onClick={() => { onAction("priority", ticket); close(); }}>
               Change Priority
             </MenuItem>
+            )}
             {/* 4. Print */}
+            {canPrint && (
             <MenuItem icon={Printer} onClick={() => { onAction("print", ticket); close(); }}>
               Print
             </MenuItem>
+            )}
             {/* 5. WhatsApp Receipt */}
+            {canComms && (
             <MenuItem icon={MessageCircle} onClick={() => { onAction("whatsapp-receipt", ticket); close(); }}>
               WhatsApp Receipt
             </MenuItem>
+            )}
             {/* 6. Email Receipt */}
+            {canComms && (
             <MenuItem icon={Mail} onClick={() => { onAction("email-receipt", ticket); close(); }}>
               Email Receipt
             </MenuItem>
+            )}
             {/* 7. Transfer Ticket */}
+            {canTransfer && (
             <MenuItem icon={ArrowRightLeft} onClick={() => { onAction("transfer", ticket); close(); }}>
               Transfer Ticket
             </MenuItem>
+            )}
             {/* 8. Download PDF */}
+            {canDownload && (
             <MenuItem icon={FileDown} onClick={() => { onAction("download-pdf", ticket); close(); }}>
               Download PDF
             </MenuItem>
-            <div className="my-1 border-t border-border" />
+            )}
             {/* 9. Delete Ticket */}
+            {canDelete && (
+            <>
+            <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onAction("delete", ticket); close(); }}>
               Delete Ticket
             </MenuItem>
+            </>
+            )}
           </>
         )}
       </Dropdown>

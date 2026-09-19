@@ -39,6 +39,7 @@ import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { useStore } from "@/lib/store";
 import {
   WALKIN_STATUS_LABEL, WALKIN_STATUS_TONE, WALKIN_TYPE_LABEL, WALKIN_TYPE_TONE, WALKIN_TYPE_BAR,
@@ -535,7 +536,12 @@ export default function WalkInPage() {
      so they fire on any page — not just here — and never double-fire. */
 
   const anyFilterActive = typeFilter !== "all" || sourceFilter !== "all" || statusFilter !== "all" || salesFilter !== "all" || followUpFilter !== "all" || followUpAttemptFilter !== "all" || followUpOutcomeFilter !== "all" || issueFilter !== "all" || conversionFilter !== "all";
-  const canDelete = can("delete") || can("full_access") || can("manage_repair_jobs");
+  const canDelete = can("delete") || can("full_access") || allow(can, CAP.walkin.delete);
+  // Per-action walk-in capability gates (granular OR backward-compatible coarse).
+  const canConvertWalkIn = allow(can, CAP.walkin.convert);
+  const canPinWalkIn = allow(can, CAP.walkin.pin);
+  const canEditWalkIn = allow(can, CAP.walkin.edit);
+  const canFinalStatus = allow(can, CAP.walkin.finalStatus);
 
   // Count of walk-ins with an ACTIVE follow-up (shown on the Follow-Up tab).
   const activeFollowUpCount = useMemo(() => walkIns.filter((w) => hasActiveFollowUp(w)).length, [walkIns]);
@@ -1017,6 +1023,7 @@ export default function WalkInPage() {
                     <td className="py-4 pr-4 pl-0 [&>*:first-child]:-ml-[4px]" onClick={(e) => e.stopPropagation()}>
                       <WalkInFinalStatusCell
                         walkIn={w}
+                        canChange={canFinalStatus}
                         onMarkLost={() => setFinalChange({ walkIn: w, next: "lost" })}
                         onMarkWon={() => setConvertTarget(w)}
                         onReopen={() => setFinalChange({ walkIn: w, next: "na" })}
@@ -1037,7 +1044,7 @@ export default function WalkInPage() {
                           >
                             <PushToTicketIcon className="h-4 w-4" />
                           </button>
-                        ) : (
+                        ) : canConvertWalkIn ? (
                           <button
                             onClick={() => setConvertTarget(w)}
                             title="Convert Walk-In to Ticket"
@@ -1046,7 +1053,7 @@ export default function WalkInPage() {
                           >
                             <PushToTicketIcon className="h-4 w-4" />
                           </button>
-                        )}
+                        ) : null}
                         <button onClick={() => setViewTarget(w)} title="View" className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground">
                           <Eye className="h-4 w-4" />
                         </button>
@@ -1062,13 +1069,15 @@ export default function WalkInPage() {
                           {(close) => (
                             <>
                               <MenuItem icon={Eye} onClick={() => { setViewTarget(w); close(); }}>View</MenuItem>
-                              <MenuItem icon={Pencil} onClick={() => { setEditTarget(w); close(); }}>Edit</MenuItem>
-                              {!w.linkedTicketId && (
+                              {canEditWalkIn && <MenuItem icon={Pencil} onClick={() => { setEditTarget(w); close(); }}>Edit</MenuItem>}
+                              {!w.linkedTicketId && canConvertWalkIn && (
                                 <MenuItem icon={TicketIcon} onClick={() => { setConvertTarget(w); close(); }}>Convert to Ticket</MenuItem>
                               )}
+                              {canPinWalkIn && (
                               <MenuItem icon={w.pinnedAt ? PinOff : Pin} onClick={() => { pinWalkIn(w.id, !w.pinnedAt); close(); }}>
                                 {w.pinnedAt ? "Unpin" : "Pin to top"}
                               </MenuItem>
+                              )}
                               {canDelete && (
                                 <>
                                   <div className="my-1 border-t border-border" />
@@ -1243,9 +1252,12 @@ export default function WalkInPage() {
    Lost Customer. From Lost the only action is Reopen (back to active). Won is a
    static pill with the linked ticket number. */
 function WalkInFinalStatusCell({
-  walkIn, onMarkLost, onMarkWon, onReopen, ticketNoFor,
+  walkIn, canChange = true, onMarkLost, onMarkWon, onReopen, ticketNoFor,
 }: {
   walkIn: WalkIn;
+  /** When false the outcome pill is static (no dropdown) — user lacks the
+   *  walkin_final_status_change capability. */
+  canChange?: boolean;
   onMarkLost: () => void;
   onMarkWon: () => void;
   onReopen: () => void;
@@ -1279,6 +1291,10 @@ function WalkInFinalStatusCell({
       </div>
     );
   }
+
+  // Without the final-status capability the outcome is READ-ONLY — a static
+  // pill with no dropdown (UI = capability).
+  if (!canChange) return pill(false);
 
   // Active (N/A or In Pipeline) → the two selectable outcomes: Won + Lost.
   const isActive = fs === "na" || fs === "pipeline";

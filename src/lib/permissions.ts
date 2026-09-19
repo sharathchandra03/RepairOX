@@ -114,6 +114,12 @@ export type PermissionKey =
   | "manage_repair_jobs"
   | "update_repair_status"
   | "assign_technicians"
+  /* Warranty (record type inside the Ticket architecture) */
+  | "view_warranty"
+  | "create_warranty"
+  | "edit_warranty"
+  | "complete_warranty"
+  | "convert_warranty_to_ticket"
   /* Invoices */
   | "create_invoice"
   | "edit_invoice"
@@ -274,6 +280,8 @@ export type PermissionKey =
   | "edit_internal_notes"
   | "pin_ticket"
   | "ticket_send_comms"
+  | "transfer_ticket"
+  | "print_ticket"
   /* Invoices — finer actions */
   | "create_partial_invoice"
   | "cancel_invoice"
@@ -467,6 +475,11 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "view_device_details", label: "View Device Details" },
       { key: "push_to_invoice", label: "Push to Invoice" },
       { key: "manage_repair_jobs", label: "Manage Repair Jobs" },
+      { key: "view_warranty", label: "View Warranty" },
+      { key: "create_warranty", label: "Create Warranty" },
+      { key: "edit_warranty", label: "Edit Warranty" },
+      { key: "complete_warranty", label: "Complete Warranty" },
+      { key: "convert_warranty_to_ticket", label: "Convert Warranty to Ticket" },
     ],
   },
   {
@@ -794,6 +807,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "edit_internal_notes", label: "Edit Internal Notes" },
       { key: "pin_ticket", label: "Pin Ticket" },
       { key: "ticket_send_comms", label: "Send Ticket Receipt (WhatsApp/Email)" },
+      { key: "transfer_ticket", label: "Transfer Ticket" },
+      { key: "print_ticket", label: "Print Ticket" },
       /* Invoices */
       { key: "create_partial_invoice", label: "Create Partial / Selective Invoice" },
       { key: "cancel_invoice", label: "Cancel Invoice" },
@@ -908,6 +923,7 @@ export const ROLES: RoleDef[] = [
       "add_parts", "remove_parts", "view_qc", "perform_qc",
       "view_internal_notes", "view_customer_details", "view_device_details", "push_to_invoice",
       "manage_repair_jobs",
+      "view_warranty", "create_warranty", "edit_warranty", "complete_warranty", "convert_warranty_to_ticket",
       "create_invoice", "edit_invoice", "delete_invoice", "view_invoice", "print_invoice",
       "update_payment", "mark_overdue", "share_invoice", "convert_from_ticket", "view_payment_history",
       "manage_invoices", "manage_payments", "manage_refunds", "manage_warranties",
@@ -951,6 +967,7 @@ export const ROLES: RoleDef[] = [
       "add_parts", "remove_parts", "view_qc", "perform_qc",
       "view_internal_notes", "view_customer_details", "view_device_details", "push_to_invoice",
       "manage_repair_jobs",
+      "view_warranty", "create_warranty", "edit_warranty", "complete_warranty", "convert_warranty_to_ticket",
       "create_invoice", "edit_invoice", "delete_invoice", "view_invoice", "print_invoice",
       "update_payment", "mark_overdue", "share_invoice", "convert_from_ticket", "view_payment_history",
       "manage_invoices", "manage_payments", "manage_refunds", "manage_warranties",
@@ -986,6 +1003,7 @@ export const ROLES: RoleDef[] = [
       "create_ticket", "edit_ticket", "view_ticket", "change_ticket_status",
       "add_parts", "view_customer_details", "view_device_details", "push_to_invoice",
       "manage_repair_jobs",
+      "view_warranty", "create_warranty", "edit_warranty", "convert_warranty_to_ticket",
       "create_invoice", "view_invoice", "print_invoice", "update_payment", "convert_from_ticket",
       "manage_invoices", "manage_payments", "use_pos",
       "view_customers", "create_customer", "edit_customer", "view_customer_history", "manage_customers",
@@ -1006,6 +1024,7 @@ export const ROLES: RoleDef[] = [
       "view_dashboard",
       "view_ticket", "change_ticket_status", "update_repair_status",
       "add_parts", "view_internal_notes", "view_device_details",
+      "view_warranty", "complete_warranty",
       "view_inventory",
       "upload_files",
     ],

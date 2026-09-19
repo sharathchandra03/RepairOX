@@ -9,6 +9,7 @@ import {
   User, Smartphone, Wrench, CreditCard, AlertTriangle,
   CheckCircle2, Phone, Mail, Building2, MapPin, Shield,
   Package, Hash, Calendar, Tag, CircleDot, Receipt, Ban, GitBranch,
+  Ticket as TicketIcon,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ import { Drawer } from "@/components/ui/drawer";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 import { useStore } from "@/lib/store";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { useStoreSettings } from "@/lib/store-settings";
 import { formatINR, cn } from "@/lib/utils";
 import {
@@ -29,6 +32,8 @@ import {
   ticketInvoiceCoverage, findInvoiceForTicketDevice,
   isEstimate, getRecordType, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, type EstimateStatus,
   isProforma,
+  isWarranty, WARRANTY_STATUS_LABEL, WARRANTY_STATUS_TONE, WARRANTY_STATUS_OPTIONS, type WarrantyStatus,
+  deviceWarrantyEligibility, warrantyEligibilityLabel,
 } from "@/lib/mock-data";
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
@@ -145,6 +150,17 @@ export default function TicketDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { tickets, invoices, deleteTicket, updateTicket, updateDeviceStatus, deductPartsForTicket } = useStore();
+  const { can } = usePermissions();
+  // Per-action ticket capability gates (granular OR backward-compatible coarse).
+  const canEditTicket = allow(can, CAP.ticket.edit);
+  const canDeleteTicket = allow(can, CAP.ticket.delete);
+  const canPushInvoice = allow(can, CAP.ticket.pushToInvoice);
+  const canChangeStatus = allow(can, CAP.ticket.changeStatus);
+  const canChangePriority = allow(can, CAP.ticket.changePriority);
+  const canPerformQc = allow(can, CAP.ticket.qc);
+  const canEditWarranty = allow(can, CAP.warranty.edit);
+  const canTransferTicket = allow(can, CAP.ticket.transfer);
+  const canPrintTicket = allow(can, CAP.ticket.print);
   const { settings } = useStoreSettings();
   const ticketId = params.id as string;
   const [editingNotes, setEditingNotes] = useState(false);
@@ -231,6 +247,35 @@ export default function TicketDetailPage() {
     [tickets, ticket?.convertedFromEstimateId],
   );
   const [showEstimateStatusMenu, setShowEstimateStatusMenu] = useState(false);
+
+  // ── Warranty awareness ──
+  // A Warranty record reuses this SAME detail page (spec §34). We add a
+  // warranty context (eyebrow, status, original-ticket link, ₹0 charge) while
+  // keeping every existing section (Customer / Device / Job) intact.
+  const warranty = ticket ? isWarranty(ticket) : false;
+  const warrantyStatus: WarrantyStatus = ticket?.warrantyStatus ?? "open";
+  // The ORIGINAL ticket this warranty claim was raised against (bidirectional
+  // navigation, spec §7).
+  const parentTicket = useMemo(
+    () => (ticket?.parentTicketId ? tickets.find((t) => t.id === ticket.parentTicketId) : undefined),
+    [tickets, ticket?.parentTicketId],
+  );
+  // Every Warranty record raised against THIS ticket — the Warranty Log (spec
+  // §6/§35/§37/§63). Chronological, never removed after completion (spec §36).
+  const warrantyLog = useMemo(
+    () => (ticket && !warranty)
+      ? tickets
+          .filter((t) => isWarranty(t) && t.parentTicketId === ticket.id)
+          .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
+      : [],
+    [tickets, ticket, warranty],
+  );
+  // When THIS ticket was created from an expired-warranty check (spec §27).
+  const warrantyOriginTicket = useMemo(
+    () => (ticket?.createdFromTicketId ? tickets.find((t) => t.id === ticket.createdFromTicketId) : undefined),
+    [tickets, ticket?.createdFromTicketId],
+  );
+  const [showWarrantyStatusMenu, setShowWarrantyStatusMenu] = useState(false);
 
   const [showPushDialog, setShowPushDialog] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -382,6 +427,14 @@ export default function TicketDetailPage() {
     setShowEstimateStatusMenu(false);
   }, [ticket, updateTicket]);
 
+  // Move a Warranty claim through its lifecycle (Open → In Progress →
+  // Completed / Rejected). Kept separate from the device repair status.
+  const handleWarrantyStatusChange = useCallback((next: WarrantyStatus) => {
+    if (!ticket) return;
+    updateTicket(ticket.id, { warrantyStatus: next });
+    setShowWarrantyStatusMenu(false);
+  }, [ticket, updateTicket]);
+
   if (!ticket) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[60vh] gap-4">
@@ -409,13 +462,21 @@ export default function TicketDetailPage() {
               </button>
             </Link>
             <div>
-              {/* Document-type eyebrow — makes an Estimate unmistakable. */}
+              {/* Document-type eyebrow — makes an Estimate / Warranty unmistakable. */}
               {estimate && (
                 <p className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">Repair Estimate</p>
               )}
+              {warranty && (
+                <p className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">Warranty Claim</p>
+              )}
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-display text-[26px] font-extrabold tracking-tight">{ticket.ticketNo ?? ticket.id}</h1>
-                {estimate ? (
+                {warranty ? (
+                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${WARRANTY_STATUS_TONE[warrantyStatus]}`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    {WARRANTY_STATUS_LABEL[warrantyStatus]}
+                  </span>
+                ) : estimate ? (
                   <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${ESTIMATE_STATUS_TONE[estimateStatus]}`}>
                     <span className="h-1.5 w-1.5 rounded-full bg-current" />
                     {ESTIMATE_STATUS_LABEL[estimateStatus]}
@@ -449,6 +510,24 @@ export default function TicketDetailPage() {
                     From {sourceEstimate.ticketNo ?? sourceEstimate.id}
                   </button>
                 )}
+                {/* Warranty → original Ticket back-link (spec §7). */}
+                {warranty && (ticket.parentTicketId || ticket.parentTicketNo) && (
+                  <button
+                    onClick={() => ticket.parentTicketId && router.push(`/tickets/${ticket.parentTicketId}`)}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#4361EE]/20 transition hover:bg-[#E0E6FB]"
+                  >
+                    Original {parentTicket?.ticketNo ?? ticket.parentTicketNo ?? ticket.parentTicketId}
+                  </button>
+                )}
+                {/* Ticket created from an expired-warranty check (spec §27). */}
+                {!warranty && warrantyOriginTicket && (
+                  <button
+                    onClick={() => router.push(`/tickets/${warrantyOriginTicket.id}`)}
+                    className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 transition hover:bg-amber-100"
+                  >
+                    From {warrantyOriginTicket.ticketNo ?? warrantyOriginTicket.id}{ticket.createdFromReason ? ` · ${ticket.createdFromReason}` : ""}
+                  </button>
+                )}
               </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 <span className="font-medium text-foreground">{ticket.customer}</span> &middot; {ticket.model} &middot; {ticket.technician} &middot; Created {getElapsedLabel(ticket.createdAt)}
@@ -458,20 +537,26 @@ export default function TicketDetailPage() {
 
           {/* Header Actions */}
           <div className="flex items-center gap-2 flex-wrap">
+            {canEditTicket && (
             <Button variant="outline" size="sm" className="rounded-full" onClick={() => router.push(`/tickets/new?edit=${ticket.id}`)}>
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
+            )}
             {estimate ? (
               // Estimate → Push to Ticket (or View Ticket once converted).
+              canPushInvoice && (
               <Button size="sm" className="rounded-full" onClick={handlePushToTicket}>
                 {estimateStatus === "converted"
                   ? <><Receipt className="h-3.5 w-3.5" /> View Ticket</>
                   : <><Receipt className="h-3.5 w-3.5" /> Push to Ticket</>}
               </Button>
+              )
             ) : (
+              canPushInvoice && (
               <Button size="sm" className="rounded-full" onClick={handlePushToInvoice} disabled={fullyInvoiced}>
                 <Receipt className="h-3.5 w-3.5" /> {fullyInvoiced ? "Fully Invoiced" : coverage === "partial" ? "Invoice Remaining" : "Push to Invoice"}
               </Button>
+              )
             )}
             {/* More actions */}
             <Dropdown
@@ -485,21 +570,21 @@ export default function TicketDetailPage() {
             >
               {(close) => (
                 <>
-                  <MenuItem icon={ArrowRightLeft} onClick={() => { close(); }}>Transfer {estimate ? "Estimate" : "Ticket"}</MenuItem>
+                  {canTransferTicket && <MenuItem icon={ArrowRightLeft} onClick={() => { close(); }}>Transfer {estimate ? "Estimate" : "Ticket"}</MenuItem>}
                   <MenuItem icon={MessageSquarePlus} onClick={() => { close(); }}>View / Add Comment</MenuItem>
                   {estimate ? (
                     // Estimate outcome (Waiting for Approval / Lost Customer).
                     // "Converted Ticket" is set only by Push to Ticket, never here.
-                    <MenuItem icon={CircleDot} onClick={() => { setShowEstimateStatusMenu(true); close(); }}>Change Estimate Status</MenuItem>
+                    canEditTicket && <MenuItem icon={CircleDot} onClick={() => { setShowEstimateStatusMenu(true); close(); }}>Change Estimate Status</MenuItem>
                   ) : (
-                    <MenuItem icon={CircleDot} onClick={() => { setShowStatusMenu(true); close(); }}>Mark Status</MenuItem>
+                    canChangeStatus && <MenuItem icon={CircleDot} onClick={() => { setShowStatusMenu(true); close(); }}>Mark Status</MenuItem>
                   )}
-                  <MenuItem icon={AlertTriangle} onClick={() => { setShowPriorityMenu(true); close(); }}>Change Priority</MenuItem>
-                  <MenuItem icon={Printer} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=a4`); close(); }}>Print A4</MenuItem>
-                  <MenuItem icon={Receipt} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=thermal`); close(); }}>Print Thermal</MenuItem>
-                  <MenuItem icon={Tag} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=label`); close(); }}>Print Label</MenuItem>
-                  <div className="my-1 border-t border-border" />
-                  <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete {estimate ? "Estimate" : "Ticket"}</MenuItem>
+                  {canChangePriority && <MenuItem icon={AlertTriangle} onClick={() => { setShowPriorityMenu(true); close(); }}>Change Priority</MenuItem>}
+                  {canPrintTicket && <MenuItem icon={Printer} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=a4`); close(); }}>Print A4</MenuItem>}
+                  {canPrintTicket && <MenuItem icon={Receipt} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=thermal`); close(); }}>Print Thermal</MenuItem>}
+                  {canPrintTicket && <MenuItem icon={Tag} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=label`); close(); }}>Print Label</MenuItem>}
+                  {canDeleteTicket && <div className="my-1 border-t border-border" />}
+                  {canDeleteTicket && <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete {estimate ? "Estimate" : "Ticket"}</MenuItem>}
                 </>
               )}
             </Dropdown>
@@ -527,6 +612,53 @@ export default function TicketDetailPage() {
           {lineageNodes.length > 1 && (
             <DetailSection title="Linked Records" icon={GitBranch}>
               <DocumentLineage nodes={lineageNodes} />
+            </DetailSection>
+          )}
+
+          {/* ── Warranty Details (only for Warranty records, spec §34/§64) ── */}
+          {warranty && (
+            <DetailSection title="Warranty Details" icon={Shield}>
+              <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+                <div>
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">Original Ticket</p>
+                  {ticket.parentTicketId ? (
+                    <Link href={`/tickets/${ticket.parentTicketId}`} className="text-sm font-semibold text-[#4361EE] hover:underline">
+                      {parentTicket?.ticketNo ?? ticket.parentTicketNo ?? ticket.parentTicketId}
+                    </Link>
+                  ) : (
+                    <p className="text-sm font-semibold">{ticket.parentTicketNo ?? "—"}</p>
+                  )}
+                </div>
+                <DetailField label="Charge" value={formatINR(ticket.amount)} />
+                <div className="sm:col-span-2">
+                  <p className="text-[11px] font-medium text-muted-foreground mb-1">New Warranty Issue</p>
+                  <p className="text-sm font-medium">{ticket.warrantyIssue || ticket.issue || "—"}</p>
+                </div>
+                {/* Per-device warranty validity. The window was frozen from the
+                    linked INVOICE at claim time (warrantyStartDate/EndDate on the
+                    device), so this reads the explicit stored dates (spec §55). */}
+                {(() => {
+                  const devices = getTicketDevices(ticket);
+                  return (
+                    <div className="sm:col-span-2 space-y-1.5">
+                      <p className="text-[11px] font-medium text-muted-foreground">Warranty Validity</p>
+                      {devices.map((d) => {
+                        const el = deviceWarrantyEligibility(d, parentTicket?.createdAt);
+                        return (
+                          <div key={d.id} className="flex items-center justify-between rounded-lg border border-border px-3 py-2 text-[13px]">
+                            <span className="font-medium">{[d.brand, d.model].filter(Boolean).join(" ") || "Device"}</span>
+                            <span className={cn("text-[11px] font-medium", el.inWarranty ? "text-emerald-700" : "text-rose-700")}>
+                              {el.hasWarranty
+                                ? `${el.inWarranty ? "Valid until" : "Expired"} ${el.endDate ? fmtDateShort(el.endDate) : "—"} · ${warrantyEligibilityLabel(el)}`
+                                : "No warranty on record"}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+              </div>
             </DetailSection>
           )}
 
@@ -695,9 +827,11 @@ export default function TicketDetailPage() {
             title="QC"
             icon={Shield}
             action={
+              canPerformQc ? (
               <button onClick={() => setShowQCDrawer(true)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
                 <Pencil className="h-3 w-3" /> Update
               </button>
+              ) : undefined
             }
           >
             <div>
@@ -938,7 +1072,23 @@ export default function TicketDetailPage() {
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>
             <div className="space-y-2">
-              {estimate ? (
+              {warranty ? (
+                /* A valid warranty service is ₹0 (spec §21/§22/§42) — there is
+                   no Push to Invoice. Surface the original ticket link instead. */
+                <button
+                  onClick={() => ticket.parentTicketId && router.push(`/tickets/${ticket.parentTicketId}`)}
+                  disabled={!ticket.parentTicketId}
+                  className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#4361EE] hover:bg-indigo-50/40 disabled:opacity-60"
+                >
+                  <span className="grid h-9 w-9 place-items-center rounded-lg bg-indigo-100 text-[#4361EE]">
+                    <TicketIcon className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="text-sm font-semibold">View Original Ticket</p>
+                    <p className="text-[11px] text-muted-foreground">{parentTicket?.ticketNo ?? ticket.parentTicketNo ?? "Linked repair"} · ₹0 warranty service</p>
+                  </div>
+                </button>
+              ) : estimate ? (
                 /* Estimate → Push to Ticket (or View Ticket once converted). */
                 <button
                   onClick={handlePushToTicket}
@@ -989,7 +1139,26 @@ export default function TicketDetailPage() {
                   <p className="text-[11px] text-muted-foreground">Modify {estimate ? "estimate" : "ticket"} details</p>
                 </div>
               </button>
-              {estimate ? (
+              {warranty ? (
+                /* Warranty case status control (Open → In Progress → Completed
+                   / Rejected). Distinct from device repair status + eligibility. */
+                <div className="rounded-xl border border-border px-4 py-3">
+                  <p className="mb-2 text-[11px] font-medium text-muted-foreground">Warranty Status</p>
+                  <div className="flex flex-wrap gap-2">
+                    {WARRANTY_STATUS_OPTIONS.map((o) => (
+                      <button
+                        key={o.value}
+                        onClick={() => { if (canEditWarranty) handleWarrantyStatusChange(o.value); }}
+                        disabled={!canEditWarranty}
+                        className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset transition", WARRANTY_STATUS_TONE[o.value], warrantyStatus === o.value ? "ring-2" : "opacity-80 hover:opacity-100", !canEditWarranty && "cursor-not-allowed opacity-60")}
+                      >
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {o.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : estimate ? (
                 /* Estimate outcome control (Waiting for Approval / Lost Customer).
                    Converted is set only by Push to Ticket. */
                 <div className="rounded-xl border border-border px-4 py-3">
@@ -1115,6 +1284,47 @@ export default function TicketDetailPage() {
               </div>
             )}
           </div>
+
+          {/* ── Warranty Log (only on ORIGINAL tickets, spec §6/§35/§63) ──
+              Sits in the right column below Internal Notes. Every warranty claim
+              raised against this ticket, chronologically, never removed after
+              completion (spec §36). Each W-id is clickable (spec §7). */}
+          {!warranty && warrantyLog.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+              <div className="mb-3 flex items-center gap-2">
+                <Shield className="h-3.5 w-3.5 text-[#4361EE]" />
+                <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Warranty Log</h3>
+              </div>
+              <div className="space-y-2">
+                {warrantyLog.map((w) => {
+                  const wDevices = getTicketDevices(w);
+                  const primaryDev = wDevices[0];
+                  return (
+                    <Link
+                      key={w.id}
+                      href={`/tickets/${w.id}`}
+                      className="flex items-center justify-between gap-3 rounded-xl border border-border px-3.5 py-2.5 transition hover:border-[#4361EE] hover:bg-indigo-50/40"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-semibold text-[#4361EE]">{w.ticketNo ?? w.id}</span>
+                          <span className="text-[11px] text-muted-foreground">{fmtDateShort(w.createdAt)}</span>
+                        </div>
+                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground">
+                          {[primaryDev?.brand, primaryDev?.model].filter(Boolean).join(" ") || w.model}
+                          {w.warrantyIssue ? ` — ${w.warrantyIssue}` : ""}
+                        </p>
+                      </div>
+                      <span className={cn("shrink-0 inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-medium ring-1 ring-inset", WARRANTY_STATUS_TONE[w.warrantyStatus ?? "open"])}>
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                        {WARRANTY_STATUS_LABEL[w.warrantyStatus ?? "open"]}
+                      </span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

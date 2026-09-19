@@ -16,6 +16,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
 import { StoreFilter } from "@/components/common/store-filter";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
@@ -28,7 +29,7 @@ import {
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
-import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, type RecordType } from "@/lib/mock-data";
+import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, isWarranty, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, WARRANTY_STATUS_LABEL, WARRANTY_STATUS_TONE, WARRANTY_STATUS_OPTIONS, type RecordType, type WarrantyStatus } from "@/lib/mock-data";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
@@ -45,6 +46,7 @@ import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 import { readDateFilterParams, isInListDateRange } from "@/lib/date-filter";
 import { InlineStatusDropdown, StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
+import { WarrantyStatusPillDropdown } from "@/components/tickets/warranty-status-dropdown";
 
 /* ─── Column Definition ──────────────────────────────────────────────────
    Column catalog, ids, and defaults now live in the shared single source of
@@ -170,6 +172,9 @@ export default function TicketsPage() {
   // only VIEW estimates must not be able to convert (spec §54/§56/§86).
   const { can } = usePermissions();
   const canPushToTicket = can("create_ticket") || can("manage_repair_jobs");
+  // Bulk-action capability gates (granular OR backward-compatible coarse).
+  const canBulkStatus = allow(can, CAP.ticket.changeStatus);
+  const canBulkDeleteTickets = allow(can, CAP.ticket.delete);
   // Multi-store mode = the consolidated All-Shops context AND the user can
   // actually see more than one store. In single-store mode the Store column is
   // hidden because the store is already obvious (avoids redundant info).
@@ -379,6 +384,25 @@ export default function TicketsPage() {
   // Pinned filters
   const { pinnedIds, togglePin, unpin, isPinned } = usePinnedFilters();
 
+  // ── Record-type-aware STATUS filter ──
+  // Ticket, Estimate and Warranty each have a DIFFERENT status vocabulary
+  // (repair lifecycle vs quote outcome vs claim lifecycle). So the Status filter
+  // options + label swap with the active record-type strip: filtering
+  // "Estimate" offers estimate statuses, "Warranty" offers warranty statuses,
+  // and Ticket / All offers the repair statuses. The predicate (okStatus below)
+  // matches the corresponding field (estimateStatus / warrantyStatus / status).
+  const statusFilterLabel =
+    recordTypeFilter === "estimate" ? "Estimate Status"
+    : recordTypeFilter === "warranty" ? "Warranty Status"
+    : "Status";
+  const statusFilterOptions = useMemo(() => {
+    const base =
+      recordTypeFilter === "estimate" ? ESTIMATE_STATUS_OPTIONS
+      : recordTypeFilter === "warranty" ? WARRANTY_STATUS_OPTIONS
+      : STATUS_OPTIONS;
+    return [{ label: "All Statuses", value: "all" }, ...base.map((s) => ({ label: s.label, value: s.value as string }))];
+  }, [recordTypeFilter]);
+
   // Define all pinnable advanced filters (same filters as the Advanced Filter panel)
   const pinnableFilters: PinnableFilterDef[] = useMemo(() => [
     {
@@ -399,10 +423,10 @@ export default function TicketsPage() {
     },
     {
       id: "status",
-      label: "Status",
+      label: statusFilterLabel,
       type: "select" as const,
       value: statusFilter,
-      options: [{ label: "All Statuses", value: "all" }, ...STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))],
+      options: statusFilterOptions,
       onChange: (v: string) => setStatusFilter(v),
     },
     {
@@ -433,7 +457,7 @@ export default function TicketsPage() {
       options: TYPE_OPTIONS,
       onChange: (v: string) => setTypeFilter(v),
     },
-  ], [priorityFilter, techFilter, statusFilter, dateRange, customerTypeFilter, typeFilter, technicians]);
+  ], [priorityFilter, techFilter, statusFilter, statusFilterLabel, statusFilterOptions, dateRange, customerTypeFilter, typeFilter, technicians]);
 
   // Set of ticket IDs that have at least one invoice generated from them.
   // Derived from the actual DB-backed invoice relationship (invoice.ticketId),
@@ -463,7 +487,20 @@ export default function TicketsPage() {
       const criticalHigh = priorityFilter === "critical_high";
       const filtered = tickets.filter((t) => {
         const okStore = !storeFilter || t.branchId === storeFilter;
-        const okStatus = statusFilter === "all" || t.status === statusFilter;
+        // Record-type-aware status match: an Estimate is filtered by its quote
+        // outcome (estimateStatus), a Warranty by its claim lifecycle
+        // (warrantyStatus), and a normal Ticket by the repair status. The
+        // status option set the user picked from swaps with the record-type
+        // strip (see statusFilterOptions), so the value always belongs to the
+        // right vocabulary.
+        const rt = getRecordType(t);
+        const okStatus =
+          statusFilter === "all" ||
+          (rt === "estimate"
+            ? (t.estimateStatus ?? "waiting_approval") === statusFilter
+            : rt === "warranty"
+              ? (t.warrantyStatus ?? "open") === statusFilter
+              : t.status === statusFilter);
         const okDate = isInListDateRange(t.createdAt, dateRange, customFrom, customTo);
         const okPriority =
           priorityFilter === "all" ||
@@ -579,6 +616,13 @@ export default function TicketsPage() {
   }, [selected, bulkUpdateStatus, tickets, deductPartsForTicket]);
 
   /* Action handler */
+  // Inline warranty CLAIM status change (Open → In Progress → Completed →
+  // Rejected). Distinct from the device repair status; persists via updateTicket
+  // (JSONB envelope) and reflects everywhere the record is shown.
+  const handleWarrantyStatusChange = useCallback((ticketId: string, status: WarrantyStatus) => {
+    updateTicket(ticketId, { warrantyStatus: status });
+  }, [updateTicket]);
+
   const handleInlineStatusChange = useCallback((ticketId: string, status: TicketStatus) => {
     updateTicket(ticketId, { status });
     // Deduct parts when repaired
@@ -866,7 +910,7 @@ export default function TicketsPage() {
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-[11px] font-medium text-muted-foreground">Status</label>
+                  <label className="text-[11px] font-medium text-muted-foreground">{statusFilterLabel}</label>
                   <button
                     onClick={() => togglePin("status")}
                     className={cn("inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium transition-colors", isPinned("status") ? "text-[#4361EE] bg-[#EEF1FD]" : "text-muted-foreground hover:text-foreground hover:bg-muted")}
@@ -876,7 +920,7 @@ export default function TicketsPage() {
                     {isPinned("status") ? "Unpin" : "Pin"}
                   </button>
                 </div>
-                <Select value={statusFilter} onChange={(e: any) => setStatusFilter(e.target.value)} options={[{ label: "All Statuses", value: "all" }, ...STATUS_OPTIONS.map((s) => ({ label: s.label, value: s.value }))]} />
+                <Select value={statusFilter} onChange={(e: any) => setStatusFilter(e.target.value)} options={statusFilterOptions} />
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
@@ -974,7 +1018,13 @@ export default function TicketsPage() {
         {RECORD_TYPE_FILTERS.map((rt) => (
           <button
             key={rt.value}
-            onClick={() => setRecordTypeFilter(rt.value)}
+            onClick={() => {
+              setRecordTypeFilter(rt.value);
+              // The status vocabulary differs per record type, so a status
+              // chosen for one type would be meaningless (and hide every row)
+              // under another. Reset it to "All Statuses" on any switch.
+              setStatusFilter("all");
+            }}
             className={cn(
               "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
               recordTypeFilter === rt.value
@@ -1002,12 +1052,16 @@ export default function TicketsPage() {
               <Download className="h-3 w-3" /> Download PDFs
             </Button>
           )}
-          <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
-            <RefreshCw className="h-3 w-3" /> Change Status
-          </Button>
-          <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
-            <Trash2 className="h-3 w-3" /> Delete
-          </Button>
+          {canBulkStatus && (
+            <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus(!showBulkStatus)}>
+              <RefreshCw className="h-3 w-3" /> Change Status
+            </Button>
+          )}
+          {canBulkDeleteTickets && (
+            <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+              <Trash2 className="h-3 w-3" /> Delete
+            </Button>
+          )}
           <button onClick={() => { setSelected(new Set()); setShowBulkStatus(false); }} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
         </motion.div>
       )}
@@ -1124,7 +1178,7 @@ export default function TicketsPage() {
                         col.align === "right" && "text-right",
                         col.align === "center" && "text-center"
                       )}>
-                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId), t.convertedTicketId ? tickets.find((x) => x.id === t.convertedTicketId)?.ticketNo : undefined, canPushToTicket)}
+                        {renderCell(col.id, t, isSelected, isWaiting, elapsed, hasMultiItems, () => toggleOne(t.id), handleAction, handleInlineStatusChange, settings.statusColors, coverageFor(t), setDeviceDetailsTicket, (id, section) => router.push(`/tickets/${id}?section=${section}`), updateDeviceStatus, getStore(t.branchId), t.convertedTicketId ? tickets.find((x) => x.id === t.convertedTicketId)?.ticketNo : undefined, canPushToTicket, handleWarrantyStatusChange)}
                       </td>
                     ))}
                   </motion.tr>
@@ -1156,7 +1210,7 @@ export default function TicketsPage() {
                       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
                         {t.pinnedAt && <Pin className="h-3 w-3 text-[#7C5CFC] fill-[#7C5CFC]" aria-label="Pinned" />}
                         <span>{t.ticketNo ?? t.id}</span>
-                        {!isEstimate(t) && <InvoiceCoverageCheck coverage={coverageFor(t)} size="xs" />}
+                        {!isEstimate(t) && !isWarranty(t) && <InvoiceCoverageCheck coverage={coverageFor(t)} size="xs" />}
                         <span>· <span className="font-medium text-[#5B6FC0]">{t.phone}</span></span>
                       </p>
                       {/* Store context — mirrors the desktop STORE column so the
@@ -1169,7 +1223,11 @@ export default function TicketsPage() {
                     </div>
                   </div>
                 </div>
-                {isEstimate(t) ? (
+                {isWarranty(t) ? (
+                  <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", WARRANTY_STATUS_TONE[t.warrantyStatus ?? "open"])}>
+                    {WARRANTY_STATUS_LABEL[t.warrantyStatus ?? "open"]}
+                  </span>
+                ) : isEstimate(t) ? (
                   <span className={cn("inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset", ESTIMATE_STATUS_TONE[t.estimateStatus ?? "waiting_approval"])}>
                     {ESTIMATE_STATUS_LABEL[t.estimateStatus ?? "waiting_approval"]}
                   </span>
@@ -1453,6 +1511,8 @@ function renderCell(
   /** Whether the user may convert an Estimate to a Ticket (gates the estimate
    *  "Push to Ticket" quick action). */
   canPushToTicket?: boolean,
+  /** Change a Warranty record's claim status inline from its status pill. */
+  onWarrantyStatusChange?: (ticketId: string, status: WarrantyStatus) => void,
 ) {
   switch (colId) {
     case "store":
@@ -1488,8 +1548,9 @@ function renderCell(
           {/* Invoicing-coverage indicator — BLUE = fully invoiced, AMBER =
               partially invoiced (some devices still pending), nothing when not
               invoiced. Reserved space via shrink-0 so it never pushes the id.
-              Estimates are never invoiced directly, so the check is hidden. */}
-          {!isEstimate(t) && <InvoiceCoverageCheck coverage={coverage} />}
+              Estimates + Warranty are never invoiced directly, so the check is
+              hidden. */}
+          {!isEstimate(t) && !isWarranty(t) && <InvoiceCoverageCheck coverage={coverage} />}
         </div>
       );
     case "customer":
@@ -1626,6 +1687,23 @@ function renderCell(
       );
     }
     case "status": {
+      // ── Warranty records show their OWN claim lifecycle (Open / In Progress /
+      //    Completed / Rejected), NOT the device repair status. This is the
+      //    operational Warranty status, distinct from eligibility (spec §24). ──
+      if (isWarranty(t)) {
+        const ws = t.warrantyStatus ?? "open";
+        // Warranty claims get an INLINE status dropdown (Open → In Progress →
+        // Completed → Rejected), nudged 15px right so it reads as a distinct
+        // claim-lifecycle control, set apart from the repair-status dropdowns.
+        return (
+          <div className="flex flex-col items-start gap-0.5 pl-[15px]">
+            <WarrantyStatusPillDropdown
+              status={ws}
+              onSelect={(next) => onWarrantyStatusChange?.(t.id, next)}
+            />
+          </div>
+        );
+      }
       // ── Estimate records show their OWN outcome status (Waiting for Approval
       //    / Converted Ticket / Lost Customer), NOT the device repair lifecycle.
       //    These are conceptually different (see design §12). Rendered as a
@@ -1685,6 +1763,11 @@ function renderCell(
         </div>
       );
     case "amount":
+      // A warranty service is ₹0 and never invoiced (spec §21/§22) — show the
+      // amount plainly with no Billing navigation.
+      if (isWarranty(t)) {
+        return <span className="font-semibold tabular-nums whitespace-nowrap text-muted-foreground">{formatINR(t.amount)}</span>;
+      }
       return (
         <button
           type="button"

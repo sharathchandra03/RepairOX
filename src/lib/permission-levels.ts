@@ -67,18 +67,19 @@ export const PERMISSION_MODULES: ModuleDef[] = [
   {
     id: "tickets",
     label: "Tickets & Repairs",
-    blurb: "Repair jobs — creation, status, parts, QC.",
+    blurb: "Repair jobs — creation, status, parts, QC, warranty.",
     icon: "Ticket",
     levels: {
-      view: ["view_ticket", "view_qc", "view_internal_notes", "view_customer_details", "view_device_details"],
+      view: ["view_ticket", "view_qc", "view_internal_notes", "view_customer_details", "view_device_details", "view_warranty"],
       work: [
         "create_ticket", "edit_ticket", "change_ticket_status", "update_repair_status",
         "ticket_device_status_change", "change_ticket_priority", "add_parts", "edit_internal_notes",
         "push_to_invoice", "convert_from_ticket", "pin_ticket", "ticket_send_comms", "print_documents",
+        "print_ticket", "transfer_ticket", "create_warranty", "edit_warranty", "convert_warranty_to_ticket",
       ],
       manage: [
         "delete_ticket", "assign_technician", "assign_technicians", "remove_parts",
-        "perform_qc", "manage_repair_jobs",
+        "perform_qc", "manage_repair_jobs", "complete_warranty",
       ],
     },
   },
@@ -233,12 +234,12 @@ export const PERMISSION_MODULES: ModuleDef[] = [
   {
     id: "reports",
     label: "Reports",
-    blurb: "Business reports, exports and analytics.",
+    blurb: "Business reports, exports, analytics and audit logs.",
     icon: "BarChart3",
     levels: {
-      view: ["view_reports", "view_ticket_reports", "view_sales_reports", "view_inventory_reports"],
+      view: ["view_reports", "view_ticket_reports", "view_sales_reports", "view_inventory_reports", "view_audit_logs"],
       work: ["reports_builder_use", "reports_comparison_use", "reports_saved_manage"],
-      manage: ["export_reports", "reports_print", "manage_reports", "reports_scheduled_manage", "import_data"],
+      manage: ["export_reports", "reports_print", "manage_reports", "reports_scheduled_manage", "import_data", "audit_export"],
     },
   },
   {
@@ -280,21 +281,23 @@ export const PERMISSION_MODULES: ModuleDef[] = [
   {
     id: "settings",
     label: "Settings",
-    blurb: "Store, invoice, ticket and system configuration.",
+    blurb: "Store, invoice, ticket, notifications and system configuration.",
     icon: "Settings",
     levels: {
-      view: ["view_settings"],
+      view: ["view_settings", "notifications_view"],
+      work: ["notifications_mark_read", "upload_files"],
       manage: [
         "edit_org_profile", "edit_store_details", "edit_invoice_settings", "edit_ticket_settings",
         "edit_numbering", "edit_printing_settings", "settings_qc_configure",
         "settings_workflow_configure", "settings_walkin_fields_configure", "settings_inventory_edit",
         "settings_customer_edit", "settings_financial_edit", "settings_device_categories_manage",
         "settings_device_colours_manage", "settings_barcode_edit", "settings_dashboard_configure",
-        "manage_settings",
+        "manage_settings", "manage_notifications",
       ],
       full: [
-        "manage_integrations", "manage_notifications", "settings_feature_visibility_manage",
+        "manage_integrations", "settings_feature_visibility_manage",
         "settings_system_manage", "manage_subscription", "backup_restore",
+        "access_api", "system_administrator",
       ],
     },
   },
