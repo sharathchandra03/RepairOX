@@ -404,7 +404,40 @@ export type PermissionKey =
   | "notifications_mark_read"
   | "audit_export"
   /* Payroll */
-  | "export_payroll";
+  | "export_payroll"
+  /* ── GAP-AUDIT ADDITIONS (v3) ─────────────────────────────────────────────
+     Granular controllables surfaced by the permission gap audit. Each is an
+     independent toggle so access can be tuned person-to-person. All OFF by
+     default (owners receive the sensitive ones via migration 0038). */
+  /* Sensitive data visibility */
+  | "inventory_view_cost"          // see buying / purchase / wholesale cost
+  | "inventory_edit_cost"          // edit buying / cost price
+  | "view_profit_margin"           // see profit & margin figures anywhere
+  | "view_revenue_totals"          // see revenue totals / KPI money figures
+  /* Record scope (own vs all) */
+  | "tickets_view_all"             // see all tickets, not only own/assigned
+  | "invoices_view_all"
+  | "leads_view_all"
+  | "field_view_all"
+  | "customers_view_all"
+  /* Locked / date integrity */
+  | "edit_locked_records"          // edit finalized/closed records
+  | "backdate_records"             // set/change record dates (backdate)
+  /* Pricing controls */
+  | "discount_over_limit"          // apply discount beyond the configured cap
+  | "edit_price_after_creation"    // override price after a record is created
+  /* Data operations */
+  | "archive_records"              // soft-delete / archive (distinct from delete)
+  | "manage_saved_filters"         // create/manage saved filters & views
+  | "import_customers"
+  | "import_inventory"
+  /* Settings — finer sections */
+  | "settings_invoice_tax_edit"
+  | "settings_payment_modes_manage"
+  | "settings_ticket_assignees_manage"
+  | "manage_webhooks"
+  /* Roles admin */
+  | "roles_preview";               // preview / impersonate a role
 
 export interface PermissionDef {
   key: PermissionKey;
@@ -891,6 +924,56 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "settings_dashboard_configure", label: "Configure Dashboard" },
     ],
   },
+  {
+    id: "sensitive_data",
+    label: "Sensitive Data Visibility",
+    description: "Control who can SEE money-sensitive figures — cost prices, profit, revenue",
+    permissions: [
+      { key: "inventory_view_cost", label: "View Cost / Purchase Price" },
+      { key: "inventory_edit_cost", label: "Edit Cost / Buying Price" },
+      { key: "view_profit_margin", label: "View Profit / Margin" },
+      { key: "view_revenue_totals", label: "View Revenue Totals" },
+    ],
+  },
+  {
+    id: "record_scope",
+    label: "Record Scope (Own vs All)",
+    description: "Restrict a user to only their OWN records, or allow seeing everyone's within their store",
+    permissions: [
+      { key: "tickets_view_all", label: "View All Tickets (not just own/assigned)" },
+      { key: "invoices_view_all", label: "View All Invoices (not just own)" },
+      { key: "leads_view_all", label: "View All Leads (not just own)" },
+      { key: "field_view_all", label: "View All Field Jobs (not just own)" },
+      { key: "customers_view_all", label: "View All Customers (not just own)" },
+    ],
+  },
+  {
+    id: "data_integrity",
+    label: "Data Integrity & Pricing Controls",
+    description: "High-trust actions: editing locked records, backdating, discount limits and price overrides",
+    permissions: [
+      { key: "edit_locked_records", label: "Edit Completed / Locked Records" },
+      { key: "backdate_records", label: "Backdate / Change Record Dates" },
+      { key: "discount_over_limit", label: "Apply Discount Above Limit" },
+      { key: "edit_price_after_creation", label: "Override Price After Creation" },
+      { key: "archive_records", label: "Archive Records (soft-delete)" },
+      { key: "manage_saved_filters", label: "Manage Saved Filters / Views" },
+      { key: "import_customers", label: "Import Customers" },
+      { key: "import_inventory", label: "Import Inventory" },
+    ],
+  },
+  {
+    id: "settings_v3",
+    label: "Settings (More Sections)",
+    description: "Additional granular settings sections surfaced by the gap audit",
+    permissions: [
+      { key: "settings_invoice_tax_edit", label: "Edit Invoice Tax Settings" },
+      { key: "settings_payment_modes_manage", label: "Manage Payment Modes" },
+      { key: "settings_ticket_assignees_manage", label: "Manage Ticket Assignees (By / To)" },
+      { key: "manage_webhooks", label: "Manage Webhooks" },
+      { key: "roles_preview", label: "Preview / Impersonate a Role" },
+    ],
+  },
 ];
 
 export const ALL_PERMISSIONS: PermissionDef[] = PERMISSION_GROUPS.flatMap((g) => g.permissions);
@@ -1016,6 +1099,11 @@ export const ROLES: RoleDef[] = [
       "print_documents", "upload_files",
       "view_field_jobs", "manage_field_jobs", "route_leads", "receive_store_handoff",
       "assign_field_manager", "assign_ninja", "update_pickup", "update_drop", "view_field_reports",
+      // Add User (create staff for their OWN store) — a Branch Manager may add
+      // users but NOT manage roles/permissions and NOT see other stores.
+      // Deliberately excludes: full_access, multi_store_access, stores_view_all,
+      // manage_roles, manage_branches (those are owner-only).
+      "view_users", "create_users", "edit_users", "assign_roles", "add_user",
     ],
   },
   {

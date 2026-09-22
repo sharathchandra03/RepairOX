@@ -36,8 +36,15 @@ export async function GET(req: Request) {
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
   // Per-store staff + ticket counts (compact — counts only, not full rows) and
-  // the store's manager (first active branch-manager assigned to the store).
-  const MANAGER_ROLES = ["shop_owner_branch_manager", "master_shop_owner"];
+  // the store's manager. "Manager" is resolved by CAPABILITY, not a hardcoded
+  // role name: any role that grants store administration (`manage_branches`)
+  // or full/wildcard authority qualifies. This works for custom roles too and
+  // stays consistent with the "no hardcoded role names" standard.
+  const { data: mgrRoleRows } = await admin
+    .from("role_permissions")
+    .select("role_id, permission_key")
+    .in("permission_key", ["manage_branches", "full_access", "*"]);
+  const MANAGER_ROLES = Array.from(new Set((mgrRoleRows ?? []).map((r) => r.role_id as string)));
   const stores = await Promise.all((branches ?? []).map(async (b) => {
     const [{ count: staffCount }, { count: ticketCount }, { data: mgr }] = await Promise.all([
       admin.from("staff").select("*", { count: "exact", head: true }).eq("branch_id", b.id).eq("status", "active"),

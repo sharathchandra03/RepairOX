@@ -8,6 +8,8 @@ import { TimePicker } from "@/components/ui/time-picker";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
 import { StoreNumberingSection } from "@/components/settings/store-numbering-section";
+import { RequireCapability } from "@/components/common/require-capability";
+import { CAP } from "@/lib/capabilities";
 
 function Field({ label, children, span }: { label: string; children: React.ReactNode; span?: boolean }) {
   return (
@@ -19,6 +21,20 @@ function Field({ label, children, span }: { label: string; children: React.React
 }
 
 export default function StoreSettingsPage() {
+  // Editing store identity (name, GSTIN, currency, address, timezone) requires
+  // store-details authority — not merely reaching the page.
+  return (
+    <RequireCapability
+      anyOf={CAP.settings.storeInfo}
+      title="Store Information is restricted"
+      description="Your role can't edit store information. Ask an administrator to grant it in Settings → Roles & Permissions."
+    >
+      <StoreSettingsInner />
+    </RequireCapability>
+  );
+}
+
+function StoreSettingsInner() {
   const { settings, updateSettings, resetSettings, hydrated } = useStoreSettings();
   const [draft, setDraft] = useState<StoreSettings>(settings);
   const [saved, setSaved] = useState(false);

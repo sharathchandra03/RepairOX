@@ -140,7 +140,7 @@ const LOCAL_STORE: StoreBranch = {
 };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
-  const { currentUser, authReady, can } = usePermissions();
+  const { currentUser, authReady, canStore } = usePermissions();
   const pathname = usePathname();
 
   const [stores, setStores] = useState<StoreBranch[]>([]);
@@ -162,7 +162,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   //   • gets no multi-store selection controls.
   // The header selector, store-list breadth and All-Shops guards all key off
   // this ONE signal so UI and behaviour can't disagree.
-  const canMultiStore = can("multi_store_access") || can("full_access");
+  // Multi-store (cross-store) visibility is a SEPARATE axis from `full_access`.
+  // `full_access` = every ACTION; `multi_store_access` = every STORE. A user
+  // with full_access to a single store must NOT see other stores. `canStore`
+  // resolves the multi-store capability WITHOUT honouring full_access (only the
+  // explicit key, or the platform wildcard '*'), mirroring the DB's
+  // auth_can_cross_branch after migration 0039.
+  const canMultiStore = canStore("multi_store_access");
   // `canCrossBranch` (used below for store-list breadth + All-Shops guards) is
   // now the multi-store capability. `manage_branches` alone (store admin) no
   // longer implies cross-store visibility unless multi-store access is granted.

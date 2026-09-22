@@ -55,6 +55,47 @@ export const CAP = {
     edit: ["stores_edit", "manage_branches"],
     assignUsers: ["stores_users_assign", "manage_branches", "manage_users"],
   },
+  /* Money-sensitive VISIBILITY gates (gap audit v3). Owners hold these via
+     full_access; grant explicitly to let a role SEE these figures. */
+  sensitive: {
+    // See cost/buying price. `manage_inventory` implies it (a stock manager
+    // already sees cost). Otherwise a plain inventory viewer does NOT.
+    viewCost: ["inventory_view_cost", "manage_inventory", "manage_purchases"],
+    editCost: ["inventory_edit_cost", "manage_inventory"],
+    viewProfit: ["view_profit_margin", "view_financial_reports"],
+    viewRevenue: ["view_revenue_totals", "view_financial_reports"],
+  },
+  /* Own-vs-all record scope. When a user LACKS the *_view_all key they should
+     see only their own/assigned records (UI filters to created_by/assigned).
+     Coarse module-manage keys imply "view all" so existing managers are
+     unaffected. */
+  recordScope: {
+    ticketsViewAll: ["tickets_view_all", "manage_repair_jobs"],
+    invoicesViewAll: ["invoices_view_all", "manage_invoices"],
+    leadsViewAll: ["leads_view_all", "manage_sales"],
+    fieldViewAll: ["field_view_all", "manage_field_jobs"],
+    customersViewAll: ["customers_view_all", "manage_customers"],
+  },
+  /* High-trust data-integrity + pricing actions. */
+  integrity: {
+    editLocked: ["edit_locked_records"],
+    backdate: ["backdate_records"],
+    discountOverLimit: ["discount_over_limit"],
+    editPriceAfterCreation: ["edit_price_after_creation", "edit_invoice"],
+    archive: ["archive_records"],
+    manageSavedFilters: ["manage_saved_filters"],
+  },
+  /* Settings sections surfaced by the audit (granular first, coarse fallback). */
+  settings: {
+    invoiceTax: ["settings_invoice_tax_edit", "edit_invoice_settings", "manage_settings"],
+    paymentModes: ["settings_payment_modes_manage", "edit_invoice_settings", "manage_settings"],
+    ticketAssignees: ["settings_ticket_assignees_manage", "edit_ticket_settings", "manage_settings"],
+    storeInfo: ["edit_store_details", "edit_org_profile", "manage_settings"],
+    moduleAccess: ["settings_feature_visibility_manage", "manage_settings"],
+    webhooks: ["manage_webhooks", "manage_integrations"],
+    rolePreview: ["roles_preview", "manage_roles"],
+    activityLog: ["view_activity_log", "view_audit_logs"],
+  },
   customer: {
     view: ["view_customers", "manage_customers"],
     create: ["create_customer", "manage_customers"],

@@ -193,6 +193,20 @@ export function checkGrantedPermission(grants: GrantMap, roleId: string, key: Pe
   return set.has(key) || set.has("full_access");
 }
 
+/** Store-SCOPE capability check that does NOT honour `full_access`.
+ *  `full_access` = every ACTION; store scope (multi_store_access) is a SEPARATE
+ *  axis, so a user with full_access to one store must not gain cross-store
+ *  scope. Only the exact key or the platform wildcard `*` (which resolveGrantedKeys
+ *  represents as "all") counts. Mirrors the DB's auth_has_store_capability
+ *  (migration 0039). */
+export function checkStoreCapability(grants: GrantMap, roleId: string, key: PermissionKey): boolean {
+  const g = grants[roleId];
+  // "all" is the client representation of the platform wildcard '*' → cross-store.
+  if (g === "all") return true;
+  const set = resolveGrantedKeys(grants, roleId);
+  return set.has(key); // NOTE: deliberately does NOT check full_access
+}
+
 export interface DeleteRoleResult {
   ok: boolean;
   reason?: "platform_owner" | "own_role" | "in_use";
@@ -249,6 +263,9 @@ interface PermissionsContextValue {
   activeRoleId: string;
   role: RoleDef;
   can: (key: PermissionKey) => boolean;
+  /** Store-scope capability check — does NOT treat full_access as multi-store.
+   *  Use for cross-store / multi-store gates (see checkStoreCapability). */
+  canStore: (key: PermissionKey) => boolean;
   allowedWorkspaces: WorkspaceDef[];
 
   isPreviewing: boolean;
@@ -543,6 +560,15 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   /* ── Grant edits ── */
   const saveGrants = useCallback(async (roleId: string, keys: PermissionKey[]): Promise<{ ok: boolean; error?: string }> => {
+    // Guarantee: the wildcard god-keys (`full_access` / `*`) that BYPASS the
+    // matrix may only ever belong to owner roles. For every other role we strip
+    // them before saving, so the role is governed strictly by its explicit
+    // matrix capabilities. The DB enforces the same rule (migration 0036); this
+    // client strip just avoids a needless save error and keeps intent clear.
+    const OWNER_WILDCARD_ROLES = new Set(["master_shop_owner", "platform_owner"]);
+    if (!OWNER_WILDCARD_ROLES.has(roleId)) {
+      keys = keys.filter((k) => (k as string) !== "full_access" && (k as string) !== "*");
+    }
     // Optimistically reflect the change locally (also the source of truth in
     // local/demo mode, where it's persisted to localStorage by an effect).
     setGrants((prev) => ({ ...prev, [roleId]: keys }));
@@ -952,6 +978,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     [grants, activeRoleId]
   );
 
+  /** Store-SCOPE capability (does not honour full_access — see
+   *  checkStoreCapability). Use this for multi-store / cross-store gates so
+   *  "all actions" never implies "all stores". */
+  const canStore = useCallback(
+    (key: PermissionKey) => checkStoreCapability(grants, activeRoleId, key),
+    [grants, activeRoleId]
+  );
+
   const allowedWorkspaces = useMemo(
     () => allowedWorkspacesForRole(activeRoleId),
     [allowedWorkspacesForRole, activeRoleId]
@@ -966,7 +1000,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         team: exposedTeam, membersInRole: isDemoMode ? ((roleId: string) => DEMO_TEAM.filter((m) => m.roleId === roleId)) : membersInRole, getStaffById, setMemberRole, deleteMember,
         addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
         authReady: hydrated, currentUser, login, logout, landingForRole,
-        adminRoleId, activeRoleId, role, can, allowedWorkspaces,
+        adminRoleId, activeRoleId, role, can, canStore, allowedWorkspaces,
         isPreviewing: previewRoleId !== null, previewRoleId, enterPreview, exitPreview,
         featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
         isDemoMode, demoRoleIds, toggleDemoRole, resetDemo, demoResetCounter,
@@ -977,7 +1011,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       team, membersInRole, getStaffById, setMemberRole, deleteMember,
       addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
       hydrated, currentUser, login, logout, landingForRole,
-      adminRoleId, activeRoleId, role, can, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
+      adminRoleId, activeRoleId, role, can, canStore, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,
       featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk, getVisibility, getVisibilityByHref,
       isDemoMode, demoRoleIds, toggleDemoRole, resetDemo, demoResetCounter,
     ]

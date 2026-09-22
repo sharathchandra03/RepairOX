@@ -80,6 +80,9 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       manage: [
         "delete_ticket", "assign_technician", "assign_technicians", "remove_parts",
         "perform_qc", "manage_repair_jobs", "complete_warranty",
+        // See all tickets (not only own/assigned), edit locked tickets, backdate.
+        "tickets_view_all", "edit_locked_records", "backdate_records", "archive_records",
+        "manage_saved_filters",
       ],
     },
   },
@@ -97,8 +100,13 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       manage: [
         "delete_invoice", "cancel_invoice", "change_invoice_status", "mark_overdue",
         "export_invoices", "manage_invoices", "manage_payments", "manage_warranties",
+        // See all invoices, override price/discount limits, edit locked, revenue.
+        "invoices_view_all", "edit_price_after_creation", "view_revenue_totals",
       ],
-      full: ["manage_refunds", "void_payment", "reconcile_payment"],
+      full: [
+        "manage_refunds", "void_payment", "reconcile_payment",
+        "discount_over_limit",
+      ],
     },
   },
   {
@@ -136,7 +144,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       manage: [
         "leads_delete", "leads_assign", "leads_import", "leads_export", "leads_options_manage",
         "leads_smart_lists_manage", "leads_campaigns_manage", "deals_delete", "companies_delete",
-        "route_leads",
+        "route_leads", "leads_view_all",
       ],
     },
   },
@@ -153,25 +161,29 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       ],
       manage: [
         "manage_field_jobs", "route_leads", "assign_ninja", "assign_field_manager",
+        "field_view_all",
       ],
     },
   },
   {
     id: "inventory",
     label: "Inventory & Stock",
-    blurb: "Stock, items, purchasing and transfers.",
+    blurb: "Stock, items, purchasing, transfers — and who can see cost prices.",
     icon: "Package",
     levels: {
       view: ["view_inventory", "view_inventory_reports"],
       work: [
         "create_item", "edit_item", "inventory_item_duplicate", "adjust_stock",
         "stock_movement", "manage_barcode", "inventory_print_labels", "inventory_bulk_update",
-        "edit_parts_pricing", "import_data", "export_reports",
+        "edit_parts_pricing", "import_data", "import_inventory", "export_reports",
+        // Cost/buying price visibility is opt-in: a normal stock-worker sees
+        // stock but NOT purchase cost unless granted.
+        "inventory_view_cost",
       ],
       manage: [
         "delete_item", "approve_inventory", "inventory_reject", "manage_inventory",
         "manage_purchases", "purchases_approve", "purchases_receive", "manage_vendors",
-        "transfer_inventory", "inventory_transfer_receive",
+        "transfer_inventory", "inventory_transfer_receive", "inventory_edit_cost",
       ],
     },
   },
@@ -200,8 +212,8 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     icon: "BookUser",
     levels: {
       view: ["view_customers", "view_customer_history"],
-      work: ["create_customer", "edit_customer", "manage_customers", "assign_customer_groups"],
-      manage: ["delete_customer", "merge_customer", "export_customers", "manage_customer_groups"],
+      work: ["create_customer", "edit_customer", "manage_customers", "assign_customer_groups", "import_customers"],
+      manage: ["delete_customer", "merge_customer", "export_customers", "manage_customer_groups", "customers_view_all"],
     },
   },
   {
@@ -245,11 +257,16 @@ export const PERMISSION_MODULES: ModuleDef[] = [
   {
     id: "reports",
     label: "Reports",
-    blurb: "Business reports, exports, analytics and audit logs.",
+    blurb: "Business reports, exports, analytics, audit logs — and profit/revenue visibility.",
     icon: "BarChart3",
     levels: {
-      view: ["view_reports", "view_ticket_reports", "view_sales_reports", "view_inventory_reports", "view_audit_logs"],
-      work: ["reports_builder_use", "reports_comparison_use", "reports_saved_manage"],
+      view: [
+        "view_reports", "view_ticket_reports", "view_sales_reports", "view_inventory_reports",
+        "view_audit_logs",
+        // Money-sensitive figures are opt-in even within reports access.
+        "view_profit_margin", "view_revenue_totals",
+      ],
+      work: ["reports_builder_use", "reports_comparison_use", "reports_saved_manage", "manage_saved_filters"],
       manage: ["export_reports", "reports_print", "manage_reports", "reports_scheduled_manage", "import_data", "audit_export"],
     },
   },
@@ -294,7 +311,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       // this tier is what turns on permission administration.
       manage: [
         "manage_roles", "manage_permissions", "manage_users",
-        "delete_users", "deactivate_accounts",
+        "delete_users", "deactivate_accounts", "roles_preview",
       ],
     },
   },
@@ -313,11 +330,14 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         "settings_customer_edit", "settings_financial_edit", "settings_device_categories_manage",
         "settings_device_colours_manage", "settings_barcode_edit", "settings_dashboard_configure",
         "manage_settings", "manage_notifications",
+        // Finer settings sections surfaced by the gap audit.
+        "settings_invoice_tax_edit", "settings_payment_modes_manage",
+        "settings_ticket_assignees_manage",
       ],
       full: [
         "manage_integrations", "settings_feature_visibility_manage",
         "settings_system_manage", "manage_subscription", "backup_restore",
-        "access_api", "system_administrator",
+        "access_api", "system_administrator", "manage_webhooks",
       ],
     },
   },

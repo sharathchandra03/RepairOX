@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Input, Label, Select } from "@/components/ui/input";
 import { toast } from "@/components/ui/toaster";
-import { usePermissions } from "@/lib/permissions-context";
+import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { cn } from "@/lib/utils";
 
@@ -33,11 +33,6 @@ interface StoreRow {
   isActive: boolean; environment: StoreEnvironment; createdAt?: string; staffCount: number; ticketCount: number;
   manager?: string | null;
 }
-
-/** The preferred default role for a store's first login, IF it exists in the
- *  organization's Roles & Permissions. We never invent it — if it's absent we
- *  fall back to the first available role and require an explicit choice. */
-const PREFERRED_MANAGER_ROLE = "shop_owner_branch_manager";
 
 const TIMEZONES = [
   { label: "Asia/Kolkata (IST)", value: "Asia/Kolkata" },
@@ -50,7 +45,7 @@ const emptyForm = { name: "", code: "", address: "", city: "", state: "", postal
 
 export function StoreManagement() {
   const router = useRouter();
-  const { apiFetch, authReady, can, allRoles } = usePermissions();
+  const { apiFetch, authReady, can, allRoles, grants } = usePermissions();
   const { setActiveStore, refreshStores } = useStoreContext();
 
   const canManage = can("manage_branches") || can("full_access");
@@ -63,12 +58,18 @@ export function StoreManagement() {
     () => allRoles.map((r) => ({ label: r.label, value: r.id })),
     [allRoles]
   );
-  // Default to Store Manager only if that role actually exists; otherwise the
-  // first available role (and we require the owner to confirm the choice).
+  // Default a store's first login to a STORE-MANAGER role — resolved by
+  // CAPABILITY, not a hardcoded role id: the first role that grants
+  // `manage_branches` (store administration). This works for custom roles too
+  // and never invents a role. Falls back to the first available role, and the
+  // owner still confirms the choice before creating the login.
   const defaultRoleId = useMemo(() => {
-    if (allRoles.some((r) => r.id === PREFERRED_MANAGER_ROLE)) return PREFERRED_MANAGER_ROLE;
-    return allRoles[0]?.id ?? "";
-  }, [allRoles]);
+    const managerRole = allRoles.find((r) => {
+      const keys = resolveGrantedKeys(grants, r.id);
+      return keys.has("manage_branches");
+    });
+    return managerRole?.id ?? allRoles[0]?.id ?? "";
+  }, [allRoles, grants]);
   const hasRoles = roleOptions.length > 0;
 
   const [stores, setStores] = useState<StoreRow[]>([]);

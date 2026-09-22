@@ -8,10 +8,13 @@ import type { SupabaseClient, User } from "@supabase/supabase-js";
    We verify it, look up their staff role, and only allow admins through.
    The returned `admin` client uses the service-role key (bypasses RLS). */
 
+/* TRUE organization / platform administrators only. A Branch Manager is NOT a
+   global admin — they operate within their assigned store via their granted
+   permissions + store scope, exactly like every other role. This list mirrors
+   the DB `is_admin()` function (migration 0035); the two MUST stay in sync. */
 const ADMIN_ROLES = [
   "master_shop_owner",
   "platform_owner",
-  "shop_owner_branch_manager",
   "developer_admin",
 ];
 
@@ -112,7 +115,19 @@ export async function requirePermission(
    only grant keys within their own grant set. This is enforced on the SERVER
    so it holds even if the client is tampered with. */
 
-/** The keys the editor is allowed to delegate. `*`/`full_access`/owner → all. */
+/** Store-scope capabilities are a SEPARATE axis from action authority.
+ *  `full_access` (all actions) must NOT let a non-owner delegate cross-store
+ *  scope — only holding the store key itself (or being a true owner / '*') can.
+ *  Mirrors the DB: full_access ≠ multi_store_access (migration 0039). */
+const STORE_SCOPE_KEYS = new Set([
+  "multi_store_access",
+  "stores_view_all",
+  "stores_multi_select",
+]);
+
+/** True when the caller has UNIVERSAL ACTION authority (can delegate any
+ *  action key). Note: this is about WHAT, not WHERE — store-scope keys are
+ *  handled separately in keysBeyondAuthority. */
 export function callerCanDelegateAll(
   roleId: string,
   permissions: Set<string>
@@ -124,6 +139,13 @@ export function callerCanDelegateAll(
   );
 }
 
+/** Whether the caller may delegate STORE-SCOPE keys. Only true owners, the
+ *  platform wildcard `*`, or a caller who literally holds the store key — NOT
+ *  merely `full_access`. */
+function callerCanDelegateStoreScope(roleId: string, permissions: Set<string>): boolean {
+  return ADMIN_ROLES.includes(roleId) || permissions.has("*");
+}
+
 /** Returns the subset of `desired` keys the caller is NOT authorized to grant.
  *  Empty array = the change is fully within the caller's delegation authority. */
 export function keysBeyondAuthority(
@@ -131,15 +153,24 @@ export function keysBeyondAuthority(
   roleId: string,
   permissions: Set<string>
 ): string[] {
-  if (callerCanDelegateAll(roleId, permissions)) return [];
-  // A caller without universal authority can only delegate keys they hold, and
-  // can NEVER mint universal keys or the administration capabilities.
-  const NEVER_DELEGATABLE_WITHOUT_FULL = new Set([
+  const universalActions = callerCanDelegateAll(roleId, permissions);
+  const canDelegateStore = callerCanDelegateStoreScope(roleId, permissions);
+
+  // Keys that are NEVER delegatable unless the caller is a true owner / '*'.
+  const NEVER_DELEGATABLE = new Set([
     "*",
-    "full_access",
     "system_administrator",
   ]);
-  return desired.filter(
-    (k) => NEVER_DELEGATABLE_WITHOUT_FULL.has(k) || !permissions.has(k)
-  );
+
+  return desired.filter((k) => {
+    if (NEVER_DELEGATABLE.has(k) && !permissions.has("*") && !ADMIN_ROLES.includes(roleId)) return true;
+    // Store-scope keys: separate axis. full_access does NOT confer these.
+    if (STORE_SCOPE_KEYS.has(k)) {
+      return !(canDelegateStore || permissions.has(k));
+    }
+    // Action keys: universal action authority (full_access/'*'/owner) covers
+    // them; otherwise the caller must hold the exact key.
+    if (universalActions) return false;
+    return !permissions.has(k);
+  });
 }

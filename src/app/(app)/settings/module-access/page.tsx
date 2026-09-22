@@ -6,6 +6,8 @@ import { Info } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Badge } from "@/components/ui/badge";
 import { WORKSPACES } from "@/lib/permissions";
+import { RequireCapability } from "@/components/common/require-capability";
+import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 
 /** Org-level switch: which of the 3 modules this business has enabled at all.
@@ -14,6 +16,19 @@ import { cn } from "@/lib/utils";
  *  they're individually granted. Lets RepairOX be sold to a business that
  *  only runs, say, Shop Management, without any redesign. */
 export default function WorkspaceAccessPage() {
+  // Turning whole modules on/off is a platform-level control — gate it.
+  return (
+    <RequireCapability
+      anyOf={CAP.settings.moduleAccess}
+      title="Module Access is restricted"
+      description="Your role can't change which modules are enabled for the business. Ask an administrator to grant it in Settings → Roles & Permissions."
+    >
+      <WorkspaceAccessInner />
+    </RequireCapability>
+  );
+}
+
+function WorkspaceAccessInner() {
   const [enabled, setEnabled] = useState<Record<string, boolean>>({
     leads: true, shop: true, operations: true,
   });

@@ -1085,13 +1085,19 @@ function MatrixTab({
     setDirty(true);
   }
 
-  /** Master switch — grant or revoke EVERY capability across ALL modules. */
+  /** Master switch — grant or revoke EVERY capability across ALL modules.
+   *  IMPORTANT: the wildcard `full_access` god-key (which BYPASSES the matrix)
+   *  is reserved for owner roles only. For any other role, "Full" grants every
+   *  individual module capability explicitly — so the role is fully capable but
+   *  still governed by the matrix (never a silent bypass). The DB enforces this
+   *  too (migration 0036), so a non-owner can never hold full_access. */
   function setAllFull(nextFull: boolean) {
     if (isPlatformOwner) return;
+    const isOwnerRole = activeRoleId === "master_shop_owner" || activeRoleId === "platform_owner";
     setGrants((prev) => {
       if (!nextFull) return { ...prev, [activeRoleId]: new Set<PermissionKey>() };
       const everything = new Set<PermissionKey>();
-      everything.add("full_access");
+      if (isOwnerRole) everything.add("full_access");
       for (const mod of PERMISSION_MODULES) {
         for (const k of allModuleKeys(mod)) everything.add(k);
       }
@@ -1190,15 +1196,17 @@ function MatrixTab({
               <UserPlus className="h-4 w-4" /> Add Role
             </Button>
           </Can>
-          <Button
-            variant="outline"
-            size="md"
-            className="gap-1.5 whitespace-nowrap rounded-full"
-            onClick={() => enterPreview(activeRoleId)}
-            title="Rebuild the entire CRM using this role's currently saved permissions"
-          >
-            <Eye className="h-4 w-4" /> Preview
-          </Button>
+          <Can permission={["roles_preview", "manage_roles"]}>
+            <Button
+              variant="outline"
+              size="md"
+              className="gap-1.5 whitespace-nowrap rounded-full"
+              onClick={() => enterPreview(activeRoleId)}
+              title="Rebuild the entire CRM using this role's currently saved permissions"
+            >
+              <Eye className="h-4 w-4" /> Preview
+            </Button>
+          </Can>
           <Can permission="manage_roles">
             <Button size="md" className="gap-1.5 whitespace-nowrap rounded-full" disabled={!dirty || saving} loading={saving} onClick={saveChanges}>
               <Save className="h-4 w-4" /> {saving ? "Saving…" : "Save changes"}

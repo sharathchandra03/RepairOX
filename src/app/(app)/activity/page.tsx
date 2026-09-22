@@ -13,6 +13,8 @@ import {
   type ActivityModule, type ActivitySeverity,
 } from "@/lib/activity-log";
 import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
+import { RequireCapability } from "@/components/common/require-capability";
+import { CAP } from "@/lib/capabilities";
 
 const PAGE_SIZE = 25;
 const GROUP_ORDER = ["Today", "Yesterday", "Earlier This Week", "Earlier This Month", "Older"];
@@ -23,6 +25,19 @@ const DATE_LABEL: Record<DateRange, string> = {
 };
 
 export default function ActivityLogPage() {
+  // The activity/audit trail is sensitive — gate it on activity-log access.
+  return (
+    <RequireCapability
+      anyOf={CAP.settings.activityLog}
+      title="Activity Log is restricted"
+      description="Your role doesn't include activity/audit log access. Ask an administrator to grant it in Settings → Roles & Permissions."
+    >
+      <ActivityLogInner />
+    </RequireCapability>
+  );
+}
+
+function ActivityLogInner() {
   const activities = useActivityLog();
   const router = useRouter();
   const searchParams = useSearchParams();
