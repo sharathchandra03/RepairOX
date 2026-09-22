@@ -83,6 +83,11 @@ export type PermissionKey =
   | "delete_users"
   | "manage_users"
   | "manage_roles"
+  /* Add User — the capability to create/add employees & assign an existing role
+     + authorized store(s). DELIBERATELY SEPARATE from manage_roles: a role may
+     grant `add_user` (create staff) WITHOUT `manage_roles` (redesign the
+     permission system). OFF by default for every role except the owner roles. */
+  | "add_user"
   | "assign_roles"
   | "reset_passwords"
   | "deactivate_accounts"
@@ -439,6 +444,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "delete_users", label: "Delete Users" },
       { key: "manage_users", label: "Manage Users" },
       { key: "manage_roles", label: "Manage Roles & Permissions" },
+      { key: "add_user", label: "Add User (create staff & assign role/store)" },
       { key: "assign_roles", label: "Assign Roles" },
       { key: "reset_passwords", label: "Reset Passwords" },
       { key: "deactivate_accounts", label: "Deactivate Accounts" },
@@ -920,7 +926,7 @@ export const ROLES: RoleDef[] = [
     permissions: [
       "view_dashboard", "view_kpi_cards", "view_charts", "view_activity_log", "export_dashboard",
       "view_audit_logs", "view_reports", "manage_reports", "export_reports", "import_data",
-      "manage_users", "manage_roles", "manage_branches", "assign_roles", "reset_passwords",
+      "manage_users", "manage_roles", "add_user", "manage_branches", "assign_roles", "reset_passwords",
       "deactivate_accounts", "view_login_activity", "view_users", "create_users", "edit_users", "delete_users",
       "manage_settings", "manage_integrations", "manage_notifications",
       "access_api", "backup_restore", "system_administrator",
@@ -935,7 +941,7 @@ export const ROLES: RoleDef[] = [
     permissions: [
       "full_access", "create", "edit", "delete", "approve", "assign",
       "view_users", "create_users", "edit_users", "delete_users",
-      "manage_users", "manage_roles", "manage_branches", "assign_roles", "reset_passwords",
+      "manage_users", "manage_roles", "add_user", "manage_branches", "assign_roles", "reset_passwords",
       "deactivate_accounts", "view_login_activity",
       "view_dashboard", "view_kpi_cards", "reorder_widgets", "view_charts", "view_activity_log", "export_dashboard", "edit_dashboard_targets",
       "create_ticket", "edit_ticket", "delete_ticket", "view_ticket", "assign_technician",

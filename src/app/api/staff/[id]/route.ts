@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission, keysBeyondAuthority, callerCanDelegateAll } from "@/lib/api-auth";
 import { rowToStaff } from "@/lib/staff-map";
 import { normalizeEmail } from "@/lib/auth";
 import { resolveBranchId } from "@/lib/tenant";
@@ -9,19 +9,46 @@ export const dynamic = "force-dynamic";
 const BANNED = "876000h"; // ~100 years
 const UNBANNED = "none";
 
+/* Org-wide administration roles that may only be assigned by a true org admin
+   (mirrors the guard in /api/staff POST). */
+const ORG_ADMIN_ROLES = new Set(["master_shop_owner", "platform_owner", "developer_admin"]);
+const CAN_GRANT_ORG_ADMIN = new Set(["master_shop_owner", "platform_owner", "developer_admin"]);
+
 /* PATCH /api/staff/[id] — update profile / role / branch / salary / status /
-   login access. Admin-only. Keeps the auth account (ban state, password) in
-   sync with the staff row. */
+   login access. Gated on user-management capability (NOT a hardcoded admin
+   role). Role changes and store moves are guarded against privilege escalation
+   the same way staff creation is. Keeps the auth account (ban state, password)
+   in sync with the staff row. */
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const guard = await requireAdmin(req);
+  const guard = await requirePermission(req, ["edit_users", "manage_users", "manage_roles", "assign_roles", "add_user"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
-  const { admin } = guard;
+  const { admin, roleId: callerRoleId, permissions: callerPerms } = guard;
 
   const { data: row, error: findErr } = await admin
     .from("staff").select("*").eq("id", params.id).maybeSingle();
   if (findErr || !row) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
 
   const body = await req.json();
+
+  // ── Privilege-escalation guard on ROLE CHANGE. Only a true org admin may
+  //    move someone onto an org-admin role, and a caller without full authority
+  //    may only assign a role whose permissions are within their delegation. ──
+  if (body.roleId !== undefined && body.roleId !== row.role_id) {
+    const nextRoleId = String(body.roleId);
+    if (ORG_ADMIN_ROLES.has(nextRoleId) && !CAN_GRANT_ORG_ADMIN.has(callerRoleId)) {
+      return NextResponse.json({ ok: false, reason: "forbidden_role" }, { status: 403 });
+    }
+    if (!callerCanDelegateAll(callerRoleId, callerPerms)) {
+      const { data: roleGrantRows } = await admin
+        .from("role_permissions").select("permission_key").eq("role_id", nextRoleId);
+      const roleKeys = (roleGrantRows ?? []).map((r) => r.permission_key as string);
+      const beyond = keysBeyondAuthority(roleKeys, callerRoleId, callerPerms);
+      if (beyond.length > 0) {
+        return NextResponse.json({ ok: false, reason: "forbidden_role", error: "You can't assign a role with permissions beyond your own authority." }, { status: 403 });
+      }
+    }
+  }
+
   const update: Record<string, unknown> = {};
   if (body.name !== undefined) update.name = String(body.name).trim();
   if (body.phone !== undefined) update.phone = body.phone || null;
@@ -77,9 +104,10 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   return NextResponse.json({ ok: true, member: rowToStaff(updated) });
 }
 
-/* DELETE /api/staff/[id] — remove the staff record and its login. Admin-only. */
+/* DELETE /api/staff/[id] — remove the staff record and its login. Gated on the
+   user-deletion capability (delete_users / manage_users). */
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const guard = await requireAdmin(req);
+  const guard = await requirePermission(req, ["delete_users", "manage_users"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin } = guard;
 

@@ -25,6 +25,36 @@ import type { PermissionKey } from "@/lib/permissions";
  *  First entries are the precise granular keys; trailing entries are the
  *  backward-compatible coarse keys so pre-existing roles keep working. */
 export const CAP = {
+  /* Administrative capabilities. These are DELIBERATELY separate:
+       • manageRoles  — view/create/edit roles + change permission grants
+                        (gates the Permission Matrix + role CRUD).
+       • addUser      — create/add staff & assign an existing role + store(s),
+                        WITHOUT the authority to redesign the permission system.
+     `add_user` implies neither `manage_roles` nor `manage_users`; and
+     `manage_roles` does NOT imply `add_user` (owners get both explicitly).
+     Coarse `manage_users` is kept only as a fallback for pre-existing roles
+     that were configured before the split. */
+  admin: {
+    // Manage Roles & Permissions — the permission-administration capability.
+    manageRoles: ["manage_roles", "manage_permissions"],
+    // Add User — create staff & assign role/store. `manage_users` is a coarse
+    // legacy fallback so existing user-managers keep the ability to add users.
+    addUser: ["add_user", "create_users", "manage_users"],
+    // Manage existing users (edit / suspend / delete / reset). Broader than add.
+    manageUsers: ["manage_users"],
+    editUser: ["edit_users", "manage_users"],
+    deleteUser: ["delete_users", "manage_users"],
+    assignRole: ["assign_roles", "manage_users", "manage_roles"],
+  },
+  store: {
+    // View All Shops (the consolidated context) — a real capability.
+    viewAll: ["stores_view_all", "multi_store_access"],
+    // Operate/switch across stores.
+    multiStore: ["multi_store_access"],
+    create: ["stores_create", "manage_branches"],
+    edit: ["stores_edit", "manage_branches"],
+    assignUsers: ["stores_users_assign", "manage_branches", "manage_users"],
+  },
   customer: {
     view: ["view_customers", "manage_customers"],
     create: ["create_customer", "manage_customers"],

@@ -66,7 +66,7 @@ export default function EmployeeDirectoryPage() {
         title="Employee Directory"
         subtitle="Every staff member — profile, role, branch, login access and salary, all in one place."
         actions={
-          <Can permission={["manage_users", "assign_technicians"]}>
+          <Can permission={["add_user", "create_users", "manage_users"]}>
             <Link href="/settings/roles-permissions/add-user">
               <Button size="md"><Plus className="h-4 w-4" /> Add staff</Button>
             </Link>

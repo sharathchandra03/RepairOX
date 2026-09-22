@@ -9,17 +9,56 @@ import {
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select, NumericInput } from "@/components/ui/input";
-import { WORKSPACE_MAP } from "@/lib/permissions";
-import { usePermissions } from "@/lib/permissions-context";
+import { WORKSPACE_MAP, type PermissionKey } from "@/lib/permissions";
+import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
+import { RequireCapability } from "@/components/common/require-capability";
+import { CAP } from "@/lib/capabilities";
 import {
   BRANCHES, SALARY_TYPES, validatePassword, PASSWORD_MIN_LENGTH,
 } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
+/* Org-admin roles a non-org-admin may never assign (mirrors the server guard). */
+const ORG_ADMIN_ROLE_IDS = new Set(["master_shop_owner", "platform_owner", "developer_admin"]);
+
 export default function AddStaffPage() {
+  // Route guard: only users with the ADD USER capability may open this page.
+  return (
+    <RequireCapability
+      anyOf={CAP.admin.addUser}
+      title="You can't add users"
+      description="Your role doesn't include the Add User permission. Ask an administrator to grant it in Settings → Roles & Permissions."
+    >
+      <AddStaffInner />
+    </RequireCapability>
+  );
+}
+
+function AddStaffInner() {
   const router = useRouter();
-  const { allRoles, addStaff, landingForRole } = usePermissions();
+  const { allRoles, addStaff, landingForRole, grants, can, adminRoleId } = usePermissions();
+
+  // ── Delegation-aware role list: a creator without full authority may only
+  //    assign a role whose permission set is a SUBSET of their own (and never
+  //    an org-admin role). This mirrors the server-side escalation guard so the
+  //    dropdown never even offers a role the server would reject. ──
+  const callerCanDelegateAll = can("full_access") || ORG_ADMIN_ROLE_IDS.has(adminRoleId);
+  const myKeys = useMemo(() => resolveGrantedKeys(grants, adminRoleId), [grants, adminRoleId]);
+  const assignableRoles = useMemo(() => {
+    if (callerCanDelegateAll) return allRoles;
+    return allRoles.filter((r) => {
+      if (ORG_ADMIN_ROLE_IDS.has(r.id)) return false;
+      const roleKeys = resolveGrantedKeys(grants, r.id);
+      // Every key the target role carries must be one the caller can delegate.
+      for (const k of roleKeys) {
+        const key = k as string;
+        if (key === "full_access" || key === "*") return false;
+        if (!myKeys.has(k as PermissionKey)) return false;
+      }
+      return true;
+    });
+  }, [allRoles, grants, myKeys, callerCanDelegateAll]);
   // Real stores from the organization (falls back to the legacy static list in
   // local/demo mode). The chosen store NAME is sent to /api/staff, which
   // resolves it to the store's branch_id — so the new employee is truly scoped
@@ -29,8 +68,10 @@ export default function AddStaffPage() {
     ? stores.map((s) => ({ label: s.name, value: s.name }))
     : BRANCHES.map((b) => ({ label: b, value: b }));
 
-  // Reception is a sensible default for a first hire.
-  const defaultRole = allRoles.find((r) => r.id === "reception")?.id ?? allRoles[0].id;
+  // Reception is a sensible default for a first hire (falls back to the first
+  // role the caller is actually allowed to assign).
+  const defaultRole =
+    assignableRoles.find((r) => r.id === "reception")?.id ?? assignableRoles[0]?.id ?? allRoles[0].id;
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -215,7 +256,7 @@ export default function AddStaffPage() {
                   id="role"
                   value={roleId}
                   onChange={(e) => setRoleId(e.target.value)}
-                  options={allRoles.map((r) => ({ label: r.label, value: r.id }))}
+                  options={assignableRoles.map((r) => ({ label: r.label, value: r.id }))}
                 />
               </div>
               <div className="space-y-1.5">

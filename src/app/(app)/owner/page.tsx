@@ -30,6 +30,7 @@ import { KpiCard } from "@/components/dashboard/kpi-card";
 import { RoxFilterPanelHeader, ActiveFiltersBar } from "@/components/ui/rox-filter";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
+import { RequireCapability } from "@/components/common/require-capability";
 import { cn } from "@/lib/utils";
 
 /** Normalized monthly projection horizon. Projection for any selected period is
@@ -141,6 +142,22 @@ function StorePerfCols() {
 }
 
 export default function OwnerDashboardPage() {
+  // Route guard: the Owner Dashboard is a permission-controlled surface. A user
+  // who navigates here directly without `owner_dashboard_view` (or multi-store
+  // access) is refused — the /api/owner/summary route + RLS enforce it on the
+  // server regardless, but the UI must not render the consolidated view either.
+  return (
+    <RequireCapability
+      anyOf={["owner_dashboard_view", "multi_store_access", "stores_view_all"]}
+      title="Owner Dashboard is restricted"
+      description="Your role doesn't include Owner Dashboard access. Ask an administrator to grant it in Settings → Roles & Permissions."
+    >
+      <OwnerDashboardInner />
+    </RequireCapability>
+  );
+}
+
+function OwnerDashboardInner() {
   const router = useRouter();
   const { can, apiFetch, authReady, currentUser } = usePermissions();
   const { stores, activeStoreId, isAllShops, canViewAllShops, setActiveStore, ready: storeReady } = useStoreContext();

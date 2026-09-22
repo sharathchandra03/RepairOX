@@ -1,15 +1,17 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
 /* PUT /api/feature-visibility — upsert one or many feature visibility entries.
-   Admin-only (platform_owner, master_shop_owner).
+   Gated on permission administration (manage_roles) or the dedicated feature-
+   visibility capability — configuring what roles can see IS a role-management
+   concern.
 
    Body: { roleId, featureId, mode } — single update
      OR: { roleId, bulk: { [featureId]: mode } } — bulk update */
 export async function PUT(req: Request) {
-  const guard = await requireAdmin(req);
+  const guard = await requirePermission(req, ["manage_roles", "settings_feature_visibility_manage"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin } = guard;
 
@@ -59,7 +61,7 @@ export async function PUT(req: Request) {
 /* DELETE /api/feature-visibility — remove a visibility override (revert to "visible").
    Body: { roleId, featureId } */
 export async function DELETE(req: Request) {
-  const guard = await requireAdmin(req);
+  const guard = await requirePermission(req, ["manage_roles", "settings_feature_visibility_manage"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin } = guard;
 

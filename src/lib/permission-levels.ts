@@ -278,14 +278,23 @@ export const PERMISSION_MODULES: ModuleDef[] = [
   {
     id: "employees_admin",
     label: "Roles & Users Admin",
-    blurb: "Create users, assign roles, manage permissions.",
+    blurb: "Add users (Work) vs. redesign roles & permissions (Manage) — kept separate.",
     icon: "ShieldCheck",
     levels: {
+      // View — see the user directory only.
       view: ["view_users"],
-      work: ["create_users", "edit_users", "assign_roles", "reset_passwords"],
+      // Work = "ADD USER". Can create/add staff and assign an EXISTING role +
+      // authorized store(s), reset their password. Does NOT include the ability
+      // to redesign roles or change what permissions a role has. This is the
+      // exact separation the RepairOX authorization standard requires: Add User
+      // must be grantable WITHOUT Manage Roles & Permissions.
+      work: ["add_user", "create_users", "edit_users", "assign_roles", "reset_passwords"],
+      // Manage = "MANAGE ROLES & PERMISSIONS". The full administrative tier:
+      // create/edit roles, change permission grants, delete users, etc. Adding
+      // this tier is what turns on permission administration.
       manage: [
-        "delete_users", "manage_users", "manage_roles", "deactivate_accounts",
-        "manage_permissions",
+        "manage_roles", "manage_permissions", "manage_users",
+        "delete_users", "deactivate_accounts",
       ],
     },
   },

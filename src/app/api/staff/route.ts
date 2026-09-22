@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission, keysBeyondAuthority, callerCanDelegateAll } from "@/lib/api-auth";
 import { rowToStaff } from "@/lib/staff-map";
 import { normalizeEmail } from "@/lib/auth";
 import { ensureOrganization, ensureBranches, orgIdForAuthUser, resolveBranchId, HQ_BRANCH } from "@/lib/tenant";
@@ -29,11 +29,14 @@ const CAN_GRANT_ORG_ADMIN = new Set([
 ]);
 
 /* POST /api/staff — create a staff member and (optionally) their login account.
-   Admin-only. Uses the service-role key to create the auth user. */
+   Gated on the ADD USER capability (`add_user`, with coarse `create_users` /
+   `manage_users` fallbacks) — NOT a hardcoded admin-role check. This lets an
+   administrator delegate user creation WITHOUT granting Manage Roles &
+   Permissions. Uses the service-role key to create the auth user. */
 export async function POST(req: Request) {
-  const guard = await requireAdmin(req);
+  const guard = await requirePermission(req, ["add_user", "create_users", "manage_users"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
-  const { admin, user } = guard;
+  const { admin, user, roleId: callerRoleId, permissions: callerPerms } = guard;
 
   const body = await req.json();
   const {
@@ -54,11 +57,32 @@ export async function POST(req: Request) {
   const { data: roleRow } = await admin.from("roles").select("id").eq("id", roleId).maybeSingle();
   if (!roleRow) return NextResponse.json({ ok: false, reason: "invalid_role" }, { status: 400 });
 
-  // ── Privilege-escalation guard: only a true org/platform admin may assign an
-  //    org-wide administration role. A Store Manager cannot mint an Owner, even
-  //    by tampering with the request. ──
-  if (ORG_ADMIN_ROLES.has(roleId) && !CAN_GRANT_ORG_ADMIN.has(guard.roleId)) {
+  // ── Privilege-escalation guard #1: only a true org/platform admin may assign
+  //    an org-wide administration role. A Store Manager cannot mint an Owner,
+  //    even by tampering with the request. ──
+  if (ORG_ADMIN_ROLES.has(roleId) && !CAN_GRANT_ORG_ADMIN.has(callerRoleId)) {
     return NextResponse.json({ ok: false, reason: "forbidden_role" }, { status: 403 });
+  }
+
+  // ── Privilege-escalation guard #2 (capability-level): a creator without full
+  //    delegation authority may only assign a role whose permission set is a
+  //    subset of what they can themselves delegate. This prevents an Add-User
+  //    delegate (e.g. Sales Manager with `add_user` but not `manage_roles`)
+  //    from assigning a role that carries administrative capabilities they
+  //    don't hold. Owners / full_access bypass this (they can delegate all). ──
+  if (!callerCanDelegateAll(callerRoleId, callerPerms)) {
+    const { data: roleGrantRows } = await admin
+      .from("role_permissions")
+      .select("permission_key")
+      .eq("role_id", roleId);
+    const roleKeys = (roleGrantRows ?? []).map((r) => r.permission_key as string);
+    const beyond = keysBeyondAuthority(roleKeys, callerRoleId, callerPerms);
+    if (beyond.length > 0) {
+      return NextResponse.json(
+        { ok: false, reason: "forbidden_role", error: "You can't assign a role with permissions beyond your own authority." },
+        { status: 403 }
+      );
+    }
   }
 
   // Duplicate email check (whenever an email is supplied).
@@ -112,6 +136,23 @@ export async function POST(req: Request) {
     }
   } else {
     branchId = await resolveBranchId(admin, orgId, branch ?? HQ_BRANCH);
+  }
+
+  // ── Store-scope guard: a creator WITHOUT multi-store authority may only
+  //    place the new user in a store they can themselves access (their own
+  //    branch + active user_stores grants). This mirrors the DB's store
+  //    isolation (auth_store_ids) so an Add-User delegate can't assign staff to
+  //    a store they aren't authorized for by tampering with storeId/branch.
+  //    Owners / full_access / multi_store_access bypass (they see all stores). ──
+  if (branchId && !callerCanDelegateAll(callerRoleId, callerPerms) && !callerPerms.has("multi_store_access")) {
+    const authorized = await creatorAuthorizedBranchIds(admin, user.id, orgId);
+    if (authorized.size > 0 && !authorized.has(branchId)) {
+      if (authUserId) await admin.auth.admin.deleteUser(authUserId).catch(() => {});
+      return NextResponse.json(
+        { ok: false, reason: "forbidden_store", error: "You can only add users to a store you're authorized to manage." },
+        { status: 403 }
+      );
+    }
   }
 
   const { data: inserted, error: insErr } = await admin
@@ -180,4 +221,33 @@ export async function POST(req: Request) {
 async function orgStaffId(admin: SupabaseClient, authUserId: string): Promise<string | null> {
   const { data } = await admin.from("staff").select("id").eq("auth_user_id", authUserId).maybeSingle();
   return (data?.id as string) ?? null;
+}
+
+/** The set of branch ids the creator is authorized to place users in when they
+ *  DON'T have multi-store authority: their own staff.branch_id plus any active
+ *  user_stores grants. Mirrors the DB's auth_store_ids() for non-cross-branch
+ *  users. Returns an empty set if the creator's own branch can't be resolved
+ *  (in which case the caller skips the restriction to avoid a false lockout —
+ *  DB RLS remains the backstop). */
+async function creatorAuthorizedBranchIds(
+  admin: SupabaseClient,
+  authUserId: string,
+  orgId: string
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const { data: me } = await admin
+    .from("staff")
+    .select("id, branch_id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+  if (me?.branch_id) out.add(me.branch_id as string);
+  if (me?.id) {
+    const { data: grants } = await admin
+      .from("user_stores")
+      .select("branch_id, status")
+      .eq("staff_id", me.id)
+      .eq("status", "active");
+    for (const g of grants ?? []) out.add(g.branch_id as string);
+  }
+  return out;
 }

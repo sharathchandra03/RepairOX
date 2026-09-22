@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { orgIdForAuthUser, ensureOrganization } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -19,7 +19,9 @@ export const dynamic = "force-dynamic";
    ────────────────────────────────────────────────────────────────────────── */
 
 export async function GET(req: Request) {
-  const guard = await requireAdmin(req);
+  // Listing stores for management requires a store-management or multi-store
+  // capability — not merely being on an admin role.
+  const guard = await requirePermission(req, ["stores_list_view", "manage_branches", "multi_store_access", "stores_view_all"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin, user } = guard;
 
@@ -60,7 +62,10 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const guard = await requireAdmin(req);
+  // Creating a store is restricted to store-creation authority. Note: this is
+  // deliberately NOT implied by `add_user` — adding users must not confer store
+  // creation (RepairOX authorization standard §35).
+  const guard = await requirePermission(req, ["stores_create", "manage_branches"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin, user } = guard;
 

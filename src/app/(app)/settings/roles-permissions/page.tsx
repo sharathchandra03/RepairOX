@@ -20,6 +20,8 @@ import { Avatar } from "@/components/ui/avatar";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Can } from "@/components/common/can";
+import { RequireCapability } from "@/components/common/require-capability";
+import { CAP } from "@/lib/capabilities";
 import { AddRoleDrawer } from "@/components/settings/add-role-drawer";
 import { DeleteRoleDialog } from "@/components/settings/delete-role-dialog";
 import { ChangeRoleDrawer } from "@/components/settings/change-role-drawer";
@@ -85,6 +87,18 @@ function draftFromContext(
 }
 
 export default function RolesPermissionsPage() {
+  // Route-level guard: the entire Roles & Permissions surface (including the
+  // Permission Matrix) is visible ONLY to users who can manage roles. The
+  // server + RLS remain the real enforcement; this refuses to render the
+  // management UI to anyone without `manage_roles`.
+  return (
+    <RequireCapability anyOf={CAP.admin.manageRoles}>
+      <RolesPermissionsInner />
+    </RequireCapability>
+  );
+}
+
+function RolesPermissionsInner() {
   const {
     grants: savedGrants, saveGrants, enterPreview, allRoles, addRole,
     isCustomRole, canDeleteRole, deleteRole, membersInRole,

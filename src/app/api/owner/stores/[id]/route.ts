@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAdmin } from "@/lib/api-auth";
+import { requirePermission } from "@/lib/api-auth";
 import { orgIdForAuthUser } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -11,7 +11,8 @@ export const dynamic = "force-dynamic";
    selector while all its data is preserved. Owner/admin only, scoped to the
    caller's own organization. */
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
-  const guard = await requireAdmin(req);
+  // Editing / (de)activating a store requires store-edit authority.
+  const guard = await requirePermission(req, ["stores_edit", "stores_deactivate", "manage_branches"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin, user } = guard;
 

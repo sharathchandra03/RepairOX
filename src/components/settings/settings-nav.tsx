@@ -10,11 +10,18 @@ import {
   Package, Ticket, FileText, UserCheck, Plug, Bell, Settings2,
   ShieldCheck, Printer, Receipt, BarChart3, Palette, Footprints,
 } from "lucide-react";
+import { usePermissions } from "@/lib/permissions-context";
+import { allow } from "@/lib/capabilities";
+import { CAP } from "@/lib/capabilities";
+import type { PermissionKey } from "@/lib/permissions";
 
 /* ─── Navigation Structure ───────────────────────────────────────────── */
 
-type NavChild = { label: string; href: string };
-type NavSection = { id: string; label: string; icon: any; children: NavChild[] };
+/** Optional `anyOf` gates a nav item on holding at least one of the keys.
+ *  Items without `anyOf` are always visible (their own page/RLS still guards
+ *  any privileged action inside). */
+type NavChild = { label: string; href: string; anyOf?: PermissionKey[] };
+type NavSection = { id: string; label: string; icon: any; anyOf?: PermissionKey[]; children: NavChild[] };
 
 const SETTINGS_NAV: NavSection[] = [
   {
@@ -116,10 +123,14 @@ const SETTINGS_NAV: NavSection[] = [
     ],
   },
   {
+    // Section shows when the user can EITHER manage roles OR add users. The two
+    // children are gated independently: a delegate with Add User (but not
+    // Manage Roles & Permissions) sees only "Add User".
     id: "roles", label: "Roles & Permissions", icon: ShieldCheck,
+    anyOf: [...CAP.admin.manageRoles, ...CAP.admin.addUser] as PermissionKey[],
     children: [
-      { label: "Roles & Permissions", href: "/settings/roles-permissions" },
-      { label: "Add User", href: "/settings/roles-permissions/add-user" },
+      { label: "Roles & Permissions", href: "/settings/roles-permissions", anyOf: CAP.admin.manageRoles as PermissionKey[] },
+      { label: "Add User", href: "/settings/roles-permissions/add-user", anyOf: CAP.admin.addUser as PermissionKey[] },
     ],
   },
 ];
@@ -129,6 +140,20 @@ const SETTINGS_NAV: NavSection[] = [
 export function SettingsNav({ onNavigate }: { onNavigate: () => void }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { can } = usePermissions();
+
+  // Permission-aware view of the nav: drop children the user can't access and
+  // hide any section that ends up empty or is gated and denied. Items with no
+  // `anyOf` are always kept.
+  const visibleNav = useMemo(() => {
+    return SETTINGS_NAV
+      .filter((section) => !section.anyOf || allow(can, section.anyOf))
+      .map((section) => ({
+        ...section,
+        children: section.children.filter((c) => !c.anyOf || allow(can, c.anyOf)),
+      }))
+      .filter((section) => section.children.length > 0);
+  }, [can]);
   // Preserve the originating module across Settings-internal navigation so the
   // "← Back to <Module>" control keeps pointing at the right place.
   const fromKey = searchParams.get("from");
@@ -136,14 +161,14 @@ export function SettingsNav({ onNavigate }: { onNavigate: () => void }) {
 
   // Determine which section is active based on path
   const activeSection = useMemo(() => {
-    for (const section of SETTINGS_NAV) {
+    for (const section of visibleNav) {
       if (section.children.some((c) => pathname === c.href || pathname.startsWith(c.href + "/"))) {
         return section.id;
       }
     }
     // Default to store
     return "store";
-  }, [pathname]);
+  }, [pathname, visibleNav]);
 
   const [expanded, setExpanded] = useState<Record<string, boolean>>(() => {
     const init: Record<string, boolean> = {};
@@ -155,11 +180,11 @@ export function SettingsNav({ onNavigate }: { onNavigate: () => void }) {
     setExpanded((prev) => ({ ...prev, [id]: !prev[id] }));
   };
 
-  // Filter sections by search
+  // Filter sections by search (over the permission-filtered nav)
   const filteredNav = useMemo(() => {
-    if (!search.trim()) return SETTINGS_NAV;
+    if (!search.trim()) return visibleNav;
     const q = search.toLowerCase();
-    return SETTINGS_NAV.map((section) => {
+    return visibleNav.map((section) => {
       const matchedChildren = section.children.filter(
         (c) => c.label.toLowerCase().includes(q) || section.label.toLowerCase().includes(q)
       );
