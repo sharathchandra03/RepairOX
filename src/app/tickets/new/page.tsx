@@ -9,7 +9,7 @@ import {
   Printer, FileText, Plus, Search, User, UserPlus, Building2, Sparkles,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
   Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
-  X, IndianRupee,
+  X, IndianRupee, Filter, Zap, BarChart3, Store as StoreIcon,
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
@@ -39,6 +39,7 @@ import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
 import { usePermissions } from "@/lib/permissions-context";
 import { type PermissionKey } from "@/lib/permissions";
+import { useStoreContext } from "@/lib/store-context";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
 import { loadQCConfig, getCachedQCConfig, activeCategories as qcActiveCategories, type QCConfig } from "@/lib/qc-config";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
@@ -1502,7 +1503,7 @@ function subtitleFor(step: number) {
     "Find an existing contact, or add a new one.",
     "Make sure the customer details are correct.",
     "Review the estimate before approval.",
-    "Tick the visible condition checkpoints.",
+    "Mark each checkpoint as Pass, Fail or Skip.",
     "Attach device photos and any paperwork.",
     "Verify all details before creating the ticket.",
   ][step - 1];
@@ -3390,9 +3391,13 @@ function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
 /* ---------------- Step 9: QC (Premium Inspection) ---------------- */
 function QCForm({ data, setData, onNext, isEdit }: any) {
   const [filter, setFilter] = useState<"all" | "pass" | "fail" | "skip" | "pending">("all");
-  const [search, setSearch] = useState("");
   const [noteOpen, setNoteOpen] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
+
+  // Active store is shown as read-only CONTEXT in the utility panel (not a
+  // filter). QC is scoped to the ticket being created in the current store, so
+  // we surface the store name for orientation without inventing a false filter.
+  const { activeStore } = useStoreContext();
 
   // ── QC checklist comes from Settings → Tickets → Quality Check ──
   // Load the org's configured QC checklist. Falls back to the built-in
@@ -3475,8 +3480,6 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     if (filter === "pending") return !qc[key];
     return true;
   };
-  const matchesSearch = (key: string) => !search.trim() || labelFor(key).toLowerCase().includes(search.toLowerCase());
-
   // Mark every UNSET item as Pass — existing fail/skip are preserved. Updates
   // all real inspection records on the active device (not just the visuals).
   const markAll = () => {
@@ -3495,14 +3498,6 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     );
     setData({ ...data, devices: resetDevices });
   };
-
-  const filters = [
-    { key: "all" as const, label: "All", count: total },
-    { key: "pass" as const, label: "Passed", count: passed },
-    { key: "fail" as const, label: "Failed", count: failed },
-    { key: "skip" as const, label: "Skipped", count: skipped },
-    { key: "pending" as const, label: "Pending", count: pending },
-  ];
 
   // Flatten the ordered groups into a single sequence of rows. Each entry
   // carries its group label AND its authoritative global index (1→N order,
@@ -3531,7 +3526,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     const status = qc[key];
     const hasNote = !!(notes[key] && notes[key]!.trim());
     return (
-      <div className="flex min-h-[46px] flex-1 items-center gap-2 px-3 py-[10px]">
+      <div className="flex min-h-[36px] flex-1 items-center gap-2 px-3 py-1.5">
         <span className="w-6 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{globalIndex + 1}.</span>
         <span className="flex-1 truncate text-[13px] font-semibold text-foreground">{labelFor(key)}</span>
         <button
@@ -3591,126 +3586,205 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     );
   };
 
-  return (
-    <div className="min-w-0">
-      <DeviceSwitcher data={data} setData={setData} />
+  // Filter Status rows for the right panel — each carries a semantic dot colour
+  // and its live count. Reuses the same `filter` state as before.
+  const statusRows = [
+    { key: "all" as const, label: "All", count: total, dot: "bg-[#4361EE]" },
+    { key: "pass" as const, label: "Passed", count: passed, dot: "bg-emerald-500" },
+    { key: "fail" as const, label: "Failed", count: failed, dot: "bg-rose-500" },
+    { key: "skip" as const, label: "Skipped", count: skipped, dot: "bg-amber-500" },
+    { key: "pending" as const, label: "Pending", count: pending, dot: "bg-zinc-400" },
+  ];
 
-      {/* Header — distinct inspection (clipboard) icon, NOT the warranty shield */}
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-3">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
-            <ClipboardList className="h-5 w-5" />
-          </span>
-          <div>
-            <h2 className="text-base font-bold tracking-tight">Quality Control Inspection</h2>
-            <p className="text-[12px] text-muted-foreground">{activeDevice.device?.model || "Device"} • {activeDevice.device?.assignedTo || "Technician"}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" onClick={resetQC}><RotateCcw className="h-3.5 w-3.5" /> Reset</Button>
-          <Button variant="outline" size="sm" onClick={markAll}><CheckCircle2 className="h-3.5 w-3.5" /> Mark All Pass</Button>
-          {!isEdit && <Button size="sm" onClick={onNext}>Finish QC</Button>}
-        </div>
-      </div>
-
-      {/* Inspection Progress — full content width */}
-      <div className="mb-3 rounded-xl border border-border bg-card px-4 py-2.5">
-        <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspection Progress</span>
-          <span className="text-[12px] font-bold">{completed} / {total} <span className="text-[#4361EE]">· {pct}%</span></span>
-        </div>
-        <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
-          <motion.div className="h-full rounded-full bg-[#4361EE]" animate={{ width: `${pct}%` }} transition={{ duration: 0.4 }} />
-        </div>
-      </div>
-
-      {/* Filters + Search */}
-      <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
-        {filters.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => setFilter(f.key)}
-            className={cn(
-              "rounded-full px-3 py-1 text-[11px] font-semibold transition-all",
-              filter === f.key ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-            )}
-          >
-            {f.label} ({f.count})
-          </button>
-        ))}
-        <button
-          type="button"
-          onClick={() => setFilter("fail")}
-          className="ml-1 inline-flex items-center gap-1 rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-50"
-        >
-          <XCircle className="h-3 w-3" /> Show Failed
-        </button>
-        <div className="ml-auto w-48">
-          <Input value={search} onChange={(e: any) => setSearch(e.target.value)} placeholder="Search component…" iconLeft={<Search className="h-3.5 w-3.5" />} />
-        </div>
-      </div>
-
-      {/* Summary metrics — compact horizontal row below search */}
-      <div className="mb-3 grid grid-cols-5 gap-2">
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-emerald-700">{passed}</p><p className="mt-0.5 text-[10px] font-medium text-emerald-600">Passed</p></div>
-        <div className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-rose-700">{failed}</p><p className="mt-0.5 text-[10px] font-medium text-rose-600">Failed</p></div>
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-amber-700">{skipped}</p><p className="mt-0.5 text-[10px] font-medium text-amber-600">Skipped</p></div>
-        <div className="rounded-lg border border-zinc-200 bg-zinc-100 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-zinc-700">{pending}</p><p className="mt-0.5 text-[10px] font-medium text-zinc-500">Pending</p></div>
-        <div className="rounded-lg border border-[#C9D3FB] bg-[#EEF1FD] px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-[#4361EE]">{pct}%</p><p className="mt-0.5 text-[10px] font-medium text-[#4361EE]/80">Completion</p></div>
-      </div>
-
-      {/* Inspection grid — two even columns (10 + 10). A group that spans the
-          boundary re-shows its heading (marked "cont.") at the top of the next
-          column so no item is ever orphaned under a missing header. */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:items-stretch">
-        {columns.map((column, colIdx) => {
-          let lastGroup: string | null = null;
-          // Group ids that already appeared in an EARLIER column — used to mark
-          // a heading as a continuation ("AUDIO (cont.)") rather than a new one.
-          const priorGroupIds = new Set(
-            columns.slice(0, colIdx).flatMap((c) => c.map((e) => e.groupId))
-          );
-          const rows = column
-            .map((entry) => ({ entry, globalIndex: entry.globalIndex }))
-            .filter(({ entry }) => matchesFilter(entry.key) && matchesSearch(entry.key));
-          if (rows.length === 0) {
-            return (
-              <div key={colIdx} className="rounded-xl border border-border bg-card">
-                <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">No items match this filter.</p>
-              </div>
-            );
-          }
+  // The inspection grid (left workspace) — two even columns (10 + 10). A group
+  // that spans the boundary re-shows its heading (marked "cont.") at the top of
+  // the next column so no item is ever orphaned under a missing header.
+  const inspectionGrid = (
+    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-stretch">
+      {columns.map((column, colIdx) => {
+        let lastGroup: string | null = null;
+        // Group ids that already appeared in an EARLIER column — used to mark
+        // a heading as a continuation ("AUDIO (cont.)") rather than a new one.
+        const priorGroupIds = new Set(
+          columns.slice(0, colIdx).flatMap((c) => c.map((e) => e.groupId))
+        );
+        const rows = column
+          .map((entry) => ({ entry, globalIndex: entry.globalIndex }))
+          .filter(({ entry }) => matchesFilter(entry.key));
+        if (rows.length === 0) {
           return (
-            <div key={colIdx} className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
-              <div className="flex flex-1 flex-col divide-y divide-border">
-                {rows.map(({ entry, globalIndex }, rowIdx) => {
-                  const showHeading = entry.groupLabel !== lastGroup;
-                  // Continuation = this group's FIRST row in THIS column, but it
-                  // already began in an earlier column (spans the boundary).
-                  const isContinuation = showHeading && rowIdx === 0 && priorGroupIds.has(entry.groupId);
-                  lastGroup = entry.groupLabel;
-                  return (
-                    <React.Fragment key={entry.key}>
-                      {showHeading && (
-                        <div className="bg-muted/40 px-3 py-1">
-                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                            {entry.groupLabel}
-                            {isContinuation && <span className="ml-1 normal-case text-muted-foreground/70">(cont.)</span>}
-                          </span>
-                        </div>
-                      )}
-                      {renderRow(entry, globalIndex)}
-                    </React.Fragment>
-                  );
-                })}
-              </div>
+            <div key={colIdx} className="rounded-xl border border-border bg-card">
+              <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">No items match this filter.</p>
             </div>
           );
-        })}
-      </div>
+        }
+        return (
+          <div key={colIdx} className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+            <div className="flex flex-1 flex-col divide-y divide-border">
+              {rows.map(({ entry, globalIndex }, rowIdx) => {
+                const showHeading = entry.groupLabel !== lastGroup;
+                // Continuation = this group's FIRST row in THIS column, but it
+                // already began in an earlier column (spans the boundary).
+                const isContinuation = showHeading && rowIdx === 0 && priorGroupIds.has(entry.groupId);
+                lastGroup = entry.groupLabel;
+                return (
+                  <React.Fragment key={entry.key}>
+                    {showHeading && (
+                      <div className="bg-muted/40 px-3 py-0.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                          {entry.groupLabel}
+                          {isContinuation && <span className="ml-1 normal-case text-muted-foreground/70">(cont.)</span>}
+                        </span>
+                      </div>
+                    )}
+                    {renderRow(entry, globalIndex)}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 
-      <p className="mt-2.5 text-center text-[10px] text-muted-foreground"><CheckCircle2 className="inline h-3 w-3 text-emerald-500" /> Auto-saved</p>
+  // Right-side vertical utility panel — Filters/Search, Filter Status, Quick
+  // Actions, Summary and Finish QC. Replaces the old horizontal KPI row + the
+  // filter/search strip above the grid. All handlers are the existing ones.
+  const utilityPanel = (
+    <aside className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]">
+      {/* Filters — contextual store only (search removed) */}
+      {activeStore && (
+        <section>
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <Filter className="h-3.5 w-3.5 text-[#4361EE]" /> Filters
+          </div>
+          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
+            <StoreIcon className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+            <span className="truncate text-[12px] font-semibold text-foreground">{activeStore.name}</span>
+          </div>
+        </section>
+      )}
+
+      {/* Filter Status — one selectable row per status with a dot + live count */}
+      <section>
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          <CircleDot className="h-3.5 w-3.5 text-[#4361EE]" /> Filter Status
+        </div>
+        <div className="flex flex-col gap-1">
+          {statusRows.map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              onClick={() => setFilter(s.key)}
+              className={cn(
+                "flex items-center justify-between rounded-lg px-2.5 py-1.5 text-[12px] font-semibold transition-all",
+                filter === s.key
+                  ? "bg-[#4361EE] text-white shadow-sm"
+                  : "text-foreground hover:bg-muted"
+              )}
+            >
+              <span className="flex items-center gap-2">
+                <span className={cn("h-2 w-2 rounded-full", filter === s.key ? "bg-white" : s.dot)} />
+                {s.label}
+              </span>
+              <span className={cn("tabular-nums", filter === s.key ? "text-white/90" : "text-muted-foreground")}>{s.count}</span>
+            </button>
+          ))}
+        </div>
+      </section>
+
+      {/* Quick Actions — Show Failed, Mark All Pass, Reset */}
+      <section>
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          <Zap className="h-3.5 w-3.5 text-[#4361EE]" /> Quick Actions
+        </div>
+        <div className="flex flex-col gap-1.5">
+          <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => setFilter("fail")}>
+            <XCircle className="h-3.5 w-3.5" /> Show Failed
+          </Button>
+          <Button variant="outline" size="sm" className="w-full justify-center" onClick={markAll}>
+            <CheckCircle2 className="h-3.5 w-3.5" /> Mark All Pass
+          </Button>
+          <Button variant="outline" size="sm" className="w-full justify-center" onClick={resetQC}>
+            <RotateCcw className="h-3.5 w-3.5" /> Reset
+          </Button>
+        </div>
+      </section>
+
+      {/* Summary — completion ring + compact status counts */}
+      <section>
+        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+          <BarChart3 className="h-3.5 w-3.5 text-[#4361EE]" /> Summary
+        </div>
+        <div className="rounded-xl border border-border bg-muted/30 p-3">
+          <div className="flex items-center gap-3">
+            <div className="relative grid h-12 w-12 shrink-0 place-items-center">
+              <svg viewBox="0 0 36 36" className="h-12 w-12 -rotate-90">
+                <circle cx="18" cy="18" r="15.5" fill="none" stroke="#E2E8F0" strokeWidth="3.5" />
+                <motion.circle
+                  cx="18" cy="18" r="15.5" fill="none" stroke="#4361EE" strokeWidth="3.5" strokeLinecap="round"
+                  strokeDasharray={2 * Math.PI * 15.5}
+                  animate={{ strokeDashoffset: 2 * Math.PI * 15.5 * (1 - pct / 100) }}
+                  transition={{ duration: 0.4 }}
+                />
+              </svg>
+              <span className="absolute text-[10px] font-bold text-[#4361EE]">{pct}%</span>
+            </div>
+            <div>
+              <p className="text-[11px] font-semibold text-foreground">Completion</p>
+              <p className="text-[11px] text-muted-foreground">{completed} / {total} checked</p>
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5">
+            <span className="flex items-center justify-between text-[11px]"><span className="flex items-center gap-1.5 text-emerald-600"><span className="h-2 w-2 rounded-full bg-emerald-500" /> Passed</span><span className="font-bold tabular-nums text-foreground">{passed}</span></span>
+            <span className="flex items-center justify-between text-[11px]"><span className="flex items-center gap-1.5 text-rose-600"><span className="h-2 w-2 rounded-full bg-rose-500" /> Failed</span><span className="font-bold tabular-nums text-foreground">{failed}</span></span>
+            <span className="flex items-center justify-between text-[11px]"><span className="flex items-center gap-1.5 text-amber-600"><span className="h-2 w-2 rounded-full bg-amber-500" /> Skipped</span><span className="font-bold tabular-nums text-foreground">{skipped}</span></span>
+            <span className="flex items-center justify-between text-[11px]"><span className="flex items-center gap-1.5 text-zinc-500"><span className="h-2 w-2 rounded-full bg-zinc-400" /> Pending</span><span className="font-bold tabular-nums text-foreground">{pending}</span></span>
+          </div>
+        </div>
+      </section>
+
+      {/* Finish QC — hidden in edit mode (matches previous behaviour) */}
+      {!isEdit && (
+        <Button size="md" className="w-full justify-center" onClick={onNext}>
+          <CheckCircle2 className="h-4 w-4" /> Finish QC
+        </Button>
+      )}
+    </aside>
+  );
+
+  return (
+    // Pull the QC step tight to the viewport: cancel the WizardShell's bottom
+    // padding (-mb) so this one-screen step has no empty scroll gap below.
+    <div className="min-w-0 -mb-16">
+      <DeviceSwitcher data={data} setData={setData} />
+
+      {/* Two-region layout: LEFT = QC workspace, RIGHT = compact utility panel.
+          Both regions start at the SAME vertical top (items-start) so the
+          right panel aligns with the top of the inspection workspace. */}
+      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+        {/* LEFT — QC inspection workspace */}
+        <div className="min-w-0">
+          {/* Inspection Progress — compact, near the top of the workspace */}
+          <div className="mb-3 rounded-xl border border-border bg-card px-4 py-2.5">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspection Progress</span>
+              <span className="text-[12px] font-bold">{completed} / {total} <span className="text-[#4361EE]">· {pct}%</span></span>
+            </div>
+            <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+              <motion.div className="h-full rounded-full bg-[#4361EE]" animate={{ width: `${pct}%` }} transition={{ duration: 0.4 }} />
+            </div>
+          </div>
+
+          {inspectionGrid}
+
+          <p className="mt-2.5 text-center text-[10px] text-muted-foreground"><CheckCircle2 className="inline h-3 w-3 text-emerald-500" /> Auto-saved</p>
+        </div>
+
+        {/* RIGHT — compact vertical utility panel */}
+        {utilityPanel}
+      </div>
 
       {/* Note Modal */}
       {noteOpen && (
