@@ -38,6 +38,8 @@ import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
 import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
+import { NoPermission } from "@/components/common/no-permission";
 import { type PermissionKey } from "@/lib/permissions";
 import { useStoreContext } from "@/lib/store-context";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
@@ -343,6 +345,7 @@ function genId(): string {
 
 function NewTicketWizard() {
   const router = useRouter();
+  const { can } = usePermissions();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const fromPage = searchParams.get("from");
@@ -1117,6 +1120,20 @@ function NewTicketWizard() {
         isEstimate={isEstimateMode}
         onBack={() => router.push("/tickets")}
         onEdit={() => router.push(`/tickets/${createdTicketId}`)}
+      />
+    );
+  }
+
+  // ── Permission gate: creating a ticket/estimate requires CAP.ticket.create;
+  //    editing an existing one requires CAP.ticket.edit. A view-only user who
+  //    reaches this URL directly is refused (they use the read-only detail
+  //    page to view). Server + RLS remain the real enforcement. ──
+  const canUseWizard = isEdit ? allow(can, CAP.ticket.edit) : allow(can, CAP.ticket.create);
+  if (!canUseWizard) {
+    return (
+      <NoPermission
+        title={isEdit ? "You can't edit this ticket" : "You can't create tickets"}
+        subtitle="Ask an administrator to grant the matching Tickets permission in Settings → Roles & Permissions."
       />
     );
   }

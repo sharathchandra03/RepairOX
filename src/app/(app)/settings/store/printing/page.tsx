@@ -6,6 +6,8 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings, type CustomPrintTemplate } from "@/lib/store-settings";
+import { useCanEdit } from "@/lib/use-can-edit";
+import { CAP } from "@/lib/capabilities";
 
 /**
  * Settings → Store → Printing
@@ -50,6 +52,7 @@ function newTemplate(): CustomPrintTemplate {
 }
 
 export default function PrintingSettingsPage() {
+  const canEdit = useCanEdit(CAP.settings.printing);
   const { settings, updateSettings, hydrated } = useStoreSettings();
   const [draft, setDraft] = useState<StoreSettings>(settings);
   const [saving, setSaving] = useState(false);
@@ -123,6 +126,7 @@ export default function PrintingSettingsPage() {
       description="All print-document text in one place. Ticket and Invoice terms are independent; the Master Default feeds custom document types."
       onSave={handleSave}
       saving={saving}
+      canEdit={canEdit}
     >
       <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-[12.5px] text-muted-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />

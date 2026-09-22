@@ -5,6 +5,8 @@ import { Palette, SlidersHorizontal, RotateCcw } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { Label, Select } from "@/components/ui/input";
 import { useStoreSettings, DEFAULT_STORE_SETTINGS } from "@/lib/store-settings";
+import { useCanEdit } from "@/lib/use-can-edit";
+import { CAP } from "@/lib/capabilities";
 import {
   INVOICE_STATUS_LABEL,
   invoiceStatusPillStyle,
@@ -28,6 +30,7 @@ const PRESET_COLORS = [
 ];
 
 export default function InvoiceGeneralSettingsPage() {
+  const canEdit = useCanEdit(CAP.settings.invoiceGeneral);
   const { settings, updateSettings } = useStoreSettings();
 
   // Local editing state — persisted as a whole on Save (matches Tickets pattern).
@@ -61,6 +64,7 @@ export default function InvoiceGeneralSettingsPage() {
       description="Defaults applied to new invoices and the colours used for invoice statuses. Existing invoices keep the values they were saved with."
       onSave={handleSave}
       saving={saving}
+      canEdit={canEdit}
     >
       {/* ── General / Invoice Defaults ── */}
       <SettingsSection

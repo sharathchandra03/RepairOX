@@ -5,6 +5,8 @@ import { Hash, Info } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { Input, Label } from "@/components/ui/input";
 import { useStoreSettings, type InvoiceNumberingConfig } from "@/lib/store-settings";
+import { useCanEdit } from "@/lib/use-can-edit";
+import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 
 function preview(cfg: InvoiceNumberingConfig): string {
@@ -12,6 +14,7 @@ function preview(cfg: InvoiceNumberingConfig): string {
 }
 
 export default function InvoiceNumberingSettingsPage() {
+  const canEdit = useCanEdit(CAP.settings.invoiceNumbering);
   const { settings, updateSettings } = useStoreSettings();
   const [numbering, setNumbering] = useState(settings.invoiceNumbering);
   const [saving, setSaving] = useState(false);
@@ -53,6 +56,7 @@ export default function InvoiceNumberingSettingsPage() {
       description="Independent numbering series for Retail and Business invoices."
       onSave={handleSave}
       saving={saving}
+      canEdit={canEdit}
     >
       <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-[12.5px] text-amber-800">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />

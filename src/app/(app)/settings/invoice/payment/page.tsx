@@ -5,6 +5,8 @@ import { Wallet, Plus, X, GripVertical, Info } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { Label, Select } from "@/components/ui/input";
 import { useStoreSettings } from "@/lib/store-settings";
+import { useCanEdit } from "@/lib/use-can-edit";
+import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 
 /** Known payment modes with friendly labels. Custom values are title-cased. */
@@ -27,6 +29,7 @@ function slugify(input: string): string {
 }
 
 export default function InvoicePaymentSettingsPage() {
+  const canEdit = useCanEdit(CAP.settings.paymentModes);
   const { settings, updateSettings } = useStoreSettings();
   const [modes, setModes] = useState<string[]>(settings.invoicePaymentModes);
   const [defaultMode, setDefaultMode] = useState<string>(settings.invoiceDefaults.paymentMode);
@@ -74,6 +77,7 @@ export default function InvoicePaymentSettingsPage() {
       description="Payment modes offered when recording invoice payments, and the default selection for new invoices."
       onSave={handleSave}
       saving={saving}
+      canEdit={canEdit}
     >
       <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-[12.5px] text-muted-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />

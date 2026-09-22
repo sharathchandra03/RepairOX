@@ -1,10 +1,21 @@
 "use client";
 
+import { createContext, useContext } from "react";
 import { SettingsBreadcrumb } from "./settings-breadcrumb";
 import { Button } from "@/components/ui/button";
-import { Save } from "lucide-react";
+import { Save, Eye } from "lucide-react";
 
 type Crumb = { label: string; href?: string };
+
+/* Read-only context so nested custom controls (not plain inputs) can react to
+   the page's edit permission. Plain <input>/<select>/<button> inside the page
+   are ALSO disabled natively by the <fieldset disabled> wrapper below. */
+const SettingsReadOnlyContext = createContext<boolean>(false);
+
+/** True when the surrounding SettingsPage is in read-only (view-only) mode. */
+export function useSettingsReadOnly(): boolean {
+  return useContext(SettingsReadOnlyContext);
+}
 
 export function SettingsPage({
   breadcrumbs,
@@ -12,6 +23,14 @@ export function SettingsPage({
   description,
   onSave,
   saving,
+  /** When false, the page renders READ-ONLY: the Save button is hidden, a
+   *  banner explains it, and every form control inside is disabled. Defaults to
+   *  true for backward compatibility — callers pass their permission check
+   *  (e.g. `canEdit={useCanEdit(CAP.settings.invoiceGeneral)}`) to enforce the
+   *  View-vs-Edit gradation. */
+  canEdit = true,
+  /** Optional custom message for the read-only banner. */
+  readOnlyNote,
   children,
 }: {
   breadcrumbs: Crumb[];
@@ -19,6 +38,8 @@ export function SettingsPage({
   description?: string;
   onSave?: () => void;
   saving?: boolean;
+  canEdit?: boolean;
+  readOnlyNote?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -30,16 +51,32 @@ export function SettingsPage({
           <h1 className="font-display text-xl font-bold tracking-tight">{title}</h1>
           {description && <p className="mt-1 text-[13px] text-muted-foreground">{description}</p>}
         </div>
-        {onSave && (
+        {/* Save is only shown when the user may actually edit this page. */}
+        {onSave && canEdit && (
           <Button size="sm" onClick={onSave} disabled={saving}>
             <Save className="h-3.5 w-3.5" /> {saving ? "Saving..." : "Save Changes"}
           </Button>
         )}
       </div>
 
-      <div className="space-y-5">
-        {children}
-      </div>
+      {!canEdit && (
+        <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] font-medium text-amber-700">
+          <Eye className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>{readOnlyNote ?? "You have view-only access to this page. Ask an administrator for edit permission to make changes."}</span>
+        </div>
+      )}
+
+      {/* A disabled <fieldset> natively greys out and blocks EVERY form control
+          (input/select/textarea/button) rendered inside — so a view-only user
+          physically cannot change or submit anything, with zero per-field code.
+          Custom controls can additionally read useSettingsReadOnly(). */}
+      <SettingsReadOnlyContext.Provider value={!canEdit}>
+        <fieldset disabled={!canEdit} className={canEdit ? undefined : "opacity-70"}>
+          <div className="space-y-5">
+            {children}
+          </div>
+        </fieldset>
+      </SettingsReadOnlyContext.Provider>
     </div>
   );
 }

@@ -27,6 +27,7 @@ import { Textarea } from "@/components/ui/input";
 import { useLeads } from "@/lib/leads-context";
 import { useSession } from "@/lib/use-session";
 import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp,
   type Lead, type LeadDraft, type LeadFieldKey,
@@ -229,8 +230,9 @@ export function LeadCaptureFlow({
 function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
   const { addLead, updateLead } = useLeads();
   const { name: currentUserName } = useSession();
-  const { team } = usePermissions();
+  const { team, can } = usePermissions();
   const isEdit = !!editLead;
+  const canSaveLead = isEdit ? allow(can, CAP.lead.edit) : allow(can, CAP.lead.create);
 
   const staffNames = useMemo(() => team.map((m) => m.name).filter(Boolean), [team]);
 
@@ -270,6 +272,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
       goToStage(1); // required fields all live in Stage 1
       return;
     }
+    if (!canSaveLead) return; // no permission → do not persist
     setSaving(true);
     try {
       if (isEdit && editLead) {

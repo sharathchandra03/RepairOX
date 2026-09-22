@@ -22,6 +22,8 @@ import {
 import { useLedger } from "@/lib/accounting-service";
 import { emitExpenseCreated, emitExpenseUpdated } from "@/lib/expense-accounting-emitter";
 import { CURRENT_USER } from "@/lib/permissions";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 
 /* ─── Props ──────────────────────────────────────────────────────── */
 
@@ -59,6 +61,10 @@ export function ExpenseModal({ open, onClose, editExpense, onSuccess }: ExpenseM
 
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const isEdit = !!editExpense;
+
+  // Edit an existing expense needs CAP.expense.edit; creating needs .create.
+  const { can } = usePermissions();
+  const canSave = isEdit ? allow(can, CAP.expense.edit) : allow(can, CAP.expense.create);
 
   React.useEffect(() => { setMounted(true); }, []);
 
@@ -136,10 +142,10 @@ export function ExpenseModal({ open, onClose, editExpense, onSuccess }: ExpenseM
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const canSubmit = category && amount > 0 && description.trim() && date && time;
+  const canSubmit = canSave && category && amount > 0 && description.trim() && date && time;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!canSubmit || !canSave) return;
 
     const actor = CURRENT_USER.name;
 

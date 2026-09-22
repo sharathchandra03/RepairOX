@@ -5,6 +5,7 @@ import { Check } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Select, Label } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 /* Generic field descriptor used by QuickEditDrawer. Keeps section-wise
    editing on View Ticket / View Invoice lightweight and consistent without
@@ -31,6 +32,8 @@ export function QuickEditDrawer({
   initialValues,
   onSave,
   width = "max-w-sm",
+  /** When false the drawer is read-only: fields disabled, Save hidden. */
+  canEdit = true,
 }: {
   open: boolean;
   onClose: () => void;
@@ -41,6 +44,7 @@ export function QuickEditDrawer({
   initialValues: Record<string, string>;
   onSave: (values: Record<string, string>) => void;
   width?: string;
+  canEdit?: boolean;
 }) {
   if (!open) return null;
   return (
@@ -53,12 +57,13 @@ export function QuickEditDrawer({
       initialValues={initialValues}
       onSave={onSave}
       width={width}
+      canEdit={canEdit}
     />
   );
 }
 
 function QuickEditDrawerInner({
-  onClose, title, subtitle, icon, fields, initialValues, onSave, width,
+  onClose, title, subtitle, icon, fields, initialValues, onSave, width, canEdit = true,
 }: Omit<Parameters<typeof QuickEditDrawer>[0], "open">) {
   const [values, setValues] = React.useState<Record<string, string>>(initialValues);
   const set = (key: string, v: string) => setValues((prev) => ({ ...prev, [key]: v }));
@@ -73,11 +78,14 @@ function QuickEditDrawerInner({
       width={width}
       footer={
         <div className="flex justify-start gap-2">
-          <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-          <Button size="sm" onClick={() => onSave(values)}><Check className="h-3.5 w-3.5" /> Save</Button>
+          <Button variant="outline" size="sm" onClick={onClose}>{canEdit ? "Cancel" : "Close"}</Button>
+          {canEdit && (
+            <Button size="sm" onClick={() => onSave(values)}><Check className="h-3.5 w-3.5" /> Save</Button>
+          )}
         </div>
       }
     >
+      <fieldset disabled={!canEdit} className={cn("m-0 min-w-0 border-0 p-0", !canEdit && "opacity-70")}>
       <div className={fields.length > 3 ? "grid grid-cols-1 gap-4 sm:grid-cols-2" : "space-y-4"}>
         {fields.map((f) => (
           <div key={f.key} className={`space-y-1.5 ${f.type === "textarea" || f.type === "datetime" ? "sm:col-span-2" : ""}`}>
@@ -107,6 +115,7 @@ function QuickEditDrawerInner({
           </div>
         ))}
       </div>
+      </fieldset>
     </Drawer>
   );
 }

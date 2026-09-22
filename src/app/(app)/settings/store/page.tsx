@@ -10,6 +10,7 @@ import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
 import { StoreNumberingSection } from "@/components/settings/store-numbering-section";
 import { RequireCapability } from "@/components/common/require-capability";
 import { CAP } from "@/lib/capabilities";
+import { useCanEdit } from "@/lib/use-can-edit";
 
 function Field({ label, children, span }: { label: string; children: React.ReactNode; span?: boolean }) {
   return (
@@ -21,13 +22,15 @@ function Field({ label, children, span }: { label: string; children: React.React
 }
 
 export default function StoreSettingsPage() {
-  // Editing store identity (name, GSTIN, currency, address, timezone) requires
-  // store-details authority — not merely reaching the page.
+  // Anyone who can VIEW settings may OPEN this page (read-only). EDITING store
+  // identity (name, GSTIN, currency, address, timezone) additionally requires
+  // store-details authority — enforced by canEdit below, so a view-tier user
+  // sees the info but every field is disabled and Save is hidden.
   return (
     <RequireCapability
-      anyOf={CAP.settings.storeInfo}
-      title="Store Information is restricted"
-      description="Your role can't edit store information. Ask an administrator to grant it in Settings → Roles & Permissions."
+      anyOf={CAP.settings.viewAny}
+      title="Settings are restricted"
+      description="Your role can't view settings. Ask an administrator to grant it in Settings → Roles & Permissions."
     >
       <StoreSettingsInner />
     </RequireCapability>
@@ -35,6 +38,7 @@ export default function StoreSettingsPage() {
 }
 
 function StoreSettingsInner() {
+  const canEdit = useCanEdit(CAP.settings.storeInfo);
   const { settings, updateSettings, resetSettings, hydrated } = useStoreSettings();
   const [draft, setDraft] = useState<StoreSettings>(settings);
   const [saved, setSaved] = useState(false);
@@ -70,6 +74,7 @@ function StoreSettingsInner() {
       description="Your business identity. This information is displayed on all printed documents and communications."
       onSave={handleSave}
       saving={saved}
+      canEdit={canEdit}
     >
       {/* Basic Information */}
       <SettingsSection title="Basic Information" description="Logo, business name and branding" icon={Building2}>

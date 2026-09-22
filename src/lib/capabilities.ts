@@ -85,16 +85,41 @@ export const CAP = {
     archive: ["archive_records"],
     manageSavedFilters: ["manage_saved_filters"],
   },
-  /* Settings sections surfaced by the audit (granular first, coarse fallback). */
+  /* Settings sections — the EDIT/SAVE capability for each settings page. These
+     gate whether a user can SAVE changes on that page (view-tier users see the
+     page read-only). Granular key first, coarse `manage_settings` fallback,
+     `full_access`/`*` implied by can(). */
   settings: {
+    // Invoice-related settings pages
+    invoiceGeneral: ["edit_invoice_settings", "manage_settings"],
+    invoiceNumbering: ["edit_numbering", "edit_invoice_settings", "manage_settings"],
     invoiceTax: ["settings_invoice_tax_edit", "edit_invoice_settings", "manage_settings"],
     paymentModes: ["settings_payment_modes_manage", "edit_invoice_settings", "manage_settings"],
+    // Ticket settings
+    ticketSettings: ["edit_ticket_settings", "manage_settings"],
     ticketAssignees: ["settings_ticket_assignees_manage", "edit_ticket_settings", "manage_settings"],
+    // Store identity + printing + numbering prefixes
     storeInfo: ["edit_store_details", "edit_org_profile", "manage_settings"],
+    printing: ["edit_printing_settings", "manage_settings"],
+    // System / preferences / backup / integrations (full tier)
+    system: ["settings_system_manage", "system_administrator", "manage_settings"],
+    integrations: ["manage_integrations", "manage_settings"],
+    // Notifications config
+    notifications: ["manage_notifications", "manage_settings"],
+    // Financial (currency/tax/accounting/expense categories)
+    financial: ["settings_financial_edit", "manage_settings"],
+    // Inventory + barcode settings
+    inventorySettings: ["settings_inventory_edit", "manage_inventory", "manage_settings"],
+    barcode: ["settings_barcode_edit", "manage_settings"],
+    // Dashboard config
+    dashboard: ["settings_dashboard_configure", "edit_dashboard_targets", "manage_settings"],
+    // Cross-cutting controls (unchanged)
     moduleAccess: ["settings_feature_visibility_manage", "manage_settings"],
     webhooks: ["manage_webhooks", "manage_integrations"],
     rolePreview: ["roles_preview", "manage_roles"],
     activityLog: ["view_activity_log", "view_audit_logs"],
+    // Can the user even OPEN settings (read-only view)? Anything above implies it.
+    viewAny: ["view_settings", "manage_settings"],
   },
   customer: {
     view: ["view_customers", "manage_customers"],
@@ -201,6 +226,12 @@ export const CAP = {
     assignFieldManager: ["assign_field_manager", "manage_field_jobs"],
     advancePickup: ["field_pickup_status_change", "update_pickup", "manage_field_jobs"],
     advanceDrop: ["field_drop_status_change", "update_drop", "manage_field_jobs"],
+  },
+  expense: {
+    view: ["view_expenses", "view_financial_reports"],
+    create: ["create_expense", "manage_payments"],
+    edit: ["edit_expense", "manage_payments"],
+    delete: ["delete_expense", "manage_payments"],
   },
 } satisfies Record<string, Record<string, PermissionKey[]>>;
 

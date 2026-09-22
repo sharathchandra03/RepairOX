@@ -5,9 +5,12 @@ import { Percent, Plus, X, Info } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { Label, Select } from "@/components/ui/input";
 import { useStoreSettings } from "@/lib/store-settings";
+import { useCanEdit } from "@/lib/use-can-edit";
+import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 
 export default function InvoiceTaxSettingsPage() {
+  const canEdit = useCanEdit(CAP.settings.invoiceTax);
   const { settings, updateSettings } = useStoreSettings();
   const [rates, setRates] = useState<number[]>(settings.invoiceGstRates);
   const [defaultRate, setDefaultRate] = useState<number>(settings.invoiceDefaults.gstRate);
@@ -50,6 +53,7 @@ export default function InvoiceTaxSettingsPage() {
       description="GST rates offered on invoices. The rate is split evenly into SGST + CGST at billing time using the existing tax calculation."
       onSave={handleSave}
       saving={saving}
+      canEdit={canEdit}
     >
       <div className="flex items-start gap-2.5 rounded-xl border border-border bg-muted/40 px-4 py-3 text-[12.5px] text-muted-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />

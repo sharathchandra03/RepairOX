@@ -168,11 +168,16 @@ export default function AddItemPage() {
     }
   }
 
-  if (!can("create") && !isEdit) {
+  // Creating a NEW item needs create/manage_inventory; EDITING an existing item
+  // needs edit_item/manage_inventory. Previously the edit branch skipped the
+  // gate entirely, so a view-only user could edit items by URL — fixed here.
+  const canCreateItem = can("create") || can("create_item") || can("manage_inventory");
+  const canEditItem = can("edit") || can("edit_item") || can("manage_inventory");
+  if ((isEdit && !canEditItem) || (!isEdit && !canCreateItem)) {
     return (
       <NoPermission
-        title="You don't have permission to create items"
-        subtitle="Ask an administrator to grant the “Create” permission to add new inventory items."
+        title={isEdit ? "You can't edit this item" : "You don't have permission to create items"}
+        subtitle="Ask an administrator to grant the matching Inventory permission in Settings → Roles & Permissions."
       />
     );
   }

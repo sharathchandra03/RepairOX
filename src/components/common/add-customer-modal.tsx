@@ -59,6 +59,10 @@ export function AddCustomerModal({
 }: AddCustomerModalProps) {
   const { can } = usePermissions();
   const canForceCreateDuplicate = allow(can, CAP.customer.createForceDuplicate);
+  // The core create path itself must be permission-gated — not only the
+  // "Create Anyway" duplicate override. A view-only user sees the form
+  // read-only and cannot save.
+  const canCreate = allow(can, CAP.customer.create);
   const { customers, addCustomer } = useStore();
 
   const [step, setStep] = useState<FormStep>('search');
@@ -102,6 +106,7 @@ export function AddCustomerModal({
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(undefined);
+    if (!canCreate) { setError("You don't have permission to create customers."); return; }
 
     if (!formData.firstName.trim() || !formData.lastName.trim() || !formData.mobile.trim()) {
       setError('First name, last name, and phone are required');
@@ -173,6 +178,9 @@ export function AddCustomerModal({
         open={isOpen}
         title={title}
         subtitle={description}
+        canEdit={canCreate}
+        readOnlyNote="You don't have permission to create customers."
+        readOnlyFooter={<Button variant="outline" onClick={onClose}>Close</Button>}
         onClose={onClose}
         width="max-w-md"
       >

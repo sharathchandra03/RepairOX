@@ -28,7 +28,7 @@ import * as React from "react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
-import { X } from "lucide-react";
+import { X, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function RoxCenteredForm({
@@ -43,6 +43,17 @@ export function RoxCenteredForm({
   width = "max-w-lg",
   /** Set false to keep the panel open on backdrop click (explicit close only). */
   closeOnBackdrop = true,
+  /** When false, the whole form renders READ-ONLY: every field inside is
+   *  disabled (native <fieldset disabled>), a view-only banner shows, and the
+   *  footer save actions are hidden (only the read-only footer, if provided,
+   *  shows). Defaults to true for backward compatibility — callers pass their
+   *  permission check (e.g. canEdit={allow(can, CAP.customer.edit)}). */
+  canEdit = true,
+  /** Footer to render when read-only (typically just a Close button). If
+   *  omitted, the normal footer is hidden entirely in read-only mode. */
+  readOnlyFooter,
+  /** Custom read-only banner message. */
+  readOnlyNote,
 }: {
   open: boolean;
   onClose: () => void;
@@ -53,6 +64,9 @@ export function RoxCenteredForm({
   footer?: React.ReactNode;
   width?: string;
   closeOnBackdrop?: boolean;
+  canEdit?: boolean;
+  readOnlyFooter?: React.ReactNode;
+  readOnlyNote?: string;
 }) {
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
@@ -124,13 +138,33 @@ export function RoxCenteredForm({
                 </button>
               </div>
 
-              {/* Scrollable body. */}
-              <div className="flex-1 overflow-y-auto p-5">{children}</div>
+              {/* Scrollable body. A disabled <fieldset> natively blocks every
+                  input/select/textarea/button inside when read-only, so a
+                  view-only user physically cannot edit or submit — with no
+                  per-field code. */}
+              <div className="flex-1 overflow-y-auto p-5">
+                {!canEdit && (
+                  <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] font-medium text-amber-700">
+                    <Eye className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>{readOnlyNote ?? "View-only: you don't have permission to change this. Ask an administrator for edit access."}</span>
+                  </div>
+                )}
+                <fieldset disabled={!canEdit} className={cn("m-0 min-w-0 border-0 p-0", !canEdit && "opacity-70")}>
+                  {children}
+                </fieldset>
+              </div>
 
-              {/* Fixed footer. */}
-              {footer && (
+              {/* Fixed footer. In read-only mode the editing footer (Save etc.)
+                  is hidden; a read-only footer (e.g. a Close button) may be
+                  supplied instead. */}
+              {canEdit && footer && (
                 <div className="flex items-center justify-between gap-2 border-t border-border p-5">
                   {footer}
+                </div>
+              )}
+              {!canEdit && readOnlyFooter && (
+                <div className="flex items-center justify-end gap-2 border-t border-border p-5">
+                  {readOnlyFooter}
                 </div>
               )}
             </div>

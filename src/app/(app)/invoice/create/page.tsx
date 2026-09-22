@@ -24,6 +24,9 @@ import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, type Customer } from "@/lib/customer-data";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
+import { NoPermission } from "@/components/common/no-permission";
 
 /* ─── Step Definitions ───────────────────────────────────────────────── */
 
@@ -194,6 +197,7 @@ export default function InvoiceCreatePage() {
 
 function InvoiceWizard() {
   const router = useRouter();
+  const { can } = usePermissions();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const { invoices, tickets, addInvoice, updateInvoice } = useStore();
@@ -709,6 +713,19 @@ function InvoiceWizard() {
           setShowSuccessAnimation(false);
           setShowCompletion(true);
         }}
+      />
+    );
+  }
+
+  // Permission gate: creating an invoice needs CAP.invoice.create; editing an
+  // existing one needs CAP.invoice.edit. View-only users are refused the form
+  // (they use the read-only invoice detail page).
+  const canUseInvoiceWizard = isEdit ? allow(can, CAP.invoice.edit) : allow(can, CAP.invoice.create);
+  if (!canUseInvoiceWizard) {
+    return (
+      <NoPermission
+        title={isEdit ? "You can't edit this invoice" : "You can't create invoices"}
+        subtitle="Ask an administrator to grant the matching Invoices permission in Settings → Roles & Permissions."
       />
     );
   }

@@ -423,6 +423,7 @@ export default function WalkInPage() {
   /* ── Save (create or edit) ── */
   const handleSaved = useCallback(async (data: Partial<WalkIn>, editingId: string | null) => {
     if (editingId) {
+      if (!allow(can, CAP.walkin.edit)) { showToast("You don't have permission to edit walk-ins."); return; }
       await updateWalkIn(editingId, data);
       showToast("Walk-In updated.");
     } else {
@@ -544,6 +545,13 @@ export default function WalkInPage() {
   const canConvertWalkIn = allow(can, CAP.walkin.convert);
   const canPinWalkIn = allow(can, CAP.walkin.pin);
   const canEditWalkIn = allow(can, CAP.walkin.edit);
+  /* Row-cell click: open the EDIT drawer only if the user may edit; otherwise
+     open the read-only VIEW drawer so a view-only user never lands in an
+     editable form (the form itself is also read-only + save-guarded). */
+  const openWalkIn = useCallback((w: WalkIn) => {
+    if (canEditWalkIn) setEditTarget(w);
+    else setViewTarget(w);
+  }, [canEditWalkIn]);
   const canFinalStatus = allow(can, CAP.walkin.finalStatus);
 
   // Count of walk-ins with an ACTIVE follow-up (shown on the Follow-Up tab).
@@ -880,7 +888,7 @@ export default function WalkInPage() {
                       <div className="flex items-center gap-1.5">
                         <button
                           type="button"
-                          onClick={() => setEditTarget(w)}
+                          onClick={() => openWalkIn(w)}
                           title={`Edit ${walkInDisplayId(w)}`}
                           className="cursor-pointer rounded text-[14px] font-semibold text-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
                         >
@@ -932,7 +940,7 @@ export default function WalkInPage() {
                           {w.phone ? (
                             <button
                               type="button"
-                              onClick={() => setEditTarget(w)}
+                              onClick={() => openWalkIn(w)}
                               title={`Edit ${walkInDisplayId(w)}`}
                               className="cursor-pointer whitespace-nowrap rounded text-[12px] tabular-nums text-muted-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
                             >
@@ -986,7 +994,7 @@ export default function WalkInPage() {
                             {primaryModel ? (
                               <button
                                 type="button"
-                                onClick={() => setEditTarget(w)}
+                                onClick={() => openWalkIn(w)}
                                 title={`Edit ${walkInDisplayId(w)}`}
                                 className="block max-w-full cursor-pointer truncate rounded text-left font-medium text-foreground transition-colors hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
                               >
