@@ -3504,14 +3504,20 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     { key: "pending" as const, label: "Pending", count: pending },
   ];
 
-  // Flatten the ordered groups into a single sequence of rows where each entry
-  // carries its group label so we can render a lightweight category subheading
-  // the first time a new group appears. The flat order is authoritative
-  // (matches qcFields / the required 1→20 sequence). We then split the flat
-  // list into two balanced halves for the 10 + 10 two-column layout.
-  const flatItems = qcGroups.flatMap((g) =>
-    g.items.map((key) => ({ key, groupId: g.id, groupLabel: g.label }))
-  );
+  // Flatten the ordered groups into a single sequence of rows. Each entry
+  // carries its group label AND its authoritative global index (1→N order,
+  // matching qcFields) so numbering stays correct no matter which column an
+  // item lands in.
+  const flatItems = qcGroups
+    .flatMap((g) => g.items.map((key) => ({ key, groupId: g.id, groupLabel: g.label })))
+    .map((entry, i) => ({ ...entry, globalIndex: i }));
+
+  // Split into two EVEN halves (items 1–10 left, 11–20 right). When a group
+  // spans the column boundary (e.g. Audio = items 8–11 → 8,9,10 left, 11
+  // right), the right column re-shows that group's heading as a continuation,
+  // so there is never an orphaned item under a missing header (see the heading
+  // logic in the render below, which prints the label at the top of a column
+  // regardless of what preceded it in the other column).
   const half = Math.ceil(flatItems.length / 2);
   const columns = [flatItems.slice(0, half), flatItems.slice(half)];
 
@@ -3525,14 +3531,8 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     const status = qc[key];
     const hasNote = !!(notes[key] && notes[key]!.trim());
     return (
-      <div className="flex items-center gap-2 px-3 py-[7px]">
-        <span className="w-5 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{globalIndex + 1}</span>
-        <span
-          className={cn(
-            "h-2 w-2 shrink-0 rounded-full",
-            status === "ok" ? "bg-emerald-600" : status === "no" ? "bg-rose-600" : status === "na" ? "bg-amber-500" : "bg-zinc-300"
-          )}
-        />
+      <div className="flex min-h-[46px] flex-1 items-center gap-2 px-3 py-[10px]">
+        <span className="w-6 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{globalIndex + 1}.</span>
         <span className="flex-1 truncate text-[13px] font-semibold text-foreground">{labelFor(key)}</span>
         <button
           type="button"
@@ -3660,13 +3660,19 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
         <div className="rounded-lg border border-[#C9D3FB] bg-[#EEF1FD] px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-[#4361EE]">{pct}%</p><p className="mt-0.5 text-[10px] font-medium text-[#4361EE]/80">Completion</p></div>
       </div>
 
-      {/* Inspection grid — two balanced columns (10 + 10), always expanded */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+      {/* Inspection grid — two even columns (10 + 10). A group that spans the
+          boundary re-shows its heading (marked "cont.") at the top of the next
+          column so no item is ever orphaned under a missing header. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2 lg:items-stretch">
         {columns.map((column, colIdx) => {
-          const offset = colIdx === 0 ? 0 : half; // global 1-based numbering
           let lastGroup: string | null = null;
+          // Group ids that already appeared in an EARLIER column — used to mark
+          // a heading as a continuation ("AUDIO (cont.)") rather than a new one.
+          const priorGroupIds = new Set(
+            columns.slice(0, colIdx).flatMap((c) => c.map((e) => e.groupId))
+          );
           const rows = column
-            .map((entry, i) => ({ entry, globalIndex: offset + i }))
+            .map((entry) => ({ entry, globalIndex: entry.globalIndex }))
             .filter(({ entry }) => matchesFilter(entry.key) && matchesSearch(entry.key));
           if (rows.length === 0) {
             return (
@@ -3676,16 +3682,22 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
             );
           }
           return (
-            <div key={colIdx} className="overflow-hidden rounded-xl border border-border bg-card">
-              <div className="divide-y divide-border">
-                {rows.map(({ entry, globalIndex }) => {
+            <div key={colIdx} className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+              <div className="flex flex-1 flex-col divide-y divide-border">
+                {rows.map(({ entry, globalIndex }, rowIdx) => {
                   const showHeading = entry.groupLabel !== lastGroup;
+                  // Continuation = this group's FIRST row in THIS column, but it
+                  // already began in an earlier column (spans the boundary).
+                  const isContinuation = showHeading && rowIdx === 0 && priorGroupIds.has(entry.groupId);
                   lastGroup = entry.groupLabel;
                   return (
                     <React.Fragment key={entry.key}>
                       {showHeading && (
                         <div className="bg-muted/40 px-3 py-1">
-                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.groupLabel}</span>
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                            {entry.groupLabel}
+                            {isContinuation && <span className="ml-1 normal-case text-muted-foreground/70">(cont.)</span>}
+                          </span>
                         </div>
                       )}
                       {renderRow(entry, globalIndex)}

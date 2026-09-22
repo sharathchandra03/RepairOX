@@ -55,8 +55,18 @@ export type QCCategory = {
 };
 
 export type QCConfig = {
+  /** Schema/content version of the SEEDED default. Bump CURRENT_QC_VERSION
+   *  whenever the canonical DEFAULT_QC_CONFIG changes in a way that should
+   *  overwrite older saved configs (e.g. the authoritative 20-item list).
+   *  A stored config with a lower version is force-migrated to the default. */
+  version?: number;
   categories: QCCategory[];
 };
+
+/** Current canonical QC config version. Any saved config with a lower (or
+ *  missing) version is replaced by DEFAULT_QC_CONFIG on load and re-saved.
+ *  v2 = the authoritative 20-item list (Device Powering On … WiFi / Bluetooth). */
+export const CURRENT_QC_VERSION = 2;
 
 /* ─── Defaults ───────────────────────────────────────────────────── */
 
@@ -67,6 +77,7 @@ export type QCConfig = {
  * continue to line up exactly.
  */
 export const DEFAULT_QC_CONFIG: QCConfig = {
+  version: CURRENT_QC_VERSION,
   categories: [
     // NOTE: The item SEQUENCE below is authoritative — flattening every
     // category top-to-bottom yields the required order 1→20. Category labels
@@ -82,7 +93,7 @@ export const DEFAULT_QC_CONFIG: QCConfig = {
     },
     {
       id: "display",
-      label: "Display",
+      label: "Display & Touch",
       items: [
         { id: "Display", label: "Display" }, // 4
         { id: "Touch", label: "Touch" }, // 5
@@ -110,7 +121,7 @@ export const DEFAULT_QC_CONFIG: QCConfig = {
     },
     {
       id: "biometrics",
-      label: "Security & Biometrics",
+      label: "Biometrics",
       items: [
         { id: "Face ID", label: "Face ID" }, // 14
         { id: "Touch ID", label: "Touch ID" }, // 15
@@ -145,7 +156,9 @@ function normalizeConfig(raw: unknown): QCConfig {
   if (!raw || typeof raw !== "object") return structuredCloneSafe(DEFAULT_QC_CONFIG);
   const cats = (raw as QCConfig).categories;
   if (!Array.isArray(cats)) return structuredCloneSafe(DEFAULT_QC_CONFIG);
+  const rawVersion = (raw as QCConfig).version;
   return {
+    version: typeof rawVersion === "number" ? rawVersion : 1,
     categories: cats
       .filter((c) => c && typeof c.id === "string")
       .map((c) => ({
@@ -170,6 +183,12 @@ function structuredCloneSafe<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));
 }
 
+/** True when a stored config predates the current canonical default and must
+ *  be force-migrated (replaced) to the authoritative 20-item list. */
+function isOutdated(config: QCConfig): boolean {
+  return (config.version ?? 1) < CURRENT_QC_VERSION;
+}
+
 /* ─── localStorage helpers (fallback) ────────────────────────────── */
 
 function loadFromLocalStorage(): QCConfig {
@@ -177,7 +196,15 @@ function loadFromLocalStorage(): QCConfig {
   try {
     const rawStr = localStorage.getItem(STORAGE_KEY);
     if (!rawStr) return structuredCloneSafe(DEFAULT_QC_CONFIG);
-    return normalizeConfig(JSON.parse(rawStr));
+    const parsed = normalizeConfig(JSON.parse(rawStr));
+    // Older saved list (e.g. the previous 18-item set) → replace with the
+    // canonical default and persist so it stays fixed.
+    if (isOutdated(parsed)) {
+      const fresh = structuredCloneSafe(DEFAULT_QC_CONFIG);
+      saveToLocalStorage(fresh);
+      return fresh;
+    }
+    return parsed;
   } catch {
     return structuredCloneSafe(DEFAULT_QC_CONFIG);
   }
@@ -259,7 +286,17 @@ async function _loadQCConfigImpl(): Promise<QCConfig> {
       return local;
     }
 
-    return normalizeConfig(data.config);
+    const stored = normalizeConfig(data.config);
+    // Older saved list (e.g. the previous 18-item set with different names /
+    // grouping) → force-migrate to the canonical 20-item default and persist
+    // so every user's QC checklist matches the authoritative list.
+    if (isOutdated(stored)) {
+      const fresh = structuredCloneSafe(DEFAULT_QC_CONFIG);
+      saveToLocalStorage(fresh);
+      await seedConfig(orgId, fresh).catch(() => {});
+      return fresh;
+    }
+    return stored;
   } catch {
     return loadFromLocalStorage();
   }
@@ -270,7 +307,10 @@ async function _loadQCConfigImpl(): Promise<QCConfig> {
  * localStorage cache too so the fallback stays warm.
  */
 export async function saveQCConfig(config: QCConfig): Promise<boolean> {
-  const normalized = normalizeConfig(config);
+  // Any explicit save stamps the current version — an admin editing the list
+  // is producing a current-version config, so it must not be force-migrated
+  // away on the next load.
+  const normalized = { ...normalizeConfig(config), version: CURRENT_QC_VERSION };
   invalidateQCConfigCache();
   saveToLocalStorage(normalized);
 
