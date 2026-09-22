@@ -201,6 +201,23 @@ export default function TicketDetailPage() {
       const t = tickets.find((tk) => tk.id === id);
       return t?.ticketNo ?? id;
     };
+    const viewingWarranty = isWarranty(ticket);
+
+    // A Warranty record's lineage is Original Ticket → Source Invoice →
+    // Warranty (current) — its OWN branch, separate from the Estimate/Ticket/
+    // Proforma/Invoice chain (spec: warranty is a claim raised AGAINST an
+    // already-completed commercial history, not another step in it).
+    if (viewingWarranty) {
+      if (ticket.parentTicketId) {
+        nodes.push({ kind: "ticket", label: ticket.parentTicketNo ?? ticketLabel(ticket.parentTicketId) ?? ticket.parentTicketId, href: `/tickets/${ticket.parentTicketId}` });
+      }
+      if (ticket.sourceInvoiceId) {
+        nodes.push({ kind: "invoice", label: ticket.sourceInvoiceId, href: `/invoice/${ticket.sourceInvoiceId}` });
+      }
+      nodes.push({ kind: "warranty", label: ticket.ticketNo ?? ticket.id, current: true });
+      return nodes;
+    }
+
     const viewingEstimate = isEstimate(ticket);
     const relatedProforma = invoices.find((inv) =>
       isProforma(inv) && (inv.sourceTicketId === ticket.id || inv.sourceEstimateId === ticket.id || inv.ticketId === ticket.id));
@@ -224,6 +241,15 @@ export default function TicketDetailPage() {
     }
     if (relatedInvoice) {
       nodes.push({ kind: "invoice", label: relatedInvoice.id, href: `/invoice/${relatedInvoice.id}` });
+    }
+    // Forward warranty lineage — a completed Ticket/Invoice may have one or
+    // more warranty claims raised against it later (see
+    // Ticket.sourceInvoiceId / Invoice.warrantyClaimIds). Shown as trailing
+    // branch node(s) so "was a warranty claimed on this ticket?" is visible
+    // without leaving the page.
+    const relatedWarranties = tickets.filter((t) => isWarranty(t) && t.parentTicketId === ticket.id);
+    for (const w of relatedWarranties) {
+      nodes.push({ kind: "warranty", label: w.ticketNo ?? w.id, href: `/tickets/${w.id}` });
     }
     return nodes;
   }, [ticket, tickets, invoices]);

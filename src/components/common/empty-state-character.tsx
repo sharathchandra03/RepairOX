@@ -28,12 +28,13 @@ import { motion, useReducedMotion, type Variants } from "framer-motion";
  * Scope: purely visual. No layout, filtering, or data logic lives here.
  */
 
-type Variant = "ticket" | "invoice" | "walkin";
+type Variant = "ticket" | "invoice" | "walkin" | "field";
 
 const ASSETS: Record<Variant, { src: string; w: number; h: number; alt: string; displayHeight: number }> = {
   ticket: { src: "/empty-states/ticket-empty.png", w: 340, h: 390, alt: "", displayHeight: 132 },
   invoice: { src: "/empty-states/invoice-empty.png", w: 340, h: 355, alt: "", displayHeight: 132 },
   walkin: { src: "/empty-states/walkin-empty.png", w: 1191, h: 1140, alt: "", displayHeight: 132 },
+  field: { src: "/empty-states/field management-empty.png", w: 1448, h: 1086, alt: "", displayHeight: 150 },
 };
 
 /* Outer layer: pop in from below with a springy overshoot, fade in,

@@ -25,6 +25,25 @@ import type { PermissionKey } from "@/lib/permissions";
  *  First entries are the precise granular keys; trailing entries are the
  *  backward-compatible coarse keys so pre-existing roles keep working. */
 export const CAP = {
+  customer: {
+    view: ["view_customers", "manage_customers"],
+    create: ["create_customer", "manage_customers"],
+    // Deliberately bypassing the duplicate-match warning ("Create Anyway")
+    // is a more sensitive variant of create — gated on the manage tier only.
+    createForceDuplicate: ["manage_customers"],
+    edit: ["edit_customer", "manage_customers"],
+    delete: ["delete_customer", "manage_customers"],
+    merge: ["merge_customer", "manage_customers"],
+    manageGroups: ["manage_customer_groups", "manage_customers"],
+    export: ["export_customers", "manage_customers"],
+  },
+  loyalty: {
+    view: ["view_loyalty", "manage_loyalty"],
+    awardPoints: ["loyalty_award_points", "manage_loyalty"],
+    redeemPoints: ["loyalty_redeem_points", "manage_loyalty"],
+    changeTier: ["loyalty_tier_change", "manage_loyalty"],
+    manage: ["manage_loyalty"],
+  },
   ticket: {
     view: ["view_ticket", "manage_repair_jobs"],
     create: ["create_ticket", "manage_repair_jobs"],

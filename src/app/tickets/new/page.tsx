@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, Camera, Image as ImageIcon, FileSignature, ShieldCheck,
   CheckCircle2, Check, XCircle, MinusCircle, Mail, Phone, MessageCircle,
-  Printer, FileText, Plus, Search, User, Building2, Sparkles,
+  Printer, FileText, Plus, Search, User, UserPlus, Building2, Sparkles,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
   Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
   X, IndianRupee,
@@ -16,6 +16,7 @@ import { OptionGrid } from "@/components/wizard/option-grid";
 import { CategoryWheel } from "@/components/wizard/category-wheel";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
+import { AddContactModal } from "@/components/common/add-contact-modal";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
@@ -30,6 +31,7 @@ import { deriveTicketStatus, createWalkInDevice, getWalkInDevices, getRecordType
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
+import { findOrCreateCustomer } from "@/lib/customer-service";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, inferCategoryFromName, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
@@ -73,22 +75,24 @@ const CATEGORIES = [
   { id: "others", label: "Others", emoji: "🧩" },
 ];
 
+// Legacy fallback used only until the org's QC config resolves. Kept in exact
+// sync with DEFAULT_QC_CONFIG (lib/qc-config.ts) — 20 items in authoritative
+// order across balanced logical groups.
 const QC_FIELDS = [
-  "Physical Condition", "Display", "Touch Panel", "Back Glass",
-  "Display Sensor", "Touch ID / Face ID", "Receiver", "Speaker",
-  "Microphone", "Battery Health", "Front Camera", "Back Camera",
-  "Charging Port", "Volume Keys", "Power Key", "Bluetooth / WiFi",
-  "Network", "Vibration",
+  "Device Powering On", "Dent", "Scratches", "Display", "Touch",
+  "Proximity Sensor", "Back Glass", "Receiver", "Mic", "Speaker",
+  "Taptic", "Main Camera", "Front Camera", "Face ID", "Touch ID",
+  "Power Key", "Volume Key", "Charging Port", "Network", "WiFi / Bluetooth",
 ];
 
 const QC_GROUPS = [
-  { id: "exterior", label: "Exterior Condition", items: ["Physical Condition", "Back Glass"] },
-  { id: "display", label: "Display & Touch", items: ["Display", "Touch Panel", "Display Sensor"] },
-  { id: "audio", label: "Audio", items: ["Receiver", "Speaker", "Microphone"] },
-  { id: "camera", label: "Camera", items: ["Front Camera", "Back Camera"] },
-  { id: "battery", label: "Battery", items: ["Battery Health"] },
-  { id: "connectivity", label: "Connectivity", items: ["Bluetooth / WiFi", "Network", "Charging Port"] },
-  { id: "buttons", label: "Buttons & Biometrics", items: ["Touch ID / Face ID", "Volume Keys", "Power Key", "Vibration"] },
+  { id: "exterior", label: "Exterior", items: ["Device Powering On", "Dent", "Scratches"] },
+  { id: "display", label: "Display", items: ["Display", "Touch", "Proximity Sensor", "Back Glass"] },
+  { id: "audio", label: "Audio", items: ["Receiver", "Mic", "Speaker", "Taptic"] },
+  { id: "camera", label: "Camera", items: ["Main Camera", "Front Camera"] },
+  { id: "biometrics", label: "Security & Biometrics", items: ["Face ID", "Touch ID"] },
+  { id: "buttons", label: "Buttons", items: ["Power Key", "Volume Key", "Charging Port"] },
+  { id: "connectivity", label: "Connectivity", items: ["Network", "WiFi / Bluetooth"] },
 ];
 
 /* ---------------- Types ---------------- */
@@ -143,6 +147,9 @@ type WizardDevice = {
   job: WizardJobData;
   parts: WizardPartData[];
   qc: Record<string, "ok" | "no" | "na" | undefined>;
+  /** Optional per-item technician notes, keyed by the same QC item id as `qc`.
+   *  Independent of the status map so existing QC persistence is untouched. */
+  qcNotes?: Record<string, string | undefined>;
   category?: string;
   /** Existing per-device operational status, carried through on EDIT so it is
    *  never reset. Undefined for brand-new devices (they take the default). */
@@ -156,6 +163,7 @@ function createWizardDevice(category?: string): WizardDevice {
     job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", deviceColour: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
+    qcNotes: {},
     category,
   };
 }
@@ -249,6 +257,7 @@ function ticketToWizard(t: Ticket): WizardData {
       },
       parts: dr.parts ? dr.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
       qc: dr.qc || {},
+      qcNotes: dr.qcNotes || {},
       category: dr.category || category,
       // Carry the saved per-device status through EDIT so it is preserved
       // (not reset to the ticket default) when the wizard saves.
@@ -383,6 +392,7 @@ function NewTicketWizard() {
   const [createdTicketId, setCreatedTicketId] = useState("");
   const [dirty, setDirty] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
+  const [showContactModal, setShowContactModal] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [showSaveToast, setShowSaveToast] = useState(false);
   const isEdit = !!editId;
@@ -662,22 +672,28 @@ function NewTicketWizard() {
       ? primaryDevice.job.customResolutionDate
       : new Date(new Date(createdAt).getTime() + resMinutes * 60_000).toISOString();
 
-    // If no existing customer was selected and we have customer details, save as new customer
+    // If no existing customer was selected (picker wasn't used) but customer
+    // details were typed, resolve through the shared Customer Master dedup
+    // service rather than blindly creating a new record — this is the ONLY
+    // path in the app that previously skipped duplicate detection entirely.
     let finalCustomerId = data.customerId;
     if (!finalCustomerId && data.customer.first && data.customer.phone) {
-      const newCustomer = createCustomer({
-        type: data.contactType,
-        firstName: data.customer.first.trim(),
-        lastName: data.customer.last.trim(),
-        mobile: data.customer.phone.trim(),
-        email: data.customer.email.trim(),
-        company: data.customer.company.trim(),
-        address: data.customer.address.trim(),
-        city: data.customer.city.trim(),
-        postalCode: data.customer.postal.trim(),
-      });
-      addCustomer(newCustomer);
-      finalCustomerId = newCustomer.id;
+      const { customer, created } = findOrCreateCustomer(
+        {
+          firstName: data.customer.first.trim(),
+          lastName: data.customer.last.trim(),
+          mobile: data.customer.phone.trim(),
+          email: data.customer.email.trim(),
+          type: data.contactType,
+          company: data.customer.company.trim(),
+          address: data.customer.address.trim(),
+          city: data.customer.city.trim(),
+          postalCode: data.customer.postal.trim(),
+        },
+        customers
+      );
+      if (created) addCustomer(customer);
+      finalCustomerId = customer.id;
     }
 
     // Build DeviceRecord[] for multi-device storage
@@ -722,6 +738,7 @@ function NewTicketWizard() {
       estimate: Number(wd.job.estimate) || wd.parts.reduce((s, p) => s + p.total, 0) || 0,
       parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
       qc: wd.qc,
+      qcNotes: wd.qcNotes,
       // Per-device status. A device that already has a saved status (existing
       // ticket being edited) KEEPS it — so editing a multi-device ticket never
       // resets Device 2's independent status. Brand-new devices (and every
@@ -764,7 +781,7 @@ function NewTicketWizard() {
         ? `${primaryDevice.device.model || primaryDevice.device.brand || "Device"} + ${deviceRecords.length - 1} more`
         : (primaryDevice.device.model || "Unknown Device"),
       issue: deviceRecords.length > 1
-        ? `${deviceRecords.length} devices — ${primaryDevice.job.issue || "Repair"}`
+        ? `${deviceRecords.length} devices - ${primaryDevice.job.issue || "Repair"}`
         : (primaryDevice.job.issue || primaryDevice.job.description || "General service"),
       items: data.devices.filter((wd) => wd.device.imei).map((wd) => ({
         device: wd.device.brand || data.category || "others",
@@ -984,7 +1001,7 @@ function NewTicketWizard() {
         // summary convention: "N devices — <primary issue>").
         const walkInPrimaryIssue = walkInPrimary?.issue || primaryDevice.job.issue || "";
         const walkInFlatIssue = walkInDevices.length > 1
-          ? `${walkInDevices.length} devices — ${walkInPrimaryIssue || "Repair"}`
+          ? `${walkInDevices.length} devices - ${walkInPrimaryIssue || "Repair"}`
           : walkInPrimaryIssue;
 
         // Duplicate protection (spec §13): if a walk-in already points at this
@@ -1143,6 +1160,12 @@ function NewTicketWizard() {
               onChange={(id) => {
                 if (id === "invoice") { router.push("/invoice/create"); return; }
                 if (id === "stock") { router.push("/inventory/add-item"); return; }
+                if (id === "contact") { 
+                  // Contact process stays in place — will open the modal
+                  // below and return to the process selector
+                  setShowContactModal(true); 
+                  return; 
+                }
                 if (id === "walkin") { router.push("/walk-in"); return; }
                 // Warranty has its own first step — a search over previous
                 // Tickets to check per-device eligibility before a claim can be
@@ -1225,6 +1248,39 @@ function NewTicketWizard() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Add Contact Modal — the modal itself persists the CRM Contact
+          (useLeads().addContact) and shows a success toast; this callback
+          just PREFILLS the name/phone/email fields onto the in-progress
+          ticket draft so the next process the user picks (e.g. New Ticket)
+          doesn't need to retype them. Deliberately does NOT set
+          data.customerId — this person hasn't started a service/commercial
+          relationship yet, so no Customer Master record is created here.
+          Promotion to a real Customer happens automatically, at save time,
+          via the existing findOrCreateCustomer call below when a ticket is
+          actually created for them. */}
+      <AddContactModal
+        isOpen={showContactModal}
+        onClose={() => setShowContactModal(false)}
+        onContactResolved={(contact) => {
+          setData({
+            ...data,
+            customer: {
+              first: contact.firstName,
+              last: contact.lastName,
+              phone: contact.mobile ?? contact.phone ?? "",
+              email: contact.email ?? "",
+              address: contact.address ?? "",
+              postal: "",
+              city: contact.city ?? "",
+              company: "",
+            },
+          });
+          setShowContactModal(false);
+        }}
+        title="Add Contact"
+        description="Capture a prospect's details - no ticket or invoice needed yet"
+      />
     </>
   );
 }
@@ -1266,12 +1322,12 @@ const PROCESS_CARDS: {
     accentColor: "#F59E0B",
   },
   {
-    id: "walkin",
-    title: "Walk-In",
-    desc: "Quick counter billing for walk-in customers",
-    icon: <Building2 className="h-6 w-6" />,
-    gradient: "from-violet-400/80 to-violet-600/80",
-    accentColor: "#8B5CF6",
+    id: "contact",
+    title: "Add Contact",
+    desc: "Capture a prospect's details - before any ticket or invoice",
+    icon: <UserPlus className="h-6 w-6" />,
+    gradient: "from-indigo-400/80 to-indigo-600/80",
+    accentColor: "#6366F1",
   },
   {
     id: "estimate",
@@ -3379,20 +3435,26 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     return key;
   };
 
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
-  // Default all groups collapsed once the group list is known (matches the
-  // original behaviour where every group started collapsed).
-  const initializedCollapse = useRef(false);
-  useEffect(() => {
-    if (!initializedCollapse.current && qcGroups.length > 0) {
-      initializedCollapse.current = true;
-      setCollapsed(new Set(qcGroups.map((g) => g.id)));
-    }
-  }, [qcGroups]);
+  // Per-item notes live in a parallel map on the active device (qcNotes),
+  // keyed by the same item id as the status map. Kept separate so the QC
+  // status persistence is byte-for-byte unchanged.
+  const notes = activeDevice.qcNotes || {};
 
+  // Toggle behaviour: clicking the already-selected status clears it back to
+  // pending, so a mis-tap is a single click to undo. Otherwise sets the status.
   const set = (k: string, v: "ok" | "no" | "na") => {
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
-      i === activeIdx ? { ...dev, qc: { ...dev.qc, [k]: v } } : dev
+      i === activeIdx ? { ...dev, qc: { ...dev.qc, [k]: dev.qc?.[k] === v ? undefined : v } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
+
+  const saveNote = (k: string, text: string) => {
+    const clean = text.trim();
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx
+        ? { ...dev, qcNotes: { ...(dev.qcNotes || {}), [k]: clean || undefined } }
+        : dev
     );
     setData({ ...data, devices: updatedDevices });
   };
@@ -3415,9 +3477,8 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   };
   const matchesSearch = (key: string) => !search.trim() || labelFor(key).toLowerCase().includes(search.toLowerCase());
 
-  const toggleGroup = (id: string) => {
-    setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  };
+  // Mark every UNSET item as Pass — existing fail/skip are preserved. Updates
+  // all real inspection records on the active device (not just the visuals).
   const markAll = () => {
     const updated = { ...qc };
     qcFields.forEach((f) => { if (!updated[f]) updated[f] = "ok"; });
@@ -3425,6 +3486,14 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
       i === activeIdx ? { ...dev, qc: updated } : dev
     );
     setData({ ...data, devices: updatedDevicesMarkAll });
+  };
+
+  // Reset clears status + notes on the active device only.
+  const resetQC = () => {
+    const resetDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, qc: {}, qcNotes: {} } : dev
+    );
+    setData({ ...data, devices: resetDevices });
   };
 
   const filters = [
@@ -3435,143 +3504,215 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     { key: "pending" as const, label: "Pending", count: pending },
   ];
 
+  // Flatten the ordered groups into a single sequence of rows where each entry
+  // carries its group label so we can render a lightweight category subheading
+  // the first time a new group appears. The flat order is authoritative
+  // (matches qcFields / the required 1→20 sequence). We then split the flat
+  // list into two balanced halves for the 10 + 10 two-column layout.
+  const flatItems = qcGroups.flatMap((g) =>
+    g.items.map((key) => ({ key, groupId: g.id, groupLabel: g.label }))
+  );
+  const half = Math.ceil(flatItems.length / 2);
+  const columns = [flatItems.slice(0, half), flatItems.slice(half)];
+
+  // A single inspection row — identical spacing/structure in both columns so
+  // the two columns stay perfectly aligned.
+  const renderRow = (
+    entry: { key: string; groupId: string; groupLabel: string },
+    globalIndex: number
+  ) => {
+    const key = entry.key;
+    const status = qc[key];
+    const hasNote = !!(notes[key] && notes[key]!.trim());
+    return (
+      <div className="flex items-center gap-2 px-3 py-[7px]">
+        <span className="w-5 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{globalIndex + 1}</span>
+        <span
+          className={cn(
+            "h-2 w-2 shrink-0 rounded-full",
+            status === "ok" ? "bg-emerald-600" : status === "no" ? "bg-rose-600" : status === "na" ? "bg-amber-500" : "bg-zinc-300"
+          )}
+        />
+        <span className="flex-1 truncate text-[13px] font-semibold text-foreground">{labelFor(key)}</span>
+        <button
+          type="button"
+          onClick={() => { setNoteOpen(key); setNoteText(notes[key] || ""); }}
+          aria-label={hasNote ? `Edit note for ${labelFor(key)}` : `Add note for ${labelFor(key)}`}
+          title={hasNote ? notes[key] : "Add note"}
+          className={cn(
+            "grid h-6 w-6 shrink-0 place-items-center rounded-md transition",
+            hasNote ? "bg-[#EEF1FD] text-[#4361EE]" : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          )}
+        >
+          <StickyNote className="h-3.5 w-3.5" />
+        </button>
+        <div className="flex shrink-0 items-center gap-1" role="group" aria-label={`Result for ${labelFor(key)}`}>
+          <button
+            type="button"
+            aria-pressed={status === "ok"}
+            onClick={() => set(key, "ok")}
+            className={cn(
+              "rounded-md border px-2 py-1 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+              status === "ok"
+                ? "border-emerald-700 bg-emerald-600 text-white shadow-sm"
+                : "border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50"
+            )}
+          >
+            Pass
+          </button>
+          <button
+            type="button"
+            aria-pressed={status === "no"}
+            onClick={() => set(key, "no")}
+            className={cn(
+              "rounded-md border px-2 py-1 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/50",
+              status === "no"
+                ? "border-rose-700 bg-rose-600 text-white shadow-sm"
+                : "border-rose-300 bg-white text-rose-700 hover:bg-rose-50"
+            )}
+          >
+            Fail
+          </button>
+          <button
+            type="button"
+            aria-pressed={status === "na"}
+            onClick={() => set(key, "na")}
+            className={cn(
+              "rounded-md border px-2 py-1 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50",
+              status === "na"
+                ? "border-amber-600 bg-amber-500 text-white shadow-sm"
+                : "border-amber-300 bg-white text-amber-700 hover:bg-amber-50"
+            )}
+          >
+            Skip
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   return (
-    <div className="flex flex-col lg:flex-row gap-4">
-      {/* Main Inspection Area */}
-      <div className="flex-1 min-w-0">
-        <DeviceSwitcher data={data} setData={setData} />
-        <div className="flex items-start justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
-              <Shield className="h-5 w-5" />
-            </span>
-            <div>
-              <h2 className="text-lg font-bold tracking-tight">Quality Control Inspection</h2>
-              <p className="text-[12px] text-muted-foreground">{activeDevice.device?.model || "Device"} • {activeDevice.device?.assignedTo || "Technician"}</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => { const resetDevices = data.devices.map((dev: WizardDevice, i: number) => i === activeIdx ? { ...dev, qc: {} } : dev); setData({ ...data, devices: resetDevices }); }}><RotateCcw className="h-3.5 w-3.5" /> Reset</Button>
-            <Button variant="outline" size="sm" onClick={markAll}><CheckCircle2 className="h-3.5 w-3.5" /> Mark All Pass</Button>
-            {!isEdit && <Button size="sm" onClick={onNext}>Finish QC</Button>}
+    <div className="min-w-0">
+      <DeviceSwitcher data={data} setData={setData} />
+
+      {/* Header — distinct inspection (clipboard) icon, NOT the warranty shield */}
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-3">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
+            <ClipboardList className="h-5 w-5" />
+          </span>
+          <div>
+            <h2 className="text-base font-bold tracking-tight">Quality Control Inspection</h2>
+            <p className="text-[12px] text-muted-foreground">{activeDevice.device?.model || "Device"} • {activeDevice.device?.assignedTo || "Technician"}</p>
           </div>
         </div>
-
-        {/* Progress */}
-        <div className="rounded-xl border border-border bg-card p-3 mb-3">
-          <div className="flex items-center justify-between mb-1.5">
-            <span className="text-[11px] font-semibold text-muted-foreground">Inspection Progress</span>
-            <span className="text-[11px] font-bold">{completed}/{total} · <span className="text-[#4361EE]">{pct}%</span></span>
-          </div>
-          <div className="h-2 w-full rounded-full bg-muted overflow-hidden">
-            <motion.div className="h-full rounded-full bg-[#4361EE]" animate={{ width: `${pct}%` }} transition={{ duration: 0.4 }} />
-          </div>
-        </div>
-
-        {/* Filters + Search */}
-        <div className="flex flex-wrap items-center gap-2 mb-3">
-          {filters.map((f) => (
-            <button key={f.key} onClick={() => setFilter(f.key)}
-              className={cn("rounded-full px-3 py-1 text-[11px] font-semibold transition-all",
-                filter === f.key ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-              )}>
-              {f.label} ({f.count})
-            </button>
-          ))}
-          <div className="ml-auto w-44">
-            <Input value={search} onChange={(e: any) => setSearch(e.target.value)} placeholder="Search component…" iconLeft={<Search className="h-3.5 w-3.5" />} />
-          </div>
-        </div>
-
-        {/* Groups — two balanced columns */}
-        <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 lg:items-start">
-          {(() => { const half = Math.ceil(qcGroups.length / 2); return [qcGroups.slice(0, half), qcGroups.slice(half)]; })().map((column, colIdx) => (
-            <div key={colIdx} className="space-y-2.5">
-              {column.map((group) => {
-                const visibleItems = group.items.filter((item) => matchesFilter(item) && matchesSearch(item));
-                if (visibleItems.length === 0) return null;
-                const groupDone = group.items.filter((i) => qc[i]).length;
-                const isCollapsed = collapsed.has(group.id);
-                return (
-                  <div key={group.id} className="rounded-xl border border-border bg-card overflow-hidden">
-                    <button onClick={() => toggleGroup(group.id)} className="flex w-full items-center justify-between px-4 py-2 bg-muted/40 hover:bg-muted/60 transition">
-                      <div className="flex items-center gap-2">
-                        {isCollapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> : <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />}
-                        <span className="text-[13px] font-semibold">{group.label}</span>
-                      </div>
-                      <span className="text-[10px] text-muted-foreground font-medium">{groupDone}/{group.items.length}</span>
-                    </button>
-                    {!isCollapsed && (
-                      <div className="divide-y divide-border">
-                        {visibleItems.map((key) => {
-                          const status = qc[key];
-                          return (
-                            <div key={key} className="flex items-center gap-2.5 px-4 py-2">
-                              <span className={cn("h-2 w-2 rounded-full shrink-0", status === "ok" ? "bg-emerald-500" : status === "no" ? "bg-rose-500" : status === "na" ? "bg-[#4361EE]" : "bg-zinc-300")} />
-                              <span className="flex-1 text-[13px] font-medium truncate">{labelFor(key)}</span>
-                              <button onClick={() => { setNoteOpen(key); setNoteText(""); }} className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-semibold text-[#4361EE] hover:bg-[#EEF1FD] transition">
-                                NOTE
-                              </button>
-                              <div className="flex items-center gap-1 shrink-0">
-                                <button onClick={() => set(key, "ok")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "ok" ? "bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200" : "bg-muted text-muted-foreground hover:bg-emerald-50 hover:text-emerald-700")}>Pass</button>
-                                <button onClick={() => set(key, "no")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "no" ? "bg-rose-100 text-rose-700 ring-1 ring-rose-200" : "bg-muted text-muted-foreground hover:bg-rose-50 hover:text-rose-700")}>Fail</button>
-                                <button onClick={() => set(key, "na")} className={cn("rounded-md px-2 py-1 text-[10px] font-semibold transition-all", status === "na" ? "bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200" : "bg-muted text-muted-foreground hover:bg-indigo-50 hover:text-indigo-700")}>Skip</button>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          ))}
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={resetQC}><RotateCcw className="h-3.5 w-3.5" /> Reset</Button>
+          <Button variant="outline" size="sm" onClick={markAll}><CheckCircle2 className="h-3.5 w-3.5" /> Mark All Pass</Button>
+          {!isEdit && <Button size="sm" onClick={onNext}>Finish QC</Button>}
         </div>
       </div>
 
-      {/* Sidebar */}
-      <div className="w-full lg:w-52 shrink-0">
-        <div className="lg:sticky lg:top-4 space-y-3 lg:mt-[60px]">
-          <div className="rounded-xl border border-border bg-card p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Summary</p>
-            <div className="grid grid-cols-2 gap-2">
-              <div className="rounded-lg bg-emerald-50 p-2 text-center"><p className="text-base font-bold text-emerald-700">{passed}</p><p className="text-[9px] font-medium text-emerald-600">Passed</p></div>
-              <div className="rounded-lg bg-rose-50 p-2 text-center"><p className="text-base font-bold text-rose-700">{failed}</p><p className="text-[9px] font-medium text-rose-600">Failed</p></div>
-              <div className="rounded-lg bg-indigo-50 p-2 text-center"><p className="text-base font-bold text-indigo-700">{skipped}</p><p className="text-[9px] font-medium text-indigo-600">Skipped</p></div>
-              <div className="rounded-lg bg-zinc-100 p-2 text-center"><p className="text-base font-bold text-zinc-700">{pending}</p><p className="text-[9px] font-medium text-zinc-500">Pending</p></div>
-            </div>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3 flex flex-col items-center">
-            <div className="relative h-16 w-16">
-              <svg className="h-16 w-16 -rotate-90" viewBox="0 0 36 36">
-                <circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3" className="text-muted" />
-                <motion.circle cx="18" cy="18" r="15.5" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" className="text-[#4361EE]" strokeDasharray="97.4" animate={{ strokeDashoffset: 97.4 - (97.4 * pct) / 100 }} transition={{ duration: 0.5 }} />
-              </svg>
-              <span className="absolute inset-0 grid place-items-center text-xs font-bold">{pct}%</span>
-            </div>
-            <p className="mt-1 text-[10px] text-muted-foreground">Completion</p>
-          </div>
-          <div className="rounded-xl border border-border bg-card p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Quick Actions</p>
-            <button onClick={() => setFilter("fail")} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><XCircle className="h-3 w-3 text-rose-500" /> Show Failed</button>
-            <button onClick={() => setCollapsed(new Set(qcGroups.map((g) => g.id)))} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><MinusCircle className="h-3 w-3 text-muted-foreground" /> Collapse All</button>
-            <button onClick={() => setCollapsed(new Set())} className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-[11px] font-medium hover:bg-muted transition"><CircleDot className="h-3 w-3 text-muted-foreground" /> Expand All</button>
-          </div>
-          <p className="text-center text-[10px] text-muted-foreground"><CheckCircle2 className="inline h-3 w-3 text-emerald-500" /> Auto-saved</p>
+      {/* Inspection Progress — full content width */}
+      <div className="mb-3 rounded-xl border border-border bg-card px-4 py-2.5">
+        <div className="mb-1.5 flex items-center justify-between">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspection Progress</span>
+          <span className="text-[12px] font-bold">{completed} / {total} <span className="text-[#4361EE]">· {pct}%</span></span>
+        </div>
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+          <motion.div className="h-full rounded-full bg-[#4361EE]" animate={{ width: `${pct}%` }} transition={{ duration: 0.4 }} />
         </div>
       </div>
+
+      {/* Filters + Search */}
+      <div className="mb-2.5 flex flex-wrap items-center gap-1.5">
+        {filters.map((f) => (
+          <button
+            key={f.key}
+            type="button"
+            onClick={() => setFilter(f.key)}
+            className={cn(
+              "rounded-full px-3 py-1 text-[11px] font-semibold transition-all",
+              filter === f.key ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
+            )}
+          >
+            {f.label} ({f.count})
+          </button>
+        ))}
+        <button
+          type="button"
+          onClick={() => setFilter("fail")}
+          className="ml-1 inline-flex items-center gap-1 rounded-full border border-rose-300 px-2.5 py-1 text-[11px] font-semibold text-rose-700 transition hover:bg-rose-50"
+        >
+          <XCircle className="h-3 w-3" /> Show Failed
+        </button>
+        <div className="ml-auto w-48">
+          <Input value={search} onChange={(e: any) => setSearch(e.target.value)} placeholder="Search component…" iconLeft={<Search className="h-3.5 w-3.5" />} />
+        </div>
+      </div>
+
+      {/* Summary metrics — compact horizontal row below search */}
+      <div className="mb-3 grid grid-cols-5 gap-2">
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-emerald-700">{passed}</p><p className="mt-0.5 text-[10px] font-medium text-emerald-600">Passed</p></div>
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-rose-700">{failed}</p><p className="mt-0.5 text-[10px] font-medium text-rose-600">Failed</p></div>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-amber-700">{skipped}</p><p className="mt-0.5 text-[10px] font-medium text-amber-600">Skipped</p></div>
+        <div className="rounded-lg border border-zinc-200 bg-zinc-100 px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-zinc-700">{pending}</p><p className="mt-0.5 text-[10px] font-medium text-zinc-500">Pending</p></div>
+        <div className="rounded-lg border border-[#C9D3FB] bg-[#EEF1FD] px-2 py-1.5 text-center"><p className="text-base font-bold leading-none text-[#4361EE]">{pct}%</p><p className="mt-0.5 text-[10px] font-medium text-[#4361EE]/80">Completion</p></div>
+      </div>
+
+      {/* Inspection grid — two balanced columns (10 + 10), always expanded */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        {columns.map((column, colIdx) => {
+          const offset = colIdx === 0 ? 0 : half; // global 1-based numbering
+          let lastGroup: string | null = null;
+          const rows = column
+            .map((entry, i) => ({ entry, globalIndex: offset + i }))
+            .filter(({ entry }) => matchesFilter(entry.key) && matchesSearch(entry.key));
+          if (rows.length === 0) {
+            return (
+              <div key={colIdx} className="rounded-xl border border-border bg-card">
+                <p className="px-3 py-6 text-center text-[12px] text-muted-foreground">No items match this filter.</p>
+              </div>
+            );
+          }
+          return (
+            <div key={colIdx} className="overflow-hidden rounded-xl border border-border bg-card">
+              <div className="divide-y divide-border">
+                {rows.map(({ entry, globalIndex }) => {
+                  const showHeading = entry.groupLabel !== lastGroup;
+                  lastGroup = entry.groupLabel;
+                  return (
+                    <React.Fragment key={entry.key}>
+                      {showHeading && (
+                        <div className="bg-muted/40 px-3 py-1">
+                          <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.groupLabel}</span>
+                        </div>
+                      )}
+                      {renderRow(entry, globalIndex)}
+                    </React.Fragment>
+                  );
+                })}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="mt-2.5 text-center text-[10px] text-muted-foreground"><CheckCircle2 className="inline h-3 w-3 text-emerald-500" /> Auto-saved</p>
 
       {/* Note Modal */}
       {noteOpen && (
         <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setNoteOpen(null)}>
-          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
-            <p className="text-sm font-bold mb-1">Note: {labelFor(noteOpen)}</p>
-            <p className="text-[11px] text-muted-foreground mb-3">Add technician notes for this item.</p>
-            <Textarea value={noteText} onChange={(e: any) => setNoteText(e.target.value)} placeholder="Enter notes…" rows={3} />
+          <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-5 shadow-2xl ring-1 ring-border">
+            <p className="mb-1 text-sm font-bold">Note: {labelFor(noteOpen)}</p>
+            <p className="mb-3 text-[11px] text-muted-foreground">Add technician notes for this item.</p>
+            <Textarea value={noteText} onChange={(e: any) => setNoteText(e.target.value)} placeholder="Enter notes…" rows={3} autoFocus />
             <div className="mt-3 flex justify-end gap-2">
+              {(notes[noteOpen] || "").trim() && (
+                <Button variant="outline" size="sm" className="mr-auto text-rose-600" onClick={() => { saveNote(noteOpen, ""); setNoteOpen(null); }}>Clear</Button>
+              )}
               <Button variant="outline" size="sm" onClick={() => setNoteOpen(null)}>Cancel</Button>
-              <Button size="sm" onClick={() => setNoteOpen(null)}>Save Note</Button>
+              <Button size="sm" onClick={() => { saveNote(noteOpen, noteText); setNoteOpen(null); }}>Save Note</Button>
             </div>
           </motion.div>
         </div>

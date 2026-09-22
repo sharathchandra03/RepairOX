@@ -16,9 +16,11 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Store, Truck, ArrowRight, ExternalLink, Route as RouteIcon, Building2, CheckCircle2 } from "lucide-react";
+import { Store, Truck, ArrowRight, ExternalLink, Route as RouteIcon, Building2, CheckCircle2, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Can } from "@/components/common/can";
+import { CAP, allow } from "@/lib/capabilities";
+import { usePermissions } from "@/lib/permissions-context";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { useField } from "@/lib/field-context";
@@ -35,11 +37,52 @@ import type { WalkIn } from "@/lib/mock-data";
 
 export function LeadOperationsPanel({ lead }: { lead: Lead }) {
   const router = useRouter();
+  const { can } = usePermissions();
   const { updateLead } = useLeads();
   const { getJob } = useField();
   const { customers, addCustomer, walkIns, addWalkIn, tickets, invoices } = useStore();
   const [routeOpen, setRouteOpen] = useState(false);
   const [converting, setConverting] = useState(false);
+  const [linkingCustomer, setLinkingCustomer] = useState(false);
+
+  const linkedCustomer = lead.customerId ? customers.find((c) => c.id === lead.customerId) : undefined;
+
+  /* Link this Lead to a Customer Master identity WITHOUT creating an
+     operational record (no Walk-In/Ticket) — this is identity-only linking,
+     independent of the fulfilment route. Uses the same resolveCustomer()
+     choke point as convertToWalkIn so a lead converted this way and later
+     converted to a Walk-In/Ticket resolves to the SAME customer, never a
+     second duplicate. */
+  async function convertToCustomer() {
+    if (lead.customerId) return; // already linked — nothing to do
+    setLinkingCustomer(true);
+    try {
+      const { customerId, created } = resolveCustomer(customers, {
+        name: lead.name, phone: lead.number, email: lead.email,
+        address: lead.location, source: "sales",
+        existingCustomerId: lead.customerId || undefined,
+      });
+      if (!customerId) {
+        toast.error("Can't link customer", { description: "This lead needs at least a name or phone number first." });
+        return;
+      }
+      if (created) await addCustomer(created);
+      await updateLead(lead.id, { customerId });
+
+      logActivity({
+        module: "Lead", action: created ? "Converted to Customer" : "Linked to Existing Customer",
+        severity: "success", entity: "Lead", reference: lead.leadNo,
+        description: created
+          ? `${lead.leadNo} created a new Customer Master record.`
+          : `${lead.leadNo} linked to an existing Customer Master record (duplicate avoided).`,
+      });
+      toast.success(created ? "Customer created" : "Linked to existing customer", {
+        description: created ? `${lead.name || "Customer"} added to the Customer Master.` : `Matched an existing record — no duplicate created.`,
+      });
+    } finally {
+      setLinkingCustomer(false);
+    }
+  }
 
   const route = normaliseRoute(lead.fulfilmentRoute);
   const linkedJob = lead.linkedFieldJobId ? getJob(lead.linkedFieldJobId) : undefined;
@@ -111,6 +154,33 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
       <div className="mb-3 flex items-center gap-2">
         <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><RouteIcon className="h-3.5 w-3.5" /></span>
         <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">Fulfilment &amp; Operations</h3>
+      </div>
+
+      {/* Customer Master link — independent of fulfilment route. Every
+          Walk-In/Ticket conversion already resolves this via the same
+          resolveCustomer() choke point, so this button mainly matters when a
+          lead is closed/won without an operational hand-off in between. */}
+      <div className="mb-3 flex items-center justify-between gap-2 rounded-xl border border-border bg-muted/20 px-3 py-2">
+        {linkedCustomer ? (
+          <>
+            <p className="inline-flex items-center gap-1.5 text-[13px] text-emerald-700 min-w-0">
+              <CheckCircle2 className="h-4 w-4 shrink-0" />
+              <span className="truncate">Linked to customer {linkedCustomer.fullName}</span>
+            </p>
+            <Button size="sm" variant="outline" className="shrink-0 gap-1.5" onClick={() => router.push(`/settings/customers/manage`)}>
+              View Customers <ExternalLink className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        ) : (
+          <>
+            <p className="text-[12px] text-zinc-500">Not yet linked to the Customer Master.</p>
+            {allow(can, CAP.lead.convert) && (
+              <Button size="sm" variant="outline" className="shrink-0 gap-1.5" loading={linkingCustomer} onClick={convertToCustomer}>
+                <UserPlus className="h-3.5 w-3.5" /> Convert to Customer
+              </Button>
+            )}
+          </>
+        )}
       </div>
 
       {/* Unrouted */}

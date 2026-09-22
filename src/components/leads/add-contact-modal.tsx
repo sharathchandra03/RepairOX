@@ -16,7 +16,9 @@ import { RSelect } from "@/components/ui/rselect";
 import { Avatar } from "@/components/ui/avatar";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
-import { createCustomer, findDuplicates, type DuplicateMatch } from "@/lib/customer-data";
+import { findContactMatches, type ContactMatch } from "@/lib/contact-service";
+import { useLeads } from "@/lib/leads-context";
+import { toast } from "@/components/ui/toaster";
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
 
@@ -170,7 +172,8 @@ export function AddContactModal({
   const sectionRefs = React.useRef<Record<string, HTMLDivElement | null>>({});
 
   const { currentUser, team } = usePermissions();
-  const { addCustomer, customers } = useStore();
+  const { companies } = useStore();
+  const { contacts, addContact } = useLeads();
 
   React.useEffect(() => { setMounted(true); }, []);
 
@@ -235,17 +238,13 @@ export function AddContactModal({
   const primaryPhone = form.phones.find((p) => p.isPrimary)?.number ?? "";
   const primaryEmail = form.emails.find((e) => e.isPrimary)?.address ?? "";
 
-  // Duplicate detection
-  const duplicates = React.useMemo<DuplicateMatch[]>(() => {
+  // Contact duplicate detection (prospects and customer-linked Contacts share
+  // the same CRM identity list). This deliberately does NOT create/search a
+  // Customer: Add Contact is prospect intake, not commercial conversion.
+  const duplicates = React.useMemo<ContactMatch[]>(() => {
     if (!primaryPhone && !primaryEmail) return [];
-    return findDuplicates(customers, {
-      mobile: primaryPhone,
-      email: primaryEmail || undefined,
-      firstName: form.firstName || undefined,
-      lastName: form.lastName || undefined,
-      company: form.company || undefined,
-    });
-  }, [customers, primaryPhone, primaryEmail, form.firstName, form.lastName, form.company]);
+    return findContactMatches(contacts, { phone: primaryPhone, email: primaryEmail });
+  }, [contacts, primaryPhone, primaryEmail]);
 
   // Section completeness
   const sectionStatus = React.useMemo(() => {
@@ -271,41 +270,55 @@ export function AddContactModal({
     return true;
   };
 
-  // Save handler
+  // Save a CRM Contact only. A Contact becomes customer-linked later when a
+  // Ticket/normal Invoice is created, or through explicit Convert to Customer.
   const handleCreate = async () => {
     if (!validate()) return;
+    if (duplicates.length > 0) {
+      toast.info("Contact already exists", { description: `${duplicates[0].contact.fullName} matched on ${duplicates[0].matchedOn}.` });
+      return;
+    }
     setSaving(true);
     try {
-      const customer = createCustomer({
+      const companyId = form.company
+        ? companies.find((c) => c.name.trim().toLowerCase() === form.company.trim().toLowerCase())?.id
+        : undefined;
+      const created = await addContact({
+        companyId,
         firstName: form.firstName.trim(),
         lastName: form.lastName.trim(),
-        mobile: primaryPhone,
-        email: primaryEmail,
-        company: form.company,
-        gstNumber: form.gstNumber,
-        address: [form.address, form.area, form.landmark].filter(Boolean).join(", "),
-        city: form.city,
-        state: form.state,
-        postalCode: form.pinCode,
-        type: form.customerType === "individual" ? "personal" : "business",
+        email: primaryEmail || undefined,
+        phone: primaryPhone || undefined,
+        mobile: primaryPhone || undefined,
+        designation: form.jobTitle || undefined,
+        department: form.industry || undefined,
+        source: form.leadSource || undefined,
+        status: form.status || "active",
+        owner: form.owner || currentUser?.name || undefined,
+        address: [form.address, form.area, form.landmark].filter(Boolean).join(", ") || undefined,
+        city: form.city || undefined,
+        communicationPreferences: {
+          email: !!primaryEmail,
+          phone: !!primaryPhone,
+        },
         notes: [
           form.notes,
-          form.jobTitle ? `Job Title: ${form.jobTitle}` : "",
-          form.industry ? `Industry: ${form.industry}` : "",
+          form.company ? `Company: ${form.company}` : "",
           form.website ? `Website: ${form.website}` : "",
-          form.leadSource ? `Lead Source: ${form.leadSource}` : "",
           form.mapsLink ? `Maps: ${form.mapsLink}` : "",
-          form.owner ? `Owner: ${form.owner}` : "",
           form.phones.length > 1 ? `Phones: ${form.phones.map((p) => `${p.type}: ${p.number}`).join(", ")}` : "",
           form.emails.length > 1 ? `Emails: ${form.emails.map((e) => e.address).filter(Boolean).join(", ")}` : "",
         ].filter(Boolean).join("\n"),
       });
-      await addCustomer(customer);
+      if (!created) return;
+
+      toast.success("Contact created", { description: `${fullName || "Contact"} was added to CRM Contacts as a prospect.` });
       onSave?.(form);
       onClose();
       setForm(INITIAL_FORM);
     } catch (err) {
       console.error("Failed to create contact:", err);
+      toast.error("Contact not saved", { description: "Something went wrong. Please try again." });
     } finally {
       setSaving(false);
     }
@@ -967,7 +980,7 @@ function ContactSummaryCard({
   initials: string;
   primaryPhone: string;
   primaryEmail: string;
-  duplicates: DuplicateMatch[];
+  duplicates: ContactMatch[];
 }) {
   return (
     <div className="space-y-4">
@@ -1057,8 +1070,8 @@ function ContactSummaryCard({
             <p className="text-[12px] font-semibold">Existing Contact Found</p>
           </div>
           {duplicates.slice(0, 2).map((d) => (
-            <p key={d.customer.id} className="mt-1 text-[11px] text-amber-700">
-              {d.customer.fullName} — matched on {d.matchedOn}
+            <p key={d.contact.id} className="mt-1 text-[11px] text-amber-700">
+              {d.contact.fullName} — matched on {d.matchedOn}
             </p>
           ))}
         </div>

@@ -68,62 +68,69 @@ export type QCConfig = {
  */
 export const DEFAULT_QC_CONFIG: QCConfig = {
   categories: [
+    // NOTE: The item SEQUENCE below is authoritative — flattening every
+    // category top-to-bottom yields the required order 1→20. Category labels
+    // are cosmetic grouping only and must never disturb the item order.
     {
       id: "exterior",
-      label: "Exterior Condition",
+      label: "Exterior",
       items: [
-        { id: "Physical Condition", label: "Physical Condition" },
-        { id: "Back Glass", label: "Back Glass" },
+        { id: "Device Powering On", label: "Device Powering On" }, // 1
+        { id: "Dent", label: "Dent" }, // 2
+        { id: "Scratches", label: "Scratches" }, // 3
       ],
     },
     {
       id: "display",
-      label: "Display & Touch",
+      label: "Display",
       items: [
-        { id: "Display", label: "Display" },
-        { id: "Touch Panel", label: "Touch Panel" },
-        { id: "Display Sensor", label: "Display Sensor" },
+        { id: "Display", label: "Display" }, // 4
+        { id: "Touch", label: "Touch" }, // 5
+        { id: "Proximity Sensor", label: "Proximity Sensor" }, // 6
+        { id: "Back Glass", label: "Back Glass" }, // 7
       ],
     },
     {
       id: "audio",
       label: "Audio",
       items: [
-        { id: "Receiver", label: "Receiver" },
-        { id: "Speaker", label: "Speaker" },
-        { id: "Microphone", label: "Microphone" },
+        { id: "Receiver", label: "Receiver" }, // 8
+        { id: "Mic", label: "Mic" }, // 9
+        { id: "Speaker", label: "Speaker" }, // 10
+        { id: "Taptic", label: "Taptic" }, // 11
       ],
     },
     {
       id: "camera",
       label: "Camera",
       items: [
-        { id: "Front Camera", label: "Front Camera" },
-        { id: "Back Camera", label: "Back Camera" },
+        { id: "Main Camera", label: "Main Camera" }, // 12
+        { id: "Front Camera", label: "Front Camera" }, // 13
       ],
     },
     {
-      id: "battery",
-      label: "Battery",
-      items: [{ id: "Battery Health", label: "Battery Health" }],
+      id: "biometrics",
+      label: "Security & Biometrics",
+      items: [
+        { id: "Face ID", label: "Face ID" }, // 14
+        { id: "Touch ID", label: "Touch ID" }, // 15
+      ],
+    },
+    {
+      id: "buttons",
+      label: "Buttons",
+      items: [
+        { id: "Power Key", label: "Power Key" }, // 16
+        { id: "Volume Key", label: "Volume Key" }, // 17
+        { id: "Charging Port", label: "Charging Port" }, // 18
+      ],
     },
     {
       id: "connectivity",
       label: "Connectivity",
       items: [
-        { id: "Bluetooth / WiFi", label: "Bluetooth / WiFi" },
-        { id: "Network", label: "Network" },
-        { id: "Charging Port", label: "Charging Port" },
-      ],
-    },
-    {
-      id: "buttons",
-      label: "Buttons & Biometrics",
-      items: [
-        { id: "Touch ID / Face ID", label: "Touch ID / Face ID" },
-        { id: "Volume Keys", label: "Volume Keys" },
-        { id: "Power Key", label: "Power Key" },
-        { id: "Vibration", label: "Vibration" },
+        { id: "Network", label: "Network" }, // 19
+        { id: "WiFi / Bluetooth", label: "WiFi / Bluetooth" }, // 20
       ],
     },
   ],

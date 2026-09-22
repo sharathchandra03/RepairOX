@@ -74,7 +74,7 @@ type InvoiceFormDevice = {
 };
 
 type InvoiceFormData = {
-  customer: { name: string; phone: string; email: string; company: string; gstNumber: string };
+  customer: { name: string; phone: string; email: string; company: string; gstNumber: string; customerId?: string };
   details: { dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories"; documentType: DocumentType; sourceEstimateId?: string; sourceTicketId?: string; sourceProformaId?: string };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
@@ -551,6 +551,7 @@ function InvoiceWizard() {
       ),
       invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
+      customerId: form.customer.customerId || undefined,
       phone: form.customer.phone,
       email: form.customer.email || undefined,
       company: form.customer.company || undefined,
@@ -881,7 +882,7 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
     : [createFormDevice({ technician: inv.employee || "", parts: inv.items })];
 
   return {
-    customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "" },
+    customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "", customerId: inv.customerId },
     details: { dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service", documentType: inv.documentType ?? "invoice", sourceEstimateId: inv.sourceEstimateId, sourceTicketId: inv.sourceTicketId, sourceProformaId: inv.sourceProformaId },
     items: inv.items,
     devices,
@@ -899,7 +900,14 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
   const d = form.details;
   const [showResults, setShowResults] = useState(false);
 
-  const set = (k: keyof typeof c, v: string) => updateForm((f) => ({ ...f, customer: { ...f.customer, [k]: v } }));
+  const set = (k: keyof typeof c, v: string) =>
+    updateForm((f) => ({
+      ...f,
+      // Editing the name after a customer was picked breaks the link to that
+      // Customer Master record — clear customerId so loyalty/stats don't get
+      // attributed to a now-stale identity.
+      customer: { ...f.customer, [k]: v, ...(k === "name" ? { customerId: undefined } : {}) },
+    }));
   const setType = (v: string) => updateForm((f) => ({ ...f, details: { ...f.details, invoiceType: v as any } }));
 
   // Search from customer name input
@@ -915,6 +923,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
         email: cust.email,
         company: cust.company,
         gstNumber: cust.gstNumber || "",
+        customerId: cust.id,
       },
       details: {
         ...f.details,

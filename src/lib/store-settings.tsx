@@ -189,6 +189,15 @@ export type StoreSettings = {
   /** Invoice warranty block text — independent of Store Information.
    *  Shown on invoice A4/thermal prints. */
   invoiceWarrantyText: string;
+
+  /* ── Loyalty program configuration (Settings → Customers → Loyalty) ── */
+  loyaltyConfig: {
+    /** Master on/off switch. When false, awardLoyaltyForPaidInvoice in
+     *  store.tsx still runs the customer-stats update but earns 0 points. */
+    enabled: boolean;
+    /** ₹ amount that earns 1 point (e.g. 100 → ₹100 spent = 1 point). */
+    pointsPerRupee: number;
+  };
 };
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -335,6 +344,11 @@ CLAIM PROCEDURE:
 - Present this invoice along with the device at our service center.
 - Warranty covers the specific repair performed, not pre-existing issues.
 - Physical/liquid damage after repair voids the warranty.`,
+
+  loyaltyConfig: {
+    enabled: true,
+    pointsPerRupee: 100,
+  },
 };
 
 /* ─── DB ↔ Client field mapping ──────────────────────────────────────── */
@@ -407,6 +421,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     // the column fall back to the built-in default (NOT the store value) so
     // invoices never silently inherit store terms once this feature ships.
     invoiceWarrantyText: (row.invoice_warranty_text as string) ?? DEFAULT_STORE_SETTINGS.invoiceWarrantyText,
+    loyaltyConfig: parseJsonColumn(row.loyalty_config, DEFAULT_STORE_SETTINGS.loyaltyConfig),
   };
 }
 
@@ -499,6 +514,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     invoiceFooter: "invoice_footer",
     invoiceSlogan: "invoice_slogan",
     invoiceWarrantyText: "invoice_warranty_text",
+    loyaltyConfig: "loyalty_config",
   };
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {

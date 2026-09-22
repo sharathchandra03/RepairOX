@@ -123,6 +123,8 @@ export type Customer = {
    *  Always normalized to an array by the mappers/factory; optional on the type
    *  only so legacy seed literals remain valid. Read with `?? []`. */
   groupIds?: string[];
+  /** Optional Company Master relationship for business customers. */
+  companyId?: string;
   firstName: string;
   lastName: string;
   fullName: string; // computed: firstName + lastName
@@ -168,6 +170,7 @@ export function createCustomer(
     type: data.type || "personal",
     source: data.source,
     groupIds: data.groupIds ?? [],
+    companyId: data.companyId,
     firstName: data.firstName,
     lastName: data.lastName,
     fullName: `${data.firstName} ${data.lastName}`.trim(),
@@ -199,15 +202,28 @@ export type DuplicateMatch = {
   confidence: "high" | "medium";
 };
 
+/**
+ * Normalize a phone number for comparison: strip everything but digits,
+ * then take the last 10 digits. This makes "+91 98456 12345", "9198456
+ * 12345", and "98456-12345" all compare equal, regardless of country-code
+ * prefix or formatting. Falls back to the full digit string if fewer than
+ * 10 digits are present (e.g. partial/invalid input) so short values still
+ * compare deterministically instead of colliding on an empty string.
+ */
+function normalizeMobile(mobile: string): string {
+  const digits = (mobile || "").replace(/\D/g, "");
+  return digits.length >= 10 ? digits.slice(-10) : digits;
+}
+
 export function findDuplicates(
   customers: Customer[],
   data: { mobile: string; email?: string; firstName?: string; lastName?: string; company?: string }
 ): DuplicateMatch[] {
   const matches: DuplicateMatch[] = [];
-  const mobile = data.mobile.replace(/[\s\-\(\)]/g, "");
+  const mobile = normalizeMobile(data.mobile);
 
   for (const c of customers) {
-    const cMobile = c.mobile.replace(/[\s\-\(\)]/g, "");
+    const cMobile = normalizeMobile(c.mobile);
 
     // Primary: Mobile number match (high confidence)
     if (mobile && cMobile && mobile === cMobile) {
@@ -233,6 +249,86 @@ export function findDuplicates(
   }
 
   return matches;
+}
+
+/* ─── Duplicate Clustering (Customer Master → Potential Duplicates) ────
+   findDuplicates() above is pairwise: "does THIS candidate match anyone in
+   the list?" — used at create-time. findDuplicateClusters() below answers a
+   different question: "across the WHOLE customer base, which existing records
+   already look like duplicates of each other?" — used to populate the
+   Potential Duplicates tab. Reuses the SAME normalized-mobile/email/name+
+   company rules so the two surfaces never disagree on what counts as a
+   duplicate. */
+
+export type DuplicateCluster = {
+  /** Stable key for the cluster (based on the matched value). */
+  id: string;
+  /** Every customer record in this cluster (2 or more). */
+  customers: Customer[];
+  /** Why these records were grouped — mirrors DuplicateMatch.matchedOn. */
+  matchedOn: "Mobile Number" | "Email" | "Name + Company";
+  confidence: "high" | "medium";
+};
+
+/** Normalize an email for comparison: trim + lowercase. Empty stays empty so
+ *  blank emails never collide with each other. */
+function normalizeEmailForMatch(email: string): string {
+  return (email || "").trim().toLowerCase();
+}
+
+/**
+ * Group the full customer list into duplicate clusters. Mobile-number and
+ * email matches are HIGH confidence (checked first); Name + Company matches
+ * are MEDIUM confidence and only considered for customers not already in a
+ * higher-confidence cluster, so one record never appears in two clusters at
+ * once (a customer belongs to exactly one, its strongest match).
+ */
+export function findDuplicateClusters(customers: Customer[]): DuplicateCluster[] {
+  const clusters: DuplicateCluster[] = [];
+  const claimed = new Set<string>();
+
+  // 1) Mobile number — highest confidence, checked first.
+  const byMobile = new Map<string, Customer[]>();
+  for (const c of customers) {
+    const key = normalizeMobile(c.mobile);
+    if (!key) continue;
+    (byMobile.get(key) ?? byMobile.set(key, []).get(key)!).push(c);
+  }
+  for (const [key, group] of byMobile) {
+    if (group.length < 2) continue;
+    clusters.push({ id: `mobile-${key}`, customers: group, matchedOn: "Mobile Number", confidence: "high" });
+    group.forEach((c) => claimed.add(c.id));
+  }
+
+  // 2) Email — high confidence, only for records not already claimed.
+  const byEmail = new Map<string, Customer[]>();
+  for (const c of customers) {
+    if (claimed.has(c.id)) continue;
+    const key = normalizeEmailForMatch(c.email);
+    if (!key) continue;
+    (byEmail.get(key) ?? byEmail.set(key, []).get(key)!).push(c);
+  }
+  for (const [key, group] of byEmail) {
+    if (group.length < 2) continue;
+    clusters.push({ id: `email-${key}`, customers: group, matchedOn: "Email", confidence: "high" });
+    group.forEach((c) => claimed.add(c.id));
+  }
+
+  // 3) Name + Company — medium confidence, only for records not already claimed.
+  const byNameCompany = new Map<string, Customer[]>();
+  for (const c of customers) {
+    if (claimed.has(c.id)) continue;
+    if (!c.firstName || !c.lastName || !c.company) continue;
+    const key = `${c.firstName.trim().toLowerCase()}|${c.lastName.trim().toLowerCase()}|${c.company.trim().toLowerCase()}`;
+    (byNameCompany.get(key) ?? byNameCompany.set(key, []).get(key)!).push(c);
+  }
+  for (const [key, group] of byNameCompany) {
+    if (group.length < 2) continue;
+    clusters.push({ id: `namecompany-${key}`, customers: group, matchedOn: "Name + Company", confidence: "medium" });
+    group.forEach((c) => claimed.add(c.id));
+  }
+
+  return clusters;
 }
 
 /* ─── Search ─────────────────────────────────────────────────────── */

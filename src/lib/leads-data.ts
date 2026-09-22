@@ -74,7 +74,11 @@ export interface Lead {
   linkedWalkInId: string;   // Walk-In created for a Store-to-Store lead
   linkedFieldJobId: string; // Field Job created for a Pickup & Drop lead
   linkedTicketId: string;   // eventual repair Ticket (cached for progress display)
-  customerId: string;       // Customer Master link once a customer record exists
+  contactId: string;        // CRM Contact identity (prospect stage; always preferred before promotion)
+  customerId: string;       // Customer Master link once commercial/service business begins
+  convertedAt?: string;     // ISO timestamp of Contact/Lead → Customer promotion
+  convertedBy?: string;     // staff id that promoted/linked the customer
+  conversionSource?: "ticket" | "invoice" | "manual" | string;
 
   /* ── Audit ── */
   createdAt: string;
@@ -87,6 +91,37 @@ export type LeadDraft = Partial<Omit<Lead,
   | "id" | "leadNo" | "date" | "time" | "month" | "createdAt" | "updatedAt"
   | "assignedTo" | "assignedToName" | "assignedBy" | "assignedByName" | "assignedAt"
 >>;
+
+/* ─── CRM Contact (linked to Customer Master) ──────────────────────────── */
+
+export interface Contact {
+  id: string;
+  customerId?: string;      // Customer Master link after promotion; null/undefined = prospect
+  companyId?: string;       // Link to Company (if available)
+  firstName: string;
+  lastName: string;
+  fullName: string;
+  email?: string;
+  phone?: string;
+  mobile?: string;
+  designation?: string;
+  department?: string;
+  role?: string;
+  source?: string;
+  status?: "active" | "inactive" | string;
+  owner?: string;
+  address?: string;
+  city?: string;
+  lastContactAt?: string;
+  communicationPreferences?: {
+    email?: boolean;
+    phone?: boolean;
+    whatsapp?: boolean;
+  };
+  notes?: string;
+  createdAt: string;
+  updatedAt: string;
+}
 
 /* ─── Configurable dropdown option ────────────────────────────────────── */
 

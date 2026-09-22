@@ -26,16 +26,18 @@ import { useSession } from "@/lib/use-session";
 import { demoKey } from "@/lib/demo-mode";
 import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
+import { createProspectContact, findContactMatches } from "@/lib/contact-service";
 import {
   LEAD_DROPDOWN_FIELDS, monthFromDate, applyLeadFilters, pinnedFirst,
   EMPTY_LEAD_FILTERS,
-  type Lead, type LeadDraft, type LeadOption, type LeadFieldKey, type LeadFilters,
+  type Lead, type LeadDraft, type LeadOption, type LeadFieldKey, type LeadFilters, type Contact,
 } from "@/lib/leads-data";
 
 /* ─── Local-storage keys (prototype mode) ─────────────────────────────── */
 const LEADS_KEY = "repairox-leads";
 const OPTIONS_KEY = "repairox-lead-options";
 const SEQ_KEY = "repairox-lead-seq";
+const CONTACTS_KEY = "repairox-contacts";
 
 /* ─── Row mappers (snake_case DB ↔ camelCase app) ─────────────────────── */
 
@@ -82,7 +84,11 @@ function rowToLead(r: any): Lead {
     linkedWalkInId: r.linked_walk_in_id ?? "",
     linkedFieldJobId: r.linked_field_job_id ?? "",
     linkedTicketId: r.linked_ticket_id ?? "",
+    contactId: r.contact_id ?? "",
     customerId: r.customer_id ?? "",
+    convertedAt: r.converted_at ?? undefined,
+    convertedBy: r.converted_by ?? undefined,
+    conversionSource: r.conversion_source ?? undefined,
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
   };
@@ -136,7 +142,11 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("linked_walk_in_id", l.linkedWalkInId);
   set("linked_field_job_id", l.linkedFieldJobId);
   set("linked_ticket_id", l.linkedTicketId);
+  set("contact_id", l.contactId);
   set("customer_id", l.customerId);
+  if (l.convertedAt !== undefined) row.converted_at = l.convertedAt || null;
+  if (l.convertedBy !== undefined) row.converted_by = l.convertedBy || null;
+  set("conversion_source", l.conversionSource);
   return row;
 }
 
@@ -150,6 +160,69 @@ function rowToOption(r: any): LeadOption {
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
   };
+}
+
+function rowToContact(r: any): Contact {
+  return {
+    id: r.id,
+    customerId: r.customer_id ?? undefined,
+    companyId: r.company_id ?? undefined,
+    firstName: r.first_name ?? "",
+    lastName: r.last_name ?? "",
+    fullName: r.full_name ?? `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+    email: r.email ?? undefined,
+    phone: r.phone ?? undefined,
+    mobile: r.mobile ?? undefined,
+    designation: r.designation ?? undefined,
+    department: r.department ?? undefined,
+    role: r.role ?? undefined,
+    source: r.source ?? undefined,
+    status: r.status ?? "active",
+    owner: r.owner ?? undefined,
+    address: r.address ?? undefined,
+    city: r.city ?? undefined,
+    lastContactAt: r.last_contact_at ?? undefined,
+    communicationPreferences: r.communication_preferences ?? undefined,
+    notes: r.notes ?? undefined,
+    createdAt: r.created_at ?? new Date().toISOString(),
+    updatedAt: r.updated_at ?? new Date().toISOString(),
+  };
+}
+
+function contactToRow(c: Partial<Contact>): Record<string, unknown> {
+  const row: Record<string, unknown> = {};
+  const set = (col: string, v: unknown) => { if (v !== undefined) row[col] = v === "" ? null : v; };
+  if (c.id !== undefined) row.id = c.id;
+  set("customer_id", c.customerId);
+  set("company_id", c.companyId);
+  set("first_name", c.firstName);
+  set("last_name", c.lastName);
+  set("full_name", c.fullName ?? (c.firstName || c.lastName ? `${c.firstName ?? ""} ${c.lastName ?? ""}`.trim() : undefined));
+  set("email", c.email);
+  set("phone", c.phone);
+  set("mobile", c.mobile);
+  set("designation", c.designation);
+  set("department", c.department);
+  set("role", c.role);
+  set("source", c.source);
+  set("status", c.status);
+  set("owner", c.owner);
+  set("address", c.address);
+  set("city", c.city);
+  if (c.lastContactAt !== undefined) row.last_contact_at = c.lastContactAt || null;
+  set("communication_preferences", c.communicationPreferences);
+  set("notes", c.notes);
+  return row;
+}
+
+/** public.contacts is created by the (optional, not-yet-required)
+ *  0031_customer_master_integration.sql migration. On a DB that hasn't run
+ *  it yet, every contacts query fails with "relation does not exist" —
+ *  treat that the same as "no contacts yet" instead of surfacing an error,
+ *  mirroring how LEAD_OPTIONAL_COLUMNS degrades gracefully above. */
+function isMissingTableError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === "42P01" || /relation .* does not exist/i.test(err.message ?? "");
 }
 
 /* ─── Context shape ───────────────────────────────────────────────────── */
@@ -189,6 +262,15 @@ interface LeadsContextValue {
   deleteOption: (id: string) => Promise<void>;
   /** How many existing leads currently use this option's value (safety check). */
   countLeadsUsingOption: (field: LeadFieldKey, value: string) => number;
+
+  /* ── CRM Contacts (people, optionally linked to a Customer Master record
+     and/or a Company) — see public.contacts, 0031_customer_master_integration.sql.
+     Degrades gracefully (empty list, no-op writes) if that migration hasn't
+     been applied yet on this database. */
+  contacts: Contact[];
+  addContact: (input: Omit<Contact, "id" | "fullName" | "createdAt" | "updatedAt"> & { fullName?: string }) => Promise<Contact | null>;
+  updateContact: (id: string, updates: Partial<Contact>) => Promise<void>;
+  deleteContact: (id: string) => Promise<void>;
 }
 
 const LeadsContext = createContext<LeadsContextValue | null>(null);
@@ -220,7 +302,8 @@ function writeLS(key: string, value: unknown) {
 /** Optional lead columns that may be absent before the migration is applied. */
 const LEAD_OPTIONAL_COLUMNS = [
   "fulfilment_route", "assigned_store", "routed_at",
-  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "customer_id",
+  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "contact_id", "customer_id",
+  "converted_at", "converted_by", "conversion_source",
 ];
 
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -256,7 +339,7 @@ function omitKeys(row: Record<string, unknown>, keys: string[]): Record<string, 
 const LEAD_FULFILMENT_KEY = "repairox-lead-fulfilment";
 type LeadFulfilmentOverlay = Partial<Pick<Lead,
   "fulfilmentRoute" | "assignedStore" | "routedAt"
-  | "linkedWalkInId" | "linkedFieldJobId" | "linkedTicketId" | "customerId">>;
+  | "linkedWalkInId" | "linkedFieldJobId" | "linkedTicketId" | "contactId" | "customerId">>;
 
 function readFulfilmentOverlay(): Record<string, LeadFulfilmentOverlay> {
   return readLS<Record<string, LeadFulfilmentOverlay>>(LEAD_FULFILMENT_KEY, {});
@@ -268,7 +351,7 @@ function writeFulfilmentOverlay(map: Record<string, LeadFulfilmentOverlay>) {
 function mergeFulfilmentOverlay(id: string, updates: Partial<Lead>) {
   const keys: (keyof LeadFulfilmentOverlay)[] = [
     "fulfilmentRoute", "assignedStore", "routedAt",
-    "linkedWalkInId", "linkedFieldJobId", "linkedTicketId", "customerId",
+    "linkedWalkInId", "linkedFieldJobId", "linkedTicketId", "contactId", "customerId",
   ];
   const patch: LeadFulfilmentOverlay = {};
   let touched = false;
@@ -295,6 +378,7 @@ function applyFulfilmentOverlay(leads: Lead[]): Lead[] {
       linkedWalkInId: l.linkedWalkInId || o.linkedWalkInId || "",
       linkedFieldJobId: l.linkedFieldJobId || o.linkedFieldJobId || "",
       linkedTicketId: l.linkedTicketId || o.linkedTicketId || "",
+      contactId: l.contactId || o.contactId || "",
       customerId: l.customerId || o.customerId || "",
     };
   });
@@ -346,6 +430,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const { id: currentUserId, name: currentUserName } = useSession();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [options, setOptions] = useState<LeadOption[]>([]);
+  const [contacts, setContacts] = useState<Contact[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [filters, setFiltersState] = useState<LeadFilters>(EMPTY_LEAD_FILTERS);
 
@@ -355,6 +440,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   optionsRef.current = options;
   const leadsRef = useRef<Lead[]>([]);
   leadsRef.current = leads;
+  const contactsRef = useRef<Contact[]>([]);
+  contactsRef.current = contacts;
   const currentUserIdRef = useRef<string | undefined>(currentUserId);
   currentUserIdRef.current = currentUserId;
   const currentUserNameRef = useRef<string>(currentUserName);
@@ -381,12 +468,20 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     async function loadFromDb() {
-      const [{ data: leadRows, error: leadErr }, { data: optRows, error: optErr }] = await Promise.all([
+      const [{ data: leadRows, error: leadErr }, { data: optRows, error: optErr }, { data: contactRows, error: contactErr }] = await Promise.all([
         db.from("leads").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         db.from("lead_options").select("*").order("field", { ascending: true }).order("sort_order", { ascending: true }),
+        db.from("contacts").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
       ]);
       if (!active) return;
       if (!leadErr && leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
+
+      // contacts table only exists once 0031_customer_master_integration.sql
+      // has been applied — treat "table missing" as "no contacts yet", not
+      // an error, so this doesn't block lead/option loading on an
+      // un-migrated database.
+      if (!contactErr && contactRows) setContacts(contactRows.map(rowToContact));
+      else if (contactErr && !isMissingTableError(contactErr)) console.error("[leads] loading contacts failed:", contactErr.message);
 
       if (!optErr && optRows) {
         if (optRows.length === 0) {
@@ -422,6 +517,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (localOpts.length && readLS<LeadOption[]>(OPTIONS_KEY, []).length === 0) writeLS(OPTIONS_KEY, localOpts);
       setLeads(localLeads);
       setOptions(localOpts);
+      setContacts(readLS<Contact[]>(CONTACTS_KEY, []));
       setHydrated(true);
     }
 
@@ -434,15 +530,17 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     let active = true;
     const channel = db.channel("leads-realtime");
     const reload = async () => {
-      const [{ data: leadRows }, { data: optRows }] = await Promise.all([
+      const [{ data: leadRows }, { data: optRows }, { data: contactRows }] = await Promise.all([
         db.from("leads").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         db.from("lead_options").select("*").order("field", { ascending: true }).order("sort_order", { ascending: true }),
+        db.from("contacts").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
       ]);
       if (!active) return;
       if (leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
       if (optRows) setOptions(optRows.map(rowToOption));
+      if (contactRows) setContacts(contactRows.map(rowToContact));
     };
-    for (const table of ["leads", "lead_options"]) {
+    for (const table of ["leads", "lead_options", "contacts"]) {
       channel.on("postgres_changes", { event: "*", schema: "public", table }, reload);
     }
     channel.subscribe();
@@ -483,9 +581,55 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     return `L-${String(current).padStart(3, "0")}`;
   }, []);
 
+  /* ── Prospect Contact resolution ──
+     Every new Lead resolves to a CRM Contact, never directly to a Customer.
+     Customer promotion is a separate Ticket/Invoice/manual action. */
+  const resolveLeadContact = useCallback(async (draft: LeadDraft): Promise<string> => {
+    if (draft.contactId) return draft.contactId;
+    const existing = findContactMatches(contactsRef.current, { phone: draft.number, email: draft.email })[0]?.contact;
+    if (existing) return existing.id;
+
+    const contact = createProspectContact({
+      fullName: draft.name,
+      phone: draft.number,
+      email: draft.email,
+      address: draft.location,
+      source: draft.source,
+      owner: draft.agent || currentUserNameRef.current,
+    });
+
+    if (useDb) {
+      const { data, error } = await db.from("contacts").insert(contactToRow(contact)).select("*").single();
+      if (!error && data) {
+        const saved = rowToContact(data);
+        setContacts((prev) => [saved, ...prev]);
+        return saved.id;
+      }
+      if (error && !isMissingTableError(error)) {
+        console.error("[leads] prospect contact save failed:", error.message);
+        throw new Error("The CRM contact could not be saved.");
+      }
+    }
+
+    setContacts((prev) => {
+      const next = [contact, ...prev];
+      if (!useDb) writeLS(CONTACTS_KEY, next);
+      return next;
+    });
+    return contact.id;
+  }, [useDb, db]);
+
   /* ── Lead CRUD ── */
   const addLead = useCallback(async (draft: LeadDraft): Promise<Lead | null> => {
     const { date, time, month } = nowParts();
+    let contactId = draft.contactId ?? "";
+    try {
+      contactId = await resolveLeadContact(draft);
+    } catch (error) {
+      toast.error("Lead not saved", { description: error instanceof Error ? error.message : "The CRM contact could not be saved." });
+      return null;
+    }
+    const resolvedDraft: LeadDraft = { ...draft, contactId, customerId: draft.customerId ?? "" };
 
     if (useDb) {
       // Ask the DB for the next org-scoped sequential Lead ID (gap-free).
@@ -496,7 +640,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       else if (seqErr) console.error("[leads] next_lead_id failed:", seqErr.message);
 
       let row: Record<string, unknown> = {
-        ...leadToRow({ ...draft, date, time, month } as Partial<Lead>),
+        ...leadToRow({ ...resolvedDraft, date, time, month } as Partial<Lead>),
         ...(leadNo ? { lead_no: leadNo } : {}),
       };
       let res = await db.from("leads").insert(row).select("*").single();
@@ -537,13 +681,14 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       assignedTo: "", assignedToName: "", assignedBy: "", assignedByName: "", assignedAt: "",
       pinnedAt: "",
       fulfilmentRoute: draft.fulfilmentRoute ?? "", assignedStore: draft.assignedStore ?? "", routedAt: "",
-      linkedWalkInId: "", linkedFieldJobId: "", linkedTicketId: "", customerId: draft.customerId ?? "",
+      linkedWalkInId: "", linkedFieldJobId: "", linkedTicketId: "", contactId, customerId: resolvedDraft.customerId ?? "",
+      convertedAt: draft.convertedAt, convertedBy: draft.convertedBy, conversionSource: draft.conversionSource,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
     setLeads((prev) => { const next = [lead, ...prev]; writeLS(LEADS_KEY, next); return next; });
     toast.success("Lead created", { description: `${lead.leadNo} · ${lead.name}` });
     return lead;
-  }, [useDb, db, nextLeadNoLocal]);
+  }, [useDb, db, nextLeadNoLocal, resolveLeadContact]);
 
   const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
     // Mirror any fulfilment/link fields to the durable overlay so they survive a
@@ -590,6 +735,68 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       }
     }
     setLeads((prev) => { const next = prev.filter((l) => l.id !== id); if (!useDb) writeLS(LEADS_KEY, next); return next; });
+  }, [useDb, db]);
+
+  /* ── CRM Contacts ── */
+  const addContact = useCallback(async (input: Omit<Contact, "id" | "fullName" | "createdAt" | "updatedAt"> & { fullName?: string }): Promise<Contact | null> => {
+    const now = new Date().toISOString();
+    const fullName = input.fullName ?? `${input.firstName} ${input.lastName ?? ""}`.trim();
+
+    if (useDb) {
+      const row = contactToRow({ ...input, fullName, id: uid() });
+      const { data, error } = await db.from("contacts").insert(row).select("*").single();
+      if (error) {
+        if (isMissingTableError(error)) {
+          // Migration not applied yet — degrade to local state only, rather
+          // than lose the contact the user just filled in a whole form for.
+          console.warn("[leads] contacts table not found (migration 0031 not applied) — keeping contact in memory only.");
+          const local: Contact = { ...input, id: uid(), fullName, createdAt: now, updatedAt: now };
+          setContacts((prev) => [local, ...prev]);
+          return local;
+        }
+        console.error("[leads] addContact failed:", error.message);
+        toast.error("Contact not saved", { description: "We couldn't save this contact to the database. Please try again." });
+        return null;
+      }
+      const created = rowToContact(data);
+      setContacts((prev) => [created, ...prev]);
+      logActivity({ module: "Lead", action: "Contact Created", severity: "success", entity: "Contact", reference: created.id, description: `Added new contact ${created.fullName}.` });
+      return created;
+    }
+
+    const local: Contact = { ...input, id: uid(), fullName, createdAt: now, updatedAt: now };
+    setContacts((prev) => { const next = [local, ...prev]; writeLS(CONTACTS_KEY, next); return next; });
+    logActivity({ module: "Lead", action: "Contact Created", severity: "success", entity: "Contact", reference: local.id, description: `Added new contact ${local.fullName}.` });
+    return local;
+  }, [useDb, db]);
+
+  const updateContact = useCallback(async (id: string, updates: Partial<Contact>) => {
+    if (useDb) {
+      const row = contactToRow(updates);
+      const { error } = await db.from("contacts").update(row).eq("id", id);
+      if (error && !isMissingTableError(error)) {
+        console.error("[leads] updateContact failed:", error.message);
+        toast.error("Contact not updated", { description: "We couldn't save these changes. Please try again." });
+        return;
+      }
+    }
+    setContacts((prev) => {
+      const next = prev.map((c) => (c.id === id ? { ...c, ...updates, updatedAt: new Date().toISOString() } : c));
+      if (!useDb) writeLS(CONTACTS_KEY, next);
+      return next;
+    });
+  }, [useDb, db]);
+
+  const deleteContact = useCallback(async (id: string) => {
+    if (useDb) {
+      const { error } = await db.from("contacts").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      if (error && !isMissingTableError(error)) {
+        console.error("[leads] deleteContact failed:", error.message);
+        toast.error("Contact not deleted", { description: "We couldn't delete this contact. Please try again." });
+        return;
+      }
+    }
+    setContacts((prev) => { const next = prev.filter((c) => c.id !== id); if (!useDb) writeLS(CONTACTS_KEY, next); return next; });
   }, [useDb, db]);
 
   /* ── Assignment ── */
@@ -786,7 +993,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     filters, setFilters, clearFilters,
     optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
-  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption]);
+    contacts, addContact, updateContact, deleteContact,
+  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

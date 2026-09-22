@@ -205,6 +205,17 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     },
   },
   {
+    id: "loyalty",
+    label: "Loyalty & Points",
+    blurb: "Customer loyalty program, points and tiers.",
+    icon: "Gift",
+    levels: {
+      view: ["view_loyalty", "loyalty_view_points"],
+      work: ["loyalty_award_points", "loyalty_redeem_points"],
+      manage: ["manage_loyalty", "loyalty_tier_change"],
+    },
+  },
+  {
     id: "employees",
     label: "Employees & Payroll",
     blurb: "Staff records, salary, payroll and advances.",
@@ -381,7 +392,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "all_shops",
     levels: {
       dashboard: "full", tickets: "full", invoices: "full", walkin: "manage", leads: "manage",
-      field: "manage", inventory: "manage", catalog: "manage", customers: "manage",
+      field: "manage", inventory: "manage", catalog: "manage", customers: "manage", loyalty: "manage",
       employees: "manage", accounts: "manage", reports: "manage", stores: "full",
       employees_admin: "manage", settings: "full", account: "work",
     },
@@ -394,7 +405,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "manage", tickets: "manage", invoices: "manage", walkin: "manage", leads: "work",
-      field: "manage", inventory: "manage", catalog: "work", customers: "manage",
+      field: "manage", inventory: "manage", catalog: "work", customers: "manage", loyalty: "manage",
       employees: "view", accounts: "work", reports: "manage", stores: "view",
       employees_admin: "view", settings: "view", account: "work",
     },
@@ -407,7 +418,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "store",
     levels: {
       dashboard: "view", tickets: "work", invoices: "work", walkin: "work", leads: "none",
-      field: "view", inventory: "view", catalog: "view", customers: "work",
+      field: "view", inventory: "view", catalog: "view", customers: "work", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work",
     },
@@ -420,7 +431,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "work", invoices: "none", walkin: "none", leads: "none",
-      field: "none", inventory: "view", catalog: "view", customers: "view",
+      field: "none", inventory: "view", catalog: "view", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "none", stores: "none",
       employees_admin: "none", settings: "none", account: "work",
     },
@@ -433,7 +444,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "manage", invoices: "view", walkin: "none", leads: "none",
-      field: "view", inventory: "work", catalog: "view", customers: "view",
+      field: "view", inventory: "work", catalog: "view", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work",
     },
@@ -446,7 +457,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "none", invoices: "work", walkin: "work", leads: "work",
-      field: "none", inventory: "none", catalog: "view", customers: "work",
+      field: "none", inventory: "none", catalog: "view", customers: "work", loyalty: "work",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work",
     },
@@ -472,7 +483,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "assigned",
     levels: {
       dashboard: "view", tickets: "view", invoices: "none", walkin: "none", leads: "none",
-      field: "manage", inventory: "none", catalog: "none", customers: "view",
+      field: "manage", inventory: "none", catalog: "none", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work",
     },
@@ -485,7 +496,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "store",
     levels: {
       dashboard: "view", tickets: "view", invoices: "manage", walkin: "none", leads: "none",
-      field: "none", inventory: "none", catalog: "none", customers: "view",
+      field: "none", inventory: "none", catalog: "none", customers: "view", loyalty: "view",
       employees: "none", accounts: "manage", reports: "view", stores: "none",
       employees_admin: "none", settings: "none", account: "work",
     },
@@ -498,7 +509,7 @@ export const ROLE_PRESETS: RolePreset[] = [
     scope: "store",
     levels: {
       dashboard: "view", tickets: "view", invoices: "view", walkin: "view", leads: "view",
-      field: "view", inventory: "view", catalog: "view", customers: "view",
+      field: "view", inventory: "view", catalog: "view", customers: "view", loyalty: "view",
       employees: "view", accounts: "view", reports: "view", stores: "none",
       employees_admin: "none", settings: "view", account: "work",
     },

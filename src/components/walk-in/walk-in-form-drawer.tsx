@@ -28,8 +28,12 @@ import { TimePicker } from "@/components/ui/time-picker";
 import { Avatar } from "@/components/ui/avatar";
 import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, type CustomerType } from "@/lib/customer-data";
+import { findOrCreateCustomer } from "@/lib/customer-service";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
+import { useLeads } from "@/lib/leads-context";
+import type { Contact } from "@/lib/leads-data";
+import { createProspectContact, findContactMatches, type ContactSeed, normalizeContactMobile, normalizeContactEmail } from "@/lib/contact-service";
 import { IssueSelector } from "@/components/common/issue-selector";
 import { FollowUpHistoryTimeline } from "@/components/walk-in/walk-in-followup-cell";
 
@@ -53,6 +57,8 @@ export function WalkInFormDrawer({
   sources,
   requireSalesPerson,
   onSaved,
+  contacts = [],
+  onContactCreated,
 }: {
   open: boolean;
   onClose: () => void;
@@ -60,16 +66,22 @@ export function WalkInFormDrawer({
   sources: string[];
   requireSalesPerson: boolean;
   onSaved: (data: Partial<WalkIn>, editingId: string | null) => void;
+  contacts?: Contact[];
+  onContactCreated?: (contact: Contact) => void;
 }) {
   const { customers, customerGroups, addCustomer, team, deviceModels, brands } = useStore();
   // Device Categories + Colours masters (same sources as the Ticket wizard).
   const [categories, setCategories] = useState<DeviceCategoryItem[]>(() => getCachedCategories() ?? []);
   const [colours, setColours] = useState<DeviceColourItem[]>(() => getCachedColours() ?? DEFAULT_COLOURS);
+  // Local state for managing contacts (synced from props)
+  const [localContacts, setLocalContacts] = useState<Contact[]>(contacts);
   useEffect(() => {
     if (!open) return;
     loadDeviceCategories().then(setCategories).catch(() => {});
     loadDeviceColours().then(setColours).catch(() => {});
-  }, [open]);
+    // Sync contacts from props whenever they change
+    setLocalContacts(contacts);
+  }, [open, contacts]);
   const isEdit = !!walkIn;
   // Once converted to a ticket, the follow-up schedule is locked (business rule).
   const isConverted = !!walkIn?.linkedTicketId;
@@ -225,27 +237,38 @@ export function WalkInFormDrawer({
       return;
     }
 
-    // Quick-create a customer when a name was typed with no existing match.
-    let customerId = form.customerId;
-    if (!customerId && name) {
-      const dup = customers.find((c) => c.mobile.replace(/\D/g, "") === (form.phone || "").replace(/\D/g, "") && (form.phone || "").trim());
-      if (dup) {
-        customerId = dup.id;
+    // Resolve a CRM Contact (prospect identity) — NOT a Customer Master record.
+    // Contacts dedup on phone/email; a Walk-In creates/links a Contact but NOT
+    // a Customer (that happens on promotion to Ticket or Invoice).
+    // This prevents duplicate prospects in the CRM when the same person calls
+    // multiple times before becoming a paying customer.
+    let contactId = form.contactId;
+    if (!contactId && name) {
+      const [first, ...rest] = name.split(" ");
+      const seed: ContactSeed = {
+        firstName: first,
+        lastName: rest.join(" "),
+        phone: (form.phone || "").trim(),
+        email: (form.email || "").trim(),
+        source: walkInTypeToCustomerSource(form.type),
+        owner: "", // Will be filled in by the page context if needed
+      };
+      
+      // Check for duplicates
+      const matches = findContactMatches(localContacts, { phone: seed.phone, email: seed.email });
+      if (matches.length > 0) {
+        // Use existing Contact
+        const existing = matches[0].contact;
+        setError(null); // Clear any previous error
+        contactId = existing.id;
       } else {
-        const [first, ...rest] = name.split(" ");
-        // Seed the new customer's ORIGIN from the walk-in handling type. The
-        // customer's Type (Personal/Business) comes from the selector — Walk-In
-        // is a source, never a customer type.
-        const created = createCustomer({
-          firstName: first,
-          lastName: rest.join(" "),
-          mobile: (form.phone || "").trim(),
-          email: (form.email || "").trim(),
-          type: contactType,
-          source: walkInTypeToCustomerSource(form.type),
-        });
-        addCustomer(created);
-        customerId = created.id;
+        // Create new prospect Contact
+        const newContact = createProspectContact(seed);
+        setLocalContacts((prev) => [newContact, ...prev]);
+        contactId = newContact.id;
+        if (onContactCreated) {
+          onContactCreated(newContact);
+        }
       }
     }
 
@@ -269,7 +292,7 @@ export function WalkInFormDrawer({
     const payload: Partial<WalkIn> = {
       ...form,
       customer: name,
-      customerId,
+      contactId,
       // Multi-device source of truth. The flat model/modelId/category/issue
       // mirror the PRIMARY device for backward-compat, search and summary
       // display (spec §5/§16/§39). Only stored when >1 device to keep legacy

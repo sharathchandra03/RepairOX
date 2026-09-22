@@ -15,7 +15,8 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
-import { StoreFilter } from "@/components/common/store-filter";
+import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
+import { TableSearch } from "@/components/common/table-utility-bar";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { useStoreContext, type StoreBranch } from "@/lib/store-context";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
@@ -250,7 +251,7 @@ export default function InvoicePage() {
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [q, setQ] = useState("");
-  const [storeFilter, setStoreFilter] = useState<string>(""); // "" = All Stores
+  const [storeFilter, setStoreFilter] = useState<string[]>([]); // [] = All Stores (full authorized scope)
   // Advanced filter panel — hidden by default, toggled by the Filter button.
   const [showFilterPanel, setShowFilterPanel] = useState(false);
   // Advanced-panel unified live search across Invoice ID + Customer Name.
@@ -406,7 +407,7 @@ export default function InvoicePage() {
       return invoices.filter((inv) => inv.id === searchFilterId);
     }
     const filtered = invoices.filter((inv) => {
-      const okStore = !storeFilter || inv.branchId === storeFilter;
+      const okStore = matchesStoreSelection(inv.branchId, storeFilter);
       const okStatus = statusFilter === "all" || inv.status === statusFilter;
       const okType = typeFilter === "all" || inv.invoiceType === typeFilter;
       const okCategory = categoryFilter === "all" || (inv.serviceCategory || "service") === categoryFilter;
@@ -757,32 +758,22 @@ export default function InvoicePage() {
           ))}
         </div>
 
-        {/* Status strip + Store filter + Search — one tidy row. The status
-            pills stay on the left and stretch; the Store filter (All-Shops
-            only) and the search box sit together on the right, matching the
-            Tickets / Walk-In pages. */}
-        <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center">
-          <SegmentedTabs
-            value={statusFilter}
-            onChange={setStatusFilter}
-            options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
-            size="sm"
-            className="flex flex-1 [&>button]:flex-1 [&>button]:px-3"
-          />
-          <div className="flex shrink-0 items-center gap-2">
-            {/* Store filter — only in the owner's All-Shops view. */}
-            <StoreFilter value={storeFilter} onChange={setStoreFilter} width="w-[150px]" />
-            {/* Search — matches the Tickets / Walk-In search boxes. */}
-            <div className="relative w-56">
-              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={q}
-                onChange={(e) => setQ(e.target.value)}
-                placeholder="Search invoices…"
-                className="h-[34px] w-full rounded-xl border border-border bg-card pl-9 pr-3 text-[13px] outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
-              />
-            </div>
-          </div>
+      </div>
+
+      {/* Status pills (left) + Store filter → Search (right), on ONE full-width
+          row so the utility group pins to the page's right edge, matching the
+          Tickets / Walk-In top row exactly. */}
+      <div className="flex w-full flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+        <SegmentedTabs
+          value={statusFilter}
+          onChange={setStatusFilter}
+          options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
+          size="sm"
+          className="[&>button]:px-3"
+        />
+        <div className="flex shrink-0 items-center gap-2">
+          <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
+          <TableSearch value={q} onChange={setQ} placeholder="Search invoices…" className="w-56" />
         </div>
       </div>
 

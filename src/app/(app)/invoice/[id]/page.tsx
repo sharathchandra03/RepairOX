@@ -165,6 +165,15 @@ export default function InvoiceDetailPage() {
       }
       nodes.push({ kind: "invoice", label: invoice.id, current: true });
     }
+    // Reverse warranty lineage — a normal (non-proforma) invoice can have one
+    // or more warranty claims raised against the devices it billed. Appended
+    // as trailing branch node(s) so "was a warranty raised from this invoice?"
+    // is answered without leaving the page (see Invoice.warrantyClaimIds).
+    if (!proforma) {
+      for (const claimId of invoice.warrantyClaimIds ?? []) {
+        nodes.push({ kind: "warranty", label: ticketLabel(claimId) ?? claimId, href: `/tickets/${claimId}` });
+      }
+    }
     return nodes;
   }, [invoice, tickets, proforma]);
 

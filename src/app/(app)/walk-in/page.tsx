@@ -23,10 +23,11 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
-import { StoreFilter } from "@/components/common/store-filter";
+import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
+import { TableSearch } from "@/components/common/table-utility-bar";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { useStoreContext } from "@/lib/store-context";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
@@ -53,6 +54,7 @@ import {
 } from "@/lib/walk-in-data";
 import { useSession } from "@/lib/use-session";
 import { cn } from "@/lib/utils";
+import { useLeads } from "@/lib/leads-context";
 import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
 import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
 import { WalkInReport } from "@/components/walk-in/walk-in-report";
@@ -75,6 +77,7 @@ function fmtDate(iso: string): string {
 export default function WalkInPage() {
   const router = useRouter();
   const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary } = useStore();
+  const { contacts } = useLeads();
   // Active-store context — drives the context-aware Store column (§3h). Shown
   // only in multi-store / All-Shops mode; hidden inside a single store.
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -92,7 +95,7 @@ export default function WalkInPage() {
 
   // Filters
   const [q, setQ] = useState("");
-  const [storeFilter, setStoreFilter] = useState<string>(""); // "" = All Stores
+  const [storeFilter, setStoreFilter] = useState<string[]>([]); // [] = All Stores (full authorized scope)
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [sourceFilter, setSourceFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -185,7 +188,7 @@ export default function WalkInPage() {
   /* ── The single filtered dataset (table + report share this) ── */
   const filtered = useMemo(() => {
     const rows = walkIns.filter((w) => {
-      if (storeFilter && w.branchId !== storeFilter) return false;
+      if (!matchesStoreSelection(w.branchId, storeFilter)) return false;
       if (!isWalkInInDateRange(w.date, dateRange, customFrom, customTo)) return false;
       if (typeFilter !== "all" && (w.type ?? "direct") !== typeFilter) return false;
       if (sourceFilter !== "all" && w.source !== sourceFilter) return false;
@@ -554,6 +557,17 @@ export default function WalkInPage() {
         subtitle="Capture, follow up and convert every customer visit."
         actions={
           <>
+            {view === "table" && (
+              <Button
+                variant={showFilters || anyFilterActive ? "soft" : "outline"}
+                size="md"
+                className="rounded-full"
+                onClick={() => setShowFilters((s) => !s)}
+              >
+                <Filter className="h-4 w-4" /> Filter
+                {anyFilterActive && <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />}
+              </Button>
+            )}
             <Can permission={["use_pos", "import_data", "manage_repair_jobs"]}>
               <Button variant="outline" size="md" className="rounded-full" onClick={() => setShowImport(true)}>
                 <Upload className="h-4 w-4" /> Import
@@ -625,20 +639,10 @@ export default function WalkInPage() {
               onMarkAllRead={handleMarkAllRead}
               onCompleteFollowUp={(w) => setCompleteTarget(w)}
             />
-            {view === "table" && (
-              <Button
-                variant={showFilters || anyFilterActive ? "soft" : "outline"}
-                size="sm"
-                className="rounded-full"
-                onClick={() => setShowFilters((s) => !s)}
-              >
-                <Filter className="h-3.5 w-3.5" /> Filters{anyFilterActive ? " ·" : ""}
-              </Button>
-            )}
-            <StoreFilter value={storeFilter} onChange={setStoreFilter} />
-            <div className="w-56 sm:w-72">
-              <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search walk-ins…" iconLeft={<Search className="h-4 w-4" />} />
-            </div>
+            {/* RIGHT-SIDE utility group — Store filter → Search, kept on the
+                SAME top row (right side), matching the Tickets reference. */}
+            <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
+            <TableSearch value={q} onChange={setQ} placeholder="Search walk-ins…" className="w-56" />
           </div>
         )}
       </div>
@@ -1128,6 +1132,7 @@ export default function WalkInPage() {
         sources={sources}
         requireSalesPerson={requireSalesPerson}
         onSaved={handleSaved}
+        contacts={contacts}
       />
 
       {/* View drawer */}

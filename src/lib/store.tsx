@@ -32,6 +32,7 @@ import {
   type InventoryItem, type StockMovement,
 } from "@/lib/inventory-data";
 import { seedCustomers as SEED_CUSTOMERS, type Customer, type CustomerGroup } from "@/lib/customer-data";
+import { pointsFromInvoiceAmount, tierForLifetimeValue, evaluateAutomaticGroups } from "@/lib/customer-service";
 import { seedCompanies as SEED_COMPANIES, type Company } from "@/lib/company-data";
 import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
@@ -109,6 +110,9 @@ interface StoreActions {
   addCustomer: (customer: Customer) => Promise<void>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
+  /** Merge a duplicate customer into a primary record (tickets, invoices,
+   *  walk-ins, loyalty, groups). See mergeCustomersAction for scope notes. */
+  mergeCustomersAction: (primaryId: string, secondaryId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
   addCustomerGroup: (group: CustomerGroup) => Promise<void>;
   updateCustomerGroup: (id: string, updates: Partial<CustomerGroup>) => Promise<void>;
   deleteCustomerGroup: (id: string) => Promise<void>;
@@ -166,6 +170,7 @@ function rowToTicket(r: any): Ticket {
     discount: Number(r.discount ?? 0),
     imeiType: r.imei_type ?? undefined,
     qcStatus: r.qc_status ?? undefined,
+    contactId: r.contact_id ?? meta.contactId ?? undefined,
     customerId: r.customer_id ?? undefined,
     customerType: meta.customerType ?? undefined,
     gstNumber: meta.gstNumber ?? undefined,
@@ -185,12 +190,16 @@ function rowToTicket(r: any): Ticket {
     estimateStatus: meta.estimateStatus ?? undefined,
     convertedTicketId: meta.convertedTicketId ?? undefined,
     convertedFromEstimateId: meta.convertedFromEstimateId ?? undefined,
+    // Billing lineage — packed in the same JSONB envelope (no migration).
+    proformaId: meta.proformaId ?? undefined,
+    invoiceId: meta.invoiceId ?? undefined,
     // Warranty case metadata — packed in the same JSONB envelope (no migration).
     parentTicketId: meta.parentTicketId ?? undefined,
     parentTicketNo: meta.parentTicketNo ?? undefined,
     warrantyDeviceIds: meta.warrantyDeviceIds ?? undefined,
     warrantyIssue: meta.warrantyIssue ?? undefined,
     warrantyStatus: meta.warrantyStatus ?? undefined,
+    sourceInvoiceId: meta.sourceInvoiceId ?? undefined,
     createdFromTicketId: meta.createdFromTicketId ?? undefined,
     createdFromReason: meta.createdFromReason ?? undefined,
     pinnedAt: r.pinned_at ?? undefined,
@@ -215,16 +224,22 @@ function ticketDevicesEnvelope(t: Partial<Ticket>): Record<string, unknown> {
     linkedWalkInId: t.linkedWalkInId || null,
     linkedFieldJobId: t.linkedFieldJobId || null,
     linkedLeadId: t.linkedLeadId || null,
+    contactId: t.contactId || null,
     recordType: t.recordType || null,
     estimateStatus: t.estimateStatus || null,
     convertedTicketId: t.convertedTicketId || null,
     convertedFromEstimateId: t.convertedFromEstimateId || null,
+    // Billing lineage (see rowToTicket) — the Proforma / final Invoice tied to
+    // this record's commercial history.
+    proformaId: t.proformaId || null,
+    invoiceId: t.invoiceId || null,
     // Warranty case metadata (see rowToTicket).
     parentTicketId: t.parentTicketId || null,
     parentTicketNo: t.parentTicketNo || null,
     warrantyDeviceIds: t.warrantyDeviceIds ?? null,
     warrantyIssue: t.warrantyIssue || null,
     warrantyStatus: t.warrantyStatus || null,
+    sourceInvoiceId: t.sourceInvoiceId || null,
     createdFromTicketId: t.createdFromTicketId || null,
     createdFromReason: t.createdFromReason || null,
   };
@@ -256,6 +271,7 @@ function ticketToRow(t: Ticket): Record<string, unknown> {
     discount: t.discount ?? 0,
     imei_type: t.imeiType || null,
     qc_status: t.qcStatus || null,
+    contact_id: t.contactId || null,
     customer_id: t.customerId || null,
     pinned_at: t.pinnedAt ?? null,
     devices: ticketDevicesEnvelope(t),
@@ -274,6 +290,8 @@ function rowToInvoice(r: any): Invoice {
     reference: r.reference ?? "",
     invoiceType: r.invoice_type ?? "retail",
     customer: r.customer ?? "",
+    contactId: r.contact_id ?? meta.contactId ?? undefined,
+    customerId: r.customer_id ?? undefined,
     phone: r.phone ?? "",
     email: r.email ?? "",
     company: r.company ?? "",
@@ -311,6 +329,8 @@ function rowToInvoice(r: any): Invoice {
     sourceEstimateId: meta.sourceEstimateId ?? undefined,
     sourceTicketId: meta.sourceTicketId ?? undefined,
     convertedInvoiceId: meta.convertedInvoiceId ?? undefined,
+    // Reverse warranty lineage (see Invoice.warrantyClaimIds).
+    warrantyClaimIds: meta.warrantyClaimIds ?? undefined,
   };
 }
 
@@ -320,6 +340,8 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
     reference: inv.reference || null,
     invoice_type: inv.invoiceType ?? "retail",
     customer: inv.customer || null,
+    contact_id: inv.contactId || null,
+    customer_id: inv.customerId || null,
     phone: inv.phone || null,
     email: inv.email || null,
     company: inv.company || null,
@@ -357,6 +379,9 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
       sourceEstimateId: inv.sourceEstimateId ?? null,
       sourceTicketId: inv.sourceTicketId ?? null,
       convertedInvoiceId: inv.convertedInvoiceId ?? null,
+      contactId: inv.contactId ?? null,
+      // Reverse warranty lineage (see rowToInvoice).
+      warrantyClaimIds: inv.warrantyClaimIds ?? null,
     },
   };
 }
@@ -660,7 +685,7 @@ async function resequenceTicketNumbers(storeId?: string | null, prefix?: string 
 const WALKIN_META_MARKER = "\n\u241F::walkin-meta::";
 
 type WalkInMeta = Partial<
-  Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "customerId" | "modelId" | "pinnedAt"
+  Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "contactId" | "customerId" | "modelId" | "pinnedAt"
     | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt" | "linkedLeadId"
     | "customerComments" | "followUpAttempt" | "followUpComments" | "followUpHistory" | "devices">
 >;
@@ -673,6 +698,7 @@ function encodeWalkInNotes(w: WalkIn): string | null {
   if (w.email) meta.email = w.email;
   if (w.salesPersonId) meta.salesPersonId = w.salesPersonId;
   if (w.salesPersonName) meta.salesPersonName = w.salesPersonName;
+  if (w.contactId) meta.contactId = w.contactId;
   if (w.customerId) meta.customerId = w.customerId;
   if (w.linkedLeadId) meta.linkedLeadId = w.linkedLeadId;
   if (w.modelId) meta.modelId = w.modelId;
@@ -734,6 +760,7 @@ function rowToWalkIn(r: any): WalkIn {
     status: r.status ?? "visitor",
     salesPersonId: r.sales_person_id ?? meta.salesPersonId ?? undefined,
     salesPersonName: r.sales_person_name ?? meta.salesPersonName ?? undefined,
+    contactId: r.contact_id ?? meta.contactId ?? undefined,
     customerId: r.customer_id ?? meta.customerId ?? undefined,
     linkedLeadId: r.linked_lead_id ?? meta.linkedLeadId ?? undefined,
     linkedTicketId,
@@ -768,6 +795,8 @@ function walkInToRow(w: WalkIn): Record<string, unknown> {
     model: w.model || null,
     reasons: w.reasons ?? [],
     status: w.status,
+    contact_id: w.contactId || null,
+    customer_id: w.customerId || null,
     ticket_id: w.linkedTicketId || w.ticketId || null,
     invoice_value: w.invoiceValue ?? 0,
     business_value: w.businessValue ?? 0,
@@ -863,6 +892,7 @@ function rowToCustomer(r: any): Customer {
     type: r.type ?? "personal",
     source: r.source ?? undefined,
     groupIds: Array.isArray(r.group_ids) ? r.group_ids : [],
+    companyId: r.company_id ?? undefined,
     firstName: r.first_name ?? "",
     lastName: r.last_name ?? "",
     fullName: r.full_name ?? `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
@@ -892,6 +922,7 @@ function customerToRow(c: Customer): Record<string, unknown> {
     type: c.type || "personal",
     source: c.source || null,
     group_ids: c.groupIds ?? [],
+    company_id: c.companyId || null,
     first_name: c.firstName || null,
     last_name: c.lastName || null,
     full_name: c.fullName || null,
@@ -1152,6 +1183,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // sync writes the counterpart record's status, that record's id is parked here
   // so its own update handler skips propagating the change back.
   const syncingIdsRef = useRef<Set<string>>(new Set());
+  // In-flight loyalty-award operations, keyed by invoice id. Guards against a
+  // rapid double-save around the same "→ paid" transition trying to award
+  // points twice before the first award's DB round-trip finishes (the DB
+  // unique index is the hard backstop; this ref avoids the extra network
+  // round-trip in the common case).
+  const awardingLoyaltyRef = useRef<Set<string>>(new Set());
 
   // In-flight Proforma → Invoice conversions. Guards against double-click /
   // rapid re-entry within THIS session while the async create is running (the
@@ -1688,10 +1725,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // preserved and touched meta is applied.
       const envelopeKeys = [
         "devices", "customerType", "gstNumber", "gstRate", "sgstRate", "cgstRate",
-        "sgst", "cgst", "linkedWalkInId", "linkedFieldJobId", "linkedLeadId",
+        "sgst", "cgst", "linkedWalkInId", "linkedFieldJobId", "linkedLeadId", "contactId",
         "recordType", "estimateStatus", "convertedTicketId", "convertedFromEstimateId",
+        "proformaId", "invoiceId",
         "parentTicketId", "parentTicketNo", "warrantyDeviceIds", "warrantyIssue",
-        "warrantyStatus", "createdFromTicketId", "createdFromReason",
+        "warrantyStatus", "sourceInvoiceId", "createdFromTicketId", "createdFromReason",
       ] as const;
       if (envelopeKeys.some((k) => k in updates)) {
         row.devices = ticketDevicesEnvelope({ ...(prev ?? {}), ...updates });
@@ -1700,6 +1738,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("email" in updates) row.email = updates.email ?? null;
       if ("address" in updates) row.address = updates.address ?? null;
       if ("company" in updates) row.company = updates.company ?? null;
+      if ("contactId" in updates) row.contact_id = updates.contactId ?? null;
       if ("customerId" in updates) row.customer_id = updates.customerId ?? null;
 
       let currentRow = row;
@@ -2026,6 +2065,140 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return undefined;
   }, []);
 
+  /**
+   * Award loyalty points + bump customer stats for a newly-paid invoice.
+   * Called from BOTH addInvoice (invoice created directly with status "paid",
+   * e.g. instant walk-in cash sale) and updateInvoice (an existing invoice
+   * transitioning TO "paid"). Callers are responsible for only invoking this
+   * once per genuine "→ paid" transition (see call sites for the exact guard);
+   * this function itself only guards against a concurrent duplicate call for
+   * the SAME invoice id via `awardingLoyaltyRef`, plus a DB unique index
+   * (loyalty_transactions_one_earn_per_source) as the hard backstop against
+   * double-awarding the same invoice.
+   *
+   * No-ops silently if the invoice has no linked customerId — legacy/guest
+   * invoices (denormalized name/phone only) never earn points until they're
+   * linked to a real Customer Master record.
+   */
+  const awardLoyaltyForPaidInvoice = useCallback(async (invoiceId: string, customerId: string | undefined, invoiceReference: string, invoiceTotal: number) => {
+    if (!customerId || awardingLoyaltyRef.current.has(invoiceId)) return;
+    awardingLoyaltyRef.current.add(invoiceId);
+    try {
+      // Loyalty config (enabled + earning rate) lives in Settings → Customers
+      // → Loyalty (organization_settings.loyalty_config), same table/pattern
+      // as invoice numbering above. Read directly here rather than through
+      // useStoreSettings() — StoreSettingsProvider is mounted INSIDE
+      // StoreProvider in the tree, so this component can't consume that hook.
+      let loyaltyEnabled = true;
+      let pointsPerRupee = 100;
+      if (shouldUseDb()) {
+        try {
+          const { data: settingsRows } = await db.from("organization_settings").select("loyalty_config").limit(1);
+          const raw = settingsRows?.[0]?.loyalty_config as unknown;
+          const cfg = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : null;
+          if (cfg && typeof cfg === "object") {
+            if (typeof cfg.enabled === "boolean") loyaltyEnabled = cfg.enabled;
+            if (typeof cfg.pointsPerRupee === "number" && cfg.pointsPerRupee > 0) pointsPerRupee = cfg.pointsPerRupee;
+          }
+        } catch {
+          /* keep defaults (program enabled, ₹100 = 1 point) */
+        }
+      }
+
+      const pointsEarned = loyaltyEnabled ? pointsFromInvoiceAmount(invoiceTotal, pointsPerRupee) : 0;
+      const customer = stateRef.current.customers.find((c) => c.id === customerId);
+
+      if (pointsEarned > 0 && shouldUseDb()) {
+        const { data: account } = await db
+          .from("loyalty_accounts")
+          .select("points_balance")
+          .eq("customer_id", customerId)
+          .maybeSingle();
+        const currentBalance = account?.points_balance ?? 0;
+        const newBalance = currentBalance + pointsEarned;
+        const newTier = tierForLifetimeValue(newBalance);
+
+        const { error: txError } = await db.from("loyalty_transactions").insert({
+          id: `LTX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 9)}`,
+          customer_id: customerId,
+          type: "earn",
+          points_change: pointsEarned,
+          points_balance: newBalance,
+          source_type: "invoice",
+          source_id: invoiceId,
+          description: `Earned ${pointsEarned} pts from invoice ${invoiceReference || invoiceId}`,
+        });
+        // Unique-violation (23505) means an earn transaction for this invoice
+        // already exists — another call already awarded it, so skip silently.
+        if (txError && txError.code !== "23505") {
+          console.error("[store] loyalty award failed:", txError.message);
+        } else if (!txError) {
+          const { error: acctError } = await db.from("loyalty_accounts").upsert({
+            customer_id: customerId,
+            points_balance: newBalance,
+            tier: newTier,
+            last_transaction_at: new Date().toISOString(),
+          });
+          if (acctError) console.error("[store] loyalty account upsert failed:", acctError.message);
+        }
+      }
+
+      // Customer stats: bump totalInvoices / lifetimeValue / lastVisit
+      // regardless of whether points were earned (amount could be ₹0).
+      if (customer) {
+        const nextTotalInvoices = (customer.totalInvoices ?? 0) + 1;
+        const nextLifetimeValue = (customer.lifetimeValue ?? 0) + invoiceTotal;
+        // "Completed" for a ticket = repaired/returned AND handed back to the
+        // customer — repaired_collected / return_collected are the real
+        // terminal TicketStatus values (there is no "completed"/"closed").
+        const nextTotalTickets = stateRef.current.tickets.filter(
+          (t) => t.customerId === customerId && (t.status === "repaired_collected" || t.status === "return_collected")
+        ).length;
+        const nowIso = new Date().toISOString();
+
+        // Re-evaluate automatic group membership now that lifetime value /
+        // ticket count / tier just changed — this is the ONE moment those
+        // numbers actually move, so it's the natural trigger point. Matches
+        // by group NAME (see evaluateAutomaticGroups) — if the org hasn't
+        // created a group literally named "High Value" / "Frequent Customer"
+        // / "Inactive" / "VIP", the corresponding rule silently assigns
+        // nothing (no error, just no match).
+        const daysSinceLastActivity = customer.lastVisit
+          ? Math.floor((Date.now() - new Date(customer.lastVisit).getTime()) / 86_400_000)
+          : 0;
+        const autoGroupIds = evaluateAutomaticGroups(
+          {
+            customer,
+            lifetimeValue: nextLifetimeValue,
+            totalTickets: nextTotalTickets,
+            totalVisits: nextTotalInvoices,
+            daysSinceLastActivity,
+          },
+          stateRef.current.customerGroups
+        );
+        const nextGroupIds = Array.from(new Set([...(customer.groupIds ?? []), ...autoGroupIds]));
+
+        if (shouldUseDb()) {
+          const { error: custError } = await db
+            .from("customers")
+            .update({ total_invoices: nextTotalInvoices, lifetime_value: nextLifetimeValue, last_visit: nowIso, group_ids: nextGroupIds })
+            .eq("id", customerId);
+          if (custError) console.error("[store] loyalty customer-stats update failed:", custError.message);
+        }
+        setState((s) => ({
+          ...s,
+          customers: s.customers.map((c) =>
+            c.id === customerId
+              ? { ...c, totalInvoices: nextTotalInvoices, lifetimeValue: nextLifetimeValue, lastVisit: nowIso, groupIds: nextGroupIds, updatedAt: nowIso }
+              : c
+          ),
+        }));
+      }
+    } finally {
+      awardingLoyaltyRef.current.delete(invoiceId);
+    }
+  }, []);
+
   /* ── Invoice actions (DB-first) ── */
   const addInvoice = useCallback(async (invoiceInput: Invoice): Promise<string> => {
     // Normalize the ticket link so a ticket NUMBER (or stale reference) can never
@@ -2130,13 +2303,39 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // "Repaired & Collected") back to the originating ticket's BILLED devices
       // immediately, even when the user never manually changed the invoice status.
       await syncTicketStatusFromInvoice(saved.ticketId, saved.repairStatus, billedTicketDeviceIds(saved));
+      // Billing lineage — stamp this invoice's id back onto the originating
+      // Ticket/Estimate so View Ticket/Estimate can answer "was it finally
+      // invoiced, and which invoice?" without a reverse scan (mirrors the
+      // sourceEstimateId/sourceTicketId lineage already carried on the invoice).
+      const linkedTicketId = saved.ticketId ?? saved.sourceTicketId;
+      if (linkedTicketId) {
+        const linkedTicket = stateRef.current.tickets.find((t) => t.id === linkedTicketId);
+        if (linkedTicket && linkedTicket.invoiceId !== saved.id) {
+          try { await updateTicket(linkedTicket.id, { invoiceId: saved.id }); } catch { /* non-fatal */ }
+        }
+      }
+      if (saved.sourceEstimateId) {
+        const est = stateRef.current.tickets.find((t) => t.id === saved.sourceEstimateId);
+        if (est && est.invoiceId !== saved.id) {
+          try { await updateTicket(est.id, { invoiceId: saved.id }); } catch { /* non-fatal */ }
+        }
+      }
+      // A brand-new invoice created directly with status "paid" (e.g. instant
+      // walk-in cash sale) never passes through updateInvoice's "→ paid"
+      // transition check, so award loyalty points here on creation instead.
+      if (saved.status === "paid") {
+        await awardLoyaltyForPaidInvoice(saved.id, saved.customerId, saved.reference || saved.id, saved.total);
+      }
       return saved.id;
     }
     setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
     logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
     await syncTicketStatusFromInvoice(invoice.ticketId, invoice.repairStatus, billedTicketDeviceIds(invoice));
+    if (invoice.status === "paid") {
+      await awardLoyaltyForPaidInvoice(invoice.id, invoice.customerId, invoice.reference || invoice.id, invoice.total);
+    }
     return invoice.id;
-  }, [syncTicketStatusFromInvoice, resolveTicketId]);
+  }, [syncTicketStatusFromInvoice, resolveTicketId, awardLoyaltyForPaidInvoice, updateTicket]);
 
   const updateInvoice = useCallback(async (id: string, updates: Partial<Invoice>) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
@@ -2185,6 +2384,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("customer" in updates) row.customer = updates.customer ?? null;
+      if ("contactId" in updates) row.contact_id = updates.contactId ?? null;
+      if ("customerId" in updates) row.customer_id = updates.customerId ?? null;
       if ("phone" in updates) row.phone = updates.phone ?? null;
       if ("email" in updates) row.email = updates.email ?? null;
       if ("company" in updates) row.company = updates.company ?? null;
@@ -2210,7 +2411,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // / sourceEstimateId / sourceTicketId / convertedInvoiceId) also live in
       // the `devices` meta jsonb — re-serialize when any of them change so the
       // proforma→invoice conversion links actually persist.
-      const LINEAGE_KEYS = ["documentType", "proformaStatus", "sourceProformaId", "sourceEstimateId", "sourceTicketId", "convertedInvoiceId"] as const;
+      const LINEAGE_KEYS = ["documentType", "proformaStatus", "sourceProformaId", "sourceEstimateId", "sourceTicketId", "convertedInvoiceId", "warrantyClaimIds"] as const;
       const lineageTouched = LINEAGE_KEYS.some((k) => k in updates);
       if (prev && ("repairStatus" in updates || "paymentMode" in updates || "serviceCategory" in updates || "devices" in updates || lineageTouched)) {
         row.devices = (invoiceToRow({ ...prev, ...updates } as Invoice).devices);
@@ -2260,6 +2461,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       }
     }
 
+    // ── Loyalty: award points once, only when the invoice becomes fully paid ──
+    // "Finalized" = status transitions TO "paid" (it wasn't already paid).
+    // Never awards from draft/sent/partial/overdue/cancelled, and never
+    // re-awards on a subsequent save that keeps status === "paid" — the
+    // transition check (prev?.status !== "paid") only fires on the edge.
+    if (updates.status === "paid" && prev?.status !== "paid") {
+      const customerId = updates.customerId ?? prev?.customerId;
+      const invoiceTotal = updates.total ?? prev?.total ?? 0;
+      await awardLoyaltyForPaidInvoice(id, customerId, prev?.reference || id, invoiceTotal);
+    }
+
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "status", label: "Status" }, { key: "paidAmount", label: "Paid", format: inr }, { key: "total", label: "Total", format: inr },
     ]);
@@ -2267,7 +2479,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (("paidAmount" in updates && (updates.paidAmount ?? 0) > (prev?.paidAmount ?? 0)) || updates.status === "paid") { action = "Payment Added"; severity = "success"; }
     else if (updates.status === "cancelled") { action = "Cancelled"; severity = "critical"; }
     logActivity({ module: "Invoice", action, severity, entity: "Invoice", reference: prev?.reference || id, description: `Updated invoice ${prev?.reference || id} (${prev?.customer ?? ""}).`, changes });
-  }, [resolveTicketId]);
+  }, [resolveTicketId, awardLoyaltyForPaidInvoice]);
 
   const deleteInvoice = useCallback(async (id: string) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
@@ -2409,6 +2621,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("category" in updates) row.category = updates.category ?? null;
       if ("model" in updates) row.model = updates.model ?? null;
       if ("status" in updates) row.status = updates.status;
+      if ("contactId" in updates) row.contact_id = updates.contactId ?? null;
+      if ("customerId" in updates) row.customer_id = updates.customerId ?? null;
       if ("ticketId" in updates || "linkedTicketId" in updates) {
         row.ticket_id = updates.linkedTicketId ?? updates.ticketId ?? null;
       }
@@ -2416,7 +2630,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("businessValue" in updates) row.business_value = updates.businessValue ?? 0;
       if ("reasons" in updates) row.reasons = updates.reasons ?? [];
       // Any change to a notes-envelope field (or notes itself) re-encodes notes.
-      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "customerId", "modelId", "pinnedAt", "convertedAt", "followUpDate", "followUpTime", "followUpStatus", "followUpReadAt", "customerComments", "followUpAttempt", "followUpComments", "followUpHistory", "devices"];
+      const envelopeKeys = ["notes", "walkInNumber", "type", "issue", "email", "salesPersonId", "salesPersonName", "contactId", "customerId", "modelId", "pinnedAt", "convertedAt", "followUpDate", "followUpTime", "followUpStatus", "followUpReadAt", "customerComments", "followUpAttempt", "followUpComments", "followUpHistory", "devices"];
       if (merged && envelopeKeys.some((k) => k in updates)) {
         row.notes = encodeWalkInNotes(merged);
       }
@@ -2627,6 +2841,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("type" in updates) row.type = updates.type;
       if ("source" in updates) row.source = updates.source ?? null;
       if ("groupIds" in updates) row.group_ids = updates.groupIds ?? [];
+      if ("companyId" in updates) row.company_id = updates.companyId ?? null;
       if ("status" in updates) row.status = updates.status;
       if ("totalTickets" in updates) row.total_tickets = updates.totalTickets;
       if ("totalInvoices" in updates) row.total_invoices = updates.totalInvoices;
@@ -2664,6 +2879,130 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     setState((s) => ({ ...s, customers: s.customers.filter((c) => c.id !== id) }));
     logActivity({ module: "Customer", action: "Customer Deleted", severity: "critical", entity: "Customer", reference: id, description: prev ? `Deleted customer ${prev.fullName}.` : `Deleted customer ${id}.`, meta: prev ? { Mobile: prev.mobile } : undefined });
   }, []);
+
+  /**
+   * Merge a duplicate customer into a primary/canonical record.
+   *
+   * Reassigns every reference this store owns from `secondaryId` →
+   * `primaryId`, unions loyalty points + group memberships, then archives
+   * (soft-deletes) the secondary record. Does NOT delete or lose data —
+   * everything is reassigned, nothing is dropped.
+   *
+   * SCOPE: covers the tables this store owns directly — tickets, invoices,
+   * walk_ins, loyalty_accounts/loyalty_transactions. Field Jobs (field-context.tsx)
+   * and Leads (leads-context.tsx) live in separate React contexts and are
+   * NOT reassigned by this function — merging those requires calling their
+   * own update functions with the same primaryId/secondaryId pair from a
+   * component that has access to both contexts (see the merge UI in
+   * Settings → Customers → Manage, which calls this plus the Leads-side
+   * reassignment in the same action).
+   *
+   * Not atomic across tables (no cross-table DB transaction from the
+   * client) — if a step fails partway, already-reassigned records stay
+   * reassigned and the function returns an error listing what succeeded.
+   * This mirrors every other multi-step write in this file (e.g.
+   * addInvoice's ticket-sync step) rather than attempting a client-side
+   * two-phase commit.
+   */
+  const mergeCustomersAction = useCallback(async (
+    primaryId: string,
+    secondaryId: string,
+    reason?: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    if (!primaryId || !secondaryId) return { success: false, error: "Both customer IDs are required." };
+    if (primaryId === secondaryId) return { success: false, error: "Cannot merge a customer with itself." };
+
+    const primary = stateRef.current.customers.find((c) => c.id === primaryId);
+    const secondary = stateRef.current.customers.find((c) => c.id === secondaryId);
+    if (!primary) return { success: false, error: "Primary customer not found." };
+    if (!secondary) return { success: false, error: "Secondary customer not found." };
+
+    const failures: string[] = [];
+
+    if (shouldUseDb()) {
+      // Tickets, invoices: real customer_id column — bulk reassign in one
+      // statement each.
+      const { error: tErr } = await db.from("tickets").update({ customer_id: primaryId }).eq("customer_id", secondaryId);
+      if (tErr) failures.push(`tickets: ${tErr.message}`);
+      const { error: iErr } = await db.from("invoices").update({ customer_id: primaryId }).eq("customer_id", secondaryId);
+      if (iErr) failures.push(`invoices: ${iErr.message}`);
+      // loyalty_transactions: real customer_id column too — reassign the
+      // ledger rows themselves so history is preserved under the primary.
+      const { error: lErr } = await db.from("loyalty_transactions").update({ customer_id: primaryId }).eq("customer_id", secondaryId);
+      if (lErr) failures.push(`loyalty_transactions: ${lErr.message}`);
+    }
+    // Local state mirror for tickets/invoices (kept in sync regardless of
+    // shouldUseDb(), matching every other action's local+DB dual write).
+    setState((s) => ({
+      ...s,
+      tickets: s.tickets.map((t) => (t.customerId === secondaryId ? { ...t, customerId: primaryId } : t)),
+      invoices: s.invoices.map((i) => (i.customerId === secondaryId ? { ...i, customerId: primaryId } : i)),
+    }));
+
+    // walk_ins: customerId lives inside the notes JSONB envelope, not a real
+    // column — must go through updateWalkIn() per-record so it's correctly
+    // re-encoded, rather than a raw SQL UPDATE.
+    const affectedWalkIns = stateRef.current.walkIns.filter((w) => w.customerId === secondaryId);
+    for (const w of affectedWalkIns) {
+      try {
+        await updateWalkIn(w.id, { customerId: primaryId });
+      } catch (e) {
+        failures.push(`walk_in ${w.id}: ${e instanceof Error ? e.message : "unknown error"}`);
+      }
+    }
+
+    // Loyalty: sum the two accounts' point balances onto the primary, then
+    // remove the secondary's account (its transactions were already
+    // reassigned above, so history isn't lost — only the now-redundant
+    // balance row goes away).
+    if (shouldUseDb()) {
+      const { data: accounts } = await db.from("loyalty_accounts").select("customer_id, points_balance").in("customer_id", [primaryId, secondaryId]);
+      const primaryBalance = accounts?.find((a: any) => a.customer_id === primaryId)?.points_balance ?? 0;
+      const secondaryBalance = accounts?.find((a: any) => a.customer_id === secondaryId)?.points_balance ?? 0;
+      if (secondaryBalance > 0 || primaryBalance > 0) {
+        const mergedBalance = primaryBalance + secondaryBalance;
+        const mergedTier = tierForLifetimeValue(mergedBalance);
+        const { error: upErr } = await db.from("loyalty_accounts").upsert({
+          customer_id: primaryId, points_balance: mergedBalance, tier: mergedTier, last_transaction_at: new Date().toISOString(),
+        });
+        if (upErr) failures.push(`loyalty_accounts: ${upErr.message}`);
+      }
+      const { error: delAcctErr } = await db.from("loyalty_accounts").delete().eq("customer_id", secondaryId);
+      if (delAcctErr && !isUndefinedColumnError(delAcctErr)) failures.push(`loyalty_accounts cleanup: ${delAcctErr.message}`);
+    }
+
+    // Groups: union of both customers' group memberships onto the primary.
+    const mergedGroupIds = Array.from(new Set([...(primary.groupIds ?? []), ...(secondary.groupIds ?? [])]));
+    await updateCustomer(primaryId, {
+      groupIds: mergedGroupIds,
+      totalTickets: (primary.totalTickets ?? 0) + (secondary.totalTickets ?? 0),
+      totalInvoices: (primary.totalInvoices ?? 0) + (secondary.totalInvoices ?? 0),
+      totalRepairs: (primary.totalRepairs ?? 0) + (secondary.totalRepairs ?? 0),
+      lifetimeValue: (primary.lifetimeValue ?? 0) + (secondary.lifetimeValue ?? 0),
+    });
+
+    // Archive (soft-delete) the secondary — never hard-delete, so the audit
+    // trail and any records this function's scope didn't reach (Field Jobs,
+    // Leads) can still resolve the id if looked up directly.
+    if (shouldUseDb()) {
+      const { error: archErr } = await db.from("customers").update({ deleted_at: new Date().toISOString() }).eq("id", secondaryId);
+      if (archErr) failures.push(`archive secondary: ${archErr.message}`);
+    }
+    setState((s) => ({ ...s, customers: s.customers.filter((c) => c.id !== secondaryId) }));
+
+    logActivity({
+      module: "Customer", action: "Customers Merged", severity: failures.length > 0 ? "warning" : "success",
+      entity: "Customer", reference: primaryId,
+      description: `Merged ${secondary.fullName} (${secondaryId}) into ${primary.fullName} (${primaryId})${reason ? ` — ${reason}` : ""}.${failures.length > 0 ? ` Partial failures: ${failures.join("; ")}` : ""}`,
+    });
+
+    if (failures.length > 0) {
+      toast.error("Merge completed with some errors", { description: failures.join("; ") });
+      return { success: false, error: failures.join("; ") };
+    }
+    toast.success("Customers merged", { description: `${secondary.fullName} merged into ${primary.fullName}.` });
+    return { success: true };
+  }, [updateWalkIn, updateCustomer]);
 
   /* ── Customer Group actions (DB-first) ── */
   const addCustomerGroup = useCallback(async (group: CustomerGroup) => {
@@ -2998,6 +3337,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addCustomer,
     updateCustomer,
     deleteCustomer,
+    mergeCustomersAction,
     addCustomerGroup,
     updateCustomerGroup,
     deleteCustomerGroup,

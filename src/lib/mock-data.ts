@@ -151,6 +151,8 @@ export type DeviceRecord = {
   parts: TicketPart[];
   /** QC results for this device */
   qc: Record<string, "ok" | "no" | "na" | undefined>;
+  /** Optional per-QC-item technician notes, keyed by the same item id as `qc`. */
+  qcNotes?: Record<string, string | undefined>;
   /** Status tracking per device */
   status: TicketStatus;
 };
@@ -608,6 +610,9 @@ export type Ticket = {
   discount?: number;
   imeiType?: "imei" | "imei1" | "imei2" | "serial";
   qcStatus?: "pending" | "pass" | "fail";
+  /** CRM Contact retained before/after Customer promotion. Estimates can carry
+   * this without creating a Customer Master record. */
+  contactId?: string;
   customerId?: string;
   customerType?: "personal" | "business";
   /** GST Number for Business/GST tickets. */
@@ -678,6 +683,13 @@ export type Ticket = {
    *  §8/§40), so a warranty covers one or more explicitly selected devices —
    *  never all devices implicitly. */
   warrantyDeviceIds?: string[];
+  /** The specific Invoice that established the warranty terms this claim was
+   *  raised against (the invoice billing the original device — see the
+   *  WARRANTY DATE SOURCE RULE above: duration + start date come from this
+   *  invoice). Captured explicitly at claim creation so View Warranty can show
+   *  "raised from Invoice X" without a reverse scan, and so the eligibility
+   *  window stays traceable even if the invoice's device links change later. */
+  sourceInvoiceId?: string;
   /** The NEW customer-reported issue for this claim. Stored SEPARATELY so the
    *  original repair's issue is never overwritten (spec §19). */
   warrantyIssue?: string;
@@ -748,7 +760,7 @@ export const navItems: NavItem[] = [
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "WalkIn", permission: "use_pos" },
-  { href: "/field",            label: "Field",         icon: "Truck", permission: "view_field_jobs" },
+  { href: "/field",            label: "Pickup & Drop", icon: "Truck", permission: "view_field_jobs" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "IndianRupee", permission: "manage_payments" },
 
@@ -1217,6 +1229,12 @@ export type Invoice = {
   reference?: string;
   invoiceType: InvoiceType;
   customer: string;
+  /** CRM Contact retained on drafts/proformas before Customer promotion. */
+  contactId?: string;
+  /** Linked Customer Master record, when selected/created via CustomerPicker
+   *  / AddCustomerModal. Optional for backward compat with legacy invoices
+   *  that only carry the denormalized name/phone/email below. */
+  customerId?: string;
   phone: string;
   email?: string;
   company?: string;
@@ -1295,6 +1313,13 @@ export type Invoice = {
    *  normal Invoice created from it. Lets View Proforma answer "was it finally
    *  invoiced, and which invoice?" and powers duplicate-conversion protection. */
   convertedInvoiceId?: string;
+  /** Reverse warranty lineage — the id(s) of every Warranty Ticket (recordType
+   *  === "warranty") raised against a device billed on THIS invoice. An
+   *  invoice's warranty terms can be claimed more than once over its lifetime
+   *  (spec: multiple claims per device history), so this is an array, newest
+   *  last. Lets View Invoice answer "was a warranty claim raised from this
+   *  invoice, and which one(s)?" without a reverse scan over all tickets. */
+  warrantyClaimIds?: string[];
 };
 
 function daysAgo(days: number): string {
@@ -1695,7 +1720,10 @@ export type WalkIn = {
   /** Assigned sales person (only when type === "sales"). Reuses the Employee/User master. */
   salesPersonId?: string;
   salesPersonName?: string;
-  /** Linked customer master record, when selected/created. */
+  /** CRM Contact identity. Enquiry-only Walk-Ins retain this without creating
+   * a Customer; promotion happens on Ticket/Invoice/manual conversion. */
+  contactId?: string;
+  /** Linked customer master record after promotion. */
   customerId?: string;
   /** Originating Lead when this walk-in was received from a Store-to-Store route. */
   linkedLeadId?: string;
@@ -1841,7 +1869,7 @@ export const walkIns: WalkIn[] = [];
 
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
-    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/field", "/price-list"] },
+    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
     { label: "INVENTORY",      items: ["/inventory"] },
     // Expenses remains standalone for daily operational quick-access.
     // Employees and Accounts are now expandable groups rendered separately.
@@ -1851,7 +1879,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],
   operations: [
-    { label: "MODULE",     items: ["/operations", "/stock"] },
+    { label: "MODULE",     items: ["/operations", "/field", "/stock"] },
     { label: "PURCHASING", items: ["/operations/vendors", "/operations/purchase-orders", "/operations/transfers", "/operations/products"] },
     { label: "GENERAL",    items: ["/operations/reports", "/settings"] },
   ],

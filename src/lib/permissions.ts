@@ -163,6 +163,13 @@ export type PermissionKey =
   | "manage_customers"
   | "manage_customer_groups"
   | "assign_customer_groups"
+  /* Loyalty */
+  | "view_loyalty"
+  | "manage_loyalty"
+  | "loyalty_view_points"
+  | "loyalty_award_points"
+  | "loyalty_redeem_points"
+  | "loyalty_tier_change"
   /* Expenses / Accounts */
   | "view_expenses"
   | "create_expense"
@@ -541,6 +548,19 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "manage_customers", label: "Manage Customers" },
       { key: "manage_customer_groups", label: "Manage Customer Groups" },
       { key: "assign_customer_groups", label: "Assign Customer Groups" },
+    ],
+  },
+  {
+    id: "loyalty",
+    label: "Customer Loyalty",
+    description: "Loyalty program, points, tiers and redemption",
+    permissions: [
+      { key: "view_loyalty", label: "View Loyalty Program" },
+      { key: "manage_loyalty", label: "Manage Loyalty Settings" },
+      { key: "loyalty_view_points", label: "View Customer Points" },
+      { key: "loyalty_award_points", label: "Award/Adjust Points" },
+      { key: "loyalty_redeem_points", label: "Process Redemption" },
+      { key: "loyalty_tier_change", label: "Change Customer Tier" },
     ],
   },
   {

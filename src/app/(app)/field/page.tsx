@@ -1,7 +1,7 @@
 "use client";
 
 /* ──────────────────────────────────────────────────────────────────────────
-   RepairOX — Shop Management → Field (Pickup & Drop operations).
+   RepairOX — Field Management → Pickup & Drop (device pickup/drop logistics).
 
    Operational/logistics workspace that moves devices between the customer and
    the store. NOT a ticket system — it wraps the existing Ticket/Invoice flow.
@@ -48,6 +48,7 @@ import {
 } from "@/lib/field-data";
 import { resolveFieldRow, formatInvoiceAmount, type FieldResolveSources } from "@/lib/field-resolve";
 import { StoreContextCell } from "@/components/common/store-context-cell";
+import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { useStoreContext, type StoreBranch } from "@/lib/store-context";
 
 const PAGE_SIZES = [10, 20, 50, 100];
@@ -273,8 +274,8 @@ export default function FieldPage() {
     <div className="space-y-5">
       {/* Header */}
       <PageHeader
-        eyebrow="Shop · Logistics"
-        title="Field Operations"
+        eyebrow="Field Management · Logistics"
+        title="Pickup & Drop"
         subtitle="Pickup & drop operations — from the customer's door to the workbench and back."
         actions={
           <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
@@ -729,8 +730,10 @@ export default function FieldPage() {
           );
         })}
         {hydrated && filtered.length === 0 && (
-          <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
-            {scopedJobs.length === 0 ? "No field jobs yet. They appear when Sales routes a lead to Pickup & Drop." : "No jobs match this view."}
+          <div className="flex flex-col items-center gap-2 p-12 text-center">
+            <EmptyStateCharacter variant="field" />
+            <p className="font-semibold">{scopedJobs.length === 0 ? "No field jobs yet" : "No jobs match this view"}</p>
+            <p className="text-sm text-muted-foreground">{scopedJobs.length === 0 ? "Field jobs are created when Sales routes a lead to Pickup & Drop." : "Try a different queue, filter or date range."}</p>
           </div>
         )}
       </div>
@@ -865,7 +868,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
 function EmptyState({ hasJobs }: { hasJobs: boolean }) {
   return (
     <div className="flex flex-col items-center gap-2 p-12 text-center">
-      <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground"><Truck className="h-6 w-6" /></div>
+      <EmptyStateCharacter variant="field" />
       <p className="font-semibold">{hasJobs ? "No jobs match this view" : "No field jobs yet"}</p>
       <p className="text-sm text-muted-foreground">{hasJobs ? "Try a different queue, filter or date range." : "Field jobs are created when Sales routes a lead to Pickup & Drop."}</p>
     </div>

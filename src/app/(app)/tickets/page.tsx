@@ -11,14 +11,15 @@ import {
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
-import { Input, Select } from "@/components/ui/input";
+import { Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
-import { StoreFilter } from "@/components/common/store-filter";
+import { TableUtilityBar } from "@/components/common/table-utility-bar";
+import { matchesStoreSelection } from "@/components/common/store-multi-select";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { TicketActionsMenu, type TicketAction } from "@/components/tickets/ticket-actions-menu";
 import { DueDateCell } from "@/components/tickets/due-date-cell";
@@ -192,7 +193,7 @@ export default function TicketsPage() {
 
   // Filters
   const [statusFilter, setStatusFilter] = useState<string>("all");
-  const [storeFilter, setStoreFilter] = useState<string>(""); // "" = All Stores (All-Shops view)
+  const [storeFilter, setStoreFilter] = useState<string[]>([]); // [] = All Stores (full authorized scope)
   const [dateRange, setDateRange] = useState<DateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
@@ -486,7 +487,7 @@ export default function TicketsPage() {
       // Critical Tasks card represents; it matches either priority value.
       const criticalHigh = priorityFilter === "critical_high";
       const filtered = tickets.filter((t) => {
-        const okStore = !storeFilter || t.branchId === storeFilter;
+        const okStore = matchesStoreSelection(t.branchId, storeFilter);
         // Record-type-aware status match: an Estimate is filtered by its quote
         // outcome (estimateStatus), a Warranty by its claim lifecycle
         // (warrantyStatus), and a normal Ticket by the repair status. The
@@ -989,26 +990,26 @@ export default function TicketsPage() {
         )}
       </AnimatePresence>
 
-      {/* Status Filters + Search */}
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <SegmentedTabs
-          value={statusFilter}
-          onChange={setStatusFilter}
-          options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
-          size="sm"
-          className="[&>button]:px-3"
-        />
-        <div className="flex items-center gap-3">
-          {/* Store filter — only shows in the owner's All-Shops view, to slice
-              the consolidated list down to one store from right here. */}
-          <StoreFilter value={storeFilter} onChange={setStoreFilter} />
-          {/* Search always stays put; the bulk-action cluster now lives in its
-              own bar directly above the table header (see below). */}
-          <div className="w-56">
-            <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search tickets…" iconLeft={<Search className="h-4 w-4" />} />
-          </div>
-        </div>
-      </div>
+      {/* Status Filters (left) + Store filter & Search (right utility area).
+          Uses the shared REPAIROX TABLE UTILITY BAR — the canonical Store→Search
+          group. This Tickets layout is the visual/interaction reference. */}
+      <TableUtilityBar
+        storeValue={storeFilter}
+        onStoreChange={setStoreFilter}
+        searchValue={q}
+        onSearchChange={setQ}
+        searchPlaceholder="Search tickets…"
+        searchClassName="w-56"
+        left={
+          <SegmentedTabs
+            value={statusFilter}
+            onChange={setStatusFilter}
+            options={STATUS_FILTERS.map((f) => ({ label: f.label, value: f.value as string }))}
+            size="sm"
+            className="[&>button]:px-3"
+          />
+        }
+      />
 
       {/* Record-Type Strip — All / Ticket / Estimate / Warranty. Sits BELOW the
           Status strip. Uses the SAME pill styling as the Date strip so it reads
@@ -1542,6 +1543,14 @@ function renderCell(
             {isEstimate(t) && t.estimateStatus === "converted" && t.convertedTicketId && (
               <p className="text-[10px] font-medium text-emerald-700 whitespace-nowrap">
                 → {convertedTicketNo ?? "Ticket"}
+              </p>
+            )}
+            {/* Original-Ticket reference — same treatment as the converted-
+                Estimate link above, linking a Warranty claim back to the
+                original completed Ticket it was raised against (spec §7). */}
+            {isWarranty(t) && t.parentTicketId && (
+              <p className="text-[10px] font-medium text-emerald-700 whitespace-nowrap">
+                → {t.parentTicketNo ?? "Ticket"}
               </p>
             )}
           </div>

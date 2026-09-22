@@ -15,10 +15,10 @@
  */
 
 import { useRouter } from "next/navigation";
-import { FileText, Ticket as TicketIcon, ReceiptText, Receipt, ChevronRight } from "lucide-react";
+import { FileText, Ticket as TicketIcon, ReceiptText, Receipt, ShieldCheck, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-export type LineageKind = "estimate" | "ticket" | "proforma" | "invoice";
+export type LineageKind = "estimate" | "ticket" | "proforma" | "invoice" | "warranty";
 
 export type LineageNode = {
   kind: LineageKind;
@@ -35,6 +35,7 @@ const KIND_META: Record<LineageKind, { title: string; icon: any }> = {
   ticket: { title: "Ticket", icon: TicketIcon },
   proforma: { title: "Proforma Invoice", icon: ReceiptText },
   invoice: { title: "Final Invoice", icon: Receipt },
+  warranty: { title: "Warranty Claim", icon: ShieldCheck },
 };
 
 export function DocumentLineage({ nodes, className }: { nodes: LineageNode[]; className?: string }) {

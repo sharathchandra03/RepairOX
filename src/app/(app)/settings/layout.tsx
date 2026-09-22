@@ -9,9 +9,11 @@ import { Menu, X } from "lucide-react";
 export default function SettingsLayout({ children }: { children: React.ReactNode }) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const pathname = usePathname();
-  // Roles & Permissions is a full-width, multi-panel module — give it room to
-  // breathe instead of the narrow forms container used by other settings pages.
-  const isWide = pathname.startsWith("/settings/roles-permissions");
+  // Roles & Permissions and Customer Master are full-width, data-dense
+  // modules (multi-panel / multi-column KPI + table layouts) — give them room
+  // to breathe instead of the narrow forms container used by simple settings
+  // forms (toggles, single-column inputs, etc.).
+  const isWide = pathname.startsWith("/settings/roles-permissions") || pathname.startsWith("/settings/customers/manage");
 
   return (
     <div className="flex -mx-4 -mt-2 -mb-4 sm:-mx-6 lg:-mx-8" style={{ height: "calc(100vh - 56px)" }}>

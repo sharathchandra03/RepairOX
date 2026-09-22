@@ -31,6 +31,7 @@ import {
   type Ticket, type DeviceRecord,
   getTicketDevices, getRecordType, isWarranty,
   ticketDeviceWarrantyEligibility, warrantyEligibilityLabel, type WarrantyEligibility,
+  findInvoiceForTicketDevice,
 } from "@/lib/mock-data";
 import { toast } from "@/components/ui/toaster";
 
@@ -57,7 +58,7 @@ type SearchHit = {
 
 export default function WarrantySearchPage() {
   const router = useRouter();
-  const { tickets, invoices, addTicket } = useStore();
+  const { tickets, invoices, addTicket, updateInvoice } = useStore();
   const { isAllShops, stores, getStore, activePrefixes } = useStoreContext();
   const { can } = usePermissions();
 
@@ -214,6 +215,22 @@ export default function WarrantySearchPage() {
         };
       });
 
+      // Resolve the specific invoice(s) that established these devices' warranty
+      // terms (the authoritative source per the DATE SOURCE RULE). Selective
+      // invoicing means different claimed devices COULD have been billed on
+      // different invoices, so resolve per-device and collect the distinct set
+      // — the warranty record links the PRIMARY device's invoice; every touched
+      // invoice gets the reverse `warrantyClaimIds` pointer.
+      const invoiceIdsTouched = new Set<string>();
+      let primaryInvoiceId: string | undefined;
+      for (const d of claimedDevices) {
+        const inv = findInvoiceForTicketDevice(original, d.id, invoices);
+        if (inv) {
+          invoiceIdsTouched.add(inv.id);
+          if (!primaryInvoiceId) primaryInvoiceId = inv.id;
+        }
+      }
+
       const primary = claimedDevices[0];
       const warrantyTicket: Ticket = {
         id: "", // assigned by addTicket (fresh unique id)
@@ -245,6 +262,9 @@ export default function WarrantySearchPage() {
         parentTicketNo: original.ticketNo ?? original.id,
         warrantyDeviceIds: selectedIds,
         warrantyIssue: newIssue.trim(),
+        // The invoice that established this claim's warranty terms — lets View
+        // Warranty answer "raised from Invoice X" without a reverse scan.
+        sourceInvoiceId: primaryInvoiceId,
         internalNotes: comments.trim() || undefined,
         // The warranty inherits the original ticket's store so numbering +
         // isolation follow the same store (spec §32).
@@ -255,14 +275,28 @@ export default function WarrantySearchPage() {
       const created = tickets.find((t) => t.id === newId);
       const wNo = created?.ticketNo ?? newId;
 
+      // Reverse link: stamp this warranty ticket's id onto every invoice whose
+      // billed device it claims against, so View Invoice can show "warranty
+      // claim(s) raised from this invoice" without a reverse scan.
+      for (const invId of invoiceIdsTouched) {
+        const inv = invoices.find((i) => i.id === invId);
+        const existingClaims = inv?.warrantyClaimIds ?? [];
+        if (!existingClaims.includes(newId)) {
+          try {
+            await updateInvoice(invId, { warrantyClaimIds: [...existingClaims, newId] });
+          } catch { /* non-fatal — warranty record itself is already saved */ }
+        }
+      }
+
       logActivity({
         module: "Warranty", action: "Warranty Created", severity: "success",
         entity: "Warranty", reference: wNo,
-        description: `Opened warranty claim ${wNo} from ${original.ticketNo ?? original.id} for ${original.customer} — ${newIssue.trim()}.`,
+        description: `Opened warranty claim ${wNo} from ${original.ticketNo ?? original.id} for ${original.customer} - ${newIssue.trim()}.`,
         meta: {
           "Original Ticket": original.ticketNo ?? original.id,
           Devices: claimedDevices.map(deviceName).join(", "),
           Charge: "₹0",
+          ...(primaryInvoiceId ? { "Source Invoice": primaryInvoiceId } : {}),
         },
       });
 
@@ -272,7 +306,7 @@ export default function WarrantySearchPage() {
     } finally {
       setSubmitting(false);
     }
-  }, [claim, selectedDeviceIds, newIssue, comments, warrantyStatus, submitting, tickets, invoices, addTicket, router]);
+  }, [claim, selectedDeviceIds, newIssue, comments, warrantyStatus, submitting, tickets, invoices, addTicket, updateInvoice, router]);
 
   /* ─── Render ─────────────────────────────────────────────────────── */
 
@@ -392,7 +426,7 @@ export default function WarrantySearchPage() {
                               </span>
                             </>
                           ) : (
-                            <span className="text-muted-foreground">No warranty on record — this device has no linked invoice with a warranty.</span>
+                            <span className="text-muted-foreground">No warranty on record - this device has no linked invoice with a warranty.</span>
                           )}
                         </div>
                       </div>
