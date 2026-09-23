@@ -15,6 +15,7 @@ import { DraggableKpiRow, type KpiCardItem } from "@/components/dashboard/dragga
 import { TodoWidget } from "@/components/dashboard/todo-widget";
 import { OrdersStatusWidget } from "@/components/dashboard/orders-status-widget";
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
@@ -90,10 +91,29 @@ export default function Dashboard() {
   // report opens with the SAME range the owner was looking at (not silently
   // reset to Today). Read once on mount via a lazy initializer.
   const searchParams = useSearchParams();
-  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "this_month" | "this_year" | "all" | "custom">(() => {
+  const [dateRange, setDateRange] = useState<"today" | "yesterday" | "7days" | "this_month" | "last_month" | "this_year" | "all" | "custom">(() => {
     const raw = searchParams.get("dateRange");
-    const valid = ["today", "yesterday", "this_month", "this_year", "all", "custom"];
-    return (raw && valid.includes(raw) ? raw : "today") as "today" | "yesterday" | "this_month" | "this_year" | "all" | "custom";
+    // Incoming param may use either the dashboard vocabulary (this_month /
+    // last_month) or the shared list vocabulary (1month / lastmonth / 7days /
+    // 1year) when arriving from another page — normalise both onto the
+    // dashboard's own preset values.
+    const normalise = (v: string | null) => {
+      switch (v) {
+        case "today": return "today";
+        case "yesterday": return "yesterday";
+        case "7days": return "7days";
+        case "this_month":
+        case "1month": return "this_month";
+        case "last_month":
+        case "lastmonth": return "last_month";
+        case "this_year":
+        case "1year": return "this_year";
+        case "all": return "all";
+        case "custom": return "custom";
+        default: return null;
+      }
+    };
+    return (normalise(raw) ?? "today") as "today" | "yesterday" | "7days" | "this_month" | "last_month" | "this_year" | "all" | "custom";
   });
   const [customRange, setCustomRange] = useState<DateRange>(() => {
     if (searchParams.get("dateRange") === "custom") {
@@ -177,7 +197,9 @@ export default function Dashboard() {
     switch (dateRange) {
       case "today": return "Today";
       case "yesterday": return "Yesterday";
+      case "7days": return "7 Days";
       case "this_month": return "This Month";
+      case "last_month": return "Last Month";
       case "this_year": return "This Year";
       case "all": return "All";
       case "custom": {
@@ -399,9 +421,24 @@ export default function Dashboard() {
         days = 1;
         break;
       }
+      case "7days": {
+        // Rolling last 7 days INCLUDING today — matches isInListDateRange's
+        // `created >= todayStart - 7 days` window.
+        start = new Date(today.getTime() - 7 * 86_400_000);
+        days = 7;
+        break;
+      }
       case "this_month": {
         start = new Date(n.getFullYear(), n.getMonth(), 1);
         days = Math.max(1, n.getDate());
+        break;
+      }
+      case "last_month": {
+        // Previous calendar month, in full.
+        start = new Date(n.getFullYear(), n.getMonth() - 1, 1);
+        end = new Date(n.getFullYear(), n.getMonth(), 1);
+        end = new Date(end.getTime() - 1); // last ms of previous month
+        days = Math.max(1, Math.ceil((end.getTime() - start.getTime()) / 86_400_000));
         break;
       }
       case "this_year": {
@@ -596,40 +633,37 @@ export default function Dashboard() {
         }
       />
 
-      {/* Segmented date filter bar */}
+      {/* Segmented date filter bar — ONE connected segmented control (RepairOX
+          standard: all filter strips use the connected SegmentedTabs container,
+          never detached pills). Selecting "Custom" opens the date picker. */}
       <div className="flex items-center gap-3 -mt-3">
-        {/* Segmented control — left aligned */}
-        <div className="inline-flex items-center rounded-full border border-border bg-muted/40 p-1 shadow-sm">
-          {([
-            { label: "Today", value: "today" as const },
-            { label: "Yesterday", value: "yesterday" as const },
-            { label: "This Month", value: "this_month" as const },
-            { label: "This Year", value: "this_year" as const },
-            { label: "All", value: "all" as const },
-            { label: "Custom", value: "custom" as const },
-          ] as const).map((opt) => (
-            <button
-              key={opt.value}
-              onClick={() => {
-                if (opt.value === "custom") {
-                  setShowDatePicker(true);
-                } else {
-                  setDateRange(opt.value);
-                }
-              }}
-              className={cn(
-                "relative rounded-full px-4 py-1.5 text-[12px] font-semibold transition-all duration-200",
-                dateRange === opt.value
-                  ? "bg-[#4361EE] text-white shadow-md shadow-[#4361EE]/25"
-                  : "text-muted-foreground hover:text-[#4361EE] hover:bg-[#EEF1FD]"
-              )}
-            >
-              {opt.value === "custom" && dateRange === "custom" && customRange.start && customRange.end
-                ? dateRangeLabel
-                : opt.label}
-            </button>
-          ))}
-        </div>
+        <SegmentedTabs
+          value={dateRange}
+          size="sm"
+          className="text-[12px] [&>button]:px-3.5 [&>button]:py-1.5"
+          onChange={(v) => {
+            if (v === "custom") {
+              setShowDatePicker(true);
+            } else {
+              setDateRange(v as typeof dateRange);
+            }
+          }}
+          options={[
+            { label: "All", value: "all" },
+            { label: "Today", value: "today" },
+            { label: "7 Days", value: "7days" },
+            { label: "This Month", value: "this_month" },
+            { label: "Last Month", value: "last_month" },
+            { label: "This Year", value: "this_year" },
+            {
+              label:
+                dateRange === "custom" && customRange.start && customRange.end
+                  ? dateRangeLabel
+                  : "Custom",
+              value: "custom",
+            },
+          ]}
+        />
       </div>
 
       {/* Custom Date Range Picker */}

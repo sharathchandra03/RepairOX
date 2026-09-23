@@ -39,7 +39,7 @@ export const WORKSPACES: WorkspaceDef[] = [
   },
   {
     id: "leads",
-    label: "Sales Management",
+    label: "Lead Management",
     navLabel: "Leads",
     tagline: "Capture, score and convert every enquiry",
     short: "SA",

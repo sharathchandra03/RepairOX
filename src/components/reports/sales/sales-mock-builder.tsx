@@ -76,7 +76,7 @@ export function SalesMockBuilder() {
 
   return (
     <div className="space-y-4">
-      <ModulePreviewBanner moduleLabel="Sales Management" />
+      <ModulePreviewBanner moduleLabel="Lead Management" />
 
       <div className="grid gap-4 lg:grid-cols-[340px_1fr]">
         {/* Builder controls */}

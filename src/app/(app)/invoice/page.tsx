@@ -740,23 +740,15 @@ export default function InvoicePage() {
       {/* The date strip defines the width; the status strip stretches to match it
           exactly so its right edge aligns with the "Custom" pill. */}
       <div className="w-fit max-w-full space-y-5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {/* Date Range Strip (always visible) — 8 options */}
-        <div className="flex items-center gap-2">
-          {DATE_RANGES.map((dr) => (
-            <button
-              key={dr.value}
-              onClick={() => setDateRange(dr.value)}
-              className={cn(
-                "shrink-0 whitespace-nowrap rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all",
-                dateRange === dr.value
-                  ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
-                  : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground"
-              )}
-            >
-              {dr.label}
-            </button>
-          ))}
-        </div>
+        {/* Date Range Strip (always visible) — 8 options as ONE connected
+            segmented control (RepairOX standard: all filter strips use the
+            connected SegmentedTabs container, never detached pills). */}
+        <SegmentedTabs
+          value={dateRange}
+          onChange={(v) => setDateRange(v as DateRange)}
+          options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
+          size="sm"
+        />
 
       </div>
 

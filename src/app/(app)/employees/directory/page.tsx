@@ -8,6 +8,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
 import { SALARY_TYPE_LABEL } from "@/lib/auth";
@@ -92,28 +93,18 @@ export default function EmployeeDirectoryPage() {
             iconLeft={<Search className="h-4 w-4" />}
           />
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
-          <button
-            onClick={() => setDeptFilter("all")}
-            className={cn(
-              "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
-              deptFilter === "all" ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-            )}
-          >
-            All ({team.length})
-          </button>
-          {departments.map((dept) => (
-            <button
-              key={dept}
-              onClick={() => setDeptFilter(dept)}
-              className={cn(
-                "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
-                deptFilter === dept ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-              )}
-            >
-              {dept}
-            </button>
-          ))}
+        {/* Department filter as ONE connected segmented control (RepairOX
+            standard: filter strips use the connected SegmentedTabs container). */}
+        <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={deptFilter}
+            onChange={setDeptFilter}
+            size="sm"
+            options={[
+              { label: `All (${team.length})`, value: "all" },
+              ...departments.map((dept) => ({ label: dept, value: dept })),
+            ]}
+          />
         </div>
       </div>
 

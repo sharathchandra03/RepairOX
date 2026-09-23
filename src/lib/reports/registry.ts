@@ -643,8 +643,8 @@ export const REPORT_MODULES: ModuleDef[] = [
   },
   {
     id: "sales",
-    label: "Sales Management",
-    short: "Sales",
+    label: "Lead Management",
+    short: "Leads",
     icon: "TrendingUp",
     status: "available",
     sources: ["leads", "deals", "quotations", "contacts", "companies", "activities", "pipelines"],

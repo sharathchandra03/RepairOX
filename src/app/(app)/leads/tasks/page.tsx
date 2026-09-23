@@ -77,22 +77,15 @@ export default function TasksPage() {
         }
       />
 
-      {/* Filter chips */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1">
-        {FILTER_CHIPS.map((chip) => (
-          <button
-            key={chip.value}
-            onClick={() => setActiveFilter(chip.value)}
-            className={cn(
-              "shrink-0 rounded-full px-3.5 py-1.5 text-[11px] font-semibold transition",
-              activeFilter === chip.value
-                ? "bg-[#4361EE] text-white shadow-sm"
-                : "bg-card border border-border text-zinc-600 hover:bg-muted"
-            )}
-          >
-            {chip.label}
-          </button>
-        ))}
+      {/* Filter chips — ONE connected segmented control (RepairOX standard:
+          filter strips use the connected SegmentedTabs container). */}
+      <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          value={activeFilter}
+          onChange={setActiveFilter}
+          size="sm"
+          options={FILTER_CHIPS.map((chip) => ({ label: chip.label, value: chip.value }))}
+        />
       </div>
 
       {/* Quick Add Task */}

@@ -6,6 +6,7 @@ import { Plus, FolderTree, Edit2, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
 /* ─── Types ─────────────────────────────────────────────────────────── */
@@ -100,29 +101,25 @@ export default function AccountManagementPage() {
         ))}
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          onClick={() => setTypeFilter("all")}
-          className={cn(
-            "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
-            typeFilter === "all" ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-          )}
-        >
-          All ({accounts.length})
-        </button>
-        {types.map((type) => (
-          <button
-            key={type}
-            onClick={() => setTypeFilter(type)}
-            className={cn(
-              "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all capitalize",
-              typeFilter === type ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-            )}
-          >
-            {type} ({accounts.filter((a) => a.type === type).length})
-          </button>
-        ))}
+      {/* Filter Tabs — ONE connected segmented control (RepairOX standard:
+          filter strips use the connected SegmentedTabs container). */}
+      <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          value={typeFilter}
+          onChange={setTypeFilter}
+          size="sm"
+          options={[
+            { label: `All (${accounts.length})`, value: "all" },
+            ...types.map((type) => ({
+              label: (
+                <span className="capitalize">
+                  {type} ({accounts.filter((a) => a.type === type).length})
+                </span>
+              ),
+              value: type,
+            })),
+          ]}
+        />
       </div>
 
       {/* Accounts Table */}

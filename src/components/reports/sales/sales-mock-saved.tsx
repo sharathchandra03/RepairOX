@@ -39,7 +39,7 @@ export function SalesMockSaved({ filterMode = "all" }: { filterMode?: FilterMode
 
   return (
     <div className="space-y-4">
-      <ModulePreviewBanner moduleLabel="Sales Management" />
+      <ModulePreviewBanner moduleLabel="Lead Management" />
 
       {filtered.length === 0 ? (
         <div className="rounded-[20px] border border-border bg-card p-8 shadow-card">

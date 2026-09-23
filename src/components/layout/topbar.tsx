@@ -51,7 +51,7 @@ export function Topbar({
 
   return (
     <header className="border-b border-border bg-card">
-      <div className="flex h-[60px] items-center gap-3 px-4 sm:px-6">
+      <div className="rox-topbar flex h-[60px] items-center gap-3 px-4 sm:px-6">
 
         {/* Mobile menu */}
         <button

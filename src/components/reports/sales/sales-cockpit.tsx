@@ -106,9 +106,9 @@ export function SalesCockpit() {
 
         {tab === "comparison" && (
           <div className="space-y-4">
-            <ModulePreviewBanner moduleLabel="Sales Management" />
+            <ModulePreviewBanner moduleLabel="Lead Management" />
             <ModuleMockComparison
-              moduleLabel="Sales Management"
+              moduleLabel="Lead Management"
               metricRows={salesComparisonMetrics}
               baseMetrics={salesComparisonBase}
               entityDimensions={salesEntityDimensions}
@@ -124,7 +124,7 @@ export function SalesCockpit() {
 
         {tab === "scheduled" && (
           <div className="space-y-4">
-            <ModulePreviewBanner moduleLabel="Sales Management" />
+            <ModulePreviewBanner moduleLabel="Lead Management" />
             <div className="rounded-[20px] border border-border bg-card p-8 shadow-card">
               <EmptyState
                 icon="calendar"

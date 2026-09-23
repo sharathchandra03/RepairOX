@@ -315,9 +315,9 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
   return (
     <aside
       className={cn(
-        "z-30 hidden h-full shrink-0 flex-col border-r border-border bg-card lg:flex",
+        "rox-sidebar z-30 hidden h-full shrink-0 flex-col border-r border-border bg-card lg:flex",
         "transition-[width] duration-300 ease-out overflow-hidden",
-        collapsed ? "w-[72px]" : "w-[256px]"
+        collapsed ? "w-[72px]" : "rox-sidebar-expanded w-[256px]"
       )}
     >
       {/* Logo + collapse toggle */}

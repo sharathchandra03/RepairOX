@@ -56,6 +56,8 @@ import { useSession } from "@/lib/use-session";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
+import { findOrCreateCustomer } from "@/lib/customer-service";
+import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
 import { WalkInReport } from "@/components/walk-in/walk-in-report";
 import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
@@ -76,7 +78,7 @@ function fmtDate(iso: string): string {
 
 export default function WalkInPage() {
   const router = useRouter();
-  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary } = useStore();
+  const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary, customers, addCustomer } = useStore();
   const { contacts } = useLeads();
   // Active-store context — drives the context-aware Store column (§3h). Shown
   // only in multi-store / All-Shops mode; hidden inside a single store.
@@ -427,6 +429,29 @@ export default function WalkInPage() {
       await updateWalkIn(editingId, data);
       showToast("Walk-In updated.");
     } else {
+      // ── Capture EVERY walk-in into the Customer Master (no longer deferred
+      //    until a ticket/invoice). Dedup on phone/email; stamp the origin as a
+      //    walk-in. This is what makes the master a complete, exportable list of
+      //    everyone who ever came in — for marketing/promotions. ──
+      let resolvedCustomerId = data.customerId;
+      const walkinName = (data.customer || "").trim();
+      const walkinPhone = (data.phone || "").trim();
+      if (!resolvedCustomerId && (walkinName || walkinPhone)) {
+        const [first, ...rest] = walkinName.split(" ");
+        const result = findOrCreateCustomer(
+          {
+            firstName: first || walkinName || "Walk-in Customer",
+            lastName: rest.join(" "),
+            mobile: walkinPhone,
+            email: (data.email || "").trim() || undefined,
+            source: walkInTypeToCustomerSource(data.type || "direct") as any,
+            captureSource: "walk_in",
+          },
+          customers,
+        );
+        if (result.created) await addCustomer(result.customer);
+        resolvedCustomerId = result.customer.id;
+      }
       const record: WalkIn = {
         id: genWalkInId(),
         walkInNumber: nextWalkInNumber(walkIns),
@@ -450,7 +475,7 @@ export default function WalkInPage() {
         status: data.status || "visitor",
         salesPersonId: data.salesPersonId,
         salesPersonName: data.salesPersonName,
-        customerId: data.customerId,
+        customerId: resolvedCustomerId,
         followUpDate: data.followUpDate,
         followUpTime: data.followUpTime,
         followUpStatus: data.followUpStatus,
@@ -464,7 +489,7 @@ export default function WalkInPage() {
     }
     setShowCreate(false);
     setEditTarget(null);
-  }, [walkIns, addWalkIn, updateWalkIn, showToast]);
+  }, [walkIns, addWalkIn, updateWalkIn, showToast, customers, addCustomer, can]);
 
   /* ── Convert Walk-In → Ticket ──
      Does NOT create a ticket directly. It opens the EXISTING ticket creation
@@ -658,21 +683,16 @@ export default function WalkInPage() {
       {/* Date-range strip (shared by table + report) — matches the Tickets/Invoice
           8-option strip exactly for visual uniformity across modules. */}
       <div className="space-y-2">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {WALKIN_DATE_RANGES.map((r) => (
-            <button
-              key={r.value}
-              onClick={() => setDateRange(r.value)}
-              className={cn(
-                "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
-                dateRange === r.value
-                  ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
-                  : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground",
-              )}
-            >
-              {r.label}
-            </button>
-          ))}
+        {/* Date-range strip as ONE connected segmented control (RepairOX
+            standard: all filter strips use the connected SegmentedTabs
+            container, never detached pills). */}
+        <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={dateRange}
+            onChange={(v) => setDateRange(v as WalkInDateRange)}
+            options={WALKIN_DATE_RANGES.map((r) => ({ label: r.label, value: r.value }))}
+            size="sm"
+          />
         </div>
         <DateRangePicker
           open={dateRange === "custom"}

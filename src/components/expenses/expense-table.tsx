@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import {
   type Expense,
   type PaymentMode,
@@ -192,21 +193,17 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
             )}
           </button>
 
-          {/* Date quick filters */}
-          {(["all", "today", "7days", "30days"] as DateFilter[]).map((d) => (
-            <button
-              key={d}
-              onClick={() => setDateFilter(d)}
-              className={cn(
-                "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
-                dateFilter === d
-                  ? "bg-[#4361EE] text-white shadow-sm"
-                  : "bg-muted text-muted-foreground hover:bg-slate-200"
-              )}
-            >
-              {DATE_LABELS[d]}
-            </button>
-          ))}
+          {/* Date quick filters — ONE connected segmented control (RepairOX
+              standard: filter strips use the connected SegmentedTabs container). */}
+          <SegmentedTabs
+            value={dateFilter}
+            onChange={(v) => setDateFilter(v as DateFilter)}
+            size="sm"
+            options={(["all", "today", "7days", "30days"] as DateFilter[]).map((d) => ({
+              label: DATE_LABELS[d],
+              value: d,
+            }))}
+          />
 
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-3.5 w-3.5" /> Export

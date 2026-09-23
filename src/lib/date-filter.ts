@@ -21,7 +21,9 @@
 export type DashboardDatePreset =
   | "today"
   | "yesterday"
+  | "7days"
   | "this_month"
+  | "last_month"
   | "this_year"
   | "all"
   | "custom";
@@ -49,7 +51,9 @@ export function mapDashboardRangeToListPreset(preset: DashboardDatePreset): List
   switch (preset) {
     case "today": return "today";
     case "yesterday": return "yesterday";
+    case "7days": return "7days";
     case "this_month": return "1month";
+    case "last_month": return "lastmonth";
     case "this_year": return "1year";
     case "all": return "all";
     case "custom": return "custom";

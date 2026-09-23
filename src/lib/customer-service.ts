@@ -162,6 +162,8 @@ export interface FindOrCreateInput {
   email?: string;
   type?: "personal" | "business";
   source?: string;
+  /** WHERE this record was captured (module of origin). Stamped on new records. */
+  captureSource?: import("@/lib/customer-data").CaptureSource;
   company?: string;
   address?: string;
   city?: string;
@@ -228,6 +230,7 @@ export function findOrCreateCustomer(
     email: input.email,
     type: input.type,
     source: (input.source as any) ?? undefined,
+    captureSource: input.captureSource,
     company: input.company,
     address: input.address,
     city: input.city,

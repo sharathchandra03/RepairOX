@@ -75,6 +75,33 @@
   /* Form — canonical = Walk-In centered modal. */
   --rox-form-radius: 1rem;                /* rounded-2xl equivalent */
   --rox-form-border: 0 0% 0%;             /* thin crisp outer boundary */
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     RESPONSIVE DENSITY TOKENS — COMFORTABLE (default, 14"+ desktop)
+     ───────────────────────────────────────────────────────────────────────
+     Single source of truth for whitespace/dimensions that must tighten on a
+     ~13-inch laptop at 100% browser zoom. Shared primitives (AppShell, Sidebar,
+     Topbar, rox-table, rox-centered-form, pagination, settings-page, filter and
+     utility-bar) consume these instead of hardcoding literals, so the whole app
+     switches density from ONE place — the `@media` compact-desktop block at the
+     bottom of this file remaps these values. Never use transform:scale, and
+     never shrink fonts aggressively — reduce whitespace and oversized
+     dimensions first. See docs/REPAIROX-DESIGN-SYSTEM.md §3i. */
+  --rox-density-page-px: 2rem;            /* page horizontal gutter (lg:px-8) */
+  --rox-density-page-pt: 0.5rem;          /* page top padding (pt-2) */
+  --rox-density-page-pb: 1rem;            /* page bottom padding (pb-4) */
+  --rox-density-section-gap: 1.25rem;     /* list-page vertical rhythm (space-y-5) */
+  --rox-density-dashboard-gap: 1.5rem;    /* dashboard vertical rhythm (space-y-6) */
+  --rox-density-card-px: 1.25rem;         /* card / section horizontal padding (px-5) */
+  --rox-density-card-py: 1rem;            /* card / section vertical padding (py-4) */
+  --rox-density-sidebar-w: 256px;         /* expanded sidebar width */
+  --rox-density-topbar-h: 60px;           /* topbar height */
+  --rox-density-control-h: 34px;          /* utility control height (search/store) */
+  --rox-density-form-pad: 1.25rem;        /* centered-form padding (p-5) */
+
+  /* Compact table dimensions — consumed by rox-table primitives. */
+  --rox-table-cell-px: 0.75rem;           /* horizontal cell padding (px-3) */
+  --rox-table-row-h-tickets: 76px;        /* Tickets 3-line row height */
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -278,6 +305,19 @@ body {
 /* Row separator — clearly visible, never a faint hairline. */
 .rox-table-row {
   border-top: 1px solid hsl(var(--rox-table-divider));
+}
+/* Density-aware row height — comfortable 68px default, compacted on ~13"
+   laptops via the compact-desktop @media block. Consumed by RoxTableRow. */
+.rox-table-row-h {
+  height: var(--rox-table-row-h);
+}
+/* Density-aware cell padding — comfortable px-3 py-4 default. Consumed by
+   RoxTableCell. Hand-written tables should use this class too. */
+.rox-table-cell {
+  padding-left: var(--rox-table-cell-px);
+  padding-right: var(--rox-table-cell-px);
+  padding-top: var(--rox-table-cell-py);
+  padding-bottom: var(--rox-table-cell-py);
 }
 /* Zero-value data ( 0 / ₹0 ) is VALID — never dim it. Apply to numeric cells
    that must always read as real data regardless of value. */
@@ -1018,3 +1058,136 @@ html, body {
 }
 
 
+
+/* ═════════════════════════════════════════════════════════════════════════
+   COMPACT-DESKTOP RESPONSIVE DENSITY  —  ~13-inch laptops @ 100% zoom
+   ───────────────────────────────────────────────────────────────────────────
+   GOAL: on a ~13" laptop at the DEFAULT 100% browser zoom, RepairOX should feel
+   as compact and usable as it currently does at 80–90% zoom on a 14" display —
+   WITHOUT asking the user to zoom, WITHOUT transform:scale(), and WITHOUT
+   shrinking fonts aggressively.
+
+   MECHANISM: this is a genuine responsive layer, not a scale hack. It (1) remaps
+   the shared density TOKENS (--rox-density-*, --rox-table-*) that the shell +
+   shared primitives already consume, and (2) tightens the recurring page-level
+   whitespace utilities — but ONLY inside the page content area (`.rox-page-main`)
+   so the sidebar, topbar and modals are governed by their own marker classes.
+
+   BREAKPOINT: 1024px ≤ viewport ≤ 1366px.
+     • Lower bound 1024px = Tailwind `lg` (the expanded desktop sidebar is active,
+       so this is unambiguously the DESKTOP layout — never the mobile/tablet one).
+     • Upper bound 1366px covers the classic 13" laptop CSS widths (1280×800,
+       1366×768). 14"+ displays report ≥1440px CSS width at 100% and are left at
+       the existing COMFORTABLE density, untouched.
+   The `min-resolution` companion is intentionally omitted — CSS px width already
+   reflects the browser's effective viewport at 100% zoom.
+
+   PRIORITY (per the RepairOX density standard): remove unnecessary whitespace and
+   oversized dimensions FIRST; typography, accessibility, click targets, table
+   alignment, sticky headers/footers and visual identity are PRESERVED.
+   See docs/REPAIROX-DESIGN-SYSTEM.md §3i.
+   ═════════════════════════════════════════════════════════════════════════ */
+@media (min-width: 1024px) and (max-width: 1366px) {
+  :root {
+    /* Whitespace + dimensions tighten; radius/colour/fonts stay put. */
+    --rox-density-page-px: 1.25rem;       /* 2rem  → 1.25rem  page gutter   */
+    --rox-density-page-pt: 0.375rem;      /* 0.5   → 0.375                  */
+    --rox-density-page-pb: 0.75rem;       /* 1rem  → 0.75rem                */
+    --rox-density-section-gap: 0.875rem;  /* 1.25  → 0.875  list rhythm     */
+    --rox-density-dashboard-gap: 1rem;    /* 1.5   → 1rem   dashboard rhythm*/
+    --rox-density-card-px: 1rem;          /* 1.25  → 1rem   card padding    */
+    --rox-density-card-py: 0.75rem;       /* 1rem  → 0.75rem                */
+    --rox-density-sidebar-w: 216px;       /* 256   → 216px  sidebar width   */
+    --rox-density-topbar-h: 52px;         /* 60    → 52px   topbar height   */
+    --rox-density-control-h: 32px;        /* 34    → 32px   utility control */
+    --rox-density-form-pad: 1rem;         /* 1.25  → 1rem   modal padding   */
+
+    /* Canonical table — the biggest single density win. */
+    --rox-table-row-h: 56px;              /* 68    → 56px   default row      */
+    --rox-table-cell-py: 0.625rem;        /* 1rem  → 0.625  cell vertical    */
+    --rox-table-cell-px: 0.625rem;        /* 0.75  → 0.625  cell horizontal  */
+    --rox-table-row-h-tickets: 64px;      /* 76    → 64px   Tickets 3-line   */
+  }
+
+  /* ── Layout shell ──────────────────────────────────────────────────────── */
+  /* Sidebar (expanded only — the collapsed 72px rail is already compact). */
+  .rox-sidebar-expanded {
+    width: var(--rox-density-sidebar-w) !important;
+  }
+  /* Topbar — shorter bar. useRoxStickyHeader() measures this at runtime, so
+     sticky table headers re-pin flush automatically; no JS change needed. */
+  .rox-topbar {
+    height: var(--rox-density-topbar-h) !important;
+  }
+  /* Page content gutters + top/bottom padding (overrides the lg:px-8 gutter
+     only; mobile/tablet px-4/sm:px-6 are never reached at ≥1024px). */
+  .rox-page-main {
+    padding-left: var(--rox-density-page-px) !important;
+    padding-right: var(--rox-density-page-px) !important;
+    padding-top: var(--rox-density-page-pt) !important;
+    padding-bottom: var(--rox-density-page-pb) !important;
+  }
+
+  /* ── Centered forms / modals ───────────────────────────────────────────── */
+  .rox-form-pad {
+    padding: var(--rox-density-form-pad) !important;
+  }
+
+  /* ── Page-content whitespace (scoped to `.rox-page-main` ONLY) ───────────
+     These tighten the recurring vertical rhythm, card padding, grid gaps and
+     oversized headings that every page shares, so density is consistent
+     WITHOUT per-page edits. Scoping to the page main leaves the sidebar,
+     topbar, toasts and portalled modals unaffected. Fonts are only nudged on
+     genuinely OVERSIZED display headings, never on body/label/table text. */
+
+  /* Vertical rhythm: list pages use space-y-5, dashboard uses space-y-6. */
+  .rox-page-main :where(.space-y-6) > * + * { margin-top: var(--rox-density-dashboard-gap) !important; }
+  .rox-page-main :where(.space-y-5) > * + * { margin-top: var(--rox-density-section-gap) !important; }
+  .rox-page-main :where(.space-y-4) > * + * { margin-top: 0.75rem !important; }
+  .rox-page-main :where(.gap-6) { gap: var(--rox-density-dashboard-gap) !important; }
+  .rox-page-main :where(.gap-5) { gap: var(--rox-density-section-gap) !important; }
+  .rox-page-main :where(.gap-4) { gap: 0.75rem !important; }
+
+  /* Card / panel interior padding — the common p-5 / p-6 / px-5 / py-4 blocks.
+     Kept readable; only the excess is removed. */
+  .rox-page-main :where(.p-6) { padding: var(--rox-density-card-px) !important; }
+  .rox-page-main :where(.p-5) { padding: var(--rox-density-card-px) !important; }
+  .rox-page-main :where(.px-6) { padding-left: var(--rox-density-card-px) !important; padding-right: var(--rox-density-card-px) !important; }
+  .rox-page-main :where(.px-5) { padding-left: var(--rox-density-card-px) !important; padding-right: var(--rox-density-card-px) !important; }
+  .rox-page-main :where(.py-6) { padding-top: var(--rox-density-card-py) !important; padding-bottom: var(--rox-density-card-py) !important; }
+  .rox-page-main :where(.py-5) { padding-top: var(--rox-density-card-py) !important; padding-bottom: var(--rox-density-card-py) !important; }
+
+  /* Oversized display headings only (page titles / big stat numbers). Body,
+     labels, table cells, buttons and inputs keep their exact sizes so the app
+     stays readable and click targets are preserved. */
+  .rox-page-main :where(.text-3xl) { font-size: 1.5rem !important; line-height: 1.9rem !important; }
+  .rox-page-main :where(.text-2xl) { font-size: 1.3125rem !important; line-height: 1.7rem !important; }
+
+  /* Buttons: trim only large button paddings; never below a comfortable tap
+     target. sm/xs buttons and icon buttons are left as-is. */
+  .rox-page-main :where(.h-11) { height: 2.5rem !important; }
+  .rox-page-main :where(.h-12) { height: 2.75rem !important; }
+
+  /* ── Hand-written canonical tables (Tickets, Walk-In, Invoice, Leads,
+     Customers) that hardcode row heights + py-4 cells instead of the shared
+     RoxTableRow/RoxTableCell. Compact them to match the token-driven tables so
+     the whole app is consistent — row height + cell vertical padding only;
+     column widths, alignment, borders and sticky headers are untouched. */
+  .rox-page-main table :where(.h-\[68px\]) { height: var(--rox-table-row-h) !important; }
+  .rox-page-main table :where(.h-\[76px\]) { height: var(--rox-table-row-h-tickets) !important; }
+  .rox-page-main table td:where(.py-4),
+  .rox-page-main table th:where(.py-4) {
+    padding-top: var(--rox-table-cell-py) !important;
+    padding-bottom: var(--rox-table-cell-py) !important;
+  }
+}
+
+/* Slightly tighter still on very short / very narrow classic laptop panels
+   (1366×768 and below) — only trims the table row a touch more so more rows
+   are visible above the fold. Everything else inherits the block above. */
+@media (min-width: 1024px) and (max-width: 1366px) and (max-height: 800px) {
+  :root {
+    --rox-table-row-h: 52px;
+    --rox-table-row-h-tickets: 60px;
+  }
+}

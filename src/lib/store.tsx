@@ -32,7 +32,7 @@ import {
   type InventoryItem, type StockMovement,
 } from "@/lib/inventory-data";
 import { seedCustomers as SEED_CUSTOMERS, type Customer, type CustomerGroup } from "@/lib/customer-data";
-import { pointsFromInvoiceAmount, tierForLifetimeValue, evaluateAutomaticGroups } from "@/lib/customer-service";
+import { pointsFromInvoiceAmount, tierForLifetimeValue, evaluateAutomaticGroups, type LoyaltyTier } from "@/lib/customer-service";
 import { seedCompanies as SEED_COMPANIES, type Company } from "@/lib/company-data";
 import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
@@ -68,6 +68,11 @@ interface StoreState {
   stockMovements: StockMovement[];
   customers: Customer[];
   customerGroups: CustomerGroup[];
+  /** Denormalized loyalty snapshot per customer (points balance + tier), keyed
+   *  by customer id. Loaded from loyalty_accounts and kept live via realtime +
+   *  the award/adjust flow, so the Customer Master can show points/tier and
+   *  manual changes reflect immediately. */
+  loyaltyByCustomer: Record<string, { points: number; tier: LoyaltyTier }>;
   companies: Company[];
   brands: Brand[];
   deviceModels: DeviceModel[];
@@ -113,6 +118,11 @@ interface StoreActions {
   /** Merge a duplicate customer into a primary record (tickets, invoices,
    *  walk-ins, loyalty, groups). See mergeCustomersAction for scope notes. */
   mergeCustomersAction: (primaryId: string, secondaryId: string, reason?: string) => Promise<{ success: boolean; error?: string }>;
+  /** Manually adjust a customer's loyalty points (delta may be negative) with a
+   *  reason. Writes an immutable `adjustment` ledger row, upserts the account
+   *  balance + recomputes tier, and updates local state so the Customer Master
+   *  reflects it immediately. Returns the new balance/tier. */
+  adjustLoyalty: (customerId: string, pointsDelta: number, reason: string) => Promise<{ ok: boolean; points: number; tier: LoyaltyTier; error?: string }>;
   addCustomerGroup: (group: CustomerGroup) => Promise<void>;
   updateCustomerGroup: (id: string, updates: Partial<CustomerGroup>) => Promise<void>;
   deleteCustomerGroup: (id: string) => Promise<void>;
@@ -891,6 +901,7 @@ function rowToCustomer(r: any): Customer {
     id: r.id,
     type: r.type ?? "personal",
     source: r.source ?? undefined,
+    captureSource: r.capture_source ?? undefined,
     groupIds: Array.isArray(r.group_ids) ? r.group_ids : [],
     companyId: r.company_id ?? undefined,
     firstName: r.first_name ?? "",
@@ -921,6 +932,7 @@ function customerToRow(c: Customer): Record<string, unknown> {
     id: c.id,
     type: c.type || "personal",
     source: c.source || null,
+    capture_source: c.captureSource || null,
     group_ids: c.groupIds ?? [],
     company_id: c.companyId || null,
     first_name: c.firstName || null,
@@ -1171,6 +1183,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoreState>({
     tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
     team: [], inventory: [], stockMovements: [], customers: [], customerGroups: [],
+    loyaltyByCustomer: {},
     companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [],
     issueLibrary: [],
     hydrated: false, mode: "local",
@@ -1257,7 +1270,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
         orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
         inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-        customers: SEED_CUSTOMERS, customerGroups: [], brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+        customers: SEED_CUSTOMERS, customerGroups: [], loyaltyByCustomer: {}, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
         companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
         assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
         issueLibrary: DEFAULT_ISSUES,
@@ -1278,7 +1291,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
           orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
           inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
-          customers: SEED_CUSTOMERS, customerGroups: [], brands: SEED_BRANDS, deviceModels: SEED_MODELS,
+          customers: SEED_CUSTOMERS, customerGroups: [], loyaltyByCustomer: {}, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
           companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
           assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
           issueLibrary: DEFAULT_ISSUES,
@@ -1306,6 +1319,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: abOpts },
         { data: atOpts },
         { data: custGroups },
+        { data: loyaltyAccts },
       ] = await Promise.all([
         // Transactional data → scoped to the active store (branch_id) when one
         // is selected; the full RLS-scoped set in All-Shops mode.
@@ -1327,6 +1341,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // customer_groups may not exist until the migration is applied — tolerate
         // the error so the rest of the app still loads.
         noScope(supabase.from("customer_groups").select("*").is("deleted_at", null).order("display_order", { ascending: true })),
+        // loyalty_accounts is org-wide (one row per customer, no branch_id).
+        noScope(supabase.from("loyalty_accounts").select("customer_id, points_balance, tier")),
       ]);
 
       if (!active) return;
@@ -1340,6 +1356,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         stockMovements: (moves ?? []).map(rowToStockMovement),
         customers: (custs ?? []).map(rowToCustomer),
         customerGroups: (custGroups ?? []).map(rowToCustomerGroup),
+        loyaltyByCustomer: Object.fromEntries(
+          (loyaltyAccts ?? []).map((a: any) => [
+            a.customer_id,
+            { points: a.points_balance ?? 0, tier: (a.tier ?? "bronze") as LoyaltyTier },
+          ])
+        ),
         companies: (comps ?? []).map(rowToCompany),
         brands: (brds ?? []).map(rowToBrand),
         deviceModels: (models ?? []).map(rowToDeviceModel),
@@ -1537,12 +1559,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const next = [...prev.assignedToOptions]; next[idx] = opt;
             return { ...prev, assignedToOptions: next };
           }
+          case "loyalty_accounts": {
+            // An upsert or delete on a loyalty account — keep loyaltyByCustomer
+            // in sync so the Customer Master reflects the latest balance/tier
+            // without a full page reload.
+            if (isDelete) {
+              const { [row.customer_id]: _removed, ...rest } = prev.loyaltyByCustomer;
+              return { ...prev, loyaltyByCustomer: rest };
+            }
+            return {
+              ...prev,
+              loyaltyByCustomer: {
+                ...prev.loyaltyByCustomer,
+                [row.customer_id]: {
+                  points: row.points_balance ?? 0,
+                  tier: (row.tier ?? "bronze") as LoyaltyTier,
+                },
+              },
+            };
+          }
           default: return prev;
         }
       });
     };
 
-    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "customer_groups", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options"];
+    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "customer_groups", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options", "loyalty_accounts"];
 
     const channel = client.channel("store-realtime");
     for (const table of tables) {
@@ -2141,6 +2182,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           });
           if (acctError) console.error("[store] loyalty account upsert failed:", acctError.message);
         }
+      }
+
+      // Patch loyaltyByCustomer in local state immediately so the Customer
+      // Master table reflects the new balance/tier without waiting for the
+      // realtime event (or in local/demo mode where there is no realtime).
+      if (pointsEarned > 0) {
+        const prevLoy = stateRef.current.loyaltyByCustomer[customerId] ?? { points: 0, tier: "bronze" as LoyaltyTier };
+        const newLoyPoints = prevLoy.points + pointsEarned;
+        const newLoyTier = tierForLifetimeValue(newLoyPoints);
+        setState((s) => ({
+          ...s,
+          loyaltyByCustomer: {
+            ...s.loyaltyByCustomer,
+            [customerId]: { points: newLoyPoints, tier: newLoyTier },
+          },
+        }));
       }
 
       // Customer stats: bump totalInvoices / lifetimeValue / lastVisit
@@ -3004,6 +3061,96 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     return { success: true };
   }, [updateWalkIn, updateCustomer]);
 
+  /* ── Loyalty: manual adjust (DB-first) ── */
+  /**
+   * Manually adjust a customer's loyalty points by `pointsDelta` (positive =
+   * award, negative = deduct). Writes an immutable `adjustment` ledger row,
+   * upserts the account balance + recomputes tier via `tierForLifetimeValue`,
+   * and patches `loyaltyByCustomer` in local state so the Customer Master
+   * reflects the change immediately without waiting for the realtime event.
+   */
+  const adjustLoyalty = useCallback(async (
+    customerId: string,
+    pointsDelta: number,
+    reason: string,
+  ): Promise<{ ok: boolean; points: number; tier: LoyaltyTier; error?: string }> => {
+    if (!shouldUseDb()) {
+      // Local / demo mode: apply optimistically against in-memory state only.
+      const prev = stateRef.current.loyaltyByCustomer[customerId] ?? { points: 0, tier: "bronze" as LoyaltyTier };
+      const newPoints = Math.max(0, prev.points + pointsDelta);
+      const newTier = tierForLifetimeValue(newPoints);
+      setState((s) => ({
+        ...s,
+        loyaltyByCustomer: {
+          ...s.loyaltyByCustomer,
+          [customerId]: { points: newPoints, tier: newTier },
+        },
+      }));
+      return { ok: true, points: newPoints, tier: newTier };
+    }
+
+    try {
+      // 1. Read current balance.
+      const { data: acct } = await db
+        .from("loyalty_accounts")
+        .select("points_balance")
+        .eq("customer_id", customerId)
+        .maybeSingle();
+      const currentBalance: number = (acct as any)?.points_balance ?? 0;
+      const newBalance = Math.max(0, currentBalance + pointsDelta);
+      const newTier = tierForLifetimeValue(newBalance);
+
+      // 2. Write the immutable ledger row.
+      const txId = `LTX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 9)}`;
+      const { error: txErr } = await db.from("loyalty_transactions").insert({
+        id: txId,
+        customer_id: customerId,
+        type: "adjustment",
+        points_delta: pointsDelta,
+        balance_after: newBalance,
+        reason: reason || "Manual adjustment",
+        created_at: new Date().toISOString(),
+      });
+      if (txErr) {
+        console.error("[store] adjustLoyalty tx insert failed:", txErr.message);
+        return { ok: false, points: currentBalance, tier: tierForLifetimeValue(currentBalance), error: txErr.message };
+      }
+
+      // 3. Upsert the account summary.
+      const { error: acctErr } = await db.from("loyalty_accounts").upsert({
+        customer_id: customerId,
+        points_balance: newBalance,
+        tier: newTier,
+        last_transaction_at: new Date().toISOString(),
+      });
+      if (acctErr) {
+        console.error("[store] adjustLoyalty account upsert failed:", acctErr.message);
+        return { ok: false, points: currentBalance, tier: tierForLifetimeValue(currentBalance), error: acctErr.message };
+      }
+
+      // 4. Patch local state immediately (realtime will also arrive shortly,
+      //    but this makes the UI feel instant).
+      setState((s) => ({
+        ...s,
+        loyaltyByCustomer: {
+          ...s.loyaltyByCustomer,
+          [customerId]: { points: newBalance, tier: newTier },
+        },
+      }));
+
+      logActivity({
+        module: "Customer", action: "Loyalty Adjusted", severity: "info",
+        entity: "Customer", reference: customerId,
+        description: `Loyalty adjusted by ${pointsDelta > 0 ? "+" : ""}${pointsDelta} pts → ${newBalance} pts (${newTier}). Reason: ${reason}`,
+      });
+
+      return { ok: true, points: newBalance, tier: newTier };
+    } catch (err: any) {
+      console.error("[store] adjustLoyalty unexpected error:", err);
+      return { ok: false, points: 0, tier: "bronze", error: String(err?.message ?? err) };
+    }
+  }, []);
+
   /* ── Customer Group actions (DB-first) ── */
   const addCustomerGroup = useCallback(async (group: CustomerGroup) => {
     if (shouldUseDb()) {
@@ -3338,6 +3485,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateCustomer,
     deleteCustomer,
     mergeCustomersAction,
+    adjustLoyalty,
     addCustomerGroup,
     updateCustomerGroup,
     deleteCustomerGroup,

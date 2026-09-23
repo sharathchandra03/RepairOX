@@ -45,6 +45,63 @@ export const CUSTOMER_SOURCES: CustomerSource[] = [
   "other",
 ];
 
+/* ─── Capture Source / Origin module ───────────────────────────────────
+   WHERE (which module/screen) a customer record was first CAPTURED. This is a
+   SEPARATE dimension from `source` (the marketing channel: GMB/Meta/referral).
+   `captureSource` answers "which door did this person come through" so the
+   Customer Master can show, for every person, exactly where they were captured
+   — walk-in desk, a lead, a ticket, an invoice, a field job, POS, a CSV import,
+   or a manual add. Every capture flow stamps this on create; it is immutable
+   provenance and never changes on later edits. */
+export type CaptureSource =
+  | "walk_in"
+  | "lead"
+  | "ticket"
+  | "invoice"
+  | "field"
+  | "pos"
+  | "import"
+  | "manual";
+
+export const CAPTURE_SOURCE_LABEL: Record<CaptureSource, string> = {
+  walk_in: "Walk-In",
+  lead: "Lead",
+  ticket: "Ticket",
+  invoice: "Invoice",
+  field: "Field Job",
+  pos: "POS / Sale",
+  import: "Imported",
+  manual: "Manual Entry",
+};
+
+/** Compact badge label (kept short so it doesn't overcrowd the table). */
+export const CAPTURE_SOURCE_BADGE: Record<CaptureSource, string> = {
+  walk_in: "Walk-In",
+  lead: "Lead",
+  ticket: "Ticket",
+  invoice: "Invoice",
+  field: "Field",
+  pos: "POS",
+  import: "Import",
+  manual: "Manual",
+};
+
+/** Subtle tone per capture source for the Source badge (RepairOX palette). */
+export const CAPTURE_SOURCE_TONE: Record<CaptureSource, string> = {
+  walk_in: "bg-amber-50 text-amber-700 ring-amber-200",
+  lead: "bg-violet-50 text-violet-700 ring-violet-200",
+  ticket: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  invoice: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  field: "bg-teal-50 text-teal-700 ring-teal-200",
+  pos: "bg-sky-50 text-sky-700 ring-sky-200",
+  import: "bg-slate-50 text-slate-600 ring-slate-200",
+  manual: "bg-zinc-50 text-zinc-600 ring-zinc-200",
+};
+
+export const CAPTURE_SOURCES: CaptureSource[] = [
+  "walk_in", "lead", "ticket", "invoice", "field", "pos", "import", "manual",
+];
+
 /* ─── Customer Group (segmentation label) ──────────────────────────────
    Reusable segmentation labels (VIP, Wholesale, Corporate, Priority, …).
    Managed under Settings → Customers → Customer Groups. A customer may belong
@@ -116,9 +173,12 @@ export function createCustomerGroup(
 export type Customer = {
   id: string;
   type: CustomerType;
-  /** Customer ORIGIN — how they first entered the business. Optional; never
-   *  overwrites `type`. */
+  /** Customer ORIGIN — how they first entered the business (marketing
+   *  channel: GMB/Meta/referral/…). Optional; never overwrites `type`. */
   source?: CustomerSource;
+  /** WHERE the record was first captured (which module/screen). Immutable
+   *  provenance shown as the "Source" column in the Customer Master. */
+  captureSource?: CaptureSource;
   /** Customer group memberships (ids into the customer_groups catalogue).
    *  Always normalized to an array by the mappers/factory; optional on the type
    *  only so legacy seed literals remain valid. Read with `?? []`. */
@@ -169,6 +229,9 @@ export function createCustomer(
     id: generateCustomerId(),
     type: data.type || "personal",
     source: data.source,
+    // Default provenance is a manual add; every non-manual capture flow passes
+    // its own captureSource (walk_in / ticket / invoice / lead / field / import).
+    captureSource: data.captureSource ?? "manual",
     groupIds: data.groupIds ?? [],
     companyId: data.companyId,
     firstName: data.firstName,

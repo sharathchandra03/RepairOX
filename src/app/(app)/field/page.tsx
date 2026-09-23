@@ -27,6 +27,7 @@ import { Input } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { Pagination } from "@/components/ui/pagination";
 import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -331,23 +332,16 @@ export default function FieldPage() {
         style={{ top: stickyTop }}
         className="sticky z-10 -mt-5 space-y-3 bg-[hsl(var(--background))] pt-5 pb-3 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
-        {/* Date Range Strip — shared 8-option pill strip (same as Tickets/Invoices),
-            scrollable on narrow screens without pushing the page. */}
-        <div className="flex max-w-full items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          {FIELD_DATE_RANGES.map((dr) => (
-            <button
-              key={dr.value}
-              onClick={() => setDateRange(dr.value)}
-              className={cn(
-                "shrink-0 whitespace-nowrap rounded-full px-5 py-1.5 text-center text-xs font-semibold transition-all",
-                dateRange === dr.value
-                  ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
-                  : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground",
-              )}
-            >
-              {dr.label}
-            </button>
-          ))}
+        {/* Date Range Strip — shared 8-option strip as ONE connected segmented
+            control (RepairOX standard: all filter strips use the connected
+            SegmentedTabs container, never detached pills). */}
+        <div className="max-w-full overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={dateRange}
+            onChange={(v) => setDateRange(v as FieldDateRange)}
+            options={FIELD_DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
+            size="sm"
+          />
         </div>
 
         {/* Custom Date Range — reuses the shared Date Range picker (same as Tickets). */}

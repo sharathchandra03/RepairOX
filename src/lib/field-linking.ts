@@ -65,6 +65,8 @@ export function resolveCustomer(
     mobile: seed.phone || "",
     email: seed.email || "",
     source: (seed.source as any) || "sales",
+    // Captured through the Lead → routing pipeline.
+    captureSource: "lead",
     address: seed.address || "",
   });
   return { customerId: created.id, created };

@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
 import { cn } from "@/lib/utils";
 
@@ -94,10 +95,15 @@ export default function WhatsAppPage() {
           {/* Search + tabs */}
           <div className="border-b border-border p-3 space-y-2">
             <Input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search..." iconLeft={<Search className="h-4 w-4" />} className="h-9" />
-            <div className="flex gap-1">
-              <button onClick={() => setTab("all")} className={cn("rounded-full px-3 py-1 text-[11px] font-semibold transition", tab === "all" ? "bg-[#4361EE] text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200")}>All</button>
-              <button onClick={() => setTab("unread")} className={cn("rounded-full px-3 py-1 text-[11px] font-semibold transition", tab === "unread" ? "bg-[#4361EE] text-white" : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200")}>Unread</button>
-            </div>
+            <SegmentedTabs
+              value={tab}
+              onChange={(v) => setTab(v as typeof tab)}
+              size="sm"
+              options={[
+                { label: "All", value: "all" },
+                { label: "Unread", value: "unread" },
+              ]}
+            />
           </div>
 
           {/* Contact list */}

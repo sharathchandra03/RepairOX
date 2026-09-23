@@ -132,6 +132,7 @@ export const CAP = {
     merge: ["merge_customer", "manage_customers"],
     manageGroups: ["manage_customer_groups", "manage_customers"],
     export: ["export_customers", "manage_customers"],
+    import: ["import_customers", "manage_customers"],
   },
   loyalty: {
     view: ["view_loyalty", "manage_loyalty"],

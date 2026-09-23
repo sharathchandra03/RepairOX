@@ -172,9 +172,11 @@ export function RoxTableRow({
       onClick={onClick}
       className={cn(
         "rox-table-row group align-middle transition",
-        // Default row height token (h-[68px]); override via className if a
-        // module genuinely needs taller rows (e.g. Tickets uses h-[76px]).
-        "h-[68px]",
+        // Default row height comes from the --rox-table-row-h density token
+        // (68px comfortable → compacted on ~13" laptops via the compact-desktop
+        // @media block in globals.css). Override via className only if a module
+        // genuinely needs a different height (e.g. Tickets uses h-[76px]).
+        "rox-table-row-h",
         selected
           ? "bg-indigo-50/40"
           : tint
@@ -189,7 +191,9 @@ export function RoxTableRow({
   );
 }
 
-/* Canonical cell padding (py-4) + vertical centering. */
+/* Canonical cell padding + vertical centering. Padding is density-aware
+   (rox-table-cell) so cells tighten on ~13" laptops via the compact-desktop
+   @media block; comfortable = px-3 py-4. */
 export function RoxTableCell({
   children,
   className,
@@ -199,7 +203,7 @@ export function RoxTableCell({
   className?: string;
 } & React.TdHTMLAttributes<HTMLTableCellElement>) {
   return (
-    <td className={cn("px-3 py-4 align-middle", className)} {...rest}>
+    <td className={cn("rox-table-cell align-middle", className)} {...rest}>
       {children}
     </td>
   );

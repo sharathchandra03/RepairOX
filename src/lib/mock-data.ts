@@ -760,6 +760,7 @@ export const navItems: NavItem[] = [
   { href: "/invoice",          label: "Invoice",       icon: "FileText", permission: "manage_invoices" },
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "WalkIn", permission: "use_pos" },
+  { href: "/customers",        label: "Customers",     icon: "BookUser", permission: ["view_customers", "manage_customers"] },
   { href: "/field",            label: "Pickup & Drop", icon: "Truck", permission: "view_field_jobs" },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "IndianRupee", permission: "manage_payments" },
@@ -1869,7 +1870,7 @@ export const walkIns: WalkIn[] = [];
 
 export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]> = {
   shop: [
-    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/price-list"] },
+    { label: "MODULE",         items: ["/dashboard", "/tickets", "/invoice", "/walk-in", "/customers", "/price-list"] },
     { label: "INVENTORY",      items: ["/inventory"] },
     // Expenses remains standalone for daily operational quick-access.
     // Employees and Accounts are now expandable groups rendered separately.

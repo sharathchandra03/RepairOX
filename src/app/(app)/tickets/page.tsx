@@ -814,22 +814,16 @@ export default function TicketsPage() {
         style={{ top: stickyTop }}
         className="sticky z-10 -mt-5 space-y-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
-      {/* Date Range Buttons — shared 8-option strip (scrollable on narrow screens) */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {DATE_RANGES.map((dr) => (
-          <button
-            key={dr.value}
-            onClick={() => setDateRange(dr.value)}
-            className={cn(
-              "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
-              dateRange === dr.value
-                ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
-                : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground"
-            )}
-          >
-            {dr.label}
-          </button>
-        ))}
+      {/* Date Range — shared 8-option strip as ONE connected segmented control
+          (RepairOX standard: all filter strips use the connected SegmentedTabs
+          container, not detached pills). Scrolls horizontally on narrow screens. */}
+      <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          value={dateRange}
+          onChange={(v) => setDateRange(v as DateRange)}
+          options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
+          size="sm"
+        />
       </div>
 
       {/* Custom Date Range — reuses the same Date Range picker pattern as Invoice */}
@@ -1015,27 +1009,19 @@ export default function TicketsPage() {
           Status strip. Uses the SAME pill styling as the Date strip so it reads
           as one consistent filter language. Composes with every existing filter
           (works immediately, no pinning needed). */}
-      <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        {RECORD_TYPE_FILTERS.map((rt) => (
-          <button
-            key={rt.value}
-            onClick={() => {
-              setRecordTypeFilter(rt.value);
-              // The status vocabulary differs per record type, so a status
-              // chosen for one type would be meaningless (and hide every row)
-              // under another. Reset it to "All Statuses" on any switch.
-              setStatusFilter("all");
-            }}
-            className={cn(
-              "shrink-0 whitespace-nowrap rounded-full px-6 py-1.5 text-center text-xs font-semibold transition-all",
-              recordTypeFilter === rt.value
-                ? "bg-[#4361EE] text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.4)]"
-                : "bg-muted text-muted-foreground hover:bg-slate-200 hover:text-foreground"
-            )}
-          >
-            {rt.label}
-          </button>
-        ))}
+      <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          value={recordTypeFilter}
+          onChange={(v) => {
+            setRecordTypeFilter(v);
+            // The status vocabulary differs per record type, so a status chosen
+            // for one type would be meaningless (and hide every row) under
+            // another. Reset it to "All Statuses" on any switch.
+            setStatusFilter("all");
+          }}
+          options={RECORD_TYPE_FILTERS.map((rt) => ({ label: rt.label, value: rt.value }))}
+          size="sm"
+        />
       </div>
 
       {/* Bulk selection bar — sits ABOVE the table header as its own row. */}

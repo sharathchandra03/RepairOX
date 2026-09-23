@@ -40,7 +40,7 @@ export function SalesReportCategories() {
 
   return (
     <div className="space-y-4">
-      <ModulePreviewBanner moduleLabel="Sales Management" />
+      <ModulePreviewBanner moduleLabel="Lead Management" />
 
       <div className="grid gap-5 lg:grid-cols-[248px_1fr]">
         <div className="lg:sticky lg:top-20 lg:self-start">

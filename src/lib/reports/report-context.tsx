@@ -66,8 +66,8 @@ export const REPORT_MODULE_META: Record<ReportModuleId, ReportModuleMeta> = {
   },
   sales: {
     id: "sales",
-    label: "Sales Management",
-    reportTitle: "Sales Reports",
+    label: "Lead Management",
+    reportTitle: "Lead Reports",
     description: "Pipeline, leads, deals, campaigns and revenue — your complete sales intelligence cockpit.",
   },
   field: {

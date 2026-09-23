@@ -54,7 +54,7 @@ export function SalesOverview() {
 
   return (
     <div className="space-y-5">
-      {!isDemoMode && <ModulePreviewBanner moduleLabel="Sales Management" />}
+      {!isDemoMode && <ModulePreviewBanner moduleLabel="Lead Management" />}
 
       {/* Section 1 — Executive Summary */}
       <ExecutiveSummary cards={cards} comparisonLabel="previous period" />

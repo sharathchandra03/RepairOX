@@ -26,7 +26,7 @@ export default function Page() {
   if (!allowed) {
     return (
       <div className="space-y-5">
-        <PageHeader eyebrow="Sales Management" title="Reports" />
+        <PageHeader eyebrow="Lead Management" title="Reports" />
         <div className="mx-auto mt-16 max-w-md rounded-2xl border border-border bg-card p-8 text-center shadow-card">
           <span className="mx-auto grid h-12 w-12 place-items-center rounded-full bg-muted">
             <Lock className="h-5 w-5 text-muted-foreground" />

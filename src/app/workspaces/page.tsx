@@ -52,7 +52,7 @@ const WORKSPACE_CARDS: Record<WorkspaceId, WorkspaceCardDef> = {
   },
   leads: {
     id: "leads",
-    title: "Sales Management",
+    title: "Lead Management",
     tagline: "Manage leads, contacts and conversions",
     description:
       "Manage leads, contacts, companies, deals, quotations, follow-ups, communication, pipeline management, and customer conversion.",

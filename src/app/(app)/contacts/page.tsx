@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { RSelect } from "@/components/ui/rselect";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, CUSTOMER_SOURCES, CUSTOMER_SOURCE_LABEL, type Customer, type CustomerSource } from "@/lib/customer-data";
 import { CustomerGroupPicker } from "@/components/common/customer-group-picker";
@@ -71,19 +72,18 @@ export default function CustomersPage() {
           />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Customer Type filter */}
-          {(["all", "personal", "business"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFilter(f)}
-              className={cn(
-                "rounded-full px-3 py-1.5 text-[11px] font-semibold transition-all",
-                filter === f ? "bg-[#4361EE] text-white shadow-sm" : "bg-muted text-muted-foreground hover:bg-slate-200"
-              )}
-            >
-              {f === "all" ? "All" : f === "personal" ? "Personal" : "Business"} ({f === "all" ? customers.length : customers.filter((c) => c.type === f).length})
-            </button>
-          ))}
+          {/* Customer Type filter — ONE connected segmented control (RepairOX
+              standard: filter strips use the connected SegmentedTabs container). */}
+          <SegmentedTabs
+            value={filter}
+            onChange={(v) => setFilter(v as typeof filter)}
+            size="sm"
+            options={[
+              { label: `All (${customers.length})`, value: "all" },
+              { label: `Personal (${customers.filter((c) => c.type === "personal").length})`, value: "personal" },
+              { label: `Business (${customers.filter((c) => c.type === "business").length})`, value: "business" },
+            ]}
+          />
           {/* Source filter — separate dimension */}
           <div className="w-40">
             <RSelect

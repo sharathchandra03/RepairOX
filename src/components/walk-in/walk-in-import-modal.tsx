@@ -190,6 +190,8 @@ export function WalkInImportModal({
           mobile: r.data.phone || "",
           email: r.data.email || "",
           source: walkInTypeToCustomerSource(r.data.type),
+          // Provenance: captured through a bulk import.
+          captureSource: "import",
         });
         addCustomer(created);
         customerId = created.id;

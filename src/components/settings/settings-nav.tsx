@@ -86,7 +86,9 @@ const SETTINGS_NAV: NavSection[] = [
   {
     id: "customers", label: "Customers", icon: UserCheck,
     children: [
-      { label: "Manage Customers", href: "/settings/customers/manage" },
+      // The operational Customer Master now lives at the top-level /customers
+      // page (Shop workspace). Settings keeps only the CONFIG surfaces.
+      { label: "Customer Master", href: "/customers" },
       { label: "Customer Groups", href: "/settings/customers/groups" },
       { label: "Loyalty", href: "/settings/customers/loyalty" },
     ],

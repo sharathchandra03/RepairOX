@@ -689,6 +689,7 @@ function NewTicketWizard() {
           mobile: data.customer.phone.trim(),
           email: data.customer.email.trim(),
           type: data.contactType,
+          captureSource: "ticket",
           company: data.customer.company.trim(),
           address: data.customer.address.trim(),
           city: data.customer.city.trim(),
@@ -3524,13 +3525,14 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     .flatMap((g) => g.items.map((key) => ({ key, groupId: g.id, groupLabel: g.label })))
     .map((entry, i) => ({ ...entry, globalIndex: i }));
 
-  // Split into two EVEN halves (items 1–10 left, 11–20 right). When a group
-  // spans the column boundary (e.g. Audio = items 8–11 → 8,9,10 left, 11
-  // right), the right column re-shows that group's heading as a continuation,
-  // so there is never an orphaned item under a missing header (see the heading
-  // logic in the render below, which prints the label at the top of a column
-  // regardless of what preceded it in the other column).
-  const half = Math.ceil(flatItems.length / 2);
+  // Split so the LEFT column carries one extra item (items 1–11 left, 12–20
+  // right). The left checklist column was visually roomier than the narrow
+  // right utility panel, so shifting item #11 into it evens the two sides.
+  // When a group spans the column boundary the right column re-shows that
+  // group's heading as a continuation, so there is never an orphaned item under
+  // a missing header (see the heading logic in the render below, which prints
+  // the label at the top of a column regardless of what preceded it).
+  const half = Math.ceil(flatItems.length / 2) + 1;
   const columns = [flatItems.slice(0, half), flatItems.slice(half)];
 
   // A single inspection row — identical spacing/structure in both columns so
@@ -3543,8 +3545,8 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     const status = qc[key];
     const hasNote = !!(notes[key] && notes[key]!.trim());
     return (
-      <div className="flex min-h-[36px] flex-1 items-center gap-2 px-3 py-1.5">
-        <span className="w-6 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{globalIndex + 1}.</span>
+      <div className="flex min-h-[34px] flex-1 items-center gap-2 px-3 py-1">
+        <span className="w-5 shrink-0 text-right text-[11px] font-semibold tabular-nums text-muted-foreground">{globalIndex + 1}.</span>
         <span className="flex-1 truncate text-[13px] font-semibold text-foreground">{labelFor(key)}</span>
         <button
           type="button"
@@ -3564,7 +3566,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
             aria-pressed={status === "ok"}
             onClick={() => set(key, "ok")}
             className={cn(
-              "rounded-md border px-2 py-1 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
+              "rounded-md border px-2 py-0.5 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500/50",
               status === "ok"
                 ? "border-emerald-700 bg-emerald-600 text-white shadow-sm"
                 : "border-emerald-300 bg-white text-emerald-700 hover:bg-emerald-50"
@@ -3577,7 +3579,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
             aria-pressed={status === "no"}
             onClick={() => set(key, "no")}
             className={cn(
-              "rounded-md border px-2 py-1 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/50",
+              "rounded-md border px-2 py-0.5 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500/50",
               status === "no"
                 ? "border-rose-700 bg-rose-600 text-white shadow-sm"
                 : "border-rose-300 bg-white text-rose-700 hover:bg-rose-50"
@@ -3590,7 +3592,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
             aria-pressed={status === "na"}
             onClick={() => set(key, "na")}
             className={cn(
-              "rounded-md border px-2 py-1 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50",
+              "rounded-md border px-2 py-0.5 text-[11px] font-bold transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/50",
               status === "na"
                 ? "border-amber-600 bg-amber-500 text-white shadow-sm"
                 : "border-amber-300 bg-white text-amber-700 hover:bg-amber-50"
@@ -3617,7 +3619,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   // that spans the boundary re-shows its heading (marked "cont.") at the top of
   // the next column so no item is ever orphaned under a missing header.
   const inspectionGrid = (
-    <div className="grid grid-cols-1 gap-3 md:grid-cols-2 md:items-stretch">
+    <div className="grid flex-1 grid-cols-1 gap-2.5 md:grid-cols-2 md:items-stretch">
       {columns.map((column, colIdx) => {
         let lastGroup: string | null = null;
         // Group ids that already appeared in an EARLIER column — used to mark
@@ -3669,7 +3671,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   // Actions, Summary and Finish QC. Replaces the old horizontal KPI row + the
   // filter/search strip above the grid. All handlers are the existing ones.
   const utilityPanel = (
-    <aside className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]">
+    <aside className="flex h-full flex-col gap-2.5 rounded-2xl border border-border bg-card p-3 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]">
       {/* Filters — contextual store only (search removed) */}
       {activeStore && (
         <section>
@@ -3762,9 +3764,11 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
         </div>
       </section>
 
-      {/* Finish QC — hidden in edit mode (matches previous behaviour) */}
+      {/* Finish QC — pinned to the BOTTOM (mt-auto) so the utility panel fills
+          the full height of the left workspace and its bottom edge lines up.
+          Hidden in edit mode (matches previous behaviour). */}
       {!isEdit && (
-        <Button size="md" className="w-full justify-center" onClick={onNext}>
+        <Button size="md" className="mt-auto w-full justify-center" onClick={onNext}>
           <CheckCircle2 className="h-4 w-4" /> Finish QC
         </Button>
       )}
@@ -3778,25 +3782,24 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
       <DeviceSwitcher data={data} setData={setData} />
 
       {/* Two-region layout: LEFT = QC workspace, RIGHT = compact utility panel.
-          Both regions start at the SAME vertical top (items-start) so the
-          right panel aligns with the top of the inspection workspace. */}
-      <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-[minmax(0,1fr)_280px]">
+          Both regions STRETCH to the same height (items-stretch) so the right
+          utility panel ends at exactly the same length as the left workspace —
+          no short/uneven right edge. */}
+      <div className="grid grid-cols-1 items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* LEFT — QC inspection workspace */}
-        <div className="min-w-0">
+        <div className="flex min-w-0 flex-col">
           {/* Inspection Progress — compact, near the top of the workspace */}
-          <div className="mb-3 rounded-xl border border-border bg-card px-4 py-2.5">
-            <div className="mb-1.5 flex items-center justify-between">
+          <div className="mb-2 rounded-xl border border-border bg-card px-4 py-2">
+            <div className="mb-1 flex items-center justify-between">
               <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspection Progress</span>
               <span className="text-[12px] font-bold">{completed} / {total} <span className="text-[#4361EE]">· {pct}%</span></span>
             </div>
-            <div className="h-2.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <motion.div className="h-full rounded-full bg-[#4361EE]" animate={{ width: `${pct}%` }} transition={{ duration: 0.4 }} />
             </div>
           </div>
 
           {inspectionGrid}
-
-          <p className="mt-2.5 text-center text-[10px] text-muted-foreground"><CheckCircle2 className="inline h-3 w-3 text-emerald-500" /> Auto-saved</p>
         </div>
 
         {/* RIGHT — compact vertical utility panel */}

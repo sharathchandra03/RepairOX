@@ -117,7 +117,7 @@ export function RoxCenteredForm({
               onClick={(e) => e.stopPropagation()}
             >
               {/* Fixed header. */}
-              <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+              <div className="rox-form-pad flex items-start justify-between gap-3 border-b border-border p-5">
                 <div className="flex items-start gap-3">
                   {Icon && (
                     <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60">
@@ -142,7 +142,7 @@ export function RoxCenteredForm({
                   input/select/textarea/button inside when read-only, so a
                   view-only user physically cannot edit or submit — with no
                   per-field code. */}
-              <div className="flex-1 overflow-y-auto p-5">
+              <div className="rox-form-pad flex-1 overflow-y-auto p-5">
                 {!canEdit && (
                   <div className="mb-4 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-[12.5px] font-medium text-amber-700">
                     <Eye className="mt-0.5 h-4 w-4 shrink-0" />
@@ -158,12 +158,12 @@ export function RoxCenteredForm({
                   is hidden; a read-only footer (e.g. a Close button) may be
                   supplied instead. */}
               {canEdit && footer && (
-                <div className="flex items-center justify-between gap-2 border-t border-border p-5">
+                <div className="rox-form-pad flex items-center justify-between gap-2 border-t border-border p-5">
                   {footer}
                 </div>
               )}
               {!canEdit && readOnlyFooter && (
-                <div className="flex items-center justify-end gap-2 border-t border-border p-5">
+                <div className="rox-form-pad flex items-center justify-end gap-2 border-t border-border p-5">
                   {readOnlyFooter}
                 </div>
               )}
