@@ -18,7 +18,7 @@ import {
   CUSTOMER_SOURCE_LABEL, CAPTURE_SOURCE_LABEL,
   type Customer, type CustomerSource,
 } from "@/lib/customer-data";
-import type { FindOrCreateInput } from "@/lib/customer-service";
+import { pointsFromInvoiceAmount, tierForLifetimeValue, type FindOrCreateInput } from "@/lib/customer-service";
 
 /** Canonical import/export columns, in order. */
 export const CUSTOMER_CSV_COLUMNS = [
@@ -163,9 +163,10 @@ export function customerTemplateCSV(): string {
 /**
  * Serialize the whole customer list to a marketing-ready CSV.
  *
- * Pass `loyaltyByCustomer` (from `useStore().loyaltyByCustomer`) to include
- * the Loyalty Points and Loyalty Tier columns; omit it and those columns are
- * left blank (safe for callers that don't have the map available).
+ * Pass `loyaltyByCustomer` (from `useStore().loyaltyByCustomer`) for the exact
+ * settled loyalty balance/tier. When a customer has no loyalty account yet, the
+ * points/tier are DERIVED from lifetime value (₹100 = 1 point) so the export
+ * matches the Customer Master table — loyalty is linked to lifetime value.
  *
  * Export-only columns appended after the importable base columns:
  *   Captured Via | Created At | Last Visit | Total Tickets | Total Invoices |
@@ -211,11 +212,13 @@ export function customersToCSV(
       c.totalTickets ?? 0,
       c.totalInvoices ?? 0,
       c.lifetimeValue ?? 0,
-      // ── loyalty (requires loyaltyByCustomer map) ─────────────────────
-      loyalty?.points ?? "",
-      loyalty?.tier
-        ? loyalty.tier.charAt(0).toUpperCase() + loyalty.tier.slice(1)
-        : "",
+      // ── loyalty: explicit account when present, else derived from
+      //    lifetime value (matches the Customer Master table) ────────────
+      loyalty?.points ?? pointsFromInvoiceAmount(c.lifetimeValue ?? 0),
+      (() => {
+        const tier = loyalty?.tier ?? tierForLifetimeValue(pointsFromInvoiceAmount(c.lifetimeValue ?? 0));
+        return tier ? tier.charAt(0).toUpperCase() + tier.slice(1) : "";
+      })(),
     ];
   });
 

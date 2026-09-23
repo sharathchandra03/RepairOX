@@ -36,10 +36,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Trash2, Search, Edit2, X, GitMerge,
   Users, Repeat, Briefcase, Gem, Wallet, UserPlus, ShieldAlert,
-  ArrowLeft, Upload, Download,
+  ArrowLeft, Upload, Download, MoreHorizontal,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { Avatar } from "@/components/ui/avatar";
@@ -56,6 +57,8 @@ import {
   CAPTURE_SOURCE_BADGE, CAPTURE_SOURCE_TONE,
   type Customer, type CustomerSource,
 } from "@/lib/customer-data";
+import { pointsFromInvoiceAmount, tierForLifetimeValue, thresholdsFromTiers, LOYALTY_TIER_LABELS } from "@/lib/customer-service";
+import { useStoreSettings } from "@/lib/store-settings";
 import { customersToCSV } from "@/lib/customer-csv";
 import { downloadCSV } from "@/lib/csv-utils";
 import { toast } from "@/components/ui/toaster";
@@ -119,6 +122,26 @@ export default function ManageCustomersPage() {
   const { customers, customerGroups, addCustomer, updateCustomer, deleteCustomer, mergeCustomersAction, loyaltyByCustomer } = useStore();
   const { contacts, hydrated: contactsHydrated } = useLeads();
   const { can } = usePermissions();
+  // Live loyalty earning rate for THIS store/org (Settings → Customers →
+  // Loyalty). Derived loyalty points in the table recompute from lifetime value
+  // using this rate, so changing it there immediately re-syncs the points shown
+  // here. When the program is disabled, derived points read 0.
+  const { settings: storeSettings } = useStoreSettings();
+  const loyaltyRate = storeSettings.loyaltyConfig.pointsPerRupee || 100;
+  const loyaltyEnabled = storeSettings.loyaltyConfig.enabled;
+  // Admin-configurable tier point structure + display labels (falls back to
+  // the built-in defaults when not customized).
+  const loyaltyThresholds = useMemo(
+    () => thresholdsFromTiers(storeSettings.loyaltyConfig.tiers),
+    [storeSettings.loyaltyConfig.tiers]
+  );
+  const loyaltyTierLabels = useMemo(() => {
+    const out: Record<string, string> = { ...LOYALTY_TIER_LABELS };
+    for (const t of storeSettings.loyaltyConfig.tiers ?? []) {
+      if (t?.key && t.label?.trim()) out[t.key] = t.label.trim();
+    }
+    return out;
+  }, [storeSettings.loyaltyConfig.tiers]);
 
   const [tab, setTab] = useState<TabKey>("customers");
 
@@ -333,13 +356,17 @@ export default function ManageCustomersPage() {
   return (
     <div className="space-y-6">
       <PageHeader
-        eyebrow="Shop › Customers"
+        eyebrow="Settings › Customers"
         title="Customer Master"
         subtitle="Everyone your business has captured — walk-ins, leads, prospects and manual entries. Import, export and use for marketing."
         actions={
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="md" className="gap-1.5 rounded-full" onClick={() => router.back()}>
-              <ArrowLeft className="h-4 w-4" /> Back
+            {/* Customer Master is reached from Settings → Customers and is no
+                longer surfaced in the Shop workspace nav. Back always returns to
+                the Settings → Customers section (deterministic, unlike
+                router.back() which depends on browser history). */}
+            <Button variant="ghost" size="md" className="gap-1.5 rounded-full" onClick={() => router.push("/settings/customers/groups")}>
+              <ArrowLeft className="h-4 w-4" /> Back to Settings
             </Button>
             <Can permission={CAP.customer.import}>
               <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={() => setShowImport(true)}>
@@ -624,9 +651,9 @@ export default function ManageCustomersPage() {
                   <col className="w-[11%]" />{/* Company / Groups */}
                   <col className="w-[11%]" />{/* Activity */}
                   <col className="w-[9%]" />{/* Lifetime Value */}
-                  <col className="w-[5%]" />{/* Loyalty */}
+                  <col className="w-[8%]" />{/* Loyalty — widened now that Actions is a single kebab */}
                   <col className="w-[7%]" />{/* Last Visit */}
-                  <col className="w-[9%] min-w-[112px]" />{/* Actions — guaranteed min-width so 3 icon buttons never overflow into the previous column */}
+                  <col className="w-[6%] min-w-[56px]" />{/* Actions — single "…" kebab menu */}
                 </colgroup>
                 <thead className="bg-[#EEF1FD] border-b-2 border-[#4361EE]/40">
                   <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
@@ -702,24 +729,46 @@ export default function ManageCustomersPage() {
                           {repeat && <p className="mt-0.5 text-[11px] text-emerald-600 font-medium">Repeat</p>}
                         </td>
                         <td className="px-3 py-4 align-middle text-right">
-                          <span className="whitespace-nowrap font-semibold tabular-nums">{formatINR(c.lifetimeValue ?? 0)}</span>
+                          {/* Shifted 10px left to match the header label and keep
+                              the whole Lifetime Value column visually aligned. */}
+                          <span className="inline-block -translate-x-[10px] whitespace-nowrap font-semibold tabular-nums">{formatINR(c.lifetimeValue ?? 0)}</span>
                         </td>
                         <td className="px-3 py-4 align-middle">
                           {(() => {
-                            const loy = loyaltyByCustomer[c.id];
-                            if (!loy) return <span className="text-[12px] text-muted-foreground">—</span>;
+                            // Prefer the explicit loyalty_accounts row (awards +
+                            // manual adjustments). When none exists yet, DERIVE
+                            // points from the customer's lifetime value (₹100 = 1
+                            // point) so every customer with spend shows a
+                            // points/tier immediately, not a blank — loyalty is
+                            // linked to lifetime value. The derived value is
+                            // marked "est." to distinguish it from a settled
+                            // ledger balance; it converges to the exact value
+                            // once Recalculate Loyalty / a paid invoice writes
+                            // the account row.
+                            const account = loyaltyByCustomer[c.id];
+                            // Derived points use the LIVE store loyalty rate; a
+                            // rate change in Settings re-syncs these instantly.
+                            // When the program is off, derived points are 0.
+                            const derivedPoints = loyaltyEnabled ? pointsFromInvoiceAmount(c.lifetimeValue ?? 0, loyaltyRate) : 0;
+                            const points = account?.points ?? derivedPoints;
+                            const isDerived = !account;
+                            if (points <= 0) return <span className="text-[12px] text-muted-foreground">—</span>;
+                            const tier = account?.tier ?? tierForLifetimeValue(points, loyaltyThresholds);
                             const tierColors: Record<string, string> = {
                               bronze:   "bg-orange-50 text-orange-700 ring-orange-200",
                               silver:   "bg-slate-50 text-slate-600 ring-slate-200",
                               gold:     "bg-yellow-50 text-yellow-700 ring-yellow-200",
                               platinum: "bg-indigo-50 text-indigo-700 ring-indigo-200",
                             };
-                            const color = tierColors[loy.tier] ?? "bg-muted text-muted-foreground ring-border";
+                            const color = tierColors[tier] ?? "bg-muted text-muted-foreground ring-border";
+                            const tierLabel = loyaltyTierLabels[tier] ?? (tier.charAt(0).toUpperCase() + tier.slice(1));
                             return (
                               <div>
-                                <p className="text-[12px] font-semibold tabular-nums text-zinc-800">{loy.points} pts</p>
+                                <p className="text-[12px] font-semibold tabular-nums text-zinc-800">
+                                  {points} pts{isDerived && <span className="ml-1 font-normal text-[10px] text-muted-foreground">est.</span>}
+                                </p>
                                 <span className={`mt-0.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ring-1 ring-inset ${color}`}>
-                                  {loy.tier.charAt(0).toUpperCase() + loy.tier.slice(1)}
+                                  {tierLabel}
                                 </span>
                               </div>
                             );
@@ -734,25 +783,46 @@ export default function ManageCustomersPage() {
                               <Button size="sm" variant="outline" onClick={(e: any) => { e.stopPropagation(); setConfirmDelete(null); }}>No</Button>
                               <Button size="sm" onClick={(e: any) => { e.stopPropagation(); handleDelete(c.id); }} className="bg-rose-600 hover:bg-rose-700 text-white">Yes</Button>
                             </div>
-                          ) : (
-                            <div className="flex items-center justify-end gap-1">
-                              {canEdit && (
-                                <button onClick={() => openEditForm(c)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-indigo-50 hover:text-[#4361EE]" title="Edit">
-                                  <Edit2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                              {canMerge && (
-                                <button onClick={() => setMergingCustomer(c)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-violet-50 hover:text-violet-600" title="Merge into another customer">
-                                  <GitMerge className="h-3.5 w-3.5" />
-                                </button>
-                              )}
-                              {canDelete && (
-                                <button onClick={() => setConfirmDelete(c.id)} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-rose-50 hover:text-rose-500" title="Delete">
-                                  <Trash2 className="h-3.5 w-3.5" />
-                                </button>
-                              )}
+                          ) : (canEdit || canMerge || canDelete) ? (
+                            // Single "…" kebab menu (Edit / Merge / Delete) to
+                            // free up the row width the Loyalty column needs.
+                            // Matches the canonical ticket-actions-menu pattern.
+                            <div className="flex items-center justify-end">
+                              <Dropdown
+                                align="right"
+                                width="w-44"
+                                trigger={({ toggle }) => (
+                                  <button
+                                    onClick={(e) => { e.stopPropagation(); toggle(); }}
+                                    className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+                                    title="More actions"
+                                  >
+                                    <MoreHorizontal className="h-4 w-4" />
+                                  </button>
+                                )}
+                              >
+                                {(close) => (
+                                  <>
+                                    {canEdit && (
+                                      <MenuItem icon={Edit2} onClick={() => { openEditForm(c); close(); }}>
+                                        Edit
+                                      </MenuItem>
+                                    )}
+                                    {canMerge && (
+                                      <MenuItem icon={GitMerge} onClick={() => { setMergingCustomer(c); close(); }}>
+                                        Merge
+                                      </MenuItem>
+                                    )}
+                                    {canDelete && (
+                                      <MenuItem icon={Trash2} danger onClick={() => { setConfirmDelete(c.id); close(); }}>
+                                        Delete
+                                      </MenuItem>
+                                    )}
+                                  </>
+                                )}
+                              </Dropdown>
                             </div>
-                          )}
+                          ) : null}
                         </td>
                       </tr>
                     );

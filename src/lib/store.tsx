@@ -32,7 +32,7 @@ import {
   type InventoryItem, type StockMovement,
 } from "@/lib/inventory-data";
 import { seedCustomers as SEED_CUSTOMERS, type Customer, type CustomerGroup } from "@/lib/customer-data";
-import { pointsFromInvoiceAmount, tierForLifetimeValue, evaluateAutomaticGroups, type LoyaltyTier } from "@/lib/customer-service";
+import { pointsFromInvoiceAmount, tierForLifetimeValue, thresholdsFromTiers, evaluateAutomaticGroups, type LoyaltyTier } from "@/lib/customer-service";
 import { seedCompanies as SEED_COMPANIES, type Company } from "@/lib/company-data";
 import {
   seedBrands as SEED_BRANDS, seedModels as SEED_MODELS,
@@ -1218,6 +1218,25 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /** Non-null supabase client — only call after shouldUseDb() returns true. */
   const db = supabase!;
 
+  /** Read the admin-configured loyalty tier point structure
+   *  (organization_settings.loyalty_config.tiers) live from the DB, falling
+   *  back to the built-in default thresholds. Keeps tier assignment in
+   *  awardLoyalty / adjustLoyalty / merge consistent with Settings → Loyalty. */
+  const readLoyaltyThresholds = useCallback(async () => {
+    if (!shouldUseDb()) return thresholdsFromTiers(null);
+    try {
+      const { data: rows } = await db.from("organization_settings").select("loyalty_config").limit(1);
+      const raw = rows?.[0]?.loyalty_config as unknown;
+      const cfg = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : null;
+      if (cfg && typeof cfg === "object" && Array.isArray((cfg as any).tiers)) {
+        return thresholdsFromTiers((cfg as any).tiers);
+      }
+    } catch {
+      /* fall back to defaults */
+    }
+    return thresholdsFromTiers(null);
+  }, [shouldUseDb, db]);
+
   /**
    * Stamp the CURRENT active store onto an outgoing insert row for a
    * store-scoped entity (ticket, invoice, walk-in, inventory item, stock
@@ -2132,6 +2151,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // StoreProvider in the tree, so this component can't consume that hook.
       let loyaltyEnabled = true;
       let pointsPerRupee = 100;
+      // Admin-configurable tier point structure (from loyalty_config.tiers).
+      // Falls back to the built-in default thresholds when not customized.
+      let loyaltyThresholds = thresholdsFromTiers(null);
       if (shouldUseDb()) {
         try {
           const { data: settingsRows } = await db.from("organization_settings").select("loyalty_config").limit(1);
@@ -2140,9 +2162,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           if (cfg && typeof cfg === "object") {
             if (typeof cfg.enabled === "boolean") loyaltyEnabled = cfg.enabled;
             if (typeof cfg.pointsPerRupee === "number" && cfg.pointsPerRupee > 0) pointsPerRupee = cfg.pointsPerRupee;
+            if (Array.isArray(cfg.tiers)) loyaltyThresholds = thresholdsFromTiers(cfg.tiers);
           }
         } catch {
-          /* keep defaults (program enabled, ₹100 = 1 point) */
+          /* keep defaults (program enabled, ₹100 = 1 point, default tiers) */
         }
       }
 
@@ -2157,7 +2180,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           .maybeSingle();
         const currentBalance = account?.points_balance ?? 0;
         const newBalance = currentBalance + pointsEarned;
-        const newTier = tierForLifetimeValue(newBalance);
+        const newTier = tierForLifetimeValue(newBalance, loyaltyThresholds);
 
         const { error: txError } = await db.from("loyalty_transactions").insert({
           id: `LTX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 9)}`,
@@ -2190,7 +2213,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (pointsEarned > 0) {
         const prevLoy = stateRef.current.loyaltyByCustomer[customerId] ?? { points: 0, tier: "bronze" as LoyaltyTier };
         const newLoyPoints = prevLoy.points + pointsEarned;
-        const newLoyTier = tierForLifetimeValue(newLoyPoints);
+        const newLoyTier = tierForLifetimeValue(newLoyPoints, loyaltyThresholds);
         setState((s) => ({
           ...s,
           loyaltyByCustomer: {
@@ -3018,7 +3041,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const secondaryBalance = accounts?.find((a: any) => a.customer_id === secondaryId)?.points_balance ?? 0;
       if (secondaryBalance > 0 || primaryBalance > 0) {
         const mergedBalance = primaryBalance + secondaryBalance;
-        const mergedTier = tierForLifetimeValue(mergedBalance);
+        const mergedTier = tierForLifetimeValue(mergedBalance, await readLoyaltyThresholds());
         const { error: upErr } = await db.from("loyalty_accounts").upsert({
           customer_id: primaryId, points_balance: mergedBalance, tier: mergedTier, last_transaction_at: new Date().toISOString(),
         });
@@ -3090,6 +3113,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     try {
+      // Resolve the admin-configured tier point structure (falls back to
+      // built-in defaults) so manual adjustments land in the right tier.
+      const loyaltyThresholds = await readLoyaltyThresholds();
+
       // 1. Read current balance.
       const { data: acct } = await db
         .from("loyalty_accounts")
@@ -3098,7 +3125,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         .maybeSingle();
       const currentBalance: number = (acct as any)?.points_balance ?? 0;
       const newBalance = Math.max(0, currentBalance + pointsDelta);
-      const newTier = tierForLifetimeValue(newBalance);
+      const newTier = tierForLifetimeValue(newBalance, loyaltyThresholds);
 
       // 2. Write the immutable ledger row.
       const txId = `LTX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -3113,7 +3140,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       if (txErr) {
         console.error("[store] adjustLoyalty tx insert failed:", txErr.message);
-        return { ok: false, points: currentBalance, tier: tierForLifetimeValue(currentBalance), error: txErr.message };
+        return { ok: false, points: currentBalance, tier: tierForLifetimeValue(currentBalance, loyaltyThresholds), error: txErr.message };
       }
 
       // 3. Upsert the account summary.
@@ -3125,7 +3152,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
       if (acctErr) {
         console.error("[store] adjustLoyalty account upsert failed:", acctErr.message);
-        return { ok: false, points: currentBalance, tier: tierForLifetimeValue(currentBalance), error: acctErr.message };
+        return { ok: false, points: currentBalance, tier: tierForLifetimeValue(currentBalance, loyaltyThresholds), error: acctErr.message };
       }
 
       // 4. Patch local state immediately (realtime will also arrive shortly,

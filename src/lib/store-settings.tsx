@@ -197,6 +197,11 @@ export type StoreSettings = {
     enabled: boolean;
     /** ₹ amount that earns 1 point (e.g. 100 → ₹100 spent = 1 point). */
     pointsPerRupee: number;
+    /** Customizable tier definitions. The `key` values stay fixed
+     *  (bronze/silver/gold/platinum — they persist in the DB tier column and
+     *  every consumer); admins can rename the display `label` and change the
+     *  points `threshold` (point structure). Ordered lowest → highest. */
+    tiers: { key: "bronze" | "silver" | "gold" | "platinum"; label: string; threshold: number }[];
   };
 };
 
@@ -348,6 +353,12 @@ CLAIM PROCEDURE:
   loyaltyConfig: {
     enabled: true,
     pointsPerRupee: 100,
+    tiers: [
+      { key: "bronze", label: "Bronze", threshold: 0 },
+      { key: "silver", label: "Silver", threshold: 1000 },
+      { key: "gold", label: "Gold", threshold: 5000 },
+      { key: "platinum", label: "Platinum", threshold: 10000 },
+    ],
   },
 };
 

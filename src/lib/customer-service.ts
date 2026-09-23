@@ -25,12 +25,47 @@ export type LoyaltyTier = "bronze" | "silver" | "gold" | "platinum";
 
 export const LOYALTY_TIERS: LoyaltyTier[] = ["bronze", "silver", "gold", "platinum"];
 
+/** Default point thresholds. The tier KEYS are fixed (they persist in the DB
+ *  `loyalty_accounts.tier` column and every consumer); admins can override
+ *  these thresholds — and the display labels — via
+ *  `settings.loyaltyConfig.tiers`. */
 export const LOYALTY_TIER_THRESHOLDS: Record<LoyaltyTier, number> = {
   bronze: 0,
   silver: 1000,
   gold: 5000,
   platinum: 10000,
 };
+
+/** Default display labels for each fixed tier key. */
+export const LOYALTY_TIER_LABELS: Record<LoyaltyTier, string> = {
+  bronze: "Bronze",
+  silver: "Silver",
+  gold: "Gold",
+  platinum: "Platinum",
+};
+
+/** A resolved tier definition (key + admin-configurable label + threshold). */
+export interface LoyaltyTierDef {
+  key: LoyaltyTier;
+  label: string;
+  threshold: number;
+}
+
+/** Build the effective threshold map from configurable tier defs, falling back
+ *  to the hardcoded defaults for any missing/invalid entry. */
+export function thresholdsFromTiers(
+  tiers?: LoyaltyTierDef[] | null
+): Record<LoyaltyTier, number> {
+  const out: Record<LoyaltyTier, number> = { ...LOYALTY_TIER_THRESHOLDS };
+  if (Array.isArray(tiers)) {
+    for (const t of tiers) {
+      if (t && LOYALTY_TIERS.includes(t.key) && Number.isFinite(t.threshold)) {
+        out[t.key] = Math.max(0, Math.round(t.threshold));
+      }
+    }
+  }
+  return out;
+}
 
 export type LoyaltyTransactionType = "earn" | "redeem" | "adjustment" | "tier_change";
 
@@ -61,10 +96,13 @@ export interface LoyaltyAccount {
  * Calculate which tier a customer should be in based on lifetime value.
  * Business logic: the tier is determined by total points balance.
  */
-export function tierForLifetimeValue(pointsBalance: number): LoyaltyTier {
-  if (pointsBalance >= LOYALTY_TIER_THRESHOLDS.platinum) return "platinum";
-  if (pointsBalance >= LOYALTY_TIER_THRESHOLDS.gold) return "gold";
-  if (pointsBalance >= LOYALTY_TIER_THRESHOLDS.silver) return "silver";
+export function tierForLifetimeValue(
+  pointsBalance: number,
+  thresholds: Record<LoyaltyTier, number> = LOYALTY_TIER_THRESHOLDS
+): LoyaltyTier {
+  if (pointsBalance >= thresholds.platinum) return "platinum";
+  if (pointsBalance >= thresholds.gold) return "gold";
+  if (pointsBalance >= thresholds.silver) return "silver";
   return "bronze";
 }
 
