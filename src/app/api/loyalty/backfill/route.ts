@@ -12,8 +12,8 @@ function tierForPoints(pts: number): string {
 }
 
 export async function POST(req: NextRequest) {
-  const authError = await requirePermission(req, ["manage_loyalty"]);
-  if (authError) return authError;
+  const guard = await requirePermission(req, ["manage_loyalty"]);
+  if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
 
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
