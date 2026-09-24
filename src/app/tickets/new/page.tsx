@@ -624,19 +624,26 @@ function NewTicketWizard() {
     else setInitialLoaded(true);
   }, [data]);
 
-  // On the Device Details step (3) with multiple devices, "Next" walks through
-  // the devices one at a time (fill device 1 → Next → device 2 …) and only
-  // advances to the next step after the LAST device. Single-device tickets
-  // behave exactly as before.
+  // Steps that are walked per-device (Device Details, Job Details, Assign
+  // Parts, QC): with multiple devices, "Next" walks through the devices one
+  // at a time (fill device 1 → Next → device 2 …) and only advances to the
+  // next step after the LAST device. Single-device tickets behave exactly as
+  // before. Each of these steps always starts back at device 1 — the shared
+  // `activeDeviceIndex` is reset to 0 whenever we leave a device-scoped step,
+  // so a leftover index from a previous step never leaks forward.
+  const DEVICE_SCOPED_STEPS = [3, 4, 5, 9];
   const next = () => {
-    if (step === 3 && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1) {
+    if (DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1) {
       setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex + 1 }));
       return;
+    }
+    if (DEVICE_SCOPED_STEPS.includes(step)) {
+      setData((prev) => ({ ...prev, activeDeviceIndex: 0 }));
     }
     setStep((s) => Math.min(s + 1, 11));
   };
   const back = () => {
-    if (step === 3 && data.devices.length > 1 && data.activeDeviceIndex > 0) {
+    if (DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1 && data.activeDeviceIndex > 0) {
       setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex - 1 }));
       return;
     }
@@ -645,6 +652,13 @@ function NewTicketWizard() {
     if (step === 1 || (step === 2 && skipToCategory)) {
       attemptNav(closeTarget);
     } else {
+      if (DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1) {
+        // Leaving a device-scoped step backwards (from device 1) into the
+        // previous step: land on the LAST device of that previous step, so
+        // Back feels symmetric with Next (mirrors how it already worked for
+        // step 3 → step 2).
+        setData((prev) => ({ ...prev, activeDeviceIndex: prev.devices.length - 1 }));
+      }
       setStep((s) => Math.max(1, s - 1));
     }
   };
@@ -652,7 +666,15 @@ function NewTicketWizard() {
   // single `data` state, so jumping between steps never loses or resets any
   // entered value. No per-step validation is enforced on navigation — required
   // fields are only checked at the final Create action (ConfirmationStep).
-  const goToStep = (target: number) => setStep(Math.min(Math.max(1, target), 11));
+  // Jumping into a device-scoped step always starts at device 1, consistent
+  // with Next/Back.
+  const goToStep = (target: number) => {
+    const clamped = Math.min(Math.max(1, target), 11);
+    if (DEVICE_SCOPED_STEPS.includes(clamped) && clamped !== step) {
+      setData((prev) => ({ ...prev, activeDeviceIndex: 0 }));
+    }
+    setStep(clamped);
+  };
 
   const attemptNav = (path: string) => {
     if (isEdit && dirty) {
@@ -1165,7 +1187,7 @@ function NewTicketWizard() {
               Save Changes
             </Button>
             <Button variant="outline" size="md" onClick={next} disabled={step >= 11}>
-              {step === 3 && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1
+              {DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1
                 ? <>Next Device ({data.activeDeviceIndex + 2}/{data.devices.length})</>
                 : <>Next</>} <ArrowRight className="h-4 w-4" />
             </Button>
@@ -2403,6 +2425,33 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 { label: "Repair Estimate", value: "estimate" },
                 { label: "Buyback", value: "buyback" },
               ]} />
+              {/* Warranty and Repair Estimate are RECORD-LEVEL concepts in the
+                  RepairOX ticket architecture, not per-device labels: a Repair
+                  Estimate is its own record type chosen when the ticket is
+                  started, and a Warranty claim is raised per-device AFTER the
+                  device has been invoiced (its warranty terms come from the
+                  linked invoice). So selecting them here just tags THIS device's
+                  job intent — it does not silently create a malformed
+                  estimate/warranty record. We surface the correct next action
+                  inline, scoped to the active device, instead. */}
+              {j.jobType === "estimate" && (
+                <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2">
+                  <FileText className="mt-0.5 h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+                  <p className="text-[11px] leading-snug text-indigo-900">
+                    Marked as a <span className="font-semibold">Repair Estimate</span> for this device. A formal, customer-approvable estimate is its own record — start one from{" "}
+                    <span className="font-semibold">Add New → Repair Estimate</span>. It can later be converted into a ticket, carrying this device over.
+                  </p>
+                </div>
+              )}
+              {j.jobType === "warranty" && (
+                <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2">
+                  <Shield className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  <p className="text-[11px] leading-snug text-emerald-900">
+                    Marked as a <span className="font-semibold">Warranty</span> job for this device. A ₹0 warranty claim is raised per-device from{" "}
+                    <span className="font-semibold">Add New → Warranty</span> once the device has been serviced and invoiced — its warranty terms come from that invoice, so it can&apos;t be claimed before this ticket exists.
+                  </p>
+                </div>
+              )}
             </Field>
             <Field label="Priority">
               <RSelect value={j.priority} onChange={(v) => set("priority", v)} options={[
@@ -2507,7 +2556,11 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
       </div>
       {!isEdit && (
         <div className="mt-2.5 flex justify-end">
-          <Button size="sm" onClick={onNext}>Next <ArrowRight className="h-3.5 w-3.5" /></Button>
+          <Button size="sm" onClick={onNext}>
+            {data.devices.length > 1 && activeIdx < data.devices.length - 1
+              ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
+              : <>Next</>} <ArrowRight className="h-3.5 w-3.5" />
+          </Button>
         </div>
       )}
 
@@ -3048,7 +3101,11 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
         {!isEdit && (
           <div className="flex gap-2">
             <Button variant="outline" size="lg" onClick={onNext}>Skip</Button>
-            <Button size="lg" onClick={onNext}>Continue <ArrowRight className="h-4 w-4" /></Button>
+            <Button size="lg" onClick={onNext}>
+              {data.devices.length > 1 && activeIdx < data.devices.length - 1
+                ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
+                : <>Continue</>} <ArrowRight className="h-4 w-4" />
+            </Button>
           </div>
         )}
       </div>
@@ -3326,67 +3383,106 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <div className="grid grid-cols-1 gap-4 md:grid-cols-[1.2fr_1fr]">
         {/* Left Panel — Itemized Quote only */}
-        <div className="rounded-2xl border border-border overflow-hidden">
-          <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
-          </div>
-          {/* Multi-device */}
-          {data.devices.length > 1 && data.devices.map((d: WizardDevice, idx: number) => {
-            const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
-            const devPartsTotal = d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
-            const devEstimate = Number(d.job.estimate) || 0;
-            const devTotal = devEstimate + devPartsTotal;
-            return (
-              <div key={d.id}>
-                <div className="grid grid-cols-3 px-4 py-3 text-sm bg-background border-t border-border">
-                  <div>
-                    <span className="font-medium">{d.job.issue || "Repair"}</span>
-                    <span className="block text-[11px] text-muted-foreground">{devLabel}</span>
+        {data.devices.length > 1 ? (
+          /* ---- Multi-device: one clearly separated card per device ---- */
+          <div className="space-y-3">
+            {data.devices.map((d: WizardDevice, idx: number) => {
+              const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+              const devPartsTotal = d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+              const devEstimate = Number(d.job.estimate) || 0;
+              const devTotal = devEstimate + devPartsTotal;
+              const hasLines = d.parts.length > 0 || devEstimate > 0;
+              return (
+                <div key={d.id} className="overflow-hidden rounded-2xl border border-border bg-background">
+                  {/* Device header banner */}
+                  <div className="flex items-start justify-between gap-3 bg-muted px-4 py-2.5">
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#4361EE] text-[10px] font-bold text-white">{idx + 1}</span>
+                        <span className="truncate text-[13px] font-semibold text-foreground">{devLabel}</span>
+                      </div>
+                      {d.job.issue && (
+                        <p className="mt-1 pl-7 text-[11px] leading-snug text-muted-foreground">{d.job.issue}</p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="block text-[10px] uppercase tracking-wider text-muted-foreground">Subtotal</span>
+                      <span className="tnum text-sm font-bold text-foreground">{formatINR(devTotal)}</span>
+                    </div>
                   </div>
-                  <div className="text-center">1</div>
-                  <div className="text-right tnum font-medium">{formatINR(devTotal)}</div>
+                  {/* Line items for this device */}
+                  {hasLines ? (
+                    <div>
+                      <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-t border-border px-4 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
+                      </div>
+                      {d.parts.map((p: any, pi: number) => (
+                        <div key={pi} className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-t border-border/60 px-4 py-2 text-[13px]">
+                          <div className="truncate">{p.name}</div>
+                          <div className="w-8 text-center text-muted-foreground">{p.qty || 1}</div>
+                          <div className="tnum w-24 text-right">{formatINR(Number(p.total))}</div>
+                        </div>
+                      ))}
+                      {devEstimate > 0 && (
+                        <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-t border-border/60 px-4 py-2 text-[13px]">
+                          <div>Service Charges</div>
+                          <div className="w-8 text-center text-muted-foreground">1</div>
+                          <div className="tnum w-24 text-right">{formatINR(devEstimate)}</div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="border-t border-border px-4 py-2.5 text-[12px] text-muted-foreground">No parts or service charges added.</div>
+                  )}
                 </div>
-                {d.parts.map((p: any, pi: number) => (
-                  <div key={pi} className="grid grid-cols-3 px-4 py-2 text-[13px] text-muted-foreground bg-muted/20 border-t border-border/50 pl-7">
-                    <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
-                  </div>
-                ))}
-                {devEstimate > 0 && (
-                  <div className="grid grid-cols-3 px-4 py-2 text-[13px] text-muted-foreground bg-muted/20 border-t border-border/50 pl-7">
-                    <div>Service Charges</div><div className="text-center">1</div><div className="text-right tnum">{formatINR(devEstimate)}</div>
-                  </div>
-                )}
+              );
+            })}
+          </div>
+        ) : (
+          /* ---- Single device: flat itemized table ---- */
+          <div className="rounded-2xl border border-border overflow-hidden">
+            <div className="grid grid-cols-3 bg-muted px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <div>Description</div><div className="text-center">Qty</div><div className="text-right">Amount</div>
+            </div>
+            {/* Single device: parts */}
+            {allParts.length > 0 && allParts.map((p: any, i: number) => (
+              <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border odd:bg-background even:bg-muted/20">
+                <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
               </div>
-            );
-          })}
-          {/* Single device: parts */}
-          {data.devices.length <= 1 && allParts.length > 0 && allParts.map((p: any, i: number) => (
-            <div key={i} className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border odd:bg-background even:bg-muted/20">
-              <div>{p.name}</div><div className="text-center">{p.qty || 1}</div><div className="text-right tnum">{formatINR(Number(p.total))}</div>
-            </div>
-          ))}
-          {/* Single device: estimate */}
-          {data.devices.length <= 1 && estimatesTotal > 0 && (
-            <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
-              <div className="font-medium">Estimate</div>
-              <div className="text-center">1</div>
-              <div className="text-right tnum font-medium">{formatINR(estimatesTotal)}</div>
-            </div>
-          )}
-          {/* Empty */}
-          {allParts.length === 0 && estimatesTotal === 0 && (
-            <div className="p-6 text-center text-sm text-muted-foreground">No parts or estimate added.</div>
-          )}
-        </div>
+            ))}
+            {/* Single device: estimate */}
+            {estimatesTotal > 0 && (
+              <div className="grid grid-cols-3 px-4 py-3 text-sm border-t border-border bg-background">
+                <div className="font-medium">Estimate</div>
+                <div className="text-center">1</div>
+                <div className="text-right tnum font-medium">{formatINR(estimatesTotal)}</div>
+              </div>
+            )}
+            {/* Empty */}
+            {allParts.length === 0 && estimatesTotal === 0 && (
+              <div className="p-6 text-center text-sm text-muted-foreground">No parts or estimate added.</div>
+            )}
+          </div>
+        )}
 
         {/* Right Panel — Summary */}
         <div className="rounded-2xl border border-border bg-gradient-to-b from-indigo-50/60 to-white p-5">
           <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Customer pays</p>
           <p className="font-display mt-1 text-3xl font-extrabold brand-gradient-text">{formatINR(total)}</p>
           <ul className="mt-4 space-y-1.5 text-sm">
-            {data.devices.length > 1 && <QRow k={`Devices (${data.devices.length})`} v={formatINR(subtotal)} />}
+            {data.devices.length > 1 && (
+              <>
+                <li className="pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({data.devices.length})</li>
+                {data.devices.map((d: WizardDevice, idx: number) => {
+                  const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+                  const devTotal = (Number(d.job.estimate) || 0) + d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+                  return <QRow key={d.id} k={devLabel} v={formatINR(devTotal)} />;
+                })}
+              </>
+            )}
             {data.devices.length <= 1 && estimatesTotal > 0 && partsTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
             {data.devices.length <= 1 && partsTotal > 0 && <QRow k="Parts" v={formatINR(partsTotal)} />}
+            {data.devices.length > 1 && <li className="border-t border-border/70 pt-1.5" />}
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
 
@@ -3399,9 +3495,9 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
 }
 function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
   return (
-    <li className="flex items-center justify-between">
-      <span className={cn("text-muted-foreground", bold && "text-foreground font-semibold")}>{k}</span>
-      <span className={cn("tnum", bold && "font-semibold")}>{v}</span>
+    <li className="flex items-center justify-between gap-3">
+      <span className={cn("min-w-0 truncate text-muted-foreground", bold && "text-foreground font-semibold")}>{k}</span>
+      <span className={cn("tnum shrink-0", bold && "font-semibold")}>{v}</span>
     </li>
   );
 }
@@ -3766,10 +3862,13 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
 
       {/* Finish QC — pinned to the BOTTOM (mt-auto) so the utility panel fills
           the full height of the left workspace and its bottom edge lines up.
-          Hidden in edit mode (matches previous behaviour). */}
+          Hidden in edit mode (Save lives in the fixed edit footer). */}
       {!isEdit && (
         <Button size="md" className="mt-auto w-full justify-center" onClick={onNext}>
-          <CheckCircle2 className="h-4 w-4" /> Finish QC
+          <CheckCircle2 className="h-4 w-4" />
+          {data.devices.length > 1 && activeIdx < data.devices.length - 1
+            ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
+            : <>Finish QC</>}
         </Button>
       )}
     </aside>
@@ -3777,8 +3876,12 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
 
   return (
     // Pull the QC step tight to the viewport: cancel the WizardShell's bottom
-    // padding (-mb) so this one-screen step has no empty scroll gap below.
-    <div className="min-w-0 -mb-16">
+    // One-screen QC step — the WHOLE checklist fits without scrolling, in BOTH
+    // create AND edit. In create the WizardShell has no footer, so we pull the
+    // block tight to the viewport (-mb-16). In edit a fixed ~66px footer bar
+    // (Previous / Save / Next) overlays the bottom, so we reserve that height
+    // (pb-20) so the LAST rows clear the footer instead of hiding under it.
+    <div className={cn("min-w-0", isEdit ? "pb-20" : "-mb-16")}>
       <DeviceSwitcher data={data} setData={setData} />
 
       {/* Two-region layout: LEFT = QC workspace, RIGHT = compact utility panel.

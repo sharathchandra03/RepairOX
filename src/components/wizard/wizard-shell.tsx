@@ -164,8 +164,12 @@ export function WizardShell({
           </ol>
         </div>
 
-      {/* Title */}
-      <div className="relative mx-auto max-w-6xl px-4 text-center sm:px-6 mt-6 sm:mt-8">
+      {/* Title. The one-screen QC step (9) pulls its title up tighter so the
+          whole inspection block sits higher and fits the viewport better. */}
+      <div className={cn(
+        "relative mx-auto max-w-6xl px-4 text-center sm:px-6",
+        step === 9 ? "mt-2 sm:mt-3" : "mt-6 sm:mt-8"
+      )}>
         <motion.h1
           key={title}
           initial={{ opacity: 0, y: 8 }}
@@ -188,10 +192,14 @@ export function WizardShell({
         )}
       </div>
 
-      {/* Step content */}
+      {/* Step content. The QC step (9) is a purpose-built ONE-SCREEN layout
+          that fits without scrolling; it manages its own bottom spacing, so we
+          drop the large default bottom padding there (in edit mode that padding
+          + the fixed footer would otherwise push the checklist off-screen). */}
       <div className={cn(
-        "relative mx-auto max-w-6xl px-4 sm:px-6 mt-6",
-        isEdit ? "pb-24" : "pb-16"
+        "relative mx-auto max-w-6xl px-4 sm:px-6",
+        step === 9 ? "mt-3 pb-4" : "mt-6",
+        step === 9 ? "" : isEdit ? "pb-24" : "pb-16"
       )}>
         <AnimatePresence mode="wait">
           <motion.div

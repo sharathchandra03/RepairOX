@@ -120,12 +120,18 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
             estimate: t.amount || 0,
             accessories: "",
             notes: "",
+            failedQC: [],
           },
         ];
 
-  // Build the itemized table rows: one main row per device + its parts as rows.
-  type Row = {
-    idx: number;
+  // Build the itemized table rows grouped strictly by device so the print
+  // reads DEVICE → details → failed QC → its parts → device subtotal, then a
+  // final grand total. Every part stays under its own device (from the
+  // device_id → parts relationship in the data) — parts are NEVER merged into a
+  // single generic list. Rows are a small discriminated union so each kind
+  // renders with the right layout while sharing the same 8-column table.
+  type BaseRow = {
+    idx?: number;
     name: string;
     tag?: string;
     descLines: { label?: string; value: string; strong?: boolean }[];
@@ -135,20 +141,29 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
     tax: number;
     total: number;
   };
+  type Row =
+    | ({ kind: "device" } & BaseRow)
+    | ({ kind: "part" } & BaseRow)
+    | { kind: "qc"; items: string[] }
+    | { kind: "subtotal"; label: string; total: number }
+    | { kind: "grand"; label: string; total: number };
 
   const gstOn = !!(t.sgst && t.sgst > 0) || !!(t.cgst && t.cgst > 0) || !!(t.gstRate && t.gstRate > 0);
+  const multiDevice = devices.length > 1;
 
   const rows: Row[] = [];
   let rowNo = 0;
+  let lineSubtotalSum = 0;
+  let discountSum = 0;
 
-  devices.forEach((dev) => {
+  devices.forEach((dev, dIdx) => {
     const deviceLabel = [dev.brand, dev.model].filter(Boolean).join(" ") || dev.brand || dev.model || "Device";
     const partsSum = (dev.parts || []).reduce((s, p) => s + p.total, 0);
     const deviceLine = Math.max(dev.estimate - partsSum, 0);
 
     // Main device row — carries the COMPLETE device information inside the
     // Description cell (no separate Device Details section exists).
-    const descLines: Row["descLines"] = [];
+    const descLines: BaseRow["descLines"] = [];
     if (dev.brand) descLines.push({ label: "Brand", value: dev.brand });
     if (dev.model) descLines.push({ label: "Model", value: dev.model });
     if (dev.serial) descLines.push({ label: dev.serialLabel || "IMEI / Serial", value: dev.serial });
@@ -165,8 +180,11 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
 
     rowNo += 1;
     rows.push({
+      kind: "device",
       idx: rowNo,
-      name: deviceLabel,
+      // Prefix multi-device rows with "Device N —" so each block is instantly
+      // attributable to a device; single-device tickets keep the clean label.
+      name: multiDevice ? `Device ${dIdx + 1} — ${deviceLabel}` : deviceLabel,
       tag: dev.issue ? "DIAGNOSIS" : dev.service || undefined,
       descLines,
       qty: 1,
@@ -175,11 +193,20 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
       tax: 0,
       total: deviceLine,
     });
+    lineSubtotalSum += deviceLine;
 
-    // Parts rows for this device
+    // Failed QC for THIS device — only checks marked FAIL. Omitted entirely
+    // when the device has none, so passed/skipped/pending never print.
+    if (dev.failedQC && dev.failedQC.length > 0) {
+      rows.push({ kind: "qc", items: dev.failedQC });
+    }
+
+    // Parts rows for this device (device_id → parts relationship). Skipped
+    // when the device has no assigned parts (no empty parts section).
     (dev.parts || []).forEach((p: PrintLineItem) => {
       rowNo += 1;
       rows.push({
+        kind: "part",
         idx: rowNo,
         name: p.name,
         descLines: p.description ? [{ value: p.description }] : [],
@@ -189,12 +216,29 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
         total: p.total,
         tax: 0,
       });
+      lineSubtotalSum += p.total;
+      discountSum += p.discount || 0;
+    });
+
+    // Per-device subtotal = device service line + its parts.
+    rows.push({
+      kind: "subtotal",
+      label: multiDevice ? `Device ${dIdx + 1} Subtotal` : "Device Subtotal",
+      total: deviceLine + partsSum,
     });
   });
 
+  // Final in-table Grand Total row — only for multi-device tickets, where the
+  // per-device subtotals need summing. Single-device tickets already show the
+  // full total in the Price Breakdown box below, so an extra in-table grand
+  // total would be redundant there.
+  if (multiDevice) {
+    rows.push({ kind: "grand", label: "Grand Total", total: lineSubtotalSum });
+  }
+
   // Summary values — all from real saved ticket data. No dummy fill.
-  const subtotal = rows.reduce((s, r) => s + r.total, 0) || t.amount || 0;
-  const discountTotal = rows.reduce((s, r) => s + (r.discount || 0), 0);
+  const subtotal = lineSubtotalSum || t.amount || 0;
+  const discountTotal = discountSum;
   const sgst = t.sgst || 0;
   const cgst = t.cgst || 0;
   const grandTotal = t.amount || subtotal;
@@ -332,40 +376,88 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
               </tr>
             </thead>
             <tbody>
-              {rows.map((r, i) => (
-                <tr key={i} data-pdf-atomic style={{ backgroundColor: i % 2 === 1 ? BRAND.bandSoft : BRAND.white, verticalAlign: "top", ...NO_BREAK }}>
-                  <td style={tdStyle("center")}>{r.idx}</td>
-                  <td style={tdStyle("left")}>
-                    <div style={{ fontWeight: 700, color: BRAND.navy }}>{r.name}</div>
-                    {r.tag ? <div style={{ fontSize: 9, fontWeight: 700, color: BRAND.blue, marginTop: 2 }}>{r.tag}</div> : null}
-                  </td>
-                  <td style={tdStyle("left")}>
-                    {r.descLines.length > 0 ? (
-                      <div
-                        style={
-                          r.descLines.length > 3
-                            ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5px 14px" }
-                            : { display: "flex", flexDirection: "column", gap: 1.5 }
-                        }
+              {rows.map((r, i) => {
+                // Failed-QC sub-row: a single band listing only the checks that
+                // FAILED for the device above it. Spans the remaining columns so
+                // it reads as a grouped sub-item, not a priced line.
+                if (r.kind === "qc") {
+                  return (
+                    <tr key={i} data-pdf-atomic style={{ backgroundColor: "#FEF2F2", verticalAlign: "top", ...NO_BREAK }}>
+                      <td style={tdStyle("center")} />
+                      <td style={{ ...tdStyle("left"), whiteSpace: "nowrap" }}>
+                        <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.3, textTransform: "uppercase", color: "#B91C1C" }}>QC — Failed</div>
+                      </td>
+                      <td style={tdStyle("left")} colSpan={6}>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 14px" }}>
+                          {r.items.map((it, qi) => (
+                            <span key={qi} style={{ fontSize: 9.3, color: "#991B1B", lineHeight: 1.35 }}>
+                              <span style={{ fontWeight: 800 }}>• </span>{it}
+                            </span>
+                          ))}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Per-device subtotal and final grand total rows. Both span the
+                // left columns and show a single figure in the Total column,
+                // keeping the 8-column grid intact.
+                if (r.kind === "subtotal" || r.kind === "grand") {
+                  const isGrand = r.kind === "grand";
+                  return (
+                    <tr key={i} data-pdf-atomic style={{ backgroundColor: isGrand ? BRAND.band : BRAND.bandSoft, ...NO_BREAK }}>
+                      <td style={tdStyle("center")} />
+                      <td
+                        style={{ ...tdStyle("right"), fontWeight: 800, color: BRAND.navy, fontSize: isGrand ? 10.5 : 10, textTransform: "uppercase", letterSpacing: 0.3 }}
+                        colSpan={6}
                       >
-                        {r.descLines.map((d, di) => (
-                          <div key={di} style={{ fontSize: 9.3, color: BRAND.ink, lineHeight: 1.35 }}>
-                            {d.label ? <span style={{ fontWeight: 700, color: BRAND.navy }}>{d.label}: </span> : null}
-                            <span>{d.value}</span>
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <span style={{ color: BRAND.slateLight }}>—</span>
-                    )}
-                  </td>
-                  <td style={tdStyle("center")}>{r.qty}</td>
-                  <td style={tdStyle("right")}>{formatPrintCurrency(r.price)}</td>
-                  <td style={tdStyle("right")}>{r.discount > 0 ? formatPrintCurrency(r.discount) : formatPrintCurrency(0)}</td>
-                  <td style={tdStyle("right")}>{formatPrintCurrency(r.tax)}</td>
-                  <td style={{ ...tdStyle("right"), fontWeight: 800, color: BRAND.navy }}>{formatPrintCurrency(r.total)}</td>
-                </tr>
-              ))}
+                        {r.label}
+                      </td>
+                      <td style={{ ...tdStyle("right"), fontWeight: 800, color: isGrand ? BRAND.blue : BRAND.navy, fontSize: isGrand ? 11 : 10 }}>
+                        {formatPrintCurrency(r.total)}
+                      </td>
+                    </tr>
+                  );
+                }
+
+                // Device header row + part rows share the same priced layout.
+                const isDevice = r.kind === "device";
+                return (
+                  <tr key={i} data-pdf-atomic style={{ backgroundColor: isDevice ? BRAND.white : BRAND.bandSoft, verticalAlign: "top", ...NO_BREAK }}>
+                    <td style={tdStyle("center")}>{r.idx}</td>
+                    <td style={tdStyle("left")}>
+                      <div style={{ fontWeight: 700, color: BRAND.navy }}>{r.name}</div>
+                      {r.tag ? <div style={{ fontSize: 9, fontWeight: 700, color: BRAND.blue, marginTop: 2 }}>{r.tag}</div> : null}
+                    </td>
+                    <td style={tdStyle("left")}>
+                      {r.descLines.length > 0 ? (
+                        <div
+                          style={
+                            r.descLines.length > 3
+                              ? { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.5px 14px" }
+                              : { display: "flex", flexDirection: "column", gap: 1.5 }
+                          }
+                        >
+                          {r.descLines.map((d, di) => (
+                            <div key={di} style={{ fontSize: 9.3, color: BRAND.ink, lineHeight: 1.35 }}>
+                              {d.label ? <span style={{ fontWeight: 700, color: BRAND.navy }}>{d.label}: </span> : null}
+                              <span>{d.value}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <span style={{ color: BRAND.slateLight }}>—</span>
+                      )}
+                    </td>
+                    <td style={tdStyle("center")}>{r.qty}</td>
+                    <td style={tdStyle("right")}>{formatPrintCurrency(r.price)}</td>
+                    <td style={tdStyle("right")}>{r.discount > 0 ? formatPrintCurrency(r.discount) : formatPrintCurrency(0)}</td>
+                    <td style={tdStyle("right")}>{formatPrintCurrency(r.tax)}</td>
+                    <td style={{ ...tdStyle("right"), fontWeight: 800, color: BRAND.navy }}>{formatPrintCurrency(r.total)}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -384,7 +476,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
                   <span style={{ fontWeight: 700, color: BRAND.navy }}>Devices: </span>{devices.length}
                 </span>
                 <span style={{ fontSize: 9.5, color: BRAND.slate }}>
-                  <span style={{ fontWeight: 700, color: BRAND.navy }}>Line Items: </span>{rows.length}
+                  <span style={{ fontWeight: 700, color: BRAND.navy }}>Line Items: </span>{rows.filter((r) => r.kind === "device" || r.kind === "part").length}
                 </span>
                 {t.priority ? (
                   <span style={{ fontSize: 9.5, color: BRAND.slate }}>

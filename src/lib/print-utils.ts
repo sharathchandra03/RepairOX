@@ -2,6 +2,7 @@ import type { StoreSettings, CustomPrintTemplate } from "@/lib/store-settings";
 import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
 import { getTicketDevices, getInvoiceDevices, formatDeviceColour, getRecordType } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
+import { qcItemLabel } from "@/lib/qc-config";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
@@ -87,6 +88,11 @@ export type PrintDeviceInfo = {
   accessories?: string;
   /** Free-text notes for the device (optional). */
   notes?: string;
+  /** Display labels of QC checks that this device FAILED (qc value "no").
+   *  Passed ("ok"), skipped ("na") and pending (undefined) checks are
+   *  intentionally excluded — the print shows only failures. Empty when the
+   *  device has no failed checks (no QC section is printed in that case). */
+  failedQC: string[];
 };
 
 export type PrintLineItem = {
@@ -240,6 +246,14 @@ export function buildTicketInfo(ticket: Ticket): PrintTicketInfo {
     estimate: dr.estimate,
     accessories: dr.accessories || "",
     notes: dr.notes || "",
+    // Only checks explicitly marked FAIL ("no"). Pass ("ok"), skip ("na") and
+    // pending (undefined) are excluded. Labels resolve from the live QC config
+    // (falling back to the raw key for archived/renamed items) so old tickets
+    // still print readable check names. Order follows the saved qc map.
+    failedQC: Object.entries(dr.qc || {})
+      .filter(([, v]) => v === "no")
+      .map(([key]) => qcItemLabel(key))
+      .filter(Boolean),
   }));
 
   return {
