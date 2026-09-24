@@ -29,6 +29,7 @@ import {
 } from "@/lib/mock-data";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
+import { PinnedRail } from "@/components/common/pinned-rail";
 import { GitBranch } from "lucide-react";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -769,8 +770,11 @@ export default function InvoiceDetailPage() {
           )}
         </div>
 
-        {/* Right Column — 1/3 width */}
-        <div className="space-y-6">
+        {/* Right Column — pinned rail. Its internal scroll is DRIVEN by the
+            page scroll (PinnedRail): left column at top → rail at top, left
+            column at bottom → rail at bottom, proportional in between, so both
+            reach their ends together. It has no independent scrollbar. */}
+        <PinnedRail>
           {/* Quick Actions */}
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>
@@ -866,7 +870,7 @@ export default function InvoiceDetailPage() {
               })}
             </div>
           </div>
-        </div>
+        </PinnedRail>
       </div>
 
       {/* ─── Payment / Status Drawer ──────────────────────────────────── */}

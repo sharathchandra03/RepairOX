@@ -205,13 +205,14 @@ export default function LeadsListPage() {
 
       {/* Status tabs + search + filter toggle */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <SegmentedTabs
-          value={filters.status}
-          onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
-          options={statusTabs}
-          size="sm"
-          className="max-w-full overflow-x-auto"
-        />
+        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={filters.status}
+            onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
+            options={statusTabs}
+            size="sm"
+          />
+        </div>
         <div className="flex items-center gap-2">
           <div className="w-full lg:w-72">
             <Input

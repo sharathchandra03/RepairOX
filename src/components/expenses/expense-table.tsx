@@ -5,14 +5,17 @@ import { motion } from "framer-motion";
 import {
   Search, Download, ChevronLeft, ChevronRight, Filter,
   CalendarDays, Tag, CreditCard, User, X, IndianRupee,
+  FileSpreadsheet, FileText, ChevronDown,
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Input } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { SegmentedTabs } from "@/components/ui/tabs";
+import { downloadCSV, downloadXLSX, toCSV } from "@/lib/csv-utils";
 import {
   type Expense,
   type PaymentMode,
@@ -138,20 +141,19 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
   const totalActive = filtered.filter((e) => e.status === "active").reduce((s, e) => s + e.amount, 0);
 
   // CSV export
-  const handleExport = () => {
-    const header = "Expense ID,Date,Category,Description,Amount,Payment Mode,Vendor,Employee,Status\n";
-    const rows = sorted.map((e) =>
-      `"${e.expenseId}","${e.date}","${e.category}","${e.description.replace(/"/g, '""')}",${e.amount},"${PAYMENT_MODE_LABELS[e.paymentMode]}","${e.vendor}","${e.employee}","${e.status}"`
-    ).join("\n");
-    const csv = header + rows;
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `expenses-export-${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
+  // Export (Excel .xlsx primary, CSV alternative) — same columns/rows for both.
+  const EXPORT_COLUMNS = [
+    "Expense ID", "Date", "Category", "Description", "Amount",
+    "Payment Mode", "Vendor", "Employee", "Status",
+  ];
+  const buildExportRows = (): (string | number)[][] =>
+    sorted.map((e) => [
+      e.expenseId, e.date, e.category, e.description, e.amount,
+      PAYMENT_MODE_LABELS[e.paymentMode], e.vendor, e.employee, e.status,
+    ]);
+  const exportName = () => `expenses-export-${new Date().toISOString().slice(0, 10)}`;
+  const handleExportExcel = () => { void downloadXLSX(exportName(), EXPORT_COLUMNS, buildExportRows(), "Expenses"); };
+  const handleExportCSV = () => { downloadCSV(exportName(), toCSV(EXPORT_COLUMNS, buildExportRows())); };
 
   const hasActiveFilters = categoryFilter !== "all" || paymentFilter !== "all" || employeeFilter !== "all" || dateFilter !== "all";
 
@@ -205,9 +207,25 @@ export function ExpenseTable({ expenses, onRowClick }: ExpenseTableProps) {
             }))}
           />
 
-          <Button variant="outline" size="sm" onClick={handleExport}>
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <Dropdown
+            width="w-52"
+            trigger={({ toggle }) => (
+              <Button variant="outline" size="sm" onClick={toggle}>
+                <Download className="h-3.5 w-3.5" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            )}
+          >
+            {(close) => (
+              <>
+                <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                  Excel (.xlsx)
+                </MenuItem>
+                <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                  CSV (.csv)
+                </MenuItem>
+              </>
+            )}
+          </Dropdown>
         </div>
       </div>
 

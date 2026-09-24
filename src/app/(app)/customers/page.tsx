@@ -36,7 +36,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Trash2, Search, Edit2, X, GitMerge,
   Users, Repeat, Briefcase, Gem, Wallet, UserPlus, ShieldAlert,
-  ArrowLeft, Upload, Download, MoreHorizontal,
+  ArrowLeft, Upload, Download, MoreHorizontal, FileSpreadsheet, FileText, ChevronDown,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -59,7 +59,7 @@ import {
 } from "@/lib/customer-data";
 import { pointsFromInvoiceAmount, tierForLifetimeValue, thresholdsFromTiers, LOYALTY_TIER_LABELS } from "@/lib/customer-service";
 import { useStoreSettings } from "@/lib/store-settings";
-import { customersToCSV } from "@/lib/customer-csv";
+import { customersToCSV, downloadCustomersXLSX } from "@/lib/customer-csv";
 import { downloadCSV } from "@/lib/csv-utils";
 import { toast } from "@/components/ui/toaster";
 import { CustomerImportDialog } from "@/components/customers/customer-import-dialog";
@@ -182,11 +182,17 @@ export default function ManageCustomersPage() {
   const [pageSize, setPageSize] = useState(20);
   const [showImport, setShowImport] = useState(false);
 
-  /* Export the WHOLE customer list to CSV (for marketing/promotions). */
-  const handleExport = () => {
+  /* Export the WHOLE customer list (for marketing/promotions). Excel (.xlsx) is
+     the primary format; CSV is offered as an alternative. */
+  const handleExportExcel = () => {
+    if (customers.length === 0) { toast.info("No customers to export yet."); return; }
+    void downloadCustomersXLSX(`customers-${new Date().toISOString().slice(0, 10)}`, customers, loyaltyByCustomer);
+    toast.success(`Exported ${customers.length} customer${customers.length === 1 ? "" : "s"} to Excel.`);
+  };
+  const handleExportCSV = () => {
     if (customers.length === 0) { toast.info("No customers to export yet."); return; }
     downloadCSV(`customers-${new Date().toISOString().slice(0, 10)}`, customersToCSV(customers, loyaltyByCustomer));
-    toast.success(`Exported ${customers.length} customer${customers.length === 1 ? "" : "s"}.`);
+    toast.success(`Exported ${customers.length} customer${customers.length === 1 ? "" : "s"} to CSV.`);
   };
 
   const mergeResults = mergeQuery.trim().length >= 2 && mergingCustomer
@@ -374,9 +380,25 @@ export default function ManageCustomersPage() {
               </Button>
             </Can>
             <Can permission={CAP.customer.export}>
-              <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={handleExport}>
-                <Download className="h-4 w-4" /> Export
-              </Button>
+              <Dropdown
+                width="w-52"
+                trigger={({ toggle }) => (
+                  <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={toggle}>
+                    <Download className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                      Excel (.xlsx)
+                    </MenuItem>
+                    <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                      CSV (.csv)
+                    </MenuItem>
+                  </>
+                )}
+              </Dropdown>
             </Can>
             <Can permission={CAP.customer.create}>
               <Button size="md" onClick={openNewForm}>

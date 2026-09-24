@@ -18,8 +18,9 @@
 import { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useRouter } from "next/navigation";
-import { Printer, FileSpreadsheet, SlidersHorizontal, Loader2, Store, TrendingUp, Map } from "lucide-react";
+import { Printer, FileSpreadsheet, FileText, ChevronDown, SlidersHorizontal, Loader2, Store, TrendingUp, Map } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
@@ -32,7 +33,7 @@ import { computeKpis, formatKpi } from "@/lib/reports/kpis";
 import { generateInsights } from "@/lib/reports/insights";
 import { EMPTY_FILTERS } from "@/lib/reports/types";
 import { REPORT_MODULES } from "@/lib/reports/registry";
-import { exportTablesCSV, printReport, type CompanyInfo } from "@/lib/reports/export";
+import { exportTablesCSV, exportTablesXLSX, printReport, type CompanyInfo } from "@/lib/reports/export";
 
 import {
   executiveSummary, revenueTrendSeries, revenueSplit, collectionsBreakdown,
@@ -140,6 +141,7 @@ export function ReportsCockpit() {
       tables: buildExportTables(),
     });
 
+  const doExcel = () => exportTablesXLSX(`repairox-report-${range.presetId}`, buildExportTables());
   const doCSV = () => exportTablesCSV(`repairox-report-${range.presetId}`, buildExportTables());
 
   const filterCount = activeFilterCount(filters);
@@ -184,9 +186,25 @@ export function ReportsCockpit() {
             )}
           </button>
           <DateRangeControl filters={filters} rangeLabel={range.label} onChange={setFilters} />
-          <Button variant="outline" size="sm" onClick={doCSV}>
-            <FileSpreadsheet className="h-4 w-4" /> Excel / CSV
-          </Button>
+          <Dropdown
+            width="w-52"
+            trigger={({ toggle }) => (
+              <Button variant="outline" size="sm" onClick={toggle}>
+                <FileSpreadsheet className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            )}
+          >
+            {(close) => (
+              <>
+                <MenuItem icon={FileSpreadsheet} onClick={() => { doExcel(); close(); }}>
+                  Excel (.xlsx)
+                </MenuItem>
+                <MenuItem icon={FileText} onClick={() => { doCSV(); close(); }}>
+                  CSV (.csv)
+                </MenuItem>
+              </>
+            )}
+          </Dropdown>
           <Button size="sm" onClick={doPrint}>
             <Printer className="h-4 w-4" /> Print / PDF
           </Button>

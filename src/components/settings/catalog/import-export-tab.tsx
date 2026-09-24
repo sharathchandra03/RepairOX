@@ -2,14 +2,16 @@
 
 import { useRef, useState } from "react";
 import {
-  Upload, Download, FileText, CheckCircle2, AlertTriangle, XCircle, X, RotateCcw,
+  Upload, Download, FileText, FileSpreadsheet, CheckCircle2, AlertTriangle, XCircle, X, RotateCcw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useCatalog, type ImportResult } from "@/lib/catalog-context";
 import {
-  parseCatalogCSV, validateRows, downloadCSV, catalogTemplateCSV, catalogToCSV, toCSV,
+  parseCatalogCSV, validateRows, downloadCSV, catalogToCSV, toCSV,
+  downloadCatalogTemplateXLSX, downloadCatalogXLSX,
   CATALOG_COLUMNS, type ValidatedRow, type ParsedCatalogCSV,
 } from "@/lib/csv-utils";
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
@@ -100,7 +102,13 @@ export function ImportExportTab() {
     setSmartFile(null);
   };
 
-  const handleExport = () => {
+  const handleExportExcel = () => {
+    void downloadCatalogXLSX(
+      `repairox-catalog-${new Date().toISOString().slice(0, 10)}`,
+      categories, brands, models, parts,
+    );
+  };
+  const handleExportCSV = () => {
     downloadCSV(
       `repairox-catalog-${new Date().toISOString().slice(0, 10)}`,
       catalogToCSV(categories, brands, models, parts),
@@ -112,16 +120,16 @@ export function ImportExportTab() {
       {/* Action cards */}
       <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
         <ActionCard
-          icon={FileText}
+          icon={FileSpreadsheet}
           title="Download Template"
-          description="Get the CSV format with all supported columns and an example row."
-          actionLabel="Download Template"
-          onClick={() => downloadCSV("repairox-catalog-template", catalogTemplateCSV())}
+          description="Get the Excel (.xlsx) template with all supported columns and an example row."
+          actionLabel="Download Excel Template"
+          onClick={() => { void downloadCatalogTemplateXLSX(); }}
         />
         <ActionCard
           icon={Upload}
-          title="Import CSV / Excel"
-          description="Upload any .csv, .xlsx or .xls sheet. Catalog templates and vendor repair sheets are both auto-detected."
+          title="Import Excel / CSV"
+          description="Upload any .xlsx, .xls or .csv sheet. Catalog templates and vendor repair sheets are both auto-detected."
           actionLabel="Choose File"
           onClick={() => fileRef.current?.click()}
           primary
@@ -129,9 +137,29 @@ export function ImportExportTab() {
         <ActionCard
           icon={Download}
           title="Export Catalog"
-          description="Download the entire current catalog as a CSV for backup or bulk editing."
-          actionLabel="Export CSV"
-          onClick={handleExport}
+          description="Download the entire current catalog as Excel (.xlsx) or CSV for backup or bulk editing."
+          action={
+            <Dropdown
+              className="mt-4 w-full"
+              width="w-52"
+              trigger={({ toggle }) => (
+                <Button variant="outline" size="sm" className="w-full" onClick={toggle}>
+                  Export
+                </Button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                    Excel (.xlsx)
+                  </MenuItem>
+                  <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                    CSV (.csv)
+                  </MenuItem>
+                </>
+              )}
+            </Dropdown>
+          }
         />
       </div>
       <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls,.xlsm,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
@@ -330,14 +358,16 @@ export function ImportExportTab() {
 
 /* ─── Small pieces ───────────────────────────────────────────────── */
 function ActionCard({
-  icon: Icon, title, description, actionLabel, onClick, primary,
+  icon: Icon, title, description, actionLabel, onClick, primary, action,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
   description: string;
-  actionLabel: string;
-  onClick: () => void;
+  actionLabel?: string;
+  onClick?: () => void;
   primary?: boolean;
+  /** Custom action node rendered instead of the default button (e.g. a menu). */
+  action?: React.ReactNode;
 }) {
   return (
     <div className="flex flex-col rounded-2xl border border-border bg-card p-5 shadow-card">
@@ -349,9 +379,11 @@ function ActionCard({
       </span>
       <p className="mt-3 text-sm font-semibold">{title}</p>
       <p className="mt-1 flex-1 text-[12px] text-muted-foreground">{description}</p>
-      <Button variant={primary ? "primary" : "outline"} size="sm" className="mt-4 w-full" onClick={onClick}>
-        {actionLabel}
-      </Button>
+      {action ?? (
+        <Button variant={primary ? "primary" : "outline"} size="sm" className="mt-4 w-full" onClick={onClick}>
+          {actionLabel}
+        </Button>
+      )}
     </div>
   );
 }

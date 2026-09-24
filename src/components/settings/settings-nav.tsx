@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, ChevronDown, User, Building2, Users, CreditCard,
   Package, Ticket, FileText, UserCheck, Plug, Bell, Settings2,
-  ShieldCheck, Printer, Receipt, BarChart3, Palette, Footprints,
+  ShieldCheck, Printer, Receipt, BarChart3, Palette, Footprints, Tags,
 } from "lucide-react";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow } from "@/lib/capabilities";
@@ -53,8 +53,15 @@ const SETTINGS_NAV: NavSection[] = [
     id: "inventory", label: "Inventory", icon: Package,
     children: [
       { label: "Inventory Settings", href: "/settings/inventory/general" },
-      { label: "Price List", href: "/settings/inventory/price-lists" },
       { label: "Barcode", href: "/settings/inventory/barcode" },
+    ],
+  },
+  {
+    // Price List is its own top-level section (moved out of Inventory). Same
+    // page/content, just surfaced as a standalone section in the Settings nav.
+    id: "price-list", label: "Price List", icon: Tags,
+    children: [
+      { label: "Price List Settings", href: "/settings/inventory/price-lists" },
     ],
   },
   {

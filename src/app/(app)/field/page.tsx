@@ -335,7 +335,7 @@ export default function FieldPage() {
         {/* Date Range Strip — shared 8-option strip as ONE connected segmented
             control (RepairOX standard: all filter strips use the connected
             SegmentedTabs container, never detached pills). */}
-        <div className="max-w-full overflow-x-auto pb-0.5 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs
             value={dateRange}
             onChange={(v) => setDateRange(v as FieldDateRange)}

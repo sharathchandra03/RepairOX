@@ -29,7 +29,7 @@ import { useStoreSettings } from "@/lib/store-settings";
 import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
 import { InlinePriorityDropdown } from "@/components/tickets/inline-priority-dropdown";
 import { formatINR, cn } from "@/lib/utils";
-import { toCSV, downloadCSV } from "@/lib/csv-utils";
+import { downloadXLSX } from "@/lib/csv-utils";
 import { useActivityLog, type ActivityEntry } from "@/lib/activity-log";
 import { ActivityTimeline, ActivityDetailDrawer } from "@/components/activity/activity-log-ui";
 import { useDashboardOrder } from "@/lib/use-dashboard-order";
@@ -350,7 +350,7 @@ export default function Dashboard() {
       t.amount,
     ]);
     const stamp = new Date().toISOString().slice(0, 10);
-    downloadCSV(`critical-tasks-${stamp}`, toCSV(headers, rows));
+    void downloadXLSX(`critical-tasks-${stamp}`, headers, rows, "Critical Tasks");
   }, [criticalTickets]);
   // Export button is temporarily disabled in the UI; keep the handler referenced
   // so the logic is preserved and lint doesn't flag it as unused.

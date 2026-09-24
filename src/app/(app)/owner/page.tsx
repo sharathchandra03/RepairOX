@@ -584,7 +584,7 @@ function OwnerDashboardInner() {
                   columns are easy to scan. */}
               <tr className="text-[12px] font-bold uppercase tracking-wider text-slate-700 [&>th]:border-b-2 [&>th]:border-b-slate-400 [&>th]:bg-slate-100 [&>th+th]:border-l [&>th+th]:border-l-slate-200">
                 <th className="px-5 py-3.5 text-left">Store</th>
-                <th className="px-3 py-3.5 text-center">Tickets</th>
+                <th className="border-l-2 !border-l-slate-400 px-3 py-3.5 text-center">Tickets</th>
                 <th className="px-3 py-3.5 text-center">Pickup</th>
                 <th className="px-3 py-3.5 text-center">Onsite</th>
                 <th className="px-3 py-3.5 text-center">Walk-In</th>
@@ -662,7 +662,7 @@ function OwnerDashboardInner() {
                     </div>
                   </td>
                   {/* OPERATIONAL COUNTS — non-zero prominent, zero still readable */}
-                  <td className={cn("px-3 py-3 text-center text-[15px] font-bold tabular-nums text-slate-900", zeroTone(s.tickets))}>{s.tickets}</td>
+                  <td className={cn("border-l-2 !border-l-slate-400 px-3 py-3 text-center text-[15px] font-bold tabular-nums text-slate-900", zeroTone(s.tickets))}>{s.tickets}</td>
                   <td className={cn("px-3 py-3 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroTone(s.pickup))}>{s.pickup}</td>
                   <td className={cn("px-3 py-3 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroTone(s.onsite))}>{s.onsite}</td>
                   <td className={cn("px-3 py-3 text-center text-[15px] font-semibold tabular-nums text-slate-700", zeroTone(s.walkIns))}>{s.walkIns}</td>
@@ -694,7 +694,7 @@ function OwnerDashboardInner() {
                     colours preserved (emerald Payment Received, blue Projection). */}
                 <tr className="text-slate-900 [&>td]:border-t-2 [&>td]:border-t-slate-400 [&>td]:bg-slate-100 [&>td+td]:border-l [&>td+td]:border-l-slate-200">
                   <td className="px-5 py-3 text-[13px] font-extrabold uppercase tracking-wide">Total</td>
-                  <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.tickets}</td>
+                  <td className="border-l-2 !border-l-slate-400 px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.tickets}</td>
                   <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.pickup}</td>
                   <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.onsite}</td>
                   <td className="px-3 py-3 text-center text-[15px] font-extrabold tabular-nums">{shownTotals.walkIns}</td>

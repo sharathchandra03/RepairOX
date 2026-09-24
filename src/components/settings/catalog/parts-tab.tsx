@@ -37,6 +37,21 @@ export function PartsTab() {
       const q = search.toLowerCase();
       list = list.filter((p) => p.partName.toLowerCase().includes(q) || p.partNumber.toLowerCase().includes(q));
     }
+    // STABLE order that never shifts when a row is edited. Editing a part (e.g.
+    // uploading an image) triggers a DB re-fetch whose raw row order is
+    // undefined, which was pushing the edited part to the bottom. Sort by SKU /
+    // part number with natural, numeric-aware comparison (661-30002 before
+    // 661-30010), falling back to part name when a SKU is absent, so the list
+    // order is fixed and meaningful.
+    const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+    list = [...list].sort((a, b) => {
+      const sa = (a.partNumber ?? "").trim();
+      const sb = (b.partNumber ?? "").trim();
+      if (sa && sb) return collator.compare(sa, sb) || collator.compare(a.partName, b.partName);
+      if (sa) return -1;
+      if (sb) return 1;
+      return collator.compare(a.partName, b.partName);
+    });
     return list;
   }, [parts, effectiveModelId, search]);
 

@@ -8,8 +8,8 @@ import {
   Plus, Download, Search, Eye, Pencil, MoreHorizontal,
   Trash2, Copy, Printer, Mail, MessageCircle, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
-  PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, X,
-  Pin, PinOff, Filter,
+  PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, ChevronDown, X,
+  Pin, PinOff, Filter, FileSpreadsheet,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -31,6 +31,7 @@ import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, type Invoice, type InvoiceStatus, type InvoiceType, type Ticket } from "@/lib/mock-data";
 import { ProformaNeedsTicketDialog } from "@/components/invoice/proforma-needs-ticket-dialog";
+import { exportInvoicesExcel, exportInvoicesCSV } from "@/lib/list-export";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
@@ -50,19 +51,22 @@ type InvColumnDef = {
   label: string;
   align?: "left" | "right" | "center";
   locked?: boolean;
+  /** Fixed column width (Tailwind class) — required so the table can run
+      `table-fixed` and never overflow its 2px frame on horizontal content. */
+  width?: string;
 };
 
 const INV_ALL_COLUMNS: InvColumnDef[] = [
-  { id: "id", label: "ID" },
-  { id: "ticket", label: "Ticket", align: "center" },
-  { id: "customer", label: "Customer" },
-  { id: "date", label: "Created" },
-  { id: "status", label: "Status" },
-  { id: "category", label: "Category" },
-  { id: "paid", label: "Paid", align: "right" },
-  { id: "tax", label: "Tax", align: "right" },
-  { id: "total", label: "Total", align: "right" },
-  { id: "actions", label: "Actions", align: "right", locked: true },
+  { id: "id", label: "ID", width: "w-[120px]" },
+  { id: "ticket", label: "Ticket", align: "center", width: "w-[96px]" },
+  { id: "customer", label: "Customer", width: "w-[20%]" },
+  { id: "date", label: "Created", width: "w-[112px]" },
+  { id: "status", label: "Status", width: "w-[130px]" },
+  { id: "category", label: "Category", width: "w-[116px]" },
+  { id: "paid", label: "Paid", align: "right", width: "w-[88px]" },
+  { id: "tax", label: "Tax", align: "right", width: "w-[76px]" },
+  { id: "total", label: "Total", align: "right", width: "w-[100px]" },
+  { id: "actions", label: "Actions", align: "right", locked: true, width: "w-[132px]" },
 ];
 
 const INV_DEFAULT_ORDER: InvColumnId[] = INV_ALL_COLUMNS.map((c) => c.id);
@@ -73,7 +77,7 @@ const INV_REQUIRED_IDS = new Set<InvColumnId>(["id", "status"]);
    deliberately NOT part of INV_ALL_COLUMNS / defaults / Column Settings — it is
    injected at the FRONT (right after the standalone checkbox) only when the
    invoice table is operating in multi-store / All-Shops mode. */
-const INV_STORE_COLUMN: InvColumnDef = { id: "store", label: "Store", locked: true };
+const INV_STORE_COLUMN: InvColumnDef = { id: "store", label: "Store", locked: true, width: "w-[132px]" };
 
 /* ─── Constants ──────────────────────────────────────────────────────── */
 
@@ -479,6 +483,21 @@ export default function InvoicePage() {
     [list, currentPage, pageSize]
   );
 
+  // Export the CURRENTLY FILTERED invoices (respects store/status/type/date/
+  // search) to Excel (primary) or CSV. Store name comes from the authoritative
+  // Invoice.branchId → Store relationship. Excel is mandatory alongside CSV.
+  const invStoreNameFor = useCallback((branchId?: string | null) => getStore(branchId)?.name ?? "", [getStore]);
+  const handleExportExcel = useCallback(() => {
+    if (list.length === 0) { toast.info("No invoices to export."); return; }
+    void exportInvoicesExcel(list, invStoreNameFor);
+    toast.success(`Exported ${list.length} invoice${list.length === 1 ? "" : "s"} to Excel.`);
+  }, [list, invStoreNameFor]);
+  const handleExportCSV = useCallback(() => {
+    if (list.length === 0) { toast.info("No invoices to export."); return; }
+    exportInvoicesCSV(list, invStoreNameFor);
+    toast.success(`Exported ${list.length} invoice${list.length === 1 ? "" : "s"} to CSV.`);
+  }, [list, invStoreNameFor]);
+
   // Changing page size resets to page 1 on the recalculated result set.
   const handlePageSizeChange = useCallback((size: number) => {
     setPageSize(size);
@@ -611,7 +630,27 @@ export default function InvoicePage() {
             {advancedActive && <span className="ml-1 h-2 w-2 rounded-full bg-[#4361EE]" />}
           </Button>
           <Can permission="manage_invoices"><Button variant="outline" size="md" className="rounded-full" onClick={openInvoiceSettings}><Settings2 className="h-4 w-4" /> Settings</Button></Can>
-          <Can permission="export_reports"><Button variant="outline" size="md" className="rounded-full"><Download className="h-4 w-4" /> Export</Button></Can>
+          <Can permission="export_reports">
+            <Dropdown
+              width="w-52"
+              trigger={({ toggle }) => (
+                <Button variant="outline" size="md" className="rounded-full" onClick={toggle}>
+                  <Download className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                </Button>
+              )}
+            >
+              {(close) => (
+                <>
+                  <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                    Excel (.xlsx)
+                  </MenuItem>
+                  <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                    CSV (.csv)
+                  </MenuItem>
+                </>
+              )}
+            </Dropdown>
+          </Can>
           <Can permission="manage_invoices"><Link href="/invoice/create"><Button size="md" className="rounded-full"><Plus className="h-4 w-4" /> Create Invoice</Button></Link></Can>
         </>}
       />
@@ -739,7 +778,7 @@ export default function InvoicePage() {
       {/* Filter System — shared architecture: Date strip → Status strip → Advanced panel */}
       {/* The date strip defines the width; the status strip stretches to match it
           exactly so its right edge aligns with the "Custom" pill. */}
-      <div className="w-fit max-w-full space-y-5 overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div className="w-fit max-w-full space-y-5 overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         {/* Date Range Strip (always visible) — 8 options as ONE connected
             segmented control (RepairOX standard: all filter strips use the
             connected SegmentedTabs container, never detached pills). */}
@@ -910,7 +949,7 @@ export default function InvoicePage() {
           flat bottom so nothing bleeds through corner gaps while frozen. */}
       <div className="-mt-6 border-2 border-zinc-300 bg-card shadow-card">
         <div className="[overflow-x:clip]">
-          <table className="w-full text-sm">
+          <table className="w-full text-sm table-fixed">
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="w-10 px-3 py-3">
@@ -922,7 +961,7 @@ export default function InvoicePage() {
                   />
                 </th>
                 {activeInvCols.map((col) => (
-                  <th key={col.id} className={cn("py-3 px-3", col.id === "store" && "pl-5 w-[132px]", col.id === "id" && "pl-5 w-[130px]", col.id === "actions" && "pr-5 w-[150px]", col.id === "customer" && "pl-[28px] w-[220px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
+                  <th key={col.id} className={cn("py-3 px-3", col.width, col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -939,7 +978,7 @@ export default function InvoicePage() {
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.id === "store" && "pl-5", col.id === "id" && "pl-5 w-[130px]", col.id === "actions" && "pr-5 w-[150px] whitespace-nowrap", col.id === "customer" && "w-[220px]", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.width, col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5 whitespace-nowrap", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
                       {(() => {
                         // Resolve the TICKET column target: the real linked
                         // Ticket when one exists, else the source Estimate.

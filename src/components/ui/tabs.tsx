@@ -15,7 +15,7 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
     <div
       role="tablist"
       className={cn(
-        "relative inline-flex items-center rounded-full border border-border bg-muted p-1",
+        "relative inline-flex items-center rounded-full border border-[#4361EE]/60 bg-muted p-1",
         size === "sm" ? "text-[11px]" : "text-sm",
         className
       )}

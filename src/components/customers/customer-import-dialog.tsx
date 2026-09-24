@@ -13,9 +13,9 @@ import { useState, useRef } from "react";
 import { UploadCloud, Download, FileSpreadsheet, CheckCircle2, AlertCircle } from "lucide-react";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Button } from "@/components/ui/button";
-import { downloadCSV } from "@/lib/csv-utils";
+import { readSpreadsheetFileToCSV, SPREADSHEET_ACCEPT } from "@/lib/csv-utils";
 import {
-  parseCustomerCSV, csvRowToInput, customerTemplateCSV,
+  parseCustomerCSV, csvRowToInput, downloadCustomerTemplateXLSX,
   type ParsedCustomerCSV,
 } from "@/lib/customer-csv";
 import { findOrCreateCustomer } from "@/lib/customer-service";
@@ -57,7 +57,9 @@ export function CustomerImportDialog({
     setError(null); setResult(null);
     setFileName(file.name);
     try {
-      const text = await file.text();
+      // Accept Excel (.xlsx/.xls/.xlsm) and CSV — the shared reader converts
+      // either to CSV text so the same parser handles both.
+      const text = await readSpreadsheetFileToCSV(file);
       const p = parseCustomerCSV(text);
       if (p.missingRequired.length > 0) {
         setError(`Missing required column(s): ${p.missingRequired.join(", ")}. Download the template for the exact format.`);
@@ -67,7 +69,7 @@ export function CustomerImportDialog({
       if (p.rows.length === 0) { setError("No data rows found in the file."); setParsed(null); return; }
       setParsed(p);
     } catch {
-      setError("Could not read the file. Please upload a valid CSV.");
+      setError("Could not read the file. Please upload a valid Excel (.xlsx/.xls) or CSV file.");
     }
   }
 
@@ -104,15 +106,15 @@ export function CustomerImportDialog({
       open={open}
       onClose={handleClose}
       title="Import Customers"
-      subtitle="Upload a CSV to add many customers at once. Duplicates (by phone/email) are skipped automatically."
+      subtitle="Upload an Excel (.xlsx/.xls) or CSV file to add many customers at once. Duplicates (by phone/email) are skipped automatically."
       icon={UploadCloud}
       width="max-w-lg"
       footer={
         <>
           <Button variant="outline" onClick={handleClose}>Close</Button>
           <div className="flex items-center gap-2">
-            <Button variant="soft" onClick={() => downloadCSV("customer-import-template", customerTemplateCSV())}>
-              <Download className="h-4 w-4" /> Template
+            <Button variant="soft" onClick={() => { void downloadCustomerTemplateXLSX(); }}>
+              <Download className="h-4 w-4" /> Excel Template
             </Button>
             <Button onClick={runImport} loading={busy} disabled={!parsed || busy || !!result}>
               <UploadCloud className="h-4 w-4" /> Import {parsed ? `${parsed.rows.length}` : ""}
@@ -130,12 +132,12 @@ export function CustomerImportDialog({
         >
           <FileSpreadsheet className="h-8 w-8 text-[#4361EE]" />
           <span className="text-[13px] font-semibold text-zinc-700">
-            {fileName || "Click to choose a CSV file"}
+            {fileName || "Click to choose an Excel or CSV file"}
           </span>
           <span className="text-[11px] text-muted-foreground">
-            First Name + Mobile are required. Download the template for the exact columns.
+            First Name + Mobile are required. Supported: .xlsx, .xls, .csv. Download the Excel template for the exact columns.
           </span>
-          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden" onChange={onFile} />
+          <input ref={fileRef} type="file" accept={SPREADSHEET_ACCEPT} className="hidden" onChange={onFile} />
         </button>
 
         {error && (

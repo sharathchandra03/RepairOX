@@ -79,7 +79,7 @@ export default function TasksPage() {
 
       {/* Filter chips — ONE connected segmented control (RepairOX standard:
           filter strips use the connected SegmentedTabs container). */}
-      <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <SegmentedTabs
           value={activeFilter}
           onChange={setActiveFilter}

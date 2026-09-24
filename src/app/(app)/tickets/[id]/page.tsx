@@ -38,8 +38,47 @@ import {
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog";
 import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
+import { qcItemLabel } from "@/lib/qc-config";
+import { PinnedRail } from "@/components/common/pinned-rail";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
+
+/** Labels of the QC checks a device FAILED (qc value "no"), mirroring the
+ *  print path (print-utils.ts). Passed ("ok"), skipped ("na") and pending
+ *  (undefined) checks are excluded. Labels resolve from the live QC config
+ *  (falling back to the raw key for archived/renamed items). */
+function deviceFailedQC(dev: DeviceRecord): string[] {
+  return Object.entries(dev.qc || {})
+    .filter(([, v]) => v === "no")
+    .map(([key]) => qcItemLabel(key))
+    .filter(Boolean);
+}
+
+/** Per-device "QC — Failed" band shown on the view page. Renders ONLY the
+ *  checks that failed for THIS device, matching the A4 print output. Returns
+ *  null when the device has no failures (nothing is shown). */
+function DeviceFailedQC({ dev }: { dev: DeviceRecord }) {
+  const failed = deviceFailedQC(dev);
+  if (failed.length === 0) return null;
+  return (
+    <div className="mt-3 pt-3 border-t border-border">
+      <p className="text-[10px] font-semibold uppercase tracking-wider text-rose-700 mb-2">
+        QC — Failed ({failed.length})
+      </p>
+      <div className="flex flex-wrap gap-1.5">
+        {failed.map((label, i) => (
+          <span
+            key={i}
+            className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-medium text-rose-700 ring-1 ring-inset ring-rose-200"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            {label}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 function fmtDate(iso: string): string {
   const d = new Date(iso);
@@ -719,17 +758,20 @@ export default function TicketDetailPage() {
               if (devices.length === 1) {
                 const dev = devices[0];
                 return (
-                  <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-                    <DetailField label="Brand" value={dev.brand || ticket.device} />
-                    <DetailField label="Model" value={dev.model || ticket.model} />
-                    <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : (dev.brand || ticket.device)} />
-                    <DetailField label="Device Colour" value={formatDeviceColour(dev.deviceColour) || "—"} />
-                    <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
-                    <DetailField label="Source" value={dev.source || ticket.source || "—"} />
-                    <DetailField label="Issue" value={dev.issue || ticket.issue} />
-                    <DetailField label="Technician" value={dev.assignedTo || ticket.technician} />
-                    <DetailField label="Accessories" value={dev.accessories || "—"} />
-                    {dev.warranty && <DetailField label="Warranty" value={dev.warranty} />}
+                  <div>
+                    <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+                      <DetailField label="Brand" value={dev.brand || ticket.device} />
+                      <DetailField label="Model" value={dev.model || ticket.model} />
+                      <DetailField label="Category" value={dev.category ? categoryLabel(dev.category) : (dev.brand || ticket.device)} />
+                      <DetailField label="Device Colour" value={formatDeviceColour(dev.deviceColour) || "—"} />
+                      <DetailField label={dev.imeiType === "serial" ? "Serial No." : "IMEI"} value={dev.imei || "—"} />
+                      <DetailField label="Source" value={dev.source || ticket.source || "—"} />
+                      <DetailField label="Issue" value={dev.issue || ticket.issue} />
+                      <DetailField label="Technician" value={dev.assignedTo || ticket.technician} />
+                      <DetailField label="Accessories" value={dev.accessories || "—"} />
+                      {dev.warranty && <DetailField label="Warranty" value={dev.warranty} />}
+                    </div>
+                    <DeviceFailedQC dev={dev} />
                   </div>
                 );
               }
@@ -781,6 +823,7 @@ export default function TicketDetailPage() {
                           </div>
                         </div>
                       )}
+                      <DeviceFailedQC dev={dev} />
                     </div>
                   ))}
                   <div className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-2.5 text-sm">
@@ -1092,8 +1135,11 @@ export default function TicketDetailPage() {
           </DetailSection>
         </div>
 
-        {/* Right Column — 1/3 width */}
-        <div className="space-y-6">
+        {/* Right Column — pinned rail. Its internal scroll is DRIVEN by the
+            page scroll (PinnedRail): left column at top → rail at top, left
+            column at bottom → rail at bottom, proportional in between, so both
+            reach their ends together. It has no independent scrollbar. */}
+        <PinnedRail>
           {/* Quick Actions */}
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>
@@ -1351,7 +1397,7 @@ export default function TicketDetailPage() {
               </div>
             </div>
           )}
-        </div>
+        </PinnedRail>
       </div>
 
       {/* ─── Status Change Dialog ─────────────────────────────────────── */}

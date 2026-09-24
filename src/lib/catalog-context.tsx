@@ -185,10 +185,15 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
         const orgId = orgIdRef.current;
         // Build queries — filter by org when available.
-        let catsQ = supabase.from("price_list_categories").select("*").order("created_at", { ascending: true });
-        let brdsQ = supabase.from("price_list_brands").select("*").order("created_at", { ascending: true });
-        let modsQ = supabase.from("price_list_models").select("*").order("created_at", { ascending: true });
-        let prtsQ = supabase.from("price_list_parts").select("*").order("created_at", { ascending: true });
+        // Secondary .order("id") is a STABLE tiebreaker: bulk-imported rows can
+        // share (or lack) a created_at, and Postgres does not guarantee order on
+        // ties — without this a row that gets UPDATEd (e.g. an image upload)
+        // resurfaces in an arbitrary position (usually last). Ordering by the
+        // unique id after created_at keeps the list order fixed across edits.
+        let catsQ = supabase.from("price_list_categories").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+        let brdsQ = supabase.from("price_list_brands").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+        let modsQ = supabase.from("price_list_models").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+        let prtsQ = supabase.from("price_list_parts").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
         if (orgId) {
           catsQ = catsQ.eq("organization_id", orgId);
           brdsQ = brdsQ.eq("organization_id", orgId);
@@ -227,28 +232,28 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       // Realtime subscription for catalog tables.
       const channel = supabase.channel("catalog-realtime")
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_categories" }, () => {
-          let q = supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true });
+          let q = supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
           if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
           q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, categories: data.map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_brands" }, () => {
-          let q = supabase!.from("price_list_brands").select("*").order("created_at", { ascending: true });
+          let q = supabase!.from("price_list_brands").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
           if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
           q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, brands: data.map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_models" }, () => {
-          let q = supabase!.from("price_list_models").select("*").order("created_at", { ascending: true });
+          let q = supabase!.from("price_list_models").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
           if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
           q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, models: data.map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })) }));
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_parts" }, () => {
-          let q = supabase!.from("price_list_parts").select("*").order("created_at", { ascending: true });
+          let q = supabase!.from("price_list_parts").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
           if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
           q.then(({ data }) => {
             if (data) setState((s) => ({ ...s, parts: data.map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })) }));

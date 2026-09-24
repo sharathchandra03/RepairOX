@@ -16,7 +16,7 @@ import { Panel, DataTable, DownloadBtn, type Column } from "./report-ui";
 import { BarChartView, LineChartView, AreaChartView, PieChartView, Leaderboard } from "./report-charts";
 import { seriesByTime, groupBy } from "@/lib/reports/aggregations";
 import { autoGranularity, inRange } from "@/lib/reports/date-ranges";
-import { exportSingleCSV } from "@/lib/reports/export";
+import { exportSingleCSV, exportSingleXLSX } from "@/lib/reports/export";
 import { STATUS_LABEL, INVOICE_STATUS_LABEL } from "@/lib/mock-data";
 import type { ReportDataset, DateRange, SeriesPoint } from "@/lib/reports/types";
 
@@ -92,12 +92,15 @@ function Grid({ children }: { children: React.ReactNode }) {
   return <div className="grid gap-4 xl:grid-cols-2">{children}</div>;
 }
 
-function csvFromSeries(name: string, dimLabel: string, valLabel: string, series: SeriesPoint[], currency: boolean) {
-  exportSingleCSV(
-    name,
-    [dimLabel, valLabel],
-    series.map((s) => [s.label, currency ? Math.round(s.value) : s.value])
-  );
+/** Build Excel + CSV export handlers for a chart series, so every panel's
+ *  DownloadBtn can offer both formats from one call. */
+function seriesExport(name: string, dimLabel: string, valLabel: string, series: SeriesPoint[], currency: boolean) {
+  const columns = [dimLabel, valLabel];
+  const rows = series.map((s) => [s.label, currency ? Math.round(s.value) : s.value] as (string | number)[]);
+  return {
+    onExcel: () => exportSingleXLSX(name, columns, rows),
+    onCsv: () => exportSingleCSV(name, columns, rows),
+  };
 }
 
 /* ─── Revenue ───────────────────────────────────────────────────────────── */
@@ -115,11 +118,11 @@ function RevenueReports({ data, range }: { data: ReportDataset; range: DateRange
 
   return (
     <div className="space-y-4">
-      <Panel title="Revenue Trend" subtitle={`Billed revenue over ${range.label.toLowerCase()}`} actions={<DownloadBtn onClick={() => csvFromSeries("revenue-trend", "Period", "Revenue", trend, true)} />}>
+      <Panel title="Revenue Trend" subtitle={`Billed revenue over ${range.label.toLowerCase()}`} actions={<DownloadBtn {...seriesExport("revenue-trend", "Period", "Revenue", trend, true)} />}>
         <AreaChartView data={trend} currency />
       </Panel>
       <Grid>
-        <Panel title="Revenue by Employee" actions={<DownloadBtn onClick={() => csvFromSeries("revenue-by-employee", "Employee", "Revenue", byEmployee, true)} />}>
+        <Panel title="Revenue by Employee" actions={<DownloadBtn {...seriesExport("revenue-by-employee", "Employee", "Revenue", byEmployee, true)} />}>
           <Leaderboard data={byEmployee} currency />
         </Panel>
         <Panel title="Revenue by Payment Mode">
@@ -128,11 +131,11 @@ function RevenueReports({ data, range }: { data: ReportDataset; range: DateRange
         <Panel title="Revenue by Invoice Type">
           <BarChartView data={byType} currency height={220} />
         </Panel>
-        <Panel title="Revenue by Device Category" actions={<DownloadBtn onClick={() => csvFromSeries("revenue-by-device", "Device", "Revenue", byDevice, true)} />}>
+        <Panel title="Revenue by Device Category" actions={<DownloadBtn {...seriesExport("revenue-by-device", "Device", "Revenue", byDevice, true)} />}>
           <BarChartView data={byDevice} currency height={220} />
         </Panel>
       </Grid>
-      <Panel title="Top Customers by Revenue" actions={<DownloadBtn onClick={() => csvFromSeries("revenue-by-customer", "Customer", "Revenue", byCustomer, true)} />}>
+      <Panel title="Top Customers by Revenue" actions={<DownloadBtn {...seriesExport("revenue-by-customer", "Customer", "Revenue", byCustomer, true)} />}>
         <DataTable
           columns={[{ key: "c", label: "Customer" }, { key: "v", label: "Revenue", format: "currency" }] as Column[]}
           rows={byCustomer.map((s) => [s.label, s.value])}
@@ -249,7 +252,7 @@ function CustomerReports({ data, range }: { data: ReportDataset; range: DateRang
         <AreaChartView data={growth} />
       </Panel>
       <Grid>
-        <Panel title="Highest-Value Customers" subtitle="By lifetime value" actions={<DownloadBtn onClick={() => csvFromSeries("top-customers", "Customer", "Lifetime Value", topByValue, true)} />}>
+        <Panel title="Highest-Value Customers" subtitle="By lifetime value" actions={<DownloadBtn {...seriesExport("top-customers", "Customer", "Lifetime Value", topByValue, true)} />}>
           <Leaderboard data={topByValue} currency />
         </Panel>
         <Panel title="Customers by Location">
@@ -333,7 +336,7 @@ function ExpenseReports({ data, range }: { data: ReportDataset; range: DateRange
         <LineChartView data={trend} currency />
       </Panel>
       <Grid>
-        <Panel title="Expenses by Category" actions={<DownloadBtn onClick={() => csvFromSeries("expense-by-category", "Category", "Amount", byCategory, true)} />}>
+        <Panel title="Expenses by Category" actions={<DownloadBtn {...seriesExport("expense-by-category", "Category", "Amount", byCategory, true)} />}>
           <BarChartView data={byCategory} currency height={240} />
         </Panel>
         <Panel title="Expenses by Payment Mode">
@@ -372,7 +375,7 @@ function EmployeeReports({ data }: { data: ReportDataset }) {
   return (
     <div className="space-y-4">
       <Grid>
-        <Panel title="Revenue Generated by Employee" actions={<DownloadBtn onClick={() => csvFromSeries("revenue-by-employee", "Employee", "Revenue", revenueByEmp, true)} />}>
+        <Panel title="Revenue Generated by Employee" actions={<DownloadBtn {...seriesExport("revenue-by-employee", "Employee", "Revenue", revenueByEmp, true)} />}>
           <Leaderboard data={revenueByEmp} currency />
         </Panel>
         <Panel title="Tickets Handled by Technician">

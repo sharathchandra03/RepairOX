@@ -3101,7 +3101,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
         {!isEdit && (
           <div className="flex gap-2">
             <Button variant="outline" size="lg" onClick={onNext}>Skip</Button>
-            <Button size="lg" onClick={onNext}>
+            <Button size="lg" onClick={onNext} className="min-w-[190px] justify-center">
               {data.devices.length > 1 && activeIdx < data.devices.length - 1
                 ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
                 : <>Continue</>} <ArrowRight className="h-4 w-4" />

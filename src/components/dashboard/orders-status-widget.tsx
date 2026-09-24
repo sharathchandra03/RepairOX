@@ -3,8 +3,8 @@
 import * as React from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  MoreHorizontal, Eye, Download, Truck, MapPin,
-  User, Package,
+  MoreHorizontal, Eye, Truck, MapPin,
+  User, Package, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { WalkInIcon } from "@/components/ui/icon-walk-in";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ import { cn, formatINR } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { getTicketDevices, type Ticket, type DeviceRecord } from "@/lib/mock-data";
 import { logActivity } from "@/lib/activity-log";
+import { downloadCSV, downloadXLSX, toCSV } from "@/lib/csv-utils";
 
 /* ── Types ── */
 type OrderType = "pickup" | "onsite" | "walkin";
@@ -221,26 +222,24 @@ export function OrdersStatusWidget({ className, tickets: ticketsProp }: { classN
     });
   };
 
-  const handleExport = () => {
-    const csvHeaders = "Type,Assigned,Received\n";
-    const csvRows = orderRows.map((r) => `"${r.label}",${r.assigned},${r.received}`).join("\n");
-    const csv = csvHeaders + csvRows;
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `orders-status-${new Date().toISOString().slice(0, 10)}.csv`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-    logActivity({
-      module: "Ticket",
-      action: "Orders Summary Exported",
-      severity: "info",
-      entity: "Ticket",
-      description: `Exported orders status summary.`,
-    });
+  const EXPORT_COLUMNS = ["Type", "Assigned", "Received"];
+  const buildExportRows = (): (string | number)[][] =>
+    orderRows.map((r) => [r.label, r.assigned, r.received]);
+  const exportName = () => `orders-status-${new Date().toISOString().slice(0, 10)}`;
+  const logExport = () => logActivity({
+    module: "Ticket",
+    action: "Orders Summary Exported",
+    severity: "info",
+    entity: "Ticket",
+    description: `Exported orders status summary.`,
+  });
+  const handleExportExcel = () => {
+    void downloadXLSX(exportName(), EXPORT_COLUMNS, buildExportRows(), "Orders Status");
+    logExport();
+  };
+  const handleExportCSV = () => {
+    downloadCSV(exportName(), toCSV(EXPORT_COLUMNS, buildExportRows()));
+    logExport();
   };
 
   return (
@@ -265,8 +264,11 @@ export function OrdersStatusWidget({ className, tickets: ticketsProp }: { classN
           >
             {(close) => (
               <>
-                <MenuItem icon={Download} onClick={() => { handleExport(); close(); }}>
-                  Export Summary
+                <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                  Export Excel (.xlsx)
+                </MenuItem>
+                <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                  Export CSV (.csv)
                 </MenuItem>
               </>
             )}

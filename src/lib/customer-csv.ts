@@ -13,7 +13,7 @@
    Built on the shared csv-utils primitives (parseCSV / toCSV / downloadCSV).
    ────────────────────────────────────────────────────────────────────────── */
 
-import { parseCSV, toCSV } from "@/lib/csv-utils";
+import { parseCSV, toCSV, downloadXLSX } from "@/lib/csv-utils";
 import {
   CUSTOMER_SOURCE_LABEL, CAPTURE_SOURCE_LABEL,
   type Customer, type CustomerSource,
@@ -150,14 +150,21 @@ export function csvRowToInput(row: CustomerCsvRow): FindOrCreateInput | null {
   };
 }
 
+/** One canonical example row for the customer template (shared by CSV + XLSX). */
+export const CUSTOMER_TEMPLATE_EXAMPLE: (string | number)[] = [
+  "Priya", "Menon", "+91 98765 43210", "priya@example.com", "personal",
+  "", "", "12 MG Road", "Bengaluru", "Karnataka", "560001", "Referral",
+  "Prefers WhatsApp",
+];
+
 /** Blank template: canonical headers + one example row. */
 export function customerTemplateCSV(): string {
-  const example = [
-    "Priya", "Menon", "+91 98765 43210", "priya@example.com", "personal",
-    "", "", "12 MG Road", "Bengaluru", "Karnataka", "560001", "Referral",
-    "Prefers WhatsApp",
-  ];
-  return toCSV([...CUSTOMER_CSV_COLUMNS], [example]);
+  return toCSV([...CUSTOMER_CSV_COLUMNS], [CUSTOMER_TEMPLATE_EXAMPLE]);
+}
+
+/** Download the customer IMPORT TEMPLATE as an Excel (.xlsx) file (Excel-only). */
+export function downloadCustomerTemplateXLSX(filename = "customer-import-template"): Promise<void> {
+  return downloadXLSX(filename, [...CUSTOMER_CSV_COLUMNS], [CUSTOMER_TEMPLATE_EXAMPLE], "Customers");
 }
 
 /**
@@ -172,23 +179,25 @@ export function customerTemplateCSV(): string {
  *   Captured Via | Created At | Last Visit | Total Tickets | Total Invoices |
  *   Lifetime Value (₹) | Loyalty Points | Loyalty Tier
  */
-export function customersToCSV(
+/** Full export column set (importable base columns + export-only provenance). */
+export const CUSTOMER_EXPORT_COLUMNS: string[] = [
+  ...CUSTOMER_CSV_COLUMNS,
+  "Captured Via",
+  "Created At",
+  "Last Visit",
+  "Total Tickets",
+  "Total Invoices",
+  "Lifetime Value (₹)",
+  "Loyalty Points",
+  "Loyalty Tier",
+];
+
+/** Build the export rows (shared by the CSV and XLSX exporters). */
+export function buildCustomerExportRows(
   customers: Customer[],
   loyaltyByCustomer?: Record<string, { points: number; tier: string }>,
-): string {
-  const headers = [
-    ...CUSTOMER_CSV_COLUMNS,
-    "Captured Via",
-    "Created At",
-    "Last Visit",
-    "Total Tickets",
-    "Total Invoices",
-    "Lifetime Value (₹)",
-    "Loyalty Points",
-    "Loyalty Tier",
-  ];
-
-  const rows = customers.map((c) => {
+): (string | number | undefined)[][] {
+  return customers.map((c) => {
     const loyalty = loyaltyByCustomer?.[c.id];
     return [
       // ── importable base columns ──────────────────────────────────────
@@ -221,6 +230,20 @@ export function customersToCSV(
       })(),
     ];
   });
+}
 
-  return toCSV(headers, rows);
+export function customersToCSV(
+  customers: Customer[],
+  loyaltyByCustomer?: Record<string, { points: number; tier: string }>,
+): string {
+  return toCSV(CUSTOMER_EXPORT_COLUMNS, buildCustomerExportRows(customers, loyaltyByCustomer));
+}
+
+/** Export the whole customer list as an Excel (.xlsx) file. */
+export function downloadCustomersXLSX(
+  filename: string,
+  customers: Customer[],
+  loyaltyByCustomer?: Record<string, { points: number; tier: string }>,
+): Promise<void> {
+  return downloadXLSX(filename, CUSTOMER_EXPORT_COLUMNS, buildCustomerExportRows(customers, loyaltyByCustomer), "Customers");
 }

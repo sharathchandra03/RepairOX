@@ -2366,6 +2366,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // Last resort: keep locally so the user doesn't lose their work. (Won't
         // survive a reload, but avoids data loss mid-session.)
         setState((s) => ({ ...s, invoices: [current, ...s.invoices] }));
+        // Make the new invoice visible to stateRef SYNCHRONOUSLY. stateRef is
+        // otherwise refreshed only by a useEffect (a tick later), so the very
+        // next line's syncTicketStatusFromInvoice — and the "Create an invoice
+        // first" hasInvoice guards it can trigger (updateTicket/
+        // updateDeviceStatus) — would read a stale invoice list and silently
+        // reject the default "Repaired & Collected" write. (Root cause of the
+        // ticket staying "In Progress" until the status was re-clicked.)
+        stateRef.current = { ...stateRef.current, invoices: [current, ...stateRef.current.invoices] };
         logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: current.reference || current.id, description: `Generated invoice for ${current.customer}.`, meta: { Total: inr(current.total) } });
         // Sync the (possibly default) repairStatus onto the linked ticket's
         // BILLED devices (selective invoicing).
@@ -2378,6 +2386,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       saved.serviceCategory = current.serviceCategory;
       saved.paymentMode = current.paymentMode;
       setState((s) => ({ ...s, invoices: [saved, ...s.invoices] }));
+      // See note above: refresh stateRef synchronously so the immediately
+      // following syncTicketStatusFromInvoice + hasInvoice guards see this
+      // invoice this tick (not one useEffect later).
+      stateRef.current = { ...stateRef.current, invoices: [saved, ...stateRef.current.invoices] };
       logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: saved.reference || saved.id, description: `Generated invoice for ${saved.customer}.`, meta: { Total: inr(saved.total) } });
       // CRITICAL: propagate the invoice's repairStatus (defaults to
       // "Repaired & Collected") back to the originating ticket's BILLED devices
@@ -2409,6 +2421,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       return saved.id;
     }
     setState((s) => ({ ...s, invoices: [invoice, ...s.invoices] }));
+    // See note above: refresh stateRef synchronously so the immediately
+    // following syncTicketStatusFromInvoice + hasInvoice guards see this invoice
+    // this tick (not one useEffect later). Matters in local/demo mode too.
+    stateRef.current = { ...stateRef.current, invoices: [invoice, ...stateRef.current.invoices] };
     logActivity({ module: "Invoice", action: "Invoice Created", severity: "success", entity: "Invoice", reference: invoice.reference || invoice.id, description: `Generated invoice for ${invoice.customer}.`, meta: { Total: inr(invoice.total) } });
     await syncTicketStatusFromInvoice(invoice.ticketId, invoice.repairStatus, billedTicketDeviceIds(invoice));
     if (invoice.status === "paid") {

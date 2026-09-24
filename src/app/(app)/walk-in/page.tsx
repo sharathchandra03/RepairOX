@@ -19,7 +19,7 @@ import { motion } from "framer-motion";
 import {
   Plus, Download, Upload, Search, Eye, Pencil, MoreHorizontal, Trash2,
   Ticket as TicketIcon, Pin, PinOff, LayoutList, BarChart3, Filter, X, Check,
-  Phone, Mail, Clock, ChevronDown,
+  Phone, Mail, Clock, ChevronDown, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -65,6 +65,7 @@ import { WalkInFollowUpBell } from "@/components/walk-in/walk-in-followup-bell";
 import { WalkInFollowUpView } from "@/components/walk-in/walk-in-followup-view";
 import { WalkInFollowUpCell, WalkInFollowUpCompleteModal } from "@/components/walk-in/walk-in-followup-cell";
 import { WalkInDeviceDetailsOverlay } from "@/components/walk-in/walk-in-device-details-overlay";
+import { downloadCSV, downloadXLSX, toCSV } from "@/lib/csv-utils";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -607,9 +608,25 @@ export default function WalkInPage() {
               </Button>
             </Can>
             <Can permission={["export_reports", "export_csv", "use_pos"]}>
-              <Button variant="outline" size="md" className="rounded-full" onClick={() => exportWalkIns(filtered, ticketNoFor)}>
-                <Download className="h-4 w-4" /> Export
-              </Button>
+              <Dropdown
+                width="w-52"
+                trigger={({ toggle }) => (
+                  <Button variant="outline" size="md" className="rounded-full" onClick={toggle}>
+                    <Download className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuItem icon={FileSpreadsheet} onClick={() => { exportWalkInsExcel(filtered, ticketNoFor); close(); }}>
+                      Excel (.xlsx)
+                    </MenuItem>
+                    <MenuItem icon={FileText} onClick={() => { exportWalkInsCSV(filtered, ticketNoFor); close(); }}>
+                      CSV (.csv)
+                    </MenuItem>
+                  </>
+                )}
+              </Dropdown>
             </Can>
             <Can permission={["use_pos", "manage_repair_jobs", "manage_sales"]}>
               <Button size="md" className="rounded-full" onClick={() => setShowCreate(true)}>
@@ -686,7 +703,7 @@ export default function WalkInPage() {
         {/* Date-range strip as ONE connected segmented control (RepairOX
             standard: all filter strips use the connected SegmentedTabs
             container, never detached pills). */}
-        <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs
             value={dateRange}
             onChange={(v) => setDateRange(v as WalkInDateRange)}
@@ -840,9 +857,9 @@ export default function WalkInPage() {
                   absorb the shrink/growth as the viewport changes. Action is a
                   fixed width so its icons never collapse or wrap. */}
               <colgroup>
-                <col className="w-9" />{/* checkbox */}
+                <col className="w-12" />{/* checkbox — extra breathing room */}
                 {multiStore && <col className="w-[132px]" />}{/* Store (multi-store only) */}
-                <col className="w-[92px]" />{/* ID — moved next to Store */}
+                <col className="w-[108px]" />{/* ID — moved next to Store; wider so the WK number sits comfortably */}
                 <col className="w-[104px]" />{/* Date */}
                 <col className="w-[96px]" />{/* Type */}
                 <col className="w-[96px]" />{/* Source */}
@@ -1622,10 +1639,10 @@ function ViewRow({ label, children }: { label: string; children: React.ReactNode
 }
 
 /* ─── CSV export (spreadsheet column structure) ──────────────────────── */
-function exportWalkIns(rows: WalkIn[], ticketNoFor: (id?: string) => string | undefined) {
-  const esc = (v: string) => `"${String(v ?? "").replace(/"/g, '""')}"`;
-  const header = ["DATE", "ID", "TYPE", "SOURCE", "NAME", "CONTACT", "MODEL", "ISSUE", "CUSTOMER COMMENTS", "FOLLOW-UP", "FINAL STATUS", "ACTION"];
-  const lines = rows.map((w) => [
+const WALKIN_EXPORT_COLUMNS = ["DATE", "ID", "TYPE", "SOURCE", "NAME", "CONTACT", "MODEL", "ISSUE", "CUSTOMER COMMENTS", "FOLLOW-UP", "FINAL STATUS", "ACTION"];
+
+function buildWalkInRows(rows: WalkIn[], ticketNoFor: (id?: string) => string | undefined): (string | number)[][] {
+  return rows.map((w) => [
     w.date,
     walkInDisplayId(w),
     WALKIN_TYPE_LABEL[w.type ?? "direct"],
@@ -1638,13 +1655,15 @@ function exportWalkIns(rows: WalkIn[], ticketNoFor: (id?: string) => string | un
     followUpPill(w).label,
     WALKIN_STATUS_LABEL[w.status],
     w.linkedTicketId ? `Ticket ${ticketNoFor(w.linkedTicketId)}` : "",
-  ].map((c) => esc(String(c ?? ""))).join(","));
-  const csv = [header.join(","), ...lines].join("\n");
-  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `walk-ins-${new Date().toISOString().slice(0, 10)}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
+  ].map((c) => String(c ?? "")));
+}
+
+/** Export walk-ins as Excel (.xlsx) — the primary format. */
+function exportWalkInsExcel(rows: WalkIn[], ticketNoFor: (id?: string) => string | undefined) {
+  void downloadXLSX(`walk-ins-${new Date().toISOString().slice(0, 10)}`, WALKIN_EXPORT_COLUMNS, buildWalkInRows(rows, ticketNoFor), "Walk-Ins");
+}
+
+/** Export walk-ins as CSV (alternative format). */
+function exportWalkInsCSV(rows: WalkIn[], ticketNoFor: (id?: string) => string | undefined) {
+  downloadCSV(`walk-ins-${new Date().toISOString().slice(0, 10)}`, toCSV(WALKIN_EXPORT_COLUMNS, buildWalkInRows(rows, ticketNoFor)));
 }

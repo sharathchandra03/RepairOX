@@ -9,7 +9,7 @@
    carry the current shop's identity.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { toCSV, downloadCSV } from "@/lib/csv-utils";
+import { toCSV, downloadCSV, downloadXLSX, downloadXLSXWorkbook } from "@/lib/csv-utils";
 
 export interface CompanyInfo {
   name: string;
@@ -59,6 +59,30 @@ export function exportSingleCSV(
   rows: (string | number)[][]
 ) {
   downloadCSV(filename, toCSV(columns, rows));
+}
+
+/* ─── Excel (.xlsx) — mandatory alongside CSV ────────────────────────────── */
+
+/** Export several report tables as a multi-sheet Excel workbook (one tab per
+ *  table, mirroring the on-screen sections). Totals are appended per sheet. */
+export function exportTablesXLSX(filename: string, tables: ExportTable[]) {
+  void downloadXLSXWorkbook(
+    filename,
+    tables.map((t) => ({
+      name: t.title,
+      headers: t.columns,
+      rows: t.totals ? [...t.rows, t.totals] : t.rows,
+    })),
+  );
+}
+
+/** Export a single report table as an Excel (.xlsx) file. */
+export function exportSingleXLSX(
+  filename: string,
+  columns: string[],
+  rows: (string | number)[][]
+) {
+  void downloadXLSX(filename, columns, rows);
 }
 
 /* ─── Print / PDF ───────────────────────────────────────────────────────── */

@@ -4,8 +4,9 @@
    sortable DataTable used across every report category. */
 
 import { useState, type ReactNode } from "react";
-import { ArrowUpDown, Download } from "lucide-react";
+import { ArrowUpDown, Download, FileSpreadsheet, FileText, ChevronDown } from "lucide-react";
 import { cn, formatINR, formatNumber } from "@/lib/utils";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 
 export function Panel({
   title,
@@ -145,12 +146,54 @@ export function DataTable({
   );
 }
 
-export function DownloadBtn({ onClick, label = "Export" }: { onClick: () => void; label?: string }) {
+/**
+ * Export button used across every report panel.
+ *
+ * Preferred usage passes BOTH `onExcel` and `onCsv` — the button becomes a
+ * small dropdown offering Excel (.xlsx) and CSV. The legacy single-`onClick`
+ * form is still supported for any caller that only exports one format.
+ */
+export function DownloadBtn({
+  onClick, onExcel, onCsv, label = "Export",
+}: {
+  onClick?: () => void;
+  onExcel?: () => void;
+  onCsv?: () => void;
+  label?: string;
+}) {
+  const btnClass =
+    "inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-medium text-zinc-600 transition hover:bg-muted";
+
+  if (onExcel || onCsv) {
+    return (
+      <Dropdown
+        width="w-48"
+        trigger={({ toggle }) => (
+          <button onClick={toggle} className={btnClass}>
+            <Download className="h-3.5 w-3.5" /> {label} <ChevronDown className="h-3 w-3 opacity-70" />
+          </button>
+        )}
+      >
+        {(close) => (
+          <>
+            {onExcel && (
+              <MenuItem icon={FileSpreadsheet} onClick={() => { onExcel(); close(); }}>
+                Excel (.xlsx)
+              </MenuItem>
+            )}
+            {onCsv && (
+              <MenuItem icon={FileText} onClick={() => { onCsv(); close(); }}>
+                CSV (.csv)
+              </MenuItem>
+            )}
+          </>
+        )}
+      </Dropdown>
+    );
+  }
+
   return (
-    <button
-      onClick={onClick}
-      className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1.5 text-[11px] font-medium text-zinc-600 transition hover:bg-muted"
-    >
+    <button onClick={onClick} className={btnClass}>
       <Download className="h-3.5 w-3.5" /> {label}
     </button>
   );

@@ -10,6 +10,7 @@ import {
   User, Cpu, HardDrive, MonitorSmartphone, Calendar,
   Info, MoreHorizontal, Pencil, Eye, Wrench, X, Tag,
   Image as ImageIcon, GripVertical, Copy, Settings2, Check,
+  FileSpreadsheet, FileText,
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
@@ -17,7 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel } from "@/lib/catalog-context";
-import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, toCSV } from "@/lib/csv-utils";
+import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, downloadCatalogXLSX, toCSV } from "@/lib/csv-utils";
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
 import { parseSmartSheet, type SmartImportResult } from "@/lib/smart-import";
 import { SmartImportDialog } from "@/components/price-list/smart-import-dialog";
@@ -303,7 +304,13 @@ export default function PriceListPage() {
   }, []);
 
   /* ── Import / Export against the live catalog ── */
-  const handleExport = useCallback(() => {
+  const handleExportExcel = useCallback(() => {
+    void downloadCatalogXLSX(
+      `repairox-price-list-${new Date().toISOString().slice(0, 10)}`,
+      categories, brands, models, allParts,
+    );
+  }, [categories, brands, models, allParts]);
+  const handleExportCSV = useCallback(() => {
     downloadCSV(
       `repairox-price-list-${new Date().toISOString().slice(0, 10)}`,
       catalogToCSV(categories, brands, models, allParts),
@@ -506,7 +513,7 @@ export default function PriceListPage() {
           </div>
 
           <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="h-3.5 w-3.5" /> Import CSV
+            <Upload className="h-3.5 w-3.5" /> Import
           </Button>
           <input
             ref={fileInputRef}
@@ -515,9 +522,25 @@ export default function PriceListPage() {
             className="hidden"
             onChange={(e) => handleImportFile(e.target.files?.[0])}
           />
-          <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={handleExport}>
-            <Download className="h-3.5 w-3.5" /> Export
-          </Button>
+          <Dropdown
+            width="w-52"
+            trigger={({ toggle }) => (
+              <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={toggle}>
+                <Download className="h-3.5 w-3.5" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+              </Button>
+            )}
+          >
+            {(close) => (
+              <>
+                <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                  Excel (.xlsx)
+                </MenuItem>
+                <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                  CSV (.csv)
+                </MenuItem>
+              </>
+            )}
+          </Dropdown>
           <Button size="sm" className="gap-1.5 rounded-xl" onClick={handleAddPrice}>
             <Plus className="h-3.5 w-3.5" /> Add Price
           </Button>
@@ -1209,6 +1232,23 @@ function PartsAndPricing({
     if (sortBy === "price-asc") list.sort((a, b) => a.price - b.price);
     else if (sortBy === "price-desc") list.sort((a, b) => b.price - a.price);
     else if (sortBy === "name") list.sort((a, b) => a.partName.localeCompare(b.partName));
+    else {
+      // Default ("none"): keep a STABLE, meaningful order that never shifts when
+      // a row is edited (e.g. an image upload triggers a DB re-fetch whose raw
+      // order is undefined). Sort by SKU / part number using natural,
+      // numeric-aware comparison (so 661-30002 comes before 661-30010), falling
+      // back to part name when a SKU is absent. Rows with a SKU always precede
+      // those without.
+      const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+      list.sort((a, b) => {
+        const sa = (a.partNumber ?? "").trim();
+        const sb = (b.partNumber ?? "").trim();
+        if (sa && sb) return collator.compare(sa, sb) || collator.compare(a.partName, b.partName);
+        if (sa) return -1;
+        if (sb) return 1;
+        return collator.compare(a.partName, b.partName);
+      });
+    }
     return list;
   }, [parts, search, warrantyFilter, minPrice, maxPrice, sortBy]);
 
@@ -1257,11 +1297,11 @@ function PartsAndPricing({
       onDrop={() => onDrop(key)}
       style={{ top }}
       className={cn(
-        "sticky z-20 bg-[#EEF1FD] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB] cursor-grab select-none whitespace-nowrap",
+        "sticky z-20 bg-[#DDE4FF] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-[#4361EE] shadow-[inset_0_-1px_0_#B9C5F7] cursor-grab select-none whitespace-nowrap",
         alignClass[key],
         // Move the whole Image column (header + content) right as one unit.
         key === "image" && "pl-[27px]",
-        overCol === key && dragCol && dragCol !== key && "bg-[#DCE3FB]",
+        overCol === key && dragCol && dragCol !== key && "bg-[#C7D2FB]",
         dragCol === key && "opacity-50"
       )}
       title="Drag to reorder column"
@@ -1477,7 +1517,7 @@ function PartsAndPricing({
               overflow container — that would create a new scroll context and
               break position:sticky. The card's overflow-hidden clips any excess
               width so the page never gains a horizontal scrollbar. */}
-          <table className="w-full min-w-[760px] table-fixed border-collapse text-left">
+          <table className="w-full min-w-[760px] table-fixed border-collapse border-x border-b border-slate-300 text-left">
             {/* Shared column grid — header + every row use identical boundaries. */}
             <colgroup>{colDefs}</colgroup>
             {/* Sticky table header — pins directly beneath the section header
@@ -1487,18 +1527,18 @@ function PartsAndPricing({
               <tr>
                 <th
                   style={{ top: tableHeadTop }}
-                  className="sticky z-20 bg-[#EEF1FD] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB]"
+                  className="sticky z-20 border-l border-[#B9C5F7] bg-[#DDE4FF] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-[#4361EE] shadow-[inset_0_-1px_0_#B9C5F7]"
                 >#</th>
                 {order.map((key) => headerCell(key, tableHeadTop))}
                 <th
                   style={{ top: tableHeadTop }}
-                  className="sticky z-20 bg-[#EEF1FD] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-[#4361EE]/80 shadow-[inset_0_-1px_0_#D6DDFB]"
+                  className="sticky z-20 border-r border-[#B9C5F7] bg-[#DDE4FF] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-[#4361EE] shadow-[inset_0_-1px_0_#B9C5F7]"
                 >Actions</th>
               </tr>
             </thead>
             <tbody>
                 {pageParts.map((part, idx) => (
-                  <tr key={part.id} className="border-b border-slate-100 transition-colors hover:bg-brand-50/40">
+                  <tr key={part.id} className="border-b border-slate-300 transition-colors hover:bg-brand-50/40">
                     <td className="pl-4 pr-2 py-3 text-left align-middle text-[13px] font-semibold tabular-nums text-muted-foreground">{(safePage - 1) * pageSize + idx + 1}</td>
                     {order.map((key) => bodyCell(key, part))}
                     <td className="py-3 px-4 align-middle">

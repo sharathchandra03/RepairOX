@@ -217,13 +217,135 @@ export function downloadCSV(filename: string, csv: string) {
   URL.revokeObjectURL(url);
 }
 
+/* ─── Excel (.xlsx) — mandatory alongside CSV (RepairOX standard) ──────────
+   Every import/export in the app must speak Excel. Template downloads are
+   Excel-ONLY. SheetJS ("xlsx") is loaded on demand so it never bloats the
+   initial bundle for pages that never touch a spreadsheet. */
+
+/** Canonical file extensions/MIME types an <input type="file"> should accept
+ *  for a data import (CSV + every common Excel variant). Use this everywhere so
+ *  the accept filter is consistent across modules. */
+export const SPREADSHEET_ACCEPT =
+  ".xlsx,.xls,.xlsm,.csv," +
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet," +
+  "application/vnd.ms-excel,text/csv";
+
+/**
+ * Build a workbook (single sheet) from a header row + data rows and trigger a
+ * client-side .xlsx download. This is the canonical export/template path.
+ *
+ * @param filename   base name (a ".xlsx" extension is added if missing)
+ * @param headers    the header row
+ * @param rows       data rows (strings/numbers; blanks become empty cells)
+ * @param sheetName  worksheet tab name (default "Sheet1")
+ */
+export async function downloadXLSX(
+  filename: string,
+  headers: string[],
+  rows: (string | number | undefined)[][],
+  sheetName = "Sheet1",
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const XLSX = await import("xlsx");
+  const aoa: (string | number)[][] = [headers, ...rows.map((r) => r.map((c) => (c ?? "") as string | number))];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // Reasonable column widths from header/content length so the sheet opens
+  // readable rather than with every column collapsed.
+  ws["!cols"] = headers.map((h, i) => {
+    const maxCell = rows.reduce((m, r) => Math.max(m, String(r[i] ?? "").length), String(h ?? "").length);
+    return { wch: Math.min(Math.max(maxCell + 2, 10), 60) };
+  });
+  const wb = XLSX.utils.book_new();
+  // Excel limits sheet names to 31 chars and forbids a few characters.
+  const safeSheet = sheetName.replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || "Sheet1";
+  XLSX.utils.book_append_sheet(wb, ws, safeSheet);
+  const name = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, name);
+}
+
+/**
+ * Build a MULTI-sheet workbook and download it as .xlsx. Each section becomes
+ * its own worksheet tab. Used by exports that group several tables (e.g.
+ * reports), so the Excel file mirrors the on-screen sections instead of one
+ * flat blob.
+ */
+export async function downloadXLSXWorkbook(
+  filename: string,
+  sheets: { name: string; headers: string[]; rows: (string | number | undefined)[][] }[],
+): Promise<void> {
+  if (typeof window === "undefined") return;
+  const XLSX = await import("xlsx");
+  const wb = XLSX.utils.book_new();
+  const usedNames = new Set<string>();
+  sheets.forEach((s, idx) => {
+    const aoa: (string | number)[][] = [s.headers, ...s.rows.map((r) => r.map((c) => (c ?? "") as string | number))];
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws["!cols"] = s.headers.map((h, i) => {
+      const maxCell = s.rows.reduce((m, r) => Math.max(m, String(r[i] ?? "").length), String(h ?? "").length);
+      return { wch: Math.min(Math.max(maxCell + 2, 10), 60) };
+    });
+    let base = (s.name || `Sheet${idx + 1}`).replace(/[\\/?*[\]:]/g, " ").slice(0, 31) || `Sheet${idx + 1}`;
+    // De-dupe sheet names (Excel rejects duplicates).
+    let name = base, n = 2;
+    while (usedNames.has(name.toLowerCase())) { name = `${base.slice(0, 28)} ${n++}`; }
+    usedNames.add(name.toLowerCase());
+    XLSX.utils.book_append_sheet(wb, ws, name);
+  });
+  const outName = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, outName);
+}
+
+/**
+ * Read an uploaded data file (CSV, XLSX, XLS, XLSM) into raw CSV text so any
+ * existing text-based parser keeps working unchanged. Excel workbooks use the
+ * first non-empty sheet. This is the single import entry point — every importer
+ * should route through it so CSV and Excel are handled identically.
+ */
+export async function readSpreadsheetFileToCSV(file: File): Promise<string> {
+  const name = file.name.toLowerCase();
+  const isExcel = /\.(xlsx|xls|xlsm|xlsb|ods)$/.test(name) ||
+    file.type.includes("spreadsheetml") || file.type.includes("ms-excel");
+  if (!isExcel) return await file.text();
+
+  const XLSX = await import("xlsx");
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array", cellDates: true, dateNF: "yyyy-mm-dd" });
+  // Pick the first sheet that actually has rows.
+  for (const sheetName of wb.SheetNames) {
+    const ws = wb.Sheets[sheetName];
+    if (!ws || !ws["!ref"]) continue;
+    const csv = XLSX.utils.sheet_to_csv(ws, { blankrows: false, dateNF: "yyyy-mm-dd" });
+    if (csv.trim().length > 0) return csv;
+  }
+  const first = wb.SheetNames[0];
+  return first ? XLSX.utils.sheet_to_csv(wb.Sheets[first], { blankrows: false, dateNF: "yyyy-mm-dd" }) : "";
+}
+
+/** One canonical example row for the catalog template (shared by CSV + XLSX). */
+export const CATALOG_TEMPLATE_EXAMPLE: (string | number)[] = [
+  "Laptop", "Apple", "MacBook Air M3", "2024", "Base", "Apple M3", "256GB",
+  "13.6 inch", "Display Assembly", "661-28751", "18500", "3 Months", "In Stock", "",
+];
+
 /** Downloadable blank template with the canonical headers + one example row. */
 export function catalogTemplateCSV(): string {
-  const example = [
-    "Laptop", "Apple", "MacBook Air M3", "2024", "Base", "Apple M3", "256GB",
-    "13.6 inch", "Display Assembly", "661-28751", "18500", "3 Months", "In Stock", "",
-  ];
-  return toCSV([...CATALOG_COLUMNS], [example]);
+  return toCSV([...CATALOG_COLUMNS], [CATALOG_TEMPLATE_EXAMPLE]);
+}
+
+/** Download the catalog IMPORT TEMPLATE as an Excel (.xlsx) file (Excel-only). */
+export function downloadCatalogTemplateXLSX(filename = "repairox-catalog-template"): Promise<void> {
+  return downloadXLSX(filename, [...CATALOG_COLUMNS], [CATALOG_TEMPLATE_EXAMPLE], "Catalog");
+}
+
+/** Export the full catalog as an Excel (.xlsx) file. */
+export function downloadCatalogXLSX(
+  filename: string,
+  categories: DeviceCategory[],
+  brands: PriceListBrand[],
+  models: PriceListModel[],
+  parts: DevicePart[],
+): Promise<void> {
+  return downloadXLSX(filename, [...CATALOG_COLUMNS], buildCatalogRows(categories, brands, models, parts), "Catalog");
 }
 
 /** Flatten the whole catalog into CSV rows (one row per part; models with no

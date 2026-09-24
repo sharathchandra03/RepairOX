@@ -4,7 +4,7 @@
    edit any report the user has built. */
 
 import { useMemo, useState } from "react";
-import { Star, Pin, Trash2, Pencil, FileSpreadsheet, Printer, Plus } from "lucide-react";
+import { Star, Pin, Trash2, Pencil, FileSpreadsheet, FileText, Printer, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Panel, DataTable, type Column } from "./report-ui";
@@ -15,7 +15,7 @@ import { useSavedReports, deleteReport, toggleFavorite, togglePinned } from "@/l
 import { runCustomReport } from "@/lib/reports/aggregations";
 import { rangeFromFilters } from "@/lib/reports/filters";
 import { DATA_SOURCES } from "@/lib/reports/registry";
-import { exportSingleCSV, printReport, type CompanyInfo } from "@/lib/reports/export";
+import { exportSingleCSV, exportSingleXLSX, printReport, type CompanyInfo } from "@/lib/reports/export";
 import type { ReportDataset, ReportFilters, CustomReportConfig } from "@/lib/reports/types";
 
 export type SavedReportsFilterMode = "all" | "recent" | "pinned" | "favorite";
@@ -154,6 +154,9 @@ function SavedReportView({
   const range = rangeFromFilters(config.filters);
   const showChart = config.visualization !== "table" && Boolean(config.groupBy);
 
+  const doExcel = () =>
+    exportSingleXLSX(config.name.replace(/\s+/g, "-").toLowerCase(), result.columns.map((c) => c.label), result.rows);
+
   const doCSV = () =>
     exportSingleCSV(config.name.replace(/\s+/g, "-").toLowerCase(), result.columns.map((c) => c.label), result.rows);
 
@@ -175,7 +178,8 @@ function SavedReportView({
           <IconBtn onClick={onFav} title="Favourite"><Star className={cn("h-4 w-4", config.favorite && "fill-amber-400 text-amber-400")} /></IconBtn>
           <IconBtn onClick={onPin} title="Pin"><Pin className={cn("h-4 w-4", config.pinned && "text-[#4361EE]")} /></IconBtn>
           <IconBtn onClick={onEdit} title="Edit"><Pencil className="h-4 w-4" /></IconBtn>
-          <IconBtn onClick={doCSV} title="Export CSV"><FileSpreadsheet className="h-4 w-4" /></IconBtn>
+          <IconBtn onClick={doExcel} title="Export Excel (.xlsx)"><FileSpreadsheet className="h-4 w-4" /></IconBtn>
+          <IconBtn onClick={doCSV} title="Export CSV"><FileText className="h-4 w-4" /></IconBtn>
           <IconBtn onClick={doPrint} title="Print / PDF"><Printer className="h-4 w-4" /></IconBtn>
           <IconBtn onClick={onDelete} title="Delete"><Trash2 className="h-4 w-4 text-rose-500" /></IconBtn>
         </>

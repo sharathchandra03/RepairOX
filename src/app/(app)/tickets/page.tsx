@@ -7,10 +7,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings,
   Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
-  Pin, PinOff, Check, TicketCheck,
+  Pin, PinOff, Check, TicketCheck, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
@@ -48,6 +49,7 @@ import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
 import { readDateFilterParams, isInListDateRange } from "@/lib/date-filter";
 import { InlineStatusDropdown, StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 import { WarrantyStatusPillDropdown } from "@/components/tickets/warranty-status-dropdown";
+import { exportTicketsExcel, exportTicketsCSV } from "@/lib/list-export";
 
 /* ─── Column Definition ──────────────────────────────────────────────────
    Column catalog, ids, and defaults now live in the shared single source of
@@ -563,6 +565,21 @@ export default function TicketsPage() {
     [list, currentPage, pageSize]
   );
 
+  // Export the CURRENTLY FILTERED list (respects store/status/date/search) to
+  // Excel (primary) or CSV. Store name is resolved from the authoritative
+  // Ticket.branchId → Store relationship. Excel is mandatory alongside CSV.
+  const storeNameFor = useCallback((branchId?: string | null) => getStore(branchId)?.name ?? "", [getStore]);
+  const handleExportExcel = useCallback(() => {
+    if (list.length === 0) { toast.info("No tickets to export."); return; }
+    void exportTicketsExcel(list, storeNameFor);
+    toast.success(`Exported ${list.length} ticket${list.length === 1 ? "" : "s"} to Excel.`);
+  }, [list, storeNameFor]);
+  const handleExportCSV = useCallback(() => {
+    if (list.length === 0) { toast.info("No tickets to export."); return; }
+    exportTicketsCSV(list, storeNameFor);
+    toast.success(`Exported ${list.length} ticket${list.length === 1 ? "" : "s"} to CSV.`);
+  }, [list, storeNameFor]);
+
   // Changing the page size resets to page 1 so the user starts at the top of
   // the recalculated result set.
   const handlePageSizeChange = useCallback((size: number) => {
@@ -786,9 +803,25 @@ export default function TicketsPage() {
               <Settings className="h-4 w-4" /> Settings
             </Button>
             <Can permission="export_reports">
-              <Button variant="outline" size="md" className="rounded-full">
-                <Download className="h-4 w-4" /> Export
-              </Button>
+              <Dropdown
+                width="w-52"
+                trigger={({ toggle }) => (
+                  <Button variant="outline" size="md" className="rounded-full" onClick={toggle}>
+                    <Download className="h-4 w-4" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" />
+                  </Button>
+                )}
+              >
+                {(close) => (
+                  <>
+                    <MenuItem icon={FileSpreadsheet} onClick={() => { handleExportExcel(); close(); }}>
+                      Excel (.xlsx)
+                    </MenuItem>
+                    <MenuItem icon={FileText} onClick={() => { handleExportCSV(); close(); }}>
+                      CSV (.csv)
+                    </MenuItem>
+                  </>
+                )}
+              </Dropdown>
             </Can>
             <Can permission="manage_repair_jobs">
               <Link href="/tickets/new?start=category">
@@ -816,8 +849,10 @@ export default function TicketsPage() {
       >
       {/* Date Range — shared 8-option strip as ONE connected segmented control
           (RepairOX standard: all filter strips use the connected SegmentedTabs
-          container, not detached pills). Scrolls horizontally on narrow screens. */}
-      <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          container, not detached pills). Scrolls horizontally on narrow screens.
+          px-0.5 py-1 keeps the rounded border + active-pill shadow from being
+          clipped by the scroll container's edges. */}
+      <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <SegmentedTabs
           value={dateRange}
           onChange={(v) => setDateRange(v as DateRange)}
@@ -1009,7 +1044,7 @@ export default function TicketsPage() {
           Status strip. Uses the SAME pill styling as the Date strip so it reads
           as one consistent filter language. Composes with every existing filter
           (works immediately, no pinning needed). */}
-      <div className="max-w-full overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+      <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
         <SegmentedTabs
           value={recordTypeFilter}
           onChange={(v) => {
