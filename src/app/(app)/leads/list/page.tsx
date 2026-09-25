@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
@@ -175,6 +176,16 @@ export default function LeadsListPage() {
     window.addEventListener(LEAD_OPEN_EVENT, handler);
     return () => window.removeEventListener(LEAD_OPEN_EVENT, handler);
   }, [leads]);
+
+  /* Deep-link: /leads/list?lead=<id> opens that lead's detail (used by the
+     assignment + follow-up-due notifications). Runs once the leads are loaded. */
+  const searchParams = useSearchParams();
+  const deepLinkLeadId = searchParams.get("lead");
+  useEffect(() => {
+    if (!deepLinkLeadId) return;
+    const lead = leads.find((l) => l.id === deepLinkLeadId);
+    if (lead) setDetailLead(lead);
+  }, [deepLinkLeadId, leads]);
 
   const activeFilters = hasActiveLeadFilters(filters);
 

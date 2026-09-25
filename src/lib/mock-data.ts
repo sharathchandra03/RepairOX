@@ -811,6 +811,7 @@ export const navItems: NavItem[] = [
   { href: "/leads/whatsapp",   label: "WhatsApp",     icon: "BookUser", permission: "send_communications" },
   { href: "/leads/smart-lists", label: "Smart Lists", icon: "ClipboardList" },
   { href: "/leads/map-view",   label: "Map View",     icon: "Map" },
+  { href: "/leads/unattributed", label: "Unattributed", icon: "ClipboardCheck", permission: ["leads_assign", "leads_reassign", "manage_sales"] },
   { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
@@ -1901,7 +1902,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
-    { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/campaigns"] },
+    { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },
     { label: "GENERAL",        items: ["/leads/reports", "/leads/settings"] },
   ],
 };

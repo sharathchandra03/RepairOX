@@ -27,8 +27,9 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
 import { toast } from "@/components/ui/toaster";
 import { BRANCHES } from "@/lib/auth";
+import { allow } from "@/lib/capabilities";
 import { resolveCustomer, staffByRole } from "@/lib/field-linking";
-import { normaliseRoute, FIELD_LEAD_TYPES, type FulfilmentRoute, type FieldLeadType } from "@/lib/field-data";
+import { normaliseRoute, routeToFieldLeadType, FIELD_LEAD_TYPES, type FulfilmentRoute, type FieldLeadType } from "@/lib/field-data";
 import { notify } from "@/lib/notifications";
 import type { Lead } from "@/lib/leads-data";
 
@@ -37,16 +38,21 @@ export function RouteLeadDialog({ lead, open, onClose }: {
   open: boolean;
   onClose: () => void;
 }) {
-  const { routeLead, updateLead } = useLeads();
-  const { createJob, activeJobForLead } = useField();
+  const { routeLead, updateLead, recordConversionEvent } = useLeads();
+  const { createJob, activeJobForLead, assignNinja } = useField();
   const { customers, addCustomer } = useStore();
-  const { team } = usePermissions();
+  const { team, can } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
+
+  // A salesperson with ninja-assignment authority can pick the field agent
+  // directly here — the Field Manager is NOT a mandatory intermediary (§6/§9/§12).
+  const canAssignNinja = allow(can, ["assign_ninja", "manage_field_jobs"]);
 
   const existingRoute = normaliseRoute(lead?.fulfilmentRoute);
   const [route, setRoute] = useState<FulfilmentRoute | "">(existingRoute);
   const [store, setStore] = useState<string>(lead?.assignedStore || "");
   const [fieldManagerId, setFieldManagerId] = useState<string>("");
+  const [ninjaId, setNinjaId] = useState<string>("");
   const [leadType, setLeadType] = useState<FieldLeadType>("pickup");
   const [pickupAddress, setPickupAddress] = useState<string>(lead?.location || "");
   const [pickupDate, setPickupDate] = useState<string>("");
@@ -55,6 +61,9 @@ export function RouteLeadDialog({ lead, open, onClose }: {
   const [busy, setBusy] = useState(false);
 
   const managers = useMemo(() => staffByRole(team, ["field_manager", "shop_owner_branch_manager", "master_shop_owner"]), [team]);
+  // Authorized field agents the salesperson may assign directly (Ninja + techs).
+  const fieldAgents = useMemo(() => staffByRole(team, ["ninja", "field_manager", "technician", "senior_technician"]), [team]);
+  const isFieldRoute = route === "PICKUP_DROP" || route === "ON_SITE";
 
   // Guardrails for a route CHANGE on an already-progressed lead (spec §59).
   const existingFieldJob = lead ? activeJobForLead(lead.id) : undefined;
@@ -86,40 +95,51 @@ export function RouteLeadDialog({ lead, open, onClose }: {
         // Notify the assigned store (branch-scoped reception role).
         notify({
           kind: "lead_routed", recipientRole: "reception",
-          title: "Store-to-Store lead assigned",
+          title: "Store / Walk-In lead assigned",
           body: `${lead.leadNo} · ${lead.name || "Customer"} — ${lead.device || "device"} heading to ${store || "your store"}.`,
           href: `/leads/list?lead=${lead.id}`, reference: lead.leadNo,
         });
-        toast.success("Routed to Store-to-Store", { description: `${lead.leadNo} → ${store || "store"} · store will receive as Walk-In.` });
+        toast.success("Routed to Store / Walk-In", { description: `${lead.leadNo} → ${store || "store"} · store will receive as Walk-In.` });
       } else {
-        // Pickup & Drop → create a Field Job (dedupe inside createJob).
+        // Pickup & Drop OR On-Site → create a Field Job (dedupe inside createJob).
+        const routeLabel = route === "ON_SITE" ? "On-Site" : "Pickup & Drop";
+        // On-Site jobs always run the on-site trip type; Pickup & Drop uses the
+        // chosen trip type (pickup / warranty variants).
+        const jobLeadType: FieldLeadType = route === "ON_SITE" ? "onsite" : leadType;
         if (existingFieldJob) {
           toast.info("Field Job exists", { description: `${existingFieldJob.jobNo} already handles this lead.` });
         } else {
           const manager = managers.find((m) => m.id === fieldManagerId);
+          const agent = canAssignNinja ? fieldAgents.find((a) => a.id === ninjaId) : undefined;
           const job = await createJob({
             leadId: lead.id, leadNo: lead.leadNo, customerId,
             customer: lead.name, phone: lead.number, email: lead.email,
             device: lead.device, issue: lead.issue,
             // Field-specific operational classification. Source is MAPPED from
             // the lead (never re-entered); leadType is the trip nature.
-            leadType,
+            leadType: jobLeadType,
             source: lead.source || "",
-            branch: manager?.branch || store || "",
+            branch: manager?.branch || agent?.branch || store || "",
             salesPersonId: currentUserId || "", salesPersonName: currentUserName || "",
             fieldManagerId: manager?.id || "", fieldManagerName: manager?.name || "",
             pickupAddress, pickupDate, pickupTime,
             status: "pending_assignment",
           });
           if (job) {
-            await routeLead(lead.id, "PICKUP_DROP");
+            await routeLead(lead.id, route);
             await updateLead(lead.id, { customerId, linkedFieldJobId: job.id });
-            // If a manager was pre-selected, notify them directly too.
-            if (manager) {
+            // Sales keeps visibility: record the field job on the lead's trail.
+            await recordConversionEvent(lead.id, "field_job_created", { targetType: "field_job", targetId: job.id, targetLabel: job.jobNo });
+            if (customerId) await recordConversionEvent(lead.id, "customer_linked", { targetType: "customer", targetId: customerId });
+            // Direct Ninja assignment when the salesperson is authorized — no
+            // mandatory Field Manager step (§6/§9). Otherwise notify managers.
+            if (agent) {
+              await assignNinja(job.id, agent.id, agent.name, pickupDate || undefined, pickupTime || undefined);
+            } else if (manager) {
               notify({
                 kind: "field_new_job", recipientId: manager.id,
-                title: "New Pickup & Drop assignment",
-                body: `${job.jobNo} · ${lead.name || "Customer"} — assign a Ninja to pick up.`,
+                title: `New ${routeLabel} assignment`,
+                body: `${job.jobNo} · ${lead.name || "Customer"} — assign a field agent.`,
                 href: `/field?job=${job.id}`, reference: job.jobNo,
               });
             }
@@ -132,7 +152,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
     }
   }
 
-  const canConfirm = route === "STORE_VISIT" ? !!store : route === "PICKUP_DROP";
+  const canConfirm = route === "STORE_VISIT" ? !!store : route === "PICKUP_DROP" || route === "ON_SITE";
 
   return (
     <Drawer
@@ -162,7 +182,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
           <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              This lead is already routed to <strong>{existingRoute === "STORE_VISIT" ? "Store-to-Store" : "Pickup & Drop"}</strong>.
+              This lead is already routed to <strong>{existingRoute === "STORE_VISIT" ? "Store / Walk-In" : existingRoute === "ON_SITE" ? "On-Site" : "Pickup & Drop"}</strong>.
               {existingFieldJob && " An active Field Job exists and will not be duplicated."}
               {existingWalkInId && " A Walk-In already exists for it."}
             </span>
@@ -176,7 +196,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
             <RouteCard
               active={route === "STORE_VISIT"}
               onClick={() => { setRoute("STORE_VISIT"); setConfirming(false); }}
-              icon={Store} title="Store-to-Store"
+              icon={Store} title="Store / Walk-In"
               desc="Customer visits a store. Handled as a Walk-In, then Ticket."
             />
             <RouteCard
@@ -184,6 +204,12 @@ export function RouteLeadDialog({ lead, open, onClose }: {
               onClick={() => { setRoute("PICKUP_DROP"); setConfirming(false); }}
               icon={Truck} title="Pickup & Drop"
               desc="Device is collected from the customer by a field Ninja."
+            />
+            <RouteCard
+              active={route === "ON_SITE"}
+              onClick={() => { setRoute("ON_SITE"); setConfirming(false); }}
+              icon={MapPin} title="On-Site"
+              desc="A field agent/technician services the customer at their location."
             />
           </div>
         </div>
@@ -206,22 +232,48 @@ export function RouteLeadDialog({ lead, open, onClose }: {
           </div>
         )}
 
-        {/* Pickup & Drop: trip type + optional field manager + pickup logistics */}
-        {route === "PICKUP_DROP" && (
+        {/* Pickup & Drop / On-Site: trip type + field agent + logistics */}
+        {isFieldRoute && (
           <div className="space-y-3">
-            <div>
-              <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Trip Type</label>
-              <select
-                value={leadType}
-                onChange={(e) => setLeadType(e.target.value as FieldLeadType)}
-                className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm focus:border-[#4361EE] focus:outline-none"
-              >
-                {FIELD_LEAD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-              </select>
-              <p className="mt-1.5 text-[11px] text-zinc-500">
-                Source is taken from the lead ({lead.source || "unspecified"}) — no need to re-enter it.
+            {route === "PICKUP_DROP" && (
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Trip Type</label>
+                <select
+                  value={leadType}
+                  onChange={(e) => setLeadType(e.target.value as FieldLeadType)}
+                  className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm focus:border-[#4361EE] focus:outline-none"
+                >
+                  {FIELD_LEAD_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                </select>
+                <p className="mt-1.5 text-[11px] text-zinc-500">
+                  Source is taken from the lead ({lead.source || "unspecified"}) — no need to re-enter it.
+                </p>
+              </div>
+            )}
+            {route === "ON_SITE" && (
+              <p className="rounded-xl bg-violet-50 px-3 py-2 text-[11px] text-violet-800 ring-1 ring-inset ring-violet-200">
+                On-Site: a field agent/technician will service the customer at their location. Source is taken from the lead ({lead.source || "unspecified"}).
               </p>
-            </div>
+            )}
+
+            {/* Direct field-agent (Ninja) assignment — only when authorized.
+                The Field Manager is not a mandatory intermediary. */}
+            {canAssignNinja && (
+              <div>
+                <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">
+                  Assign Field Agent {route === "ON_SITE" ? "" : "/ Ninja"} (optional)
+                </label>
+                <select
+                  value={ninjaId}
+                  onChange={(e) => setNinjaId(e.target.value)}
+                  className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm focus:border-[#4361EE] focus:outline-none"
+                >
+                  <option value="">Not yet — Field Manager will assign</option>
+                  {fieldAgents.map((a) => <option key={a.id} value={a.id}>{a.name} · {a.branch}</option>)}
+                </select>
+                <p className="mt-1.5 text-[11px] text-zinc-500">Pick a field agent directly, or leave it for a Field Manager to assign.</p>
+              </div>
+            )}
             <div>
               <label className="mb-1.5 block text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Field Manager (optional)</label>
               <select
@@ -264,12 +316,14 @@ export function RouteLeadDialog({ lead, open, onClose }: {
         {confirming && route && (
           <div className="rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD] p-3.5 text-sm">
             <p className="font-semibold text-[#4361EE]">
-              Route {lead.leadNo} to {route === "STORE_VISIT" ? "Store-to-Store" : "Pickup & Drop"}?
+              Route {lead.leadNo} to {route === "STORE_VISIT" ? "Store / Walk-In" : route === "ON_SITE" ? "On-Site" : "Pickup & Drop"}?
             </p>
             <p className="mt-1 text-[12px] text-zinc-600">
               {route === "STORE_VISIT"
                 ? `${store} will be notified and can receive ${lead.name || "the customer"} as a Walk-In.`
-                : `A Field Job will be created and ${fieldManagerId ? "the selected Field Manager" : "all Field Managers"} will be notified to assign a Ninja.`}
+                : canAssignNinja && ninjaId
+                  ? `A Field Job will be created and assigned directly to ${fieldAgents.find((a) => a.id === ninjaId)?.name || "the selected agent"}.`
+                  : `A Field Job will be created and ${fieldManagerId ? "the selected Field Manager" : "all Field Managers"} will be notified to assign a field agent.`}
             </p>
           </div>
         )}

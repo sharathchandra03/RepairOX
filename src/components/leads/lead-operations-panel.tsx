@@ -38,7 +38,7 @@ import type { WalkIn } from "@/lib/mock-data";
 export function LeadOperationsPanel({ lead }: { lead: Lead }) {
   const router = useRouter();
   const { can } = usePermissions();
-  const { updateLead } = useLeads();
+  const { updateLead, recordConversionEvent } = useLeads();
   const { getJob } = useField();
   const { customers, addCustomer, walkIns, addWalkIn, tickets, invoices } = useStore();
   const [routeOpen, setRouteOpen] = useState(false);
@@ -136,6 +136,9 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
       };
       await addWalkIn(record);
       await updateLead(lead.id, { linkedWalkInId: record.id, customerId, status: "Converted" });
+      // Conversion trail (+ customer link) — Sales keeps visibility after handoff.
+      await recordConversionEvent(lead.id, "walk_in_created", { targetType: "walk_in", targetId: record.id, targetLabel: record.walkInNumber });
+      if (customerId) await recordConversionEvent(lead.id, "customer_linked", { targetType: "customer", targetId: customerId });
 
       logActivity({
         module: "Lead", action: "Converted to Walk-In", severity: "success", entity: "Lead",
@@ -225,11 +228,11 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
         </div>
       )}
 
-      {/* Pickup & Drop */}
-      {route === "PICKUP_DROP" && (
+      {/* Pickup & Drop / On-Site — both run a Field Job */}
+      {(route === "PICKUP_DROP" || route === "ON_SITE") && (
         <div className="space-y-3">
           <div className="flex items-center gap-2 rounded-xl bg-violet-50 px-3 py-2 text-[12px] font-medium text-violet-800 ring-1 ring-inset ring-violet-200">
-            <Truck className="h-3.5 w-3.5" /> Pickup &amp; Drop
+            <Truck className="h-3.5 w-3.5" /> {route === "ON_SITE" ? "On-Site" : "Pickup & Drop"}
           </div>
           {linkedJob ? (
             <>

@@ -32,6 +32,7 @@ import { findOrCreateCustomer } from "@/lib/customer-service";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { useLeads } from "@/lib/leads-context";
+import { OpenLeadBanner } from "@/components/leads/open-lead-banner";
 import type { Contact } from "@/lib/leads-data";
 import { createProspectContact, findContactMatches, type ContactSeed, normalizeContactMobile, normalizeContactEmail } from "@/lib/contact-service";
 import { IssueSelector } from "@/components/common/issue-selector";
@@ -482,6 +483,25 @@ export function WalkInFormDrawer({
               />
             </div>
           </div>
+
+          {/* Attribution safety net: if this customer matches an OPEN lead,
+              offer to link it so the salesperson keeps credit for the visit. */}
+          <OpenLeadBanner
+            phone={form.phone}
+            email={form.email}
+            customerId={form.customerId}
+            linkedLeadId={form.linkedLeadId}
+            onLink={(lead) => set({
+              linkedLeadId: lead.id,
+              // Adopt the lead's customer identity + sales person so the walk-in
+              // is attributed to the originating agent (§11 sales owner remains).
+              customerId: form.customerId || lead.customerId || undefined,
+              customer: form.customer || lead.name || "",
+              source: form.source || lead.source || "",
+              salesPersonId: form.salesPersonId || lead.assignedTo || undefined,
+              salesPersonName: form.salesPersonName || lead.assignedToName || undefined,
+            })}
+          />
 
           {/* Sales person — only when Type = Sales */}
           {form.type === "sales" && (

@@ -22,6 +22,9 @@ import { demoKey } from "@/lib/demo-mode";
 
 export type NotificationKind =
   | "lead_routed"
+  | "lead_assigned"
+  | "lead_followup_due"
+  | "lead_followup_overdue"
   | "store_handoff"
   | "field_new_job"
   | "field_assignment"
@@ -52,6 +55,10 @@ export interface AppNotification {
   href?: string;
   /** Related entity reference for display (e.g. FJ-001). */
   reference?: string;
+  /** Optional link back to a specific follow-up record (lead_followup_history).
+   *  Lets a follow-up-due notification deep-link to that exact follow-up while
+   *  reusing this single notifications feed — no separate system. */
+  followUpId?: string;
   /** Stable idempotency key. When set, a second notify() with the same key
    *  will NOT create a duplicate record — it returns the existing one. Used to
    *  guarantee "one follow-up due event → one notification". */
@@ -107,6 +114,7 @@ export function notify(input: NotificationInput): AppNotification {
     recipientRole: input.recipientRole,
     href: input.href,
     reference: input.reference,
+    followUpId: input.followUpId,
     dedupeKey: input.dedupeKey,
     read: false,
   };

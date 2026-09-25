@@ -379,7 +379,7 @@ function NewTicketWizard() {
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
   const { tickets, invoices, addTicket, updateTicket, updateInvoice, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
   const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
-  const { updateLead } = useLeads();
+  const { updateLead, recordConversionEvent } = useLeads();
   const { settings } = useStoreSettings();
 
   // Start on Device Details (step 3) for edit, walk-in, field-job and
@@ -954,7 +954,8 @@ function NewTicketWizard() {
         // Carry the ticket link back to the originating Lead (Store-to-Store).
         const srcWalkIn = walkIns.find((w) => w.id === fromWalkInId);
         if (srcWalkIn?.linkedLeadId) {
-          await updateLead(srcWalkIn.linkedLeadId, { linkedTicketId: linkId, finalResult: "Converted to Ticket" });
+          await updateLead(srcWalkIn.linkedLeadId, { linkedTicketId: linkId, finalResult: "Converted to Ticket", conversionSource: "ticket" });
+          await recordConversionEvent(srcWalkIn.linkedLeadId, "ticket_created", { targetType: "ticket", targetId: linkId, targetLabel: (newId as string) || linkId });
         }
       }
       // Field Job conversion (Pickup & Drop): link the ticket to the field job
@@ -969,7 +970,8 @@ function NewTicketWizard() {
         const firstDeviceId = ticketData.devices?.[0]?.id;
         await linkFieldTicket(fromFieldJobId, linkId, { setInRepair: true, ticketDeviceId: firstDeviceId });
         if (job?.leadId) {
-          await updateLead(job.leadId, { linkedTicketId: linkId });
+          await updateLead(job.leadId, { linkedTicketId: linkId, conversionSource: "ticket" });
+          await recordConversionEvent(job.leadId, "ticket_created", { targetType: "ticket", targetId: linkId, targetLabel: (newId as string) || linkId });
         }
       }
       // ── Ticket Type = Walk-In → auto-create/link ONE Walk-In record ──

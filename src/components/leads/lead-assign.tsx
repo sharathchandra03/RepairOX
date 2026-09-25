@@ -16,6 +16,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Dropdown } from "@/components/ui/dropdown";
 import { usePermissions } from "@/lib/permissions-context";
 import { useLeads } from "@/lib/leads-context";
+import { useStoreContext } from "@/lib/store-context";
 import { canAssignLeads, type Lead } from "@/lib/leads-data";
 import { cn } from "@/lib/utils";
 
@@ -46,12 +47,27 @@ export function AssignBadge({ lead, size = 22 }: { lead: Lead; size?: number }) 
 export function AssignMenu({ lead, compact }: { lead: Lead; compact?: boolean }) {
   const { team } = usePermissions();
   const { assignLead } = useLeads();
+  const { stores } = useStoreContext();
   const [query, setQuery] = useState("");
 
-  const staff = useMemo(
-    () => team.filter((m) => m.status === "active" && m.name).map((m) => ({ id: m.id, name: m.name })),
-    [team],
-  );
+  // Store-scoped assignees: a lead belongs to a store (lead.branchId). Only show
+  // people authorized for THAT store — a salesperson must never be assignable to
+  // a store they can't work (§10/§11). We scope to staff whose home store is the
+  // lead's store OR who are org-wide (no branch). When the lead has no branch, or
+  // the store isn't among the caller's authorized stores, fall back to the full
+  // active directory (the server + RLS remain the real enforcement).
+  const staff = useMemo(() => {
+    const leadBranch = lead.branchId || "";
+    const knownStore = leadBranch && stores.some((s) => s.id === leadBranch);
+    return team
+      .filter((m) => m.status === "active" && m.name)
+      .filter((m) => {
+        if (!knownStore) return true;                 // unscoped lead → all active
+        const mb = m.branchId || "";
+        return !mb || mb === leadBranch;              // org-wide staff or same store
+      })
+      .map((m) => ({ id: m.id, name: m.name }));
+  }, [team, stores, lead.branchId]);
   const filtered = query.trim()
     ? staff.filter((s) => s.name.toLowerCase().includes(query.trim().toLowerCase()))
     : staff;

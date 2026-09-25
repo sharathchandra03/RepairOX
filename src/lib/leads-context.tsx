@@ -26,9 +26,15 @@ import { useSession } from "@/lib/use-session";
 import { demoKey } from "@/lib/demo-mode";
 import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
+import { notify } from "@/lib/notifications";
 import { createProspectContact, findContactMatches } from "@/lib/contact-service";
 import {
   LEAD_DROPDOWN_FIELDS, monthFromDate, applyLeadFilters, pinnedFirst,
+  isQualifiedStatus, isWonStatus, isLostStatus,
+  computeLeadMetrics, openFollowUp, leadsOwnedBy,
+  type LeadFollowUp, type LeadFollowUpDraft, type LeadAssignmentEvent, type LeadMetrics,
+  operationalRecordAttributedElsewhere,
+  type LeadConversionEvent, type LeadConversionEventType, type LeadConversionTargetType,
   EMPTY_LEAD_FILTERS,
   type Lead, type LeadDraft, type LeadOption, type LeadFieldKey, type LeadFilters, type Contact,
 } from "@/lib/leads-data";
@@ -38,12 +44,16 @@ const LEADS_KEY = "repairox-leads";
 const OPTIONS_KEY = "repairox-lead-options";
 const SEQ_KEY = "repairox-lead-seq";
 const CONTACTS_KEY = "repairox-contacts";
+const FOLLOWUPS_KEY = "repairox-lead-followups";
+const ASSIGN_HISTORY_KEY = "repairox-lead-assignment-history";
+const CONVERSION_HISTORY_KEY = "repairox-lead-conversion-history";
 
 /* ─── Row mappers (snake_case DB ↔ camelCase app) ─────────────────────── */
 
 function rowToLead(r: any): Lead {
   return {
     id: r.id,
+    branchId: r.branch_id ?? "",
     leadNo: r.lead_no ?? "",
     date: r.lead_date ?? "",
     time: r.lead_time ?? "",
@@ -84,6 +94,7 @@ function rowToLead(r: any): Lead {
     linkedWalkInId: r.linked_walk_in_id ?? "",
     linkedFieldJobId: r.linked_field_job_id ?? "",
     linkedTicketId: r.linked_ticket_id ?? "",
+    linkedInvoiceId: r.linked_invoice_id ?? "",
     contactId: r.contact_id ?? "",
     customerId: r.customer_id ?? "",
     convertedAt: r.converted_at ?? undefined,
@@ -102,7 +113,9 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("lead_no", l.leadNo);
   set("lead_date", l.date);
   set("lead_time", l.time);
-  set("lead_month", l.month);
+  // NOTE: `lead_month` is a STORED GENERATED column (derived from lead_date via
+  // migration 0045) — the DB rejects any write to it. Never map it to a row.
+  // It is read back in rowToLead(); the derivation lives in the database.
   set("region", l.region);
   set("source", l.source);
   set("agent", l.agent);
@@ -142,6 +155,7 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("linked_walk_in_id", l.linkedWalkInId);
   set("linked_field_job_id", l.linkedFieldJobId);
   set("linked_ticket_id", l.linkedTicketId);
+  set("linked_invoice_id", l.linkedInvoiceId);
   set("contact_id", l.contactId);
   set("customer_id", l.customerId);
   if (l.convertedAt !== undefined) row.converted_at = l.convertedAt || null;
@@ -215,6 +229,56 @@ function contactToRow(c: Partial<Contact>): Record<string, unknown> {
   return row;
 }
 
+/* ─── Follow-up + assignment-history row mappers ──────────────────────── */
+
+function rowToFollowUp(r: any): LeadFollowUp {
+  return {
+    id: r.id,
+    leadId: r.lead_id,
+    seq: Number(r.seq ?? 0),
+    dueAt: r.scheduled_at ?? "",
+    followUpUserId: r.followup_user_id ?? "",
+    followUpUserName: r.followup_user_name ?? "",
+    createdBy: r.created_by ?? "",
+    createdByName: r.created_by_name ?? "",
+    status: (r.status ?? "scheduled") as LeadFollowUp["status"],
+    completedAt: r.completed_at ?? undefined,
+    outcome: r.outcome ?? r.result ?? undefined,
+    comments: r.comments ?? undefined,
+    createdAt: r.created_at ?? new Date().toISOString(),
+  };
+}
+
+function rowToAssignmentEvent(r: any): LeadAssignmentEvent {
+  return {
+    id: r.id,
+    leadId: r.lead_id,
+    fromUserId: r.from_user_id ?? undefined,
+    fromUserName: r.from_user_name ?? undefined,
+    toUserId: r.to_user_id ?? undefined,
+    toUserName: r.to_user_name ?? undefined,
+    assignedBy: r.assigned_by ?? undefined,
+    assignedByName: r.assigned_by_name ?? undefined,
+    reason: r.reason ?? undefined,
+    createdAt: r.created_at ?? new Date().toISOString(),
+  };
+}
+
+function rowToConversionEvent(r: any): LeadConversionEvent {
+  return {
+    id: r.id,
+    leadId: r.lead_id,
+    eventType: r.event_type as LeadConversionEventType,
+    targetType: (r.target_type ?? undefined) as LeadConversionTargetType | undefined,
+    targetId: r.target_id ?? undefined,
+    targetLabel: r.target_label ?? r.note ?? undefined,
+    value: r.value == null ? null : Number(r.value),
+    note: r.note ?? undefined,
+    actorName: r.actor_name ?? undefined,
+    occurredAt: r.occurred_at ?? r.created_at ?? new Date().toISOString(),
+  };
+}
+
 /** public.contacts is created by the (optional, not-yet-required)
  *  0031_customer_master_integration.sql migration. On a DB that hasn't run
  *  it yet, every contacts query fails with "relation does not exist" —
@@ -247,12 +311,50 @@ interface LeadsContextValue {
   addLead: (draft: LeadDraft) => Promise<Lead | null>;
   updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
   deleteLead: (id: string) => Promise<void>;
-  /** Assign or reassign a lead to a staff member (pass "" to unassign). */
-  assignLead: (id: string, staffId: string, staffName: string) => Promise<void>;
+  /** Assign or reassign a lead to a staff member (pass "" to unassign).
+   *  Writes an assignment-history row + a durable notification to the assignee. */
+  assignLead: (id: string, staffId: string, staffName: string, reason?: string) => Promise<void>;
   /** Pin/unpin a lead so it floats to the top of the list (DB-backed). */
   pinLead: (id: string, pinned: boolean) => Promise<void>;
-  /** Record the Sales fulfilment routing decision (store-visit vs pickup-drop). */
-  routeLead: (id: string, route: "STORE_VISIT" | "PICKUP_DROP", opts?: { assignedStore?: string; fieldManagerId?: string }) => Promise<void>;
+  /** Record the Sales service-route decision (Store / Pickup & Drop / On-Site). */
+  routeLead: (id: string, route: "STORE_VISIT" | "PICKUP_DROP" | "ON_SITE", opts?: { assignedStore?: string; assignedStoreId?: string; fieldManagerId?: string }) => Promise<void>;
+  /** Change a lead's lifecycle status; writes status-history + terminal
+   *  timestamps (qualified/converted/lost). Never auto-wins from a follow-up. */
+  changeLeadStatus: (id: string, status: string, opts?: { note?: string; finalResult?: string; lostReason?: string }) => Promise<void>;
+
+  /* ── Structured follow-ups (public.lead_followup_history) ── */
+  /** All follow-ups across all loaded leads (newest first). */
+  followUps: LeadFollowUp[];
+  /** Follow-ups for one lead, ordered by sequence (Follow-up #1, #2, …). */
+  followUpsFor: (leadId: string) => LeadFollowUp[];
+  /** Schedule a NEW follow-up (keeps all previous follow-up records). */
+  scheduleFollowUp: (leadId: string, draft: LeadFollowUpDraft) => Promise<LeadFollowUp | null>;
+  /** Complete a follow-up with a structured outcome. Optionally schedule the
+   *  next follow-up in the same action (retains history). Does NOT win the lead. */
+  completeFollowUp: (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft }) => Promise<void>;
+  /** Cancel a scheduled follow-up (kept in history as cancelled). */
+  cancelFollowUp: (followUpId: string, reason?: string) => Promise<void>;
+
+  /* ── Assignment history (public.lead_assignment_history) ── */
+  assignmentHistory: LeadAssignmentEvent[];
+  assignmentHistoryFor: (leadId: string) => LeadAssignmentEvent[];
+
+  /* ── Conversion / handoff history (public.lead_conversion_history) ── */
+  conversionHistory: LeadConversionEvent[];
+  conversionHistoryFor: (leadId: string) => LeadConversionEvent[];
+  /** Append a conversion/handoff event (routed / *_created / won / lost). The
+   *  operational modules call this so the Lead's trail is always complete. */
+  recordConversionEvent: (leadId: string, eventType: LeadConversionEventType, opts?: { targetType?: LeadConversionTargetType; targetId?: string; targetLabel?: string; value?: number | null; note?: string }) => Promise<void>;
+  /** Link an existing operational record (walk-in / field job / ticket / invoice)
+   *  to a lead — used by open-lead detection + the unattributed safety net.
+   *  Writes the lead's linked_* id + a conversion event; guards duplicate attribution. */
+  linkOperationalRecord: (leadId: string, kind: "walk_in" | "field_job" | "ticket" | "invoice", recordId: string, recordLabel?: string) => Promise<void>;
+
+  /** Derived salesperson metrics for a scope: "me" (own), "all" (loaded set),
+   *  or an explicit ownerId. Computed from lead + follow-up records — never a
+   *  stored counter. Pass `revenue` (store tickets+invoices) to derive Revenue
+   *  Won from FINALIZED invoices; omit it for pipeline-only metrics. */
+  leadMetrics: (scope?: "me" | "all" | { ownerId: string }, revenue?: { tickets: any[]; invoices: any[] }) => LeadMetrics;
 
   addOption: (field: LeadFieldKey, value: string) => Promise<void>;
   updateOption: (id: string, value: string) => Promise<void>;
@@ -302,7 +404,7 @@ function writeLS(key: string, value: unknown) {
 /** Optional lead columns that may be absent before the migration is applied. */
 const LEAD_OPTIONAL_COLUMNS = [
   "fulfilment_route", "assigned_store", "routed_at",
-  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "contact_id", "customer_id",
+  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id",
   "converted_at", "converted_by", "conversion_source",
 ];
 
@@ -431,6 +533,9 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [options, setOptions] = useState<LeadOption[]>([]);
   const [contacts, setContacts] = useState<Contact[]>([]);
+  const [followUps, setFollowUps] = useState<LeadFollowUp[]>([]);
+  const [assignmentHistory, setAssignmentHistory] = useState<LeadAssignmentEvent[]>([]);
+  const [conversionHistory, setConversionHistory] = useState<LeadConversionEvent[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [filters, setFiltersState] = useState<LeadFilters>(EMPTY_LEAD_FILTERS);
 
@@ -442,6 +547,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   leadsRef.current = leads;
   const contactsRef = useRef<Contact[]>([]);
   contactsRef.current = contacts;
+  const followUpsRef = useRef<LeadFollowUp[]>([]);
+  followUpsRef.current = followUps;
+  const conversionHistoryRef = useRef<LeadConversionEvent[]>([]);
+  conversionHistoryRef.current = conversionHistory;
   const currentUserIdRef = useRef<string | undefined>(currentUserId);
   currentUserIdRef.current = currentUserId;
   const currentUserNameRef = useRef<string>(currentUserName);
@@ -468,10 +577,20 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     let active = true;
 
     async function loadFromDb() {
-      const [{ data: leadRows, error: leadErr }, { data: optRows, error: optErr }, { data: contactRows, error: contactErr }] = await Promise.all([
+      const [
+        { data: leadRows, error: leadErr },
+        { data: optRows, error: optErr },
+        { data: contactRows, error: contactErr },
+        { data: fuRows, error: fuErr },
+        { data: ahRows, error: ahErr },
+        { data: chRows, error: chErr },
+      ] = await Promise.all([
         db.from("leads").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         db.from("lead_options").select("*").order("field", { ascending: true }).order("sort_order", { ascending: true }),
         db.from("contacts").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
+        db.from("lead_followup_history").select("*").order("created_at", { ascending: false }),
+        db.from("lead_assignment_history").select("*").order("created_at", { ascending: false }),
+        db.from("lead_conversion_history").select("*").order("occurred_at", { ascending: false }),
       ]);
       if (!active) return;
       if (!leadErr && leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
@@ -482,6 +601,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       // un-migrated database.
       if (!contactErr && contactRows) setContacts(contactRows.map(rowToContact));
       else if (contactErr && !isMissingTableError(contactErr)) console.error("[leads] loading contacts failed:", contactErr.message);
+
+      // Follow-up + assignment history come from migration 0045/0046. Degrade
+      // gracefully (empty) when the tables aren't there yet — never block leads.
+      if (!fuErr && fuRows) setFollowUps(fuRows.map(rowToFollowUp));
+      else if (fuErr && !isMissingTableError(fuErr)) console.error("[leads] loading follow-ups failed:", fuErr.message);
+      if (!ahErr && ahRows) setAssignmentHistory(ahRows.map(rowToAssignmentEvent));
+      else if (ahErr && !isMissingTableError(ahErr)) console.error("[leads] loading assignment history failed:", ahErr.message);
+      if (!chErr && chRows) setConversionHistory(chRows.map(rowToConversionEvent));
+      else if (chErr && !isMissingTableError(chErr)) console.error("[leads] loading conversion history failed:", chErr.message);
 
       if (!optErr && optRows) {
         if (optRows.length === 0) {
@@ -518,6 +646,9 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       setLeads(localLeads);
       setOptions(localOpts);
       setContacts(readLS<Contact[]>(CONTACTS_KEY, []));
+      setFollowUps(readLS<LeadFollowUp[]>(FOLLOWUPS_KEY, []));
+      setAssignmentHistory(readLS<LeadAssignmentEvent[]>(ASSIGN_HISTORY_KEY, []));
+      setConversionHistory(readLS<LeadConversionEvent[]>(CONVERSION_HISTORY_KEY, []));
       setHydrated(true);
     }
 
@@ -530,17 +661,23 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     let active = true;
     const channel = db.channel("leads-realtime");
     const reload = async () => {
-      const [{ data: leadRows }, { data: optRows }, { data: contactRows }] = await Promise.all([
+      const [{ data: leadRows }, { data: optRows }, { data: contactRows }, { data: fuRows, error: fuErr }, { data: ahRows, error: ahErr }, { data: chRows, error: chErr }] = await Promise.all([
         db.from("leads").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
         db.from("lead_options").select("*").order("field", { ascending: true }).order("sort_order", { ascending: true }),
         db.from("contacts").select("*").is("deleted_at", null).order("created_at", { ascending: false }),
+        db.from("lead_followup_history").select("*").order("created_at", { ascending: false }),
+        db.from("lead_assignment_history").select("*").order("created_at", { ascending: false }),
+        db.from("lead_conversion_history").select("*").order("occurred_at", { ascending: false }),
       ]);
       if (!active) return;
       if (leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
       if (optRows) setOptions(optRows.map(rowToOption));
       if (contactRows) setContacts(contactRows.map(rowToContact));
+      if (!fuErr && fuRows) setFollowUps(fuRows.map(rowToFollowUp));
+      if (!ahErr && ahRows) setAssignmentHistory(ahRows.map(rowToAssignmentEvent));
+      if (!chErr && chRows) setConversionHistory(chRows.map(rowToConversionEvent));
     };
-    for (const table of ["leads", "lead_options", "contacts"]) {
+    for (const table of ["leads", "lead_options", "contacts", "lead_followup_history", "lead_assignment_history", "lead_conversion_history"]) {
       channel.on("postgres_changes", { event: "*", schema: "public", table }, reload);
     }
     channel.subscribe();
@@ -668,6 +805,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     // Local mode
     const lead: Lead = {
       id: uid(),
+      branchId: draft.branchId ?? "",
       leadNo: nextLeadNoLocal(),
       date, time, month,
       region: draft.region ?? "", source: draft.source ?? "", agent: draft.agent ?? "",
@@ -681,7 +819,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       assignedTo: "", assignedToName: "", assignedBy: "", assignedByName: "", assignedAt: "",
       pinnedAt: "",
       fulfilmentRoute: draft.fulfilmentRoute ?? "", assignedStore: draft.assignedStore ?? "", routedAt: "",
-      linkedWalkInId: "", linkedFieldJobId: "", linkedTicketId: "", contactId, customerId: resolvedDraft.customerId ?? "",
+      linkedWalkInId: "", linkedFieldJobId: "", linkedTicketId: "", linkedInvoiceId: "", contactId, customerId: resolvedDraft.customerId ?? "",
       convertedAt: draft.convertedAt, convertedBy: draft.convertedBy, conversionSource: draft.conversionSource,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
@@ -800,7 +938,36 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [useDb, db]);
 
   /* ── Assignment ── */
-  const assignLead = useCallback(async (id: string, staffId: string, staffName: string) => {
+  /** Append an assignment-history row (DB append-only table, or local mirror).
+   *  Ownership is NEVER overwritten without leaving this trail. */
+  const recordAssignmentEvent = useCallback(async (ev: Omit<LeadAssignmentEvent, "id" | "createdAt"> & { branchId?: string | null }) => {
+    const lead = leadsRef.current.find((l) => l.id === ev.leadId);
+    const local: LeadAssignmentEvent = { ...ev, id: uid(), createdAt: new Date().toISOString() };
+    setAssignmentHistory((prev) => {
+      const next = [local, ...prev];
+      if (!useDb) writeLS(ASSIGN_HISTORY_KEY, next);
+      return next;
+    });
+    if (useDb) {
+      const row: Record<string, unknown> = {
+        lead_id: ev.leadId,
+        branch_id: (lead as any)?.branchId ?? ev.branchId ?? null,
+        from_user_id: ev.fromUserId || null,
+        from_user_name: ev.fromUserName || null,
+        to_user_id: ev.toUserId || null,
+        to_user_name: ev.toUserName || null,
+        assigned_by: ev.assignedBy || null,
+        assigned_by_name: ev.assignedByName || null,
+        reason: ev.reason || null,
+      };
+      const { error } = await db.from("lead_assignment_history").insert(row);
+      if (error && !isMissingTableError(error) && !isUndefinedColumnError(error)) {
+        console.error("[leads] assignment history insert failed:", error.message);
+      }
+    }
+  }, [useDb, db]);
+
+  const assignLead = useCallback(async (id: string, staffId: string, staffName: string, reason?: string) => {
     const lead = leadsRef.current.find((l) => l.id === id);
     if (!lead) return;
     const previousAssignee = lead.assignedTo;
@@ -809,6 +976,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
 
     const updates: Partial<Lead> = {
       assignedTo: staffId,
+      // assigned_user_id (canonical ownership) is kept in lockstep by the DB
+      // trigger (0045); mirror it locally too so local mode agrees.
       assignedToName: staffName,
       assignedBy: currentUserIdRef.current || "",
       assignedByName: currentUserNameRef.current || "",
@@ -816,7 +985,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     };
 
     if (useDb) {
-      const { error } = await db.from("leads").update(leadToRow(updates)).eq("id", id);
+      const row = { ...leadToRow(updates), assigned_user_id: staffId || null };
+      const { error } = await db.from("leads").update(row).eq("id", id);
       if (error) {
         console.error("[leads] assignLead failed:", error.message);
         toast.error("Assignment failed", { description: "We couldn't save the assignment. Please try again." });
@@ -827,6 +997,18 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       const next = prev.map((l) => (l.id === id ? { ...l, ...updates, updatedAt: nowIso } : l));
       if (!useDb) writeLS(LEADS_KEY, next);
       return next;
+    });
+
+    // Ownership history — never overwrite an owner without a trail.
+    await recordAssignmentEvent({
+      leadId: id,
+      fromUserId: previousAssignee || undefined,
+      fromUserName: lead.assignedToName || undefined,
+      toUserId: staffId || undefined,
+      toUserName: staffName || undefined,
+      assignedBy: currentUserIdRef.current || undefined,
+      assignedByName: currentUserNameRef.current || undefined,
+      reason,
     });
 
     // Audit trail (reuses the existing activity/audit system).
@@ -842,15 +1024,22 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       changes: [{ field: "Assigned To", from: lead.assignedToName || "Unassigned", to: staffName || "Unassigned" }],
     });
 
-    // Notify — but only the ASSIGNED USER should get the "assigned to you" alert.
-    // If the person doing the assigning is also the assignee, skip (they know).
-    if (staffId && staffId === currentUserIdRef.current) {
-      // Assigner assigned it to themselves — a quiet confirmation is enough.
+    // Notify the ASSIGNED USER (durable bell entry), unless they assigned it to
+    // themselves. Reuses the shared notifications feed — no separate system.
+    if (staffId && staffId !== currentUserIdRef.current) {
+      notify({
+        kind: "lead_assigned",
+        recipientId: staffId,
+        title: isReassign ? "A lead was reassigned to you" : "New lead assigned to you",
+        body: `${lead.leadNo} · ${lead.name || "Unnamed"}${currentUserNameRef.current ? ` — by ${currentUserNameRef.current}` : ""}.`,
+        href: `/leads/list?lead=${id}`,
+        reference: lead.leadNo,
+        dedupeKey: `lead-assigned:${id}:${staffId}:${nowIso}`,
+      });
+    } else if (staffId && staffId === currentUserIdRef.current) {
       toast.success("Lead assigned to you", { description: `${lead.leadNo} · ${lead.name || "Unnamed"}` });
     }
-    // For a different assignee, the notification fires in THEIR session — see
-    // the assignment-watch effect below (realtime + reload picks it up).
-  }, [useDb, db]);
+  }, [useDb, db, recordAssignmentEvent]);
 
   /* ── Pin ── */
   const pinLead = useCallback(async (id: string, pinned: boolean) => {
@@ -867,6 +1056,49 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
   }, [useDb, db]);
 
+  /* ── Conversion / handoff history ──────────────────────────────────────
+     Append-only trail of the Lead → operations journey. Every operational
+     module (route, walk-in, field job, ticket, invoice) records its event here
+     so Sales never loses visibility after handoff. */
+  const conversionHistoryFor = useCallback((leadId: string): LeadConversionEvent[] => {
+    return conversionHistory.filter((e) => e.leadId === leadId).sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
+  }, [conversionHistory]);
+
+  const recordConversionEvent = useCallback(async (
+    leadId: string,
+    eventType: LeadConversionEventType,
+    opts?: { targetType?: LeadConversionTargetType; targetId?: string; targetLabel?: string; value?: number | null; note?: string },
+  ) => {
+    const lead = leadsRef.current.find((l) => l.id === leadId);
+    // Idempotency: don't record the same (event, target) twice for a lead.
+    const dup = conversionHistoryRef.current.some(
+      (e) => e.leadId === leadId && e.eventType === eventType && (opts?.targetId ? e.targetId === opts.targetId : true),
+    );
+    if (dup) return;
+    const nowIso = new Date().toISOString();
+    const ev: LeadConversionEvent = {
+      id: uid(), leadId, eventType,
+      targetType: opts?.targetType, targetId: opts?.targetId, targetLabel: opts?.targetLabel,
+      value: opts?.value ?? null, note: opts?.note, actorName: currentUserNameRef.current || undefined,
+      occurredAt: nowIso,
+    };
+    setConversionHistory((prev) => { const next = [ev, ...prev]; if (!useDb) writeLS(CONVERSION_HISTORY_KEY, next); return next; });
+
+    if (useDb) {
+      const row: Record<string, unknown> = {
+        lead_id: leadId, branch_id: (lead as any)?.branchId ?? null,
+        event_type: eventType, target_type: opts?.targetType ?? null, target_id: opts?.targetId ?? null,
+        value: opts?.value ?? null,
+        // target_label lives in `note` when the column isn't present; prefer note.
+        note: opts?.note ?? opts?.targetLabel ?? null,
+      };
+      const { error } = await db.from("lead_conversion_history").insert(row);
+      if (error && !isMissingTableError(error) && !isUndefinedColumnError(error)) {
+        console.error("[leads] conversion history insert failed:", error.message);
+      }
+    }
+  }, [useDb, db]);
+
   /* ── Fulfilment routing ──
      Records the Sales routing decision on the lead (route + optional store).
      Creating the downstream Walk-In / Field Job happens in the UI layer where
@@ -874,29 +1106,237 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
      context free of cross-module dependencies. */
   const routeLead = useCallback(async (
     id: string,
-    route: "STORE_VISIT" | "PICKUP_DROP",
-    opts?: { assignedStore?: string; fieldManagerId?: string },
+    route: "STORE_VISIT" | "PICKUP_DROP" | "ON_SITE",
+    opts?: { assignedStore?: string; assignedStoreId?: string; fieldManagerId?: string },
   ) => {
     const lead = leadsRef.current.find((l) => l.id === id);
     if (!lead) return;
-    const routeLabel = route === "STORE_VISIT" ? "Store-to-Store" : "Pickup & Drop";
+    const routeLabel = route === "STORE_VISIT" ? "Store / Walk-In" : route === "ON_SITE" ? "On-Site" : "Pickup & Drop";
     const updates: Partial<Lead> = {
       fulfilmentRoute: route,
       assignedStore: route === "STORE_VISIT" ? (opts?.assignedStore ?? "") : "",
       routedAt: new Date().toISOString(),
     };
     await updateLead(id, updates);
+    // Persist assigned_store_id (uuid) when a store id is available.
+    if (useDb && route === "STORE_VISIT" && opts?.assignedStoreId) {
+      const res = await db.from("leads").update({ assigned_store_id: opts.assignedStoreId }).eq("id", id);
+      if (res.error && !isUndefinedColumnError(res.error)) console.error("[leads] routeLead store id failed:", res.error.message);
+    }
+
+    // Conversion trail: the route decision is the first handoff event.
+    await recordConversionEvent(id, "routed", { note: routeLabel });
 
     logActivity({
       module: "Lead", action: "Lead Routed", severity: "info", entity: "Lead",
       reference: lead.leadNo,
       description: `${lead.leadNo} (${lead.name || "Unnamed"}) routed to ${routeLabel}${updates.assignedStore ? ` · ${updates.assignedStore}` : ""}.`,
-      changes: [{ field: "Fulfilment Route", from: lead.fulfilmentRoute || "Unrouted", to: routeLabel }],
+      changes: [{ field: "Service Route", from: lead.fulfilmentRoute || "Unrouted", to: routeLabel }],
     });
 
     // Confirmation to the sales person who routed it.
     toast.success("Lead routed", { description: `${lead.leadNo} → ${routeLabel}` });
-  }, [updateLead]);
+  }, [updateLead, useDb, db, recordConversionEvent]);
+
+  /* ── Lead status change (writes status-history + terminal timestamps) ──
+     A follow-up completing NEVER lands here automatically — the lead status is
+     an explicit, separate decision. This sets qualified_at/converted_at/lost_at
+     the first time a lead reaches those states so time-to-* is derivable. */
+  const changeLeadStatus = useCallback(async (
+    id: string,
+    status: string,
+    opts?: { note?: string; finalResult?: string; lostReason?: string },
+  ) => {
+    const lead = leadsRef.current.find((l) => l.id === id);
+    if (!lead || status === lead.status) return;
+    const nowIso = new Date().toISOString();
+    const finalResult = opts?.finalResult ?? lead.finalResult;
+
+    const updates: Partial<Lead> = { status };
+    if (opts?.finalResult !== undefined) updates.finalResult = opts.finalResult;
+    // Terminal / milestone timestamps — set once (first time reached).
+    const extraCols: Record<string, unknown> = {};
+    if (isQualifiedStatus(status) && !(lead as any).qualifiedAt) extraCols.qualified_at = nowIso;
+    if (isWonStatus(status, finalResult)) { extraCols.converted_at = nowIso; extraCols.converted_by = currentUserIdRef.current || null; }
+    if (isLostStatus(status, finalResult)) { extraCols.lost_at = nowIso; if (opts?.lostReason) extraCols.lost_reason = opts.lostReason; }
+
+    await updateLead(id, updates);
+    if (useDb && Object.keys(extraCols).length > 0) {
+      let row = { ...extraCols };
+      let res = await db.from("leads").update(row).eq("id", id);
+      let heal = 0;
+      while (res.error && isUndefinedColumnError(res.error) && Object.keys(row).length > 0 && heal < 6) {
+        heal += 1;
+        const col = extractMissingColumn(res.error);
+        row = omitKeys(row, col ? [col] : Object.keys(extraCols));
+        if (Object.keys(row).length === 0) break;
+        res = await db.from("leads").update(row).eq("id", id);
+      }
+    }
+
+    // Status-history event (append-only).
+    const histRow: Record<string, unknown> = {
+      lead_id: id, branch_id: (lead as any).branchId ?? null,
+      from_status: lead.status || null, to_status: status, note: opts?.note || null,
+    };
+    if (useDb) {
+      const { error } = await db.from("lead_status_history").insert(histRow);
+      if (error && !isMissingTableError(error) && !isUndefinedColumnError(error)) console.error("[leads] status history insert failed:", error.message);
+    }
+
+    logActivity({
+      module: "Lead",
+      action: isWonStatus(status, finalResult) ? "Lead Converted" : isLostStatus(status, finalResult) ? "Lead Lost" : "Lead Status Changed",
+      severity: isWonStatus(status, finalResult) ? "success" : "info",
+      entity: "Lead", reference: lead.leadNo,
+      description: `${lead.leadNo} (${lead.name || "Unnamed"}) status → ${status}.`,
+      changes: [{ field: "Status", from: lead.status || "—", to: status }],
+    });
+  }, [useDb, db, updateLead]);
+
+  /* ── Structured follow-ups ──────────────────────────────────────────────
+     A follow-up is its OWN record. Scheduling a new one keeps all previous
+     follow-ups. Completing records the activity + outcome, and can schedule the
+     NEXT follow-up in the same action — it never changes the lead's status. */
+  const followUpsFor = useCallback((leadId: string): LeadFollowUp[] => {
+    return followUpsRef.current.filter((f) => f.leadId === leadId).sort((a, b) => a.seq - b.seq);
+  }, []);
+
+  const scheduleFollowUp = useCallback(async (leadId: string, draft: LeadFollowUpDraft): Promise<LeadFollowUp | null> => {
+    const lead = leadsRef.current.find((l) => l.id === leadId);
+    if (!lead || !draft.dueAt) return null;
+    const nowIso = new Date().toISOString();
+    // Follow-up agent defaults to the lead owner but may differ (§12).
+    const fuUserId = draft.followUpUserId || lead.assignedTo || currentUserIdRef.current || "";
+    const fuUserName = draft.followUpUserName || lead.assignedToName || currentUserNameRef.current || "";
+    const existing = followUpsRef.current.filter((f) => f.leadId === leadId);
+    const seq = existing.reduce((m, f) => Math.max(m, f.seq), 0) + 1;
+
+    const fu: LeadFollowUp = {
+      id: uid(), leadId, seq, dueAt: draft.dueAt,
+      followUpUserId: fuUserId, followUpUserName: fuUserName,
+      createdBy: currentUserIdRef.current || "", createdByName: currentUserNameRef.current || "",
+      status: "scheduled", comments: draft.comments, createdAt: nowIso,
+    };
+
+    if (useDb) {
+      const row: Record<string, unknown> = {
+        lead_id: leadId, branch_id: (lead as any).branchId ?? null,
+        scheduled_at: draft.dueAt, followup_user_id: fuUserId || null, followup_user_name: fuUserName || null,
+        created_by: currentUserIdRef.current || null, created_by_name: currentUserNameRef.current || null,
+        status: "scheduled", comments: draft.comments || null,
+      };
+      const { data, error } = await db.from("lead_followup_history").insert(row).select("*").single();
+      if (error) {
+        if (!isMissingTableError(error)) {
+          console.error("[leads] scheduleFollowUp failed:", error.message);
+          toast.error("Follow-up not saved", { description: "We couldn't schedule this follow-up. Please try again." });
+          return null;
+        }
+      } else if (data) {
+        const saved = rowToFollowUp(data);
+        setFollowUps((prev) => [saved, ...prev]);
+        // Keep the lead's quick-glance next-follow-up in sync (denormalized).
+        await updateLead(leadId, { followUpDate: draft.dueAt.slice(0, 10), followUpAgent: fuUserName });
+        logActivity({ module: "Lead", action: "Follow-up Scheduled", severity: "info", entity: "Lead", reference: lead.leadNo, description: `Follow-up #${saved.seq} scheduled for ${lead.leadNo} on ${draft.dueAt.slice(0, 10)}${fuUserName ? ` · ${fuUserName}` : ""}.` });
+        return saved;
+      }
+    }
+
+    setFollowUps((prev) => { const next = [fu, ...prev]; if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
+    await updateLead(leadId, { followUpDate: draft.dueAt.slice(0, 10), followUpAgent: fuUserName });
+    logActivity({ module: "Lead", action: "Follow-up Scheduled", severity: "info", entity: "Lead", reference: lead.leadNo, description: `Follow-up #${fu.seq} scheduled for ${lead.leadNo} on ${draft.dueAt.slice(0, 10)}${fuUserName ? ` · ${fuUserName}` : ""}.` });
+    return fu;
+  }, [useDb, db, updateLead]);
+
+  const completeFollowUp = useCallback(async (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft }) => {
+    const fu = followUpsRef.current.find((f) => f.id === followUpId);
+    if (!fu) return;
+    const lead = leadsRef.current.find((l) => l.id === fu.leadId);
+    const nowIso = new Date().toISOString();
+    const patch: Partial<LeadFollowUp> = { status: "completed", completedAt: nowIso, outcome, comments: opts?.comments ?? fu.comments };
+
+    setFollowUps((prev) => { const next = prev.map((f) => (f.id === followUpId ? { ...f, ...patch } : f)); if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
+    if (useDb) {
+      const { error } = await db.from("lead_followup_history").update({ status: "completed", completed_at: nowIso, outcome, result: outcome, comments: opts?.comments ?? fu.comments ?? null }).eq("id", followUpId);
+      if (error && !isMissingTableError(error)) console.error("[leads] completeFollowUp failed:", error.message);
+    }
+    logActivity({ module: "Lead", action: "Follow-up Completed", severity: "success", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} completed — outcome: ${outcome}. (Lead status unchanged.)` });
+
+    // Optionally chain the NEXT follow-up while retaining this one's history.
+    if (opts?.next?.dueAt) await scheduleFollowUp(fu.leadId, opts.next);
+    else await updateLead(fu.leadId, { followUpDate: "" }); // no open follow-up left
+    toast.success("Follow-up completed", { description: `Outcome: ${outcome}` });
+  }, [useDb, db, scheduleFollowUp, updateLead]);
+
+  const cancelFollowUp = useCallback(async (followUpId: string, reason?: string) => {
+    const fu = followUpsRef.current.find((f) => f.id === followUpId);
+    if (!fu) return;
+    const lead = leadsRef.current.find((l) => l.id === fu.leadId);
+    setFollowUps((prev) => { const next = prev.map((f) => (f.id === followUpId ? { ...f, status: "cancelled" as const, comments: reason ?? f.comments } : f)); if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
+    if (useDb) {
+      const { error } = await db.from("lead_followup_history").update({ status: "cancelled", comments: reason ?? fu.comments ?? null }).eq("id", followUpId);
+      if (error && !isMissingTableError(error)) console.error("[leads] cancelFollowUp failed:", error.message);
+    }
+    logActivity({ module: "Lead", action: "Follow-up Cancelled", severity: "info", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} cancelled${reason ? ` — ${reason}` : ""}.` });
+    // If no other open follow-up remains, clear the lead's quick-glance date.
+    const stillOpen = followUpsRef.current.some((f) => f.leadId === fu.leadId && f.id !== followUpId && f.status === "scheduled");
+    if (!stillOpen) await updateLead(fu.leadId, { followUpDate: "" });
+  }, [useDb, db, updateLead]);
+
+  const assignmentHistoryFor = useCallback((leadId: string): LeadAssignmentEvent[] => {
+    return assignmentHistory.filter((h) => h.leadId === leadId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [assignmentHistory]);
+
+  /** Link an existing operational record to a lead (open-lead detection +
+   *  unattributed safety net). Sets the lead's linked_* id, resolves the
+   *  customer link, records a conversion event, and guards against attributing
+   *  the SAME record to a different lead. */
+  const linkOperationalRecord = useCallback(async (
+    leadId: string,
+    kind: "walk_in" | "field_job" | "ticket" | "invoice",
+    recordId: string,
+    recordLabel?: string,
+  ) => {
+    const lead = leadsRef.current.find((l) => l.id === leadId);
+    if (!lead || !recordId) return;
+    // Duplicate-attribution guard: a single operational record must not be
+    // attributed to two leads. If it's already on another lead, block + warn.
+    const other = operationalRecordAttributedElsewhere(leadsRef.current, kind, recordId, leadId);
+    if (other) {
+      toast.error("Already attributed", { description: `${kind.replace("_", " ")} ${recordLabel || recordId} is already linked to ${other.leadNo}.` });
+      return;
+    }
+    const field = kind === "walk_in" ? "linkedWalkInId" : kind === "field_job" ? "linkedFieldJobId" : kind === "ticket" ? "linkedTicketId" : "linkedInvoiceId";
+    const eventType: LeadConversionEventType = kind === "walk_in" ? "walk_in_created" : kind === "field_job" ? "field_job_created" : kind === "ticket" ? "ticket_created" : "invoice_created";
+    await updateLead(leadId, { [field]: recordId } as Partial<Lead>);
+    await recordConversionEvent(leadId, eventType, {
+      targetType: kind as LeadConversionTargetType, targetId: recordId, targetLabel: recordLabel,
+    });
+    logActivity({
+      module: "Lead", action: "Operational Record Linked", severity: "success", entity: "Lead",
+      reference: lead.leadNo,
+      description: `${lead.leadNo} linked to ${kind.replace("_", " ")} ${recordLabel || recordId}.`,
+    });
+  }, [updateLead, recordConversionEvent]);
+
+  const leadMetrics = useCallback((scope: "me" | "all" | { ownerId: string } = "all", revenue?: { tickets: any[]; invoices: any[] }): LeadMetrics => {
+    const ownerId = scope === "me" ? (currentUserIdRef.current || "") : typeof scope === "object" ? scope.ownerId : "";
+    const scoped = ownerId ? leadsOwnedBy(leads, ownerId) : leads;
+    // Build leadId → open (scheduled) follow-up, so pending/overdue derive from
+    // real follow-up records.
+    const byLead = new Map<string, LeadFollowUp[]>();
+    for (const f of followUps) {
+      const arr = byLead.get(f.leadId) ?? [];
+      arr.push(f); byLead.set(f.leadId, arr);
+    }
+    const openByLead = new Map<string, LeadFollowUp>();
+    for (const [leadId, list] of byLead) {
+      const o = openFollowUp(list);
+      if (o) openByLead.set(leadId, o);
+    }
+    return computeLeadMetrics(scoped, openByLead, revenue);
+  }, [leads, followUps]);
 
   /* ── Shared filters ── */
   const setFilters = useCallback((updater: LeadFilters | ((prev: LeadFilters) => LeadFilters)) => {
@@ -991,10 +1431,14 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LeadsContextValue>(() => ({
     leads, filteredLeads, options, hydrated, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
-    optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead,
+    optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
+    followUps, followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp,
+    assignmentHistory, assignmentHistoryFor,
+    conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord,
+    leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     contacts, addContact, updateContact, deleteContact,
-  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
+  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus, followUps, followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

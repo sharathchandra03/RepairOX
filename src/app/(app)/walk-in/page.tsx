@@ -80,7 +80,7 @@ function fmtDate(iso: string): string {
 export default function WalkInPage() {
   const router = useRouter();
   const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary, customers, addCustomer } = useStore();
-  const { contacts } = useLeads();
+  const { contacts, linkOperationalRecord } = useLeads();
   // Active-store context — drives the context-aware Store column (§3h). Shown
   // only in multi-store / All-Shops mode; hidden inside a single store.
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -482,15 +482,21 @@ export default function WalkInPage() {
         followUpStatus: data.followUpStatus,
         followUpAttempt: data.followUpDate ? (data.followUpAttempt || 1) : undefined,
         followUpComments: data.followUpComments,
+        // Attribution: the originating lead, when the OPEN LEAD banner linked one.
+        linkedLeadId: data.linkedLeadId,
         invoiceValue: 0,
         businessValue: 0,
       };
       await addWalkIn(record);
+      // Close the loop back to the Lead so Sales keeps visibility (§4/§5).
+      if (data.linkedLeadId) {
+        await linkOperationalRecord(data.linkedLeadId, "walk_in", record.id, record.walkInNumber);
+      }
       showToast(`Walk-In ${record.walkInNumber} created.`);
     }
     setShowCreate(false);
     setEditTarget(null);
-  }, [walkIns, addWalkIn, updateWalkIn, showToast, customers, addCustomer, can]);
+  }, [walkIns, addWalkIn, updateWalkIn, showToast, customers, addCustomer, can, linkOperationalRecord]);
 
   /* ── Convert Walk-In → Ticket ──
      Does NOT create a ticket directly. It opens the EXISTING ticket creation

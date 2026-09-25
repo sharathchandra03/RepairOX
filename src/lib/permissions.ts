@@ -327,6 +327,9 @@ export type PermissionKey =
   | "leads_edit"
   | "leads_delete"
   | "leads_assign"
+  | "leads_reassign"
+  | "leads_view_team"
+  | "leads_followup"
   | "leads_stage_change"
   | "leads_priority_change"
   | "leads_pin"
@@ -811,6 +814,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_edit", label: "Edit Lead" },
       { key: "leads_delete", label: "Delete Lead" },
       { key: "leads_assign", label: "Assign Lead" },
+      { key: "leads_reassign", label: "Reassign Lead (change owner)" },
+      { key: "leads_view_team", label: "View Team Leads (their sales team)" },
+      { key: "leads_followup", label: "Manage Lead Follow-ups" },
       { key: "leads_stage_change", label: "Change Stage (Kanban)" },
       { key: "leads_priority_change", label: "Change Lead Priority" },
       { key: "leads_pin", label: "Pin Lead" },

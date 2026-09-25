@@ -21,26 +21,41 @@
 
 /* ─── Fulfilment route (lives on the Lead, mirrored onto the FieldJob) ──── */
 
-/** Internal, stable route values. Display labels are separate (below). */
-export type FulfilmentRoute = "STORE_VISIT" | "PICKUP_DROP";
+/** Internal, stable route values. Display labels are separate (below).
+ *  A Lead's SERVICE ROUTE is one of three distinct service paths:
+ *    STORE_VISIT  → customer visits a store (Walk-In → Ticket)
+ *    PICKUP_DROP  → device collected from the customer by a field Ninja
+ *    ON_SITE      → a field agent/technician services the customer on location */
+export type FulfilmentRoute = "STORE_VISIT" | "PICKUP_DROP" | "ON_SITE";
 
 export const FULFILMENT_ROUTE_LABEL: Record<FulfilmentRoute, string> = {
-  STORE_VISIT: "Store-to-Store",
+  STORE_VISIT: "Store / Walk-In",
   PICKUP_DROP: "Pickup & Drop",
+  ON_SITE: "On-Site",
 };
 
 export const FULFILMENT_ROUTES: { value: FulfilmentRoute; label: string; hint: string }[] = [
-  { value: "STORE_VISIT", label: "Store-to-Store", hint: "Customer visits a store; handled as a Walk-In." },
+  { value: "STORE_VISIT", label: "Store / Walk-In", hint: "Customer visits a store; handled as a Walk-In." },
   { value: "PICKUP_DROP", label: "Pickup & Drop",  hint: "Device is picked up from the customer by a field agent." },
+  { value: "ON_SITE",     label: "On-Site",        hint: "A field agent/technician services the customer at their location." },
 ];
 
 /** Normalise any stored value (label or internal) to a stable route value. */
 export function normaliseRoute(v: string | null | undefined): FulfilmentRoute | "" {
   if (!v) return "";
   const s = String(v).trim().toLowerCase();
-  if (s === "store_visit" || s === "store-to-store" || s === "store to store") return "STORE_VISIT";
+  if (s === "store_visit" || s === "store-to-store" || s === "store to store" || s === "store / walk-in" || s === "store/walk-in" || s === "walk-in" || s === "store") return "STORE_VISIT";
   if (s === "pickup_drop" || s === "pickup & drop" || s === "pickup and drop" || s === "pickup&drop") return "PICKUP_DROP";
+  if (s === "on_site" || s === "on-site" || s === "onsite") return "ON_SITE";
   return "";
+}
+
+/** Map a Lead service route to the Field Job TYPE used for its trip workflow.
+ *  STORE_VISIT is handled as a Walk-In (no field job); the other two create a
+ *  Field Job of the matching type. */
+export function routeToFieldLeadType(route: FulfilmentRoute): FieldLeadType {
+  if (route === "ON_SITE") return "onsite";
+  return "pickup"; // PICKUP_DROP
 }
 
 /* ─── Field Job TYPE (the "Lead Type" column in the prototype) ─────────────

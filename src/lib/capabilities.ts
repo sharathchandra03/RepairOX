@@ -216,13 +216,22 @@ export const CAP = {
     create: ["leads_create", "manage_sales"],
     edit: ["leads_edit", "manage_sales"],
     delete: ["leads_delete", "manage_sales"],
+    // First assignment of an owner. `assign` (generic) + manage_sales fallback.
     assign: ["leads_assign", "assign", "manage_sales"],
+    // Change an EXISTING owner. leads_assign implies it (assigners can reassign).
+    reassign: ["leads_reassign", "leads_assign", "assign", "manage_sales"],
     stageChange: ["leads_stage_change", "manage_sales"],
     priorityChange: ["leads_priority_change", "manage_sales"],
     pin: ["leads_pin", "leads_edit", "manage_sales"],
+    // Work a lead's follow-ups (schedule/complete/cancel). Editing implies it.
+    followup: ["leads_followup", "leads_edit", "manage_sales"],
     convert: ["leads_convert", "manage_sales"],
     import: ["leads_import", "import_data", "manage_sales"],
     export: ["leads_export", "export_reports", "manage_sales"],
+    // Scope: see the whole team's leads (between own-only and org-wide view-all).
+    viewTeam: ["leads_view_team", "leads_view_all", "manage_sales", "view_sales_reports"],
+    // Scope: see every lead in the org/store (own-vs-all record scope).
+    viewAll: ["leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
   },
   deal: {
     create: ["deals_create", "manage_sales"],

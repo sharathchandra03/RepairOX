@@ -25,6 +25,8 @@ import {
   type Lead, type LeadFieldKey,
 } from "@/lib/leads-data";
 import { priorityTone, statusTone } from "@/components/leads/lead-pills";
+import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
+import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadOperationsPanel } from "@/components/leads/lead-operations-panel";
 
@@ -361,6 +363,12 @@ export function LeadDetailDrawer({
             </>
           )}
         </Section>
+
+        {/* ── Structured follow-up history + ownership history (view mode) ── */}
+        {!editing && <LeadFollowUpHistory lead={lead} />}
+
+        {/* ── Full customer/sales journey (view mode) ── */}
+        {!editing && <LeadJourneyTimeline lead={lead} />}
 
         {/* ── Result ── */}
         <Section icon={Flag} title="Result">

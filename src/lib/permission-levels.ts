@@ -136,13 +136,14 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       view: ["leads_view", "deals_view", "quotations_view", "companies_view", "contacts_view", "comms_activities_view", "leads_inbox_view", "leads_map_view", "view_sales_reports"],
       work: [
         "manage_sales", "leads_create", "leads_edit", "leads_stage_change", "leads_priority_change",
-        "leads_pin", "leads_convert", "deals_create", "deals_edit", "quotations_create",
+        "leads_pin", "leads_followup", "leads_convert", "deals_create", "deals_edit", "quotations_create",
         "quotations_send", "quotations_convert_to_invoice", "companies_create", "companies_edit",
         "contacts_create", "contacts_manage", "comms_call_log", "comms_email_send",
         "comms_whatsapp_send", "comms_tasks_manage", "comms_meetings_manage", "send_communications",
       ],
       manage: [
-        "leads_delete", "leads_assign", "leads_import", "leads_export", "leads_options_manage",
+        "leads_delete", "leads_assign", "leads_reassign", "leads_view_team", "leads_import",
+        "leads_export", "leads_options_manage",
         "leads_smart_lists_manage", "leads_campaigns_manage", "deals_delete", "companies_delete",
         "route_leads", "leads_view_all",
       ],
