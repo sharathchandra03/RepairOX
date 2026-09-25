@@ -15,7 +15,7 @@ import {
   createContext, useContext, useState, useCallback, type ReactNode,
 } from "react";
 
-export type CatalogTabId = "categories" | "brands" | "models" | "parts" | "import";
+export type CatalogTabId = "categories" | "brands" | "models" | "parts" | "media" | "import";
 
 interface SelectionState {
   tab: CatalogTabId;
@@ -48,7 +48,7 @@ const Ctx = createContext<CatalogSelection | null>(null);
  * starts clean with no category/brand/model preselected. This avoids the page
  * always reopening the last (or a forced default) selection.
  */
-const VALID_TABS: CatalogTabId[] = ["categories", "brands", "models", "parts", "import"];
+const VALID_TABS: CatalogTabId[] = ["categories", "brands", "models", "parts", "media", "import"];
 
 export function CatalogSelectionProvider({
   children,

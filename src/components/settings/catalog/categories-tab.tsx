@@ -32,7 +32,10 @@ export function CategoriesTab() {
   // Settings → Inventory → Price List, so it reuses that edit capability.
   const canReorder = allow(can, CAP.settings.inventorySettings);
   const [search, setSearch] = useState("");
-  const [sortAsc, setSortAsc] = useState(true);
+  // View sort for browse mode. "order" = the saved administrator order (the
+  // default, matching Shop → Price List); "asc"/"desc" are optional A–Z/Z–A
+  // view overrides that do NOT change the persisted order.
+  const [viewSort, setViewSort] = useState<"order" | "asc" | "desc">("order");
   const [editing, setEditing] = useState<DeviceCategory | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
@@ -62,17 +65,19 @@ export function CategoriesTab() {
     return map;
   }, [categories, brands, models]);
 
-  // Browse mode rows. The A–Z / Z–A toggle is a local VIEW sort only; the
-  // persisted administrator order is edited in reorder mode below.
+  // Browse mode rows. Defaults to the SAVED administrator order (sortCategories)
+  // so the grid matches Shop → Price List after a reorder. A–Z / Z–A are
+  // optional VIEW overrides that never change the persisted order.
   const rows = useMemo(() => {
-    let list = [...categories];
+    let list = viewSort === "order" ? sortCategories(categories) : [...categories];
     if (search.trim()) {
       const q = search.toLowerCase();
       list = list.filter((c) => c.name.toLowerCase().includes(q));
     }
-    list.sort((a, b) => (sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)));
+    if (viewSort === "asc") list.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+    else if (viewSort === "desc") list.sort((a, b) => b.name.localeCompare(a.name, undefined, { sensitivity: "base" }));
     return list;
-  }, [categories, search, sortAsc]);
+  }, [categories, search, viewSort]);
 
   // Drag-and-drop reorder handlers (native HTML5 DnD — no extra dependency).
   const handleDrop = (targetId: string) => {
@@ -127,8 +132,15 @@ export function CategoriesTab() {
             </>
           ) : (
             <>
-              <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={() => setSortAsc((v) => !v)}>
-                <ArrowUpDown className="h-3.5 w-3.5" /> {sortAsc ? "A–Z" : "Z–A"}
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5 rounded-xl"
+                onClick={() => setViewSort((v) => (v === "order" ? "asc" : v === "asc" ? "desc" : "order"))}
+                title="Cycle view: Saved order → A–Z → Z–A"
+              >
+                <ArrowUpDown className="h-3.5 w-3.5" />
+                {viewSort === "order" ? "Saved order" : viewSort === "asc" ? "A–Z" : "Z–A"}
               </Button>
               {canReorder && (
                 <Button
@@ -174,14 +186,16 @@ export function CategoriesTab() {
                 onDragOver={(e) => { e.preventDefault(); handleDrop(cat.id); }}
                 onDrop={(e) => { e.preventDefault(); handleDrop(cat.id); }}
                 className={cn(
-                  "flex items-center gap-3 rounded-2xl border bg-card p-3 shadow-card transition",
-                  isDragging ? "border-[#4361EE] opacity-60 ring-2 ring-[#4361EE]/20" : "border-border"
+                  "flex items-center gap-3 rounded-2xl border-2 bg-[#F5F7FF] p-3 shadow-card transition hover:border-[#4361EE] hover:bg-[#EEF1FD]",
+                  isDragging
+                    ? "border-[#3049c9] opacity-70 ring-2 ring-[#4361EE]/25"
+                    : "border-[#4361EE]/40"
                 )}
               >
-                <span className="grid h-8 w-8 shrink-0 cursor-grab place-items-center rounded-lg text-muted-foreground hover:bg-muted active:cursor-grabbing" title="Drag to reorder">
+                <span className="grid h-8 w-8 shrink-0 cursor-grab place-items-center rounded-lg text-[#4361EE] hover:bg-[#E0E6FF] active:cursor-grabbing" title="Drag to reorder">
                   <GripVertical className="h-4 w-4" />
                 </span>
-                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-[11px] font-bold tabular-nums text-muted-foreground">
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#4361EE] text-[11px] font-bold tabular-nums text-white">
                   {index + 1}
                 </span>
                 <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">

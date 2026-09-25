@@ -1,9 +1,11 @@
 "use client";
 
-import { useRef, useState } from "react";
-import { Upload, X, Image as ImageIcon, Loader2 } from "lucide-react";
+import { useMemo, useRef, useState } from "react";
+import { Upload, X, Image as ImageIcon, Loader2, Images, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
+import { useCatalog } from "@/lib/catalog-context";
+import { collectMedia } from "./media-library";
 
 const BUCKET_NAME = "catalog-images";
 
@@ -23,6 +25,7 @@ export function ImageUpload({
   maxDimension = 512,
   rounded = "rounded-xl",
   folder = "categories",
+  showLibrary = true,
 }: {
   value?: string;
   onChange: (url: string) => void;
@@ -33,9 +36,12 @@ export function ImageUpload({
   rounded?: string;
   /** Sub-folder inside the bucket (e.g. "categories", "brands", "models"). */
   folder?: string;
+  /** Show the "Choose from library" button to reuse an existing catalog image. */
+  showLibrary?: boolean;
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
 
   const dims = size === "sm" ? "h-12 w-12" : size === "lg" ? "h-24 w-24" : "h-16 w-16";
 
@@ -182,14 +188,120 @@ export function ImageUpload({
         )}
       </div>
       <div>
-        <button
-          type="button"
-          onClick={() => inputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground transition hover:bg-muted"
-        >
-          <Upload className="h-3.5 w-3.5" /> {value ? "Replace" : "Upload"}
-        </button>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <button
+            type="button"
+            onClick={() => inputRef.current?.click()}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground transition hover:bg-muted"
+          >
+            <Upload className="h-3.5 w-3.5" /> {value ? "Replace" : "Upload"}
+          </button>
+          {showLibrary && (
+            <button
+              type="button"
+              onClick={() => setLibraryOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground transition hover:bg-muted"
+              title="Reuse an image already saved in the catalog"
+            >
+              <Images className="h-3.5 w-3.5" /> Library
+            </button>
+          )}
+        </div>
         {label && <p className="mt-1 text-[10px] text-muted-foreground">{label}</p>}
+      </div>
+
+      {showLibrary && libraryOpen && (
+        <ImageLibraryPicker
+          onClose={() => setLibraryOpen(false)}
+          onPick={(url) => { onChange(url); setLibraryOpen(false); }}
+        />
+      )}
+    </div>
+  );
+}
+
+/* ─── Library picker modal — reuse an existing catalog image ───────── */
+function ImageLibraryPicker({ onClose, onPick }: { onClose: () => void; onPick: (url: string) => void }) {
+  const { categories, brands, models, parts } = useCatalog();
+  const [search, setSearch] = useState("");
+
+  const groups = useMemo(
+    () => collectMedia({ categories, brands, models, parts }),
+    [categories, brands, models, parts]
+  );
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.map((g) => ({ ...g, images: g.images.filter((im) => im.ownerName.toLowerCase().includes(q)) }));
+  }, [groups, search]);
+
+  const total = filtered.reduce((n, g) => n + g.images.length, 0);
+
+  return (
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onClick={onClose}>
+      <div
+        className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Images className="h-4 w-4" /></span>
+            <div>
+              <h3 className="text-sm font-bold">Choose from library</h3>
+              <p className="text-[11px] text-muted-foreground">Reuse an image already saved in the catalog</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {/* Search */}
+        <div className="border-b border-border px-5 py-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search by name..."
+              className="h-9 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+            />
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          {total === 0 ? (
+            <div className="grid place-items-center py-12 text-center text-sm text-muted-foreground">
+              {search.trim() ? "No images match your search." : "No images saved in the catalog yet."}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {filtered.map((g) => g.images.length > 0 && (
+                <div key={g.type}>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{g.label} · {g.images.length}</p>
+                  <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
+                    {g.images.map((im) => (
+                      <button
+                        key={`${g.type}-${im.ownerId}-${im.url}`}
+                        type="button"
+                        onClick={() => onPick(im.url)}
+                        title={`Use ${im.ownerName}`}
+                        className="group overflow-hidden rounded-xl border border-zinc-300 bg-muted/30 text-left transition hover:border-[#4361EE] hover:shadow-card-hover"
+                      >
+                        <div className="aspect-square w-full overflow-hidden bg-white">
+                          <img src={im.url} alt={im.ownerName} className="h-full w-full object-contain p-1.5" />
+                        </div>
+                        <p className="truncate border-t border-border/70 px-2 py-1 text-[10px] font-medium">{im.ownerName}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

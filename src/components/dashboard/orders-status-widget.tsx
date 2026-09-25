@@ -243,7 +243,7 @@ export function OrdersStatusWidget({ className, tickets: ticketsProp }: { classN
   };
 
   return (
-    <div className={cn("rounded-2xl border border-border/70 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6", className)}>
+    <div className={cn("rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6", className)}>
       {/* Header */}
       <div className="flex items-center justify-between mb-3">
         <p className="text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">Orders Status</p>

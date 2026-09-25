@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { LayoutGrid, Building2, Laptop, Wrench, ArrowLeftRight } from "lucide-react";
+import { LayoutGrid, Building2, Laptop, Wrench, ArrowLeftRight, Images } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { SettingsBreadcrumb } from "@/components/settings/settings-breadcrumb";
 import { useCatalog } from "@/lib/catalog-context";
@@ -11,12 +11,15 @@ import { BrandsTab } from "./brands-tab";
 import { ModelsTab } from "./models-tab";
 import { PartsTab } from "./parts-tab";
 import { ImportExportTab } from "./import-export-tab";
+import { MediaTab } from "./media-tab";
+import { mediaCount } from "./media-library";
 
 const TABS: { id: CatalogTabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "categories", label: "Categories", icon: LayoutGrid },
   { id: "brands", label: "Brands", icon: Building2 },
   { id: "models", label: "Models", icon: Laptop },
   { id: "parts", label: "Parts & Pricing", icon: Wrench },
+  { id: "media", label: "Media", icon: Images },
   { id: "import", label: "Import / Export", icon: ArrowLeftRight },
 ];
 
@@ -49,6 +52,7 @@ function CatalogAdminInner() {
     brands: brands.length,
     models: models.length,
     parts: parts.length,
+    media: mediaCount({ categories, brands, models, parts }),
     import: null,
   };
 
@@ -65,8 +69,9 @@ function CatalogAdminInner() {
         </div>
       </div>
 
-      {/* Tab bar */}
-      <div className="mb-5 flex items-center gap-1 overflow-x-auto border-b border-border [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+      {/* Tab bar — wraps to a second row on narrow widths so every tab
+          (including Import / Export) stays reachable; never clips a tab. */}
+      <div className="mb-5 flex flex-wrap items-center gap-x-1 gap-y-0 border-b border-border">
         {TABS.map((t) => {
           const active = tab === t.id;
           return (
@@ -74,7 +79,7 @@ function CatalogAdminInner() {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={cn(
-                "relative flex shrink-0 items-center gap-2 px-4 py-2.5 text-[13px] font-medium transition-colors",
+                "relative flex shrink-0 items-center gap-2 px-3.5 py-2.5 text-[13px] font-medium transition-colors",
                 active ? "text-brand-600" : "text-muted-foreground hover:text-foreground"
               )}
             >
@@ -105,6 +110,7 @@ function CatalogAdminInner() {
           {tab === "brands" && <BrandsTab />}
           {tab === "models" && <ModelsTab />}
           {tab === "parts" && <PartsTab />}
+          {tab === "media" && <MediaTab />}
           {tab === "import" && <ImportExportTab />}
         </>
       )}

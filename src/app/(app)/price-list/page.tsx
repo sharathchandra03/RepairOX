@@ -10,14 +10,17 @@ import {
   User, Cpu, HardDrive, MonitorSmartphone, Calendar,
   Info, MoreHorizontal, Pencil, Eye, Wrench, X, Tag,
   Image as ImageIcon, GripVertical, Copy, Settings2, Check,
-  FileSpreadsheet, FileText,
+  FileSpreadsheet, FileText, Loader2, Trash2, Images,
 } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel, sortCategories } from "@/lib/catalog-context";
+import { uploadCatalogImage } from "@/components/settings/catalog/upload-image";
+import { collectMedia } from "@/components/settings/catalog/media-library";
 import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, downloadCatalogXLSX, toCSV } from "@/lib/csv-utils";
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
 import { parseSmartSheet, type SmartImportResult } from "@/lib/smart-import";
@@ -270,7 +273,13 @@ export default function PriceListPage() {
     if (partSearch.trim()) params.set("q", partSearch.trim());
     const returnTo = `/price-list${params.toString() ? `?${params.toString()}` : ""}`;
     rememberOrigin({ key: "price-list", label: "Price List", returnTo });
-    router.push("/settings/inventory/price-lists?tab=parts&from=price-list");
+    // Carry the current category/brand/model into Settings so the Parts tab
+    // opens with them preselected — no manual re-selection needed.
+    const q = new URLSearchParams({ tab: "parts", from: "price-list" });
+    if (selectedCategoryId) q.set("cat", selectedCategoryId);
+    if (selectedBrandId) q.set("brand", selectedBrandId);
+    if (selectedModelId) q.set("model", selectedModelId);
+    router.push(`/settings/inventory/price-lists?${q.toString()}`);
   }, [router, selectedCategoryId, selectedBrandId, selectedModelId, partSearch]);
 
   // General "Settings" entry → Device Catalog (Categories tab). Remembers the
@@ -1113,7 +1122,7 @@ function DeviceHeroCard({
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: EASE }}
-      className="relative rounded-2xl border border-border bg-card shadow-card overflow-hidden"
+      className="relative rounded-2xl border border-zinc-300 bg-card shadow-card overflow-hidden"
     >
       {/* Expand / collapse control — small chevron, part of the card. Up = collapse,
           Down = expand, matching the resting direction of the content. */}
@@ -1247,6 +1256,176 @@ const PART_COL_LABEL: Record<PartColKey, string> = {
   image: "Image", part: "Part Name", price: "Price (INR)", warranty: "Warranty",
 };
 
+/* ─── Inline Part Image cell — upload from device or reuse from library ───
+   Click the thumbnail/placeholder to open a small menu. No trip to Settings. */
+function PartImageCell({ part, onChange }: { part: DevicePart; onChange: (url: string) => void }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const handleFile = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    setMenuOpen(false);
+    const url = await uploadCatalogImage(file, "parts");
+    setBusy(false);
+    if (url) onChange(url);
+  };
+
+  // Close the menu on outside click.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (btnRef.current && !btnRef.current.parentElement?.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDoc);
+    return () => document.removeEventListener("mousedown", onDoc);
+  }, [menuOpen]);
+
+  return (
+    <div className="relative inline-block">
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={() => setMenuOpen((v) => !v)}
+        title={part.imageUrl ? "Change image" : "Add image"}
+        className="group grid h-12 w-12 place-items-center overflow-hidden rounded-xl border border-border bg-muted/40 transition hover:border-[#4361EE]/50 hover:bg-[#EEF1FD]/40"
+      >
+        {busy ? (
+          <Loader2 className="h-5 w-5 animate-spin text-[#4361EE]" />
+        ) : part.imageUrl ? (
+          <img src={part.imageUrl} alt={part.partName} className="h-full w-full object-cover" />
+        ) : (
+          <ImageIcon className="h-5 w-5 text-muted-foreground/40 transition group-hover:text-[#4361EE]" />
+        )}
+      </button>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/*,.png,.jpg,.jpeg,.webp,.gif,.svg,.avif,.bmp,.heic,.heif"
+        className="hidden"
+        onChange={(e) => handleFile(e.target.files?.[0])}
+      />
+
+      {menuOpen && (
+        <div className="absolute left-0 top-full z-50 mt-1 w-48 overflow-hidden rounded-xl border border-border bg-popover p-1 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]">
+          <button
+            onClick={() => { setMenuOpen(false); inputRef.current?.click(); }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[#EEF1FD]"
+          >
+            <Upload className="h-4 w-4 opacity-70" /> Upload from device
+          </button>
+          <button
+            onClick={() => { setMenuOpen(false); setLibraryOpen(true); }}
+            className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors hover:bg-[#EEF1FD]"
+          >
+            <Images className="h-4 w-4 opacity-70" /> Choose from library
+          </button>
+          {part.imageUrl && (
+            <>
+              <div className="my-1 border-t border-border" />
+              <button
+                onClick={() => { setMenuOpen(false); setConfirmRemove(true); }}
+                className="flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-rose-600 transition-colors hover:bg-rose-50"
+              >
+                <Trash2 className="h-4 w-4 opacity-80" /> Remove image
+              </button>
+            </>
+          )}
+        </div>
+      )}
+
+      {libraryOpen && (
+        <PartLibraryPicker
+          onClose={() => setLibraryOpen(false)}
+          onPick={(url) => { onChange(url); setLibraryOpen(false); }}
+        />
+      )}
+
+      {/* Confirm before removing so an accidental click can't wipe the image. */}
+      <ConfirmDialog
+        open={confirmRemove}
+        onClose={() => setConfirmRemove(false)}
+        onConfirm={() => { onChange(""); setConfirmRemove(false); }}
+        title="Remove this image?"
+        description={`The image for "${part.partName}" will be removed. You can add it again anytime.`}
+        confirmLabel="Remove Image"
+      />
+    </div>
+  );
+}
+
+/* Library picker for the inline part cell — reuse an existing catalog image. */
+function PartLibraryPicker({ onClose, onPick }: { onClose: () => void; onPick: (url: string) => void }) {
+  const { categories, brands, models, parts } = useCatalog();
+  const [search, setSearch] = useState("");
+  const groups = useMemo(() => collectMedia({ categories, brands, models, parts }), [categories, brands, models, parts]);
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return groups;
+    return groups.map((g) => ({ ...g, images: g.images.filter((im) => im.ownerName.toLowerCase().includes(q)) }));
+  }, [groups, search]);
+  const total = filtered.reduce((n, g) => n + g.images.length, 0);
+
+  return (
+    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onClick={onClose}>
+      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
+          <div className="flex items-center gap-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Images className="h-4 w-4" /></span>
+            <div>
+              <h3 className="text-sm font-bold">Choose from library</h3>
+              <p className="text-[11px] text-muted-foreground">Reuse an image already saved in the catalog</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted" aria-label="Close"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="border-b border-border px-5 py-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name..." className="h-9 w-full rounded-xl border border-border bg-card pl-9 pr-3 text-sm placeholder:text-muted-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15" />
+          </div>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          {total === 0 ? (
+            <div className="grid place-items-center py-12 text-center text-sm text-muted-foreground">
+              {search.trim() ? "No images match your search." : "No images saved in the catalog yet."}
+            </div>
+          ) : (
+            <div className="space-y-5">
+              {filtered.map((g) => g.images.length > 0 && (
+                <div key={g.type}>
+                  <p className="mb-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">{g.label} · {g.images.length}</p>
+                  <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-5">
+                    {g.images.map((im) => (
+                      <button
+                        key={`${g.type}-${im.ownerId}-${im.url}`}
+                        type="button"
+                        onClick={() => onPick(im.url)}
+                        title={`Use ${im.ownerName}`}
+                        className="group overflow-hidden rounded-xl border border-zinc-300 bg-muted/30 text-left transition hover:border-[#4361EE] hover:shadow-card-hover"
+                      >
+                        <div className="aspect-square w-full overflow-hidden bg-white">
+                          <img src={im.url} alt={im.ownerName} className="h-full w-full object-contain p-1.5" />
+                        </div>
+                        <p className="truncate border-t border-border/70 px-2 py-1 text-[10px] font-medium">{im.ownerName}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function PartsAndPricing({
   parts, modelName, search, onSearchChange, onManageInSettings,
 }: {
@@ -1256,6 +1435,7 @@ function PartsAndPricing({
   onSearchChange: (v: string) => void;
   onManageInSettings: () => void;
 }) {
+  const { updatePart } = useCatalog();
   const [activeTab] = useState("parts");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(50);
@@ -1411,11 +1591,11 @@ function PartsAndPricing({
       onDrop={() => onDrop(key)}
       style={{ top }}
       className={cn(
-        "sticky z-20 bg-[#DDE4FF] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-[#4361EE] shadow-[inset_0_-1px_0_#B9C5F7] cursor-grab select-none whitespace-nowrap",
+        "sticky z-20 border-b border-l border-border bg-[#4261EE] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-white cursor-grab select-none whitespace-nowrap",
         alignClass[key],
         // Move the whole Image column (header + content) right as one unit.
         key === "image" && "pl-[27px]",
-        overCol === key && dragCol && dragCol !== key && "bg-[#C7D2FB]",
+        overCol === key && dragCol && dragCol !== key && "bg-[#3049c9]",
         dragCol === key && "opacity-50"
       )}
       title="Drag to reorder column"
@@ -1424,7 +1604,7 @@ function PartsAndPricing({
         "inline-flex items-center gap-1",
         key === "part" || key === "image" ? "justify-start" : key === "price" ? "justify-end" : "justify-center"
       )}>
-        <GripVertical className="h-3 w-3 opacity-40" />
+        <GripVertical className="h-3 w-3 opacity-60" />
         {PART_COL_LABEL[key]}
       </span>
     </th>
@@ -1432,16 +1612,14 @@ function PartsAndPricing({
 
   const bodyCell = (key: PartColKey, part: DevicePart) => {
     if (key === "image") return (
-      <td key={key} className="pl-[27px] pr-4 py-3 text-left align-middle">
-        <div className="ml-[11px] grid h-12 w-12 place-items-center overflow-hidden rounded-xl border border-border bg-muted/40">
-          {part.imageUrl
-            ? <img src={part.imageUrl} alt={part.partName} className="h-full w-full object-cover" />
-            : <ImageIcon className="h-5 w-5 text-muted-foreground/40" />}
+      <td key={key} className="border-l border-border pl-[27px] pr-4 py-3 text-left align-middle">
+        <div className="ml-[11px]">
+          <PartImageCell part={part} onChange={(url) => updatePart(part.id, { imageUrl: url })} />
         </div>
       </td>
     );
     if (key === "part") return (
-      <td key={key} className="px-4 py-3 text-left align-middle">
+      <td key={key} className="border-l border-border px-4 py-3 text-left align-middle">
         <p className="ml-[14px] text-[15px] font-semibold leading-snug text-foreground">{part.partName}</p>
         {part.repairCategory && (
           <p className="ml-[14px] mt-0.5 text-[11.5px] text-muted-foreground">{part.repairCategory}</p>
@@ -1449,7 +1627,7 @@ function PartsAndPricing({
       </td>
     );
     if (key === "price") return (
-      <td key={key} className="px-4 py-3 text-right align-middle">
+      <td key={key} className="border-l border-border px-4 py-3 text-right align-middle">
         {part.priceKnown === false
           ? <span className="mr-[5px] text-[14px] font-medium text-muted-foreground">N/A</span>
           : <span className="mr-[5px] text-[16px] font-extrabold tracking-tight tabular-nums text-foreground">{formatINR(part.price)}</span>}
@@ -1457,7 +1635,7 @@ function PartsAndPricing({
     );
     // warranty
     return (
-      <td key={key} className="px-4 py-3 text-center align-middle">
+      <td key={key} className="border-l border-border px-4 py-3 text-center align-middle">
         <div className="flex justify-center"><span className="ml-[4px]"><WarrantyBadge warranty={part.warranty} /></span></div>
       </td>
     );
@@ -1631,7 +1809,7 @@ function PartsAndPricing({
               overflow container — that would create a new scroll context and
               break position:sticky. The card's overflow-hidden clips any excess
               width so the page never gains a horizontal scrollbar. */}
-          <table className="w-full min-w-[760px] table-fixed border-collapse border-x border-b border-slate-300 text-left">
+          <table className="w-full min-w-[760px] table-fixed border-collapse border-x border-b border-border text-left">
             {/* Shared column grid — header + every row use identical boundaries. */}
             <colgroup>{colDefs}</colgroup>
             {/* Sticky table header — pins directly beneath the section header
@@ -1641,21 +1819,21 @@ function PartsAndPricing({
               <tr>
                 <th
                   style={{ top: tableHeadTop }}
-                  className="sticky z-20 border-l border-[#B9C5F7] bg-[#DDE4FF] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-[#4361EE] shadow-[inset_0_-1px_0_#B9C5F7]"
+                  className="sticky z-20 border-b border-r border-border bg-[#4261EE] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-white"
                 >#</th>
                 {order.map((key) => headerCell(key, tableHeadTop))}
                 <th
                   style={{ top: tableHeadTop }}
-                  className="sticky z-20 border-r border-[#B9C5F7] bg-[#DDE4FF] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-[#4361EE] shadow-[inset_0_-1px_0_#B9C5F7]"
+                  className="sticky z-20 border-b border-l border-border bg-[#4261EE] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-white"
                 >Actions</th>
               </tr>
             </thead>
             <tbody>
                 {pageParts.map((part, idx) => (
-                  <tr key={part.id} className="border-b border-slate-300 transition-colors hover:bg-brand-50/40">
+                  <tr key={part.id} className="border-b border-border transition-colors hover:bg-brand-50/40">
                     <td className="pl-4 pr-2 py-3 text-left align-middle text-[13px] font-semibold tabular-nums text-muted-foreground">{(safePage - 1) * pageSize + idx + 1}</td>
                     {order.map((key) => bodyCell(key, part))}
-                    <td className="py-3 px-4 align-middle">
+                    <td className="border-l border-border py-3 px-4 align-middle">
                       <div className="flex items-center justify-center gap-1">
                         <button onClick={() => setDetail(part)} title="View details" className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]">
                           <Eye className="h-4 w-4" />
@@ -1698,7 +1876,7 @@ function PartsAndPricing({
           surface). Same 10/20/50/100 pattern as Tickets & Invoices; search
           resets to page 1. */}
       {activeTab === "parts" && (
-        <div className="rounded-b-2xl border-t border-border bg-card px-5 py-3">
+        <div className="rounded-b-2xl border-x border-b border-t border-border bg-card px-5 py-3">
           <Pagination
             page={safePage}
             totalPages={totalPages}

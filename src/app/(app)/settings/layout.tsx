@@ -13,7 +13,13 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
   // modules (multi-panel / multi-column KPI + table layouts) — give them room
   // to breathe instead of the narrow forms container used by simple settings
   // forms (toggles, single-column inputs, etc.).
-  const isWide = pathname.startsWith("/settings/roles-permissions") || pathname.startsWith("/settings/customers/manage");
+  const isWide =
+    pathname.startsWith("/settings/roles-permissions") ||
+    pathname.startsWith("/settings/customers/manage") ||
+    // Device Catalog (Price List) is a data-grid-heavy admin page — it needs the
+    // full width so its 6-tab bar stays on one line and its tables/galleries
+    // use the available space.
+    pathname.startsWith("/settings/inventory/price-lists");
 
   return (
     <div className="flex -mx-4 -mt-2 -mb-4 sm:-mx-6 lg:-mx-8" style={{ height: "calc(100vh - 56px)" }}>
