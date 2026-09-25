@@ -17,7 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
-import { useCatalog, brandsForCategory, modelsForBrand, partsForModel } from "@/lib/catalog-context";
+import { useCatalog, brandsForCategory, modelsForBrand, partsForModel, sortCategories } from "@/lib/catalog-context";
 import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, downloadCatalogXLSX, toCSV } from "@/lib/csv-utils";
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
 import { parseSmartSheet, type SmartImportResult } from "@/lib/smart-import";
@@ -42,7 +42,12 @@ const iconMap: Record<string, React.ComponentType<{ className?: string }>> = {
 // Panel width: left col (196) + gap (14) + right col (250) = 460
 const PANEL_WIDTH = 460;
 const SPRING = { type: "spring", stiffness: 320, damping: 34, mass: 0.7 } as const;
-const HOVER_DELAY_OUT = 380;
+/** Left-edge reveal strip width (ZONE A). Narrow + fixed so it never overlaps
+ *  the browser/workspace divider and can't act as a close trigger. */
+const REVEAL_ZONE_WIDTH = 14;
+/** Hover-intent window. Short and intentional (not an artificial timeout) — a
+ *  pointer merely crossing the divider won't flip the expanded/collapsed state. */
+const HOVER_INTENT_MS = 180;
 
 /* ─── Rotating search hints (fade only, no layout shift) ─────────────
    Top search operates on the DEVICE / MODEL dataset only — never Parts. */
@@ -202,8 +207,11 @@ export default function PriceListPage() {
     return m;
   }, [models]);
 
+  // Categories follow the administrator-defined order (sortCategories); this is
+  // the SAME source of truth used by Settings → Device Catalog. Brands/models
+  // below are sorted A–Z inside brandsForCategory / modelsForBrand.
   const visibleCategories = useMemo(
-    () => categories.filter((c) => c.enabled ?? true).map((c) => ({ ...c, count: catModelCount.get(c.id) ?? 0 })),
+    () => sortCategories(categories.filter((c) => c.enabled ?? true)).map((c) => ({ ...c, count: catModelCount.get(c.id) ?? 0 })),
     [categories, catModelCount]
   );
 
@@ -263,6 +271,38 @@ export default function PriceListPage() {
     const returnTo = `/price-list${params.toString() ? `?${params.toString()}` : ""}`;
     rememberOrigin({ key: "price-list", label: "Price List", returnTo });
     router.push("/settings/inventory/price-lists?tab=parts&from=price-list");
+  }, [router, selectedCategoryId, selectedBrandId, selectedModelId, partSearch]);
+
+  // General "Settings" entry → Device Catalog (Categories tab). Remembers the
+  // exact Price List context so the Settings "← Back to Price List" control
+  // returns the user right here (same pattern as Tickets/Invoice).
+  const handleOpenCatalogSettings = useCallback(() => {
+    const params = new URLSearchParams();
+    if (selectedCategoryId) params.set("cat", selectedCategoryId);
+    if (selectedBrandId) params.set("brand", selectedBrandId);
+    if (selectedModelId) params.set("model", selectedModelId);
+    if (partSearch.trim()) params.set("q", partSearch.trim());
+    const returnTo = `/price-list${params.toString() ? `?${params.toString()}` : ""}`;
+    rememberOrigin({ key: "price-list", label: "Price List", returnTo });
+    router.push("/settings/inventory/price-lists?tab=categories&from=price-list");
+  }, [router, selectedCategoryId, selectedBrandId, selectedModelId, partSearch]);
+
+  // "Edit Model" (Device Hero) → Settings → Device Catalog, Models tab, with the
+  // current category/brand/model preselected. Remembers the Price List context
+  // so "← Back to Price List" returns the user to this exact device.
+  const handleEditModel = useCallback(() => {
+    const params = new URLSearchParams();
+    if (selectedCategoryId) params.set("cat", selectedCategoryId);
+    if (selectedBrandId) params.set("brand", selectedBrandId);
+    if (selectedModelId) params.set("model", selectedModelId);
+    if (partSearch.trim()) params.set("q", partSearch.trim());
+    const returnTo = `/price-list${params.toString() ? `?${params.toString()}` : ""}`;
+    rememberOrigin({ key: "price-list", label: "Price List", returnTo });
+    const q = new URLSearchParams({ tab: "models", from: "price-list" });
+    if (selectedCategoryId) q.set("cat", selectedCategoryId);
+    if (selectedBrandId) q.set("brand", selectedBrandId);
+    if (selectedModelId) q.set("model", selectedModelId);
+    router.push(`/settings/inventory/price-lists?${q.toString()}`);
   }, [router, selectedCategoryId, selectedBrandId, selectedModelId, partSearch]);
 
   /* ── Top search — MODELS ONLY ──
@@ -400,25 +440,56 @@ export default function PriceListPage() {
     setSmartFile(null);
   }, [smartResult, importSmartModels]);
 
-  // Hover reveal — entire panel as one unit
-  const handleHoverEnter = useCallback(() => {
-    if (!focusMode) return;
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    setNavVisible(true);
-  }, [focusMode]);
+  /* ────────────────────────────────────────────────────────────────
+     FOCUS MODE — stable interaction model (no flicker)
 
-  const handleHoverLeave = useCallback(() => {
-    if (!focusMode) return;
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    hoverTimeoutRef.current = setTimeout(() => setNavVisible(false), HOVER_DELAY_OUT);
-  }, [focusMode]);
+     One state variable (`navVisible`) is the single source of truth for
+     EXPANDED (true) / COLLAPSED (false). It is driven only by explicit,
+     non-overlapping pointer zones — never by the animating panel itself, so
+     the panel resizing under the cursor can never re-trigger a state change:
 
-  // Keep the browser panel open while the user is typing in a search box (so
-  // the model/brand search doesn't collapse mid-interaction in focus mode).
-  const keepNavOpen = useCallback(() => {
-    if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current);
-    setNavVisible(true);
+       • ZONE A — left-edge reveal strip (fixed 14px, non-animating):
+         pointer-enter here (with hover intent) → EXPAND.
+       • ZONE B — main workspace (Device Hero + Parts & Pricing):
+         pointer clearly inside → COLLAPSE (after a short intent delay).
+       • ZONE C — the browser panel + a transition buffer: PRESERVE state.
+         Entering the panel cancels any pending collapse; it never toggles.
+
+     Delays use a short hover-intent window (HOVER_INTENT_MS) so crossing the
+     divider doesn't switch states. Layout does not reflow: the panel's slot
+     keeps a stable width and the content slides via transform (see markup). */
+  const clearHoverTimer = useCallback(() => {
+    if (hoverTimeoutRef.current) { clearTimeout(hoverTimeoutRef.current); hoverTimeoutRef.current = null; }
   }, []);
+
+  // ZONE A — deliberate left-edge reveal (expand).
+  const revealBrowser = useCallback(() => {
+    if (!focusMode) return;
+    clearHoverTimer();
+    hoverTimeoutRef.current = setTimeout(() => setNavVisible(true), HOVER_INTENT_MS);
+  }, [focusMode, clearHoverTimer]);
+
+  // ZONE B — pointer clearly inside the main workspace (collapse).
+  const collapseFromWorkspace = useCallback(() => {
+    if (!focusMode) return;
+    // Only meaningful once a model is chosen and the browser is open.
+    clearHoverTimer();
+    hoverTimeoutRef.current = setTimeout(() => setNavVisible(false), HOVER_INTENT_MS);
+  }, [focusMode, clearHoverTimer]);
+
+  // ZONE C — inside the browser panel / buffer: preserve the open state and
+  // cancel any pending collapse. Never expands on its own (it's already open).
+  const holdBrowserOpen = useCallback(() => {
+    if (!focusMode) return;
+    clearHoverTimer();
+  }, [focusMode, clearHoverTimer]);
+
+  // Keep the browser open while typing in a search box (search focus must not
+  // let a stray collapse timer fire mid-interaction).
+  const keepNavOpen = useCallback(() => {
+    clearHoverTimer();
+    setNavVisible(true);
+  }, [clearHoverTimer]);
 
   useEffect(() => {
     return () => { if (hoverTimeoutRef.current) clearTimeout(hoverTimeoutRef.current); };
@@ -541,6 +612,9 @@ export default function PriceListPage() {
               </>
             )}
           </Dropdown>
+          <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={handleOpenCatalogSettings} title="Open Device Catalog settings">
+            <Settings2 className="h-3.5 w-3.5" /> Settings
+          </Button>
           <Button size="sm" className="gap-1.5 rounded-xl" onClick={handleAddPrice}>
             <Plus className="h-3.5 w-3.5" /> Add Price
           </Button>
@@ -572,35 +646,46 @@ export default function PriceListPage() {
           overflow-free on smaller screens. */}
       <div className="mx-auto flex w-full max-w-[1400px] items-start relative">
         {/*
-          REVEAL HANDLE — a visible, in-flow handle shown when the browser is
-          collapsed in Focus Mode. Anchored to the content's left edge (NOT the
-          viewport), so moving toward the app sidebar never triggers it.
-          Revealing is a deliberate click; hovering only highlights it.
+          ZONE A — LEFT-EDGE REVEAL STRIP (collapsed state only).
+          A fixed, narrow (REVEAL_ZONE_WIDTH), NON-animating strip anchored to
+          the content's left edge. Hover-intent here re-opens the browser. It is
+          the ONLY reopen trigger — the divider between panel and workspace is
+          deliberately NOT a trigger, which is what stops oscillation. It also
+          hosts the visible "Devices" handle so revealing is discoverable
+          (hover reveals; a click reveals immediately too).
         */}
         {focusMode && !navVisible && (
-          <button
-            type="button"
-            onClick={() => setNavVisible(true)}
-            className="group sticky top-[76px] self-start mr-4 flex h-[calc(100vh-92px)] w-12 shrink-0 flex-col items-center justify-center gap-5 rounded-2xl border border-border bg-card shadow-card transition-colors hover:border-brand-300 hover:bg-brand-50"
-            title="Show device browser"
-            aria-label="Show device browser"
+          <div
+            className="sticky top-[76px] self-start mr-4 shrink-0 h-[calc(100vh-92px)]"
+            style={{ width: REVEAL_ZONE_WIDTH + 48 }}
+            onMouseEnter={revealBrowser}
+            onMouseLeave={clearHoverTimer}
           >
-            <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 text-brand-600 shadow-sm transition-colors group-hover:bg-brand-500 group-hover:text-white">
-              <ChevronRight className="h-5 w-5" />
-            </span>
-            <span className="[writing-mode:vertical-rl] rotate-180 text-[12px] font-bold uppercase tracking-[0.25em] text-muted-foreground transition-colors group-hover:text-brand-600">
-              Devices
-            </span>
-          </button>
+            <button
+              type="button"
+              onClick={() => { clearHoverTimer(); setNavVisible(true); }}
+              className="group flex h-full w-12 flex-col items-center justify-center gap-5 rounded-2xl border border-border bg-card shadow-card transition-colors hover:border-brand-300 hover:bg-brand-50"
+              title="Show device browser"
+              aria-label="Show device browser"
+            >
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-brand-50 text-brand-600 shadow-sm transition-colors group-hover:bg-brand-500 group-hover:text-white">
+                <ChevronRight className="h-5 w-5" />
+              </span>
+              <span className="[writing-mode:vertical-rl] rotate-180 text-[12px] font-bold uppercase tracking-[0.25em] text-muted-foreground transition-colors group-hover:text-brand-600">
+                Devices
+              </span>
+            </button>
+          </div>
         )}
 
         {/*
-          UNIFIED DEVICE BROWSER PANEL
-          One outer motion.div controls the width in the flex layout.
-          When collapsed: width=0, marginRight=0, overflow hidden.
-          The inner wrapper uses translateX for GPU-accelerated slide.
-          All three sections (Category, Brand, Model) live inside as
-          one continuous unit — they always appear/disappear together.
+          UNIFIED DEVICE BROWSER PANEL (ZONE C).
+          The outer motion.div animates its WIDTH to reclaim/return layout
+          space, but it carries NO hover handlers — so it can never re-trigger a
+          state change while it resizes under the cursor (this was the flicker
+          source). Hover intent lives on the STABLE inner content (holdBrowserOpen)
+          which keeps a fixed PANEL_WIDTH and slides via transform, plus a small
+          transition buffer on its right edge that preserves the open state.
         */}
         <motion.div
           className="shrink-0 overflow-hidden sticky top-[76px] self-start h-[calc(100vh-92px)]"
@@ -610,8 +695,6 @@ export default function PriceListPage() {
           }}
           transition={SPRING}
           style={{ willChange: "width, margin" }}
-          onMouseEnter={handleHoverEnter}
-          onMouseLeave={handleHoverLeave}
         >
           <motion.div
             className="flex gap-3.5 h-full"
@@ -621,6 +704,7 @@ export default function PriceListPage() {
               opacity: panelOpen ? 1 : 0,
             }}
             transition={SPRING}
+            onMouseEnter={holdBrowserOpen}
           >
             {/* LEFT COLUMN: Category + Brand stacked, filling full height */}
             <div className="w-[196px] shrink-0 flex flex-col gap-3.5 h-full">
@@ -666,8 +750,34 @@ export default function PriceListPage() {
           </motion.div>
         </motion.div>
 
-        {/* ─── Right Workspace: Hero Card + Parts Table ────────────── */}
-        <div ref={heroScrollAnchor as React.RefObject<HTMLDivElement>} className="flex-1 min-w-0 space-y-4 [overflow-x:clip]">
+        {/*
+          ZONE C — TRANSITION BUFFER. A small, invisible neutral gutter between
+          the browser and the main workspace. The pointer crossing this band
+          PRESERVES the current state (it cancels a pending collapse but never
+          toggles), so travelling from the Model list into the Parts table does
+          not flip the sidebar. Only visible/active in focus mode when open.
+        */}
+        {focusMode && navVisible && (
+          <div
+            aria-hidden="true"
+            className="shrink-0 self-stretch"
+            style={{ width: 16 }}
+            onMouseEnter={holdBrowserOpen}
+          />
+        )}
+
+        {/* ─── Right Workspace (ZONE B): Hero Card + Parts Table ─────
+            Pointer clearly inside here → collapse the browser (after a short
+            hover-intent delay). This is the ONLY collapse trigger, and because
+            it sits past the transition buffer it can't fight the panel's
+            reveal. */}
+        <div
+          ref={heroScrollAnchor as React.RefObject<HTMLDivElement>}
+          className="flex-1 min-w-0 space-y-4 [overflow-x:clip]"
+          onMouseEnter={collapseFromWorkspace}
+        >
+          {/* Guard: a stray move back toward the browser cancels the pending
+              collapse so the panel doesn't close after the pointer left. */}
           {selectedModel ? (
             <>
               <DeviceHeroCard
@@ -677,6 +787,7 @@ export default function PriceListPage() {
                 parts={modelParts}
                 collapsed={heroCollapsed}
                 onToggleCollapse={toggleHeroCollapse}
+                onEditModel={handleEditModel}
               />
               <PartsAndPricing
                 parts={modelParts}
@@ -928,6 +1039,7 @@ function DeviceHeroCard({
   parts = [],
   collapsed = false,
   onToggleCollapse,
+  onEditModel,
 }: {
   model: PriceListModel;
   brand: PriceListBrand | null;
@@ -937,6 +1049,8 @@ function DeviceHeroCard({
   collapsed?: boolean;
   /** Toggle handler for the expand/collapse chevron control. */
   onToggleCollapse?: () => void;
+  /** Opens the model in Settings → Device Catalog (Models tab). */
+  onEditModel?: () => void;
 }) {
   const CategoryIcon = (category && iconMap[category.icon]) || Laptop;
   const isActive = model.status === "active";
@@ -1039,7 +1153,7 @@ function DeviceHeroCard({
                   {isActive ? "Active" : "Discontinued"}
                 </Badge>
               </div>
-              <Button variant="outline" size="sm" className="ml-auto gap-1.5 rounded-xl text-[12px] shrink-0">
+              <Button variant="outline" size="sm" className="ml-auto gap-1.5 rounded-xl text-[12px] shrink-0" onClick={onEditModel}>
                 <Pencil className="h-3 w-3" /> Edit Model
               </Button>
             </div>
@@ -1084,7 +1198,7 @@ function DeviceHeroCard({
                       </Badge>
                     </div>
                   </div>
-                  <Button variant="outline" size="sm" className="gap-1.5 rounded-xl text-[12px] shrink-0">
+                  <Button variant="outline" size="sm" className="gap-1.5 rounded-xl text-[12px] shrink-0" onClick={onEditModel}>
                     <Pencil className="h-3 w-3" /> Edit Model
                   </Button>
                 </div>

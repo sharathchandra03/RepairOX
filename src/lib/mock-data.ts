@@ -900,6 +900,17 @@ export type TeamMember = {
   createdAt?: string;
   updatedAt?: string;
   lastLogin?: string;
+
+  /* ── Credential lifecycle (never the plaintext password) ──
+   *  Surfaced so an authorized admin can see the credential STATUS of an
+   *  account (set / last changed / must-reset) without ever seeing the
+   *  password. Stamped server-side on password writes. */
+  /** When the login password was last set/changed. */
+  lastPasswordChangedAt?: string;
+  /** The user must change their password at next login (temporary password). */
+  passwordResetRequired?: boolean;
+  /** When login was disabled / the account was suspended. */
+  disabledAt?: string;
 };
 
 /** Build a seeded staff account with a known default password so the demo is

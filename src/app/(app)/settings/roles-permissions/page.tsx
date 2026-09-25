@@ -9,7 +9,7 @@ import {
   TrendingUp, Wallet, Crown, Code2, LayoutGrid, SlidersHorizontal,
   Mail, UserCog, Plus, MapPin, KeyRound, MoreHorizontal, Power, Ban, Phone,
   Sparkles, Home, Ticket, FileText, Footprints, ClipboardList, Truck,
-  BookUser, UsersRound, IndianRupee, BarChart3, Settings, Lock, Pencil,
+  BookUser, UsersRound, IndianRupee, BarChart3, Settings, Lock, Pencil, CircleUser,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,7 @@ import { DeleteRoleDialog } from "@/components/settings/delete-role-dialog";
 import { ChangeRoleDrawer } from "@/components/settings/change-role-drawer";
 import { DeleteMemberDialog } from "@/components/settings/delete-member-dialog";
 import { ResetPasswordDrawer } from "@/components/settings/reset-password-drawer";
+import { UserDetailsDrawer } from "@/components/settings/user-details-drawer";
 import {
   PERMISSION_GROUPS, ALL_PERMISSIONS, WORKSPACE_MAP, WORKSPACES,
   type PermissionKey, type RoleDef, type WorkspaceId,
@@ -1507,6 +1508,7 @@ function UsersTab({
   const selfEmail = currentUser?.email ?? "";
 
   const [query, setQuery] = useState("");
+  const [viewing, setViewing] = useState<TeamMember | null>(null);
   const [editing, setEditing] = useState<TeamMember | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
@@ -1571,10 +1573,15 @@ function UsersTab({
                     className="border-t border-border transition hover:bg-muted/40"
                   >
                     <td className="px-5 py-3">
-                      <div className="flex items-center gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setViewing(t)}
+                        title="View full user details"
+                        className="flex w-full items-center gap-2.5 text-left"
+                      >
                         <Avatar name={t.name} size={32} />
                         <div className="min-w-0">
-                          <p className="truncate text-[13.5px] font-semibold leading-tight">
+                          <p className="truncate text-[13.5px] font-semibold leading-tight text-[#3A4DBB] hover:underline">
                             {t.name}
                             {isSelf && <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">(you)</span>}
                           </p>
@@ -1587,7 +1594,7 @@ function UsersTab({
                             </p>
                           )}
                         </div>
-                      </div>
+                      </button>
                     </td>
                     <td className="py-3">
                       <Badge tone="brand">{role?.label ?? t.roleId}</Badge>
@@ -1630,6 +1637,9 @@ function UsersTab({
                             {(close) => (
                               <>
                                 <MenuLabel>Manage access</MenuLabel>
+                                <MenuItem icon={CircleUser} onClick={() => { setViewing(t); close(); }}>
+                                  View details
+                                </MenuItem>
                                 <MenuItem icon={UserCog} onClick={() => { setEditing(t); close(); }}>
                                   Change role
                                 </MenuItem>
@@ -1679,6 +1689,18 @@ function UsersTab({
         </div>
       </div>
 
+      <UserDetailsDrawer
+        open={!!viewing}
+        member={viewing}
+        roles={allRoles}
+        onClose={() => setViewing(null)}
+        onChangeRole={(m) => { setViewing(null); setEditing(m); }}
+        onResetPassword={(m) => { setViewing(null); setResetting(m); }}
+        onToggleLogin={(id, enabled) => toggleLogin(id, enabled)}
+        onSuspend={(m) => { setViewing(null); setSuspending(m); }}
+        onActivate={(id) => setStaffStatus(id, "active")}
+      />
+
       <ChangeRoleDrawer
         open={!!editing}
         onClose={() => setEditing(null)}
@@ -1692,8 +1714,8 @@ function UsersTab({
         open={!!resetting}
         onClose={() => setResetting(null)}
         memberName={resetting?.name ?? ""}
-        onConfirm={(password) => {
-          if (resetting) resetPassword(resetting.id, password);
+        onConfirm={(password, opts) => {
+          if (resetting) resetPassword(resetting.id, password, opts);
           setResetting(null);
         }}
       />

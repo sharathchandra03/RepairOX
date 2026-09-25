@@ -87,6 +87,13 @@ interface CatalogActions {
   updateCategory: (id: string, updates: Partial<DeviceCategory>) => void;
   deleteCategory: (id: string) => void;
   toggleCategory: (id: string) => void;
+  /**
+   * Persist an administrator-defined category display order. `orderedIds` is
+   * the full list of category ids in the desired order; each category's
+   * `sortOrder` is written to its index so the order survives refresh,
+   * logout/login and is shared org-wide by Settings and Shop → Price List.
+   */
+  reorderCategories: (orderedIds: string[]) => void;
   // Brands
   addBrand: (data: Omit<PriceListBrand, "id" | "count">) => PriceListBrand;
   updateBrand: (id: string, updates: Partial<PriceListBrand>) => void;
@@ -121,6 +128,59 @@ function seedState(): CatalogState {
     brands: SEED_BRANDS.map((b) => ({ ...b, enabled: b.enabled ?? true, seed: true })),
     models: SEED_MODELS.map((m) => ({ ...m, seed: true })),
     parts: SEED_PARTS.map((p) => ({ ...p, seed: true })),
+  };
+}
+
+/**
+ * Sort categories by the administrator-defined `sortOrder` (ascending), with a
+ * stable name/id tiebreaker. This is the ONE manual ordering layer — brands and
+ * models always sort A–Z (see sortBrandsAZ / sortModelsAZ). Both Settings →
+ * Device Catalog and Shop → Price List must render categories through this so
+ * they share a single source of truth.
+ */
+export function sortCategories(cats: DeviceCategory[]): DeviceCategory[] {
+  return [...cats].sort((a, b) => {
+    const ao = a.sortOrder ?? 0;
+    const bo = b.sortOrder ?? 0;
+    if (ao !== bo) return ao - bo;
+    const byName = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    if (byName !== 0) return byName;
+    return a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Case-insensitive A–Z sort for brands, based on the normalized brand name.
+ * New brands automatically fall into their correct alphabetical position.
+ */
+export function sortBrandsAZ<T extends { name: string; id: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+    return byName !== 0 ? byName : a.id.localeCompare(b.id);
+  });
+}
+
+/**
+ * Case-insensitive A–Z sort for models, based on the normalized model name.
+ * Never uses creation/insertion order. New models fall into position on add.
+ */
+export function sortModelsAZ<T extends { name: string; id: string }>(list: T[]): T[] {
+  return [...list].sort((a, b) => {
+    const byName = a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" });
+    return byName !== 0 ? byName : a.id.localeCompare(b.id);
+  });
+}
+
+/** Map a Supabase price_list_categories row → DeviceCategory. */
+function rowToCategory(r: any): DeviceCategory {
+  return {
+    id: r.id,
+    name: r.name ?? "",
+    icon: r.icon ?? "Box",
+    count: r.item_count ?? 0,
+    imageUrl: r.image_url ?? undefined,
+    enabled: r.enabled ?? true,
+    sortOrder: r.sort_order ?? 0,
   };
 }
 
@@ -190,20 +250,37 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         // ties — without this a row that gets UPDATEd (e.g. an image upload)
         // resurfaces in an arbitrary position (usually last). Ordering by the
         // unique id after created_at keeps the list order fixed across edits.
-        let catsQ = supabase.from("price_list_categories").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+        //
+        // Categories load in the administrator-defined display order
+        // (sort_order asc). This is resilient: if migration 0042 hasn't run yet
+        // (no sort_order column), the query errors — we detect that and retry
+        // WITHOUT the sort_order ordering so categories still load. `sortCategories`
+        // then falls back to name/id order (sortOrder defaults to 0). Once the
+        // migration is applied the admin order takes over automatically.
+        const fetchCategories = async () => {
+          let q = supabase!.from("price_list_categories").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }).order("id", { ascending: true });
+          if (orgId) q = q.eq("organization_id", orgId);
+          const res = await q;
+          if (res.error) {
+            let q2 = supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+            if (orgId) q2 = q2.eq("organization_id", orgId);
+            return await q2;
+          }
+          return res;
+        };
+
         let brdsQ = supabase.from("price_list_brands").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
         let modsQ = supabase.from("price_list_models").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
         let prtsQ = supabase.from("price_list_parts").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
         if (orgId) {
-          catsQ = catsQ.eq("organization_id", orgId);
           brdsQ = brdsQ.eq("organization_id", orgId);
           modsQ = modsQ.eq("organization_id", orgId);
           prtsQ = prtsQ.eq("organization_id", orgId);
         }
 
-        const [{ data: cats }, { data: brds }, { data: mods }, { data: prts }] = await Promise.all([catsQ, brdsQ, modsQ, prtsQ]);
+        const [{ data: cats }, { data: brds }, { data: mods }, { data: prts }] = await Promise.all([fetchCategories(), brdsQ, modsQ, prtsQ]);
         const dbState: CatalogState = {
-          categories: (cats ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })),
+          categories: sortCategories((cats ?? []).map(rowToCategory)),
           brands: (brds ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", categoryId: r.category_id ?? "", count: r.item_count ?? 0, logoUrl: r.logo_url ?? undefined, enabled: r.enabled ?? true })),
           models: (mods ?? []).map((r: any) => ({ id: r.id, name: r.name ?? "", brandId: r.brand_id ?? "", categoryId: r.category_id ?? "", year: r.model_year ?? new Date().getFullYear(), chip: r.chip ?? undefined, storage: r.storage ?? undefined, displaySize: r.display_size ?? undefined, variant: r.variant ?? undefined, imageUrl: r.image_url ?? undefined, status: r.status ?? "active", meta: r.meta ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "", updatedBy: "", createdOn: r.created_at ?? "" })),
           parts: (prts ?? []).map((r: any) => ({ id: Number(r.id) || 0, modelId: r.model_id ?? "", partName: r.part_name ?? "", partNumber: r.part_number ?? "", price: Number(r.price ?? 0), priceKnown: r.price_known ?? true, warranty: r.warranty ?? "N/A", availability: r.availability ?? "In Stock", repairCategory: r.repair_category ?? undefined, imageUrl: r.image_url ?? undefined, lastUpdated: r.updated_at ?? r.created_at ?? "" })),
@@ -214,7 +291,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
         } else if (orgId) {
           // DB is empty for this org — push seed data so subsequent operations persist.
           const seed = seedState();
-          const seedCatRows = seed.categories.map((c) => ({ id: c.id, organization_id: orgId, name: c.name, icon: c.icon, item_count: c.count, enabled: c.enabled ?? true, image_url: null }));
+          const seedCatRows = seed.categories.map((c, i) => ({ id: c.id, organization_id: orgId, name: c.name, icon: c.icon, item_count: c.count, enabled: c.enabled ?? true, image_url: null, sort_order: c.sortOrder ?? i }));
           const seedBrandRows = seed.brands.map((b) => ({ id: b.id, organization_id: orgId, name: b.name, category_id: b.categoryId, item_count: b.count, logo_url: b.logoUrl ?? null, enabled: b.enabled ?? true }));
           const seedModelRows = seed.models.map((m) => ({ id: m.id, organization_id: orgId, brand_id: m.brandId, category_id: m.categoryId, name: m.name, model_year: m.year, chip: m.chip ?? null, storage: m.storage ?? null, display_size: m.displaySize ?? null, variant: m.variant ?? null, image_url: m.imageUrl ?? null, status: m.status ?? "active" }));
           const seedPartRows = seed.parts.map((p) => ({ id: String(p.id), organization_id: orgId, model_id: p.modelId, part_name: p.partName, part_number: p.partNumber ?? null, price: p.price, price_known: p.priceKnown ?? true, warranty: p.warranty ?? null, availability: p.availability ?? "In Stock", repair_category: p.repairCategory ?? null, image_url: p.imageUrl ?? null }));
@@ -232,10 +309,14 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       // Realtime subscription for catalog tables.
       const channel = supabase.channel("catalog-realtime")
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_categories" }, () => {
-          let q = supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+          let q = supabase!.from("price_list_categories").select("*").order("sort_order", { ascending: true }).order("created_at", { ascending: true }).order("id", { ascending: true });
           if (orgIdRef.current) q = q.eq("organization_id", orgIdRef.current);
-          q.then(({ data }) => {
-            if (data) setState((s) => ({ ...s, categories: data.map((r: any) => ({ id: r.id, name: r.name ?? "", icon: r.icon ?? "Box", count: r.item_count ?? 0, imageUrl: r.image_url ?? undefined, enabled: r.enabled ?? true })) }));
+          q.then((res) => {
+            if (!res.error && res.data) { setState((s) => ({ ...s, categories: sortCategories(res.data.map(rowToCategory)) })); return; }
+            // Fallback when sort_order column doesn't exist yet (pre-migration).
+            let q2 = supabase!.from("price_list_categories").select("*").order("created_at", { ascending: true }).order("id", { ascending: true });
+            if (orgIdRef.current) q2 = q2.eq("organization_id", orgIdRef.current);
+            q2.then(({ data }) => { if (data) setState((s) => ({ ...s, categories: sortCategories(data.map(rowToCategory)) })); });
           });
         })
         .on("postgres_changes" as any, { event: "*", schema: "public", table: "price_list_brands" }, () => {
@@ -263,7 +344,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       return () => { supabase!.removeChannel(channel); };
     } else {
       const saved = loadFromStorage();
-      if (saved) setState(saved);
+      if (saved) setState({ ...saved, categories: sortCategories(saved.categories) });
       setHydrated(true);
     }
   }, []);
@@ -281,6 +362,10 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
 
   /* ── Categories ── */
   const addCategory = useCallback((data: Omit<DeviceCategory, "id" | "count">) => {
+    // New categories append to the END of the admin-defined order.
+    const nextOrder = stateRef.current.categories.reduce(
+      (max, c) => Math.max(max, (c.sortOrder ?? 0) + 1), 0
+    );
     const cat: DeviceCategory = {
       id: generateCategoryId(),
       name: data.name.trim(),
@@ -288,10 +373,11 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       count: 0,
       imageUrl: data.imageUrl,
       enabled: data.enabled ?? true,
+      sortOrder: nextOrder,
     };
-    setState((s) => ({ ...s, categories: [...s.categories, cat] }));
+    setState((s) => ({ ...s, categories: sortCategories([...s.categories, cat]) }));
     if (isSupabaseConfigured && supabase) {
-      supabase.from("price_list_categories").insert({ id: cat.id, organization_id: orgIdRef.current, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled }).then();
+      supabase.from("price_list_categories").insert({ id: cat.id, organization_id: orgIdRef.current, name: cat.name, icon: cat.icon, item_count: 0, image_url: cat.imageUrl ?? null, enabled: cat.enabled, sort_order: cat.sortOrder }).then();
     }
     logActivity({
       module: "Price List", action: "Category Created", severity: "success",
@@ -304,7 +390,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
     const prev = stateRef.current.categories.find((c) => c.id === id);
     setState((s) => ({
       ...s,
-      categories: s.categories.map((c) => (c.id === id ? { ...c, ...updates } : c)),
+      categories: sortCategories(s.categories.map((c) => (c.id === id ? { ...c, ...updates } : c))),
     }));
     if (isSupabaseConfigured && supabase) {
       const row: Record<string, unknown> = {};
@@ -312,6 +398,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       if ("icon" in updates) row.icon = updates.icon;
       if ("enabled" in updates) row.enabled = updates.enabled;
       if ("imageUrl" in updates) row.image_url = updates.imageUrl ?? null;
+      if ("sortOrder" in updates) row.sort_order = updates.sortOrder ?? 0;
       supabase.from("price_list_categories").update(row).eq("id", id).then();
     }
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
@@ -364,6 +451,31 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
       entity: "Category", reference: prev?.name || id,
       description: `${next ? "Enabled" : "Disabled"} category ${prev?.name || id}.`,
       changes: [{ field: "Enabled", from: String(!next), to: String(next) }],
+    });
+  }, []);
+
+  const reorderCategories = useCallback((orderedIds: string[]) => {
+    // Map each id to its new index; unknown ids keep their existing order after
+    // the listed ones (defensive — the UI always passes the full list).
+    const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+    const fallback = orderedIds.length;
+    setState((s) => ({
+      ...s,
+      categories: sortCategories(
+        s.categories.map((c) => ({ ...c, sortOrder: orderMap.get(c.id) ?? fallback }))
+      ),
+    }));
+    if (isSupabaseConfigured && supabase) {
+      // Persist each new position. Per-row updates keep the existing RLS/audit
+      // path and avoid a bulk upsert that could disturb other columns.
+      orderedIds.forEach((id, i) => {
+        supabase!.from("price_list_categories").update({ sort_order: i }).eq("id", id).then();
+      });
+    }
+    logActivity({
+      module: "Price List", action: "Categories Reordered", severity: "info",
+      entity: "Category", reference: `${orderedIds.length} categories`,
+      description: `Updated the Price List category display order.`,
     });
   }, []);
 
@@ -891,7 +1003,7 @@ export function CatalogProvider({ children }: { children: ReactNode }) {
   const catalog: Catalog = {
     ...state,
     hydrated,
-    addCategory, updateCategory, deleteCategory, toggleCategory,
+    addCategory, updateCategory, deleteCategory, toggleCategory, reorderCategories,
     addBrand, updateBrand, deleteBrand,
     addModel, updateModel, deleteModel, bulkDeleteModels, setModelImage,
     addPart, updatePart, deletePart, bulkDeleteParts,
@@ -912,11 +1024,13 @@ export function useCatalog(): Catalog {
 /* ─── Selector helpers (pure) ────────────────────────────────────── */
 
 export function brandsForCategory(brands: PriceListBrand[], categoryId: string) {
-  return brands.filter((b) => b.categoryId === categoryId);
+  // Brands ALWAYS display A–Z (case-insensitive) — never creation order.
+  return sortBrandsAZ(brands.filter((b) => b.categoryId === categoryId));
 }
 
 export function modelsForBrand(models: PriceListModel[], brandId: string) {
-  return models.filter((m) => m.brandId === brandId);
+  // Models ALWAYS display A–Z (case-insensitive) within the selected brand.
+  return sortModelsAZ(models.filter((m) => m.brandId === brandId));
 }
 
 export function partsForModel(parts: DevicePart[], modelId: string) {

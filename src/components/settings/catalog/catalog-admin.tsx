@@ -23,8 +23,18 @@ const TABS: { id: CatalogTabId; label: string; icon: React.ComponentType<{ class
 export function CatalogAdmin() {
   const searchParams = useSearchParams();
   const initialTab = searchParams.get("tab");
+  // Optional deep-link context (e.g. from Shop → Price List "Edit Model"):
+  // preselect the category/brand/model and open the matching tab.
+  const initialCategoryId = searchParams.get("cat");
+  const initialBrandId = searchParams.get("brand");
+  const initialModelId = searchParams.get("model");
   return (
-    <CatalogSelectionProvider initialTab={initialTab}>
+    <CatalogSelectionProvider
+      initialTab={initialTab}
+      initialCategoryId={initialCategoryId}
+      initialBrandId={initialBrandId}
+      initialModelId={initialModelId}
+    >
       <CatalogAdminInner />
     </CatalogSelectionProvider>
   );

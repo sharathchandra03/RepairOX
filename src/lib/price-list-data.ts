@@ -9,6 +9,14 @@ export type DeviceCategory = {
   imageUrl?: string;
   /** Whether the category is visible/usable across modules. Defaults to true. */
   enabled?: boolean;
+  /**
+   * Administrator-defined display order (ascending). This is the ONLY manually
+   * controlled ordering layer in the Device Catalog — brands and models always
+   * sort A–Z. Persisted org-wide (price_list_categories.sort_order) so the
+   * order is identical in Settings → Device Catalog and Shop → Price List
+   * across refreshes, users, browsers and devices. Defaults to 0.
+   */
+  sortOrder?: number;
   /** True for built-in sample data; cleared automatically on first import. */
   seed?: boolean;
 };
@@ -68,15 +76,15 @@ export type DevicePart = {
 /* ─── Categories ─────────────────────────────────────────────────── */
 
 export const deviceCategories: DeviceCategory[] = [
-  { id: "cat-mobile", name: "Mobile", icon: "Smartphone", count: 2453 },
-  { id: "cat-tablet", name: "Tablet", icon: "Tablet", count: 568 },
-  { id: "cat-laptop", name: "Laptop", icon: "Laptop", count: 1280 },
-  { id: "cat-mac", name: "Mac", icon: "Monitor", count: 892 },
-  { id: "cat-smartwatch", name: "Smart Watch", icon: "Watch", count: 320 },
-  { id: "cat-accessories", name: "Accessories", icon: "Headphones", count: 760 },
-  { id: "cat-gaming", name: "Gaming Console", icon: "Gamepad2", count: 210 },
-  { id: "cat-drone", name: "Drone", icon: "Plane", count: 98 },
-  { id: "cat-others", name: "Others", icon: "Box", count: 145 },
+  { id: "cat-mobile", name: "Mobile", icon: "Smartphone", count: 2453, sortOrder: 0 },
+  { id: "cat-tablet", name: "Tablet", icon: "Tablet", count: 568, sortOrder: 1 },
+  { id: "cat-laptop", name: "Laptop", icon: "Laptop", count: 1280, sortOrder: 2 },
+  { id: "cat-mac", name: "Mac", icon: "Monitor", count: 892, sortOrder: 3 },
+  { id: "cat-smartwatch", name: "Smart Watch", icon: "Watch", count: 320, sortOrder: 4 },
+  { id: "cat-accessories", name: "Accessories", icon: "Headphones", count: 760, sortOrder: 5 },
+  { id: "cat-gaming", name: "Gaming Console", icon: "Gamepad2", count: 210, sortOrder: 6 },
+  { id: "cat-drone", name: "Drone", icon: "Plane", count: 98, sortOrder: 7 },
+  { id: "cat-others", name: "Others", icon: "Box", count: 145, sortOrder: 8 },
 ];
 
 /* ─── Brands (per category) ──────────────────────────────────────── */

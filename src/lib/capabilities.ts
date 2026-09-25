@@ -53,7 +53,22 @@ export const CAP = {
     multiStore: ["multi_store_access"],
     create: ["stores_create", "manage_branches"],
     edit: ["stores_edit", "manage_branches"],
+    // View the store list / a store's administration detail.
+    listView: ["stores_list_view", "manage_branches", "multi_store_access", "stores_view_all"],
+    // View a store's members (People With Access).
+    viewUsers: ["stores_users_view", "stores_users_assign", "manage_branches", "manage_users"],
     assignUsers: ["stores_users_assign", "manage_branches", "manage_users"],
+    removeUsers: ["stores_users_remove", "manage_branches", "manage_users"],
+    // Manage store logins / credential actions (reset password, temp password).
+    manageCredentials: ["stores_credentials_manage", "manage_branches", "manage_users"],
+    // Assign a role to a store member.
+    assignRoles: ["stores_roles_assign", "manage_branches", "manage_users", "assign_roles"],
+    // Activate / deactivate (archive) a store.
+    deactivate: ["stores_deactivate", "manage_branches"],
+    // Permanently delete a store (guarded further server-side: empty stores only).
+    delete: ["stores_delete"],
+    // View a store's reports.
+    reportsView: ["stores_reports_view", "multi_store_access", "manage_branches"],
   },
   /* Money-sensitive VISIBILITY gates (gap audit v3). Owners hold these via
      full_access; grant explicitly to let a role SEE these figures. */

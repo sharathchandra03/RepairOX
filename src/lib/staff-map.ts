@@ -25,6 +25,10 @@ export interface StaffRow {
   created_at: string | null;
   updated_at: string | null;
   last_login: string | null;
+  /* ── Credential lifecycle (migration 0043). Never the password itself. ── */
+  last_password_changed_at?: string | null;
+  password_reset_required?: boolean | null;
+  disabled_at?: string | null;
 }
 
 export function rowToStaff(r: StaffRow): TeamMember {
@@ -48,5 +52,8 @@ export function rowToStaff(r: StaffRow): TeamMember {
     createdAt: r.created_at ?? undefined,
     updatedAt: r.updated_at ?? undefined,
     lastLogin: r.last_login ?? undefined,
+    lastPasswordChangedAt: r.last_password_changed_at ?? undefined,
+    passwordResetRequired: Boolean(r.password_reset_required),
+    disabledAt: r.disabled_at ?? undefined,
   };
 }

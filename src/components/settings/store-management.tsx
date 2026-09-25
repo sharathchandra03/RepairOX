@@ -46,7 +46,7 @@ const emptyForm = { name: "", code: "", address: "", city: "", state: "", postal
 export function StoreManagement() {
   const router = useRouter();
   const { apiFetch, authReady, can, allRoles, grants } = usePermissions();
-  const { setActiveStore, refreshStores } = useStoreContext();
+  const { refreshStores } = useStoreContext();
 
   const canManage = can("manage_branches") || can("full_access");
 
@@ -212,9 +212,11 @@ export function StoreManagement() {
     await load(); await refreshStores();
   }
 
-  function openStore(s: StoreRow) {
-    setActiveStore(s.id);
-    router.push("/dashboard");
+  /* "View Store" opens the store ADMINISTRATION detail — identity, people with
+     access, credentials and data — NOT the operational workspace. Entering the
+     workspace is done from the header store selector. */
+  function viewStore(s: StoreRow) {
+    router.push(`/settings/store/configuration/${s.id}`);
   }
 
   function openLoginDrawer(s: StoreRow) {
@@ -358,10 +360,10 @@ export function StoreManagement() {
                 {/* Primary action fills the row; secondary actions are compact,
                     equal-size icon buttons with tooltips so nothing wraps. */}
                 <button
-                  onClick={() => openStore(b)}
+                  onClick={() => viewStore(b)}
                   className="group inline-flex h-9 flex-1 items-center justify-center gap-1.5 rounded-full border border-[#E5E9F8] bg-[#F5F7FF] px-3 text-[12px] font-semibold text-[#3A4DBB] transition hover:border-[#B3BFF6]"
                 >
-                  Open store <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
+                  View Store <ArrowRight className="h-3.5 w-3.5 transition group-hover:translate-x-0.5" />
                 </button>
                 <button
                   onClick={() => openEdit(b)}

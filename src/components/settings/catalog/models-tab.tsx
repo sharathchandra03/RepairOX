@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Plus, Search, Pencil, Trash2, Laptop, Trash, CheckSquare, Square, ChevronRight, Wrench } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import type { PriceListModel, DevicePart } from "@/lib/price-list-data";
 
 export function ModelsTab() {
   const { categories, brands, models, parts, addModel, updateModel, deleteModel, bulkDeleteModels } = useCatalog();
-  const { categoryId: selCat, brandId: selBrand, setCategory, setBrand, clearSelection, openParts } = useCatalogSelection();
+  const { categoryId: selCat, brandId: selBrand, modelId: selModel, setCategory, setBrand, setModel, clearSelection, openParts } = useCatalogSelection();
 
   // No auto-fallback: each level stays empty until the user picks it.
   const categoryId = selCat ?? "";
@@ -28,6 +28,20 @@ export function ModelsTab() {
   const [detailId, setDetailId] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmBulk, setConfirmBulk] = useState(false);
+
+  // Deep-link "Edit Model" (from Shop → Price List): when the tab opens with a
+  // preselected model, open its edit drawer once. The selection's modelId is
+  // then cleared so it doesn't re-open when the drawer is closed.
+  const deepLinkHandled = useRef(false);
+  useEffect(() => {
+    if (deepLinkHandled.current) return;
+    if (!selModel) return;
+    const target = models.find((m) => m.id === selModel);
+    if (!target) return; // wait until catalog is hydrated
+    deepLinkHandled.current = true;
+    setEditing(target);
+    setModel(null);
+  }, [selModel, models, setModel]);
 
   const rows = useMemo(() => {
     let list = models.filter((m) => m.brandId === effectiveBrandId);

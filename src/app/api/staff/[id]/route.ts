@@ -65,11 +65,20 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   if (body.designation !== undefined) update.designation = body.designation;
   if (body.status !== undefined) update.status = body.status;
   if (body.loginEnabled !== undefined) update.login_enabled = Boolean(body.loginEnabled);
+  // Force-password-change flag (temporary password). An explicit boolean lets
+  // an admin set OR clear it independently of a password write.
+  if (body.passwordResetRequired !== undefined) {
+    update.password_reset_required = Boolean(body.passwordResetRequired);
+  }
 
   const finalStatus = (update.status ?? row.status) as string;
   const finalLoginEnabled = (update.login_enabled ?? row.login_enabled) as boolean;
   let authUserId: string | null = row.auth_user_id;
   const email = (update.email ?? row.email) as string | null;
+  // Track whether the login password was (re)written on this request so we can
+  // stamp the credential-lifecycle metadata. We NEVER store the password
+  // itself — only WHEN it changed. Passwords stay hashed in Supabase Auth.
+  let passwordWritten = false;
 
   // Enabling login for a staff member who has no auth account yet needs a password.
   if (finalLoginEnabled && !authUserId) {
@@ -83,10 +92,30 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     }
     authUserId = created.user.id;
     update.auth_user_id = authUserId;
+    passwordWritten = true;
   } else if (body.password && authUserId) {
     // Password reset / change.
     await admin.auth.admin.updateUserById(authUserId, { password: body.password });
     update.login_enabled = true;
+    passwordWritten = true;
+  }
+
+  // Stamp credential-lifecycle metadata when the password was written. If the
+  // caller flagged this as a TEMPORARY password, force a change at next login;
+  // otherwise a normal reset clears any prior force-change requirement.
+  if (passwordWritten) {
+    update.last_password_changed_at = new Date().toISOString();
+    if (body.temporary === true || body.passwordResetRequired === true) {
+      update.password_reset_required = true;
+    } else if (body.passwordResetRequired === undefined) {
+      update.password_reset_required = false;
+    }
+  }
+
+  // Stamp/clear disabled_at when login is toggled or the account is suspended.
+  if (body.loginEnabled !== undefined || body.status !== undefined) {
+    const nowDisabled = finalStatus === "suspended" || finalLoginEnabled === false;
+    update.disabled_at = nowDisabled ? (row.disabled_at ?? new Date().toISOString()) : null;
   }
 
   const { data: updated, error: updErr } = await admin
@@ -102,6 +131,87 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   }
 
   return NextResponse.json({ ok: true, member: rowToStaff(updated) });
+}
+
+/* GET /api/staff/[id] — full account detail for the User Details view.
+   Returns the staff profile, the role, EVERY store the user is assigned to
+   (their home branch + active user_stores grants, resolved to store names),
+   and the credential STATUS (password set? last changed? must reset?). It
+   NEVER returns a password — no plaintext credential exists to return.
+   Gated on user-view / user-management authority. */
+export async function GET(req: Request, { params }: { params: { id: string } }) {
+  const guard = await requirePermission(req, [
+    "view_users", "manage_users", "edit_users", "add_user",
+    "stores_users_view", "manage_roles",
+  ]);
+  if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
+  const { admin, user } = guard;
+
+  const { data: row, error } = await admin
+    .from("staff").select("*").eq("id", params.id).maybeSingle();
+  if (error || !row) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
+
+  const member = rowToStaff(row);
+
+  // Assigned stores: the user's home branch + any active user_stores grants,
+  // resolved to { id, name, code, isDefault, roleId, accessOrigin }. Tolerates
+  // the user_stores table being absent (multi-store migration optional).
+  const storeIds = new Set<string>();
+  if (row.branch_id) storeIds.add(row.branch_id as string);
+  let grants: any[] = [];
+  try {
+    const { data: g } = await admin
+      .from("user_stores")
+      .select("branch_id, is_default, status, role_id, created_by")
+      .eq("staff_id", params.id)
+      .eq("status", "active");
+    grants = g ?? [];
+    for (const gr of grants) if (gr.branch_id) storeIds.add(gr.branch_id as string);
+  } catch { /* user_stores not present */ }
+
+  const stores: {
+    id: string; name: string; code: string | null; isDefault: boolean;
+    roleId: string | null; isHome: boolean;
+  }[] = [];
+  if (storeIds.size > 0) {
+    const { data: branches } = await admin
+      .from("branches")
+      .select("id, name, code")
+      .in("id", Array.from(storeIds));
+    const byId = new Map((branches ?? []).map((b) => [b.id as string, b]));
+    for (const id of storeIds) {
+      const b = byId.get(id);
+      if (!b) continue;
+      const grant = grants.find((gr) => gr.branch_id === id);
+      stores.push({
+        id,
+        name: (b.name as string) ?? "",
+        code: (b.code as string) ?? null,
+        isDefault: Boolean(grant?.is_default) || id === row.branch_id,
+        roleId: (grant?.role_id as string) ?? null,
+        isHome: id === row.branch_id,
+      });
+    }
+  }
+
+  // Credential STATUS — never the password. Whether an auth login exists,
+  // whether it's set, when it last changed, and whether a reset is required.
+  const credential = {
+    hasLogin: Boolean(row.auth_user_id) && Boolean(row.login_enabled),
+    passwordSet: Boolean(row.auth_user_id),
+    lastPasswordChangedAt: row.last_password_changed_at ?? null,
+    passwordResetRequired: Boolean(row.password_reset_required),
+    disabledAt: row.disabled_at ?? null,
+  };
+
+  return NextResponse.json({
+    ok: true,
+    member,
+    stores,
+    credential,
+    // Convenience flag: is this the caller's own account?
+    isSelf: row.auth_user_id === user.id,
+  });
 }
 
 /* DELETE /api/staff/[id] — remove the staff record and its login. Gated on the

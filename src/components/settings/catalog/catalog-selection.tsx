@@ -53,10 +53,19 @@ const VALID_TABS: CatalogTabId[] = ["categories", "brands", "models", "parts", "
 export function CatalogSelectionProvider({
   children,
   initialTab,
+  initialCategoryId,
+  initialBrandId,
+  initialModelId,
 }: {
   children: ReactNode;
   /** Optional starting tab (e.g. from a `?tab=` deep link). */
   initialTab?: string | null;
+  /** Optional preselected category (from a `?cat=` deep link). */
+  initialCategoryId?: string | null;
+  /** Optional preselected brand (from a `?brand=` deep link). */
+  initialBrandId?: string | null;
+  /** Optional preselected model (from a `?model=` deep link, e.g. Edit Model). */
+  initialModelId?: string | null;
 }) {
   const startTab: CatalogTabId =
     initialTab && VALID_TABS.includes(initialTab as CatalogTabId)
@@ -64,7 +73,10 @@ export function CatalogSelectionProvider({
       : "categories";
 
   const [state, setState] = useState<SelectionState>({
-    tab: startTab, categoryId: null, brandId: null, modelId: null,
+    tab: startTab,
+    categoryId: initialCategoryId ?? null,
+    brandId: initialBrandId ?? null,
+    modelId: initialModelId ?? null,
   });
 
   const setTab = useCallback((tab: CatalogTabId) => setState((s) => ({ ...s, tab })), []);

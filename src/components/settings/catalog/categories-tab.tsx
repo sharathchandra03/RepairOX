@@ -1,8 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Plus, Search, Pencil, Trash2, ArrowUpDown, ChevronRight, Building2, Layers, CheckCircle2, XCircle,
+  GripVertical, ListOrdered, Check,
   Smartphone, Tablet, Laptop, Monitor, Watch, Headphones, Gamepad2, Plane, Box,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -10,9 +11,11 @@ import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Drawer } from "@/components/ui/drawer";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
-import { useCatalog } from "@/lib/catalog-context";
+import { useCatalog, sortCategories } from "@/lib/catalog-context";
 import { useCatalogSelection } from "./catalog-selection";
 import { ImageUpload } from "./image-upload";
+import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
 import type { DeviceCategory } from "@/lib/price-list-data";
 
 /** Icons offered for categories — must stay in sync with the shop browser's iconMap. */
@@ -22,14 +25,30 @@ export const CATEGORY_ICONS: Record<string, React.ComponentType<{ className?: st
 const ICON_OPTIONS = Object.keys(CATEGORY_ICONS).map((k) => ({ label: k, value: k }));
 
 export function CategoriesTab() {
-  const { categories, brands, models, addCategory, updateCategory, deleteCategory, toggleCategory } = useCatalog();
+  const { categories, brands, models, addCategory, updateCategory, deleteCategory, toggleCategory, reorderCategories } = useCatalog();
   const { openBrands, openModels } = useCatalogSelection();
+  const { can } = usePermissions();
+  // Reordering is a configure/manage action — the Device Catalog lives under
+  // Settings → Inventory → Price List, so it reuses that edit capability.
+  const canReorder = allow(can, CAP.settings.inventorySettings);
   const [search, setSearch] = useState("");
   const [sortAsc, setSortAsc] = useState(true);
   const [editing, setEditing] = useState<DeviceCategory | null>(null);
   const [creating, setCreating] = useState(false);
   const [deleteId, setDeleteId] = useState<string | null>(null);
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Reorder mode: the grid becomes a single-column draggable list whose order
+  // is the administrator-defined display order. `draft` holds the working list
+  // so a drag preview doesn't thrash the persisted order on every hover.
+  const [reordering, setReordering] = useState(false);
+  const [draft, setDraft] = useState<DeviceCategory[]>([]);
+  const [dragId, setDragId] = useState<string | null>(null);
+
+  // Seed the draft from the persisted (sortOrder) order whenever reorder mode
+  // opens or the underlying categories change while it's open.
+  useEffect(() => {
+    if (reordering) setDraft(sortCategories(categories));
+  }, [reordering, categories]);
 
   // Nested counts per category
   const stats = useMemo(() => {
@@ -43,6 +62,8 @@ export function CategoriesTab() {
     return map;
   }, [categories, brands, models]);
 
+  // Browse mode rows. The A–Z / Z–A toggle is a local VIEW sort only; the
+  // persisted administrator order is edited in reorder mode below.
   const rows = useMemo(() => {
     let list = [...categories];
     if (search.trim()) {
@@ -52,6 +73,31 @@ export function CategoriesTab() {
     list.sort((a, b) => (sortAsc ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name)));
     return list;
   }, [categories, search, sortAsc]);
+
+  // Drag-and-drop reorder handlers (native HTML5 DnD — no extra dependency).
+  const handleDrop = (targetId: string) => {
+    if (!dragId || dragId === targetId) return;
+    setDraft((list) => {
+      const from = list.findIndex((c) => c.id === dragId);
+      const to = list.findIndex((c) => c.id === targetId);
+      if (from === -1 || to === -1) return list;
+      const next = [...list];
+      const [moved] = next.splice(from, 1);
+      next.splice(to, 0, moved);
+      return next;
+    });
+  };
+
+  const saveOrder = () => {
+    reorderCategories(draft.map((c) => c.id));
+    setReordering(false);
+    setDragId(null);
+  };
+
+  const cancelReorder = () => {
+    setReordering(false);
+    setDragId(null);
+  };
 
   const deleteTarget = categories.find((c) => c.id === deleteId);
   const detailCategory = categories.find((c) => c.id === detailId) ?? null;
@@ -70,16 +116,94 @@ export function CategoriesTab() {
           />
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={() => setSortAsc((v) => !v)}>
-            <ArrowUpDown className="h-3.5 w-3.5" /> {sortAsc ? "A–Z" : "Z–A"}
-          </Button>
-          <Button size="sm" className="gap-1.5 rounded-xl" onClick={() => setCreating(true)}>
-            <Plus className="h-3.5 w-3.5" /> New Category
-          </Button>
+          {reordering ? (
+            <>
+              <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={cancelReorder}>
+                <XCircle className="h-3.5 w-3.5" /> Cancel
+              </Button>
+              <Button size="sm" className="gap-1.5 rounded-xl" onClick={saveOrder}>
+                <Check className="h-3.5 w-3.5" /> Save Order
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button variant="outline" size="sm" className="gap-1.5 rounded-xl" onClick={() => setSortAsc((v) => !v)}>
+                <ArrowUpDown className="h-3.5 w-3.5" /> {sortAsc ? "A–Z" : "Z–A"}
+              </Button>
+              {canReorder && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 rounded-xl"
+                  onClick={() => setReordering(true)}
+                  title="Set the order shown in Shop → Price List"
+                >
+                  <ListOrdered className="h-3.5 w-3.5" /> Reorder
+                </Button>
+              )}
+              <Button size="sm" className="gap-1.5 rounded-xl" onClick={() => setCreating(true)}>
+                <Plus className="h-3.5 w-3.5" /> New Category
+              </Button>
+            </>
+          )}
         </div>
       </div>
 
-      {/* Grid */}
+      {reordering && (
+        <div className="flex items-center gap-2 rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD] px-3.5 py-2.5 text-[12px] text-[#3049c9]">
+          <GripVertical className="h-4 w-4 shrink-0" />
+          <span>
+            Drag categories to set the order shown in <strong>Shop → Price List</strong>. This order is saved for your whole organization.
+          </span>
+        </div>
+      )}
+
+      {/* Reorder list (drag handle + drag/drop) — the administrator-defined order */}
+      {reordering ? (
+        <div className="space-y-2">
+          {draft.map((cat, index) => {
+            const Icon = CATEGORY_ICONS[cat.icon] || Box;
+            const s = stats.get(cat.id) ?? { brands: 0, models: 0, active: 0 };
+            const isDragging = dragId === cat.id;
+            return (
+              <div
+                key={cat.id}
+                draggable
+                onDragStart={() => setDragId(cat.id)}
+                onDragEnd={() => setDragId(null)}
+                onDragOver={(e) => { e.preventDefault(); handleDrop(cat.id); }}
+                onDrop={(e) => { e.preventDefault(); handleDrop(cat.id); }}
+                className={cn(
+                  "flex items-center gap-3 rounded-2xl border bg-card p-3 shadow-card transition",
+                  isDragging ? "border-[#4361EE] opacity-60 ring-2 ring-[#4361EE]/20" : "border-border"
+                )}
+              >
+                <span className="grid h-8 w-8 shrink-0 cursor-grab place-items-center rounded-lg text-muted-foreground hover:bg-muted active:cursor-grabbing" title="Drag to reorder">
+                  <GripVertical className="h-4 w-4" />
+                </span>
+                <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-muted text-[11px] font-bold tabular-nums text-muted-foreground">
+                  {index + 1}
+                </span>
+                <span className="grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
+                  {cat.imageUrl ? (
+                    <img src={cat.imageUrl} alt={cat.name} className="h-full w-full object-cover" />
+                  ) : (
+                    <Icon className="h-4.5 w-4.5" />
+                  )}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold">{cat.name}</p>
+                  <p className="mt-0.5 truncate text-[11px] text-muted-foreground">
+                    <span className="font-medium text-[#4361EE]">{s.brands}</span> brands ·{" "}
+                    <span className="font-medium text-[#4361EE]">{s.models}</span> models
+                  </p>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+      /* Grid */
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {rows.map((cat) => {
           const Icon = CATEGORY_ICONS[cat.icon] || Box;
@@ -151,6 +275,7 @@ export function CategoriesTab() {
           </div>
         )}
       </div>
+      )}
 
       {/* Detail drawer */}
       <CategoryDetailDrawer

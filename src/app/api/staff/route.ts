@@ -168,6 +168,11 @@ export async function POST(req: Request) {
       branch: branchName,
       status: "active",
       login_enabled: Boolean(hasLogin),
+      // Credential lifecycle: stamp when a login (password) was first set. We
+      // never store the password — only when it was set. If the creator marks
+      // it temporary, force a change at first login.
+      last_password_changed_at: hasLogin ? new Date().toISOString() : null,
+      password_reset_required: hasLogin && body?.temporary === true ? true : false,
       salary_type: salaryType ?? "monthly",
       salary_amount: Number(salaryAmount ?? 0),
       department: department ?? null,

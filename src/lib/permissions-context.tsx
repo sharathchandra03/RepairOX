@@ -249,7 +249,7 @@ interface PermissionsContextValue {
   }) => Promise<{ ok: boolean; reason?: string }>;
   /** Authenticated fetch to a server route (attaches the bearer token). */
   apiFetch: (path: string, init?: RequestInit) => Promise<{ ok: boolean; status: number; json: any }>;
-  resetPassword: (id: string, newPassword: string) => void;
+  resetPassword: (id: string, newPassword: string, opts?: { temporary?: boolean }) => void;
   setStaffStatus: (id: string, status: TeamMember["status"]) => void;
   toggleLogin: (id: string, enabled: boolean, password?: string) => void;
 
@@ -799,14 +799,24 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }, [currentUser, apiFetch, refreshTeamFromDb]);
 
-  const resetPassword = useCallback((id: string, newPassword: string) => {
+  const resetPassword = useCallback((id: string, newPassword: string, opts?: { temporary?: boolean }) => {
     const now = new Date().toISOString();
+    const temporary = Boolean(opts?.temporary);
     setTeam((prev) => prev.map((m) => (m.id === id
-      ? { ...m, passwordHash: hashPassword(newPassword, id), loginEnabled: true, updatedAt: now }
+      ? {
+          ...m,
+          passwordHash: hashPassword(newPassword, id),
+          loginEnabled: true,
+          lastPasswordChangedAt: now,
+          passwordResetRequired: temporary,
+          updatedAt: now,
+        }
       : m)));
     if (isSupabaseConfigured) {
-      apiFetch(`/api/staff/${id}`, { method: "PATCH", body: JSON.stringify({ password: newPassword, loginEnabled: true }) })
-        .then(() => refreshTeamFromDb());
+      apiFetch(`/api/staff/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ password: newPassword, loginEnabled: true, temporary }),
+      }).then(() => refreshTeamFromDb());
     }
   }, [apiFetch, refreshTeamFromDb]);
 
