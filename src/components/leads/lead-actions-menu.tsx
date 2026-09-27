@@ -7,9 +7,10 @@
    <Dropdown>) so it floats above the table instead of being clipped.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Phone, MessageSquare, Mail, Route as RouteIcon } from "lucide-react";
+import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Route as RouteIcon } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Can } from "@/components/common/can";
+import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads-data";
 
@@ -23,13 +24,10 @@ export function LeadActionsMenu({
 }) {
   const isPinned = !!lead.pinnedAt;
   return (
-    <div className="flex items-center justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-      {/* Quick contact actions (kept from before, shown on row hover) */}
-      <div className="hidden items-center gap-1 opacity-0 transition group-hover:opacity-100 lg:flex">
-        {lead.number && <a href={`tel:${lead.number}`} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 transition" title="Call"><Phone className="h-3.5 w-3.5" /></a>}
-        {lead.number && <a href={`https://wa.me/${lead.number.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-green-50 hover:text-green-600 transition" title="WhatsApp"><MessageSquare className="h-3.5 w-3.5" /></a>}
-        {lead.email && <a href={`mailto:${lead.email}`} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-sky-50 hover:text-sky-600 transition" title="Email"><Mail className="h-3.5 w-3.5" /></a>}
-      </div>
+    <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {/* Quick call/WhatsApp/email actions live in the Contact Info cell
+          (clickable phone + email). Removed from here so they never overflow
+          into the neighbouring Result column on row hover. */}
 
       {/* View */}
       <button
@@ -41,16 +39,18 @@ export function LeadActionsMenu({
       </button>
 
       {/* Pin / Unpin — RepairOX violet accent (same as tickets) */}
-      <button
-        onClick={() => onAction("pin", lead)}
-        className={cn(
-          "inline-flex h-7 w-7 items-center justify-center rounded-lg transition",
-          isPinned ? "text-[#7C5CFC] bg-[#7C5CFC]/10 hover:bg-[#7C5CFC]/20" : "text-muted-foreground hover:bg-[#7C5CFC]/10 hover:text-[#7C5CFC]",
-        )}
-        title={isPinned ? "Unpin lead" : "Pin lead"}
-      >
-        {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
-      </button>
+      <Can permission={CAP.lead.pin}>
+        <button
+          onClick={() => onAction("pin", lead)}
+          className={cn(
+            "inline-flex h-7 w-7 items-center justify-center rounded-lg transition",
+            isPinned ? "text-[#7C5CFC] bg-[#7C5CFC]/10 hover:bg-[#7C5CFC]/20" : "text-muted-foreground hover:bg-[#7C5CFC]/10 hover:text-[#7C5CFC]",
+          )}
+          title={isPinned ? "Unpin lead" : "Pin lead"}
+        >
+          {isPinned ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}
+        </button>
+      </Can>
 
       {/* More */}
       <Dropdown
@@ -72,16 +72,18 @@ export function LeadActionsMenu({
             <Can permission="route_leads">
               <MenuItem icon={RouteIcon} onClick={() => { onAction("route", lead); close(); }}>Route / Assign</MenuItem>
             </Can>
-            <Can permission="manage_sales">
+            <Can permission={CAP.lead.edit}>
               <MenuItem icon={Pencil} onClick={() => { onAction("edit", lead); close(); }}>Edit</MenuItem>
             </Can>
-            <Can permission="manage_sales">
+            <Can permission={CAP.lead.priorityChange}>
               <MenuItem icon={Flag} onClick={() => { onAction("priority", lead); close(); }}>Change Priority</MenuItem>
             </Can>
-            <MenuItem icon={isPinned ? PinOff : Pin} onClick={() => { onAction("pin", lead); close(); }}>
-              {isPinned ? "Unpin from top" : "Pin to top"}
-            </MenuItem>
-            <Can permission="manage_sales">
+            <Can permission={CAP.lead.pin}>
+              <MenuItem icon={isPinned ? PinOff : Pin} onClick={() => { onAction("pin", lead); close(); }}>
+                {isPinned ? "Unpin from top" : "Pin to top"}
+              </MenuItem>
+            </Can>
+            <Can permission={CAP.lead.delete}>
               <MenuItem icon={Trash2} danger onClick={() => { onAction("delete", lead); close(); }}>Delete</MenuItem>
             </Can>
           </>

@@ -133,7 +133,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     blurb: "Leads, pipeline, deals, quotations and CRM.",
     icon: "Users",
     levels: {
-      view: ["leads_view", "deals_view", "quotations_view", "companies_view", "contacts_view", "comms_activities_view", "leads_inbox_view", "leads_map_view", "view_sales_reports"],
+      view: ["leads_view", "deals_view", "quotations_view", "companies_view", "contacts_view", "comms_activities_view", "leads_inbox_view", "leads_map_view", "view_sales_reports", "leads_performance_view_own"],
       work: [
         "manage_sales", "leads_create", "leads_edit", "leads_stage_change", "leads_priority_change",
         "leads_pin", "leads_followup", "leads_convert", "deals_create", "deals_edit", "quotations_create",
@@ -145,8 +145,21 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         "leads_delete", "leads_assign", "leads_reassign", "leads_view_team", "leads_import",
         "leads_export", "leads_options_manage",
         "leads_smart_lists_manage", "leads_campaigns_manage", "deals_delete", "companies_delete",
-        "route_leads", "leads_view_all",
+        "route_leads", "leads_view_all", "leads_performance_view_all",
       ],
+    },
+  },
+  {
+    // Sales Agent identity is its OWN module (single Work tier) so it is never
+    // switched on as a side-effect of giving a manager/owner a higher Leads
+    // tier. Only roles explicitly set to "Work" here become eligible lead
+    // owners (listed in the Agent / Follow-up Agent pickers).
+    id: "sales_agent",
+    label: "Sales Agent (Lead Owner)",
+    blurb: "Makes this role's users eligible lead owners — listed in the Lead Agent picker.",
+    icon: "UserCheck",
+    levels: {
+      work: ["leads_sales_agent"],
     },
   },
   {

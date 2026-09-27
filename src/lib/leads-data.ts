@@ -11,6 +11,9 @@
        capture flow, list, detail drawer and settings pages. No React here.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { CAP, allow } from "@/lib/capabilities";
+import type { PermissionKey } from "@/lib/permissions";
+
 /* ─── Lead ────────────────────────────────────────────────────────────── */
 
 export interface Lead {
@@ -28,7 +31,8 @@ export interface Lead {
 
   /* ── Stage 1: Quick capture ── */
   region: string;
-  source: string;
+  source: string;         // acquisition source (Google / Meta / GMB / …)
+  captureChannel: string; // HOW it was captured (IVR / Form / Chat / Email / …) — separate from source
   agent: string;
   name: string;
   number: string;
@@ -36,11 +40,17 @@ export interface Lead {
   location: string;
 
   /* ── Stage 2: Qualification ── */
-  device: string;
+  device: string;           // cached display label (brand + model, or free text)
+  /* Device Catalog references (canonical; reuse the catalog, never duplicate).
+     Category → Brand → Model ids from useCatalog(). "" when not resolved. */
+  deviceCategoryId: string; // DeviceCategory.id (cat-…)
+  deviceBrandId: string;    // PriceListBrand.id (plb-…)
+  deviceModelId: string;    // PriceListModel.id (plm-…)
   issue: string;
-  category: string;
-  estimate: number | null;
-  discount: number | null;
+  category: string;         // issue/service category (lead_options master)
+  estimate: number | null;  // pipeline / expected value (NOT revenue)
+  discount: number | null;  // structured numeric value; unit in discountType
+  discountType: "amount" | "percent"; // how `discount` is expressed
   leadCategory: string;
   leadNature: string;
   priority: string;
@@ -52,7 +62,8 @@ export interface Lead {
   result: string;
   finalRemarks: string;
   followUpDate: string;      // YYYY-MM-DD or ""
-  followUpAgent: string;
+  followUpAgent: string;     // cached display name of the follow-up agent
+  followUpAgentId: string;   // staff id of the follow-up agent (may differ from owner)
   finalResult: string;
   followUpComments: string;
 
@@ -85,15 +96,19 @@ export interface Lead {
   conversionSource?: "ticket" | "invoice" | "walk_in" | "field" | "manual" | string;
 
   /* ── Audit ── */
+  /** staff id of the user who CREATED the lead (DB-stamped, immutable). */
+  createdBy: string;
   createdAt: string;
   updatedAt: string;
 }
 
 /** A partial lead used while capturing — everything optional except what the
- *  create flow fills in. */
+ *  create flow fills in. The AGENTS field (primary owner) is captured on the
+ *  draft as `assignedTo`/`assignedToName` (the picker stores the USER ID); the
+ *  DB stamps `createdBy`/`assignedBy`/`assignedByName`/`assignedAt` at save. */
 export type LeadDraft = Partial<Omit<Lead,
-  | "id" | "leadNo" | "date" | "time" | "month" | "createdAt" | "updatedAt"
-  | "assignedTo" | "assignedToName" | "assignedBy" | "assignedByName" | "assignedAt"
+  | "id" | "leadNo" | "date" | "time" | "month" | "createdAt" | "updatedAt" | "createdBy"
+  | "assignedBy" | "assignedByName" | "assignedAt"
 >>;
 
 /* ─── CRM Contact (linked to Customer Master) ──────────────────────────── */
@@ -264,6 +279,43 @@ export function needsFollowUp(lead: Pick<Lead, "result" | "status">): boolean {
   return needle.includes("follow") || needle.includes("rnr") || needle.includes("busy");
 }
 
+/* ─── Lead devices (for the shared Device & Issue details popup) ─────────
+   A lead currently captures ONE device (flat catalog-reference fields on the
+   Lead). This helper normalises that into an ARRAY so the Device Details popup
+   renders identically whether a lead has one device or, in future, several —
+   exactly like the Ticket / Walk-In "Device N" overlay. It never invents data:
+   if there is no device at all it returns []. */
+
+export interface LeadDevice {
+  id: string;
+  /** Cached display label (brand + model, or free text). */
+  label: string;
+  categoryId: string;
+  brandId: string;
+  modelId: string;
+  issue: string;
+  /** Issue/service category (lead_options master). */
+  category: string;
+}
+
+/** The lead's device(s), normalised to an array (one entry today). Returns []
+ *  when the lead has captured no device/issue information at all. */
+export function getLeadDevices(lead: Pick<Lead,
+  "id" | "device" | "deviceCategoryId" | "deviceBrandId" | "deviceModelId" | "issue" | "category"
+>): LeadDevice[] {
+  const hasAny = !!(lead.device || lead.deviceModelId || lead.deviceBrandId || lead.deviceCategoryId || lead.issue || lead.category);
+  if (!hasAny) return [];
+  return [{
+    id: `${lead.id}-dev-1`,
+    label: lead.device || "",
+    categoryId: lead.deviceCategoryId || "",
+    brandId: lead.deviceBrandId || "",
+    modelId: lead.deviceModelId || "",
+    issue: lead.issue || "",
+    category: lead.category || "",
+  }];
+}
+
 /* ─── Validation ──────────────────────────────────────────────────────── */
 
 export interface LeadValidation {
@@ -272,15 +324,19 @@ export interface LeadValidation {
 }
 
 /** Minimum required fields to create a lead + format checks. Kept intentionally
- *  light so sales can capture fast. */
-export function validateLead(draft: LeadDraft): LeadValidation {
+ *  light so sales can capture fast. `requireOwner` (default true) enforces the
+ *  AGENTS owner on the Lead Form; section quick-edits of an EXISTING lead pass
+ *  false because ownership is changed only through the Assignment control. */
+export function validateLead(draft: LeadDraft, opts: { requireOwner?: boolean } = {}): LeadValidation {
   const errors: Partial<Record<keyof Lead, string>> = {};
+  const requireOwner = opts.requireOwner ?? true;
 
   if (!draft.name?.trim()) errors.name = "Name is required.";
   if (!draft.number?.trim()) errors.number = "Phone number is required.";
   else if (!isValidPhone(draft.number)) errors.number = "Enter a valid phone number.";
   if (!draft.source?.trim()) errors.source = "Source is required.";
-  if (!draft.agent?.trim()) errors.agent = "Agent is required.";
+  // AGENTS = the owner's USER ID (a Sales Agent), never a typed/cached name.
+  if (requireOwner && !draft.assignedTo?.trim()) errors.assignedTo = "Select the lead owner (Sales Agent).";
 
   if (draft.email?.trim() && !isValidEmail(draft.email)) errors.email = "Enter a valid email.";
   if (draft.estimate != null && (isNaN(Number(draft.estimate)) || Number(draft.estimate) < 0)) errors.estimate = "Enter a valid amount.";
@@ -306,16 +362,21 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
   return {
     region: "",
     source: "",
+    captureChannel: "",
     agent,
     name: "",
     number: "",
     email: "",
     location: "",
     device: "",
+    deviceCategoryId: "",
+    deviceBrandId: "",
+    deviceModelId: "",
     issue: "",
     category: "",
     estimate: null,
     discount: null,
+    discountType: "amount",
     leadCategory: "",
     leadNature: "",
     priority: LEAD_SMART_DEFAULTS.priority ?? "",
@@ -326,6 +387,7 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
     finalRemarks: "",
     followUpDate: "",
     followUpAgent: "",
+    followUpAgentId: "",
     finalResult: "",
     followUpComments: "",
   };
@@ -333,24 +395,11 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
 
 /* ─── Assignment capability ───────────────────────────────────────────── */
 
-/**
- * Permission keys that let a user assign/reassign leads and see ALL leads
- * (owners/managers). Mirrors the leads_sel / leads_upd RLS policy so the UI
- * gate matches what the database will actually allow. A plain sales user
- * (manage_sales only, without these) can work their own leads but not manage
- * assignment or view everyone else's.
- */
-export const LEAD_ASSIGN_PERMISSIONS = [
-  "manage_users",
-  "manage_reports",
-  "view_sales_reports",
-  "view_financial_reports",
-  "assign",
-] as const;
-
-/** Given a permission checker (usePermissions().can), can this user assign leads? */
-export function canAssignLeads(can: (key: any) => boolean): boolean {
-  return LEAD_ASSIGN_PERMISSIONS.some((k) => can(k));
+/** Given a permission checker (usePermissions().can), can this user assign or
+ *  reassign leads? Resolved through the central CAP entries — the SAME keys the
+ *  DB ownership guard (migration 0049) checks — never an ad-hoc key list. */
+export function canAssignLeads(can: (key: PermissionKey) => boolean): boolean {
+  return allow(can, CAP.lead.assign) || allow(can, CAP.lead.reassign);
 }
 
 /* ─── Shared filter model (used by BOTH the list and the dashboard) ─────── */
@@ -361,7 +410,9 @@ export type LeadDateRange = "all" | "today" | "yesterday" | "7days" | "30days" |
 export type LeadFilterField =
   | "region" | "source" | "agent" | "assignedToName" | "contactStatus"
   | "leadCategory" | "status" | "leadNature" | "result" | "priority"
-  | "device" | "category" | "followUpAgent" | "finalResult";
+  | "device" | "category" | "followUpAgent" | "finalResult"
+  /* People filters match the structured USER ID (never the rendered name). */
+  | "assignedTo" | "followUpAgentId";
 
 /** The complete, shared lead filter state. `field` holds per-field exact
  *  matches; `query` is the free-text search; `dateRange` filters by creation
@@ -422,8 +473,17 @@ export function leadInDateRange(createdAt: string, range: LeadDateRange): boolea
  * exact matches, date range, follow-up timing, and free-text search across the
  * key identifying fields.
  */
-export function applyLeadFilters(leads: Lead[], f: LeadFilters): Lead[] {
+export function applyLeadFilters(
+  leads: Lead[],
+  f: LeadFilters,
+  /** Optional map of leadId → its OPEN structured follow-up. When supplied, the
+   *  follow-up filter uses the datetime-precise lifecycle from the real
+   *  lead_followup_history records (Overdue/Due/Upcoming); otherwise it falls
+   *  back to the flat `followUpDate` calendar-date classification. */
+  openFollowUpsByLead?: Map<string, LeadFollowUp>,
+): Lead[] {
   const q = f.query.trim().toLowerCase();
+  const asOf = Date.now();
   return leads.filter((l) => {
     if (f.status && l.status !== f.status) return false;
     for (const [k, v] of Object.entries(f.fields)) {
@@ -432,7 +492,11 @@ export function applyLeadFilters(leads: Lead[], f: LeadFilters): Lead[] {
     if (!leadInDateRange(l.createdAt || l.date, f.dateRange)) return false;
 
     if (f.followUp !== "any") {
-      const state = followUpState(l.followUpDate);
+      // Prefer the structured open follow-up (datetime-precise). Fall back to
+      // the flat followUpDate when no records are threaded through.
+      const state: FollowUpState = openFollowUpsByLead
+        ? openFollowUpRowState(openFollowUpsByLead.get(l.id), asOf)
+        : followUpState(l.followUpDate);
       if (f.followUp === "has" && state === "none") return false;
       if (f.followUp === "none" && state !== "none") return false;
       if (f.followUp === "overdue" && state !== "overdue") return false;
@@ -528,13 +592,25 @@ export interface LeadFollowUpDraft {
  * is Pending until its due time is within today (Due) or past (Overdue).
  * Completed/Cancelled are terminal. `missed`/`rescheduled` map to their intent.
  */
-export function followUpLifecycle(fu: Pick<LeadFollowUp, "status" | "dueAt">): LeadFollowUpState {
+export function followUpLifecycle(fu: Pick<LeadFollowUp, "status" | "dueAt">, asOf: number = Date.now()): LeadFollowUpState {
   if (fu.status === "completed") return "Completed";
   if (fu.status === "cancelled") return "Cancelled";
-  const state = followUpState(fu.dueAt ? fu.dueAt.slice(0, 10) : "");
-  if (fu.status === "missed" || state === "overdue") return "Overdue";
-  if (state === "today") return "Due";
+  const due = fu.dueAt ? new Date(fu.dueAt).getTime() : NaN;
+  // OVERDUE is DATETIME-PRECISE (§6): a follow-up scheduled for 6:00 PM is
+  // overdue at 6:01 PM — never based purely on the calendar date. `missed`
+  // also maps to Overdue.
+  if (fu.status === "missed") return "Overdue";
+  if (!isNaN(due) && due <= asOf) return "Overdue";
+  // Not yet past. "Due" = still scheduled for TODAY (same calendar day) so the
+  // agent sees it needs attention today; anything later is "Pending" (upcoming).
+  if (!isNaN(due) && isSameCalendarDay(due, asOf)) return "Due";
   return "Pending";
+}
+
+/** True when two epoch-ms instants fall on the same local calendar day. */
+function isSameCalendarDay(a: number, b: number): boolean {
+  const da = new Date(a); const db = new Date(b);
+  return da.getFullYear() === db.getFullYear() && da.getMonth() === db.getMonth() && da.getDate() === db.getDate();
 }
 
 /** Tone classes for a follow-up lifecycle chip (reuses the follow-up palette). */
@@ -553,6 +629,22 @@ export function openFollowUp(followUps: LeadFollowUp[]): LeadFollowUp | undefine
   return followUps
     .filter((f) => f.status === "scheduled")
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
+}
+
+/**
+ * Map a structured follow-up's live lifecycle to the compact `FollowUpState`
+ * used for the Lead table row tint / chip (so the table shares ONE overdue
+ * language with the Ticket table). Only an OPEN (scheduled) follow-up drives the
+ * row's urgency — a completed/cancelled follow-up leaves the row neutral.
+ * Datetime-precise via {@link followUpLifecycle}.
+ */
+export function openFollowUpRowState(open: LeadFollowUp | undefined, asOf: number = Date.now()): FollowUpState {
+  if (!open) return "none";
+  const life = followUpLifecycle(open, asOf);
+  if (life === "Overdue") return "overdue";
+  if (life === "Due") return "today";
+  if (life === "Pending") return "upcoming";
+  return "none"; // Completed / Cancelled → not urgent
 }
 
 /* ─── Lead assignment history (one row of lead_assignment_history) ──────── */
@@ -651,6 +743,22 @@ export interface LeadMetrics {
   conversionRate: number;  // converted / total (0..1)
   /** Per-route conversion counts (walk-in / pickup / on-site), from real links. */
   routeConversions: RouteConversionCounts;
+
+  /* ── Follow-up engine metrics (Phase 2) — ALL derived from the structured
+     lead_followup_history records, never a manual counter. Populated only when
+     the full follow-up list is passed to computeLeadMetrics; 0 otherwise. ── */
+  /** Open follow-ups that are DUE today (datetime-precise, not yet past). */
+  followUpsDueToday: number;
+  /** Open follow-ups whose time has passed (datetime-precise). */
+  followUpsOverdue: number;
+  /** Open follow-ups scheduled for a future day (Pending / upcoming). */
+  followUpsUpcoming: number;
+  /** Follow-ups that have been completed (historical, never deleted). */
+  followUpsCompleted: number;
+  /** Total scheduled/completed follow-ups (excludes cancelled). */
+  followUpsTotal: number;
+  /** completed / (completed + open) — 0..1. */
+  followUpCompletionRate: number;
 }
 
 /** Expected/pipeline value of a lead: expectedValue if present, else estimate. */
@@ -672,6 +780,10 @@ export function computeLeadMetrics(
   /** Optional finalized-revenue sources. When provided, revenueWon is derived
    *  from FINALIZED invoices (Lead→Ticket→Invoice); omitted → revenueWon = 0. */
   revenue?: { tickets: RevenueTicketLike[]; invoices: RevenueInvoiceLike[] },
+  /** Optional FULL follow-up record set (scoped to these leads). When supplied,
+   *  the follow-up engine metrics (Due Today / Overdue / Upcoming / Completed /
+   *  Completion Rate) are derived from the real records — no manual counters. */
+  allFollowUps?: LeadFollowUp[],
 ): LeadMetrics {
   let qualified = 0, pendingFollowUp = 0, overdue = 0, converted = 0, lost = 0;
   let pipelineValue = 0, revenueWon = 0, ticketsWon = 0;
@@ -696,12 +808,33 @@ export function computeLeadMetrics(
     }
   }
 
+  // ── Follow-up engine metrics (all derived from the structured records) ──
+  const asOf = Date.now();
+  let followUpsDueToday = 0, followUpsOverdue = 0, followUpsUpcoming = 0, followUpsCompleted = 0;
+  if (allFollowUps) {
+    const leadIds = new Set(leads.map((l) => l.id));
+    for (const fu of allFollowUps) {
+      if (!leadIds.has(fu.leadId)) continue;   // stay within the scoped lead set
+      if (fu.status === "cancelled") continue; // cancelled don't count toward the load/rate
+      if (fu.status === "completed") { followUpsCompleted += 1; continue; }
+      // scheduled / missed → derive the live lifecycle (datetime-precise).
+      const state = followUpLifecycle(fu, asOf);
+      if (state === "Overdue") followUpsOverdue += 1;
+      else if (state === "Due") followUpsDueToday += 1;
+      else if (state === "Pending") followUpsUpcoming += 1;
+    }
+  }
+  const followUpsOpen = followUpsDueToday + followUpsOverdue + followUpsUpcoming;
+  const followUpsTotal = followUpsCompleted + followUpsOpen;
+
   return {
     total: leads.length,
     qualified, pendingFollowUp, overdue, converted, lost,
     pipelineValue, revenueWon, ticketsWon,
     conversionRate: leads.length > 0 ? converted / leads.length : 0,
     routeConversions: computeRouteConversions(leads),
+    followUpsDueToday, followUpsOverdue, followUpsUpcoming, followUpsCompleted, followUpsTotal,
+    followUpCompletionRate: followUpsTotal > 0 ? followUpsCompleted / followUpsTotal : 0,
   };
 }
 

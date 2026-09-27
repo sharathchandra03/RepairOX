@@ -28,6 +28,11 @@ import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
 import { notify } from "@/lib/notifications";
 import { createProspectContact, findContactMatches } from "@/lib/contact-service";
+import { CAP, allow } from "@/lib/capabilities";
+import {
+  agentsForStore, computeLocalSalesAgents, friendlyLeadOwnershipError, isAgentEligible,
+  rowToSalesAgent, type SalesAgent,
+} from "@/lib/sales-agents";
 import {
   LEAD_DROPDOWN_FIELDS, monthFromDate, applyLeadFilters, pinnedFirst,
   isQualifiedStatus, isWonStatus, isLostStatus,
@@ -60,16 +65,21 @@ function rowToLead(r: any): Lead {
     month: r.lead_month ?? "",
     region: r.region ?? "",
     source: r.source ?? "",
+    captureChannel: r.capture_channel ?? "",
     agent: r.agent ?? "",
     name: r.name ?? "",
     number: r.number ?? "",
     email: r.email ?? "",
     location: r.location ?? "",
     device: r.device ?? "",
+    deviceCategoryId: r.device_category_id ?? "",
+    deviceBrandId: r.device_brand_id ?? "",
+    deviceModelId: r.device_model_id ?? "",
     issue: r.issue ?? "",
     category: r.category ?? "",
     estimate: r.estimate == null ? null : Number(r.estimate),
     discount: r.discount == null ? null : Number(r.discount),
+    discountType: r.discount_type === "percent" ? "percent" : "amount",
     leadCategory: r.lead_category ?? "",
     leadNature: r.lead_nature ?? "",
     priority: r.priority ?? "",
@@ -80,9 +90,11 @@ function rowToLead(r: any): Lead {
     finalRemarks: r.final_remarks ?? "",
     followUpDate: r.follow_up_date ?? "",
     followUpAgent: r.follow_up_agent ?? "",
+    followUpAgentId: r.follow_up_agent_id ?? "",
     finalResult: r.final_result ?? "",
     followUpComments: r.follow_up_comments ?? "",
-    assignedTo: r.assigned_to ?? "",
+    // assigned_user_id is the canonical owner (0045); assigned_to is its mirror.
+    assignedTo: r.assigned_user_id ?? r.assigned_to ?? "",
     assignedToName: r.assigned_to_name ?? "",
     assignedBy: r.assigned_by ?? "",
     assignedByName: r.assigned_by_name ?? "",
@@ -100,6 +112,7 @@ function rowToLead(r: any): Lead {
     convertedAt: r.converted_at ?? undefined,
     convertedBy: r.converted_by ?? undefined,
     conversionSource: r.conversion_source ?? undefined,
+    createdBy: r.created_by ?? "",
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
   };
@@ -118,16 +131,21 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   // It is read back in rowToLead(); the derivation lives in the database.
   set("region", l.region);
   set("source", l.source);
+  set("capture_channel", l.captureChannel);
   set("agent", l.agent);
   set("name", l.name);
   set("number", l.number);
   set("email", l.email);
   set("location", l.location);
   set("device", l.device);
+  set("device_category_id", l.deviceCategoryId);
+  set("device_brand_id", l.deviceBrandId);
+  set("device_model_id", l.deviceModelId);
   set("issue", l.issue);
   set("category", l.category);
   if (l.estimate !== undefined) row.estimate = l.estimate;
   if (l.discount !== undefined) row.discount = l.discount;
+  set("discount_type", l.discountType);
   set("lead_category", l.leadCategory);
   set("lead_nature", l.leadNature);
   set("priority", l.priority);
@@ -138,6 +156,7 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("final_remarks", l.finalRemarks);
   set("follow_up_date", l.followUpDate);
   set("follow_up_agent", l.followUpAgent);
+  set("follow_up_agent_id", l.followUpAgentId);
   set("final_result", l.finalResult);
   set("follow_up_comments", l.followUpComments);
   // Assignment columns (uuid FKs — null when unassigned)
@@ -292,6 +311,9 @@ function isMissingTableError(err: { code?: string; message?: string } | null): b
 /* ─── Context shape ───────────────────────────────────────────────────── */
 
 interface LeadsContextValue {
+  /** Leads the signed-in user may see: see-all roles get every lead in their
+   *  store scope; everyone else gets created / owned / follow-up leads only.
+   *  (RLS enforces the same rule in the DB — this keeps local mode + UI aligned.) */
   leads: Lead[];
   /** Leads after applying the SHARED filters, pinned-first. The list table and
    *  the dashboard both read this so they always agree on the dataset. */
@@ -309,11 +331,29 @@ interface LeadsContextValue {
   optionsFor: (field: LeadFieldKey) => LeadOption[];
 
   addLead: (draft: LeadDraft) => Promise<Lead | null>;
-  updateLead: (id: string, updates: Partial<Lead>) => Promise<void>;
+  /** Resolves false when nothing (or not everything) could be saved. */
+  updateLead: (id: string, updates: Partial<Lead>) => Promise<boolean>;
+  /** May the current user change THIS lead's owner (mirrors the DB guard)? */
+  canChangeLeadOwner: (lead: Pick<Lead, "assignedTo" | "createdBy">) => boolean;
   deleteLead: (id: string) => Promise<void>;
-  /** Assign or reassign a lead to a staff member (pass "" to unassign).
-   *  Writes an assignment-history row + a durable notification to the assignee. */
-  assignLead: (id: string, staffId: string, staffName: string, reason?: string) => Promise<void>;
+  /** Assign or reassign a lead to an eligible Sales Agent (pass "" to unassign).
+   *  The DB validates eligibility + permission and writes the assignment-history
+   *  row in the same transaction; this also notifies the assignee. */
+  assignLead: (id: string, staffId: string, staffName: string, reason?: string) => Promise<boolean>;
+
+  /* ── Sales Agents (eligible lead owners — real user ids) ── */
+  /** Every eligible Sales Agent the caller may see (store-scoped by the DB). */
+  salesAgents: SalesAgent[];
+  salesAgentsReady: boolean;
+  /** Eligible Sales Agents for a lead in `storeId` ("" = org-wide lead). */
+  salesAgentsFor: (storeId?: string | null) => SalesAgent[];
+  /** Is `userId` an eligible Sales Agent for a lead in `storeId`? */
+  isEligibleSalesAgent: (userId: string, storeId?: string | null) => boolean;
+  /** True when the signed-in user is themselves an eligible Sales Agent for `storeId`. */
+  currentUserIsSalesAgent: (storeId?: string | null) => boolean;
+  refreshSalesAgents: () => Promise<void>;
+  /** Whether the signed-in user sees every lead in their store scope (vs own only). */
+  canSeeAllLeads: boolean;
   /** Pin/unpin a lead so it floats to the top of the list (DB-backed). */
   pinLead: (id: string, pinned: boolean) => Promise<void>;
   /** Record the Sales service-route decision (Store / Pickup & Drop / On-Site). */
@@ -327,6 +367,9 @@ interface LeadsContextValue {
   followUps: LeadFollowUp[];
   /** Follow-ups for one lead, ordered by sequence (Follow-up #1, #2, …). */
   followUpsFor: (leadId: string) => LeadFollowUp[];
+  /** The single OPEN (scheduled) follow-up per lead — the datetime-precise
+   *  source of a lead's follow-up urgency (row red-tint / cell / filter). */
+  openFollowUpsByLead: Map<string, LeadFollowUp>;
   /** Schedule a NEW follow-up (keeps all previous follow-up records). */
   scheduleFollowUp: (leadId: string, draft: LeadFollowUpDraft) => Promise<LeadFollowUp | null>;
   /** Complete a follow-up with a structured outcome. Optionally schedule the
@@ -406,6 +449,7 @@ const LEAD_OPTIONAL_COLUMNS = [
   "fulfilment_route", "assigned_store", "routed_at",
   "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id",
   "converted_at", "converted_by", "conversion_source",
+  "device_category_id", "device_brand_id", "device_model_id", "discount_type", "follow_up_agent_id",
 ];
 
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -528,7 +572,7 @@ function emitAssignmentNotification(l: Lead) {
 /* ─── Provider ────────────────────────────────────────────────────────── */
 
 export function LeadsProvider({ children }: { children: ReactNode }) {
-  const { authReady } = usePermissions();
+  const { authReady, can, grants, team, getRoleById } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [options, setOptions] = useState<LeadOption[]>([]);
@@ -559,6 +603,89 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   // so realtime reloads don't re-fire the same "assigned to you" toast.
   const notifiedRef = useRef<Set<string>>(new Set());
   const notifyReadyRef = useRef(false);
+
+  /* ── Sales Agents: the ONLY people offered as lead owner / follow-up agent ──
+     DB mode reads the store-scoped RPC (role holds `leads_sales_agent` + active
+     + store authorization — the same predicate the DB triggers enforce). Local
+     mode derives it from the team + role grants. Re-resolved whenever the team
+     or role grants change (role removed / user deactivated → drops out). */
+  const [salesAgents, setSalesAgents] = useState<SalesAgent[]>([]);
+  const [salesAgentsReady, setSalesAgentsReady] = useState(false);
+  const salesAgentsRef = useRef<SalesAgent[]>([]);
+  salesAgentsRef.current = salesAgents;
+  const salesAgentsReadyRef = useRef(false);
+  salesAgentsReadyRef.current = salesAgentsReady;
+
+  const refreshSalesAgents = useCallback(async () => {
+    if (useDb) {
+      if (!authReady) return;
+      const { data, error } = await db.rpc("lead_sales_agents");
+      if (error) {
+        // Function missing (migration 0049 not applied) → no eligible agents;
+        // never fall back to the whole staff directory.
+        console.error("[leads] loading sales agents failed:", error.message);
+        setSalesAgents([]);
+      } else {
+        setSalesAgents(((data as any[]) ?? []).map(rowToSalesAgent));
+      }
+      setSalesAgentsReady(true);
+      return;
+    }
+    setSalesAgents(computeLocalSalesAgents(team, grants, (rid) => getRoleById(rid)?.label ?? rid));
+    setSalesAgentsReady(true);
+  }, [useDb, db, authReady, team, grants, getRoleById]);
+
+  useEffect(() => { void refreshSalesAgents(); }, [refreshSalesAgents]);
+
+  // Other sessions changing a user's role / status / store grants converge live.
+  useEffect(() => {
+    if (!useDb || !authReady) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = () => { if (timer) clearTimeout(timer); timer = setTimeout(() => { void refreshSalesAgents(); }, 300); };
+    const channel = db.channel("lead-sales-agents");
+    for (const table of ["staff", "user_stores", "role_permissions"]) {
+      channel.on("postgres_changes", { event: "*", schema: "public", table }, schedule);
+    }
+    channel.subscribe();
+    return () => { if (timer) clearTimeout(timer); db.removeChannel(channel); };
+  }, [useDb, authReady, db, refreshSalesAgents]);
+
+  const salesAgentsFor = useCallback((storeId?: string | null) => agentsForStore(salesAgents, storeId), [salesAgents]);
+  const isEligibleSalesAgent = useCallback(
+    (userId: string, storeId?: string | null) => isAgentEligible(salesAgents, userId, storeId),
+    [salesAgents],
+  );
+  const currentUserIsSalesAgent = useCallback(
+    (storeId?: string | null) => !!currentUserId && isAgentEligible(salesAgents, currentUserId, storeId),
+    [salesAgents, currentUserId],
+  );
+  /** Client pre-check before a write. Until the directory has loaded we defer
+   *  to the database (the trigger is the real gate). */
+  const eligibleOrUnknown = (userId: string, storeId?: string | null) =>
+    !salesAgentsReadyRef.current || isAgentEligible(salesAgentsRef.current, userId, storeId);
+
+  /** Lead visibility scope (UI = RLS): see-all keys vs own/assigned/follow-up. */
+  const canSeeAllLeads = allow(can, CAP.lead.viewTeam);
+  const canSeeAllLeadsRef = useRef(canSeeAllLeads);
+  canSeeAllLeadsRef.current = canSeeAllLeads;
+
+  /** May the current user change THIS lead's owner? Mirrors the DB guard
+   *  (0050): reassign-level keys → any visible lead; `leads_assign` → only
+   *  leads they own/created, or any lead with a see-all key. A follow-up agent
+   *  can't take over someone else's lead. */
+  const canChangeLeadOwner = useCallback((lead: Pick<Lead, "assignedTo" | "createdBy">): boolean => {
+    if (allow(can, CAP.lead.reassignAny)) return true;
+    const me = currentUserId || "";
+    const mine = !!me && (lead.assignedTo === me || lead.createdBy === me);
+    return allow(can, ["leads_assign"]) && (mine || canSeeAllLeads);
+  }, [can, currentUserId, canSeeAllLeads]);
+  const canChangeLeadOwnerRef = useRef(canChangeLeadOwner);
+  canChangeLeadOwnerRef.current = canChangeLeadOwner;
+
+  /** Show a DB ownership-guard error as a clear message (falls back to `fallback`). */
+  const reportLeadError = (title: string, message: string | undefined, fallback: string) => {
+    toast.error(title, { description: friendlyLeadOwnershipError(message) ?? fallback });
+  };
 
   /* ── Seed default options in LOCAL mode (once) ── */
   const seedLocalOptionsIfEmpty = useCallback((existing: LeadOption[]): LeadOption[] => {
@@ -766,7 +893,35 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       toast.error("Lead not saved", { description: error instanceof Error ? error.message : "The CRM contact could not be saved." });
       return null;
     }
-    const resolvedDraft: LeadDraft = { ...draft, contactId, customerId: draft.customerId ?? "" };
+    const me = currentUserIdRef.current || "";
+    const storeId = draft.branchId || "";
+
+    // ── Ownership (AGENTS = a Sales Agent's USER ID) ──
+    // Default owner = the logged-in user when they are an eligible Sales Agent
+    // (IVR / phone capture: no need to search for yourself). The DB applies the
+    // same default + validation, so this is a mirror, not the gate.
+    let ownerId = draft.assignedTo || "";
+    if (!ownerId && me && isAgentEligible(salesAgentsRef.current, me, storeId)) ownerId = me;
+    const ownerName = ownerId
+      ? (salesAgentsRef.current.find((a) => a.id === ownerId)?.name || draft.assignedToName || (ownerId === me ? currentUserNameRef.current : "") || "")
+      : "";
+    if (ownerId && !eligibleOrUnknown(ownerId, storeId)) {
+      toast.error("Lead not saved", { description: "The lead owner must be an active Sales Agent who can work this store." });
+      return null;
+    }
+    if (ownerId && ownerId !== me && !allow(can, CAP.lead.assign)) {
+      toast.error("Lead not saved", { description: "You can only create leads owned by yourself." });
+      return null;
+    }
+    if (draft.followUpAgentId && !eligibleOrUnknown(draft.followUpAgentId, storeId)) {
+      toast.error("Lead not saved", { description: "The follow-up agent must be an active Sales Agent who can work this store." });
+      return null;
+    }
+
+    const resolvedDraft: LeadDraft = {
+      ...draft, contactId, customerId: draft.customerId ?? "",
+      assignedTo: ownerId, assignedToName: ownerName, agent: ownerName || draft.agent || "",
+    };
 
     if (useDb) {
       // Ask the DB for the next org-scoped sequential Lead ID (gap-free).
@@ -776,8 +931,16 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (!seqErr && typeof seq === "string") leadNo = seq;
       else if (seqErr) console.error("[leads] next_lead_id failed:", seqErr.message);
 
+      // Owner = assigned_user_id (canonical). created_by, assigned_by/at and the
+      // cached names are stamped by the DB ownership guard (migration 0049), and
+      // the assignment-history row is written by the DB in the same transaction.
       let row: Record<string, unknown> = {
-        ...leadToRow({ ...resolvedDraft, date, time, month } as Partial<Lead>),
+        ...omitKeys(leadToRow({ ...resolvedDraft, date, time, month } as Partial<Lead>), ["assigned_by", "assigned_by_name", "assigned_at"]),
+        assigned_user_id: ownerId || null,
+        assigned_to: ownerId || null,
+        // The lead's STORE is the one the form validated the owner against
+        // (never left to the DB's home-store default).
+        ...(storeId ? { branch_id: storeId } : {}),
         ...(leadNo ? { lead_no: leadNo } : {}),
       };
       let res = await db.from("leads").insert(row).select("*").single();
@@ -793,12 +956,17 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       const { data, error } = res;
       if (error || !data) {
         console.error("[leads] addLead failed:", error?.message);
-        toast.error("Lead not saved", { description: "We couldn't save this lead to the database. Please try again." });
+        reportLeadError("Lead not saved", error?.message, "We couldn't save this lead to the database. Please try again.");
         return null;
       }
-      const created = rowToLead(data);
+      const created = applyFulfilmentOverlay([rowToLead(data)])[0];
       setLeads((prev) => [created, ...prev]);
-      toast.success("Lead created", { description: `${created.leadNo} · ${created.name}` });
+      // Pull the DB-written ownership history row for this lead.
+      const { data: hist } = await db.from("lead_assignment_history").select("*").eq("lead_id", created.id);
+      if (hist && hist.length) {
+        setAssignmentHistory((prev) => [...hist.map(rowToAssignmentEvent), ...prev.filter((h) => h.leadId !== created.id)]);
+      }
+      afterLeadCreated(created);
       return created;
     }
 
@@ -808,27 +976,80 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       branchId: draft.branchId ?? "",
       leadNo: nextLeadNoLocal(),
       date, time, month,
-      region: draft.region ?? "", source: draft.source ?? "", agent: draft.agent ?? "",
+      region: draft.region ?? "", source: draft.source ?? "", captureChannel: draft.captureChannel ?? "", agent: draft.agent ?? "",
       name: draft.name ?? "", number: draft.number ?? "", email: draft.email ?? "", location: draft.location ?? "",
-      device: draft.device ?? "", issue: draft.issue ?? "", category: draft.category ?? "",
-      estimate: draft.estimate ?? null, discount: draft.discount ?? null,
+      device: draft.device ?? "", deviceCategoryId: draft.deviceCategoryId ?? "", deviceBrandId: draft.deviceBrandId ?? "", deviceModelId: draft.deviceModelId ?? "",
+      issue: draft.issue ?? "", category: draft.category ?? "",
+      estimate: draft.estimate ?? null, discount: draft.discount ?? null, discountType: draft.discountType ?? "amount",
       leadCategory: draft.leadCategory ?? "", leadNature: draft.leadNature ?? "", priority: draft.priority ?? "",
       comments: draft.comments ?? "", contactStatus: draft.contactStatus ?? "", status: draft.status ?? "",
       result: draft.result ?? "", finalRemarks: draft.finalRemarks ?? "", followUpDate: draft.followUpDate ?? "",
-      followUpAgent: draft.followUpAgent ?? "", finalResult: draft.finalResult ?? "", followUpComments: draft.followUpComments ?? "",
-      assignedTo: "", assignedToName: "", assignedBy: "", assignedByName: "", assignedAt: "",
+      followUpAgent: draft.followUpAgent ?? "", followUpAgentId: draft.followUpAgentId ?? "", finalResult: draft.finalResult ?? "", followUpComments: draft.followUpComments ?? "",
+      // AGENTS = the primary owner (user id). The draft's agent picker sets these.
+      assignedTo: ownerId, assignedToName: ownerName,
+      assignedBy: ownerId ? me : "", assignedByName: ownerId ? currentUserNameRef.current || "" : "",
+      assignedAt: ownerId ? new Date().toISOString() : "",
       pinnedAt: "",
       fulfilmentRoute: draft.fulfilmentRoute ?? "", assignedStore: draft.assignedStore ?? "", routedAt: "",
       linkedWalkInId: "", linkedFieldJobId: "", linkedTicketId: "", linkedInvoiceId: "", contactId, customerId: resolvedDraft.customerId ?? "",
       convertedAt: draft.convertedAt, convertedBy: draft.convertedBy, conversionSource: draft.conversionSource,
+      createdBy: me,
       createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(),
     };
+    lead.agent = ownerName || lead.agent;
     setLeads((prev) => { const next = [lead, ...prev]; writeLS(LEADS_KEY, next); return next; });
-    toast.success("Lead created", { description: `${lead.leadNo} · ${lead.name}` });
+    if (ownerId) {
+      // Local mirror of the DB's create-time assignment history row.
+      const ev: LeadAssignmentEvent = {
+        id: uid(), leadId: lead.id, toUserId: ownerId, toUserName: ownerName,
+        assignedBy: me || undefined, assignedByName: currentUserNameRef.current || undefined,
+        reason: "Lead created", createdAt: new Date().toISOString(),
+      };
+      setAssignmentHistory((prev) => { const next = [ev, ...prev]; writeLS(ASSIGN_HISTORY_KEY, next); return next; });
+    }
+    afterLeadCreated(lead);
     return lead;
-  }, [useDb, db, nextLeadNoLocal, resolveLeadContact]);
+  }, [useDb, db, can, nextLeadNoLocal, resolveLeadContact]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const updateLead = useCallback(async (id: string, updates: Partial<Lead>) => {
+  /** Shared post-create side effects: confirmation, audit, and notifications to
+   *  the owner / follow-up agent when they aren't the creator. */
+  function afterLeadCreated(created: Lead) {
+    const me = currentUserIdRef.current || "";
+    const by = currentUserNameRef.current || "";
+    toast.success("Lead created", {
+      description: `${created.leadNo} · ${created.name}${created.assignedToName ? ` — owner: ${created.assignedToName}` : ""}`,
+    });
+    logActivity({
+      module: "Lead", action: "Lead Created", severity: "success", entity: "Lead", reference: created.leadNo,
+      description: `Created ${created.leadNo} (${created.name || "Unnamed"})${created.assignedToName ? `, owned by ${created.assignedToName}` : ""}.`,
+    });
+    if (created.assignedTo && created.assignedTo !== me) {
+      notify({
+        kind: "lead_assigned",
+        recipientId: created.assignedTo,
+        title: "New lead assigned to you",
+        body: `${created.leadNo} · ${created.name || "Unnamed"}${by ? ` — by ${by}` : ""}.`,
+        href: `/leads/list?lead=${created.id}`,
+        reference: created.leadNo,
+        dedupeKey: `lead-assigned:${created.id}:${created.assignedTo}:create`,
+      });
+    }
+    if (created.followUpAgentId && created.followUpAgentId !== me && created.followUpAgentId !== created.assignedTo) {
+      notify({
+        kind: "lead_assigned",
+        recipientId: created.followUpAgentId,
+        title: "Follow-up assigned to you",
+        body: `${created.leadNo} · ${created.name || "Unnamed"}${by ? ` — by ${by}` : ""}.`,
+        href: `/leads/list?lead=${created.id}`,
+        reference: created.leadNo,
+        dedupeKey: `lead-followup-agent:${created.id}:${created.followUpAgentId}:create`,
+      });
+    }
+  }
+
+  /** Low-level lead write (optimistic + DB). Callers that change OWNERSHIP or
+   *  the FOLLOW-UP AGENT must go through updateLead / assignLead instead. */
+  const persistLeadPatch = useCallback(async (id: string, updates: Partial<Lead>): Promise<boolean> => {
     // Mirror any fulfilment/link fields to the durable overlay so they survive a
     // DB reload even before the optional migration adds the real columns.
     mergeFulfilmentOverlay(id, updates);
@@ -858,17 +1079,74 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       }
       if (res.error) {
         console.error("[leads] updateLead failed:", res.error.message);
-        toast.error("Changes not saved", { description: "We couldn't update this lead in the database. Please try again." });
+        reportLeadError("Changes not saved", res.error.message, "We couldn't update this lead in the database. Please try again.");
+        // Roll the optimistic change back to the authoritative row.
+        const { data: fresh } = await db.from("leads").select("*").eq("id", id).maybeSingle();
+        if (fresh) setLeads((prev) => prev.map((l) => (l.id === id ? applyFulfilmentOverlay([rowToLead(fresh)])[0] : l)));
+        return false;
       }
     }
-  }, [useDb, db]);
+    return true;
+  }, [useDb, db]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Late-bound refs so updateLead can route ownership/follow-up-agent changes
+  // through their dedicated flows (defined further below).
+  const assignLeadRef = useRef<(id: string, staffId: string, staffName: string, reason?: string) => Promise<boolean>>(async () => false);
+  const reassignOpenFollowUpsRef = useRef<(leadId: string, userId: string, userName: string, previousName?: string) => Promise<void>>(async () => {});
+
+  /** Update a lead. Ownership fields are NEVER written directly: an owner
+   *  change is routed through assignLead (permission + eligibility + history +
+   *  notification); a follow-up agent change is validated against the Sales
+   *  Agent directory and moves the OPEN follow-up to the new agent. created_by
+   *  and the cached AGENTS label are server-owned. */
+  const updateLead = useCallback(async (id: string, updatesIn: Partial<Lead>): Promise<boolean> => {
+    const current = leadsRef.current.find((l) => l.id === id);
+    const {
+      assignedTo, assignedToName,
+      assignedBy: _ab, assignedByName: _abn, assignedAt: _at, createdBy: _cb, agent: _agent,
+      ...updates
+    } = updatesIn;
+    const ownerChange = assignedTo !== undefined && !!current && (assignedTo || "") !== (current.assignedTo || "");
+    const fuChange = updates.followUpAgentId !== undefined && !!current && (updates.followUpAgentId || "") !== (current.followUpAgentId || "");
+    const storeId = updates.branchId ?? current?.branchId ?? "";
+    const previousFollowUpAgent = current?.followUpAgent || "";
+
+    // Validate EVERY part of the change before writing anything, so a save is
+    // never half-applied (fields saved but the owner change rejected).
+    if (ownerChange && current && !canChangeLeadOwnerRef.current(current)) {
+      toast.error("Changes not saved", { description: "You don't have permission to change the owner of this lead." });
+      return false;
+    }
+    if (ownerChange && assignedTo && !eligibleOrUnknown(assignedTo, storeId)) {
+      toast.error("Changes not saved", { description: "Only active Sales Agents who can work this store can own a lead." });
+      return false;
+    }
+    if (fuChange && updates.followUpAgentId && !eligibleOrUnknown(updates.followUpAgentId, storeId)) {
+      toast.error("Changes not saved", { description: "The follow-up agent must be an active Sales Agent who can work this store." });
+      return false;
+    }
+    if (fuChange) {
+      const agent = salesAgentsRef.current.find((a) => a.id === updates.followUpAgentId);
+      updates.followUpAgent = updates.followUpAgentId ? (agent?.name || updates.followUpAgent || "") : "";
+    } else if (updates.followUpAgent !== undefined && current?.followUpAgentId) {
+      // The cached follow-up agent name always follows the id.
+      delete updates.followUpAgent;
+    }
+
+    let saved = true;
+    if (Object.keys(updates).length > 0) saved = await persistLeadPatch(id, updates);
+    if (!saved) return false;
+    if (fuChange) await reassignOpenFollowUpsRef.current(id, updates.followUpAgentId || "", updates.followUpAgent || "", previousFollowUpAgent);
+    if (ownerChange) return assignLeadRef.current(id, assignedTo || "", assignedToName || "");
+    return true;
+  }, [persistLeadPatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteLead = useCallback(async (id: string) => {
     if (useDb) {
       const { error } = await db.from("leads").update({ deleted_at: new Date().toISOString() }).eq("id", id);
       if (error) {
         console.error("[leads] deleteLead failed:", error.message);
-        toast.error("Lead not deleted", { description: "We couldn't delete this lead in the database. Please try again." });
+        reportLeadError("Lead not deleted", error.message, "We couldn't delete this lead in the database. Please try again.");
         return;
       }
     }
@@ -938,78 +1216,96 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [useDb, db]);
 
   /* ── Assignment ── */
-  /** Append an assignment-history row (DB append-only table, or local mirror).
-   *  Ownership is NEVER overwritten without leaving this trail. */
+  /** LOCAL-MODE mirror of an assignment-history row. In DB mode the history is
+   *  written by the database itself (leads_record_assignment trigger, migration
+   *  0049) in the same transaction as the owner change — never by the client,
+   *  so it can't be skipped or duplicated. */
   const recordAssignmentEvent = useCallback(async (ev: Omit<LeadAssignmentEvent, "id" | "createdAt"> & { branchId?: string | null }) => {
-    const lead = leadsRef.current.find((l) => l.id === ev.leadId);
+    if (useDb) return;
     const local: LeadAssignmentEvent = { ...ev, id: uid(), createdAt: new Date().toISOString() };
     setAssignmentHistory((prev) => {
       const next = [local, ...prev];
-      if (!useDb) writeLS(ASSIGN_HISTORY_KEY, next);
+      writeLS(ASSIGN_HISTORY_KEY, next);
       return next;
     });
-    if (useDb) {
-      const row: Record<string, unknown> = {
-        lead_id: ev.leadId,
-        branch_id: (lead as any)?.branchId ?? ev.branchId ?? null,
-        from_user_id: ev.fromUserId || null,
-        from_user_name: ev.fromUserName || null,
-        to_user_id: ev.toUserId || null,
-        to_user_name: ev.toUserName || null,
-        assigned_by: ev.assignedBy || null,
-        assigned_by_name: ev.assignedByName || null,
-        reason: ev.reason || null,
-      };
-      const { error } = await db.from("lead_assignment_history").insert(row);
-      if (error && !isMissingTableError(error) && !isUndefinedColumnError(error)) {
-        console.error("[leads] assignment history insert failed:", error.message);
-      }
-    }
-  }, [useDb, db]);
+  }, [useDb]);
 
-  const assignLead = useCallback(async (id: string, staffId: string, staffName: string, reason?: string) => {
+  const assignLead = useCallback(async (id: string, staffId: string, staffNameIn: string, reason?: string): Promise<boolean> => {
     const lead = leadsRef.current.find((l) => l.id === id);
-    if (!lead) return;
+    if (!lead) return false;
     const previousAssignee = lead.assignedTo;
-    const isReassign = !!previousAssignee && previousAssignee !== staffId;
+    if ((previousAssignee || "") === (staffId || "")) return true;
+    const isReassign = !!previousAssignee;
     const nowIso = new Date().toISOString();
+
+    // ── Client mirror of the DB ownership guard (the trigger is the real gate) ──
+    if (!canChangeLeadOwnerRef.current(lead)) {
+      toast.error("Assignment failed", { description: "You don't have permission to change the owner of this lead." });
+      return false;
+    }
+    if (staffId && !eligibleOrUnknown(staffId, lead.branchId)) {
+      toast.error("Assignment failed", { description: "Only active Sales Agents who can work this store can own a lead." });
+      return false;
+    }
+    const staffName = staffId ? (salesAgentsRef.current.find((a) => a.id === staffId)?.name || staffNameIn) : "";
 
     const updates: Partial<Lead> = {
       assignedTo: staffId,
-      // assigned_user_id (canonical ownership) is kept in lockstep by the DB
-      // trigger (0045); mirror it locally too so local mode agrees.
       assignedToName: staffName,
+      agent: staffName,
       assignedBy: currentUserIdRef.current || "",
       assignedByName: currentUserNameRef.current || "",
       assignedAt: staffId ? nowIso : "",
     };
 
     if (useDb) {
-      const row = { ...leadToRow(updates), assigned_user_id: staffId || null };
-      const { error } = await db.from("leads").update(row).eq("id", id);
+      // Canonical owner = assigned_user_id (assigned_to mirrors it). The DB
+      // stamps assigned_by/at + names and writes lead_assignment_history in the
+      // same transaction. NO .select() here: RETURNING would require the caller
+      // to still SEE the lead after handing it to someone else.
+      let row: Record<string, unknown> = {
+        assigned_user_id: staffId || null,
+        assigned_to: staffId || null,
+        last_assignment_reason: reason || null,
+      };
+      let { error } = await db.from("leads").update(row).eq("id", id);
+      if (error && isUndefinedColumnError(error)) {
+        row = omitKeys(row, ["last_assignment_reason"]);
+        ({ error } = await db.from("leads").update(row).eq("id", id));
+      }
       if (error) {
         console.error("[leads] assignLead failed:", error.message);
-        toast.error("Assignment failed", { description: "We couldn't save the assignment. Please try again." });
-        return;
+        reportLeadError("Assignment failed", error.message, "We couldn't save the assignment. Please try again.");
+        return false;
       }
+      // Re-read the authoritative row (it may no longer be visible to the caller
+      // if they handed off a lead they don't own/created) + its history.
+      const [{ data: fresh }, { data: hist }] = await Promise.all([
+        db.from("leads").select("*").eq("id", id).maybeSingle(),
+        db.from("lead_assignment_history").select("*").eq("lead_id", id),
+      ]);
+      setLeads((prev) => fresh
+        ? prev.map((l) => (l.id === id ? applyFulfilmentOverlay([rowToLead(fresh)])[0] : l))
+        : prev.filter((l) => l.id !== id));
+      if (hist) setAssignmentHistory((prev) => [...hist.map(rowToAssignmentEvent), ...prev.filter((h) => h.leadId !== id)]);
+    } else {
+      setLeads((prev) => {
+        const next = prev.map((l) => (l.id === id ? { ...l, ...updates, updatedAt: nowIso } : l));
+        writeLS(LEADS_KEY, next);
+        return next;
+      });
+      // Local mirror of the DB-written ownership history row.
+      await recordAssignmentEvent({
+        leadId: id,
+        fromUserId: previousAssignee || undefined,
+        fromUserName: lead.assignedToName || undefined,
+        toUserId: staffId || undefined,
+        toUserName: staffName || undefined,
+        assignedBy: currentUserIdRef.current || undefined,
+        assignedByName: currentUserNameRef.current || undefined,
+        reason,
+      });
     }
-    setLeads((prev) => {
-      const next = prev.map((l) => (l.id === id ? { ...l, ...updates, updatedAt: nowIso } : l));
-      if (!useDb) writeLS(LEADS_KEY, next);
-      return next;
-    });
-
-    // Ownership history — never overwrite an owner without a trail.
-    await recordAssignmentEvent({
-      leadId: id,
-      fromUserId: previousAssignee || undefined,
-      fromUserName: lead.assignedToName || undefined,
-      toUserId: staffId || undefined,
-      toUserName: staffName || undefined,
-      assignedBy: currentUserIdRef.current || undefined,
-      assignedByName: currentUserNameRef.current || undefined,
-      reason,
-    });
 
     // Audit trail (reuses the existing activity/audit system).
     logActivity({
@@ -1039,7 +1335,51 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     } else if (staffId && staffId === currentUserIdRef.current) {
       toast.success("Lead assigned to you", { description: `${lead.leadNo} · ${lead.name || "Unnamed"}` });
     }
-  }, [useDb, db, recordAssignmentEvent]);
+    return true;
+  }, [useDb, db, can, recordAssignmentEvent]); // eslint-disable-line react-hooks/exhaustive-deps
+  assignLeadRef.current = assignLead;
+
+  /** Follow-up agent changed on a lead → move its OPEN (scheduled) follow-up(s)
+   *  to the new agent, notify them, and audit it. Completed/cancelled
+   *  follow-ups are history and keep their original agent. The lead OWNER is
+   *  untouched (follow-up responsibility ≠ ownership). */
+  const reassignOpenFollowUps = useCallback(async (leadId: string, userId: string, userName: string, previousName?: string) => {
+    const lead = leadsRef.current.find((l) => l.id === leadId);
+    const open = followUpsRef.current.filter((f) => f.leadId === leadId && f.status === "scheduled" && (f.followUpUserId || "") !== (userId || ""));
+    for (const f of open) {
+      if (useDb) {
+        const { error } = await db.from("lead_followup_history").update({ followup_user_id: userId || null, followup_user_name: userName || null }).eq("id", f.id);
+        if (error) {
+          console.error("[leads] follow-up agent change failed:", error.message);
+          reportLeadError("Follow-up not reassigned", error.message, "We couldn't move the open follow-up to the new agent.");
+          continue;
+        }
+      }
+      setFollowUps((prev) => {
+        const next = prev.map((x) => (x.id === f.id ? { ...x, followUpUserId: userId, followUpUserName: userName } : x));
+        if (!useDb) writeLS(FOLLOWUPS_KEY, next);
+        return next;
+      });
+    }
+    if (!lead) return;
+    logActivity({
+      module: "Lead", action: "Follow-up Agent Changed", severity: "info", entity: "Lead", reference: lead.leadNo,
+      description: `Follow-up agent for ${lead.leadNo} set to ${userName || "none"} (owner unchanged: ${lead.assignedToName || "Unassigned"}).`,
+      changes: [{ field: "Follow-Up Agent", from: previousName || "—", to: userName || "—" }],
+    });
+    if (userId && userId !== currentUserIdRef.current) {
+      notify({
+        kind: "lead_assigned",
+        recipientId: userId,
+        title: "Follow-up assigned to you",
+        body: `${lead.leadNo} · ${lead.name || "Unnamed"}${currentUserNameRef.current ? ` — by ${currentUserNameRef.current}` : ""}.`,
+        href: `/leads/list?lead=${leadId}`,
+        reference: lead.leadNo,
+        dedupeKey: `lead-followup-agent:${leadId}:${userId}:${Date.now()}`,
+      });
+    }
+  }, [useDb, db]); // eslint-disable-line react-hooks/exhaustive-deps
+  reassignOpenFollowUpsRef.current = reassignOpenFollowUps;
 
   /* ── Pin ── */
   const pinLead = useCallback(async (id: string, pinned: boolean) => {
@@ -1206,9 +1546,22 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     const lead = leadsRef.current.find((l) => l.id === leadId);
     if (!lead || !draft.dueAt) return null;
     const nowIso = new Date().toISOString();
-    // Follow-up agent defaults to the lead owner but may differ (§12).
-    const fuUserId = draft.followUpUserId || lead.assignedTo || currentUserIdRef.current || "";
-    const fuUserName = draft.followUpUserName || lead.assignedToName || currentUserNameRef.current || "";
+    // Follow-up agent: explicit pick, else the lead's follow-up agent, else the
+    // owner, else me — the first one who is an ELIGIBLE Sales Agent for the
+    // lead's store (legacy/inactive owners are skipped, never assigned work).
+    if (draft.followUpUserId && !eligibleOrUnknown(draft.followUpUserId, lead.branchId)) {
+      toast.error("Follow-up not saved", { description: "The follow-up agent must be an active Sales Agent who can work this store." });
+      return null;
+    }
+    const fuUserId = draft.followUpUserId
+      || [lead.followUpAgentId, lead.assignedTo, currentUserIdRef.current || ""].find((uid) => !!uid && eligibleOrUnknown(uid, lead.branchId))
+      || "";
+    const fuUserName = fuUserId
+      ? (salesAgentsRef.current.find((a) => a.id === fuUserId)?.name
+        || draft.followUpUserName
+        || (fuUserId === lead.followUpAgentId ? lead.followUpAgent : fuUserId === lead.assignedTo ? lead.assignedToName : currentUserNameRef.current)
+        || "")
+      : "";
     const existing = followUpsRef.current.filter((f) => f.leadId === leadId);
     const seq = existing.reduce((m, f) => Math.max(m, f.seq), 0) + 1;
 
@@ -1230,24 +1583,41 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (error) {
         if (!isMissingTableError(error)) {
           console.error("[leads] scheduleFollowUp failed:", error.message);
-          toast.error("Follow-up not saved", { description: "We couldn't schedule this follow-up. Please try again." });
+          reportLeadError("Follow-up not saved", error.message, "We couldn't schedule this follow-up. Please try again.");
           return null;
         }
       } else if (data) {
         const saved = rowToFollowUp(data);
         setFollowUps((prev) => [saved, ...prev]);
-        // Keep the lead's quick-glance next-follow-up in sync (denormalized).
-        await updateLead(leadId, { followUpDate: draft.dueAt.slice(0, 10), followUpAgent: fuUserName });
-        logActivity({ module: "Lead", action: "Follow-up Scheduled", severity: "info", entity: "Lead", reference: lead.leadNo, description: `Follow-up #${saved.seq} scheduled for ${lead.leadNo} on ${draft.dueAt.slice(0, 10)}${fuUserName ? ` · ${fuUserName}` : ""}.` });
+        await afterFollowUpScheduled(lead, saved, fuUserId, fuUserName, draft.dueAt);
         return saved;
       }
     }
 
     setFollowUps((prev) => { const next = [fu, ...prev]; if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
-    await updateLead(leadId, { followUpDate: draft.dueAt.slice(0, 10), followUpAgent: fuUserName });
-    logActivity({ module: "Lead", action: "Follow-up Scheduled", severity: "info", entity: "Lead", reference: lead.leadNo, description: `Follow-up #${fu.seq} scheduled for ${lead.leadNo} on ${draft.dueAt.slice(0, 10)}${fuUserName ? ` · ${fuUserName}` : ""}.` });
+    await afterFollowUpScheduled(lead, fu, fuUserId, fuUserName, draft.dueAt);
     return fu;
-  }, [useDb, db, updateLead]);
+  }, [useDb, db, persistLeadPatch]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /** Keep the lead's quick-glance follow-up (date + agent ID + name) in sync,
+   *  audit it, and notify the follow-up agent when it isn't the scheduler. The
+   *  lead OWNER never changes here (follow-up responsibility ≠ ownership). */
+  async function afterFollowUpScheduled(lead: Lead, saved: LeadFollowUp, fuUserId: string, fuUserName: string, dueAt: string) {
+    await persistLeadPatch(lead.id, { followUpDate: dueAt.slice(0, 10), followUpAgentId: fuUserId, followUpAgent: fuUserName });
+    logActivity({ module: "Lead", action: "Follow-up Scheduled", severity: "info", entity: "Lead", reference: lead.leadNo, description: `Follow-up #${saved.seq} scheduled for ${lead.leadNo} on ${dueAt.slice(0, 10)}${fuUserName ? ` · ${fuUserName}` : ""}.` });
+    if (fuUserId && fuUserId !== currentUserIdRef.current) {
+      notify({
+        kind: "lead_assigned",
+        recipientId: fuUserId,
+        title: "Follow-up assigned to you",
+        body: `${lead.leadNo} · ${lead.name || "Unnamed"} — due ${new Date(dueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.`,
+        href: `/leads/list?lead=${lead.id}`,
+        reference: lead.leadNo,
+        followUpId: saved.id,
+        dedupeKey: `lead-followup-assigned:${saved.id}`,
+      });
+    }
+  }
 
   const completeFollowUp = useCallback(async (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft }) => {
     const fu = followUpsRef.current.find((f) => f.id === followUpId);
@@ -1280,9 +1650,20 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
     logActivity({ module: "Lead", action: "Follow-up Cancelled", severity: "info", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} cancelled${reason ? ` — ${reason}` : ""}.` });
     // If no other open follow-up remains, clear the lead's quick-glance date.
-    const stillOpen = followUpsRef.current.some((f) => f.leadId === fu.leadId && f.id !== followUpId && f.status === "scheduled");
-    if (!stillOpen) await updateLead(fu.leadId, { followUpDate: "" });
-  }, [useDb, db, updateLead]);
+    // A cancelled follow-up must not leave its agent holding the lead: when the
+    // lead-level follow-up agent was this follow-up's agent, hand it to the next
+    // open follow-up's agent (or clear it). The OWNER is never touched.
+    const nextOpen = followUpsRef.current
+      .filter((f) => f.leadId === fu.leadId && f.id !== followUpId && f.status === "scheduled")
+      .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())[0];
+    const patch: Partial<Lead> = {};
+    if (!nextOpen) patch.followUpDate = "";
+    if (lead?.followUpAgentId && lead.followUpAgentId === fu.followUpUserId) {
+      patch.followUpAgentId = nextOpen?.followUpUserId || "";
+      patch.followUpAgent = nextOpen?.followUpUserName || "";
+    }
+    if (Object.keys(patch).length > 0) await persistLeadPatch(fu.leadId, patch);
+  }, [useDb, db, persistLeadPatch]);
 
   const assignmentHistoryFor = useCallback((leadId: string): LeadAssignmentEvent[] => {
     return assignmentHistory.filter((h) => h.leadId === leadId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -1320,9 +1701,33 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     });
   }, [updateLead, recordConversionEvent]);
 
+  /* ── Lead visibility scope (UI = RLS) ──
+     See-all roles (CAP.lead.viewTeam ≡ DB auth_lead_see_all) see every lead
+     in their store scope. Everyone else — e.g. a Sales Agent — sees only leads
+     they CREATED, OWN, or carry FOLLOW-UP responsibility for (the lead's
+     follow-up agent or an assigned follow-up record). In DB mode RLS already
+     returns exactly this set; the filter keeps local mode + optimistic state
+     consistent and is defence-in-depth, never the security boundary. */
+  const scopedLeads = useMemo(() => {
+    if (canSeeAllLeads) return leads;
+    const me = currentUserId || "";
+    if (!me) return [];
+    const followUpLeadIds = new Set(
+      followUps.filter((f) => f.followUpUserId === me && f.status !== "cancelled").map((f) => f.leadId),
+    );
+    return leads.filter((l) =>
+      l.createdBy === me || l.assignedTo === me || l.followUpAgentId === me || followUpLeadIds.has(l.id),
+    );
+  }, [leads, followUps, canSeeAllLeads, currentUserId]);
+
   const leadMetrics = useCallback((scope: "me" | "all" | { ownerId: string } = "all", revenue?: { tickets: any[]; invoices: any[] }): LeadMetrics => {
     const ownerId = scope === "me" ? (currentUserIdRef.current || "") : typeof scope === "object" ? scope.ownerId : "";
-    const scoped = ownerId ? leadsOwnedBy(leads, ownerId) : leads;
+    // "all" = everything the caller may see (never beyond their scope). An
+    // explicit other owner requires the all-performance capability.
+    if (typeof scope === "object" && scope.ownerId !== currentUserIdRef.current && !allow(can, CAP.lead.performanceAll)) {
+      return computeLeadMetrics([], new Map(), revenue, []);
+    }
+    const scoped = ownerId ? leadsOwnedBy(scopedLeads, ownerId) : scopedLeads;
     // Build leadId → open (scheduled) follow-up, so pending/overdue derive from
     // real follow-up records.
     const byLead = new Map<string, LeadFollowUp[]>();
@@ -1335,8 +1740,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       const o = openFollowUp(list);
       if (o) openByLead.set(leadId, o);
     }
-    return computeLeadMetrics(scoped, openByLead, revenue);
-  }, [leads, followUps]);
+    // Pass the FULL follow-up set too so the follow-up engine metrics (Due Today
+    // / Overdue / Upcoming / Completed / Completion Rate) derive from records.
+    return computeLeadMetrics(scoped, openByLead, revenue, followUps);
+  }, [scopedLeads, followUps, can]);
 
   /* ── Shared filters ── */
   const setFilters = useCallback((updater: LeadFilters | ((prev: LeadFilters) => LeadFilters)) => {
@@ -1344,7 +1751,28 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, []);
   const clearFilters = useCallback(() => setFiltersState(EMPTY_LEAD_FILTERS), []);
 
-  const filteredLeads = useMemo(() => pinnedFirst(applyLeadFilters(leads, filters)), [leads, filters]);
+  /* leadId → its single OPEN (scheduled) follow-up. Derived once from the
+   * structured lead_followup_history records so the list filter, the table row
+   * red-tint / cell, and the metrics all share ONE datetime-precise source of
+   * follow-up urgency (never the flat calendar-date field). */
+  const openFollowUpsByLead = useMemo(() => {
+    const byLead = new Map<string, LeadFollowUp[]>();
+    for (const f of followUps) {
+      const arr = byLead.get(f.leadId) ?? [];
+      arr.push(f); byLead.set(f.leadId, arr);
+    }
+    const open = new Map<string, LeadFollowUp>();
+    for (const [leadId, list] of byLead) {
+      const o = openFollowUp(list);
+      if (o) open.set(leadId, o);
+    }
+    return open;
+  }, [followUps]);
+
+  const filteredLeads = useMemo(
+    () => pinnedFirst(applyLeadFilters(scopedLeads, filters, openFollowUpsByLead)),
+    [scopedLeads, filters, openFollowUpsByLead],
+  );
 
   /* ── Option CRUD ── */
   const addOption = useCallback(async (field: LeadFieldKey, value: string) => {
@@ -1429,16 +1857,18 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [options]);
 
   const value = useMemo<LeadsContextValue>(() => ({
-    leads, filteredLeads, options, hydrated, mode: useDb ? "db" : "local",
+    leads: scopedLeads, filteredLeads, options, hydrated, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
     optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    followUps, followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp,
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
+    followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp,
     assignmentHistory, assignmentHistoryFor,
     conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord,
     leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     contacts, addContact, updateContact, deleteContact,
-  }), [leads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus, followUps, followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
+  }), [scopedLeads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

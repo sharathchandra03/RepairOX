@@ -17,6 +17,7 @@
     "db:migrate:dry": "node scripts/migrate.mjs up --dry-run",
     "ms:verify": "node scripts/ms-verify.mjs",
     "ms:security": "node scripts/ms-security.mjs",
+    "leads:verify": "node scripts/sales-agent-verify.mjs",
     "ms:migrate": "node scripts/apply-multi-store.mjs"
   },
   "dependencies": {

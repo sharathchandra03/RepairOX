@@ -11,6 +11,7 @@ import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { UniversalSearch } from "@/components/layout/universal-search";
 import { StoreSelector } from "@/components/layout/store-selector";
+import { AgentScopeSelector } from "@/components/layout/agent-scope-selector";
 import { useRouter } from "next/navigation";
 import { navGroups } from "@/lib/mock-data";
 import {
@@ -120,6 +121,14 @@ export function Topbar({
             two context selectors read together (see design reference). */}
         <div className="shrink-0">
           <StoreSelector />
+        </div>
+
+        {/* Agent scope selector — Lead-Management-only "Agents" pill, next to
+            the store selector. Renders only inside the Leads workspace and only
+            for owners who may view all agents' performance. Agent scope and
+            Store scope are independent dimensions (see the component). */}
+        <div className="shrink-0">
+          <AgentScopeSelector activeWorkspace={activeWorkspace} />
         </div>
 
         {/* Universal Search */}

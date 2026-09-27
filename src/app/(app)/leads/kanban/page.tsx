@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { CAP } from "@/lib/capabilities";
 import { cn, formatINR } from "@/lib/utils";
 
 /* ── Pipeline stages ── */
@@ -107,7 +108,7 @@ export default function KanbanPage() {
           <div className="flex items-center gap-2">
             <Input iconLeft={<Search className="h-4 w-4" />} placeholder="Search..." className="h-9 w-56 rounded-xl" />
             <Button variant="outline" size="sm" className="gap-1.5 rounded-full"><Filter className="h-3.5 w-3.5" /> Filter</Button>
-            <Can permission="manage_sales">
+            <Can permission={CAP.lead.create}>
               <Button size="sm" className="gap-1.5 rounded-full"><Plus className="h-3.5 w-3.5" /> Add Lead</Button>
             </Can>
           </div>

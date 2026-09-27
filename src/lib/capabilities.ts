@@ -87,7 +87,9 @@ export const CAP = {
   recordScope: {
     ticketsViewAll: ["tickets_view_all", "manage_repair_jobs"],
     invoicesViewAll: ["invoices_view_all", "manage_invoices"],
-    leadsViewAll: ["leads_view_all", "manage_sales"],
+    // Mirrors CAP.lead.viewAll / the DB's auth_lead_see_all(). manage_sales is a
+    // write key and does NOT widen lead visibility in RLS, so it isn't here.
+    leadsViewAll: ["leads_view_all", "leads_view_team", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     fieldViewAll: ["field_view_all", "manage_field_jobs"],
     customersViewAll: ["customers_view_all", "manage_customers"],
   },
@@ -218,8 +220,12 @@ export const CAP = {
     delete: ["leads_delete", "manage_sales"],
     // First assignment of an owner. `assign` (generic) + manage_sales fallback.
     assign: ["leads_assign", "assign", "manage_sales"],
-    // Change an EXISTING owner. leads_assign implies it (assigners can reassign).
+    // Change an EXISTING owner. leads_assign implies it (assigners can reassign)
+    // — but ONLY for leads the user owns/created or, with a see-all key, any
+    // visible lead. Changing the owner of someone else's lead (e.g. as its
+    // follow-up agent) needs `reassignAny`. Mirrors leads_ownership_guard (0050).
     reassign: ["leads_reassign", "leads_assign", "assign", "manage_sales"],
+    reassignAny: ["leads_reassign", "assign", "manage_sales"],
     stageChange: ["leads_stage_change", "manage_sales"],
     priorityChange: ["leads_priority_change", "manage_sales"],
     pin: ["leads_pin", "leads_edit", "manage_sales"],
@@ -228,10 +234,19 @@ export const CAP = {
     convert: ["leads_convert", "manage_sales"],
     import: ["leads_import", "import_data", "manage_sales"],
     export: ["leads_export", "export_reports", "manage_sales"],
-    // Scope: see the whole team's leads (between own-only and org-wide view-all).
-    viewTeam: ["leads_view_team", "leads_view_all", "manage_sales", "view_sales_reports"],
+    // Scope: see every lead in the user's STORE scope (team = store). MUST match
+    // the DB's auth_lead_see_all() (migration 0049) so UI = RLS. `manage_sales`
+    // is deliberately NOT here — it is a write key, not a visibility key.
+    viewTeam: ["leads_view_team", "leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     // Scope: see every lead in the org/store (own-vs-all record scope).
     viewAll: ["leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
+    // Sales Agent identity marker. Resolve ELIGIBILITY with the exact-key check
+    // in lib/sales-agents.ts (never via can(), which honours full_access) — an
+    // owner is not a Sales Agent merely because they can do everything.
+    salesAgent: ["leads_sales_agent"],
+    // Performance views (derived metrics). Own = the caller's leads only.
+    performanceOwn: ["leads_performance_view_own", "leads_view", "manage_sales"],
+    performanceAll: ["leads_performance_view_all", "leads_view_all", "view_sales_reports", "manage_reports"],
   },
   deal: {
     create: ["deals_create", "manage_sales"],

@@ -18,6 +18,8 @@ import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Can } from "@/components/common/can";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { cn, formatINR } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import {
@@ -28,6 +30,7 @@ import { priorityTone, statusTone } from "@/components/leads/lead-pills";
 import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
 import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
+import { AgentPicker } from "@/components/leads/lead-form-fields";
 import { LeadOperationsPanel } from "@/components/leads/lead-operations-panel";
 
 function formatDateTime(iso: string): string {
@@ -35,18 +38,6 @@ function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
   return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
-}
-
-function Section({ icon: Icon, title, children }: { icon: React.ComponentType<{ className?: string }>; title: string; children: React.ReactNode }) {
-  return (
-    <section className="rounded-2xl border border-border bg-card p-4">
-      <div className="mb-3 flex items-center gap-2">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Icon className="h-3.5 w-3.5" /></span>
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">{title}</h3>
-      </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-3">{children}</div>
-    </section>
-  );
 }
 
 function Cell({ label, children, wide }: { label: string; children: React.ReactNode; wide?: boolean }) {
@@ -123,6 +114,82 @@ function EditSelect({ field, value, onChange, extra = [] }: { field: LeadFieldKe
   );
 }
 
+/* ── EditableSection ─────────────────────────────────────────────────────
+   A self-contained detail section that can be edited IN PLACE. Header shows the
+   title + a small "Edit" button (permission-gated). When editing, the section
+   swaps its read-only cells for edit fields and shows its own Save / Cancel —
+   it saves ONLY its own fields via updateLead. Every section works this way, so
+   the whole record is editable section-by-section without a global edit mode. */
+function EditableSection({
+  icon: Icon, title, canEdit, lead, fields, renderView, renderEdit, validate,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  canEdit: boolean;
+  lead: Lead;
+  /** The lead keys this section owns (only these are saved). */
+  fields: (keyof Lead)[];
+  renderView: () => React.ReactNode;
+  renderEdit: (draft: Lead, set: <K extends keyof Lead>(k: K, v: Lead[K]) => void, errors: Partial<Record<keyof Lead, string>>) => React.ReactNode;
+  /** Optional per-section validation gate. */
+  validate?: (draft: Lead) => boolean;
+}) {
+  const { updateLead } = useLeads();
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [draft, setDraft] = useState<Lead>(lead);
+
+  // Re-sync when the underlying lead changes and we're NOT editing.
+  useEffect(() => { if (!editing) setDraft(lead); }, [lead, editing]);
+
+  const set = <K extends keyof Lead>(k: K, v: Lead[K]) => setDraft((d) => ({ ...d, [k]: v }));
+  // Section quick-edits never change ownership (that's the Assignment control),
+  // so the owner requirement doesn't gate unrelated sections of legacy leads.
+  const errors = validateLead(draft, { requireOwner: false }).errors;
+  const okToSave = validate ? validate(draft) : true;
+  const dirty = fields.some((k) => draft[k] !== lead[k]);
+
+  const save = async () => {
+    if (!okToSave) return;
+    setSaving(true);
+    try {
+      const updates: Partial<Lead> = {};
+      fields.forEach((k) => { if (draft[k] !== lead[k]) (updates as any)[k] = draft[k]; });
+      if (Object.keys(updates).length > 0) await updateLead(lead.id, updates);
+      setEditing(false);
+    } finally { setSaving(false); }
+  };
+  const cancel = () => { setDraft(lead); setEditing(false); };
+
+  return (
+    <section className="rounded-2xl border border-border bg-card p-4">
+      <div className="mb-3 flex items-center justify-between gap-2 border-b border-border/60 pb-3">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Icon className="h-3.5 w-3.5" /></span>
+          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">{title}</h3>
+        </div>
+        {editing ? (
+          <div className="flex items-center gap-1.5">
+            <Button variant="ghost" size="sm" className="h-7 px-2 text-[12px]" onClick={cancel}>Cancel</Button>
+            <Button size="sm" className="h-7 gap-1 px-2.5 text-[12px]" loading={saving} disabled={!dirty || !okToSave} onClick={save}>
+              <Check className="h-3.5 w-3.5" /> Save
+            </Button>
+          </div>
+        ) : (
+          canEdit && (
+            <button onClick={() => setEditing(true)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
+              <Pencil className="h-3 w-3" /> Edit
+            </button>
+          )
+        )}
+      </div>
+      <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+        {editing ? renderEdit(draft, set, errors) : renderView()}
+      </div>
+    </section>
+  );
+}
+
 export function LeadDetailDrawer({
   lead, open, onClose, onEdit, onDelete,
 }: {
@@ -134,78 +201,37 @@ export function LeadDetailDrawer({
   onDelete: (lead: Lead) => void;
 }) {
   const canAssign = useCanAssignLeads();
-  const { updateLead } = useLeads();
-  const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [draft, setDraft] = useState<Lead | null>(lead);
+  const { can } = usePermissions();
+  const canEdit = allow(can, CAP.lead.edit);
+  const canFollowUp = allow(can, CAP.lead.followup);
 
-  // Sync the draft whenever a different lead opens (or realtime updates it).
-  useEffect(() => { setDraft(lead); setEditing(false); }, [lead?.id]);
-  // While NOT editing, keep the draft mirrored to live lead updates.
-  useEffect(() => { if (!editing) setDraft(lead); }, [lead, editing]);
-
-  if (!lead || !draft) return null;
-
-  const dirty = editing && JSON.stringify(draft) !== JSON.stringify(lead);
-  const validation = validateLead(draft);
-  const set = <K extends keyof Lead>(k: K, v: Lead[K]) => setDraft((d) => (d ? { ...d, [k]: v } : d));
+  if (!lead) return null;
 
   const fu = followUpState(lead.followUpDate);
   const fuTone = followUpTone(fu).chip;
   const money = (n: number | null) => (n == null ? "—" : formatINR(n));
 
-  const handleSave = async () => {
-    if (!validation.ok) return;
-    setSaving(true);
-    try {
-      // Only send changed business fields.
-      const updates: Partial<Lead> = {};
-      (Object.keys(draft) as (keyof Lead)[]).forEach((k) => {
-        if (draft[k] !== lead[k]) (updates as any)[k] = draft[k];
-      });
-      await updateLead(lead.id, updates);
-      setEditing(false);
-    } finally {
-      setSaving(false);
-    }
-  };
-  const handleCancel = () => { setDraft(lead); setEditing(false); };
-
   return (
     <Drawer
       open={open}
-      onClose={editing ? handleCancel : onClose}
+      onClose={onClose}
       title={lead.name || "Lead"}
       subtitle={`${lead.leadNo}${lead.number ? ` · ${lead.number}` : ""}`}
       icon={User}
       width="max-w-xl"
       footer={
         <div className="flex items-center justify-between">
-          {editing ? (
-            <>
-              <span className="text-[12px] text-muted-foreground">{dirty ? "Unsaved changes" : "Editing"}</span>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={handleCancel}>Cancel</Button>
-                <Button size="sm" className="gap-1.5" loading={saving} disabled={!dirty || !validation.ok} onClick={handleSave}>
-                  <Check className="h-4 w-4" /> Save Changes
-                </Button>
-              </div>
-            </>
-          ) : (
-            <>
-              <Can permission="manage_sales">
-                <Button variant="ghost" size="sm" className="gap-1.5 text-rose-600 hover:bg-rose-50" onClick={() => onDelete(lead)}>
-                  <Trash2 className="h-4 w-4" /> Delete
-                </Button>
-              </Can>
-              <div className="flex items-center gap-2">
-                <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
-                <Can permission="manage_sales">
-                  <Button size="sm" className="gap-1.5" onClick={() => setEditing(true)}><Pencil className="h-4 w-4" /> Edit</Button>
-                </Can>
-              </div>
-            </>
-          )}
+          <Can permission={CAP.lead.delete}>
+            <Button variant="ghost" size="sm" className="gap-1.5 text-rose-600 hover:bg-rose-50" onClick={() => onDelete(lead)}>
+              <Trash2 className="h-4 w-4" /> Delete
+            </Button>
+          </Can>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
+            <Can permission={CAP.lead.edit}>
+              <Button size="sm" className="gap-1.5" onClick={() => onEdit(lead)}><Pencil className="h-4 w-4" /> Open Full Form</Button>
+            </Can>
+          </div>
         </div>
       }
     >
@@ -225,64 +251,54 @@ export function LeadDetailDrawer({
           </div>
         </div>
 
-        {!editing && (
-          <>
-            {/* Quick actions */}
+        {/* Quick actions */}
+        <div className="flex items-center gap-2">
+          {lead.number && <a href={`tel:${lead.number}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-emerald-50 hover:text-emerald-700"><Phone className="h-3.5 w-3.5" /> Call</a>}
+          {lead.number && <a href={`https://wa.me/${lead.number.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-green-50 hover:text-green-700"><MessageSquare className="h-3.5 w-3.5" /> WhatsApp</a>}
+          {lead.email && <a href={`mailto:${lead.email}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-sky-50 hover:text-sky-700"><Mail className="h-3.5 w-3.5" /> Email</a>}
+        </div>
+
+        {/* Follow-up banner */}
+        {lead.followUpDate && (
+          <div className={cn("flex items-center justify-between rounded-2xl px-4 py-3 ring-1 ring-inset", fuTone)}>
             <div className="flex items-center gap-2">
-              {lead.number && <a href={`tel:${lead.number}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-emerald-50 hover:text-emerald-700"><Phone className="h-3.5 w-3.5" /> Call</a>}
-              {lead.number && <a href={`https://wa.me/${lead.number.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-green-50 hover:text-green-700"><MessageSquare className="h-3.5 w-3.5" /> WhatsApp</a>}
-              {lead.email && <a href={`mailto:${lead.email}`} className="flex flex-1 items-center justify-center gap-1.5 rounded-xl border border-border bg-card py-2 text-[12px] font-medium text-zinc-700 transition hover:bg-sky-50 hover:text-sky-700"><Mail className="h-3.5 w-3.5" /> Email</a>}
-            </div>
-
-            {/* Follow-up banner */}
-            {lead.followUpDate && (
-              <div className={cn("flex items-center justify-between rounded-2xl px-4 py-3 ring-1 ring-inset", fuTone)}>
-                <div className="flex items-center gap-2">
-                  <CalendarClock className="h-4 w-4" />
-                  <div>
-                    <p className="text-[12px] font-semibold">{fu === "overdue" ? "Follow-up overdue" : fu === "today" ? "Follow-up today" : "Upcoming follow-up"}</p>
-                    <p className="text-[11px] opacity-80">{lead.followUpDate}{lead.followUpAgent ? ` · ${lead.followUpAgent}` : ""}</p>
-                  </div>
-                </div>
+              <CalendarClock className="h-4 w-4" />
+              <div>
+                <p className="text-[12px] font-semibold">{fu === "overdue" ? "Follow-up overdue" : fu === "today" ? "Follow-up today" : "Upcoming follow-up"}</p>
+                <p className="text-[11px] opacity-80">{lead.followUpDate}{lead.followUpAgent ? ` · ${lead.followUpAgent}` : ""}</p>
               </div>
-            )}
-
-            {/* Fulfilment & operations — routing + store/field hand-off */}
-            <LeadOperationsPanel lead={lead} />
-          </>
+            </div>
+          </div>
         )}
 
-        {/* Assignment (view mode only — reassign uses the AssignMenu) */}
-        {!editing && (
-          <section className="rounded-2xl border border-border bg-card p-4">
-            <div className="mb-3 flex items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><UserCheck className="h-3.5 w-3.5" /></span>
-                <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">Assignment</h3>
-              </div>
-              {canAssign && <AssignMenu lead={lead} />}
-            </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-3">
-              <div className="col-span-2">
-                <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Assigned To</p>
-                <div className="mt-1"><AssignBadge lead={lead} size={24} /></div>
-              </div>
-              <Cell label="Assigned By">{lead.assignedByName}</Cell>
-              <Cell label="Assigned Date">{formatDateTime(lead.assignedAt)}</Cell>
-            </div>
-          </section>
-        )}
+        {/* Fulfilment & operations — routing + store/field hand-off (own inline actions) */}
+        <LeadOperationsPanel lead={lead} />
 
-        {/* ── Contact ── */}
-        <Section icon={User} title="Contact">
-          {editing ? (
-            <>
-              <EditField label="Name" error={!validation.ok ? validation.errors.name : undefined}><input className={editInput(!!validation.errors.name)} value={draft.name} onChange={(e) => set("name", e.target.value)} /></EditField>
-              <EditField label="Number" error={!validation.ok ? validation.errors.number : undefined}><input className={editInput(!!validation.errors.number)} value={draft.number} onChange={(e) => set("number", e.target.value)} inputMode="tel" /></EditField>
-              <EditField label="Email" error={validation.errors.email}><input className={editInput(!!validation.errors.email)} value={draft.email} onChange={(e) => set("email", e.target.value)} inputMode="email" /></EditField>
-              <EditField label="Location"><input className={editInput()} value={draft.location} onChange={(e) => set("location", e.target.value)} /></EditField>
-            </>
-          ) : (
+        {/* Assignment — reassign inline via the AssignMenu */}
+        <section className="rounded-2xl border border-border bg-card p-4">
+          <div className="mb-3 flex items-center justify-between gap-2 border-b border-border/60 pb-3">
+            <div className="flex items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><UserCheck className="h-3.5 w-3.5" /></span>
+              <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">Assignment</h3>
+            </div>
+            {canAssign && <AssignMenu lead={lead} />}
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-3">
+            <div className="col-span-2">
+              <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Assigned To</p>
+              <div className="mt-1"><AssignBadge lead={lead} size={24} /></div>
+            </div>
+            <Cell label="Assigned By">{lead.assignedByName}</Cell>
+            <Cell label="Assigned Date">{formatDateTime(lead.assignedAt)}</Cell>
+          </div>
+        </section>
+
+        {/* ── Contact (inline editable) ── */}
+        <EditableSection
+          icon={User} title="Contact" canEdit={canEdit} lead={lead}
+          fields={["name", "number", "email", "location"]}
+          validate={(d) => validateLead(d, { requireOwner: false }).ok}
+          renderView={() => (
             <>
               <Cell label="Name">{lead.name}</Cell>
               <Cell label="Number">{lead.number}</Cell>
@@ -290,48 +306,54 @@ export function LeadDetailDrawer({
               <Cell label="Location">{lead.location}</Cell>
             </>
           )}
-        </Section>
-
-        {/* ── Lead ── */}
-        <Section icon={Tag} title="Lead">
-          {editing ? (
+          renderEdit={(draft, set, errors) => (
             <>
-              <Cell label="Lead ID">{lead.leadNo}</Cell>
-              <Cell label="Date">{lead.date}{lead.time ? ` · ${lead.time}` : ""}</Cell>
-              <EditField label="Region"><EditSelect field="region" value={draft.region} onChange={(v) => set("region", v)} /></EditField>
-              <EditField label="Source"><EditSelect field="source" value={draft.source} onChange={(v) => set("source", v)} /></EditField>
-              <EditField label="Agent"><EditSelect field="agent" value={draft.agent} onChange={(v) => set("agent", v)} /></EditField>
-              <EditField label="Lead Category"><EditSelect field="leadCategory" value={draft.leadCategory} onChange={(v) => set("leadCategory", v)} /></EditField>
-              <EditField label="Lead Nature"><EditSelect field="leadNature" value={draft.leadNature} onChange={(v) => set("leadNature", v)} /></EditField>
-              <EditField label="Priority"><EditSelect field="priority" value={draft.priority} onChange={(v) => set("priority", v)} /></EditField>
+              <EditField label="Name" error={errors.name}><input className={editInput(!!errors.name)} value={draft.name} onChange={(e) => set("name", e.target.value)} /></EditField>
+              <EditField label="Number" error={errors.number}><input className={editInput(!!errors.number)} value={draft.number} onChange={(e) => set("number", e.target.value)} inputMode="tel" /></EditField>
+              <EditField label="Email" error={errors.email}><input className={editInput(!!errors.email)} value={draft.email} onChange={(e) => set("email", e.target.value)} inputMode="email" /></EditField>
+              <EditField label="Location"><input className={editInput()} value={draft.location} onChange={(e) => set("location", e.target.value)} /></EditField>
             </>
-          ) : (
+          )}
+        />
+
+        {/* ── Lead (inline editable; system fields stay read-only) ── */}
+        <EditableSection
+          icon={Tag} title="Lead" canEdit={canEdit} lead={lead}
+          fields={["region", "source", "leadCategory", "leadNature", "priority"]}
+          renderView={() => (
             <>
               <Cell label="Lead ID">{lead.leadNo}</Cell>
               <Cell label="Date">{lead.date}{lead.time ? ` · ${lead.time}` : ""}</Cell>
               <Cell label="Month">{lead.month}</Cell>
               <Cell label="Region">{lead.region}</Cell>
               <Cell label="Source">{lead.source}</Cell>
-              <Cell label="Agent">{lead.agent}</Cell>
+              {/* AGENTS = the owner (a Sales Agent user) — changed only via Assignment. */}
+              <Cell label="Agent (owner)">{lead.assignedToName || lead.agent}</Cell>
               <Cell label="Lead Category">{lead.leadCategory}</Cell>
               <Cell label="Lead Nature">{lead.leadNature}</Cell>
               <Cell label="Priority">{lead.priority}</Cell>
             </>
           )}
-        </Section>
-
-        {/* ── Repair / Sales ── */}
-        <Section icon={Wrench} title="Repair / Sales Details">
-          {editing ? (
+          renderEdit={(draft, set) => (
             <>
-              <EditField label="Device"><EditSelect field="device" value={draft.device} onChange={(v) => set("device", v)} /></EditField>
-              <EditField label="Category"><EditSelect field="category" value={draft.category} onChange={(v) => set("category", v)} /></EditField>
-              <EditField label="Issue" wide><input className={editInput()} value={draft.issue} onChange={(e) => set("issue", e.target.value)} /></EditField>
-              <EditField label="Estimate" error={validation.errors.estimate}><input className={editInput(!!validation.errors.estimate)} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} inputMode="decimal" /></EditField>
-              <EditField label="Discount" error={validation.errors.discount}><input className={editInput(!!validation.errors.discount)} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} inputMode="decimal" /></EditField>
-              <EditField label="Comments" wide><textarea className={cn(editInput(), "h-auto min-h-[64px] py-2")} value={draft.comments} onChange={(e) => set("comments", e.target.value)} /></EditField>
+              <Cell label="Lead ID">{lead.leadNo}</Cell>
+              <Cell label="Date">{lead.date}{lead.time ? ` · ${lead.time}` : ""}</Cell>
+              <EditField label="Region"><EditSelect field="region" value={draft.region} onChange={(v) => set("region", v)} /></EditField>
+              <EditField label="Source"><EditSelect field="source" value={draft.source} onChange={(v) => set("source", v)} /></EditField>
+              <Cell label="Agent (owner)">{lead.assignedToName || lead.agent}</Cell>
+              <EditField label="Lead Category"><EditSelect field="leadCategory" value={draft.leadCategory} onChange={(v) => set("leadCategory", v)} /></EditField>
+              <EditField label="Lead Nature"><EditSelect field="leadNature" value={draft.leadNature} onChange={(v) => set("leadNature", v)} /></EditField>
+              <EditField label="Priority"><EditSelect field="priority" value={draft.priority} onChange={(v) => set("priority", v)} /></EditField>
             </>
-          ) : (
+          )}
+        />
+
+        {/* ── Repair / Sales (inline editable) ── */}
+        <EditableSection
+          icon={Wrench} title="Repair / Sales Details" canEdit={canEdit} lead={lead}
+          fields={["device", "category", "issue", "estimate", "discount", "comments"]}
+          validate={(d) => validateLead(d, { requireOwner: false }).ok}
+          renderView={() => (
             <>
               <Cell label="Device">{lead.device}</Cell>
               <Cell label="Category">{lead.category}</Cell>
@@ -341,19 +363,24 @@ export function LeadDetailDrawer({
               <Cell label="Comments" wide>{lead.comments}</Cell>
             </>
           )}
-        </Section>
-
-        {/* ── Contact & Follow-Up ── */}
-        <Section icon={ClipboardCheck} title="Contact & Follow-Up">
-          {editing ? (
+          renderEdit={(draft, set, errors) => (
             <>
-              <EditField label="Contact Status"><EditSelect field="contactStatus" value={draft.contactStatus} onChange={(v) => set("contactStatus", v)} /></EditField>
-              <EditField label="Status"><EditSelect field="status" value={draft.status} onChange={(v) => set("status", v)} /></EditField>
-              <EditField label="Follow-Up Date" error={validation.errors.followUpDate}><input type="date" className={editInput(!!validation.errors.followUpDate)} value={draft.followUpDate} onChange={(e) => set("followUpDate", e.target.value)} /></EditField>
-              <EditField label="Follow-Up Agent"><EditSelect field="followUpAgent" value={draft.followUpAgent} onChange={(v) => set("followUpAgent", v)} /></EditField>
-              <EditField label="Follow-Up Comments" wide><textarea className={cn(editInput(), "h-auto min-h-[56px] py-2")} value={draft.followUpComments} onChange={(e) => set("followUpComments", e.target.value)} /></EditField>
+              <EditField label="Device"><EditSelect field="device" value={draft.device} onChange={(v) => set("device", v)} /></EditField>
+              <EditField label="Category"><EditSelect field="category" value={draft.category} onChange={(v) => set("category", v)} /></EditField>
+              <EditField label="Issue" wide><input className={editInput()} value={draft.issue} onChange={(e) => set("issue", e.target.value)} /></EditField>
+              <EditField label="Estimate" error={errors.estimate}><input className={editInput(!!errors.estimate)} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} inputMode="decimal" /></EditField>
+              <EditField label="Discount" error={errors.discount}><input className={editInput(!!errors.discount)} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} inputMode="decimal" /></EditField>
+              <EditField label="Comments" wide><textarea className={cn(editInput(), "h-auto min-h-[64px] py-2")} value={draft.comments} onChange={(e) => set("comments", e.target.value)} /></EditField>
             </>
-          ) : (
+          )}
+        />
+
+        {/* ── Contact & Follow-Up (inline editable) ── */}
+        <EditableSection
+          icon={ClipboardCheck} title="Contact & Follow-Up" canEdit={canEdit} lead={lead}
+          fields={["contactStatus", "status", "followUpDate", "followUpAgentId", "followUpAgent", "followUpComments"]}
+          validate={(d) => validateLead(d, { requireOwner: false }).ok}
+          renderView={() => (
             <>
               <Cell label="Contact Status">{lead.contactStatus}</Cell>
               <Cell label="Status">{lead.status}</Cell>
@@ -362,30 +389,52 @@ export function LeadDetailDrawer({
               <Cell label="Follow-Up Comments" wide>{lead.followUpComments}</Cell>
             </>
           )}
-        </Section>
-
-        {/* ── Structured follow-up history + ownership history (view mode) ── */}
-        {!editing && <LeadFollowUpHistory lead={lead} />}
-
-        {/* ── Full customer/sales journey (view mode) ── */}
-        {!editing && <LeadJourneyTimeline lead={lead} />}
-
-        {/* ── Result ── */}
-        <Section icon={Flag} title="Result">
-          {editing ? (
+          renderEdit={(draft, set, errors) => (
             <>
-              <EditField label="Result"><EditSelect field="result" value={draft.result} onChange={(v) => set("result", v)} /></EditField>
-              <EditField label="Final Result"><EditSelect field="finalResult" value={draft.finalResult} onChange={(v) => set("finalResult", v)} /></EditField>
-              <EditField label="Final Remarks" wide><textarea className={cn(editInput(), "h-auto min-h-[56px] py-2")} value={draft.finalRemarks} onChange={(e) => set("finalRemarks", e.target.value)} /></EditField>
+              <EditField label="Contact Status"><EditSelect field="contactStatus" value={draft.contactStatus} onChange={(v) => set("contactStatus", v)} /></EditField>
+              <EditField label="Status"><EditSelect field="status" value={draft.status} onChange={(v) => set("status", v)} /></EditField>
+              <EditField label="Follow-Up Date" error={errors.followUpDate}><input type="date" className={editInput(!!errors.followUpDate)} value={draft.followUpDate} onChange={(e) => set("followUpDate", e.target.value)} /></EditField>
+              <EditField label="Follow-Up Agent">
+                {/* Follow-up responsibility is a Sales Agent USER ID (separate from the owner). */}
+                <AgentPicker
+                  valueId={draft.followUpAgentId}
+                  storeId={lead.branchId || undefined}
+                  fallbackName={lead.followUpAgent}
+                  disabled={!canFollowUp}
+                  placeholder="Sales Agent (may differ from owner)"
+                  onChange={(uid, nm) => { set("followUpAgentId", uid); set("followUpAgent", nm); }}
+                />
+              </EditField>
+              <EditField label="Follow-Up Comments" wide><textarea className={cn(editInput(), "h-auto min-h-[56px] py-2")} value={draft.followUpComments} onChange={(e) => set("followUpComments", e.target.value)} /></EditField>
             </>
-          ) : (
+          )}
+        />
+
+        {/* ── Structured follow-up history + ownership history ── */}
+        <LeadFollowUpHistory lead={lead} />
+
+        {/* ── Full customer/sales journey ── */}
+        <LeadJourneyTimeline lead={lead} />
+
+        {/* ── Result (inline editable) ── */}
+        <EditableSection
+          icon={Flag} title="Result" canEdit={canEdit} lead={lead}
+          fields={["result", "finalResult", "finalRemarks"]}
+          renderView={() => (
             <>
               <Cell label="Result">{lead.result}</Cell>
               <Cell label="Final Result">{lead.finalResult}</Cell>
               <Cell label="Final Remarks" wide>{lead.finalRemarks}</Cell>
             </>
           )}
-        </Section>
+          renderEdit={(draft, set) => (
+            <>
+              <EditField label="Result"><EditSelect field="result" value={draft.result} onChange={(v) => set("result", v)} /></EditField>
+              <EditField label="Final Result"><EditSelect field="finalResult" value={draft.finalResult} onChange={(v) => set("finalResult", v)} /></EditField>
+              <EditField label="Final Remarks" wide><textarea className={cn(editInput(), "h-auto min-h-[56px] py-2")} value={draft.finalRemarks} onChange={(e) => set("finalRemarks", e.target.value)} /></EditField>
+            </>
+          )}
+        />
       </div>
     </Drawer>
   );

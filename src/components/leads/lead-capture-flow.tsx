@@ -27,11 +27,15 @@ import { Textarea } from "@/components/ui/input";
 import { useLeads } from "@/lib/leads-context";
 import { useSession } from "@/lib/use-session";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStore } from "@/lib/store";
+import { useStoreContext } from "@/lib/store-context";
 import { CAP, allow } from "@/lib/capabilities";
 import {
-  emptyLeadDraft, validateLead, needsFollowUp,
+  emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
   type Lead, type LeadDraft, type LeadFieldKey,
 } from "@/lib/leads-data";
+import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
+import { CustomerPicker } from "@/components/common/customer-picker";
 import { cn } from "@/lib/utils";
 
 /* ─── Configurable select (searchable, options from Settings) ─────────── */
@@ -122,6 +126,7 @@ function ConfigurableSelect({
           <div className="fixed inset-0 z-[10040]" onClick={close} />
           <div
             ref={panelRef}
+            data-lead-popover-open="true"
             style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
             className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
           >
@@ -202,9 +207,11 @@ const inputCls = (invalid?: boolean) =>
 /* ─── Stage config ────────────────────────────────────────────────────── */
 
 const STAGES = [
-  { id: 1, label: "Quick Capture", hint: "Register the lead" },
-  { id: 2, label: "Qualification", hint: "Device & estimate" },
-  { id: 3, label: "Follow-Up", hint: "Contact & result" },
+  { id: 1, label: "Customer",      hint: "Who + how to reach" },
+  { id: 2, label: "Lead Details",  hint: "Source, agent, priority" },
+  { id: 3, label: "Device & Issue", hint: "Device, estimate" },
+  { id: 4, label: "Follow-Up",     hint: "Contact & result" },
+  { id: 5, label: "Review",        hint: "Confirm & save" },
 ];
 
 /* Subtle horizontal slide + fade for step transitions. `custom` is the
@@ -227,60 +234,178 @@ export function LeadCaptureFlow({
   return <FlowInner onClose={onClose} editLead={editLead} onSaved={onSaved} />;
 }
 
+
 function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
-  const { addLead, updateLead } = useLeads();
-  const { name: currentUserName } = useSession();
-  const { team, can } = usePermissions();
+  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner } = useLeads();
+  const { id: currentUserId, name: currentUserName } = useSession();
+  const { team, can, currentUser } = usePermissions();
+  const { customers } = useStore();
+  const { activeStoreId } = useStoreContext();
   const isEdit = !!editLead;
   const canSaveLead = isEdit ? allow(can, CAP.lead.edit) : allow(can, CAP.lead.create);
-
-  const staffNames = useMemo(() => team.map((m) => m.name).filter(Boolean), [team]);
+  // Who may pick the OWNER: first assignment needs CAP.lead.assign; changing an
+  // existing owner needs CAP.lead.reassign. Without it the owner is locked
+  // (a Sales Agent creating a lead owns it). The DB guard enforces the same.
+  const canPickOwner = isEdit && editLead
+    ? canChangeLeadOwner(editLead)
+    : allow(can, CAP.lead.assign);
+  const canPickFollowUpAgent = allow(can, CAP.lead.followup);
 
   const [stage, setStage] = useState(1);
-  // Direction of the last step change: +1 = forward (Continue), -1 = back.
-  // Drives the horizontal slide so Back returns content from the opposite side.
   const [dir, setDir] = useState(1);
   const bodyRef = useRef<HTMLDivElement>(null);
-  const goToStage = (next: number) => {
-    if (next === stage) return;
-    setDir(next >= stage ? 1 : -1);
-    setStage(next);
-  };
-  // Each time the step changes, snap the body back to the top so the new step
-  // always starts from its first field (no carried-over scroll position).
-  useLayoutEffect(() => {
-    if (bodyRef.current) bodyRef.current.scrollTo({ top: 0 });
-  }, [stage]);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
+
+  /* ── Single coherent draft state (survives all step changes) ── */
   const [draft, setDraft] = useState<LeadDraft>(() => {
     if (editLead) {
       const { id, leadNo, date, time, month, createdAt, updatedAt, ...rest } = editLead;
       return rest;
     }
-    return emptyLeadDraft(currentUserName || "");
+    // New lead: the logged-in user becomes the default OWNER only when they are
+    // an eligible Sales Agent for this store (IVR / phone capture — no need to
+    // search for yourself). Owners/managers who aren't Sales Agents pick one.
+    // The lead's store = the active store, or (All-Shops view) the creator's
+    // home store — the same store the DB would default to — so the owner is
+    // validated against the store the lead is actually saved in.
+    const storeId = activeStoreId || currentUser?.branchId || "";
+    const selfIsAgent = !!currentUserId && currentUserIsSalesAgent(storeId || null);
+    return {
+      ...emptyLeadDraft(selfIsAgent ? currentUserName || "" : ""),
+      assignedTo: selfIsAgent ? currentUserId || "" : "",
+      assignedToName: selfIsAgent ? currentUserName || "" : "",
+      branchId: storeId,
+    };
   });
+
+  // The Sales Agent directory may finish loading after the form opens — apply
+  // the self-default once, only if nobody has been picked yet.
+  const selfDefaultApplied = useRef(false);
+  useEffect(() => {
+    if (isEdit || selfDefaultApplied.current || !salesAgentsReady) return;
+    selfDefaultApplied.current = true;
+    if (!draft.assignedTo && currentUserId && currentUserIsSalesAgent(draft.branchId || null)) {
+      setDraft((d) => ({ ...d, assignedTo: currentUserId, assignedToName: currentUserName || "", agent: currentUserName || "" }));
+    }
+  }, [isEdit, salesAgentsReady, currentUserId, currentUserName, currentUserIsSalesAgent, draft.assignedTo, draft.branchId]);
 
   const set = <K extends keyof LeadDraft>(key: K, val: LeadDraft[K]) => setDraft((d) => ({ ...d, [key]: val }));
 
-  const validation = useMemo(() => validateLead(draft), [draft]);
+  // The owner is REQUIRED whenever one can actually be chosen: the user can pick
+  // an owner and the store has Sales Agents, or the user is a Sales Agent
+  // themselves. Otherwise the lead may be saved unassigned (a manager assigns
+  // it later) — never blocked, and never given to a non-Sales-Agent.
+  const storeAgentCount = salesAgentsFor(draft.branchId || null).length;
+  const ownerRequired = !salesAgentsReady
+    || (canPickOwner ? storeAgentCount > 0 : !!currentUserId && currentUserIsSalesAgent(draft.branchId || null));
+  const baseValidation = useMemo(() => validateLead(draft, { requireOwner: ownerRequired }), [draft, ownerRequired]);
+  // Owner / follow-up agent must be ELIGIBLE Sales Agents for the lead's store
+  // (only checked when they're being set now — historical values are kept).
+  const validation = useMemo(() => {
+    const errors = { ...baseValidation.errors };
+    const store = draft.branchId || null;
+    const ownerChanged = !isEdit || (draft.assignedTo || "") !== (editLead?.assignedTo || "");
+    if (salesAgentsReady && draft.assignedTo && ownerChanged && !isEligibleSalesAgent(draft.assignedTo, store)) {
+      errors.assignedTo = "The owner must be an active Sales Agent who can work this store.";
+    }
+    const fuChanged = !isEdit || (draft.followUpAgentId || "") !== (editLead?.followUpAgentId || "");
+    if (salesAgentsReady && draft.followUpAgentId && fuChanged && !isEligibleSalesAgent(draft.followUpAgentId, store)) {
+      errors.followUpAgentId = "The follow-up agent must be an active Sales Agent who can work this store.";
+    }
+    return { ok: Object.keys(errors).length === 0, errors };
+  }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent]);
   const showFollowUp = needsFollowUp({ result: draft.result ?? "", status: draft.status ?? "" }) || !!draft.followUpDate;
 
+  /* ── Non-linear navigation ──
+     Any step is reachable directly (click the stepper) or via Prev/Next. No
+     step is a gate — required-field validation is enforced only at SAVE, so a
+     salesperson can fill the form in whatever order the customer talks. */
+  const goToStage = (next: number) => {
+    const clamped = Math.max(1, Math.min(STAGES.length, next));
+    if (clamped === stage) return;
+    setDir(clamped >= stage ? 1 : -1);
+    setStage(clamped);
+  };
+  useLayoutEffect(() => { if (bodyRef.current) bodyRef.current.scrollTo({ top: 0 }); }, [stage]);
+
+  /* ── Left/Right arrow-key step navigation ──
+     ONLY when the user is NOT actively editing a field. We ignore the keys when
+     focus is in an input/textarea/select/contenteditable, or any dropdown/date
+     popover is open — so arrows keep their normal text/cursor/list meaning and
+     navigation can never mutate a value. */
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement as HTMLElement | null;
+      const tag = el?.tagName?.toLowerCase();
+      if (tag === "input" || tag === "textarea" || tag === "select" || el?.isContentEditable) return;
+      // A portalled dropdown/date popover open anywhere → let it handle arrows.
+      if (document.querySelector('[data-lead-popover-open="true"]')) return;
+      // Only when the focus is within the form container (not elsewhere on page).
+      if (el && !el.closest('[data-lead-form="true"]') && el !== document.body) return;
+      if (e.key === "ArrowLeft") { e.preventDefault(); goToStage(stage - 1); }
+      else { e.preventDefault(); goToStage(stage + 1); }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [stage]);
+
+  /* ── Device selection bridge (draft ⇄ DeviceCatalogPicker) ── */
+  const deviceSelection: DeviceSelection = {
+    categoryId: draft.deviceCategoryId ?? "",
+    brandId: draft.deviceBrandId ?? "",
+    modelId: draft.deviceModelId ?? "",
+    label: draft.device ?? "",
+  };
+  const onDeviceChange = (next: DeviceSelection) => {
+    setDraft((d) => ({
+      ...d,
+      deviceCategoryId: next.categoryId,
+      deviceBrandId: next.brandId,
+      deviceModelId: next.modelId,
+      device: next.label || d.device || "",
+    }));
+  };
+
+  /* ── Customer identity bridge (Customer Master, no duplicates) ── */
+  const onCustomerPicked = (cid: string) => {
+    if (!cid) { set("customerId", ""); return; }
+    const c = customers.find((x) => x.id === cid);
+    if (!c) { set("customerId", cid); return; }
+    setDraft((d) => ({
+      ...d,
+      customerId: c.id,
+      name: d.name || c.fullName || "",
+      number: d.number || c.mobile || "",
+      email: d.email || c.email || "",
+      location: d.location || c.address || "",
+    }));
+  };
+
+  /* ── Save (create or edit) — the ONLY place validation gates ── */
   const handleSave = async () => {
     setTouched(true);
     if (!validation.ok) {
-      goToStage(1); // required fields all live in Stage 1
+      // Jump to the step holding the first problem (the stepper stays free-form).
+      const e = validation.errors;
+      goToStage(e.name || e.number || e.email ? 1 : e.source || e.assignedTo ? 2 : e.estimate || e.discount ? 3 : 4);
       return;
     }
-    if (!canSaveLead) return; // no permission → do not persist
+    if (!canSaveLead || saving) return;              // permission + double-submit guard
     setSaving(true);
     try {
+      // Close ONLY when the save fully landed — a rejected owner / follow-up
+      // agent change keeps the form open with the user's input intact.
       if (isEdit && editLead) {
-        await updateLead(editLead.id, draft as Partial<Lead>);
+        const ok = await updateLead(editLead.id, draft as Partial<Lead>);
+        if (!ok) return;
         onSaved?.({ ...editLead, ...(draft as Partial<Lead>) } as Lead);
       } else {
         const created = await addLead(draft);
-        if (created) onSaved?.(created);
+        if (!created) return;
+        onSaved?.(created);
       }
       onClose();
     } finally {
@@ -288,16 +413,18 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     }
   };
 
+  /* ── Derived display bits for Review ── */
+  const money = (n: number | null | undefined) => (n == null || n === undefined ? "—" : `₹${Number(n).toLocaleString("en-IN")}`);
+  const derivedMonth = monthFromDate(editLead?.date || new Date().toISOString().slice(0, 10));
+
   const content = (
     <>
-      {/* Full-screen blurred / dimmed backdrop — CRM stays visible behind it. */}
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
         transition={{ duration: 0.2 }}
         className="fixed inset-0 z-[9998] bg-foreground/50 backdrop-blur-sm"
         onClick={onClose}
       />
-      {/* Centered container — panel is vertically + horizontally centered. */}
       <motion.div
         initial={{ opacity: 0, scale: 0.97, y: 10 }}
         animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -306,68 +433,63 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
       >
         <div
-          /* RepairOX Design System v2 canonical centered-form panel — thin crisp
-             boundary + RepairOX radius + soft deep shadow (matches New Walk-In). */
-          className="rox-form-panel relative flex max-h-[92vh] w-full max-w-lg flex-col overflow-hidden ring-1 ring-black/10 shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
+          data-lead-form="true"
+          className="rox-form-panel relative flex max-h-[92vh] w-full max-w-2xl flex-col overflow-hidden ring-1 ring-black/10 shadow-[0_32px_80px_-20px_rgba(20,30,80,0.35)]"
           role="dialog" aria-modal="true"
           onClick={(e) => e.stopPropagation()}
         >
-        {/* Header */}
-        <div className="flex items-start justify-between gap-3 border-b border-border p-5">
-          <div className="flex items-start gap-3">
-            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60"><UserPlus className="h-5 w-5" /></span>
-            <div>
-              <h2 className="font-display text-lg font-bold tracking-tight">{isEdit ? `Edit ${editLead?.leadNo}` : "New Lead"}</h2>
-              <p className="mt-0.5 text-[12px] text-muted-foreground">{isEdit ? "Update lead details." : "Capture quickly — qualify later."}</p>
+          {/* Header */}
+          <div className="flex items-start justify-between gap-3 border-b border-border p-5">
+            <div className="flex items-start gap-3">
+              <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60"><UserPlus className="h-5 w-5" /></span>
+              <div>
+                <h2 className="font-display text-lg font-bold tracking-tight">{isEdit ? `Edit ${editLead?.leadNo}` : "New Lead"}</h2>
+                <p className="mt-0.5 text-[12px] text-muted-foreground">{isEdit ? "Update lead details — Lead ID, date & time stay fixed." : "Capture in any order — jump between steps freely."}</p>
+              </div>
             </div>
+            <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Close"><X className="h-4 w-4" /></button>
           </div>
-          <button onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted hover:text-foreground" aria-label="Close"><X className="h-4 w-4" /></button>
-        </div>
 
-        {/* Stage stepper */}
-        <div className="flex items-center gap-1 border-b border-border px-5 py-3">
-          {STAGES.map((s, i) => {
-            const done = stage > s.id;
-            const activeStep = stage === s.id;
-            return (
-              <button key={s.id} type="button" onClick={() => goToStage(s.id)} className="flex flex-1 items-center gap-2 text-left">
-                <span className={cn(
-                  "grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold transition",
-                  done ? "bg-emerald-500 text-white" : activeStep ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground",
-                )}>{done ? <Check className="h-3.5 w-3.5" /> : s.id}</span>
-                <span className="hidden min-w-0 sm:block">
-                  <span className={cn("block truncate text-[12px] font-semibold", activeStep ? "text-foreground" : "text-muted-foreground")}>{s.label}</span>
-                </span>
-                {i < STAGES.length - 1 && <span className="mx-1 hidden h-px flex-1 bg-border sm:block" />}
-              </button>
-            );
-          })}
-        </div>
+          {/* Clickable stepper (free navigation) */}
+          <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-5 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            {STAGES.map((s, i) => {
+              const done = stage > s.id;
+              const activeStep = stage === s.id;
+              return (
+                <button key={s.id} type="button" onClick={() => goToStage(s.id)} className="flex flex-1 items-center gap-2 text-left" title={s.hint}>
+                  <span className={cn(
+                    "grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold transition",
+                    done ? "bg-emerald-500 text-white" : activeStep ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground",
+                  )}>{done ? <Check className="h-3.5 w-3.5" /> : s.id}</span>
+                  <span className="hidden min-w-0 md:block">
+                    <span className={cn("block truncate text-[12px] font-semibold", activeStep ? "text-foreground" : "text-muted-foreground")}>{s.label}</span>
+                  </span>
+                  {i < STAGES.length - 1 && <span className="mx-1 hidden h-px flex-1 bg-border md:block" />}
+                </button>
+              );
+            })}
+          </div>
 
-        {/* Body — the panel stays fixed; only this inner step content transitions.
-            overflow-hidden on the wrapper clips the horizontal slide so there's
-            no layout shift while the next/previous step moves in. */}
-        <div
-          ref={bodyRef}
-          onFocus={(e) => {
-            // When a field is focused (tab or click), keep it comfortably in view.
-            const t = e.target as HTMLElement;
-            if (t.matches("input, textarea, select")) scrollTriggerIntoView(t);
-          }}
-          className="relative flex-1 overflow-y-auto overflow-x-hidden p-5"
-        >
-          {/* Only the active step is mounted; it animates IN on mount (fade +
-              small directional slide). No exit/AnimatePresence, so the panel
-              height simply follows the new content — no wait-gap or snap. */}
-          <motion.div
-            key={stage}
-            initial={{ opacity: 0, x: dir >= 0 ? 20 : -20 }}
-            animate={{ opacity: 1, x: 0 }}
-            transition={STEP_TRANSITION}
+          {/* Body */}
+          <div
+            ref={bodyRef}
+            onFocus={(e) => { const t = e.target as HTMLElement; if (t.matches("input, textarea, select")) scrollTriggerIntoView(t); }}
+            className="relative flex-1 overflow-y-auto overflow-x-hidden p-5"
           >
+            <motion.div key={stage} initial={{ opacity: 0, x: dir >= 0 ? 20 : -20 }} animate={{ opacity: 1, x: 0 }} transition={STEP_TRANSITION}>
+
+              {/* ── STEP 1 · Customer ── */}
               {stage === 1 && (
                 <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Contact & Source</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
+                  <Field label="Find existing customer">
+                    <CustomerPicker
+                      customers={customers}
+                      value={draft.customerId || ""}
+                      onChange={onCustomerPicked}
+                      placeholder="Search by name, phone or email (reuses Customer Master)…"
+                    />
+                  </Field>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Name" required error={touched ? validation.errors.name : undefined}>
                       <input className={inputCls(touched && !!validation.errors.name)} value={draft.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="Full name" />
@@ -377,19 +499,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     </Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Source" required error={touched ? validation.errors.source : undefined}>
-                      <ConfigurableSelect field="source" value={draft.source ?? ""} onChange={(v) => set("source", v)} placeholder="How did they reach us?" invalid={touched && !!validation.errors.source} />
-                    </Field>
-                    <Field label="Agent" required error={touched ? validation.errors.agent : undefined}>
-                      <ConfigurableSelect field="agent" value={draft.agent ?? ""} onChange={(v) => set("agent", v)} placeholder="Owner" extra={staffNames} invalid={touched && !!validation.errors.agent} />
-                    </Field>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Region">
-                      <ConfigurableSelect field="region" value={draft.region ?? ""} onChange={(v) => set("region", v)} placeholder="City / area" />
-                    </Field>
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>
                       <input className={inputCls(touched && !!validation.errors.email)} value={draft.email ?? ""} onChange={(e) => set("email", e.target.value)} placeholder="name@email.com" inputMode="email" />
+                    </Field>
+                    <Field label="Region">
+                      <ConfigurableSelect field="region" value={draft.region ?? ""} onChange={(v) => set("region", v)} placeholder="City / area" />
                     </Field>
                   </div>
                   <Field label="Location">
@@ -398,34 +512,44 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                 </div>
               )}
 
+              {/* ── STEP 2 · Lead Details ── */}
               {stage === 2 && (
                 <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Qualification <span className="font-normal normal-case text-muted-foreground/70">— all optional</span></p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Lead Details</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Device"><ConfigurableSelect field="device" value={draft.device ?? ""} onChange={(v) => set("device", v)} placeholder="Device" /></Field>
-                    <Field label="Category"><ConfigurableSelect field="category" value={draft.category ?? ""} onChange={(v) => set("category", v)} placeholder="Category" /></Field>
+                    <Field label="Source" required error={touched ? validation.errors.source : undefined}>
+                      <ConfigurableSelect field="source" value={draft.source ?? ""} onChange={(v) => set("source", v)} placeholder="How did they reach us?" invalid={touched && !!validation.errors.source} />
+                    </Field>
+                    <Field label="Agent (owner)" required error={touched ? validation.errors.assignedTo : undefined}>
+                      <AgentPicker
+                        valueId={draft.assignedTo || ""}
+                        storeId={draft.branchId || undefined}
+                        onChange={(uid, nm) => setDraft((d) => ({ ...d, assignedTo: uid, assignedToName: nm, agent: nm }))}
+                        placeholder={canPickOwner ? "Select the Sales Agent" : "Only an assigner can pick the owner"}
+                        invalid={touched && !!validation.errors.assignedTo}
+                        disabled={!canPickOwner}
+                        fallbackName={editLead?.assignedToName}
+                        allowClear={canPickOwner}
+                      />
+                      {!canPickOwner && !isEdit && !!draft.assignedTo && draft.assignedTo === currentUserId && (
+                        <p className="mt-1 text-[10.5px] text-muted-foreground">You own the leads you create.</p>
+                      )}
+                      {!ownerRequired && !draft.assignedTo && (
+                        <p className="mt-1 text-[10.5px] text-muted-foreground">
+                          {canPickOwner
+                            ? "No Sales Agent is available for this store yet — the lead will be saved unassigned."
+                            : "The lead will be saved unassigned — a manager will assign its Sales Agent."}
+                        </p>
+                      )}
+                    </Field>
                   </div>
-                  <Field label="Issue">
-                    <input className={inputCls()} value={draft.issue ?? ""} onChange={(e) => set("issue", e.target.value)} placeholder="What's the problem?" />
-                  </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Estimate" error={touched ? validation.errors.estimate : undefined}>
-                      <div className="flex">
-                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
-                        <input className={cn(inputCls(touched && !!validation.errors.estimate), "rounded-l-none")} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
-                      </div>
-                    </Field>
-                    <Field label="Discount" error={touched ? validation.errors.discount : undefined}>
-                      <div className="flex">
-                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
-                        <input className={cn(inputCls(touched && !!validation.errors.discount), "rounded-l-none")} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
-                      </div>
-                    </Field>
+                    <Field label="Lead Category"><ConfigurableSelect field="leadCategory" value={draft.leadCategory ?? ""} onChange={(v) => set("leadCategory", v)} placeholder="Repair / Other / …" /></Field>
+                    <Field label="Lead Nature"><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Parts / Hardware" /></Field>
                   </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <Field label="Lead Category"><ConfigurableSelect field="leadCategory" value={draft.leadCategory ?? ""} onChange={(v) => set("leadCategory", v)} placeholder="Type" /></Field>
-                    <Field label="Lead Nature"><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Nature" /></Field>
-                    <Field label="Priority"><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Priority" /></Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Priority"><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Hot / Warm / Cold" /></Field>
+                    <Field label="Contact Status"><ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted / RNR" /></Field>
                   </div>
                   <Field label="Comments">
                     <Textarea value={draft.comments ?? ""} onChange={(e) => set("comments", e.target.value)} placeholder="Notes about this lead…" className="min-h-[70px] text-[13px]" />
@@ -433,19 +557,49 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                 </div>
               )}
 
+              {/* ── STEP 3 · Device & Issue ── */}
               {stage === 3 && (
                 <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Contact & Result <span className="font-normal normal-case text-muted-foreground/70">— fill when known</span></p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue <span className="font-normal normal-case text-muted-foreground/70">— all optional</span></p>
+                  <Field label="Device (from catalog)">
+                    <DeviceCatalogPicker value={deviceSelection} onChange={onDeviceChange} />
+                  </Field>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Contact Status"><ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Reached?" /></Field>
-                    <Field label="Status"><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle" /></Field>
+                    <Field label="Issue Category"><ConfigurableSelect field="category" value={draft.category ?? ""} onChange={(v) => set("category", v)} placeholder="Screen / Battery / …" /></Field>
+                    <Field label="Issue"><input className={inputCls()} value={draft.issue ?? ""} onChange={(e) => set("issue", e.target.value)} placeholder="What's the problem?" /></Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Result"><ConfigurableSelect field="result" value={draft.result ?? ""} onChange={(v) => set("result", v)} placeholder="Outcome" /></Field>
-                    <Field label="Final Result"><ConfigurableSelect field="finalResult" value={draft.finalResult ?? ""} onChange={(v) => set("finalResult", v)} placeholder="Closed as" /></Field>
+                    <Field label="Estimate (pipeline value)" error={touched ? validation.errors.estimate : undefined}>
+                      <div className="flex">
+                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
+                        <input className={cn(inputCls(touched && !!validation.errors.estimate), "rounded-l-none")} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
+                      </div>
+                    </Field>
+                    <Field label="Discount" error={touched ? validation.errors.discount : undefined}>
+                      <div className="flex">
+                        <input className={cn(inputCls(touched && !!validation.errors.discount), "rounded-r-none")} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
+                        <button type="button"
+                          onClick={() => set("discountType", (draft.discountType === "percent" ? "amount" : "percent"))}
+                          className="flex h-[38px] min-w-[46px] items-center justify-center rounded-r-xl border border-l-0 border-input bg-muted px-2.5 text-[12px] font-semibold text-zinc-700 transition hover:bg-muted/70"
+                          title="Toggle ₹ / %">
+                          {draft.discountType === "percent" ? "%" : "₹"}
+                        </button>
+                      </div>
+                    </Field>
                   </div>
+                </div>
+              )}
 
-                  {/* Context-sensitive follow-up block */}
+              {/* ── STEP 4 · Follow-Up & Result ── */}
+              {stage === 4 && (
+                <div className="space-y-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Contact &amp; Result <span className="font-normal normal-case text-muted-foreground/70">— fill when known</span></p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Status"><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
+                    <Field label="Result"><ConfigurableSelect field="result" value={draft.result ?? ""} onChange={(v) => set("result", v)} placeholder="Latest outcome" /></Field>
+                  </div>
+                  <Field label="Final Result"><ConfigurableSelect field="finalResult" value={draft.finalResult ?? ""} onChange={(v) => set("finalResult", v)} placeholder="Terminal outcome (only when closed)" /></Field>
+
                   <div className={cn("rounded-2xl border p-4 transition", showFollowUp ? "border-[#B3BFF6] bg-[#EEF1FD]/50" : "border-dashed border-border bg-muted/30")}>
                     <div className="mb-3 flex items-center gap-2">
                       <CalendarClock className={cn("h-4 w-4", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")} />
@@ -455,7 +609,17 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       <Field label="Follow-Up Date" error={touched ? validation.errors.followUpDate : undefined}>
                         <input type="date" className={inputCls(touched && !!validation.errors.followUpDate)} value={draft.followUpDate ?? ""} onChange={(e) => set("followUpDate", e.target.value)} />
                       </Field>
-                      <Field label="Follow-Up Agent"><ConfigurableSelect field="followUpAgent" value={draft.followUpAgent ?? ""} onChange={(v) => set("followUpAgent", v)} placeholder="Assign" extra={staffNames} /></Field>
+                      <Field label="Follow-Up Agent" error={touched ? validation.errors.followUpAgentId : undefined}>
+                        <AgentPicker
+                          valueId={draft.followUpAgentId || ""}
+                          storeId={draft.branchId || undefined}
+                          onChange={(uid, nm) => setDraft((d) => ({ ...d, followUpAgentId: uid, followUpAgent: nm }))}
+                          placeholder="Sales Agent (may differ from owner)"
+                          invalid={touched && !!validation.errors.followUpAgentId}
+                          disabled={!canPickFollowUpAgent}
+                          fallbackName={editLead?.followUpAgent}
+                        />
+                      </Field>
                     </div>
                     <Field label="Follow-Up Comments" className="mt-3">
                       <Textarea value={draft.followUpComments ?? ""} onChange={(e) => set("followUpComments", e.target.value)} placeholder="What to do next…" className="min-h-[60px] text-[13px]" />
@@ -467,32 +631,69 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   </Field>
                 </div>
               )}
-          </motion.div>
-        </div>
 
-        {/* Footer */}
-        <div className="flex items-center justify-between gap-2 border-t border-border p-4">
-          <div>
-            {stage > 1 && (
-              <Button variant="ghost" size="sm" className="gap-1" onClick={() => goToStage(stage - 1)}><ChevronLeft className="h-4 w-4" /> Back</Button>
-            )}
+              {/* ── STEP 5 · Review ── (reflects the form state; no duplicate inputs) */}
+              {stage === 5 && (
+                <div className="space-y-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Review &amp; Save</p>
+                  {!validation.ok && (
+                    <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
+                      <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                      <span>Some required fields need attention: {Object.values(validation.errors).filter(Boolean).join(" ")} <button type="button" className="font-semibold underline" onClick={() => goToStage(1)}>Fix</button></span>
+                    </div>
+                  )}
+                  <ReviewGroup title="Customer" onEdit={() => goToStage(1)} rows={[
+                    ["Name", draft.name], ["Number", draft.number], ["Email", draft.email],
+                    ["Region", draft.region], ["Location", draft.location],
+                    ["Customer Master", draft.customerId ? "Linked" : "New / unlinked"],
+                  ]} />
+                  <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
+                    ["Source", draft.source], ["Agent (owner)", draft.assignedToName],
+                    ["Lead Category", draft.leadCategory], ["Lead Nature", draft.leadNature],
+                    ["Priority", draft.priority], ["Contact Status", draft.contactStatus],
+                    ["Comments", draft.comments],
+                  ]} />
+                  <ReviewGroup title="Device & Issue" onEdit={() => goToStage(3)} rows={[
+                    ["Device", draft.device], ["Issue Category", draft.category], ["Issue", draft.issue],
+                    ["Estimate", money(draft.estimate)],
+                    ["Discount", draft.discount == null ? "—" : draft.discountType === "percent" ? `${draft.discount}%` : money(draft.discount)],
+                  ]} />
+                  <ReviewGroup title="Follow-Up & Result" onEdit={() => goToStage(4)} rows={[
+                    ["Status", draft.status], ["Result", draft.result], ["Final Result", draft.finalResult],
+                    ["Follow-Up Date", draft.followUpDate], ["Follow-Up Agent", draft.followUpAgent],
+                    ["Follow-Up Comments", draft.followUpComments], ["Final Remarks", draft.finalRemarks],
+                  ]} />
+                  <div className="rounded-xl border border-dashed border-border bg-muted/20 p-3 text-[11px] text-muted-foreground">
+                    <span className="font-semibold text-zinc-600">System-generated:</span> Lead ID, Date &amp; Time on create · Month ({isEdit ? editLead?.month : derivedMonth}) is derived from the date — never typed.
+                  </div>
+                </div>
+              )}
+            </motion.div>
           </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            {stage < 3 ? (
-              <>
-                {!isEdit && (
-                  <Button variant="soft" size="sm" loading={saving} onClick={handleSave}>Save now</Button>
-                )}
-                <Button size="sm" className="gap-1" onClick={() => goToStage(stage + 1)}>Continue <ChevronRight className="h-4 w-4" /></Button>
-              </>
-            ) : (
-              <Button size="sm" className="gap-1.5" loading={saving} onClick={handleSave}>
-                <Check className="h-4 w-4" /> {isEdit ? "Save changes" : "Create lead"}
-              </Button>
-            )}
+
+          {/* Footer */}
+          <div className="flex items-center justify-between gap-2 border-t border-border p-4">
+            <div>
+              {stage > 1 && (
+                <Button variant="ghost" size="sm" className="gap-1" onClick={() => goToStage(stage - 1)}><ChevronLeft className="h-4 w-4" /> Previous</Button>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
+              {stage < STAGES.length ? (
+                <>
+                  {!isEdit && (
+                    <Button variant="soft" size="sm" loading={saving} disabled={saving} onClick={handleSave}>Save now</Button>
+                  )}
+                  <Button size="sm" className="gap-1" onClick={() => goToStage(stage + 1)}>Next <ChevronRight className="h-4 w-4" /></Button>
+                </>
+              ) : (
+                <Button size="sm" className="gap-1.5" loading={saving} disabled={saving || !canSaveLead} onClick={handleSave}>
+                  <Check className="h-4 w-4" /> {isEdit ? "Save changes" : "Create lead"}
+                </Button>
+              )}
+            </div>
           </div>
-        </div>
         </div>
       </motion.div>
     </>
@@ -500,4 +701,29 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
 
   if (typeof document === "undefined") return null;
   return createPortal(<AnimatePresence>{content}</AnimatePresence>, document.body);
+}
+
+/* ─── Review group (read-only reflection of the draft; edit jumps to step) ── */
+function ReviewGroup({ title, rows, onEdit }: { title: string; rows: [string, string | null | undefined][]; onEdit: () => void }) {
+  const filled = rows.filter(([, v]) => v != null && String(v).trim() !== "" && v !== "—");
+  return (
+    <div className="rounded-xl border border-border bg-card p-3.5">
+      <div className="mb-2 flex items-center justify-between">
+        <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">{title}</h4>
+        <button type="button" onClick={onEdit} className="text-[11px] font-medium text-[#4361EE] hover:underline">Edit</button>
+      </div>
+      {filled.length === 0 ? (
+        <p className="text-[12px] text-muted-foreground">Nothing entered.</p>
+      ) : (
+        <dl className="grid grid-cols-2 gap-x-4 gap-y-1.5">
+          {filled.map(([k, v]) => (
+            <div key={k} className="min-w-0">
+              <dt className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{k}</dt>
+              <dd className="truncate text-[13px] text-foreground">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      )}
+    </div>
+  );
 }

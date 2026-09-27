@@ -341,6 +341,15 @@ export type PermissionKey =
   | "leads_map_view"
   | "leads_inbox_view"
   | "leads_campaigns_manage"
+  /* Sales Agent identity + performance (Lead Management Phase 1).
+     `leads_sales_agent` marks a ROLE as an eligible lead owner: only active
+     users whose role holds this exact key appear in the Lead Agent / Follow-up
+     Agent pickers and may be set as a lead's owner (enforced in the DB by
+     lead_agent_eligible()). It is NOT implied by full_access or '*' — an owner
+     is not a Sales Agent merely because they can do everything. */
+  | "leads_sales_agent"
+  | "leads_performance_view_own"
+  | "leads_performance_view_all"
   /* Deals & quotations */
   | "deals_view"
   | "deals_create"
@@ -815,7 +824,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_delete", label: "Delete Lead" },
       { key: "leads_assign", label: "Assign Lead" },
       { key: "leads_reassign", label: "Reassign Lead (change owner)" },
-      { key: "leads_view_team", label: "View Team Leads (their sales team)" },
+      { key: "leads_view_team", label: "View Team Leads (all leads in their store scope)" },
       { key: "leads_followup", label: "Manage Lead Follow-ups" },
       { key: "leads_stage_change", label: "Change Stage (Kanban)" },
       { key: "leads_priority_change", label: "Change Lead Priority" },
@@ -828,6 +837,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_map_view", label: "View Map" },
       { key: "leads_inbox_view", label: "View Inbox" },
       { key: "leads_campaigns_manage", label: "Manage Campaigns" },
+      { key: "leads_sales_agent", label: "Sales Agent — eligible lead owner (listed in the Agent picker)" },
+      { key: "leads_performance_view_own", label: "View Own Sales Performance" },
+      { key: "leads_performance_view_all", label: "View All Sales Agents' Performance" },
       { key: "deals_view", label: "View Deals" },
       { key: "deals_create", label: "Create Deal" },
       { key: "deals_edit", label: "Edit Deal" },
@@ -1200,6 +1212,36 @@ export const ROLES: RoleDef[] = [
       "print_documents",
       // Sales owns the fulfilment routing decision + high-level progress view.
       "route_leads", "view_field_jobs",
+    ],
+  },
+  {
+    // A dedicated Lead Management role. Every user on this role is an ELIGIBLE
+    // LEAD OWNER (leads_sales_agent) identified by their own user id. Visibility
+    // is OWN / ASSIGNED / FOLLOW-UP only: no leads_view_all / leads_view_team /
+    // report keys, no manage_sales (the coarse key that would imply delete),
+    // no multi-store, no Add User, no Manage Roles. The owner can widen any of
+    // this later in Roles & Permissions.
+    id: "sales_agent",
+    label: "Sales Agent",
+    summary: "Captures and works their own leads — owned, assigned and follow-up leads only.",
+    workspaces: ["leads"],
+    permissions: [
+      // Identity: eligible lead owner (appears in the Agent / Follow-up Agent pickers).
+      "leads_sales_agent",
+      // Lead work — scoped by the DB to own / assigned / follow-up leads.
+      "leads_view", "leads_create", "leads_edit", "leads_followup", "leads_assign",
+      "leads_stage_change", "leads_priority_change", "leads_pin",
+      "leads_performance_view_own",
+      // Comments / activities on their leads.
+      "comms_call_log", "comms_activities_view",
+      // Identity resolution during capture (Customer Master + CRM Contacts).
+      "view_customers", "contacts_view", "contacts_create",
+      // Device picker + Price List quotes.
+      "view_device_catalog",
+      "view_dashboard",
+      // Self-service + notifications.
+      "account_password_change", "account_pin_manage",
+      "notifications_view", "notifications_mark_read",
     ],
   },
   {

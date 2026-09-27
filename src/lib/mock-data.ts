@@ -789,15 +789,17 @@ export const navItems: NavItem[] = [
 
   // Leads
   { href: "/lead-management",  label: "Dashboard",    icon: "Home", permission: "view_dashboard" },
-  { href: "/leads/list",       label: "Leads",        icon: "Users", permission: "manage_sales" },
+  // Leads are visible to anyone with CAP.lead.view (e.g. Sales Agent via
+  // `leads_view`); WHICH leads they see is scoped by RLS (own/assigned/follow-up).
+  { href: "/leads/list",       label: "Leads",        icon: "Users", permission: ["leads_view", "manage_sales"] },
   // Price List — NOT a duplicate. This is a Leads-owned ACCESS POINT that opens
   // the STANDALONE Price List route (/leads-price-list) in a new browser tab.
   // That route renders the SAME canonical Price List page + live catalog as
   // Shop → Price List (single source of truth) but as a clean full-screen page
   // with no shell chrome. `href` is the stable nav key (drives permission +
   // feature-visibility); `targetHref` is where the new tab actually points.
-  { href: "/leads/price-list", label: "Price List",   icon: "ClipboardList", permission: "manage_sales", newTab: true, targetHref: "/leads-price-list" },
-  { href: "/leads/kanban",     label: "Kanban",       icon: "ClipboardList", permission: "manage_sales" },
+  { href: "/leads/price-list", label: "Price List",   icon: "ClipboardList", permission: ["manage_sales", "leads_view"], newTab: true, targetHref: "/leads-price-list" },
+  { href: "/leads/kanban",     label: "Kanban",       icon: "ClipboardList", permission: ["leads_view", "manage_sales"] },
   { href: "/leads/contacts",   label: "Contacts",     icon: "BookUser", permission: "manage_customers" },
   { href: "/leads/companies",  label: "Companies",    icon: "Store", permission: "manage_customers" },
   { href: "/leads/deals",      label: "Deals",        icon: "ClipboardList", permission: "manage_sales" },
@@ -812,6 +814,11 @@ export const navItems: NavItem[] = [
   { href: "/leads/smart-lists", label: "Smart Lists", icon: "ClipboardList" },
   { href: "/leads/map-view",   label: "Map View",     icon: "Map" },
   { href: "/leads/unattributed", label: "Unattributed", icon: "ClipboardCheck", permission: ["leads_assign", "leads_reassign", "manage_sales"] },
+  // Agent Performance — salesperson analytics (distinct from the operational
+  // Lead Dashboard). Visible to anyone who may see their OWN performance
+  // (leads_performance_view_own); the page itself renders the individual view
+  // for a Sales Agent and the owner comparison table for authorized owners.
+  { href: "/leads/performance", label: "Agent Performance", icon: "Trophy", permission: ["leads_performance_view_own", "leads_performance_view_all", "manage_sales"] },
   { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
@@ -1900,6 +1907,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   ],
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
+    { label: "PERFORMANCE",    items: ["/leads/performance"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },

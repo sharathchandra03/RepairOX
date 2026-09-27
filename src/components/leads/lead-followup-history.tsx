@@ -46,19 +46,22 @@ function toIso(date: string, time: string): string {
 }
 
 export function LeadFollowUpHistory({ lead }: { lead: Lead }) {
-  const { can, team } = usePermissions();
-  const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor } = useLeads();
+  const { can } = usePermissions();
+  const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent } = useLeads();
   const canFollowUp = allow(can, CAP.lead.followup);
 
   const followUps = followUpsFor(lead.id);
   const open = openFollowUp(followUps);
   const history = assignmentHistoryFor(lead.id);
 
-  // Assignable agents (active staff). Follow-up agent may differ from owner.
-  const agents = useMemo(
-    () => team.filter((m) => m.status === "active" && m.name).map((m) => ({ id: m.id, name: m.name })),
-    [team],
-  );
+  // Follow-up agents = eligible SALES AGENTS for this lead's store (never the
+  // whole staff list). The follow-up agent may differ from the lead owner and
+  // never changes ownership.
+  const agents = useMemo(() => salesAgentsFor(lead.branchId || null), [salesAgentsFor, lead.branchId]);
+  const defaultAgentName =
+    (lead.followUpAgentId && isEligibleSalesAgent(lead.followUpAgentId, lead.branchId || null) && lead.followUpAgent)
+    || (lead.assignedTo && isEligibleSalesAgent(lead.assignedTo, lead.branchId || null) && lead.assignedToName)
+    || "";
 
   /* ── Schedule form state ── */
   const [scheduling, setScheduling] = useState(false);
@@ -99,7 +102,16 @@ export function LeadFollowUpHistory({ lead }: { lead: Lead }) {
     try {
       await completeFollowUp(fu.id, outcome, {
         comments: completeComments || undefined,
-        next: scheduleNext && nextDate ? { dueAt: toIso(nextDate, nextTime), followUpUserId: fu.followUpUserId, followUpUserName: fu.followUpUserName } : undefined,
+        // The next follow-up stays with the same agent while they're still an
+        // eligible Sales Agent; otherwise it falls back to the lead's default.
+        next: scheduleNext && nextDate
+          ? {
+              dueAt: toIso(nextDate, nextTime),
+              ...(fu.followUpUserId && isEligibleSalesAgent(fu.followUpUserId, lead.branchId || null)
+                ? { followUpUserId: fu.followUpUserId, followUpUserName: fu.followUpUserName }
+                : {}),
+            }
+          : undefined,
       });
       resetComplete();
     } finally { setBusy(false); }
@@ -133,9 +145,13 @@ export function LeadFollowUpHistory({ lead }: { lead: Lead }) {
             </label>
           </div>
           <label className="mt-2 block text-[11px] font-medium text-muted-foreground">
-            Follow-up Agent <span className="font-normal normal-case">(defaults to owner)</span>
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} className="mt-1 h-[34px] w-full rounded-lg border border-input bg-card px-2 text-[13px]">
-              <option value="">{lead.assignedToName || "Lead owner"}</option>
+            Follow-up Agent <span className="font-normal normal-case">(Sales Agent — defaults to the lead&apos;s follow-up agent / owner)</span>
+            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={agents.length === 0} className="mt-1 h-[34px] w-full rounded-lg border border-input bg-card px-2 text-[13px] disabled:bg-muted/40">
+              <option value="">
+                {defaultAgentName ? `Default — ${defaultAgentName}`
+                  : agents.length === 0 ? "No sales agents available"
+                  : currentUserIsSalesAgent(lead.branchId || null) ? "Default — me" : "Select a Sales Agent"}
+              </option>
               {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </label>
