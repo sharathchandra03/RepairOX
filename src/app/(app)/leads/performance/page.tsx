@@ -102,7 +102,13 @@ export default function AgentPerformancePage() {
   const canAll = allow(can, CAP.lead.performanceAll);
   const canOwn = allow(can, CAP.lead.performanceOwn);
 
-  const [tab, setTab] = useState<"individual" | "all">("individual");
+  // Role-driven view:
+  //   • Owner / full-access (canAll)  → the AGGREGATE All-Agents leaderboard by
+  //     default, framed generically (never under one person's name). They drill
+  //     into a specific agent via the leaderboard's Report link.
+  //   • Sales Agent (own-scope only)  → ONLY their own name-branded dashboard,
+  //     with no tab switcher (there is no team view for them here).
+  const [tab, setTab] = useState<"individual" | "all">(canAll ? "all" : "individual");
 
   /* ── All-Agents filters (owner-only) ── */
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
@@ -152,19 +158,23 @@ export default function AgentPerformancePage() {
 
   if (!canAll && !canOwn) return <Restricted />;
 
-  const tabToggle = (
+  // Only an owner (canAll) may switch between the aggregate leaderboard and an
+  // individual breakdown. A Sales Agent sees no switcher — just their own page.
+  const tabToggle = canAll ? (
     <SegmentedTabs
       size="sm"
       value={tab}
       onChange={(v) => setTab(v as "individual" | "all")}
       options={[
-        { label: "Individual", value: "individual" },
         { label: "All Agents", value: "all" },
+        { label: "Individual", value: "individual" },
       ]}
     />
-  );
+  ) : null;
 
-  /* ══════════════════ INDIVIDUAL TAB — month-by-month table ══════════════════ */
+  /* ══════════════════ INDIVIDUAL VIEW — month-by-month table ══════════════════
+     For a Sales Agent this is their personal, name-branded dashboard. An owner
+     only reaches it by explicitly switching to the Individual tab. */
   if (tab === "individual") {
     return (
       <div className="space-y-5">

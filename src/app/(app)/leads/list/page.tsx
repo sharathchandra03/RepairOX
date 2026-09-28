@@ -14,7 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
-import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
+import { RoxFilterPanelHeader, ActiveFilterChip } from "@/components/ui/rox-filter";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { useStoreContext } from "@/lib/store-context";
 import { Can } from "@/components/common/can";
@@ -365,8 +365,45 @@ export default function LeadsListPage() {
 
   const activeFilters = hasActiveLeadFilters(filters);
 
-  // Applied-filter chips (appliedFilters) intentionally removed — see
-  // docs/use-later.md. The filter panel (with its Clear all) remains.
+  /* Applied-filter chips — each APPLIED filter is individually removable
+     (Design System v2 §3g). The panel's "Clear all" is in addition, never
+     instead. Values resolve to human-readable labels; the underlying filter
+     state stays structured (ids for people, raw values for fields). */
+  const appliedChips = useMemo(() => {
+    const chips: { label: string; value: string; onClear: () => void }[] = [];
+    if (filters.dateRange !== "all") {
+      chips.push({
+        label: "Date",
+        value: DATE_RANGES.find((d) => d.value === filters.dateRange)?.label ?? filters.dateRange,
+        onClear: () => setFilters((f) => ({ ...f, dateRange: "all" })),
+      });
+    }
+    if (filters.followUp !== "any") {
+      const fu = FOLLOWUP_FILTERS.find((d) => d.value === filters.followUp);
+      chips.push({
+        label: "Follow-up",
+        value: (fu?.label ?? filters.followUp).replace(/^Follow-up:\s*/i, ""),
+        onClear: () => setFilters((f) => ({ ...f, followUp: "any" })),
+      });
+    }
+    for (const field of FILTER_FIELDS) {
+      const v = filters.fields[field.key];
+      if (!v) continue;
+      // People filters store a user id → show the resolved name.
+      let display = v;
+      if (field.key === "assignedTo" || field.key === "followUpAgentId") {
+        display = salesAgents.find((a) => a.id === v)?.name
+          ?? leads.find((l) => String(l[field.key] || "") === v)?.[field.key === "assignedTo" ? "assignedToName" : "followUpAgent"]
+          ?? v;
+      }
+      chips.push({
+        label: field.label,
+        value: display,
+        onClear: () => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [field.key]: "" } })),
+      });
+    }
+    return chips;
+  }, [filters, salesAgents, leads, setFilters]);
 
   return (
     <div className="space-y-5">
@@ -465,7 +502,20 @@ export default function LeadsListPage() {
         </motion.div>
       )}
 
-      {/* Applied-filter chips bar intentionally removed (see docs/use-later.md). */}
+      {/* Applied-filter chips — each individually removable (Design System §3g). */}
+      {appliedChips.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2">
+          {appliedChips.map((c, i) => (
+            <ActiveFilterChip key={`${c.label}-${i}`} label={c.label} value={c.value} onClear={c.onClear} />
+          ))}
+          <button
+            onClick={clearFilters}
+            className="text-[12px] font-medium text-[#4361EE] hover:underline"
+          >
+            Clear all
+          </button>
+        </div>
+      )}
 
       {/* Desktop Table — 15-column grouped Lead Table.
           A single BOUNDED, DUAL-SCROLL container: the card scrolls BOTH axes

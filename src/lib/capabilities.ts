@@ -89,7 +89,7 @@ export const CAP = {
     invoicesViewAll: ["invoices_view_all", "manage_invoices"],
     // Mirrors CAP.lead.viewAll / the DB's auth_lead_see_all(). manage_sales is a
     // write key and does NOT widen lead visibility in RLS, so it isn't here.
-    leadsViewAll: ["leads_view_all", "leads_view_team", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
+    leadsViewAll: ["leads_view_all", "leads_view_team", "leads_performance_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     fieldViewAll: ["field_view_all", "manage_field_jobs"],
     customersViewAll: ["customers_view_all", "manage_customers"],
   },
@@ -237,7 +237,9 @@ export const CAP = {
     // Scope: see every lead in the user's STORE scope (team = store). MUST match
     // the DB's auth_lead_see_all() (migration 0049) so UI = RLS. `manage_sales`
     // is deliberately NOT here — it is a write key, not a visibility key.
-    viewTeam: ["leads_view_team", "leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
+    // `leads_performance_view_all` is included so the owner All-Agents
+    // leaderboard actually resolves every agent's leads (not just the owner's).
+    viewTeam: ["leads_view_team", "leads_view_all", "leads_performance_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     // Scope: see every lead in the org/store (own-vs-all record scope).
     viewAll: ["leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     // Sales Agent identity marker. Resolve ELIGIBILITY with the exact-key check
