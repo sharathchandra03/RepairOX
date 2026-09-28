@@ -94,6 +94,17 @@ export interface Lead {
   convertedAt?: string;     // ISO timestamp of Contact/Lead → Customer promotion
   convertedBy?: string;     // staff id that promoted/linked the customer
   conversionSource?: "ticket" | "invoice" | "walk_in" | "field" | "manual" | string;
+  /* ── Attribution mode (effort-based agent credit) ──
+     How the downstream operational record became attached to this lead:
+       • "agent_routed"  → the agent WORKED the lead and routed it forward
+         (agent-driven). The conversion COUNTS toward the agent's credit.
+       • "back_matched"  → a SELF-INITIATED operational record (customer came
+         in on their own) was later linked to this lead by the attribution
+         safety net. Kept for history/reporting, but does NOT count toward the
+         agent's headline credit — the agent didn't drive it.
+     Empty/undefined on an unconverted lead. Defaults to "agent_routed" for a
+     lead the agent routed forward (routedAt set) when unspecified. */
+  attributionMode?: "agent_routed" | "back_matched" | "";
 
   /* ── Audit ── */
   /** staff id of the user who CREATED the lead (DB-stamped, immutable). */
@@ -735,14 +746,29 @@ export interface LeadMetrics {
   qualified: number;
   pendingFollowUp: number; // leads with an open (scheduled) follow-up
   overdue: number;         // leads with an overdue open follow-up
-  converted: number;       // won / converted
+  converted: number;       // won / converted (ALL — agent-driven + self-initiated)
   lost: number;
   pipelineValue: number;   // Σ expected value of OPEN (non-terminal) leads
-  revenueWon: number;      // Σ FINALIZED (paid) invoice totals linked to the leads
-  ticketsWon: number;      // leads that produced a linked operational ticket
+  revenueWon: number;      // Σ FINALIZED (paid) invoice totals linked to the leads (ALL)
+  ticketsWon: number;      // leads that produced a linked operational ticket (ALL)
   conversionRate: number;  // converted / total (0..1)
   /** Per-route conversion counts (walk-in / pickup / on-site), from real links. */
   routeConversions: RouteConversionCounts;
+
+  /* ── Effort-based agent credit split ─────────────────────────────────────
+     The headline agent metrics that carry CREDIT are split into what the agent
+     actually DROVE ("agentDriven") vs what was SELF-INITIATED and only linked
+     back ("selfInitiated"). The sales-agent dashboard credits agentDriven*
+     numbers; selfInitiated* are shown separately so nothing is hidden.
+     `converted`/`ticketsWon`/`revenueWon` above stay the ALL totals. */
+  convertedAgentDriven: number;
+  convertedSelfInitiated: number;
+  ticketsWonAgentDriven: number;
+  ticketsWonSelfInitiated: number;
+  revenueWonAgentDriven: number;
+  revenueWonSelfInitiated: number;
+  /** converted (agent-driven) / total — the agent's earned conversion rate. */
+  conversionRateAgentDriven: number;
 
   /* ── Follow-up engine metrics (Phase 2) — ALL derived from the structured
      lead_followup_history records, never a manual counter. Populated only when
@@ -767,6 +793,24 @@ export function leadExpectedValue(lead: Pick<Lead, "estimate"> & { expectedValue
   return typeof v === "number" && !isNaN(v) ? v : (lead.estimate ?? 0) || 0;
 }
 
+/* ── Effort-based agent credit ───────────────────────────────────────────
+   A conversion counts for the sales agent ONLY when the agent actually drove
+   it. The agent drove it when they WORKED the lead and routed it forward
+   (routedAt set), or the attribution was explicitly marked "agent_routed". A
+   SELF-INITIATED conversion — the customer came in on their own and the record
+   was later "back_matched" to an old lead — does NOT count toward the agent's
+   credit, even though the link is kept for history/reporting.
+
+   This is deliberately about ATTRIBUTION EFFORT, not customer newness: an old/
+   returning customer the agent actively pursues still counts; a customer who
+   walks in themselves does not, just because a stale lead exists in their name. */
+export function isAgentDrivenLead(lead: Pick<Lead, "attributionMode" | "routedAt">): boolean {
+  if (lead.attributionMode === "back_matched") return false;
+  if (lead.attributionMode === "agent_routed") return true;
+  // Unmarked (legacy) leads: a routing decision (routedAt) is the agent's work.
+  return !!lead.routedAt;
+}
+
 /**
  * Compute salesperson dashboard metrics from the given leads + their follow-ups.
  * Pass the ALREADY-SCOPED lead set (e.g. only the user's own, or the team's, or
@@ -787,17 +831,24 @@ export function computeLeadMetrics(
 ): LeadMetrics {
   let qualified = 0, pendingFollowUp = 0, overdue = 0, converted = 0, lost = 0;
   let pipelineValue = 0, revenueWon = 0, ticketsWon = 0;
+  // Effort-based credit split.
+  let convertedAgentDriven = 0, convertedSelfInitiated = 0;
+  let ticketsWonAgentDriven = 0, ticketsWonSelfInitiated = 0;
+  let revenueWonAgentDriven = 0, revenueWonSelfInitiated = 0;
 
   for (const l of leads) {
     const won = isWonStatus(l.status, l.finalResult);
     const lostL = isLostStatus(l.status, l.finalResult);
+    const agentDriven = isAgentDrivenLead(l);   // did the agent actually drive it?
+    const rev = revenue ? revenueWonForLead(l, revenue.tickets, revenue.invoices) : 0;
+
     if (isQualifiedStatus(l.status)) qualified += 1;
-    if (won) converted += 1;
-    if (l.linkedTicketId) ticketsWon += 1;          // Ticket Won = a real linked ticket
+    if (won) { converted += 1; if (agentDriven) convertedAgentDriven += 1; else convertedSelfInitiated += 1; }
+    if (l.linkedTicketId) { ticketsWon += 1; if (agentDriven) ticketsWonAgentDriven += 1; else ticketsWonSelfInitiated += 1; } // Ticket Won = a real linked ticket
     if (lostL) lost += 1;
     if (!won && !lostL) pipelineValue += leadExpectedValue(l);  // pipeline = expected value of open leads
     // Revenue Won = FINALIZED invoices only (never estimate/proforma/pipeline).
-    if (revenue) revenueWon += revenueWonForLead(l, revenue.tickets, revenue.invoices);
+    if (revenue) { revenueWon += rev; if (agentDriven) revenueWonAgentDriven += rev; else revenueWonSelfInitiated += rev; }
   }
 
   for (const l of leads) {
@@ -833,6 +884,10 @@ export function computeLeadMetrics(
     pipelineValue, revenueWon, ticketsWon,
     conversionRate: leads.length > 0 ? converted / leads.length : 0,
     routeConversions: computeRouteConversions(leads),
+    convertedAgentDriven, convertedSelfInitiated,
+    ticketsWonAgentDriven, ticketsWonSelfInitiated,
+    revenueWonAgentDriven, revenueWonSelfInitiated,
+    conversionRateAgentDriven: leads.length > 0 ? convertedAgentDriven / leads.length : 0,
     followUpsDueToday, followUpsOverdue, followUpsUpcoming, followUpsCompleted, followUpsTotal,
     followUpCompletionRate: followUpsTotal > 0 ? followUpsCompleted / followUpsTotal : 0,
   };

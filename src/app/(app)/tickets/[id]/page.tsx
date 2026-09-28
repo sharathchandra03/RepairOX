@@ -40,6 +40,7 @@ import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog
 import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 import { qcItemLabel } from "@/lib/qc-config";
 import { PinnedRail } from "@/components/common/pinned-rail";
+import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -1140,6 +1141,11 @@ export default function TicketDetailPage() {
             column at bottom → rail at bottom, proportional in between, so both
             reach their ends together. It has no independent scrollbar. */}
         <PinnedRail>
+          {/* CRM Contact identity — the SAME person's CRM record + originating
+              lead, resolved from the ticket's contactId / linkedLeadId. Renders
+              nothing when there's no CRM contact behind this ticket. */}
+          <CrmContactIdentity contactId={(ticket as any).contactId} leadId={(ticket as any).linkedLeadId} />
+
           {/* Quick Actions */}
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>

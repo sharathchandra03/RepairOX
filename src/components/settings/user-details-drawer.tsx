@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   UserCog, Mail, Phone, ShieldCheck, Store, Home, KeyRound, Clock,
   CircleUser, CheckCircle2, AlertTriangle, Lock, Ban, Power, Pencil,
-  Loader2, Fingerprint, Building2,
+  Loader2, Fingerprint, Building2, ArrowRight,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Input, Label } from "@/components/ui/input";
 import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
 import type { TeamMember } from "@/lib/mock-data";
 import type { RoleDef } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -51,10 +52,19 @@ interface CredentialStatus {
   disabledAt: string | null;
 }
 
+/** One recorded store relocation (from the audit trail). */
+interface StoreChange {
+  from: string | null;
+  to: string | null;
+  by: string | null;
+  at: string | null;
+}
+
 interface UserDetail {
   member: TeamMember;
   stores: UserStore[];
   credential: CredentialStatus;
+  storeHistory?: StoreChange[];
   isSelf: boolean;
 }
 
@@ -81,6 +91,7 @@ export function UserDetailsDrawer({
   roles,
   onClose,
   onChangeRole,
+  onChangeStore,
   onResetPassword,
   onToggleLogin,
   onSuspend,
@@ -93,6 +104,8 @@ export function UserDetailsDrawer({
   onClose: () => void;
   /** Open the Change Role drawer for this member. */
   onChangeRole: (m: TeamMember) => void;
+  /** Open the Change Store drawer for this member (home-store relocation). */
+  onChangeStore?: (m: TeamMember) => void;
   /** Open the Reset Password drawer for this member. */
   onResetPassword: (m: TeamMember) => void;
   /** Enable/disable login. */
@@ -153,8 +166,11 @@ export function UserDetailsDrawer({
   const d = detail?.member ?? member;
   const cred = detail?.credential;
   const stores = detail?.stores ?? [];
+  const storeHistory = detail?.storeHistory ?? [];
+  const homeStore = stores.find((s) => s.isHome) ?? null;
   const role = roles.find((r) => r.id === d.roleId);
   const isSelf = detail?.isSelf ?? (d.email === (currentUser?.email ?? ""));
+  const canChangeStore = canManage && !isSelf && !!onChangeStore && allow(can, CAP.store.assignUsers);
 
   const statusTone: "success" | "warning" | "danger" =
     d.status === "active" ? "success" : d.status === "suspended" ? "danger" : "warning";
@@ -251,7 +267,18 @@ export function UserDetailsDrawer({
           </Section>
 
           {/* ── Assigned stores ── */}
-          <Section icon={Store} title={`Assigned Store${stores.length === 1 ? "" : "s"}`}>
+          <Section
+            icon={Store}
+            title={`Assigned Store${stores.length === 1 ? "" : "s"}`}
+            action={canChangeStore ? (
+              <button
+                onClick={() => onChangeStore!(d)}
+                className="inline-flex items-center gap-1 text-[12px] font-medium text-[#4361EE] hover:underline"
+              >
+                <Pencil className="h-3 w-3" /> Change store
+              </button>
+            ) : undefined}
+          >
             {stores.length === 0 ? (
               <p className="text-[12.5px] text-muted-foreground">No store assigned.</p>
             ) : (
@@ -280,6 +307,26 @@ export function UserDetailsDrawer({
               </div>
             )}
           </Section>
+
+          {/* ── Store history (relocations — from the audit trail) ── */}
+          {storeHistory.length > 0 && (
+            <Section icon={Building2} title="Store History">
+              <div className="space-y-2">
+                {storeHistory.map((h, i) => (
+                  <div key={i} className="rounded-xl border border-border bg-muted/20 px-3 py-2.5">
+                    <p className="flex items-center gap-1.5 text-[12.5px] font-medium">
+                      <span className="text-muted-foreground">{h.from || "—"}</span>
+                      <ArrowRight className="h-3 w-3 shrink-0 text-muted-foreground" />
+                      <span className="text-foreground">{h.to || "—"}</span>
+                    </p>
+                    <p className="mt-0.5 text-[11px] text-muted-foreground">
+                      {h.by ? `Changed by ${h.by}` : "Changed"}{h.at ? ` · ${fmtDate(h.at)}` : ""}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </Section>
+          )}
 
           {/* ── Credential status (NEVER the password) ── */}
           <Section icon={KeyRound} title="Credentials">
@@ -359,19 +406,23 @@ export function UserDetailsDrawer({
 /* ── Small building blocks ── */
 
 function Section({
-  icon: Icon, title, children,
+  icon: Icon, title, action, children,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   title: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
     <section className="space-y-3 rounded-2xl border border-border bg-card p-4">
-      <div className="flex items-center gap-2">
-        <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-          <Icon className="h-3.5 w-3.5" />
-        </span>
-        <h3 className="text-[12px] font-bold uppercase tracking-wider text-foreground">{title}</h3>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+            <Icon className="h-3.5 w-3.5" />
+          </span>
+          <h3 className="text-[12px] font-bold uppercase tracking-wider text-foreground">{title}</h3>
+        </div>
+        {action}
       </div>
       {children}
     </section>

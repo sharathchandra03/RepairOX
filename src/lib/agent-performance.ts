@@ -161,6 +161,20 @@ export interface AgentPerformance {
   avgLeadValue: number;    // pipelineValue+revenueWon proxy → Σ expected value / leads
   ticketsWon: number;      // leads that produced a real linked ticket
 
+  /* ── Effort-based credit split ──
+     The agent EARNS the *AgentDriven values (leads they actually worked +
+     routed). The *SelfInitiated values are self-initiated conversions only
+     back-linked to an old lead — shown for transparency, NOT counted as the
+     agent's earned performance. `converted`/`ticketsWon`/`revenueWon` above are
+     the ALL totals (agent-driven + self-initiated). */
+  convertedAgentDriven: number;
+  convertedSelfInitiated: number;
+  ticketsWonAgentDriven: number;
+  ticketsWonSelfInitiated: number;
+  revenueWonAgentDriven: number;
+  revenueWonSelfInitiated: number;
+  conversionRateAgentDriven: number;
+
   /* Route leads + conversions (real links only) */
   routeAssigned: number; // leads ROUTED as STORE_VISIT (assigned to a store)
   walkIn: number;   // STORE_VISIT leads with a linked walk-in
@@ -373,6 +387,14 @@ export function computeAgentPerformance(
     avgLeadValue: agentLeads.length > 0 ? expectedValueSum / agentLeads.length : 0,
     ticketsWon: base.ticketsWon,
 
+    convertedAgentDriven: base.convertedAgentDriven,
+    convertedSelfInitiated: base.convertedSelfInitiated,
+    ticketsWonAgentDriven: base.ticketsWonAgentDriven,
+    ticketsWonSelfInitiated: base.ticketsWonSelfInitiated,
+    revenueWonAgentDriven: base.revenueWonAgentDriven,
+    revenueWonSelfInitiated: base.revenueWonSelfInitiated,
+    conversionRateAgentDriven: base.conversionRateAgentDriven,
+
     routeAssigned: routeAgg.STORE_VISIT.leads,
     walkIn: base.routeConversions.walkIn,
     pickup: routeAgg.PICKUP_DROP.leads,
@@ -420,25 +442,28 @@ export function computeAgentPerformance(
    `rankScore` exposes the primary metric so the UI can show WHY an agent
    ranks where they do. Nothing about the order is opaque. */
 export function rankAgents(agents: AgentPerformance[]): AgentPerformance[] {
+  // Rank by EARNED (agent-driven) revenue/conversions — self-initiated
+  // conversions the agent didn't drive never inflate their rank.
   const ranked = [...agents].sort((a, b) => {
-    if (b.revenueWon !== a.revenueWon) return b.revenueWon - a.revenueWon;
-    if (b.converted !== a.converted) return b.converted - a.converted;
-    if (b.conversionRate !== a.conversionRate) return b.conversionRate - a.conversionRate;
+    if (b.revenueWonAgentDriven !== a.revenueWonAgentDriven) return b.revenueWonAgentDriven - a.revenueWonAgentDriven;
+    if (b.convertedAgentDriven !== a.convertedAgentDriven) return b.convertedAgentDriven - a.convertedAgentDriven;
+    if (b.conversionRateAgentDriven !== a.conversionRateAgentDriven) return b.conversionRateAgentDriven - a.conversionRateAgentDriven;
     if (b.qualified !== a.qualified) return b.qualified - a.qualified;
     if (b.leads !== a.leads) return b.leads - a.leads;
     return a.agentName.localeCompare(b.agentName, undefined, { sensitivity: "base" });
   });
   ranked.forEach((a, i) => {
     a.rank = i + 1;
-    a.rankScore = a.revenueWon;
+    a.rankScore = a.revenueWonAgentDriven;
   });
   return ranked;
 }
 
 /** Human explanation of the ranking metric (shown in the UI tooltip/footnote). */
 export const RANKING_EXPLANATION =
-  "Ranked by finalized Revenue Won (paid invoices linked via Lead → Ticket → Invoice). " +
-  "Ties break by converted leads, then conversion rate, then qualified leads, then total leads.";
+  "Ranked by EARNED Revenue Won — finalized (paid) invoices from leads the agent actually worked and routed. " +
+  "Self-initiated conversions (customer walked in on their own, only linked to an old lead) are shown separately and don't count. " +
+  "Ties break by agent-driven conversions, then earned conversion rate, then qualified, then total leads.";
 
 /** The medal for a rank (1/2/3), or "" for the rest. Emoji medals per spec;
  *  callers may map these to icons if preferred. */
@@ -555,6 +580,13 @@ export interface PerfTotals {
   pendingFollowUp: number;
   overdueFollowUp: number;
   conversionRate: number;
+  /* Effort-based credit split (earned vs self-initiated). */
+  convertedAgentDriven: number;
+  convertedSelfInitiated: number;
+  ticketsWonAgentDriven: number;
+  ticketsWonSelfInitiated: number;
+  revenueWonAgentDriven: number;
+  revenueWonSelfInitiated: number;
 }
 
 /** Sum any set of performance rows (agent rows or month rows) into totals that
@@ -563,11 +595,15 @@ export interface PerfTotals {
 export function sumPerfRows(rows: Pick<AgentPerformance,
   | "leads" | "qualified" | "converted" | "routeAssigned" | "walkIn" | "pickup" | "onSite"
   | "pickupCompleted" | "onSiteCompleted" | "revenueWon" | "invoiceCount" | "projection"
-  | "ticketsWon" | "pendingFollowUp" | "overdueFollowUp">[]): PerfTotals {
+  | "ticketsWon" | "pendingFollowUp" | "overdueFollowUp"
+  | "convertedAgentDriven" | "convertedSelfInitiated" | "ticketsWonAgentDriven"
+  | "ticketsWonSelfInitiated" | "revenueWonAgentDriven" | "revenueWonSelfInitiated">[]): PerfTotals {
   const t: PerfTotals = {
     leads: 0, qualified: 0, converted: 0, routeAssigned: 0, walkIn: 0, pickup: 0, onSite: 0,
     pickupCompleted: 0, onSiteCompleted: 0, revenueWon: 0, invoiceCount: 0, projection: 0,
     ticketsWon: 0, pendingFollowUp: 0, overdueFollowUp: 0, conversionRate: 0,
+    convertedAgentDriven: 0, convertedSelfInitiated: 0, ticketsWonAgentDriven: 0,
+    ticketsWonSelfInitiated: 0, revenueWonAgentDriven: 0, revenueWonSelfInitiated: 0,
   };
   for (const r of rows) {
     t.leads += r.leads;
@@ -585,6 +621,12 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
     t.ticketsWon += r.ticketsWon;
     t.pendingFollowUp += r.pendingFollowUp;
     t.overdueFollowUp += r.overdueFollowUp;
+    t.convertedAgentDriven += r.convertedAgentDriven;
+    t.convertedSelfInitiated += r.convertedSelfInitiated;
+    t.ticketsWonAgentDriven += r.ticketsWonAgentDriven;
+    t.ticketsWonSelfInitiated += r.ticketsWonSelfInitiated;
+    t.revenueWonAgentDriven += r.revenueWonAgentDriven;
+    t.revenueWonSelfInitiated += r.revenueWonSelfInitiated;
   }
   t.conversionRate = t.leads > 0 ? t.converted / t.leads : 0;
   return t;

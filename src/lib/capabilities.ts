@@ -40,6 +40,10 @@ export const CAP = {
     // Add User — create staff & assign role/store. `manage_users` is a coarse
     // legacy fallback so existing user-managers keep the ability to add users.
     addUser: ["add_user", "create_users", "manage_users"],
+    // Delete Role — permanently delete a role (destructive). Granular key first;
+    // `manage_roles` is the coarse fallback so existing permission-admins keep
+    // it, and owners hold it via full_access.
+    deleteRole: ["roles_delete", "manage_roles"],
     // Manage existing users (edit / suspend / delete / reset). Broader than add.
     manageUsers: ["manage_users"],
     editUser: ["edit_users", "manage_users"],

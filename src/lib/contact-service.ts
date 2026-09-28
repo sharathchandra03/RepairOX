@@ -19,7 +19,22 @@ export interface ContactSeed {
 
 export interface ContactMatch {
   contact: Contact;
-  matchedOn: "Mobile Number" | "Email";
+  matchedOn: "Mobile Number" | "Email" | "Name + City" | "Same Name";
+  /** high = exact phone/email; low = proactive fuzzy (possible same person who
+   *  used a different number). Absent means high (back-compat). */
+  confidence?: "high" | "low";
+}
+
+/** Normalize a person name for fuzzy comparison (lowercase, strip punctuation,
+ *  collapse spaces). Mirrors the Customer Master matcher so the two never
+ *  disagree on what "the same name" means. */
+export function normalizeContactName(value?: string): string {
+  return (value || "").toLowerCase().replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+}
+
+/** Normalize a city for fuzzy comparison. */
+export function normalizeContactCity(value?: string): string {
+  return (value || "").toLowerCase().replace(/\s+/g, " ").trim();
 }
 
 export function normalizeContactMobile(value?: string): string {
@@ -31,22 +46,39 @@ export function normalizeContactEmail(value?: string): string {
   return (value ?? "").trim().toLowerCase();
 }
 
-export function findContactMatches(contacts: Contact[], seed: Pick<ContactSeed, "phone" | "email">): ContactMatch[] {
+export function findContactMatches(
+  contacts: Contact[],
+  seed: Pick<ContactSeed, "phone" | "email" | "fullName" | "firstName" | "lastName" | "city">,
+): ContactMatch[] {
   const mobile = normalizeContactMobile(seed.phone);
   const email = normalizeContactEmail(seed.email);
+  const seedName = normalizeContactName(seed.fullName || `${seed.firstName ?? ""} ${seed.lastName ?? ""}`);
+  const seedCity = normalizeContactCity(seed.city);
   const matches: ContactMatch[] = [];
   for (const contact of contacts) {
     const contactMobile = normalizeContactMobile(contact.mobile || contact.phone);
     if (mobile && contactMobile && mobile === contactMobile) {
-      matches.push({ contact, matchedOn: "Mobile Number" });
+      matches.push({ contact, matchedOn: "Mobile Number", confidence: "high" });
       continue;
     }
     const contactEmail = normalizeContactEmail(contact.email);
     if (email && contactEmail && email === contactEmail) {
-      matches.push({ contact, matchedOn: "Email" });
+      matches.push({ contact, matchedOn: "Email", confidence: "high" });
+      continue;
+    }
+    // Proactive fuzzy tier: possible same person with a DIFFERENT number.
+    const cName = normalizeContactName(contact.fullName || `${contact.firstName ?? ""} ${contact.lastName ?? ""}`);
+    if (seedName && cName && seedName === cName) {
+      const cCity = normalizeContactCity(contact.city);
+      if (seedCity && cCity && seedCity === cCity) {
+        matches.push({ contact, matchedOn: "Name + City", confidence: "low" });
+      } else if (!seedCity || !cCity) {
+        matches.push({ contact, matchedOn: "Same Name", confidence: "low" });
+      }
     }
   }
-  return matches;
+  const rank = { high: 0, low: 1 } as const;
+  return matches.sort((a, b) => (rank[a.confidence ?? "high"]) - (rank[b.confidence ?? "high"]));
 }
 
 function splitName(seed: ContactSeed): { firstName: string; lastName: string; fullName: string } {

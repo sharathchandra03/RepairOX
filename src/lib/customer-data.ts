@@ -261,9 +261,28 @@ export function createCustomer(
 
 export type DuplicateMatch = {
   customer: Customer;
-  matchedOn: string; // e.g. "Mobile Number", "Email", "Name + Company"
-  confidence: "high" | "medium";
+  matchedOn: string; // e.g. "Mobile Number", "Email", "Name + Company", "Name + City", "Same Name"
+  /** high = exact phone/email (definite). medium = name+company.
+   *  low = a POSSIBLE same-person match (name+city / identical name) — the
+   *  proactive fuzzy tier that catches a returning customer who used a
+   *  DIFFERENT phone number. Never auto-merges; only warns. */
+  confidence: "high" | "medium" | "low";
 };
+
+/** Normalize a person name for fuzzy comparison: lowercase, collapse spaces,
+ *  strip punctuation (so "Ravi Kumar", "ravi  kumar" and "Ravi Kumar." match). */
+function normalizeName(value?: string): string {
+  return (value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/** Normalize a city for fuzzy comparison. */
+function normalizeCity(value?: string): string {
+  return (value || "").toLowerCase().replace(/\s+/g, " ").trim();
+}
 
 /**
  * Normalize a phone number for comparison: strip everything but digits,
@@ -280,38 +299,58 @@ function normalizeMobile(mobile: string): string {
 
 export function findDuplicates(
   customers: Customer[],
-  data: { mobile: string; email?: string; firstName?: string; lastName?: string; company?: string }
+  data: { mobile: string; email?: string; firstName?: string; lastName?: string; company?: string; city?: string }
 ): DuplicateMatch[] {
   const matches: DuplicateMatch[] = [];
   const mobile = normalizeMobile(data.mobile);
+  const seedName = normalizeName(`${data.firstName ?? ""} ${data.lastName ?? ""}`);
+  const seedCity = normalizeCity(data.city);
 
   for (const c of customers) {
     const cMobile = normalizeMobile(c.mobile);
 
-    // Primary: Mobile number match (high confidence)
+    // Primary: Mobile number match (high confidence — definite).
     if (mobile && cMobile && mobile === cMobile) {
       matches.push({ customer: c, matchedOn: "Mobile Number", confidence: "high" });
       continue;
     }
 
-    // Secondary: Email match (high confidence)
+    // Secondary: Email match (high confidence — definite).
     if (data.email && c.email && data.email.toLowerCase() === c.email.toLowerCase()) {
       matches.push({ customer: c, matchedOn: "Email", confidence: "high" });
       continue;
     }
 
-    // Tertiary: Name + Company match (medium confidence)
+    // Tertiary: Name + Company match (medium confidence).
     if (data.firstName && data.lastName && c.firstName && c.lastName) {
       const nameMatch =
         data.firstName.toLowerCase() === c.firstName.toLowerCase() &&
         data.lastName.toLowerCase() === c.lastName.toLowerCase();
       if (nameMatch && data.company && c.company && data.company.toLowerCase() === c.company.toLowerCase()) {
         matches.push({ customer: c, matchedOn: "Name + Company", confidence: "medium" });
+        continue;
+      }
+    }
+
+    // Quaternary (PROACTIVE FUZZY): a POSSIBLE same-person match when the phone
+    // and email DON'T match — this is the returning-customer-with-a-different-
+    // number case. Never definite → "low" confidence, warn only, never auto-use.
+    //   • same full name + same city  → possible
+    //   • identical full name (no city on either side to compare) → possible
+    const cName = normalizeName(c.fullName || `${c.firstName ?? ""} ${c.lastName ?? ""}`);
+    if (seedName && cName && seedName === cName) {
+      const cCity = normalizeCity(c.city);
+      if (seedCity && cCity && seedCity === cCity) {
+        matches.push({ customer: c, matchedOn: "Name + City", confidence: "low" });
+      } else if (!seedCity || !cCity) {
+        matches.push({ customer: c, matchedOn: "Same Name", confidence: "low" });
       }
     }
   }
 
-  return matches;
+  // Order strongest-first so the UI highlights the most reliable match.
+  const rank = { high: 0, medium: 1, low: 2 } as const;
+  return matches.sort((a, b) => rank[a.confidence] - rank[b.confidence]);
 }
 
 /* ─── Duplicate Clustering (Customer Master → Potential Duplicates) ────

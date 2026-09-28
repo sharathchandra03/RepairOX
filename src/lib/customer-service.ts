@@ -241,20 +241,29 @@ export function findOrCreateCustomer(
   input: FindOrCreateInput,
   existingCustomers: Customer[]
 ): FindOrCreateResult {
-  // Step 1: Search for duplicates
+  // Step 1: Search for duplicates (exact phone/email/name+company AND the
+  // proactive fuzzy name+city "possible" tier).
   const duplicateMatches = findDuplicates(existingCustomers, {
     mobile: input.mobile,
     email: input.email,
     firstName: input.firstName,
     lastName: input.lastName,
     company: input.company,
+    city: input.city,
   });
 
-  // Step 2: If we found a match and the caller hasn't explicitly opted to
-  // force-create, return the existing customer (don't create a duplicate).
-  if (duplicateMatches.length > 0 && !input.forceCreate) {
+  // A DEFINITE match (exact phone/email, or name+company) is deduped: we return
+  // the existing customer instead of creating a duplicate. A "low"-confidence
+  // fuzzy match (name+city / same name with a DIFFERENT number) is only a
+  // POSSIBILITY — it is reported to the caller as a warning but does NOT block
+  // creation, so a genuinely different person with the same name isn't merged.
+  const definiteMatches = duplicateMatches.filter((m) => m.confidence !== "low");
+
+  // Step 2: If we found a DEFINITE match and the caller hasn't explicitly opted
+  // to force-create, return the existing customer (don't create a duplicate).
+  if (definiteMatches.length > 0 && !input.forceCreate) {
     return {
-      customer: duplicateMatches[0].customer,
+      customer: definiteMatches[0].customer,
       created: false,
       duplicateMatches,
     };

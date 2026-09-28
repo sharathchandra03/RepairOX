@@ -190,8 +190,8 @@ export default function AgentPerformancePage() {
           <TotalCard label="Leads" value={String(myTotals.leads)} sub={`${myTotals.qualified} qualified`} icon={Users} />
           <TotalCard label="Walk-In" value={String(myTotals.walkIn)} sub={`${myTotals.routeAssigned} assigned`} icon={RouteIcon} />
           <TotalCard label="Pickup / On-Site" value={String(myTotals.pickup + myTotals.onSite)} sub={`${myTotals.pickupCompleted + myTotals.onSiteCompleted} done`} icon={RouteIcon} />
-          <TotalCard label="Revenue Won" value={formatINR(myTotals.revenueWon)} sub={`${myTotals.invoiceCount} invoices`} icon={IndianRupee} />
-          <TotalCard label="Ticket Won" value={String(myTotals.ticketsWon)} icon={TicketIcon} />
+          <TotalCard label="Revenue Won" value={formatINR(myTotals.revenueWonAgentDriven)} sub={myTotals.revenueWonSelfInitiated > 0 ? `+${formatINR(myTotals.revenueWonSelfInitiated)} self-initiated` : `${myTotals.invoiceCount} invoices`} icon={IndianRupee} />
+          <TotalCard label="Ticket Won" value={String(myTotals.ticketsWonAgentDriven)} sub={myTotals.ticketsWonSelfInitiated > 0 ? `+${myTotals.ticketsWonSelfInitiated} self-initiated` : undefined} icon={TicketIcon} />
           <TotalCard label="Follow-up" value={String(myTotals.pendingFollowUp)} sub={myTotals.overdueFollowUp > 0 ? `${myTotals.overdueFollowUp} overdue` : "pending"} icon={CalendarClock} />
         </div>
 
@@ -243,8 +243,8 @@ export default function AgentPerformancePage() {
         <TotalCard label="Agents" value={String(boardAgentCount)} icon={Users} />
         <TotalCard label="Leads" value={String(boardTotals.leads)} icon={Users} />
         <TotalCard label="Qualified" value={String(boardTotals.qualified)} icon={Users} />
-        <TotalCard label="Converted" value={String(boardTotals.converted)} icon={Trophy} />
-        <TotalCard label="Revenue Won" value={formatINR(boardTotals.revenueWon)} icon={IndianRupee} />
+        <TotalCard label="Converted" value={String(boardTotals.convertedAgentDriven)} sub={boardTotals.convertedSelfInitiated > 0 ? `+${boardTotals.convertedSelfInitiated} self` : undefined} icon={Trophy} />
+        <TotalCard label="Revenue Won" value={formatINR(boardTotals.revenueWonAgentDriven)} sub={boardTotals.revenueWonSelfInitiated > 0 ? `+${formatINR(boardTotals.revenueWonSelfInitiated)} self` : undefined} icon={IndianRupee} />
         <TotalCard label="Conversion" value={pct(boardTotals.conversionRate)} icon={Trophy} />
       </div>
 

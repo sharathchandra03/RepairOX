@@ -98,8 +98,8 @@ export function PerformanceTable({
         <table className="w-full min-w-[860px] table-fixed border-collapse text-[13px]">
           <colgroup>
             {isAgent && <col style={{ width: "38px" }} />}
-            {/* Compact name column so the table fits without side-scroll. */}
-            <col style={{ width: isAgent ? "150px" : "130px" }} />
+            {/* Name column — no avatar, so the full name gets the whole width. */}
+            <col style={{ width: isAgent ? "180px" : "130px" }} />
             <col /><col /><col /><col /><col /><col />
             <col style={{ width: "116px" }} /><col style={{ width: "104px" }} />
             <col /><col /><col />
@@ -150,16 +150,12 @@ export function PerformanceTable({
                     {isAgent && (
                       <td className={CELL}><RankBadge rank={r.rank} /></td>
                     )}
-                    {/* Name / month + the REPORT link tucked underneath it. */}
+                    {/* Name / month + the REPORT link tucked underneath it.
+                        No avatar chip — the full name uses the whole cell width. */}
                     <td className={cn(CELL, "text-left")}>
                       <div className="flex items-center gap-2">
-                        {isAgent && (
-                          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[11px] font-bold text-[#4361EE]">
-                            {r.agentName.slice(0, 2).toUpperCase()}
-                          </span>
-                        )}
                         <span className="flex min-w-0 flex-col leading-tight">
-                          <span className="truncate font-bold text-foreground">
+                          <span className="font-bold text-foreground">
                             {label}
                             {isMe && <span className="ml-1 rounded bg-[#4361EE]/10 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#4361EE]">You</span>}
                           </span>
@@ -188,14 +184,25 @@ export function PerformanceTable({
                     <td className={cn(CELL, "border-l border-zinc-200")}><Metric primary={r.pickup} secondary={r.pickupCompleted > 0 ? `${r.pickupCompleted} done` : undefined} /></td>
                     <td className={CELL}><Metric primary={r.onSite} secondary={r.onSiteCompleted > 0 ? `${r.onSiteCompleted} done` : undefined} /></td>
 
-                    {/* Revenue Won (amount + invoice count) */}
-                    <td className={cn(CELL, "border-l border-zinc-200")}><Metric primary={formatINR(r.revenueWon)} secondary={`${r.invoiceCount} inv`} /></td>
+                    {/* Revenue Won — EARNED (agent-driven) is the credited
+                        figure; self-initiated shown as a muted secondary. */}
+                    <td className={cn(CELL, "border-l border-zinc-200")}>
+                      <Metric
+                        primary={formatINR(r.revenueWonAgentDriven)}
+                        secondary={r.revenueWonSelfInitiated > 0 ? `+${formatINR(r.revenueWonSelfInitiated)} self` : `${r.invoiceCount} inv`}
+                      />
+                    </td>
 
                     {/* Projection (weighted) */}
                     <td className={CELL}><Metric primary={formatINR(r.projection)} secondary="weighted" /></td>
 
-                    {/* Ticket Won */}
-                    <td className={CELL}><Metric primary={r.ticketsWon} /></td>
+                    {/* Ticket Won — EARNED count; self-initiated shown separately. */}
+                    <td className={CELL}>
+                      <Metric
+                        primary={r.ticketsWonAgentDriven}
+                        secondary={r.ticketsWonSelfInitiated > 0 ? `+${r.ticketsWonSelfInitiated} self` : undefined}
+                      />
+                    </td>
 
                     {/* Pending Follow-up */}
                     <td className={CELL}><Metric primary={r.pendingFollowUp} secondary={r.overdueFollowUp > 0 ? `${r.overdueFollowUp} overdue` : undefined} /></td>

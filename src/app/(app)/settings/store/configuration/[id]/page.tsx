@@ -21,6 +21,8 @@ import { usePermissions } from "@/lib/permissions-context";
 import { allow } from "@/lib/capabilities";
 import { UserDetailsDrawer } from "@/components/settings/user-details-drawer";
 import { ChangeRoleDrawer } from "@/components/settings/change-role-drawer";
+import { ChangeStoreDrawer } from "@/components/settings/change-store-drawer";
+import { useStoreContext } from "@/lib/store-context";
 import { ResetPasswordDrawer } from "@/components/settings/reset-password-drawer";
 import { ArchiveStoreDialog } from "@/components/settings/archive-store-dialog";
 import type { TeamMember } from "@/lib/mock-data";
@@ -75,7 +77,8 @@ function ViewStoreInner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const storeId = params?.id;
-  const { apiFetch, can, allRoles, setMemberRole, resetPassword, toggleLogin, setStaffStatus } = usePermissions();
+  const { apiFetch, can, allRoles, setMemberRole, setMemberStore, resetPassword, toggleLogin, setStaffStatus } = usePermissions();
+  const { stores } = useStoreContext();
 
   const [loading, setLoading] = useState(true);
   const [detail, setDetail] = useState<StoreDetail | null>(null);
@@ -83,6 +86,7 @@ function ViewStoreInner() {
   // Drawers / dialogs.
   const [viewingMember, setViewingMember] = useState<TeamMember | null>(null);
   const [changingRole, setChangingRole] = useState<TeamMember | null>(null);
+  const [changingStore, setChangingStore] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
   const [archiving, setArchiving] = useState(false);
   const [changingMgr, setChangingMgr] = useState(false);
@@ -377,6 +381,7 @@ function ViewStoreInner() {
         roles={allRoles}
         onClose={() => setViewingMember(null)}
         onChangeRole={(m) => { setViewingMember(null); setChangingRole(m); }}
+        onChangeStore={(m) => { setViewingMember(null); setChangingStore(m); }}
         onResetPassword={(m) => { setViewingMember(null); setResetting(m); }}
         onToggleLogin={(id, enabled) => { toggleLogin(id, enabled); setTimeout(load, 400); }}
         onSuspend={(m) => { setStaffStatus(m.id, "suspended"); setViewingMember(null); setTimeout(load, 400); }}
@@ -390,6 +395,16 @@ function ViewStoreInner() {
         currentRoleId={changingRole?.roleId ?? allRoles[0].id}
         roles={allRoles}
         onConfirm={(roleId) => { if (changingRole) { setMemberRole(changingRole.email, roleId); } setChangingRole(null); setTimeout(load, 400); }}
+      />
+
+      <ChangeStoreDrawer
+        open={!!changingStore}
+        onClose={() => setChangingStore(null)}
+        memberName={changingStore?.name ?? ""}
+        currentStoreId={changingStore?.branchId ?? null}
+        currentStoreName={changingStore?.branch ?? null}
+        stores={stores}
+        onConfirm={(sid) => { if (changingStore) setMemberStore(changingStore.id, sid); setChangingStore(null); setTimeout(load, 400); }}
       />
 
       <ResetPasswordDrawer

@@ -234,6 +234,8 @@ interface PermissionsContextValue {
   membersInRole: (roleId: string) => TeamMember[];
   getStaffById: (id: string) => TeamMember | undefined;
   setMemberRole: (email: string, roleId: string) => void;
+  /** Relocate a member to a different HOME store (by store id). */
+  setMemberStore: (id: string, storeId: string) => void;
   deleteMember: (email: string) => DeleteMemberResult;
 
   addStaff: (input: AddStaffInput) => Promise<AddStaffResult>;
@@ -647,6 +649,18 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     }
   }, [team, apiFetch, refreshTeamFromDb]);
 
+  /* Relocate a member to a new HOME store. Optimistically updates the local
+     branchId; the server re-scopes user_stores, writes the store-change audit,
+     and returns the resolved branch NAME, which refreshTeamFromDb brings back. */
+  const setMemberStore = useCallback((id: string, storeId: string) => {
+    const now = new Date().toISOString();
+    setTeam((prev) => prev.map((m) => (m.id === id ? { ...m, branchId: storeId, updatedAt: now } : m)));
+    if (isSupabaseConfigured) {
+      apiFetch(`/api/staff/${id}`, { method: "PATCH", body: JSON.stringify({ storeId }) })
+        .then(() => refreshTeamFromDb());
+    }
+  }, [apiFetch, refreshTeamFromDb]);
+
   const deleteRole = useCallback((roleId: string, reassignTo?: string): DeleteRoleResult => {
     if (roleId === "platform_owner") return { ok: false, reason: "platform_owner" };
     if (roleId === adminRoleId) return { ok: false, reason: "own_role" };
@@ -1007,7 +1021,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       const exposedTeam = isDemoMode ? DEMO_TEAM : team;
       return {
         grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
-        team: exposedTeam, membersInRole: isDemoMode ? ((roleId: string) => DEMO_TEAM.filter((m) => m.roleId === roleId)) : membersInRole, getStaffById, setMemberRole, deleteMember,
+        team: exposedTeam, membersInRole: isDemoMode ? ((roleId: string) => DEMO_TEAM.filter((m) => m.roleId === roleId)) : membersInRole, getStaffById, setMemberRole, setMemberStore, deleteMember,
         addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
         authReady: hydrated, currentUser, login, logout, landingForRole,
         adminRoleId, activeRoleId, role, can, canStore, allowedWorkspaces,
@@ -1018,7 +1032,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     },
     [
       grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
-      team, membersInRole, getStaffById, setMemberRole, deleteMember,
+      team, membersInRole, getStaffById, setMemberRole, setMemberStore, deleteMember,
       addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
       hydrated, currentUser, login, logout, landingForRole,
       adminRoleId, activeRoleId, role, can, canStore, allowedWorkspaces, previewRoleId, enterPreview, exitPreview,

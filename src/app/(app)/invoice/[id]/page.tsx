@@ -30,6 +30,7 @@ import {
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PinnedRail } from "@/components/common/pinned-rail";
+import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 import { GitBranch } from "lucide-react";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -775,6 +776,11 @@ export default function InvoiceDetailPage() {
             column at bottom → rail at bottom, proportional in between, so both
             reach their ends together. It has no independent scrollbar. */}
         <PinnedRail>
+          {/* CRM Contact identity — the SAME person's CRM record + originating
+              lead, resolved from the invoice's contactId. Renders nothing when
+              there's no CRM contact behind this invoice. */}
+          <CrmContactIdentity contactId={(invoice as any).contactId} />
+
           {/* Quick Actions */}
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-4">Quick Actions</h3>

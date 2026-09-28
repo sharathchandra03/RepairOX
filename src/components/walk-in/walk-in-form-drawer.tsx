@@ -33,6 +33,7 @@ import { CustomerBadges, resolveGroups } from "@/components/common/customer-clas
 import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { useLeads } from "@/lib/leads-context";
 import { OpenLeadBanner } from "@/components/leads/open-lead-banner";
+import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 import type { Contact } from "@/lib/leads-data";
 import { createProspectContact, findContactMatches, type ContactSeed, normalizeContactMobile, normalizeContactEmail } from "@/lib/contact-service";
 import { IssueSelector } from "@/components/common/issue-selector";
@@ -502,6 +503,12 @@ export function WalkInFormDrawer({
               salesPersonName: form.salesPersonName || lead.assignedToName || undefined,
             })}
           />
+
+          {/* CRM Contact identity — the SAME person's CRM record + originating
+              lead behind this walk-in. Renders nothing when there's no contact. */}
+          {(form.contactId || form.linkedLeadId) && (
+            <CrmContactIdentity contactId={form.contactId} leadId={form.linkedLeadId} />
+          )}
 
           {/* Sales person — only when Type = Sales */}
           {form.type === "sales" && (

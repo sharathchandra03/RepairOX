@@ -26,6 +26,8 @@ import { CAP } from "@/lib/capabilities";
 import { AddRoleDrawer } from "@/components/settings/add-role-drawer";
 import { DeleteRoleDialog } from "@/components/settings/delete-role-dialog";
 import { ChangeRoleDrawer } from "@/components/settings/change-role-drawer";
+import { ChangeStoreDrawer } from "@/components/settings/change-store-drawer";
+import { useStoreContext } from "@/lib/store-context";
 import { DeleteMemberDialog } from "@/components/settings/delete-member-dialog";
 import { ResetPasswordDrawer } from "@/components/settings/reset-password-drawer";
 import { UserDetailsDrawer } from "@/components/settings/user-details-drawer";
@@ -105,7 +107,7 @@ function RolesPermissionsInner() {
   const {
     grants: savedGrants, saveGrants, enterPreview, allRoles, addRole,
     isCustomRole, canDeleteRole, deleteRole, membersInRole,
-    getRoleById, team, setMemberRole, deleteMember,
+    getRoleById, team, setMemberRole, setMemberStore, deleteMember,
     resetPassword, setStaffStatus, toggleLogin, updateRoleWorkspaces,
     featureVisibility, setFeatureVisibility, setFeatureVisibilityBulk,
     adminRoleId, demoRoleIds, toggleDemoRole, resetDemo,
@@ -243,6 +245,7 @@ function RolesPermissionsInner() {
               allRoles={allRoles}
               getRoleById={getRoleById}
               setMemberRole={setMemberRole}
+              setMemberStore={setMemberStore}
               deleteMember={deleteMember}
               resetPassword={resetPassword}
               setStaffStatus={setStaffStatus}
@@ -304,9 +307,11 @@ function RolesTab({
   setStaffStatus: ReturnType<typeof usePermissions>["setStaffStatus"];
   toggleLogin: ReturnType<typeof usePermissions>["toggleLogin"];
 }) {
-  const { grants, currentUser } = usePermissions();
+  const { grants, currentUser, canDeleteRole, deleteRole, isCustomRole } = usePermissions();
   const selfEmail = currentUser?.email ?? "";
   const [addOpen, setAddOpen] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletedToast, setDeletedToast] = useState<string | null>(null);
   const [detailView, setDetailView] = useState<"members" | "permissions">("members");
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [removingMember, setRemovingMember] = useState<TeamMember | null>(null);
@@ -325,6 +330,16 @@ function RolesTab({
     const id = onAddRole({ label: input.label, summary: input.summary, workspaces: input.workspaces, permissions: [] });
     setActiveRoleId(id);
     setAddOpen(false);
+  }
+
+  function handleDeleteRole(reassignTo?: string) {
+    const deletedLabel = active.label;
+    const result = deleteRole(active.id, reassignTo);
+    if (!result.ok) return;
+    setActiveRoleId(allRoles.find((r) => r.id !== active.id)?.id ?? allRoles[0].id);
+    setDeleteOpen(false);
+    setDeletedToast(`"${deletedLabel}" was deleted.`);
+    setTimeout(() => setDeletedToast(null), 2600);
   }
 
   function handleChangeRole(email: string, roleId: string) {
@@ -442,11 +457,25 @@ function RolesTab({
                 <p className="mt-1 max-w-lg text-sm text-zinc-600">{active.summary}</p>
               </div>
             </div>
-            <Can permission="manage_roles">
-              <Button size="md" className="shrink-0 gap-1.5 rounded-full" onClick={onEditPermissions}>
-                <SlidersHorizontal className="h-4 w-4" /> Edit permissions
-              </Button>
-            </Can>
+            <div className="flex shrink-0 items-center gap-2">
+              <Can permission="manage_roles">
+                <Button size="md" className="gap-1.5 rounded-full" onClick={onEditPermissions}>
+                  <SlidersHorizontal className="h-4 w-4" /> Edit permissions
+                </Button>
+              </Can>
+              {canDeleteRole(active.id) && (
+                <Can permission={CAP.admin.deleteRole}>
+                  <Button
+                    variant="outline"
+                    size="md"
+                    className="gap-1.5 rounded-full border-rose-200 text-rose-600 hover:bg-rose-50 hover:text-rose-700"
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4" /> Delete role
+                  </Button>
+                </Can>
+              )}
+            </div>
           </div>
 
           {/* Access + scope summary cards */}
@@ -531,6 +560,31 @@ function RolesTab({
 
       {/* Drawers and dialogs */}
       <AddRoleDrawer open={addOpen} onClose={() => setAddOpen(false)} onCreate={handleCreate} />
+      <DeleteRoleDialog
+        open={deleteOpen}
+        onClose={() => setDeleteOpen(false)}
+        role={active}
+        isBuiltIn={!isCustomRole(active.id)}
+        affectedMembers={members}
+        otherRoles={allRoles.filter((r) => r.id !== active.id)}
+        onConfirm={handleDeleteRole}
+      />
+
+      {/* Deleted confirmation toast */}
+      <motion.div
+        initial={false}
+        animate={{ opacity: deletedToast ? 1 : 0, y: deletedToast ? 0 : -6 }}
+        transition={{ duration: 0.2 }}
+        className={cn(
+          "fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border border-zinc-200 bg-white px-4 py-2.5 text-[12.5px] font-medium text-zinc-700 shadow-[0_12px_40px_-12px_rgba(20,30,80,0.25)]",
+          !deletedToast && "pointer-events-none"
+        )}
+        style={{ display: deletedToast ? "flex" : "none" }}
+      >
+        <Trash2 className="h-4 w-4 text-rose-500" />
+        {deletedToast}
+      </motion.div>
+
       <ChangeRoleDrawer open={!!editingMember} onClose={() => setEditingMember(null)} memberName={editingMember?.name ?? ""} currentRoleId={editingMember?.roleId ?? allRoles[0].id} roles={allRoles} onConfirm={(roleId) => editingMember && handleChangeRole(editingMember.email, roleId)} />
       <ResetPasswordDrawer open={!!resettingMember} onClose={() => setResettingMember(null)} memberName={resettingMember?.name ?? ""} onConfirm={(password) => { if (resettingMember) resetPassword(resettingMember.id, password); setResettingMember(null); }} />
       <ConfirmDialog open={!!suspendingMember} onClose={() => setSuspendingMember(null)} title="Suspend this staff member?" description={`${suspendingMember?.name ?? "They"} will lose access immediately and won't be able to log in until reactivated.`} confirmLabel="Suspend" onConfirm={() => { if (suspendingMember) setStaffStatus(suspendingMember.id, "suspended"); setSuspendingMember(null); }} />
@@ -1411,12 +1465,14 @@ function MatrixTab({
                 <RotateCcw className="h-3.5 w-3.5" /> Reset to default
               </button>
               {canDeleteRole(activeRoleId) && (
-                <button
-                  onClick={() => setDeleteOpen(true)}
-                  className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-rose-600 hover:text-rose-700"
-                >
-                  <Trash2 className="h-3.5 w-3.5" /> Delete role
-                </button>
+                <Can permission={CAP.admin.deleteRole}>
+                  <button
+                    onClick={() => setDeleteOpen(true)}
+                    className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-rose-600 hover:text-rose-700"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" /> Delete role
+                  </button>
+                </Can>
               )}
             </div>
           </div>
@@ -1495,24 +1551,27 @@ function MatrixTab({
    change-role and remove actions. Ported from the old settings/users page.
    ───────────────────────────────────────────────────────────────────────── */
 function UsersTab({
-  team, allRoles, getRoleById, setMemberRole, deleteMember,
+  team, allRoles, getRoleById, setMemberRole, setMemberStore, deleteMember,
   resetPassword, setStaffStatus, toggleLogin,
 }: {
   team: TeamMember[];
   allRoles: RoleDef[];
   getRoleById: ReturnType<typeof usePermissions>["getRoleById"];
   setMemberRole: ReturnType<typeof usePermissions>["setMemberRole"];
+  setMemberStore: ReturnType<typeof usePermissions>["setMemberStore"];
   deleteMember: ReturnType<typeof usePermissions>["deleteMember"];
   resetPassword: ReturnType<typeof usePermissions>["resetPassword"];
   setStaffStatus: ReturnType<typeof usePermissions>["setStaffStatus"];
   toggleLogin: ReturnType<typeof usePermissions>["toggleLogin"];
 }) {
   const { currentUser } = usePermissions();
+  const { stores } = useStoreContext();
   const selfEmail = currentUser?.email ?? "";
 
   const [query, setQuery] = useState("");
   const [viewing, setViewing] = useState<TeamMember | null>(null);
   const [editing, setEditing] = useState<TeamMember | null>(null);
+  const [changingStore, setChangingStore] = useState<TeamMember | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
   const [suspending, setSuspending] = useState<TeamMember | null>(null);
@@ -1550,78 +1609,91 @@ function UsersTab({
         </Can>
       </div>
 
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="overflow-hidden rounded-2xl border-2 border-zinc-300 bg-card shadow-card">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
+          <table className="w-full min-w-[860px] border-collapse">
             <thead className="bg-[#EEF1FD]">
-              <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
-                <th className="px-5 py-3">Member</th>
-                <th className="py-3">Role</th>
-                <th className="py-3">Modules</th>
-                <th className="py-3">Branch</th>
-                <th className="py-3">Status</th>
-                <th className="w-[70px] py-3 pr-5 text-right">Actions</th>
+              <tr className="text-left text-[11px] font-bold uppercase tracking-[0.08em] text-[#3347D6]">
+                <th className="px-6 py-3.5">Member</th>
+                <th className="px-3 py-3.5">Role &amp; Access</th>
+                <th className="w-[150px] px-3 py-3.5">Modules</th>
+                <th className="px-3 py-3.5 pl-6">Branch</th>
+                <th className="px-3 py-3.5">Status</th>
+                <th className="w-[80px] px-3 py-3.5 pr-6 text-right">Actions</th>
               </tr>
             </thead>
             <tbody>
               {rows.map((t, i) => {
                 const role = getRoleById(t.roleId);
                 const isSelf = t.email === selfEmail;
+                const moduleCount = role?.workspaces.length ?? 0;
                 return (
                   <motion.tr
                     key={t.email}
                     initial={{ opacity: 0, y: 4 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: 0.03 * i }}
-                    className="border-t border-border transition hover:bg-muted/40"
+                    className="h-[84px] border-t border-zinc-500/60 align-middle transition-colors hover:bg-[#F7F8FE]"
                   >
-                    <td className="px-5 py-3">
+                    <td className="px-6 py-5">
                       <button
                         type="button"
                         onClick={() => setViewing(t)}
                         title="View full user details"
-                        className="flex w-full items-center gap-2.5 text-left"
+                        className="group flex w-full items-center gap-3 text-left"
                       >
-                        <Avatar name={t.name} size={32} />
-                        <div className="min-w-0">
-                          <p className="truncate text-[13.5px] font-semibold leading-tight text-[#3A4DBB] hover:underline">
+                        <Avatar name={t.name} size={40} className="shrink-0 ring-2 ring-[#4361EE]/10" />
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate text-[15px] font-semibold leading-none text-[#2B3A9E] group-hover:underline">
                             {t.name}
-                            {isSelf && <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">(you)</span>}
+                            {isSelf && <span className="ml-1.5 align-middle text-[11px] font-medium text-muted-foreground">(you)</span>}
                           </p>
-                          <p className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
-                            <Mail className="h-3 w-3" /> {t.email}
+                          <p className="flex items-center gap-1.5 truncate text-[12.5px] leading-none text-muted-foreground">
+                            <Mail className="h-3.5 w-3.5 shrink-0 opacity-70" /> {t.email}
                           </p>
                           {t.phone && (
-                            <p className="flex items-center gap-1 truncate text-[11px] text-muted-foreground">
-                              <Phone className="h-3 w-3" /> {t.phone}
+                            <p className="flex items-center gap-1.5 truncate text-[12.5px] leading-none text-muted-foreground">
+                              <Phone className="h-3.5 w-3.5 shrink-0 opacity-70" /> {t.phone}
                             </p>
                           )}
                         </div>
                       </button>
                     </td>
-                    <td className="py-3">
-                      <Badge tone="brand">{role?.label ?? t.roleId}</Badge>
+                    <td className="px-3 py-5">
+                      <div className="flex flex-col gap-1">
+                        <span className="text-[14px] font-semibold leading-none text-foreground">{role?.label ?? t.roleId}</span>
+                        <span className="text-[12px] leading-none text-muted-foreground">
+                          {moduleCount === 0 ? "No modules" : `${moduleCount} module${moduleCount === 1 ? "" : "s"}`}
+                        </span>
+                      </div>
                     </td>
-                    <td className="py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {role?.workspaces.map((w) => {
+                    <td className="w-[150px] px-3 py-5">
+                      <div className="flex flex-nowrap items-center gap-1.5">
+                        {role?.workspaces.length ? role.workspaces.map((w) => {
                           const wd = WORKSPACE_MAP[w as WorkspaceId];
                           return (
-                            <span key={w} className={cn("rounded-full px-2 py-0.5 text-[10.5px] font-semibold", wd.bg, wd.color)}>
+                            <span
+                              key={w}
+                              title={wd.label}
+                              className={cn(
+                                "inline-flex shrink-0 items-center rounded-md px-2.5 py-1 text-[12px] font-semibold ring-1 ring-inset ring-current/15",
+                                wd.bg, wd.color
+                              )}
+                            >
                               {wd.short}
                             </span>
                           );
-                        })}
+                        }) : <span className="text-[13px] text-muted-foreground">—</span>}
                       </div>
                     </td>
-                    <td className="py-3 whitespace-nowrap text-muted-foreground">{t.branch}</td>
-                    <td className="py-3">
+                    <td className="px-3 py-5 pl-6 whitespace-nowrap text-[13.5px] font-medium text-foreground/80">{t.branch}</td>
+                    <td className="px-3 py-5">
                       <div className="flex flex-wrap items-center gap-1.5">
                         <Badge tone={STATUS_TONE[t.status]} dot={t.status === "active"}>{STATUS_LABEL[t.status]}</Badge>
                         {!t.loginEnabled && <Badge tone="neutral">No login</Badge>}
                       </div>
                     </td>
-                    <td className="py-3 pr-5 text-right">
+                    <td className="px-3 py-5 pr-6 text-right">
                       <Can permission="manage_users">
                         <div className="flex justify-end">
                           <Dropdown
@@ -1631,9 +1703,9 @@ function UsersTab({
                               <button
                                 onClick={toggle}
                                 aria-label="Manage staff member"
-                                className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                                className="grid h-9 w-9 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#3347D6]"
                               >
-                                <MoreHorizontal className="h-4 w-4" />
+                                <MoreHorizontal className="h-[18px] w-[18px]" />
                               </button>
                             )}
                           >
@@ -1687,8 +1759,10 @@ function UsersTab({
             </tbody>
           </table>
         </div>
-        <div className="flex items-center justify-between border-t border-border p-4">
-          <p className="text-xs text-muted-foreground">Showing {rows.length} of {team.length} staff members</p>
+        <div className="flex items-center justify-between border-t border-zinc-500/60 px-6 py-3.5">
+          <p className="text-[13px] font-medium text-muted-foreground">
+            Showing <span className="font-semibold text-foreground">{rows.length}</span> of <span className="font-semibold text-foreground">{team.length}</span> staff members
+          </p>
         </div>
       </div>
 
@@ -1698,6 +1772,7 @@ function UsersTab({
         roles={allRoles}
         onClose={() => setViewing(null)}
         onChangeRole={(m) => { setViewing(null); setEditing(m); }}
+        onChangeStore={(m) => { setViewing(null); setChangingStore(m); }}
         onResetPassword={(m) => { setViewing(null); setResetting(m); }}
         onToggleLogin={(id, enabled) => toggleLogin(id, enabled)}
         onSuspend={(m) => { setViewing(null); setSuspending(m); }}
@@ -1711,6 +1786,16 @@ function UsersTab({
         currentRoleId={editing?.roleId ?? allRoles[0].id}
         roles={allRoles}
         onConfirm={(roleId) => editing && changeRole(editing.email, roleId)}
+      />
+
+      <ChangeStoreDrawer
+        open={!!changingStore}
+        onClose={() => setChangingStore(null)}
+        memberName={changingStore?.name ?? ""}
+        currentStoreId={changingStore?.branchId ?? null}
+        currentStoreName={changingStore?.branch ?? null}
+        stores={stores}
+        onConfirm={(storeId) => { if (changingStore) setMemberStore(changingStore.id, storeId); setChangingStore(null); }}
       />
 
       <ResetPasswordDrawer

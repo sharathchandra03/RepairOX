@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { requirePermission, keysBeyondAuthority, callerCanDelegateAll } from "@/lib/api-auth";
 import { rowToStaff } from "@/lib/staff-map";
 import { normalizeEmail } from "@/lib/auth";
@@ -22,13 +23,47 @@ const CAN_GRANT_ORG_ADMIN = new Set(["master_shop_owner", "platform_owner", "dev
 export async function PATCH(req: Request, { params }: { params: { id: string } }) {
   const guard = await requirePermission(req, ["edit_users", "manage_users", "manage_roles", "assign_roles", "add_user"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
-  const { admin, roleId: callerRoleId, permissions: callerPerms } = guard;
+  const { admin, user, roleId: callerRoleId, permissions: callerPerms } = guard;
 
   const { data: row, error: findErr } = await admin
     .from("staff").select("*").eq("id", params.id).maybeSingle();
   if (findErr || !row) return NextResponse.json({ ok: false, error: "Not found." }, { status: 404 });
 
   const body = await req.json();
+
+  // ── Store relocation ──────────────────────────────────────────────────────
+  // A `storeId` (real branches.id) RELOCATES the user's HOME store: staff.branch_id
+  // becomes the new store, the old home user_stores grant is removed, and the new
+  // store is upserted as the default grant. The user then operates in the NEW
+  // store only. Records they still own in the old store keep their old branch_id
+  // (option a) — the store-change audit explains the transition. Gated on the
+  // store-user-assign capability with the SAME store-scope guard as staff creation.
+  let storeMove: { fromId: string | null; fromName: string | null; toId: string; toName: string } | null = null;
+  if (body.storeId !== undefined && body.storeId && body.storeId !== row.branch_id) {
+    const { data: target } = await admin
+      .from("branches").select("id, name, organization_id").eq("id", String(body.storeId)).maybeSingle();
+    if (!target || target.organization_id !== row.organization_id) {
+      return NextResponse.json({ ok: false, reason: "store_not_found", error: "That store isn't in this organization." }, { status: 400 });
+    }
+    // Store-scope guard: a caller WITHOUT multi-store authority may only move a
+    // user INTO a store they can themselves manage. Owners / full_access /
+    // multi_store_access bypass. Mirrors POST /api/staff.
+    if (!callerCanDelegateAll(callerRoleId, callerPerms) && !callerPerms.has("multi_store_access")) {
+      const authorized = await callerAuthorizedBranchIds(admin, user.id, row.organization_id as string);
+      if (authorized.size > 0 && !authorized.has(target.id as string)) {
+        return NextResponse.json(
+          { ok: false, reason: "forbidden_store", error: "You can only move users to a store you're authorized to manage." },
+          { status: 403 }
+        );
+      }
+    }
+    storeMove = {
+      fromId: (row.branch_id as string) ?? null,
+      fromName: (row.branch as string) ?? null,
+      toId: target.id as string,
+      toName: (target.name as string) ?? "",
+    };
+  }
 
   // ── Privilege-escalation guard on ROLE CHANGE. Only a true org admin may
   //    move someone onto an org-admin role, and a caller without full authority
@@ -58,6 +93,12 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     update.branch = body.branch;
     // Keep the branch_id foreign key in sync with the branch label.
     update.branch_id = await resolveBranchId(admin, row.organization_id ?? null, body.branch);
+  }
+  // A validated store relocation sets BOTH the FK and the display name directly
+  // (takes precedence over a `branch` name if both were sent).
+  if (storeMove) {
+    update.branch_id = storeMove.toId;
+    update.branch = storeMove.toName;
   }
   if (body.salaryType !== undefined) update.salary_type = body.salaryType;
   if (body.salaryAmount !== undefined) update.salary_amount = Number(body.salaryAmount);
@@ -130,7 +171,107 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     await admin.auth.admin.updateUserById(authUserId, { ban_duration: banned ? BANNED : UNBANNED }).catch(() => {});
   }
 
+  // ── Sync user_stores + write the store-change audit for a relocation ──
+  // Best-effort: user_stores is optional (multi-store migration) and audit is a
+  // trail — neither blocks the already-committed staff move.
+  if (storeMove) {
+    const finalRoleId = (update.role_id ?? row.role_id) as string | null;
+    try {
+      // Remove the OLD home-store grant (clean relocation — the user no longer
+      // operates in the old store).
+      if (storeMove.fromId) {
+        await admin.from("user_stores").delete().eq("staff_id", params.id).eq("branch_id", storeMove.fromId);
+      }
+      // Upsert the NEW store as the default grant, carrying the user's role.
+      await admin.from("user_stores").upsert(
+        {
+          organization_id: row.organization_id,
+          staff_id: params.id,
+          branch_id: storeMove.toId,
+          role_id: finalRoleId,
+          is_default: true,
+          status: "active",
+          created_by: await actingStaffId(admin, user.id),
+        },
+        { onConflict: "staff_id,branch_id" }
+      );
+    } catch { /* user_stores not present — staff.branch_id already scopes the user */ }
+
+    await writeStoreChangeAudit(admin, {
+      authUserId: user.id,
+      staffId: params.id,
+      staffName: (updated.name as string) ?? (row.name as string) ?? "",
+      organizationId: (row.organization_id as string) ?? null,
+      fromName: storeMove.fromName,
+      toName: storeMove.toName,
+      fromId: storeMove.fromId,
+      toId: storeMove.toId,
+    });
+  }
+
   return NextResponse.json({ ok: true, member: rowToStaff(updated) });
+}
+
+/** The staff.id for the signed-in auth user (the actor), for created_by /
+ *  performed_by stamping. */
+async function actingStaffId(admin: SupabaseClient, authUserId: string): Promise<string | null> {
+  const { data } = await admin.from("staff").select("id").eq("auth_user_id", authUserId).maybeSingle();
+  return (data?.id as string) ?? null;
+}
+
+/** The set of branch ids the caller may assign users to when they lack
+ *  multi-store authority: their own staff.branch_id + active user_stores grants.
+ *  Mirrors auth_store_ids() / the POST /api/staff guard. Empty set → the caller
+ *  skips the restriction (RLS remains the backstop) to avoid a false lockout. */
+async function callerAuthorizedBranchIds(
+  admin: SupabaseClient,
+  authUserId: string,
+  orgId: string
+): Promise<Set<string>> {
+  const out = new Set<string>();
+  const { data: me } = await admin
+    .from("staff").select("id, branch_id").eq("auth_user_id", authUserId).maybeSingle();
+  if (me?.branch_id) out.add(me.branch_id as string);
+  if (me?.id) {
+    const { data: grants } = await admin
+      .from("user_stores").select("branch_id, status").eq("staff_id", me.id).eq("status", "active");
+    for (const g of grants ?? []) out.add(g.branch_id as string);
+  }
+  return out;
+}
+
+/** Best-effort audit of a staff store relocation. Mirrors writePermissionAudit
+ *  in /api/roles/[id]: resolves the acting staff, then appends to audit_log.
+ *  Any failure is swallowed so an audit hiccup never blocks a legitimate move. */
+async function writeStoreChangeAudit(
+  admin: SupabaseClient,
+  args: {
+    authUserId: string; staffId: string; staffName: string; organizationId: string | null;
+    fromName: string | null; toName: string; fromId: string | null; toId: string;
+  }
+) {
+  try {
+    const { data: actor } = await admin
+      .from("staff").select("id, name").eq("auth_user_id", args.authUserId).maybeSingle();
+    const from = args.fromName || "—";
+    await admin.from("audit_log").insert({
+      organization_id: args.organizationId,
+      module: "Employee",
+      entity_type: "staff",
+      record_id: args.staffId,
+      action_type: "update",
+      action: "store_changed",
+      severity: "info",
+      description: `Store for ${args.staffName || "a user"} changed from ${from} to ${args.toName} by ${actor?.name ?? "an administrator"}.`,
+      previous_value: { store: args.fromName, storeId: args.fromId },
+      new_value: { store: args.toName, storeId: args.toId },
+      changes: { field: "store", from: args.fromName, to: args.toName },
+      performed_by: actor?.id ?? null,
+      actor: actor?.name ?? null,
+    });
+  } catch {
+    /* audit is best-effort */
+  }
 }
 
 /* GET /api/staff/[id] — full account detail for the User Details view.
@@ -204,11 +345,32 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
     disabledAt: row.disabled_at ?? null,
   };
 
+  // Store-change history: every relocation of this user, newest first. Sourced
+  // from the append-only audit_log (module=Employee, action=store_changed) so it
+  // reflects exactly who moved them and when. Tolerates the table being empty.
+  let storeHistory: { from: string | null; to: string | null; by: string | null; at: string | null }[] = [];
+  try {
+    const { data: events } = await admin
+      .from("audit_log")
+      .select("previous_value, new_value, actor, created_at")
+      .eq("entity_type", "staff")
+      .eq("record_id", params.id)
+      .eq("action", "store_changed")
+      .order("created_at", { ascending: false });
+    storeHistory = (events ?? []).map((e: any) => ({
+      from: e.previous_value?.store ?? null,
+      to: e.new_value?.store ?? null,
+      by: e.actor ?? null,
+      at: e.created_at ?? null,
+    }));
+  } catch { /* audit_log unavailable — history simply empty */ }
+
   return NextResponse.json({
     ok: true,
     member,
     stores,
     credential,
+    storeHistory,
     // Convenience flag: is this the caller's own account?
     isSelf: row.auth_user_id === user.id,
   });

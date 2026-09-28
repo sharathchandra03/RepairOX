@@ -42,7 +42,7 @@ export const WORKSPACES: WorkspaceDef[] = [
     label: "Lead Management",
     navLabel: "Leads",
     tagline: "Capture, score and convert every enquiry",
-    short: "SA",
+    short: "LM",
     color: "text-violet-700",
     bg: "bg-violet-50",
     homeHref: "/lead-management",
@@ -88,6 +88,12 @@ export type PermissionKey =
      grant `add_user` (create staff) WITHOUT `manage_roles` (redesign the
      permission system). OFF by default for every role except the owner roles. */
   | "add_user"
+  /* Delete Role — the capability to permanently delete a role (and reassign its
+     members). DELIBERATELY SEPARATE from manage_roles so an admin can grant the
+     ability to CREATE/EDIT roles without granting the destructive DELETE. Owners
+     hold it via full_access; manage_roles is the coarse fallback so existing
+     permission-administrators keep the ability. OFF by default otherwise. */
+  | "roles_delete"
   | "assign_roles"
   | "reset_passwords"
   | "deactivate_accounts"
@@ -489,6 +495,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "delete_users", label: "Delete Users" },
       { key: "manage_users", label: "Manage Users" },
       { key: "manage_roles", label: "Manage Roles & Permissions" },
+      { key: "roles_delete", label: "Delete Role" },
       { key: "add_user", label: "Add User (create staff & assign role/store)" },
       { key: "assign_roles", label: "Assign Roles" },
       { key: "reset_passwords", label: "Reset Passwords" },

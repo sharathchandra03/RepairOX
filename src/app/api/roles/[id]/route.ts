@@ -63,10 +63,11 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
 }
 
 /* DELETE /api/roles/[id]?reassignTo=roleId — delete a role, moving any staff
-   currently on it to `reassignTo` first. Gated on `manage_roles`. Platform
-   Owner is protected. */
+   currently on it to `reassignTo` first. Gated on the granular `roles_delete`
+   capability (coarse `manage_roles` is the backward-compatible fallback; owners
+   hold it via full_access). Platform Owner is protected. */
 export async function DELETE(req: Request, { params }: { params: { id: string } }) {
-  const guard = await requirePermission(req, "manage_roles");
+  const guard = await requirePermission(req, ["roles_delete", "manage_roles"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
   const { admin } = guard;
 

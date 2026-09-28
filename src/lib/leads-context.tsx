@@ -112,6 +112,7 @@ function rowToLead(r: any): Lead {
     convertedAt: r.converted_at ?? undefined,
     convertedBy: r.converted_by ?? undefined,
     conversionSource: r.conversion_source ?? undefined,
+    attributionMode: r.attribution_mode ?? undefined,
     createdBy: r.created_by ?? "",
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
@@ -180,6 +181,7 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   if (l.convertedAt !== undefined) row.converted_at = l.convertedAt || null;
   if (l.convertedBy !== undefined) row.converted_by = l.convertedBy || null;
   set("conversion_source", l.conversionSource);
+  if (l.attributionMode !== undefined) row.attribution_mode = l.attributionMode || null;
   return row;
 }
 
@@ -448,7 +450,7 @@ function writeLS(key: string, value: unknown) {
 const LEAD_OPTIONAL_COLUMNS = [
   "fulfilment_route", "assigned_store", "routed_at",
   "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id",
-  "converted_at", "converted_by", "conversion_source",
+  "converted_at", "converted_by", "conversion_source", "attribution_mode",
   "device_category_id", "device_brand_id", "device_model_id", "discount_type", "follow_up_agent_id",
 ];
 
@@ -850,7 +852,14 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
      Customer promotion is a separate Ticket/Invoice/manual action. */
   const resolveLeadContact = useCallback(async (draft: LeadDraft): Promise<string> => {
     if (draft.contactId) return draft.contactId;
-    const existing = findContactMatches(contactsRef.current, { phone: draft.number, email: draft.email })[0]?.contact;
+    // Only auto-reuse a DEFINITE (high-confidence exact phone/email) contact.
+    // A "low"-confidence fuzzy name/city match is a POSSIBILITY surfaced to the
+    // user at capture — never silently merged here (could be a different
+    // person with the same name).
+    const matches = findContactMatches(contactsRef.current, {
+      phone: draft.number, email: draft.email, fullName: draft.name, city: draft.location,
+    });
+    const existing = matches.find((m) => (m.confidence ?? "high") === "high")?.contact;
     if (existing) return existing.id;
 
     const contact = createProspectContact({
@@ -1456,6 +1465,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       fulfilmentRoute: route,
       assignedStore: route === "STORE_VISIT" ? (opts?.assignedStore ?? "") : "",
       routedAt: new Date().toISOString(),
+      // The agent WORKED this lead and routed it forward → agent-driven credit.
+      attributionMode: "agent_routed",
     };
     await updateLead(id, updates);
     // Persist assigned_store_id (uuid) when a store id is available.
@@ -1690,7 +1701,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
     const field = kind === "walk_in" ? "linkedWalkInId" : kind === "field_job" ? "linkedFieldJobId" : kind === "ticket" ? "linkedTicketId" : "linkedInvoiceId";
     const eventType: LeadConversionEventType = kind === "walk_in" ? "walk_in_created" : kind === "field_job" ? "field_job_created" : kind === "ticket" ? "ticket_created" : "invoice_created";
-    await updateLead(leadId, { [field]: recordId } as Partial<Lead>);
+    // Back-matched: this operational record was created SELF-INITIATED (the
+    // customer came in on their own) and only now linked to the lead. It does
+    // NOT earn the agent credit — unless the agent had already routed the lead
+    // forward (routedAt set), in which case the agent-driven mode stands.
+    const linkUpdates: Partial<Lead> = { [field]: recordId } as Partial<Lead>;
+    if (!lead.routedAt && lead.attributionMode !== "agent_routed") {
+      linkUpdates.attributionMode = "back_matched";
+    }
+    await updateLead(leadId, linkUpdates);
     await recordConversionEvent(leadId, eventType, {
       targetType: kind as LeadConversionTargetType, targetId: recordId, targetLabel: recordLabel,
     });

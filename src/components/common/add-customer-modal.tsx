@@ -32,6 +32,12 @@ interface ConfirmExistingState {
   existing: Customer;
   newData: FindOrCreateInput;
   useExisting: boolean;
+  /** How the match was found (e.g. "Mobile Number", "Name + City"). */
+  matchedOn?: string;
+  /** true = a DEFINITE match (exact phone/email) → default action is "Use
+   *  Existing". false = a POSSIBLE fuzzy match (same name + city, different
+   *  number) → default action leans to "Create New" but warns first. */
+  definite: boolean;
 }
 
 /**
@@ -120,17 +126,34 @@ export function AddCustomerModal({
       // modal itself, so every caller gets it "for free" and can't forget
       // to save the customer they just filled in a whole form for.
       const result = findOrCreateCustomer(formData, customers);
+      const topMatch = result.duplicateMatches[0];
+      const lowMatches = result.duplicateMatches.filter((m) => m.confidence === "low");
 
       if (!result.created && result.duplicateMatches.length > 0) {
-        // Existing customer found - show confirmation
+        // DEFINITE match (exact phone/email/name+company) → confirm; default
+        // action is "Use Existing".
         setConfirmState({
           existing: result.customer,
           newData: formData,
           useExisting: true,
+          matchedOn: topMatch?.matchedOn,
+          definite: true,
+        });
+        setStep('confirm_existing');
+      } else if (result.created && lowMatches.length > 0) {
+        // POSSIBLE match only (same name + city with a DIFFERENT number) — the
+        // record was built as NEW, but warn first so a returning customer who
+        // used a new number isn't duplicated by accident. The user decides.
+        setConfirmState({
+          existing: lowMatches[0].customer,
+          newData: formData,
+          useExisting: false,
+          matchedOn: lowMatches[0].matchedOn,
+          definite: false,
         });
         setStep('confirm_existing');
       } else {
-        // New customer created — persist it, then tell the caller.
+        // No match → persist the new customer, then tell the caller.
         await addCustomer(result.customer);
         toast.success('Customer created', { description: `${formatCustomerName(result.customer)} was added to the Customer Master.` });
         onCustomerCreated(result.customer);
@@ -155,9 +178,14 @@ export function AddCustomerModal({
     if (!confirmState) return;
     setIsLoading(true);
     try {
-      // Explicit override: bypass dedup and always create a new customer,
-      // even though a duplicate match was found above.
-      const result = findOrCreateCustomer({ ...confirmState.newData, forceCreate: true }, customers);
+      // Bypass dedup and create a new customer. forceCreate is only needed to
+      // override a DEFINITE match; a POSSIBLE (fuzzy) match created a NEW record
+      // already, so this just confirms it — no force-duplicate capability
+      // required for the fuzzy case.
+      const result = findOrCreateCustomer(
+        { ...confirmState.newData, forceCreate: confirmState.definite },
+        customers,
+      );
       await addCustomer(result.customer);
       toast.success('Customer created', { description: `${formatCustomerName(result.customer)} was added to the Customer Master.` });
       onCustomerCreated(result.customer);
@@ -333,25 +361,42 @@ export function AddCustomerModal({
 
   // Step 2: Confirm Existing Customer
   if (step === 'confirm_existing' && confirmState) {
+    const isPossible = !confirmState.definite;
+    // For a DEFINITE match, "Create Anyway" is the force-duplicate override
+    // (gated). For a POSSIBLE fuzzy match, creating a genuinely different person
+    // with the same name is a normal create — no force-duplicate gate needed.
+    const canCreateNew = isPossible ? canCreate : canForceCreateDuplicate;
     return (
       <RoxCenteredForm
         open={isOpen}
-        title="Customer Already Exists"
-        subtitle="A customer with this phone number or email is already in the system."
+        title={isPossible ? "Possible Duplicate" : "Customer Already Exists"}
+        subtitle={isPossible
+          ? "A customer with the same name already exists in this area, but with a different phone number. Is this the same person?"
+          : "A customer with this phone number or email is already in the system."}
         onClose={onClose}
         width="max-w-md"
       >
         <div className="space-y-4">
-          <div className="rounded-lg bg-amber-50 border border-amber-200 p-4">
-            <h4 className="font-semibold text-amber-900 mb-2">Existing Customer</h4>
-            <p className="text-sm text-amber-800">
+          <div className={`rounded-lg border p-4 ${isPossible ? "bg-sky-50 border-sky-200" : "bg-amber-50 border-amber-200"}`}>
+            <h4 className={`font-semibold mb-2 ${isPossible ? "text-sky-900" : "text-amber-900"}`}>
+              {isPossible ? "Possible existing customer" : "Existing Customer"}
+              {confirmState.matchedOn && (
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${isPossible ? "bg-sky-100 text-sky-700" : "bg-amber-100 text-amber-700"}`}>
+                  Matched on {confirmState.matchedOn}
+                </span>
+              )}
+            </h4>
+            <p className={`text-sm ${isPossible ? "text-sky-800" : "text-amber-800"}`}>
               <strong>{formatCustomerName(confirmState.existing)}</strong>
             </p>
             {confirmState.existing.mobile && (
-              <p className="text-sm text-amber-800 mt-1">{confirmState.existing.mobile}</p>
+              <p className={`text-sm mt-1 ${isPossible ? "text-sky-800" : "text-amber-800"}`}>{confirmState.existing.mobile}</p>
+            )}
+            {confirmState.existing.city && (
+              <p className={`text-sm ${isPossible ? "text-sky-800" : "text-amber-800"}`}>{confirmState.existing.city}</p>
             )}
             {confirmState.existing.company && (
-              <p className="text-sm text-amber-800">{confirmState.existing.company}</p>
+              <p className={`text-sm ${isPossible ? "text-sky-800" : "text-amber-800"}`}>{confirmState.existing.company}</p>
             )}
           </div>
 
@@ -367,18 +412,19 @@ export function AddCustomerModal({
             <Button
               onClick={handleUseExisting}
               disabled={isLoading}
-              className="flex-1 bg-emerald-600 hover:bg-emerald-700"
+              className={`flex-1 ${isPossible ? "" : "bg-emerald-600 hover:bg-emerald-700"}`}
+              variant={isPossible ? "outline" : undefined}
             >
               Use Existing
             </Button>
-            {canForceCreateDuplicate && (
+            {canCreateNew && (
               <Button
                 onClick={handleCreateAnyway}
                 disabled={isLoading}
-                variant="outline"
+                variant={isPossible ? undefined : "outline"}
                 className="flex-1"
               >
-                Create Anyway
+                {isPossible ? "Create New" : "Create Anyway"}
               </Button>
             )}
           </div>

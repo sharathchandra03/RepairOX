@@ -325,7 +325,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       // this tier is what turns on permission administration.
       manage: [
         "manage_roles", "manage_permissions", "manage_users",
-        "delete_users", "deactivate_accounts", "roles_preview",
+        "roles_delete", "delete_users", "deactivate_accounts", "roles_preview",
       ],
     },
   },
