@@ -197,6 +197,9 @@ export interface FindOrCreateInput {
   firstName: string;
   lastName: string;
   mobile: string;
+  /** Alternate/secondary contact number. Also used to identify a returning
+   *  customer who reaches out from their other number. */
+  altMobile?: string;
   email?: string;
   type?: "personal" | "business";
   source?: string;
@@ -245,6 +248,7 @@ export function findOrCreateCustomer(
   // proactive fuzzy name+city "possible" tier).
   const duplicateMatches = findDuplicates(existingCustomers, {
     mobile: input.mobile,
+    altMobile: input.altMobile,
     email: input.email,
     firstName: input.firstName,
     lastName: input.lastName,
@@ -274,6 +278,7 @@ export function findOrCreateCustomer(
     firstName: input.firstName,
     lastName: input.lastName,
     mobile: input.mobile,
+    altMobile: input.altMobile,
     email: input.email,
     type: input.type,
     source: (input.source as any) ?? undefined,

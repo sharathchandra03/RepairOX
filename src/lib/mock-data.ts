@@ -1118,6 +1118,16 @@ export type InvoiceDeviceRecord = {
   deviceColour?: string;
   /** Assignment */
   technician: string;
+  /** Commercial estimate value for this device, carried over from the linked
+   *  ticket's estimate (Ticket.DeviceRecord.estimate). This is a REFERENCE
+   *  amount only — it is NOT a Parts & Services inventory line and never
+   *  becomes billable stock. Optional for legacy records; defaults to 0. */
+  estimateValue?: number;
+  /** The agreed repair/labour charge for this device — a structured monetary
+   *  value that participates in invoice pricing as its own breakdown component
+   *  (separate from parts, discount, tax and the estimate reference). It is NOT
+   *  an inventory line item. Optional for legacy records; defaults to 0. */
+  repairCost?: number;
   /** Parts assigned to this device */
   parts: InvoiceLineItem[];
   /** Notes specific to this device */
@@ -1147,6 +1157,8 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
     warrantyUnit: undefined,
     deviceColour: undefined,
     technician: "",
+    estimateValue: 0,
+    repairCost: 0,
     parts: [],
     notes: "",
     subtotal: 0,
@@ -1159,6 +1171,9 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
  * mapping parts from TicketPart to InvoiceLineItem.
  */
 export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRecord {
+  // Parts & Services carries ONLY real ticket parts. The ticket estimate is a
+  // commercial reference value and is mapped to `estimateValue` below — it must
+  // NEVER be injected as a synthetic "Repair Service" line item.
   const parts: InvoiceLineItem[] = dev.parts.map((p, i) => ({
     id: `li-${dev.id}-${i}`,
     sku: p.sku,
@@ -1169,21 +1184,6 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
     discount: 0,
     total: p.total,
   }));
-
-  // If device has estimate exceeding parts total, add a service/labour line
-  const partsTotal = parts.reduce((s, p) => s + p.total, 0);
-  const labourAmount = dev.estimate - partsTotal;
-  if (labourAmount > 0 || parts.length === 0) {
-    parts.push({
-      id: `li-${dev.id}-labour`,
-      name: dev.issue || "Repair Service",
-      description: [dev.brand, dev.model].filter(Boolean).join(" "),
-      qty: 1,
-      price: Math.max(labourAmount, dev.estimate || 0),
-      discount: 0,
-      total: Math.max(labourAmount, dev.estimate || 0),
-    });
-  }
 
   const subtotal = parts.reduce((s, p) => s + p.total, 0);
 
@@ -1211,6 +1211,10 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
     // Copy the persisted colour — do not re-infer it.
     deviceColour: dev.deviceColour,
     technician: dev.assignedTo,
+    // The ticket estimate becomes the device's Estimate Value reference — never
+    // an inventory line. Repair Cost starts at 0 (the user sets it explicitly).
+    estimateValue: dev.estimate || 0,
+    repairCost: 0,
     parts,
     notes: dev.notes,
     subtotal,
@@ -1716,6 +1720,8 @@ export type WalkIn = {
   customer: string;
   /** Phone / contact number. */
   phone: string;
+  /** Alternate / secondary contact number (optional). */
+  altPhone?: string;
   /** Customer email (optional). */
   email?: string;
   source: string;

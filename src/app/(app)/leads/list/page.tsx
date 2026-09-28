@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, Smartphone,
+  Phone, Mail, UserCheck, UserPlus,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -14,8 +14,12 @@ import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
-import { RoxFilterPanelHeader, ActiveFilterChip } from "@/components/ui/rox-filter";
+import { ActiveFilterChip } from "@/components/ui/rox-filter";
 import { StoreContextCell } from "@/components/common/store-context-cell";
+import { LeadFilterPanel, type FacetDef } from "@/components/leads/lead-filter-panel";
+import { FreezeColumnsMenu } from "@/components/common/freeze-columns-menu";
+import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
+import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { Can } from "@/components/common/can";
 import { CAP } from "@/lib/capabilities";
@@ -23,8 +27,8 @@ import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
 import {
-  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, type LeadFollowUp,
-  type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange,
+  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadIsExistingCustomer, type LeadFollowUp,
+  type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
 } from "@/lib/leads-data";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
@@ -36,7 +40,73 @@ import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/l
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
+/* Page-size options for the detached pagination footer (matches Tickets). */
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
+
+/* ── LEAD TABLE COLUMN CONTRACT ───────────────────────────────────────────
+   The columns in VISUAL ORDER with their rendered widths. Two mandatory
+   structural anchors: "id" (Lead ID) frozen LEFT, "actions" (Last Action)
+   frozen RIGHT. Everything between is freezable-to-left by the user. The
+   conditional multi-store "store" column is not offered in the freeze menu
+   (freezable:false) since it only exists in All-Shops. Widths match the
+   original <colgroup> so freeze offsets line up exactly. */
+function leadGridColumns(multiStore: boolean): GridColumn[] {
+  const cols: GridColumn[] = [
+    { key: "id", label: "Lead ID", width: 84, lockedLeft: true },
+  ];
+  if (multiStore) cols.push({ key: "store", label: "Store", width: 132, freezable: false });
+  cols.push(
+    { key: "date", label: "Date", width: 92 },
+    { key: "region", label: "Region", width: 120 },
+    { key: "source", label: "Source", width: 120 },
+    { key: "agent", label: "Agent", width: 150 },
+    { key: "contactStatus", label: "Contact Status", width: 128 },
+    { key: "contactInfo", label: "Contact Info", width: 220 },
+    { key: "device", label: "Device & Issue", width: 200 },
+    { key: "value", label: "Lead Value", width: 120 },
+    { key: "comment", label: "Comment", width: 200 },
+    { key: "leadCategory", label: "Lead Category", width: 120 },
+    { key: "tbd", label: "TBD", width: 110 },
+    { key: "leadType", label: "Lead Type", width: 104 },
+    { key: "status", label: "Status", width: 140 },
+    { key: "result", label: "Result", width: 128 },
+    { key: "actions", label: "Last Action", width: 100, lockedRight: true },
+  );
+  return cols;
+}
+
+/* Merge a column's frozen props (className + inline offset style) with the
+   cell's own base classes. Returns a spreadable prop object for <th>/<td>. */
+function mergeFrozen(
+  frozen: { className: string; style?: React.CSSProperties },
+  base: string,
+): { className: string; style?: React.CSSProperties } {
+  return { className: cn(base, frozen.className), style: frozen.style };
+}
+
+/* Toggles data-scroll-left / data-scroll-right on the scroll container so the
+   frozen-edge shadow only shows when there is actually scrollable content
+   underneath that edge (spec §18). rAF-throttled; no layout thrash. */
+function useScrollEdges(ref: React.RefObject<HTMLElement>) {
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let raf = 0;
+    const update = () => {
+      raf = 0;
+      const left = el.scrollLeft > 1;
+      const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
+      el.setAttribute("data-scroll-left", String(left));
+      el.setAttribute("data-scroll-right", String(right));
+    };
+    const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
+    update();
+    el.addEventListener("scroll", onScroll, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", onScroll); ro.disconnect(); if (raf) cancelAnimationFrame(raf); };
+  }, [ref]);
+}
 
 /* ── Follow-up cell — mirrors the Ticket due-date reddish/pink treatment.
    Driven by the STRUCTURED open follow-up (lead_followup_history) so overdue is
@@ -126,9 +196,24 @@ function ContactStatusCell({ lead }: { lead: Lead }) {
 /* Column 7 — CONTACT INFO (GROUPED: name + phone + email in one cell). */
 function ContactInfoCell({ lead }: { lead: Lead }) {
   const phoneDigits = (lead.number || "").replace(/\D/g, "");
+  const existing = leadIsExistingCustomer(lead);
   return (
     <div className="min-w-0 leading-snug" onClick={(e) => e.stopPropagation()}>
-      <p className="truncate font-semibold text-zinc-900">{lead.name || "—"}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="min-w-0 truncate font-semibold text-zinc-900">{lead.name || "—"}</p>
+        <span
+          title={existing ? "Existing customer — linked to Customer Master" : "New prospect — not yet a customer"}
+          className={cn(
+            "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset",
+            existing
+              ? "bg-emerald-50 text-emerald-600 ring-emerald-200"
+              : "bg-amber-50 text-amber-600 ring-amber-200",
+          )}
+        >
+          {existing ? <UserCheck className="h-3 w-3" /> : <UserPlus className="h-3 w-3" />}
+          {existing ? "Existing" : "New"}
+        </span>
+      </div>
       {lead.number && (
         <a href={`tel:${phoneDigits}`} className="mt-1 flex items-center gap-1.5 text-[12.5px] text-zinc-600 hover:text-[#4361EE] tnum">
           <Phone className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{lead.number}</span>
@@ -158,8 +243,7 @@ function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) =>
       className="group/device flex w-full min-w-0 items-center gap-1.5 rounded-lg text-left transition hover:bg-indigo-50/50"
     >
       <div className="min-w-0 flex-1 leading-snug">
-        <p className="flex items-center gap-1.5 truncate font-medium text-zinc-800">
-          {lead.device && <Smartphone className="h-4 w-4 shrink-0 text-zinc-400" />}
+        <p className="truncate font-medium text-zinc-800">
           <span className="truncate">{lead.device || (lead.issue ? "Device" : "—")}</span>
         </p>
         {lead.issue && <p className="mt-0.5 truncate text-[12.5px] text-zinc-500" title={lead.issue}>{lead.issue}</p>}
@@ -195,38 +279,13 @@ function CommentCell({ text }: { text: string }) {
   );
 }
 
-/* ── Filter chip dropdown (values from Lead Settings + live data) ──
-   Options are plain values, or { label, value } pairs for structured fields
-   (e.g. Agent → the USER ID as value, the name as label). */
+/* ── Filter option shape (values from Lead Settings + live data) ──
+   Plain values, or { label, value } pairs for structured fields (e.g. Agent →
+   the USER ID as value, the name as label). Consumed by the faceted
+   LeadFilterPanel + the applied-chip label resolution. */
 type FilterOption = string | { label: string; value: string };
-const optValue = (o: FilterOption) => (typeof o === "string" ? o : o.value);
-const optLabel = (o: FilterOption) => (typeof o === "string" ? o : o.label);
 
-function FilterChip({ label, value, options, onChange }: { label: string; value: string; options: FilterOption[]; onChange: (v: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const selected = options.find((o) => optValue(o) === value);
-  return (
-    <div className="relative">
-      <button onClick={() => setOpen((o) => !o)} className={cn("inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-medium transition", value ? "border-[#4361EE] bg-[#EEF1FD] text-[#4361EE]" : "border-border bg-card text-zinc-600 hover:bg-muted")}>
-        <span className="max-w-[140px] truncate">{value ? (selected ? optLabel(selected) : value) : label}</span>
-        {value ? <X className="h-3 w-3" onClick={(e) => { e.stopPropagation(); onChange(""); }} /> : <ChevronDown className="h-3 w-3" />}
-      </button>
-      {open && (
-        <>
-          <div className="fixed inset-0 z-30" onClick={() => setOpen(false)} />
-          <div className="absolute left-0 top-full z-40 mt-1 max-h-64 w-52 overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-xl">
-            {options.length === 0 && <p className="px-2.5 py-2 text-[12px] text-muted-foreground">No values</p>}
-            {options.map((o) => (
-              <button key={optValue(o)} onClick={() => { onChange(optValue(o)); setOpen(false); }} className={cn("flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-[12px] transition hover:bg-muted", optValue(o) === value && "bg-[#EEF1FD] font-medium text-[#4361EE]")}>{optLabel(o)}</button>
-            ))}
-          </div>
-        </>
-      )}
-    </div>
-  );
-}
-
-/* Which lead fields get a filter chip, and how they read their options. */
+/* Which lead fields become facets, and how they read their options. */
 const FILTER_FIELDS: { key: LeadFilterField; label: string; optionField?: LeadFieldKey }[] = [
   { key: "region",         label: "Region",          optionField: "region" },
   { key: "source",         label: "Source",          optionField: "source" },
@@ -264,10 +323,47 @@ const FOLLOWUP_FILTERS = [
 export default function LeadsListPage() {
   const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, salesAgents, openFollowUpsByLead } = useLeads();
   const canAssign = useCanAssignLeads();
+  const { currentUser } = usePermissions();
   // Multi-store: show the shared Store Context column only in the consolidated
   // All-Shops view with >1 authorized store (Design System v2 multi-store rule).
   const { isAllShops, stores, getStore } = useStoreContext();
   const multiStore = isAllShops && stores.length > 1;
+
+  /* ── Frozen columns (professional data-grid) ──────────────────────────────
+     Lead ID is permanently frozen LEFT, Last Action permanently frozen RIGHT;
+     the user may additionally freeze middle columns to the left. Persisted
+     per-user. `frozenCellProps(key)` returns the sticky className + inline
+     left/right offset for any column so the header and body cells stay in
+     lockstep with the real column widths. */
+  const gridColumns = useMemo(() => leadGridColumns(multiStore), [multiStore]);
+  const frozen = useFrozenColumns("leads-list", currentUser?.id, gridColumns);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useScrollEdges(scrollRef);
+
+  const frozenCellProps = useCallback(
+    (key: string): { className: string; style?: React.CSSProperties } => {
+      // LEFT frozen block — cumulative offset = sum of widths BEFORE this col.
+      const leftIdx = frozen.leftKeys.indexOf(key);
+      if (leftIdx >= 0) {
+        let offset = 0;
+        for (let i = 0; i < leftIdx; i++) {
+          const c = gridColumns.find((g) => g.key === frozen.leftKeys[i]);
+          offset += c?.width ?? 0;
+        }
+        const isLast = leftIdx === frozen.leftKeys.length - 1;
+        return {
+          className: cn("rox-frozen rox-frozen-left", isLast && "rox-frozen-left-edge"),
+          style: { ["--rox-frozen-offset" as any]: `${offset}px` },
+        };
+      }
+      // RIGHT frozen anchor (single column).
+      if (key === frozen.rightKey) {
+        return { className: "rox-frozen rox-frozen-right rox-frozen-right-edge", style: { ["--rox-frozen-offset" as any]: "0px" } };
+      }
+      return { className: "" };
+    },
+    [frozen.leftKeys, frozen.rightKey, gridColumns],
+  );
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
@@ -310,8 +406,12 @@ export default function LeadsListPage() {
     return [{ label: "All", value: "" }, ...set.map((s) => ({ label: s, value: s }))];
   }, [leads]);
 
-  /* Reset to page 1 whenever the filtered dataset changes. */
-  useEffect(() => { setPage(1); }, [filters, pageSize]);
+  /* Reset to page 1 + scroll the grid back to the top whenever the filtered
+     dataset changes (filter/search/page-size). Freeze config is untouched. */
+  useEffect(() => {
+    setPage(1);
+    if (scrollRef.current) scrollRef.current.scrollTop = 0;
+  }, [filters, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -386,6 +486,13 @@ export default function LeadsListPage() {
         onClear: () => setFilters((f) => ({ ...f, followUp: "any" })),
       });
     }
+    if (filters.customerLink !== "any") {
+      chips.push({
+        label: "Customer",
+        value: filters.customerLink === "existing" ? "Existing" : "New",
+        onClear: () => setFilters((f) => ({ ...f, customerLink: "any" })),
+      });
+    }
     for (const field of FILTER_FIELDS) {
       const v = filters.fields[field.key];
       if (!v) continue;
@@ -404,6 +511,24 @@ export default function LeadsListPage() {
     }
     return chips;
   }, [filters, salesAgents, leads, setFilters]);
+
+  /* Facet definitions for the structured filter panel — reuse the SAME option
+     resolution as the applied chips (configured Settings values + live data;
+     people fields resolve id→name). */
+  const filterFacets = useMemo<FacetDef[]>(
+    () =>
+      FILTER_FIELDS.map((f) => ({
+        key: f.key,
+        label: f.label,
+        options: optionsForFilter(f).map((o) =>
+          typeof o === "string" ? { label: o, value: o } : o,
+        ),
+      })),
+    // optionsForFilter closes over leads/salesAgents/optionsFor; recompute when
+    // the dataset changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [leads, salesAgents],
+  );
 
   return (
     <div className="space-y-5">
@@ -438,6 +563,19 @@ export default function LeadsListPage() {
           />
         </div>
         <div className="flex items-center gap-2">
+          {/* Customer Master linkage — New (fresh prospect) vs Existing (linked). */}
+          <div className="hidden shrink-0 sm:block">
+            <SegmentedTabs
+              value={filters.customerLink}
+              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
+              options={[
+                { label: "All", value: "any" },
+                { label: "New", value: "new" },
+                { label: "Existing", value: "existing" },
+              ]}
+              size="sm"
+            />
+          </div>
           <div className="w-full lg:w-72">
             <Input
               value={filters.query}
@@ -450,57 +588,35 @@ export default function LeadsListPage() {
             variant={showFilters || activeFilters ? "soft" : "outline"}
             size="sm"
             className="shrink-0 gap-1.5 rounded-full"
-            onClick={() => setShowFilters((s) => !s)}
+            onClick={() => setShowFilters(true)}
           >
             <Filter className="h-3.5 w-3.5" /> Filters
+            {appliedChips.length > 0 && (
+              <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#4361EE] px-1 text-[10px] font-bold text-white">
+                {appliedChips.length}
+              </span>
+            )}
           </Button>
+          {/* Freeze-columns control — desktop grid only. */}
+          <div className="hidden md:block">
+            <FreezeColumnsMenu columns={gridColumns} state={frozen} />
+          </div>
         </div>
       </div>
 
-      {/* Full filter bar */}
-      {showFilters && (
-        <motion.div
-          initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: "auto" }}
-          className="rounded-2xl border border-border bg-card p-4 shadow-card"
-        >
-          {/* Canonical panel header — mandatory close (×) + Reset (Design System v2 §3g). */}
-          <RoxFilterPanelHeader
-            title="Filters"
-            onClose={() => setShowFilters(false)}
-            onReset={clearFilters}
-            resetLabel="Clear all"
-            showReset={activeFilters}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            {/* Date range */}
-            <select
-              value={filters.dateRange}
-              onChange={(e) => setFilters((f) => ({ ...f, dateRange: e.target.value as LeadDateRange }))}
-              className="h-8 rounded-full border border-border bg-card px-3 text-[12px] font-medium text-zinc-700 transition hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:outline-none"
-            >
-              {DATE_RANGES.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
-            {/* Follow-up */}
-            <select
-              value={filters.followUp}
-              onChange={(e) => setFilters((f) => ({ ...f, followUp: e.target.value as any }))}
-              className="h-8 rounded-full border border-border bg-card px-3 text-[12px] font-medium text-zinc-700 transition hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:outline-none"
-            >
-              {FOLLOWUP_FILTERS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
-            </select>
-            {/* Per-field chips */}
-            {FILTER_FIELDS.map((f) => (
-              <FilterChip
-                key={f.key}
-                label={f.label}
-                value={filters.fields[f.key] ?? ""}
-                options={optionsForFilter(f)}
-                onChange={(v) => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [f.key]: v } }))}
-              />
-            ))}
-          </div>
-        </motion.div>
-      )}
+      {/* Structured, faceted filter panel (slide-over) — grouped sections,
+          searchable facets with live counts, and a live "Show N leads"
+          preview. Replaces the flat pill wall. */}
+      <LeadFilterPanel
+        open={showFilters}
+        onClose={() => setShowFilters(false)}
+        filters={filters}
+        onApply={(next) => setFilters(() => next)}
+        onClearAll={clearFilters}
+        leads={leads}
+        openFollowUpsByLead={openFollowUpsByLead}
+        facets={filterFacets}
+      />
 
       {/* Applied-filter chips — each individually removable (Design System §3g). */}
       {appliedChips.length > 0 && (
@@ -517,78 +633,88 @@ export default function LeadsListPage() {
         </div>
       )}
 
-      {/* Desktop Table — 15-column grouped Lead Table.
-          A single BOUNDED, DUAL-SCROLL container: the card scrolls BOTH axes
-          internally (wide 15-col table needs real column widths; tall lists get
-          internal vertical scroll per spec), and the <thead> is `sticky top-0`
-          RELATIVE TO THIS CONTAINER — so the header stays frozen during BOTH
-          vertical and horizontal scroll, with no white band and no cramping.
-          Keeps the canonical sharp 2px frame + brand header from the design
-          system; only the scroll strategy differs (justified: 15 columns). */}
-      <div className="rox-table-card shadow-card hidden md:block">
-        <div className="max-h-[calc(100vh-260px)] overflow-auto rounded-[inherit] [scrollbar-width:thin]">
+      {/* Desktop Data-Grid — professional CRM/ERP table (spec).
+          A single BOUNDED, DUAL-SCROLL container scrolls BOTH axes internally.
+          - <thead> is `sticky top-0` relative to THIS container → frozen while
+            vertically scrolling.
+          - Lead ID (left) + Last Action (right) columns are `position: sticky`
+            (rox-frozen) → frozen while horizontally scrolling; the user may
+            freeze extra columns to the left. Header + body use the same
+            frozenCellProps(key) so offsets stay in lockstep with the column
+            widths. One coordinated scroll model — no duplicated tables, no JS
+            scroll-sync. Sharp 2px frame + brand header preserved. */}
+      <div className="rox-table-card shadow-card hidden md:flex md:flex-col md:min-h-0">
+        <div
+          ref={scrollRef}
+          className="rox-grid-scroll max-h-[calc(100vh-300px)] overflow-auto"
+        >
         {/* Explicit per-column pixel widths (deterministic with table-fixed) so
-            every grouped column gets a generous, non-clumsy width and content
-            never truncates awkwardly. The min-width equals their sum; the
-            container scrolls horizontally on narrower viewports. */}
+            every grouped column gets a generous width AND the frozen offsets
+            line up exactly. The min-width equals their sum; the container
+            scrolls horizontally on narrower viewports. */}
         <table className="w-full min-w-[2140px] table-fixed text-[14px]">
           <colgroup>
-            <col className="w-[84px]" />                   {/* ID */}
-            {multiStore && <col className="w-[132px]" />}   {/* Store (multi-store only) */}
-            <col className="w-[92px]" />                    {/* Date + time */}
-            <col className="w-[120px]" />                   {/* Region */}
-            <col className="w-[120px]" />                   {/* Source + capture channel */}
-            <col className="w-[150px]" />                   {/* Agent (owner) */}
-            <col className="w-[128px]" />                   {/* Contact Status */}
-            <col className="w-[220px]" />                   {/* Contact Info (grouped) */}
-            <col className="w-[200px]" />                   {/* Device & Issue (grouped) */}
-            <col className="w-[120px]" />                   {/* Lead Value */}
-            <col className="w-[200px]" />                   {/* Comment */}
-            <col className="w-[120px]" />                   {/* Lead Category */}
-            <col className="w-[110px]" />                   {/* TBD */}
-            <col className="w-[104px]" />                   {/* Lead Type (priority) */}
-            <col className="w-[140px]" />                   {/* Status (+ route) */}
-            <col className="w-[128px]" />                   {/* Result */}
-            <col className="w-[100px]" />                   {/* Actions (eye · pin · ⋯) */}
+            {gridColumns.map((c) => (
+              <col key={c.key} style={{ width: c.width }} />
+            ))}
           </colgroup>
-          <thead className="rox-table-head sticky top-0 z-[5]">
+          <thead className="rox-table-head sticky top-0 z-[6]">
             <tr className="text-left text-[12px] font-bold uppercase tracking-wider">
-              <th className="px-4 py-4 text-left">ID</th>
+              <th {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 text-left")}>ID</th>
               {multiStore && <th className="px-3 py-4 text-left">Store</th>}
-              <th className="px-3 py-4 text-left">Date</th>
-              <th className="px-3 py-4 text-left">Region</th>
-              <th className="px-3 py-4 text-left">Source</th>
-              <th className="px-3 py-4 text-left">Agent</th>
-              <th className="px-3 py-4 text-left">Contact Status</th>
-              <th className="px-3 py-4 text-left">Contact Info</th>
-              <th className="px-3 py-4 text-left">Device &amp; Issue</th>
-              <th className="px-3 py-4 text-left">Lead Value</th>
-              <th className="px-3 py-4 text-left">Comment</th>
-              <th className="px-3 py-4 text-left">Lead Category</th>
-              <th className="px-3 py-4 text-left">{TBD_HEADER_LABEL}</th>
-              <th className="px-3 py-4 text-left">Lead Type</th>
-              <th className="px-3 py-4 text-left">Status</th>
-              <th className="px-3 py-4 text-left">Result</th>
-              <th className="px-3 py-4 text-right"><span className="sr-only">Actions</span></th>
+              <th {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 text-left")}>Date</th>
+              <th {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 text-left")}>Region</th>
+              <th {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 text-left")}>Source</th>
+              <th {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 text-left")}>Agent</th>
+              <th {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 text-left")}>Contact Status</th>
+              <th {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 text-left")}>Contact Info</th>
+              <th {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 text-left")}>Device &amp; Issue</th>
+              <th {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 text-left")}>Lead Value</th>
+              <th {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 text-left")}>Comment</th>
+              <th {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 text-left")}>Lead Category</th>
+              <th {...mergeFrozen(frozenCellProps("tbd"), "px-3 py-4 text-left")}>{TBD_HEADER_LABEL}</th>
+              <th {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 text-left")}>Lead Type</th>
+              <th {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 text-left")}>Status</th>
+              <th {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 text-left")}>Result</th>
+              <th {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right")}><span className="sr-only">Last Action</span></th>
             </tr>
           </thead>
           <tbody>
-            {paged.map((lead, i) => (
+            {paged.map((lead, i) => {
+              const fuState = openFollowUpRowState(openFollowUpsByLead.get(lead.id));
+              const tint = followUpTone(fuState).rowTint;
+              const tinted = !!tint || !!lead.pinnedAt;
+              // Resolved SOLID colour matching the row's (semi-transparent) tint,
+              // handed to the frozen cells as --rox-row-tint so they can layer
+              // the SAME tint over their opaque base (no bleed-through). The
+              // follow-up tint (red) wins over the pinned tint (purple), matching
+              // the class order above.
+              const rowTintVar = tint
+                ? (fuState === "overdue" ? "hsl(0 93% 82% / 0.9)"
+                  : fuState === "today" ? "hsl(0 93% 82% / 0.7)"
+                  : "hsl(0 93% 82% / 0.6)")
+                : lead.pinnedAt ? "hsl(255 92% 68% / 0.06)" : undefined;
+              return (
               <motion.tr
                 key={lead.id}
                 initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(0.02 * i, 0.3) }}
                 onClick={() => setDetailLead(lead)}
+                style={rowTintVar ? ({ ["--rox-row-tint" as any]: rowTintVar }) : undefined}
                 className={cn(
                   "rox-table-row group h-[76px] cursor-pointer align-middle transition hover:bg-muted/40",
                   lead.pinnedAt && "bg-[#7C5CFC]/[0.04]",
                   // Whole-row urgency from the STRUCTURED open follow-up (overdue
                   // active follow-up → entire row reads red), mirroring the
                   // Ticket overdue row treatment. Datetime-precise.
-                  followUpTone(openFollowUpRowState(openFollowUpsByLead.get(lead.id))).rowTint,
+                  tint,
+                  // Tinted rows tell frozen cells to layer the SAME tint over
+                  // their opaque base so the pinned/overdue tint shows through
+                  // the sticky columns without ever going transparent.
+                  tinted && "rox-frozen-tinted",
                 )}
               >
-                {/* 1 · ID (click opens the lead) */}
-                <td className="px-4 py-4 align-middle">
+                {/* 1 · ID — FROZEN LEFT anchor (click opens the lead) */}
+                <td {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 align-middle")}>
                   <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="flex items-center gap-1 text-left font-semibold text-[#4361EE] hover:underline tnum">
                     {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
                     {lead.leadNo || "—"}
@@ -599,44 +725,45 @@ export default function LeadsListPage() {
                   <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" /></td>
                 )}
                 {/* 2 · Date + time */}
-                <td className="px-3 py-4 align-middle"><DateCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}><DateCell lead={lead} /></td>
                 {/* 3 · Region */}
-                <td className="px-3 py-4 align-middle"><span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}><span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span></td>
                 {/* 4 · Source + capture channel */}
-                <td className="px-3 py-4 align-middle"><SourceCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 align-middle")}><SourceCell lead={lead} /></td>
                 {/* 5 · Agent (owner — user id → name) */}
-                <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
+                <td {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
                   {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={22} />}
                 </td>
                 {/* 6 · Contact Status */}
-                <td className="px-3 py-4 align-middle"><ContactStatusCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 align-middle")}><ContactStatusCell lead={lead} /></td>
                 {/* 7 · Contact Info (grouped) */}
-                <td className="px-3 py-4 align-middle"><ContactInfoCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 align-middle")}><ContactInfoCell lead={lead} /></td>
                 {/* 8 · Device & Issue (grouped) */}
-                <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}><DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} /></td>
+                <td {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}><DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} /></td>
                 {/* 9 · Lead Value (pipeline) */}
-                <td className="px-3 py-4 align-middle"><LeadValueCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}><LeadValueCell lead={lead} /></td>
                 {/* 10 · Comment */}
-                <td className="px-3 py-4 align-middle"><CommentCell text={lead.comments || ""} /></td>
+                <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}><CommentCell text={lead.comments || ""} /></td>
                 {/* 11 · Lead Category */}
-                <td className="px-3 py-4 align-middle"><span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}><span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span></td>
                 {/* 12 · TBD (mapped via TBD_SOURCE_FIELD — re-pointable) */}
-                <td className="px-3 py-4 align-middle"><span className="block truncate text-zinc-600">{String(lead[TBD_SOURCE_FIELD] || "") || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("tbd"), "px-3 py-4 align-middle")}><span className="block truncate text-zinc-600">{String(lead[TBD_SOURCE_FIELD] || "") || "—"}</span></td>
                 {/* 13 · Lead Type (= Priority: Hot/Warm/Cold) */}
-                <td className="px-3 py-4 align-middle">{lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
                 {/* 14 · Status (+ fulfilment route) */}
-                <td className="px-3 py-4 align-middle">
+                <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")}>
                   {lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}
                   <div className="mt-1.5"><FulfilmentRouteBadge lead={lead} /></div>
                 </td>
                 {/* 15 · Result */}
-                <td className="px-3 py-4 align-middle"><span className="block truncate font-medium text-zinc-700">{lead.result || "—"}</span></td>
-                {/* Actions */}
-                <td className="px-3 py-4 text-right align-middle" onClick={(e) => e.stopPropagation()}>
+                <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}><span className="block truncate font-medium text-zinc-700">{lead.result || "—"}</span></td>
+                {/* Last Action — FROZEN RIGHT anchor */}
+                <td {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right align-middle")} onClick={(e) => e.stopPropagation()}>
                   <LeadActionsMenu lead={lead} onAction={handleAction} />
                 </td>
               </motion.tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
         </div>
@@ -694,7 +821,7 @@ export default function LeadsListPage() {
       </div>
 
       {/* Pagination — DETACHED footer (bare sibling below the table frame, per
-          the Design System table standard). page size 10/20/50/100. */}
+          the Design System table standard). Page sizes 10/20/50/100. */}
       <Pagination
         page={currentPage}
         totalPages={totalPages}

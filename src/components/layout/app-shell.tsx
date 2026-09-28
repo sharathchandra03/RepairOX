@@ -164,7 +164,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         activeWorkspace={activeWorkspace}
         setActiveWorkspace={setActiveWorkspace}
       />
-      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
+      <div className="flex min-w-0 flex-1 flex-col overflow-y-auto [overscroll-behavior:none]">
         <div className="sticky top-0 z-20">
           <PreviewBanner />
           <DemoBanner />

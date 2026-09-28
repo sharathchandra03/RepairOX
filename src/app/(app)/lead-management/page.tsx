@@ -49,14 +49,16 @@ import {
 } from "@/lib/agent-performance";
 import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
+import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 
 /* The single shared operational date filter (drives EVERY component below). */
 const DATE_OPTIONS: { label: string; value: PerfDateRange }[] = [
-  { label: "All Time", value: "all" },
+  { label: "All", value: "all" },
   { label: "Today", value: "today" },
-  { label: "This Week", value: "thisWeek" },
+  { label: "Yesterday", value: "yesterday" },
   { label: "This Month", value: "thisMonth" },
   { label: "Last Month", value: "lastMonth" },
+  { label: "This Year", value: "thisYear" },
   { label: "Custom", value: "custom" },
 ];
 
@@ -71,9 +73,10 @@ export default function LeadDashboardPage() {
   const { leads, followUps, canSeeAllLeads, setFilters } = useLeads();
   const { tickets, invoices } = useStore();
 
-  const [dateRange, setDateRange] = useState<PerfDateRange>("all");
+  const [dateRange, setDateRange] = useState<PerfDateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  const [showCalendar, setShowCalendar] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
 
   const canView = allow(can, CAP.lead.view);
@@ -233,7 +236,7 @@ export default function LeadDashboardPage() {
     );
   }
 
-  const dateLabel = DATE_OPTIONS.find((d) => d.value === dateRange)?.label ?? "All Time";
+  const dateLabel = DATE_OPTIONS.find((d) => d.value === dateRange)?.label ?? "All";
   const scopeSubtitle = canSeeAllLeads
     ? "Your store's sales workspace — every card, chart and follow-up reflects the same date filter."
     : "Your personal sales workspace — only your leads and follow-ups, all reflecting the same date filter.";
@@ -268,27 +271,44 @@ export default function LeadDashboardPage() {
             size="sm"
             options={DATE_OPTIONS}
             value={dateRange}
-            onChange={(v) => setDateRange(v as PerfDateRange)}
+            onChange={(v) => {
+              const next = v as PerfDateRange;
+              if (next === "custom") {
+                // Selecting Custom always opens the calendar to pick a range.
+                setShowCalendar(true);
+                setDateRange("custom");
+              } else {
+                setDateRange(next);
+              }
+            }}
           />
         </div>
-        {dateRange === "custom" && (
-          <div className="flex items-center gap-2">
-            <input
-              type="date"
-              value={customFrom}
-              onChange={(e) => setCustomFrom(e.target.value)}
-              className="h-[34px] rounded-xl border border-input bg-card px-2.5 text-[13px] text-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-            />
-            <span className="text-[12px] text-muted-foreground">to</span>
-            <input
-              type="date"
-              value={customTo}
-              onChange={(e) => setCustomTo(e.target.value)}
-              className="h-[34px] rounded-xl border border-input bg-card px-2.5 text-[13px] text-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-            />
-          </div>
+        {dateRange === "custom" && (customFrom || customTo) && (
+          <button
+            onClick={() => setShowCalendar(true)}
+            className="inline-flex h-[34px] items-center gap-1.5 rounded-xl border border-input bg-card px-3 text-[13px] font-medium text-foreground transition hover:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+          >
+            <CalendarClock className="h-3.5 w-3.5 text-[#4361EE]" />
+            {formatRangeLabel(customFrom, customTo)}
+          </button>
         )}
       </div>
+
+      {/* Custom-range calendar (matches the app date-range picker). */}
+      <DateRangePicker
+        open={showCalendar}
+        onClose={() => {
+          setShowCalendar(false);
+          // If the user cancels without a committed range, fall back to Today.
+          if (!customFrom && !customTo) setDateRange("today");
+        }}
+        onApply={(range: DateRange) => {
+          setCustomFrom(toISODate(range.start));
+          setCustomTo(toISODate(range.end));
+          setDateRange("custom");
+        }}
+        initialRange={{ start: fromISODate(customFrom), end: fromISODate(customTo) }}
+      />
 
       {/* ── TOP KPI CARDS (all derived; each clickable to a real filtered view) ── */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
@@ -576,6 +596,28 @@ export default function LeadDashboardPage() {
 
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
+}
+
+/* Local-date <-> YYYY-MM-DD helpers for the custom range calendar (kept local
+   so we never shift the day by a timezone conversion). */
+function toISODate(d: Date | null): string {
+  if (!d) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+function fromISODate(s: string): Date | null {
+  if (!s) return null;
+  const d = new Date(`${s}T00:00:00`);
+  return isNaN(d.getTime()) ? null : d;
+}
+function formatRangeLabel(from: string, to: string): string {
+  const fmt = (s: string) => {
+    const d = fromISODate(s);
+    return d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  };
+  return `${fmt(from)} — ${fmt(to)}`;
 }
 
 const KPI_TONES: Record<string, string> = {

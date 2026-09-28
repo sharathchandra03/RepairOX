@@ -76,6 +76,7 @@ export function AddCustomerModal({
     firstName: defaultData?.firstName || '',
     lastName: defaultData?.lastName || '',
     mobile: defaultData?.mobile || '',
+    altMobile: defaultData?.altMobile || '',
     email: defaultData?.email || '',
     type: defaultData?.type || 'personal',
     company: defaultData?.company || '',
@@ -96,6 +97,7 @@ export function AddCustomerModal({
         firstName: defaultData?.firstName || '',
         lastName: defaultData?.lastName || '',
         mobile: defaultData?.mobile || '',
+        altMobile: defaultData?.altMobile || '',
         email: defaultData?.email || '',
         type: defaultData?.type || 'personal',
         company: defaultData?.company || '',
@@ -246,17 +248,30 @@ export function AddCustomerModal({
             />
           </div>
 
-          <div>
-            <label className="block text-sm font-medium text-zinc-700 mb-1">
-              Phone (Mobile) *
-            </label>
-            <Input
-              type="tel"
-              value={formData.mobile}
-              onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
-              placeholder="+91 9876543210"
-              required
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 mb-1">
+                Phone (Mobile) *
+              </label>
+              <Input
+                type="tel"
+                value={formData.mobile}
+                onChange={(e) => setFormData({ ...formData, mobile: e.target.value })}
+                placeholder="+91 9876543210"
+                required
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 mb-1">
+                Alternate Number
+              </label>
+              <Input
+                type="tel"
+                value={formData.altMobile ?? ''}
+                onChange={(e) => setFormData({ ...formData, altMobile: e.target.value })}
+                placeholder="+91 ..."
+              />
+            </div>
           </div>
 
           <div>

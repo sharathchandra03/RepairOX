@@ -98,7 +98,7 @@ export function IssueSelector({
       <div
         onClick={() => { setOpen(true); inputRef.current?.focus(); }}
         className={cn(
-          "flex min-h-[42px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-input bg-background px-3 py-2 text-sm transition focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/20",
+          "flex min-h-[42px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2 text-sm transition-all duration-150 hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/15",
           className,
         )}
       >
@@ -130,7 +130,7 @@ export function IssueSelector({
       </div>
 
       {open && (
-        <div className="absolute z-40 mt-1 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1 shadow-lg">
+        <div className="absolute z-40 mt-1.5 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-xl ring-1 ring-black/[0.03]">
           {filtered.length > 0 ? (
             filtered.map((item) => (
               <button

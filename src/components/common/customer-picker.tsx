@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Customer } from '@/lib/customer-data';
 import { searchForCustomer, formatCustomerName, formatPhone, findOrCreateCustomer } from '@/lib/customer-service';
 import { Input } from '@/components/ui/input';
@@ -45,6 +45,32 @@ export function CustomerPicker({
 }: CustomerPickerProps) {
   const [query, setQuery] = useState('');
   const [isOpen, setIsOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Close the dropdown when clicking/tapping outside, or pressing Escape.
+  useEffect(() => {
+    if (!isOpen) return;
+    const close = () => {
+      setIsOpen(false);
+      // Drop DOM focus so the caret + any focus outline clears too.
+      const active = document.activeElement as HTMLElement | null;
+      if (active && rootRef.current?.contains(active)) active.blur();
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        close();
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [isOpen]);
 
   const results = useMemo(() => {
     if (!query.trim()) return [];
@@ -68,15 +94,14 @@ export function CustomerPicker({
   };
 
   return (
-    <div className={cn('relative', className)}>
+    <div ref={rootRef} className={cn('relative', className)}>
       {/* Display Selected Customer or Search Input */}
       <div
         className={cn(
-          'relative flex items-center gap-2 rounded-lg border',
-          'border-input bg-white px-3 py-2',
+          'relative flex items-center gap-2 rounded-lg border bg-white px-3 py-2',
           'transition-colors',
           disabled && 'cursor-not-allowed opacity-50',
-          isOpen && 'ring-1 ring-[#4361EE]'
+          isOpen ? 'border-[#4361EE]' : 'border-input'
         )}
         onClick={() => !disabled && setIsOpen(true)}
       >
@@ -85,7 +110,14 @@ export function CustomerPicker({
             <span className="flex-1 text-sm font-medium text-zinc-900">
               {formatCustomerName(selectedCustomer)}
             </span>
-            <span className="text-xs text-zinc-500">
+            <span
+              className={cn(
+                'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
+                selectedCustomer.type === 'business'
+                  ? 'bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20'
+                  : 'bg-emerald-50 text-emerald-600 ring-emerald-200'
+              )}
+            >
               {selectedCustomer.type === 'business' ? 'Business' : 'Personal'}
             </span>
             {!disabled && (
@@ -107,7 +139,10 @@ export function CustomerPicker({
               onChange={(e) => setQuery(e.target.value)}
               onClick={() => setIsOpen(true)}
               disabled={disabled}
-              className="flex-1 bg-transparent text-sm placeholder-zinc-400 outline-none"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              className="flex-1 bg-transparent text-sm placeholder-zinc-400 outline-none focus-visible:shadow-none"
               required={required && !value}
             />
           </>
@@ -164,8 +199,15 @@ export function CustomerPicker({
                         )}
                       </div>
                     </div>
-                    <span className="text-xs font-medium text-zinc-400 whitespace-nowrap">
-                      {customer.type === 'business' ? 'Biz' : 'Per'}
+                    <span
+                      className={cn(
+                        'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
+                        customer.type === 'business'
+                          ? 'bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20'
+                          : 'bg-emerald-50 text-emerald-600 ring-emerald-200'
+                      )}
+                    >
+                      {customer.type === 'business' ? 'Business' : 'Personal'}
                     </span>
                   </div>
                 </button>

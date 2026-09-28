@@ -695,7 +695,7 @@ async function resequenceTicketNumbers(storeId?: string | null, prefix?: string 
 const WALKIN_META_MARKER = "\n\u241F::walkin-meta::";
 
 type WalkInMeta = Partial<
-  Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "salesPersonId" | "salesPersonName" | "contactId" | "customerId" | "modelId" | "pinnedAt"
+  Pick<WalkIn, "walkInNumber" | "type" | "issue" | "email" | "altPhone" | "salesPersonId" | "salesPersonName" | "contactId" | "customerId" | "modelId" | "pinnedAt"
     | "convertedAt" | "followUpDate" | "followUpTime" | "followUpStatus" | "followUpReadAt" | "linkedLeadId"
     | "customerComments" | "followUpAttempt" | "followUpComments" | "followUpHistory" | "devices">
 >;
@@ -706,6 +706,7 @@ function encodeWalkInNotes(w: WalkIn): string | null {
   if (w.type) meta.type = w.type;
   if (w.issue) meta.issue = w.issue;
   if (w.email) meta.email = w.email;
+  if (w.altPhone) meta.altPhone = w.altPhone;
   if (w.salesPersonId) meta.salesPersonId = w.salesPersonId;
   if (w.salesPersonName) meta.salesPersonName = w.salesPersonName;
   if (w.contactId) meta.contactId = w.contactId;
@@ -757,6 +758,7 @@ function rowToWalkIn(r: any): WalkIn {
     type: (r.walkin_type ?? meta.type) as WalkIn["type"],
     customer: r.customer ?? "",
     phone: r.phone ?? "",
+    altPhone: meta.altPhone ?? undefined,
     email: r.email_addr ?? meta.email ?? undefined,
     source: r.source ?? "",
     category: r.category ?? "",
@@ -908,6 +910,7 @@ function rowToCustomer(r: any): Customer {
     lastName: r.last_name ?? "",
     fullName: r.full_name ?? `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     mobile: r.mobile ?? "",
+    altMobile: r.alt_mobile ?? "",
     email: r.email ?? "",
     company: r.company ?? "",
     gstNumber: r.gst_number ?? "",
@@ -939,6 +942,7 @@ function customerToRow(c: Customer): Record<string, unknown> {
     last_name: c.lastName || null,
     full_name: c.fullName || null,
     mobile: c.mobile || null,
+    alt_mobile: c.altMobile || null,
     email: c.email || null,
     company: c.company || null,
     gst_number: c.gstNumber || null,
@@ -2926,6 +2930,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("lastName" in updates) row.last_name = updates.lastName ?? null;
       if ("fullName" in updates) row.full_name = updates.fullName ?? null;
       if ("mobile" in updates) row.mobile = updates.mobile ?? null;
+      if ("altMobile" in updates) row.alt_mobile = updates.altMobile ?? null;
       if ("email" in updates) row.email = updates.email ?? null;
       if ("company" in updates) row.company = updates.company ?? null;
       if ("gstNumber" in updates) row.gst_number = updates.gstNumber ?? null;

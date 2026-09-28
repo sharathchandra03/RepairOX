@@ -181,7 +181,7 @@ export function WalkInFormDrawer({
   }, [customers, custQuery]);
 
   function pickCustomer(c: (typeof customers)[number]) {
-    set({ customer: c.fullName, phone: c.mobile, email: c.email || form.email, customerId: c.id });
+    set({ customer: c.fullName, phone: c.mobile, altPhone: c.altMobile || "", email: c.email || form.email, customerId: c.id });
     setContactType(c.type);
     setCustQuery(c.fullName);
     setCustOpen(false);
@@ -474,15 +474,25 @@ export function WalkInFormDrawer({
               />
             </div>
             <div className="space-y-1">
-              <Label>Email</Label>
+              <Label>Alternate Number</Label>
               <Input
-                type="email"
-                value={form.email || ""}
-                iconLeft={<Mail className="h-4 w-4" />}
-                placeholder="name@email.com"
-                onChange={(e: any) => set({ email: e.target.value })}
+                value={form.altPhone || ""}
+                iconLeft={<Phone className="h-4 w-4" />}
+                placeholder="Alternate number"
+                onChange={(e: any) => set({ altPhone: e.target.value })}
               />
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label>Email</Label>
+            <Input
+              type="email"
+              value={form.email || ""}
+              iconLeft={<Mail className="h-4 w-4" />}
+              placeholder="name@email.com"
+              onChange={(e: any) => set({ email: e.target.value })}
+            />
           </div>
 
           {/* Attribution safety net: if this customer matches an OPEN lead,

@@ -72,12 +72,21 @@ type InvoiceFormDevice = {
   /** Device colour carried over from the linked ticket device / persisted invoice. */
   deviceColour: string;
   technician: string;
+  /** Commercial estimate value (₹) for this device. Sourced from the linked
+   *  ticket's estimate when invoicing from a ticket; a REFERENCE amount only —
+   *  never a Parts & Services inventory line. Held as a string for the input,
+   *  persisted as a number. */
+  estimateValue: string;
+  /** Agreed repair/labour charge (₹) for this device — a separate financial
+   *  value that participates in pricing, distinct from the estimate and from
+   *  Parts & Services. Held as a string for the input, persisted as a number. */
+  repairCost: string;
   notes: string;
   parts: InvoiceLineItem[];
 };
 
 type InvoiceFormData = {
-  customer: { name: string; phone: string; email: string; company: string; gstNumber: string; customerId?: string };
+  customer: { name: string; phone: string; altPhone: string; email: string; company: string; gstNumber: string; customerId?: string };
   details: { dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories"; documentType: DocumentType; sourceEstimateId?: string; sourceTicketId?: string; sourceProformaId?: string };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
@@ -110,6 +119,8 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
     warrantyUnit: "",
     deviceColour: "",
     technician: "",
+    estimateValue: "",
+    repairCost: "",
     notes: "",
     parts: [],
     ...overrides,
@@ -117,7 +128,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 }
 
 const DEFAULT_FORM: InvoiceFormData = {
-  customer: { name: "", phone: "", email: "", company: "", gstNumber: "" },
+  customer: { name: "", phone: "", altPhone: "", email: "", company: "", gstNumber: "" },
   details: { dueDate: "", employee: "", ticketId: "", ticketNo: "", ticketLocked: false, status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service", documentType: "invoice" },
   items: [],
   devices: [createFormDevice()],
@@ -247,6 +258,7 @@ function InvoiceWizard() {
     if (fromTicket && !editId) {
       const customer = searchParams.get("customer") || "";
       const phone = searchParams.get("phone") || "";
+      const altPhone = searchParams.get("altPhone") || "";
       const email = searchParams.get("email") || "";
       const company = searchParams.get("company") || "";
       const employee = searchParams.get("employee") || "";
@@ -271,25 +283,13 @@ function InvoiceWizard() {
               total: p.total || ((p.qty || 1) * (p.unitPrice || p.price || 0)),
             }));
 
-            // Add a service/labour line ONLY when there is a real amount to
-            // charge for it (estimate exceeds parts total). If the ticket had
-            // no parts AND no chargeable labour, we deliberately leave the item
-            // list empty — the Issue must NOT be auto-added as a line item.
-            const partsTotal = parts.reduce((s, p2) => s + p2.total, 0);
-            const labourAmount = (dev.estimate || 0) - partsTotal;
-            if (labourAmount > 0) {
-              parts.push({
-                id: `li-${Date.now()}-${idx}-labour`,
-                // The line is a service charge for the estimate — it must NOT be
-                // named after the Issue. Keep the Issue on the description only.
-                name: "Repair Service",
-                description: [dev.issue, dev.brand, dev.model].filter(Boolean).join(" — "),
-                qty: 1,
-                price: labourAmount,
-                discount: 0,
-                total: labourAmount,
-              });
-            }
+            // The ticket estimate is a COMMERCIAL REFERENCE VALUE — it maps to
+            // the device's Estimate Value field below, NOT to a Parts & Services
+            // line item. We deliberately do NOT synthesise a "Repair Service"
+            // labour line from the estimate any more: Parts & Services carries
+            // only the real ticket parts, and the estimate stays a separate
+            // financial value the user can see and adjust.
+            const estimateValue = Number(dev.estimate) || 0;
 
             return createFormDevice({
               // Durable link to the originating ticket device (selective invoicing).
@@ -318,6 +318,9 @@ function InvoiceWizard() {
               warrantyUnit: dev.warrantyUnit || "",
               deviceColour: dev.deviceColour || "",
               technician: dev.technician || "",
+              // Ticket estimate → Estimate Value (reference), not an item.
+              estimateValue: estimateValue > 0 ? String(estimateValue) : "",
+              repairCost: "",
               notes: dev.notes || "",
               parts,
             });
@@ -336,26 +339,23 @@ function InvoiceWizard() {
         const brand = searchParams.get("brand") || "";
         const serial = searchParams.get("serial") || "";
 
-        if (amount > 0) {
-          const parts: InvoiceLineItem[] = [{
-            id: `li-${Date.now()}`,
-            // Neutral service label — the Issue/service text stays in the
-            // description, never as the Item name.
-            name: "Repair Service",
-            description: [service, brand, device, serial ? `SN: ${serial}` : ""].filter(Boolean).join(" — "),
-            qty: 1,
-            price: amount,
-            discount: 0,
-            total: amount,
-          }];
-          formDevices = [createFormDevice({ brand, model: device, imei: serial, issue: service, parts })];
-          flatItems = parts;
-        }
+        // Legacy single-device push carries only a total `amount` (the ticket
+        // estimate). That is a COMMERCIAL REFERENCE VALUE → Estimate Value, not
+        // a synthetic Parts & Services line. Parts & Services stays empty here;
+        // the user adds real billable items as needed.
+        formDevices = [createFormDevice({
+          brand,
+          model: device,
+          imei: serial,
+          issue: service,
+          estimateValue: amount > 0 ? String(amount) : "",
+        })];
+        flatItems = [];
       }
 
       setForm((prev) => ({
         ...prev,
-        customer: { name: customer, phone, email, company, gstNumber: searchParams.get("gstNumber") || "" },
+        customer: { name: customer, phone, altPhone, email, company, gstNumber: searchParams.get("gstNumber") || "" },
         details: (() => {
           // Distinguish the source of the push. When it comes from an ESTIMATE
           // (Estimate → Proforma), `fromTicket` is the ESTIMATE id — NOT a
@@ -487,12 +487,27 @@ function InvoiceWizard() {
     if (pendingNav) router.push(pendingNav);
   }, [pendingNav, router]);
 
-  // Computed totals — derive from devices or flat items
+  // Computed totals — derive from devices or flat items.
+  //  • partsTotal   = sum of all Parts & Services line totals (inventory).
+  //  • repairCost   = sum of each device's agreed Repair Cost (a separate,
+  //                   non-inventory financial component that IS billed).
+  //  • estimateTotal = sum of device Estimate Values — a COMMERCIAL REFERENCE
+  //                   only; it is NOT added to the billed subtotal/total.
+  //  Billed subtotal = partsTotal + repairCost, then discount → GST → total,
+  //  reusing the existing SGST/CGST split so nothing else in pricing changes.
   const totals = useMemo(() => {
-    const allItems = form.devices.length > 0
+    const hasDevices = form.devices.length > 0;
+    const allItems = hasDevices
       ? form.devices.flatMap((d) => d.parts)
       : form.items;
-    const subtotal = allItems.reduce((s, item) => s + item.total, 0);
+    const partsTotal = allItems.reduce((s, item) => s + item.total, 0);
+    const repairCost = hasDevices
+      ? form.devices.reduce((s, d) => s + (Number(d.repairCost) || 0), 0)
+      : 0;
+    const estimateTotal = hasDevices
+      ? form.devices.reduce((s, d) => s + (Number(d.estimateValue) || 0), 0)
+      : 0;
+    const subtotal = partsTotal + repairCost;
     const discount = form.pricing.discount;
     const taxable = subtotal - discount;
     const gstRate = form.pricing.gstRate;
@@ -502,15 +517,18 @@ function InvoiceWizard() {
     const cgst = Math.round(taxable * (cgstRate / 100));
     const tax = sgst + cgst;
     const total = taxable + tax;
-    return { subtotal, discount, sgst, cgst, sgstRate, cgstRate, gstRate, tax, total };
+    return { subtotal, partsTotal, repairCost, estimateTotal, discount, sgst, cgst, sgstRate, cgstRate, gstRate, tax, total };
   }, [form.devices, form.items, form.pricing]);
 
   // Build a full Invoice record from the current form. An optional status
   // override lets callers (e.g. Save Draft) force a specific status without
   // touching the rest of the invoice-building logic.
   const buildInvoice = useCallback((statusOverride?: InvoiceStatus): Invoice => {
-    // Build invoice device records for storage
-    const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
+    // Build invoice device records for storage. A device is worth persisting
+    // when it carries identity, parts, or any financial value (estimate /
+    // repair cost) — an estimate-only device (pushed from a ticket with no
+    // parts) must still be saved.
+    const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0 || Number(d.estimateValue) > 0 || Number(d.repairCost) > 0);
     const invoiceDevices: InvoiceDeviceRecord[] = hasDevices ? form.devices.map((d) => ({
       id: d.id,
       // Persist the durable link back to the ticket device so the invoice stays
@@ -532,6 +550,11 @@ function InvoiceWizard() {
       warrantyUnit: (d.warrantyUnit || undefined) as "days" | "months" | "years" | undefined,
       deviceColour: d.deviceColour || undefined,
       technician: d.technician,
+      // Financial reference (estimate) + agreed repair charge — persisted as
+      // numbers. Estimate Value is a reference; Repair Cost participates in
+      // pricing. Neither is an inventory line item.
+      estimateValue: d.estimateValue ? Number(d.estimateValue) : 0,
+      repairCost: d.repairCost ? Number(d.repairCost) : 0,
       parts: d.parts,
       notes: d.notes,
       subtotal: d.parts.reduce((s, p) => s + p.total, 0),
@@ -680,6 +703,17 @@ function InvoiceWizard() {
   // the first device so the user reviews each device's pricing in order.
   const isDeviceStep = step === 3 || step === 4;
   const goNext = () => {
+    // Warranty is MANDATORY on the Products step. Validate the ACTIVE device
+    // before advancing (whether moving to the next device or leaving the step),
+    // so every device carries a warranty value + duration unit.
+    if (step === 3) {
+      const dev = form.devices[form.activeDeviceIndex];
+      const hasWarranty = !!dev && Number(dev.warrantyValue) > 0 && !!dev.warrantyUnit;
+      if (!hasWarranty) {
+        toast.error("Warranty is required — enter a value and select a duration.");
+        return;
+      }
+    }
     if (isDeviceStep && form.devices.length > 1 && form.activeDeviceIndex < form.devices.length - 1) {
       updateForm((f) => ({ ...f, activeDeviceIndex: f.activeDeviceIndex + 1 }));
       return;
@@ -893,13 +927,15 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
         warrantyUnit: d.warrantyUnit || "",
         deviceColour: d.deviceColour || "",
         technician: d.technician,
+        estimateValue: d.estimateValue ? String(d.estimateValue) : "",
+        repairCost: d.repairCost ? String(d.repairCost) : "",
         notes: d.notes,
         parts: d.parts,
       }))
     : [createFormDevice({ technician: inv.employee || "", parts: inv.items })];
 
   return {
-    customer: { name: inv.customer, phone: inv.phone, email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "", customerId: inv.customerId },
+    customer: { name: inv.customer, phone: inv.phone, altPhone: "", email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "", customerId: inv.customerId },
     details: { dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service", documentType: inv.documentType ?? "invoice", sourceEstimateId: inv.sourceEstimateId, sourceTicketId: inv.sourceTicketId, sourceProformaId: inv.sourceProformaId },
     items: inv.items,
     devices,
@@ -925,7 +961,14 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
       // attributed to a now-stale identity.
       customer: { ...f.customer, [k]: v, ...(k === "name" ? { customerId: undefined } : {}) },
     }));
-  const setType = (v: string) => updateForm((f) => ({ ...f, details: { ...f.details, invoiceType: v as any } }));
+  const setType = (v: string) => updateForm((f) => ({
+    ...f,
+    details: { ...f.details, invoiceType: v as any },
+    // Company / Organization + GST are Business-only billing details. Clear
+    // them when switching to Retail so a hidden value never lands on the saved
+    // invoice; they reappear (blank) if the user switches back to Business.
+    customer: v === "retail" ? { ...f.customer, company: "", gstNumber: "" } : f.customer,
+  }));
 
   // Search from customer name input
   const results = c.name.trim().length >= 2 ? searchCustomers(customers, c.name) : [];
@@ -937,6 +980,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
       customer: {
         name: cust.fullName,
         phone: cust.mobile,
+        altPhone: cust.altMobile || "",
         email: cust.email,
         company: cust.company,
         gstNumber: cust.gstNumber || "",
@@ -1020,20 +1064,29 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
             )}
           </div>
           <div className="space-y-1"><Label>Phone</Label><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" /></div>
+          <div className="space-y-1"><Label>Alternate Number</Label><Input value={c.altPhone} onChange={(e: any) => set("altPhone", e.target.value)} placeholder="+91 …" /></div>
           <div className="space-y-1"><Label>Email</Label><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="customer@email.com" type="email" /></div>
-          <div className="space-y-1"><Label>Company / Organization</Label><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="Optional" /></div>
-          {/* GST Number — only for Business invoices */}
+          {/* Company / Organization + GST Number — Business invoices only.
+              Like GST, the org name is a business-billing detail, so it stays
+              hidden for a Retail (individual / walk-in) invoice and appears as a
+              paired row only when Business is selected. */}
           {d.invoiceType === "business" && (
-            <div className="space-y-1">
-              <Label>GST Number</Label>
-              <Input
-                value={c.gstNumber}
-                onChange={(e: any) => set("gstNumber", e.target.value.toUpperCase())}
-                placeholder="e.g. 29ABCDE1234F1Z5"
-                className="font-mono tracking-wider uppercase"
-                maxLength={15}
-              />
-            </div>
+            <>
+              <div className="space-y-1">
+                <Label>Company / Organization</Label>
+                <Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="e.g. Kapoor Electronics" />
+              </div>
+              <div className="space-y-1">
+                <Label>GST Number</Label>
+                <Input
+                  value={c.gstNumber}
+                  onChange={(e: any) => set("gstNumber", e.target.value.toUpperCase())}
+                  placeholder="e.g. 29ABCDE1234F1Z5"
+                  className="font-mono tracking-wider uppercase"
+                  maxLength={15}
+                />
+              </div>
+            </>
           )}
         </div>
       </div>
@@ -1361,11 +1414,11 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
         </div>
 
         {/* Active Device Form */}
-        <div className="px-6 pt-[13px] pb-4 sm:px-8 space-y-4">
+        <div className="px-6 pt-3 pb-3 sm:px-8 space-y-2.5">
           {/* Device Details */}
           <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Device Details</p>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Device Details</p>
+            <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-3">
               <div className="space-y-1">
                 <Label>Category</Label>
                 <Select
@@ -1386,6 +1439,8 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                 onBrandIdChange={(v) => setDeviceField("brandId", v)}
                 onModelIdChange={(v) => setDeviceField("modelId", v)}
               />
+              {/* Second row: IMEI / Serial paired with Warranty (per the detail
+                  layout — Warranty sits directly next to the identifier). */}
               {/* Single intelligent identifier field — auto-detects IMEI vs
                   Serial from the value. When pushed from a ticket the type is
                   copied (never re-inferred); editing the value recalculates it. */}
@@ -1410,29 +1465,11 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   autoComplete="off"
                 />
               </div>
-            </div>
-          </div>
-
-          {/* Job Details */}
-          <div>
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">Job Details</p>
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-9" /></div>
+              {/* Warranty — moved beside IMEI / Serial. Same underlying logic
+                  (value + duration → `warranty` label); only the placement and
+                  the centered value alignment changed. */}
               <div className="space-y-1">
-                <Label>Job Type</Label>
-                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} className="h-9" options={[
-                  { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
-                ]} />
-              </div>
-              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" className="h-9" /></div>
-              <div className="space-y-1">
-                <Label>Priority</Label>
-                <Select value={activeDevice.priority} onChange={(e: any) => setDeviceField("priority", e.target.value)} className="h-9" options={[
-                  { label: "Normal", value: "normal" }, { label: "High", value: "high" }, { label: "Critical", value: "critical" },
-                ]} />
-              </div>
-              <div className="space-y-1">
-                <Label>Warranty</Label>
+                <Label>Warranty <span className="text-rose-500">*</span></Label>
                 <div className="flex gap-1.5">
                   <input
                     type="text"
@@ -1450,7 +1487,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                       }));
                     }}
                     placeholder="0"
-                    className="h-9 w-[72px] rounded-xl border border-border bg-card px-2.5 text-sm font-medium text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                    className="h-9 w-[72px] rounded-xl border border-input bg-card px-2.5 text-center text-sm font-medium text-foreground outline-none transition-all duration-150 hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
                   />
                   <div className="flex-1">
                     <Select className="h-9" value={activeDevice.warrantyUnit} onChange={(e: any) => {
@@ -1470,14 +1507,61 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Job Details — Priority removed (no invoice/pricing meaning; it stays
+              a Ticket concept). */}
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5">Job Details</p>
+            <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-3">
+              <div className="space-y-1"><Label>Issue</Label><Input value={activeDevice.issue} onChange={(e: any) => setDeviceField("issue", e.target.value)} placeholder="Display replacement" className="h-9" /></div>
+              <div className="space-y-1">
+                <Label>Job Type</Label>
+                <Select value={activeDevice.jobType} onChange={(e: any) => setDeviceField("jobType", e.target.value)} className="h-9" options={[
+                  { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
+                ]} />
+              </div>
+              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" className="h-9" /></div>
+            </div>
+          </div>
+
+          {/* Financial / Invoice Context — Estimate Value + Repair Cost are
+              structured monetary values (₹), stored numerically per device.
+              They are SEPARATE from Parts & Services inventory and from each
+              other; neither is ever an inventory line item. */}
+          <div>
+            <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-3">
+              <div className="space-y-1">
+                <Label>Estimate Value</Label>
+                <NumericInput
+                  value={Number(activeDevice.estimateValue) || 0}
+                  onChange={(v) => setDeviceField("estimateValue", v > 0 ? String(v) : "")}
+                  min={0}
+                  iconLeft={<span className="text-[13px]">₹</span>}
+                  className="h-9"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Repair Cost</Label>
+                <NumericInput
+                  value={Number(activeDevice.repairCost) || 0}
+                  onChange={(v) => setDeviceField("repairCost", v > 0 ? String(v) : "")}
+                  min={0}
+                  iconLeft={<span className="text-[13px]">₹</span>}
+                  className="h-9"
+                />
+              </div>
               <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-9" /></div>
             </div>
           </div>
 
-          {/* Parts for this device */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Parts & Services</p>
+          {/* Parts for this device — highlighted as the billable INVENTORY
+              section so it reads distinctly from the device/financial fields
+              above. Brand-tinted card + accent header. */}
+          <div className="mt-5 rounded-xl border border-[#4361EE]/25 bg-[#4361EE]/[0.04] px-3 pt-2 pb-4 sm:px-4">
+            <div className="flex items-center justify-between mb-2.5">
+              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]"><Package className="h-3.5 w-3.5" /> Inventory Cost</p>
               <div className="flex gap-1.5">
                 <Button size="sm" variant="outline" onClick={() => setShowInventorySearch(true)}><Search className="h-3.5 w-3.5" /> Search Item</Button>
                 <Button size="sm" onClick={addPart}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
@@ -1505,7 +1589,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
             {/* Always-visible item entry row */}
             {activeDevice.parts.length === 0 && !showInventorySearch && (
-              <div className="rounded-xl border border-border p-3 mb-2">
+              <div className="rounded-xl border border-border bg-card p-2.5">
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
                   <div className="space-y-1"><Label>Item</Label><Input value="" onChange={() => addPart()} onFocus={() => addPart()} placeholder="Click to add an item…" className="h-9" /></div>
                   <div className="space-y-1"><Label>Qty</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">1</div></div>
@@ -1519,7 +1603,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
             {activeDevice.parts.length > 0 && (
               <div className="space-y-2">
                 {activeDevice.parts.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-border p-3">
+                  <div key={item.id} className="rounded-xl border border-border bg-card p-3">
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
                       <div className="space-y-1"><Label>Item</Label><Input value={item.name} onChange={(e: any) => updatePart(item.id, "name", e.target.value)} placeholder="Display assembly" className="h-9" /></div>
                       <div className="space-y-1"><Label>Qty</Label><NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} className="h-9" /></div>
@@ -1549,7 +1633,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
 /* ─── Step 4: Pricing ────────────────────────────────────────────────── */
 
-function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number } }) {
+function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; totals: { subtotal: number; partsTotal: number; repairCost: number; estimateTotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number } }) {
   const { settings } = useStoreSettings();
   const { updateDeviceStatus, invoices } = useStore();
   const gstPresets = settings.invoiceGstRates?.length ? settings.invoiceGstRates : [0, 12, 18];
@@ -1722,6 +1806,19 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
           {multiDevice && activeDevice && (
             <div className="flex justify-between border-b border-border/60 pb-2"><span className="text-muted-foreground">{activeDeviceLabel} subtotal</span><span className="tabular-nums font-medium">{formatINR(activeDeviceSubtotal)}</span></div>
           )}
+          {/* Estimate Value is a REFERENCE only — shown for context, never added
+              to the billed subtotal/total. */}
+          {totals.estimateTotal > 0 && (
+            <div className="flex justify-between"><span className="text-muted-foreground">Estimate Value <span className="text-[11px]">(reference)</span></span><span className="tabular-nums text-muted-foreground">{formatINR(totals.estimateTotal)}</span></div>
+          )}
+          {/* Parts & Repair Cost are the two billed components that make up the
+              subtotal. Show them separately when a repair cost exists. */}
+          {totals.repairCost > 0 && (
+            <>
+              <div className="flex justify-between"><span className="text-muted-foreground">Parts &amp; Services</span><span className="tabular-nums font-medium">{formatINR(totals.partsTotal)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Repair Cost</span><span className="tabular-nums font-medium">{formatINR(totals.repairCost)}</span></div>
+            </>
+          )}
           <div className="flex justify-between"><span className="text-muted-foreground">{multiDevice ? "Invoice Subtotal" : "Subtotal"}</span><span className="tabular-nums font-medium">{formatINR(totals.subtotal)}</span></div>
           {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
           {totals.sgst > 0 && <div className="flex justify-between"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div>}
@@ -1754,8 +1851,8 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
 
 /* ─── Step 6: Review ─────────────────────────────────────────────────── */
 
-function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number }; isEdit: boolean }) {
-  const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0);
+function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: { subtotal: number; partsTotal: number; repairCost: number; estimateTotal: number; discount: number; sgst: number; cgst: number; sgstRate: number; cgstRate: number; gstRate: number; tax: number; total: number }; isEdit: boolean }) {
+  const hasDevices = form.devices.length > 0 && form.devices.some((d) => d.brand || d.model || d.parts.length > 0 || Number(d.estimateValue) > 0 || Number(d.repairCost) > 0);
   const statusLabel = (form.details.status || "draft").replace(/\b\w/g, (c) => c.toUpperCase());
   return (
     <div className="mx-auto w-full max-w-4xl">
@@ -1885,6 +1982,8 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
           <section className="flex flex-col">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
             <div className="flex flex-1 flex-col rounded-xl border border-border bg-muted/20 p-4 text-[13px]">
+              {totals.estimateTotal > 0 && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Estimate Value <span className="text-[11px]">(reference)</span></span><span className="tabular-nums text-muted-foreground">{formatINR(totals.estimateTotal)}</span></div><div className="h-px bg-border/50" /></>}
+              {totals.repairCost > 0 && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Parts &amp; Services</span><span className="tabular-nums">{formatINR(totals.partsTotal)}</span></div><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Repair Cost</span><span className="tabular-nums">{formatINR(totals.repairCost)}</span></div><div className="h-px bg-border/50" /></>}
               <div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatINR(totals.subtotal)}</span></div>
               {totals.discount > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div></>}
               {totals.sgst > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div></>}

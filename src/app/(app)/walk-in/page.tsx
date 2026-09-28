@@ -437,6 +437,7 @@ export default function WalkInPage() {
       let resolvedCustomerId = data.customerId;
       const walkinName = (data.customer || "").trim();
       const walkinPhone = (data.phone || "").trim();
+      const walkinAltPhone = (data.altPhone || "").trim();
       if (!resolvedCustomerId && (walkinName || walkinPhone)) {
         const [first, ...rest] = walkinName.split(" ");
         const result = findOrCreateCustomer(
@@ -444,6 +445,7 @@ export default function WalkInPage() {
             firstName: first || walkinName || "Walk-in Customer",
             lastName: rest.join(" "),
             mobile: walkinPhone,
+            altMobile: walkinAltPhone || undefined,
             email: (data.email || "").trim() || undefined,
             source: walkInTypeToCustomerSource(data.type || "direct") as any,
             captureSource: "walk_in",
@@ -461,6 +463,7 @@ export default function WalkInPage() {
         type: data.type || "direct",
         customer: data.customer || "",
         phone: data.phone || "",
+        altPhone: data.altPhone || "",
         email: data.email || "",
         source: data.source || "",
         category: data.category || "",

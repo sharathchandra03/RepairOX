@@ -173,6 +173,9 @@ body {
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+  /* Disable the document-level elastic overscroll bounce app-wide so no
+     scroller ever "drags open" a white gap at its extremes. */
+  overscroll-behavior: none;
 }
 
 ::selection {
@@ -356,6 +359,100 @@ body {
   padding-top: var(--rox-table-cell-py);
   padding-bottom: var(--rox-table-cell-py);
 }
+/* ── Frozen (sticky) columns — professional data-grid horizontal freeze ──────
+   Used by dense RepairOX grids (Lead Table first) to pin an identity column to
+   the LEFT edge and an actions column to the RIGHT edge while the middle
+   columns scroll horizontally inside the table's own scroll container.
+
+   Mechanism: plain CSS `position: sticky` on <th>/<td> — no duplicated tables,
+   no absolute-position hacks, no JS scroll-sync. Left/right offsets are set
+   inline per cell (from the real column widths) via CSS custom properties.
+
+   Z-index layering (spec §17): sticky header (z from .rox-table-head) sits
+   above frozen body cells; frozen cells sit above scrolling cells; the frozen
+   HEADER intersection sits above everything. */
+.rox-frozen {
+  position: sticky;
+  /* FULLY OPAQUE base so scrolling content NEVER bleeds through a frozen cell.
+     This is a SOLID colour (no alpha). Row tints — which are intentionally
+     semi-transparent — are layered ON TOP via background-image below, so the
+     cell keeps its tint appearance while staying 100% opaque. */
+  background-color: hsl(var(--card));
+}
+.rox-frozen-left {
+  left: var(--rox-frozen-offset, 0px);
+  z-index: 3;
+}
+.rox-frozen-right {
+  right: var(--rox-frozen-offset, 0px);
+  z-index: 3;
+}
+
+/* Frozen cells inside the sticky header must out-layer frozen body cells so the
+   header/anchor intersection is always on top. Solid indigo head fill. */
+.rox-table-head .rox-frozen {
+  z-index: 7;
+  background-color: hsl(var(--rox-table-head-bg));
+}
+/* Tinted rows (pinned / overdue / hover): the row's tint is intentionally
+   semi-transparent. The frozen cell keeps its SOLID --card base and layers the
+   SAME tint on top as a background-image gradient → the tint reads identically
+   to the scrolling cells while the cell stays 100% opaque (no bleed-through).
+   `--rox-row-tint` is set inline on the row by the table (falls back to a
+   transparent overlay for un-tinted rows). */
+.rox-table-row.rox-frozen-tinted .rox-frozen {
+  background-image: linear-gradient(var(--rox-row-tint, transparent), var(--rox-row-tint, transparent));
+}
+/* Hover still reads on frozen cells — opaque muted overlay over the solid base
+   (only when the row is NOT already tinted, so a tint isn't washed out). */
+.rox-table-row:hover:not(.rox-frozen-tinted) .rox-frozen {
+  background-image: linear-gradient(hsl(var(--muted) / 0.55), hsl(var(--muted) / 0.55));
+}
+
+/* Boundary treatment (spec §6 + §18): a subtle divider on the inner edge of
+   the frozen block, plus a soft shadow that only appears when there is
+   scrollable content underneath (toggled by data-scroll-* on the container). */
+.rox-frozen-left-edge {
+  box-shadow: inset -1px 0 0 hsl(var(--rox-table-divider));
+}
+.rox-frozen-right-edge {
+  box-shadow: inset 1px 0 0 hsl(var(--rox-table-divider));
+}
+[data-scroll-left="true"] .rox-frozen-left-edge {
+  box-shadow: inset -1px 0 0 hsl(var(--rox-table-divider)),
+    6px 0 8px -6px rgba(20, 30, 80, 0.22);
+}
+[data-scroll-right="true"] .rox-frozen-right-edge {
+  box-shadow: inset 1px 0 0 hsl(var(--rox-table-divider)),
+    -6px 0 8px -6px rgba(20, 30, 80, 0.22);
+}
+
+/* Polished, unobtrusive scrollbar for the grid scroll container (spec §10). */
+.rox-grid-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: hsl(var(--rox-table-divider)) transparent;
+  /* Kill the elastic RUBBER-BAND bounce entirely (the "table gets dragged and
+     opens a white gap, then snaps back" at the end of a fling). `none` (not
+     `contain`) stops BOTH scroll-chaining AND the browser's own overscroll
+     bounce/glow on this scroller, on BOTH axes. This is what freezes the
+     background so it never opens a gap at the scroll extremes. */
+  overscroll-behavior: none;
+  /* Solid card background so any sub-pixel seam beside a frozen column reads as
+     table-white, never a bare page gap. */
+  background-color: hsl(var(--card));
+}
+.rox-grid-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.rox-grid-scroll::-webkit-scrollbar-track { background: transparent; }
+.rox-grid-scroll::-webkit-scrollbar-thumb {
+  background: hsl(var(--rox-table-divider));
+  border: 2px solid hsl(var(--card));
+  border-radius: 9999px;
+}
+.rox-grid-scroll::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--rox-table-head-accent) / 0.55);
+}
+.rox-grid-scroll::-webkit-scrollbar-corner { background: transparent; }
+
 /* Zero-value data ( 0 / ₹0 ) is VALID — never dim it. Apply to numeric cells
    that must always read as real data regardless of value. */
 .rox-data {

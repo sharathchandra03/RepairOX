@@ -642,7 +642,7 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
 /** The date presets shown on the performance strip (mirrors the reference
  *  image: All / Today / This Month / Last Month / Custom). `thisWeek` is used
  *  by the operational Lead Dashboard (current calendar week, Mon–Sun). */
-export type PerfDateRange = "all" | "today" | "thisWeek" | "7days" | "thisMonth" | "lastMonth" | "custom";
+export type PerfDateRange = "all" | "today" | "yesterday" | "thisWeek" | "7days" | "thisMonth" | "lastMonth" | "thisYear" | "custom";
 
 export interface PerfFilters {
   dateRange: PerfDateRange;
@@ -678,6 +678,8 @@ export function leadInPerfDateRange(lead: Lead, f: PerfFilters, asOf: number = D
   switch (f.dateRange) {
     case "today":
       return t >= startOfToday;
+    case "yesterday":
+      return t >= startOfToday - DAY && t < startOfToday;
     case "thisWeek": {
       // Current calendar week starting Monday (locale-independent, matches the
       // "This Week" operational bucket on the Lead Dashboard).
@@ -695,6 +697,8 @@ export function leadInPerfDateRange(lead: Lead, f: PerfFilters, asOf: number = D
       const end = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
       return t >= start && t < end;
     }
+    case "thisYear":
+      return t >= new Date(now.getFullYear(), 0, 1).getTime();
     case "custom": {
       const from = f.customFrom ? new Date(`${f.customFrom}T00:00:00`).getTime() : -Infinity;
       const to = f.customTo ? new Date(`${f.customTo}T23:59:59`).getTime() : Infinity;

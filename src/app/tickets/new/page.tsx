@@ -182,7 +182,7 @@ type WizardData = {
   gstRate: number;
   customGstRate?: boolean;
   gstNumber: string;
-  customer: { first: string; last: string; phone: string; email: string; address: string; postal: string; city: string; company: string };
+  customer: { first: string; last: string; phone: string; altPhone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
   files: string[];
   signatureCleared: boolean;
@@ -200,7 +200,7 @@ const DEFAULT: WizardData = {
   contactType: "personal",
   gstRate: 18,
   gstNumber: "",
-  customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" },
+  customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
   files: [],
   signatureCleared: false,
@@ -275,7 +275,7 @@ function ticketToWizard(t: Ticket): WizardData {
       contactType: t.customerType || (t.company ? "business" : "personal"),
       gstRate: t.gstRate ?? 18,
       gstNumber: t.gstNumber || "",
-      customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
+      customer: { first, last, phone: t.phone || "", altPhone: (t as any).altPhone || "", email: t.email || "", address, postal, city, company: t.company || "" },
       customerId: (t as any).customerId || null,
       files: [],
       signatureCleared: false,
@@ -326,7 +326,7 @@ function ticketToWizard(t: Ticket): WizardData {
     contactType: t.customerType || (t.company ? "business" : "personal"),
     gstRate: t.gstRate ?? 18,
     gstNumber: t.gstNumber || "",
-    customer: { first, last, phone: t.phone || "", email: t.email || "", address, postal, city, company: t.company || "" },
+    customer: { first, last, phone: t.phone || "", altPhone: (t as any).altPhone || "", email: t.email || "", address, postal, city, company: t.company || "" },
     customerId: (t as any).customerId || null,
     files: [],
     signatureCleared: false,
@@ -501,6 +501,7 @@ function NewTicketWizard() {
         first: nameParts[0] || "",
         last: nameParts.slice(1).join(" ") || "",
         phone: sourceProforma.phone || "",
+        altPhone: "",
         email: sourceProforma.email || "",
         address: "", postal: "", city: "",
         company: sourceProforma.company || "",
@@ -562,6 +563,7 @@ function NewTicketWizard() {
         first: nameParts[0] || "",
         last: nameParts.slice(1).join(" ") || "",
         phone: w.phone || "",
+        altPhone: "",
         email: w.email || "",
         address: "", postal: "", city: "", company: "",
       },
@@ -605,6 +607,7 @@ function NewTicketWizard() {
         first: nameParts[0] || "",
         last: nameParts.slice(1).join(" ") || "",
         phone: job.phone || "",
+        altPhone: "",
         email: job.email || "",
         address: job.pickupAddress || "", postal: "", city: "", company: "",
       },
@@ -709,6 +712,7 @@ function NewTicketWizard() {
           firstName: data.customer.first.trim(),
           lastName: data.customer.last.trim(),
           mobile: data.customer.phone.trim(),
+          altMobile: data.customer.altPhone.trim(),
           email: data.customer.email.trim(),
           type: data.contactType,
           captureSource: "ticket",
@@ -1312,6 +1316,7 @@ function NewTicketWizard() {
               first: contact.firstName,
               last: contact.lastName,
               phone: contact.mobile ?? contact.phone ?? "",
+              altPhone: "",
               email: contact.email ?? "",
               address: contact.address ?? "",
               postal: "",
@@ -2842,7 +2847,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
         className={cn(
           "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-center gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
           open
-            ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
+            ? "border-[#4361EE] ring-2 ring-[#4361EE]/10"
             : "border-border hover:border-[#4361EE]/40",
           className
         )}
@@ -2875,7 +2880,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1 w-full rounded-xl border border-border bg-card p-1 shadow-lg max-h-60 overflow-y-auto">
+        <div className="absolute left-0 top-full z-50 mt-1.5 w-full rounded-xl border border-border bg-card p-1.5 shadow-xl ring-1 ring-black/[0.03] max-h-60 overflow-y-auto">
           {showCreate && (
             <button
               type="button"
@@ -3137,6 +3142,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
         first: c.firstName,
         last: c.lastName,
         phone: c.mobile,
+        altPhone: c.altMobile ?? "",
         email: c.email,
         address: c.address,
         postal: c.postalCode,
@@ -3247,7 +3253,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
               <button
                 onClick={() => {
                   setSelectedId(null);
-                  setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" } });
+                  setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" } });
                 }}
                 className="shrink-0 rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-100 transition"
                 aria-label="Clear selection"
@@ -3261,7 +3267,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
 
         {/* Action Buttons */}
         <div className={cn("mt-6 flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:justify-center", isEdit && "hidden")}>
-          <Button variant="outline" size="lg" onClick={() => { setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", email: "", address: "", postal: "", city: "", company: "" } }); onNext(); }}>
+          <Button variant="outline" size="lg" onClick={() => { setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" } }); onNext(); }}>
             <Plus className="h-4 w-4" /> Add New
           </Button>
           <Button size="lg" onClick={onNext} disabled={!selectedId}>
@@ -3331,7 +3337,8 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
           <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
             <Field label="First Name"><Input value={c.first} onChange={(e: any) => set("first", e.target.value)} placeholder="Rahul" className="h-11" /></Field>
             <Field label="Last Name"><Input value={c.last} onChange={(e: any) => set("last", e.target.value)} placeholder="Kapoor" className="h-11" /></Field>
-            <div className="col-span-2"><Field label="Contact Number"><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" className="h-11" /></Field></div>
+            <Field label="Contact Number"><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" className="h-11" /></Field>
+            <Field label="Alternate Number"><Input value={c.altPhone} onChange={(e: any) => set("altPhone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" className="h-11" /></Field>
             <Field label="E-mail ID"><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} iconLeft={<Mail className="h-4 w-4" />} placeholder="rahul@email.com" className="h-11" /></Field>
             <Field label="Company / Organization"><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} iconLeft={<Building2 className="h-4 w-4" />} placeholder="Optional" className="h-11" /></Field>
           </div>

@@ -433,6 +433,11 @@ export interface LeadFilters {
   status: string;              // "" = all (also drives the status tabs)
   dateRange: LeadDateRange;
   followUp: "any" | "has" | "overdue" | "today" | "upcoming" | "none";
+  /** Customer Master linkage. "existing" = the lead is linked to a Customer
+   *  Master record (lead.customerId set); "new" = fresh prospect, not yet a
+   *  customer (customerId empty). Presence/absence check — not a `fields`
+   *  exact match, so it lives as its own axis like dateRange/followUp. */
+  customerLink: "any" | "existing" | "new";
   fields: Partial<Record<LeadFilterField, string>>;
 }
 
@@ -441,14 +446,24 @@ export const EMPTY_LEAD_FILTERS: LeadFilters = {
   status: "",
   dateRange: "all",
   followUp: "any",
+  customerLink: "any",
   fields: {},
 };
 
 export function hasActiveLeadFilters(f: LeadFilters): boolean {
   return (
     !!f.query.trim() || !!f.status || f.dateRange !== "all" || f.followUp !== "any" ||
+    f.customerLink !== "any" ||
     Object.values(f.fields).some(Boolean)
   );
+}
+
+/** A lead is an EXISTING customer when it is linked to a Customer Master record
+ *  (customerId set) or has been promoted (convertedAt). Otherwise it's a NEW /
+ *  unlinked prospect. This mirrors the capture flow's Review semantics
+ *  ("Linked" vs "New / unlinked"). */
+export function leadIsExistingCustomer(l: Lead): boolean {
+  return !!(l.customerId && l.customerId.trim()) || !!l.convertedAt;
 }
 
 function startOfToday(): number {
@@ -501,6 +516,12 @@ export function applyLeadFilters(
       if (v && String((l as any)[k] ?? "") !== v) return false;
     }
     if (!leadInDateRange(l.createdAt || l.date, f.dateRange)) return false;
+
+    if (f.customerLink !== "any") {
+      const existing = leadIsExistingCustomer(l);
+      if (f.customerLink === "existing" && !existing) return false;
+      if (f.customerLink === "new" && existing) return false;
+    }
 
     if (f.followUp !== "any") {
       // Prefer the structured open follow-up (datetime-precise). Fall back to

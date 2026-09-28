@@ -189,6 +189,9 @@ export type Customer = {
   lastName: string;
   fullName: string; // computed: firstName + lastName
   mobile: string;
+  /** Alternate/secondary contact number. Captured alongside `mobile` and used
+   *  to identify a returning customer who reaches out from a different number. */
+  altMobile?: string;
   email: string;
   company: string;
   gstNumber: string;
@@ -238,6 +241,7 @@ export function createCustomer(
     lastName: data.lastName,
     fullName: `${data.firstName} ${data.lastName}`.trim(),
     mobile: data.mobile,
+    altMobile: data.altMobile || "",
     email: data.email || "",
     company: data.company || "",
     gstNumber: data.gstNumber || "",
@@ -299,18 +303,27 @@ function normalizeMobile(mobile: string): string {
 
 export function findDuplicates(
   customers: Customer[],
-  data: { mobile: string; email?: string; firstName?: string; lastName?: string; company?: string; city?: string }
+  data: { mobile: string; altMobile?: string; email?: string; firstName?: string; lastName?: string; company?: string; city?: string }
 ): DuplicateMatch[] {
   const matches: DuplicateMatch[] = [];
   const mobile = normalizeMobile(data.mobile);
+  const altMobile = normalizeMobile(data.altMobile || "");
+  // The set of phone numbers the incoming record can be reached on (primary +
+  // alternate), so a returning customer is identified regardless of which of
+  // their two numbers they used this time.
+  const seedPhones = [mobile, altMobile].filter(Boolean);
   const seedName = normalizeName(`${data.firstName ?? ""} ${data.lastName ?? ""}`);
   const seedCity = normalizeCity(data.city);
 
   for (const c of customers) {
     const cMobile = normalizeMobile(c.mobile);
+    const cAltMobile = normalizeMobile(c.altMobile || "");
+    // Any overlap between the seed's numbers (primary/alt) and the existing
+    // customer's numbers (primary/alt) is a definite same-customer match.
+    const custPhones = [cMobile, cAltMobile].filter(Boolean);
 
-    // Primary: Mobile number match (high confidence — definite).
-    if (mobile && cMobile && mobile === cMobile) {
+    // Primary: Mobile number match on EITHER number (high confidence — definite).
+    if (seedPhones.some((p) => custPhones.includes(p))) {
       matches.push({ customer: c, matchedOn: "Mobile Number", confidence: "high" });
       continue;
     }
@@ -389,17 +402,24 @@ export function findDuplicateClusters(customers: Customer[]): DuplicateCluster[]
   const clusters: DuplicateCluster[] = [];
   const claimed = new Set<string>();
 
-  // 1) Mobile number — highest confidence, checked first.
+  // 1) Mobile number — highest confidence, checked first. A record is keyed by
+  //    BOTH its primary and alternate number, so two records that share either
+  //    number cluster together (returning customer who used their other line).
   const byMobile = new Map<string, Customer[]>();
   for (const c of customers) {
-    const key = normalizeMobile(c.mobile);
-    if (!key) continue;
-    (byMobile.get(key) ?? byMobile.set(key, []).get(key)!).push(c);
+    const keys = Array.from(new Set([normalizeMobile(c.mobile), normalizeMobile(c.altMobile || "")].filter(Boolean)));
+    for (const key of keys) {
+      (byMobile.get(key) ?? byMobile.set(key, []).get(key)!).push(c);
+    }
   }
   for (const [key, group] of byMobile) {
-    if (group.length < 2) continue;
-    clusters.push({ id: `mobile-${key}`, customers: group, matchedOn: "Mobile Number", confidence: "high" });
-    group.forEach((c) => claimed.add(c.id));
+    // A record may key on both its primary and alternate number; only cluster
+    // the members not already grouped by a previous (stronger) mobile key, so
+    // one record never lands in two mobile clusters at once.
+    const fresh = group.filter((c) => !claimed.has(c.id));
+    if (fresh.length < 2) continue;
+    clusters.push({ id: `mobile-${key}`, customers: fresh, matchedOn: "Mobile Number", confidence: "high" });
+    fresh.forEach((c) => claimed.add(c.id));
   }
 
   // 2) Email — high confidence, only for records not already claimed.
@@ -456,7 +476,10 @@ export function searchCustomers(customers: Customer[], query: string): Customer[
     const name = c.fullName.toLowerCase();
     const company = (c.company ?? "").toLowerCase();
     const cMobile = c.mobile.replace(/[\s\-\(\)\+]/g, "");
-    const phoneMatch = qMobile.length >= 3 && cMobile.includes(qMobile);
+    const cAltMobile = (c.altMobile ?? "").replace(/[\s\-\(\)\+]/g, "");
+    // Match on EITHER the primary or the alternate number, so searching by the
+    // alternate number still pulls up the right customer (invoice/ticket/etc.).
+    const phoneMatch = qMobile.length >= 3 && (cMobile.includes(qMobile) || (!!cAltMobile && cAltMobile.includes(qMobile)));
     const emailMatch = !!c.email && c.email.toLowerCase().includes(q);
     const idMatch = c.id.toLowerCase().includes(q);
 

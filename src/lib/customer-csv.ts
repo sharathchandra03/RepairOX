@@ -25,6 +25,7 @@ export const CUSTOMER_CSV_COLUMNS = [
   "First Name",
   "Last Name",
   "Mobile",
+  "Alternate Mobile",
   "Email",
   "Type",           // personal | business
   "Company",
@@ -42,6 +43,9 @@ const HEADER_KEY: Record<string, keyof CustomerCsvRow> = {
   firstname: "firstName", first_name: "firstName", first: "firstName", name: "firstName",
   lastname: "lastName", last_name: "lastName", last: "lastName", surname: "lastName",
   mobile: "mobile", phone: "mobile", phonenumber: "mobile", contact: "mobile", mobilenumber: "mobile",
+  altmobile: "altMobile", alternatemobile: "altMobile", alternatenumber: "altMobile", altphone: "altMobile",
+  alternatephone: "altMobile", secondarymobile: "altMobile", secondarynumber: "altMobile", secondaryphone: "altMobile",
+  altnumber: "altMobile", alternatecontact: "altMobile",
   email: "email", emailaddress: "email",
   type: "type", customertype: "type",
   company: "company", companyname: "company", business: "company",
@@ -58,6 +62,7 @@ export interface CustomerCsvRow {
   firstName?: string;
   lastName?: string;
   mobile?: string;
+  altMobile?: string;
   email?: string;
   type?: string;
   company?: string;
@@ -138,6 +143,7 @@ export function csvRowToInput(row: CustomerCsvRow): FindOrCreateInput | null {
     firstName: firstName || "Customer",
     lastName: (row.lastName || "").trim(),
     mobile,
+    altMobile: (row.altMobile || "").trim() || undefined,
     email: (row.email || "").trim() || undefined,
     type,
     source: coerceSource(row.source),
@@ -152,7 +158,7 @@ export function csvRowToInput(row: CustomerCsvRow): FindOrCreateInput | null {
 
 /** One canonical example row for the customer template (shared by CSV + XLSX). */
 export const CUSTOMER_TEMPLATE_EXAMPLE: (string | number)[] = [
-  "Priya", "Menon", "+91 98765 43210", "priya@example.com", "personal",
+  "Priya", "Menon", "+91 98765 43210", "+91 91234 56780", "priya@example.com", "personal",
   "", "", "12 MG Road", "Bengaluru", "Karnataka", "560001", "Referral",
   "Prefers WhatsApp",
 ];
@@ -204,6 +210,7 @@ export function buildCustomerExportRows(
       c.firstName,
       c.lastName,
       c.mobile,
+      c.altMobile,
       c.email,
       c.type,
       c.company,
