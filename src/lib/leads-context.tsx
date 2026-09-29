@@ -36,6 +36,7 @@ import {
 import {
   LEAD_DROPDOWN_FIELDS, monthFromDate, applyLeadFilters, pinnedFirst,
   isQualifiedStatus, isWonStatus, isLostStatus,
+  isNotContactedStatus, isNotContactedLocked,
   computeLeadMetrics, openFollowUp, leadsOwnedBy,
   type LeadFollowUp, type LeadFollowUpDraft, type LeadAssignmentEvent, type LeadMetrics,
   operationalRecordAttributedElsewhere,
@@ -71,6 +72,9 @@ function rowToLead(r: any): Lead {
     number: r.number ?? "",
     email: r.email ?? "",
     location: r.location ?? "",
+    locationLat: r.location_lat == null ? null : Number(r.location_lat),
+    locationLng: r.location_lng == null ? null : Number(r.location_lng),
+    locationMapsUrl: r.location_maps_url ?? "",
     device: r.device ?? "",
     deviceCategoryId: r.device_category_id ?? "",
     deviceBrandId: r.device_brand_id ?? "",
@@ -93,6 +97,7 @@ function rowToLead(r: any): Lead {
     followUpAgentId: r.follow_up_agent_id ?? "",
     finalResult: r.final_result ?? "",
     followUpComments: r.follow_up_comments ?? "",
+    notContactedSince: r.not_contacted_since ?? "",
     // assigned_user_id is the canonical owner (0045); assigned_to is its mirror.
     assignedTo: r.assigned_user_id ?? r.assigned_to ?? "",
     assignedToName: r.assigned_to_name ?? "",
@@ -138,6 +143,11 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("number", l.number);
   set("email", l.email);
   set("location", l.location);
+  // Map pin coordinates: numeric passthrough (never ""→null coerce so a real 0
+  // is preserved); the shareable URL is a plain string.
+  if (l.locationLat !== undefined) row.location_lat = l.locationLat;
+  if (l.locationLng !== undefined) row.location_lng = l.locationLng;
+  set("location_maps_url", l.locationMapsUrl);
   set("device", l.device);
   set("device_category_id", l.deviceCategoryId);
   set("device_brand_id", l.deviceBrandId);
@@ -160,6 +170,9 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("follow_up_agent_id", l.followUpAgentId);
   set("final_result", l.finalResult);
   set("follow_up_comments", l.followUpComments);
+  // Not-Contacted lock timestamp — explicit so "" clears it to NULL and
+  // undefined leaves it untouched (the lock is derived from this + contactStatus).
+  if (l.notContactedSince !== undefined) row.not_contacted_since = l.notContactedSince || null;
   // Assignment columns (uuid FKs — null when unassigned)
   if (l.assignedTo !== undefined) row.assigned_to = l.assignedTo || null;
   if (l.assignedBy !== undefined) row.assigned_by = l.assignedBy || null;
@@ -452,6 +465,7 @@ const LEAD_OPTIONAL_COLUMNS = [
   "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id",
   "converted_at", "converted_by", "conversion_source", "attribution_mode",
   "device_category_id", "device_brand_id", "device_model_id", "discount_type", "follow_up_agent_id",
+  "location_lat", "location_lng", "location_maps_url",
 ];
 
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -927,9 +941,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       return null;
     }
 
+    // Not-Contacted lock clock: a lead created at "Not Contacted" starts the
+    // countdown now; a lead created already contacted has no lock.
+    const bornNotContacted = isNotContactedStatus(draft.contactStatus ?? "");
+    const notContactedSince = bornNotContacted ? new Date().toISOString() : "";
+
     const resolvedDraft: LeadDraft = {
       ...draft, contactId, customerId: draft.customerId ?? "",
       assignedTo: ownerId, assignedToName: ownerName, agent: ownerName || draft.agent || "",
+      notContactedSince,
     };
 
     if (useDb) {
@@ -987,6 +1007,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       date, time, month,
       region: draft.region ?? "", source: draft.source ?? "", captureChannel: draft.captureChannel ?? "", agent: draft.agent ?? "",
       name: draft.name ?? "", number: draft.number ?? "", email: draft.email ?? "", location: draft.location ?? "",
+      locationLat: draft.locationLat ?? null, locationLng: draft.locationLng ?? null, locationMapsUrl: draft.locationMapsUrl ?? "",
       device: draft.device ?? "", deviceCategoryId: draft.deviceCategoryId ?? "", deviceBrandId: draft.deviceBrandId ?? "", deviceModelId: draft.deviceModelId ?? "",
       issue: draft.issue ?? "", category: draft.category ?? "",
       estimate: draft.estimate ?? null, discount: draft.discount ?? null, discountType: draft.discountType ?? "amount",
@@ -994,6 +1015,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       comments: draft.comments ?? "", contactStatus: draft.contactStatus ?? "", status: draft.status ?? "",
       result: draft.result ?? "", finalRemarks: draft.finalRemarks ?? "", followUpDate: draft.followUpDate ?? "",
       followUpAgent: draft.followUpAgent ?? "", followUpAgentId: draft.followUpAgentId ?? "", finalResult: draft.finalResult ?? "", followUpComments: draft.followUpComments ?? "",
+      notContactedSince,
       // AGENTS = the primary owner (user id). The draft's agent picker sets these.
       assignedTo: ownerId, assignedToName: ownerName,
       assignedBy: ownerId ? me : "", assignedByName: ownerId ? currentUserNameRef.current || "" : "",
@@ -1117,6 +1139,22 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     } = updatesIn;
     const ownerChange = assignedTo !== undefined && !!current && (assignedTo || "") !== (current.assignedTo || "");
     const fuChange = updates.followUpAgentId !== undefined && !!current && (updates.followUpAgentId || "") !== (current.followUpAgentId || "");
+
+    // ── Not-Contacted lock clock ────────────────────────────────────────────
+    // Keep `notContactedSince` in lockstep with contactStatus, UNLESS the caller
+    // set it explicitly (e.g. a reassignment restarting the clock).
+    if (updates.contactStatus !== undefined && current && updates.notContactedSince === undefined) {
+      const wasNC = isNotContactedStatus(current.contactStatus);
+      const willNC = isNotContactedStatus(updates.contactStatus);
+      if (willNC && !wasNC) {
+        // Re-entered Not-Contacted → restart the 48h countdown.
+        updates.notContactedSince = new Date().toISOString();
+      } else if (!willNC && wasNC) {
+        // Contacted at last → clear the lock (leaves the Not-Contacted queue).
+        updates.notContactedSince = "";
+      }
+      // willNC && wasNC → leave the existing since untouched (clock keeps running).
+    }
     const storeId = updates.branchId ?? current?.branchId ?? "";
     const previousFollowUpAgent = current?.followUpAgent || "";
 
@@ -1258,6 +1296,16 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
     const staffName = staffId ? (salesAgentsRef.current.find((a) => a.id === staffId)?.name || staffNameIn) : "";
 
+    // ── Reassigning a stale Not-Contacted lead: fresh start for the NEW owner ──
+    // When a senior reassigns a lead that had aged out at "Not Contacted", the
+    // new owner starts clean: the 48h lock clock restarts NOW (a real new owner)
+    // and attribution resets so any conversion CREDIT/REWARD is earned by the
+    // NEW owner through their own work — never inherited by the previous owner.
+    // (Ownership already routes each lead's metrics to its current owner; this
+    // also drops any stale agent-driven flag so the new owner earns it fresh.)
+    const wasNotContacted = isNotContactedStatus(lead.contactStatus);
+    const freshStart = isReassign && !!staffId && wasNotContacted;
+
     const updates: Partial<Lead> = {
       assignedTo: staffId,
       assignedToName: staffName,
@@ -1265,6 +1313,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       assignedBy: currentUserIdRef.current || "",
       assignedByName: currentUserNameRef.current || "",
       assignedAt: staffId ? nowIso : "",
+      ...(freshStart
+        ? {
+            // Restart the Not-Contacted countdown for the new owner.
+            notContactedSince: nowIso,
+            // Reset effort attribution so credit is the new owner's to earn.
+            attributionMode: "",
+            routedAt: "",
+          }
+        : {}),
     };
 
     if (useDb) {
@@ -1276,10 +1333,17 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
         assigned_user_id: staffId || null,
         assigned_to: staffId || null,
         last_assignment_reason: reason || null,
+        ...(freshStart
+          ? { not_contacted_since: nowIso, attribution_mode: null, routed_at: null }
+          : {}),
       };
       let { error } = await db.from("leads").update(row).eq("id", id);
-      if (error && isUndefinedColumnError(error)) {
-        row = omitKeys(row, ["last_assignment_reason"]);
+      // Heal schema drift: drop optional columns the DB may not have yet.
+      let healA = 0;
+      while (error && isUndefinedColumnError(error) && healA < 4) {
+        healA += 1;
+        const col = extractMissingColumn(error);
+        row = omitKeys(row, col ? [col] : ["last_assignment_reason", "not_contacted_since", "attribution_mode", "routed_at"]);
         ({ error } = await db.from("leads").update(row).eq("id", id));
       }
       if (error) {
@@ -1734,9 +1798,17 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     const followUpLeadIds = new Set(
       followUps.filter((f) => f.followUpUserId === me && f.status !== "cancelled").map((f) => f.leadId),
     );
-    return leads.filter((l) =>
-      l.createdBy === me || l.assignedTo === me || l.followUpAgentId === me || followUpLeadIds.has(l.id),
-    );
+    return leads.filter((l) => {
+      const mine = l.createdBy === me || l.assignedTo === me || l.followUpAgentId === me || followUpLeadIds.has(l.id);
+      if (!mine) return false;
+      // Not-Contacted lock: once a lead has aged out at "Not Contacted" (48h+),
+      // the Sales Agent loses access to the flow until a senior reassigns it.
+      // Seniors/owners (canSeeAllLeads) never hit this branch. A locked lead is
+      // hidden from the agent entirely here (defence-in-depth); the DB RLS is
+      // the real boundary. It reappears the moment it's reassigned (fresh clock).
+      if (isNotContactedLocked(l)) return false;
+      return true;
+    });
   }, [leads, followUps, canSeeAllLeads, currentUserId]);
 
   const leadMetrics = useCallback((scope: "me" | "all" | { ownerId: string } = "all", revenue?: { tickets: any[]; invoices: any[] }): LeadMetrics => {

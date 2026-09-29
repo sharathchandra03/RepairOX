@@ -26,7 +26,7 @@ import { Search, SlidersHorizontal, Check, ChevronDown, X, RotateCcw, CalendarCl
 import { Drawer } from "@/components/ui/drawer";
 import { cn } from "@/lib/utils";
 import {
-  applyLeadFilters, hasActiveLeadFilters,
+  applyLeadFilters, hasActiveLeadFilters, LEAD_DATE_RANGES,
   type Lead, type LeadFilters, type LeadFilterField, type LeadFollowUp, type LeadDateRange,
 } from "@/lib/leads-data";
 
@@ -56,14 +56,9 @@ const SECTIONS: SectionDef[] = [
   { id: "device", title: "Device", icon: Smartphone, facetKeys: ["device", "category"] },
 ];
 
-const DATE_RANGES: { value: LeadDateRange; label: string }[] = [
-  { value: "all", label: "All time" },
-  { value: "today", label: "Today" },
-  { value: "yesterday", label: "Yesterday" },
-  { value: "7days", label: "Last 7 days" },
-  { value: "30days", label: "Last 30 days" },
-  { value: "thisMonth", label: "This month" },
-];
+// Reuse the shared 8-option date-range vocabulary (matches the page strip +
+// Tickets / Dashboard) so the panel and the strip never disagree.
+const DATE_RANGES = LEAD_DATE_RANGES;
 
 const FOLLOWUP_FILTERS = [
   { value: "any", label: "Any" },

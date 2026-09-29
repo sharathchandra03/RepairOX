@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { X, Phone, Mail, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { CustomerLifecycleBadge, customerLifecycle } from '@/components/common/customer-classification';
 
 export interface CustomerPickerProps {
   value?: string; // selected customer ID
@@ -110,6 +111,7 @@ export function CustomerPicker({
             <span className="flex-1 text-sm font-medium text-zinc-900">
               {formatCustomerName(selectedCustomer)}
             </span>
+            <CustomerLifecycleBadge lifecycle={customerLifecycle(selectedCustomer)} />
             <span
               className={cn(
                 'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
@@ -181,8 +183,11 @@ export function CustomerPicker({
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex-1 min-w-0">
-                      <div className="font-medium text-sm text-zinc-900 truncate">
-                        {formatCustomerName(customer)}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="font-medium text-sm text-zinc-900 truncate">
+                          {formatCustomerName(customer)}
+                        </span>
+                        <CustomerLifecycleBadge lifecycle={customerLifecycle(customer)} />
                       </div>
                       <div className="flex items-center gap-3 mt-1">
                         {customer.mobile && (

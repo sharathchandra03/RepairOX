@@ -57,7 +57,7 @@ import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { WalkInFormDrawer } from "@/components/walk-in/walk-in-form-drawer";
 import { findOrCreateCustomer } from "@/lib/customer-service";
-import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
+import { resolvePromotionOrigin } from "@/lib/customer-candidates";
 import { WalkInImportModal } from "@/components/walk-in/walk-in-import-modal";
 import { WalkInReport } from "@/components/walk-in/walk-in-report";
 import { PushToTicketIcon } from "@/components/walk-in/push-to-ticket-icon";
@@ -80,7 +80,7 @@ function fmtDate(iso: string): string {
 export default function WalkInPage() {
   const router = useRouter();
   const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary, customers, addCustomer } = useStore();
-  const { contacts, linkOperationalRecord } = useLeads();
+  const { contacts, leads, updateContact, linkOperationalRecord } = useLeads();
   // Active-store context — drives the context-aware Store column (§3h). Shown
   // only in multi-store / All-Shops mode; hidden inside a single store.
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -440,6 +440,13 @@ export default function WalkInPage() {
       const walkinAltPhone = (data.altPhone || "").trim();
       if (!resolvedCustomerId && (walkinName || walkinPhone)) {
         const [first, ...rest] = walkinName.split(" ");
+        // Two-logic origin: Sales if this person came from a LEAD/CRM contact,
+        // otherwise Manual (a walk-in typed at the desk = created individually).
+        const origin = resolvePromotionOrigin(
+          { mobile: walkinPhone, email: (data.email || "").trim() },
+          contacts,
+          leads,
+        );
         const result = findOrCreateCustomer(
           {
             firstName: first || walkinName || "Walk-in Customer",
@@ -447,13 +454,16 @@ export default function WalkInPage() {
             mobile: walkinPhone,
             altMobile: walkinAltPhone || undefined,
             email: (data.email || "").trim() || undefined,
-            source: walkInTypeToCustomerSource(data.type || "direct") as any,
-            captureSource: "walk_in",
+            source: origin.fromLead ? "sales" : undefined,
+            captureSource: origin.fromLead ? "lead" : "walk_in",
           },
           customers,
         );
         if (result.created) await addCustomer(result.customer);
         resolvedCustomerId = result.customer.id;
+        // Link the originating CRM contact so it stops showing as an
+        // unpromoted prospect (kills the duplicate in the CRM tab).
+        if (origin.contactId) void updateContact(origin.contactId, { customerId: result.customer.id });
       }
       const record: WalkIn = {
         id: genWalkInId(),

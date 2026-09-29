@@ -24,6 +24,10 @@ import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, type Customer } from "@/lib/customer-data";
+import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
+import { findOrCreateCustomer } from "@/lib/customer-service";
+import { useLeads } from "@/lib/leads-context";
+import { CustomerLifecycleBadge, customerLifecycle } from "@/components/common/customer-classification";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { NoPermission } from "@/components/common/no-permission";
@@ -211,7 +215,8 @@ function InvoiceWizard() {
   const { can } = usePermissions();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
-  const { invoices, tickets, addInvoice, updateInvoice } = useStore();
+  const { invoices, tickets, addInvoice, updateInvoice, customers, addCustomer } = useStore();
+  const { contacts, leads, updateContact } = useLeads();
   const { settings, hydrated: settingsHydrated } = useStoreSettings();
   const isEdit = !!editId;
 
@@ -523,7 +528,7 @@ function InvoiceWizard() {
   // Build a full Invoice record from the current form. An optional status
   // override lets callers (e.g. Save Draft) force a specific status without
   // touching the rest of the invoice-building logic.
-  const buildInvoice = useCallback((statusOverride?: InvoiceStatus): Invoice => {
+  const buildInvoice = useCallback((statusOverride?: InvoiceStatus, customerIdOverride?: string): Invoice => {
     // Build invoice device records for storage. A device is worth persisting
     // when it carries identity, parts, or any financial value (estimate /
     // repair cost) — an estimate-only device (pushed from a ticket with no
@@ -578,7 +583,7 @@ function InvoiceWizard() {
       ),
       invoiceType: (form.details.invoiceType as InvoiceType) || "retail",
       customer: form.customer.name || "Walk-in Customer",
-      customerId: form.customer.customerId || undefined,
+      customerId: customerIdOverride || form.customer.customerId || undefined,
       phone: form.customer.phone,
       email: form.customer.email || undefined,
       company: form.customer.company || undefined,
@@ -626,9 +631,52 @@ function InvoiceWizard() {
     return invoice;
   }, [form, totals, editId, isEdit, invoices, draftId, settings.invoiceNumbering]);
 
+  // Promote the picked identity into the Customer Master before saving. When
+  // the user picked an existing customer, customerId is already set and this is
+  // a no-op. When they picked a not-yet-promoted CRM contact (or typed a fresh
+  // name), we resolve through the shared dedup service and capture them into
+  // the Customer Master — the same "capture everyone / one canonical identity"
+  // rule the Ticket and Walk-In flows follow.
+  const resolveCustomerForSave = useCallback(async (): Promise<string | undefined> => {
+    if (form.customer.customerId) return form.customer.customerId;
+    const name = (form.customer.name || "").trim();
+    const phone = (form.customer.phone || "").trim();
+    if (!name && !phone) return undefined;
+    const [first, ...rest] = name.split(" ");
+    // Two-logic origin: Sales if the person came from a LEAD/CRM contact,
+    // otherwise Manual (created individually here on the invoice).
+    const origin = resolvePromotionOrigin(
+      { mobile: phone, email: (form.customer.email || "").trim() },
+      contacts,
+      leads,
+    );
+    const { customer, created } = findOrCreateCustomer(
+      {
+        firstName: first || name || "Walk-in Customer",
+        lastName: rest.join(" "),
+        mobile: phone,
+        altMobile: (form.customer.altPhone || "").trim() || undefined,
+        email: (form.customer.email || "").trim() || undefined,
+        type: form.details.invoiceType === "business" ? "business" : "personal",
+        captureSource: origin.fromLead ? "lead" : "invoice",
+        source: origin.fromLead ? "sales" : undefined,
+        company: (form.customer.company || "").trim() || undefined,
+      },
+      customers,
+    );
+    if (created) await addCustomer(customer);
+    // Link the originating CRM contact so it stops showing as an unpromoted
+    // prospect (kills the duplicate in the CRM tab).
+    if (origin.contactId) void updateContact(origin.contactId, { customerId: customer.id });
+    // Link the resolved id back onto the form so buildInvoice picks it up.
+    updateForm((f) => ({ ...f, customer: { ...f.customer, customerId: customer.id } }));
+    return customer.id;
+  }, [form.customer, form.details.invoiceType, customers, addCustomer, updateForm, contacts, leads, updateContact]);
+
   // Submit (finalize / save)
   const handleSubmit = useCallback(async () => {
-    const invoice = buildInvoice();
+    const resolvedId = await resolveCustomerForSave();
+    const invoice = buildInvoice(undefined, resolvedId);
 
     setDirty(false);
     if (isEdit) {
@@ -656,7 +704,7 @@ function InvoiceWizard() {
       setCreatedInvoiceId(savedId);
       setShowSuccessAnimation(true);
     }
-  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId]);
+  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId, resolveCustomerForSave]);
 
   // Save Draft — persist current form to the DB with status "draft" without
   // finalizing the invoice or leaving the flow. Re-uses the same invoice store
@@ -949,6 +997,7 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
 
 function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
   const { customers } = useStore();
+  const { contacts } = useLeads();
   const c = form.customer;
   const d = form.details;
   const [showResults, setShowResults] = useState(false);
@@ -970,10 +1019,12 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
     customer: v === "retail" ? { ...f.customer, company: "", gstNumber: "" } : f.customer,
   }));
 
-  // Search from customer name input
-  const results = c.name.trim().length >= 2 ? searchCustomers(customers, c.name) : [];
+  // Search over BOTH the Customer Master AND un-promoted CRM contacts so a
+  // captured contact is fetchable here. A contact-candidate is virtual — it's
+  // promoted to a real Customer via findOrCreateCustomer at invoice save time.
+  const results: CustomerCandidate[] = c.name.trim().length >= 2 ? searchCustomerCandidates(customers, contacts, c.name) : [];
 
-  const selectCustomer = (cust: Customer) => {
+  const selectCustomer = (cust: CustomerCandidate) => {
     setShowResults(false);
     updateForm((f) => ({
       ...f,
@@ -984,7 +1035,9 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
         email: cust.email,
         company: cust.company,
         gstNumber: cust.gstNumber || "",
-        customerId: cust.id,
+        // A contact-candidate has no Customer Master id yet — leave it
+        // undefined so save-time promotion links the real customer.
+        customerId: cust.isContact ? undefined : cust.id,
       },
       details: {
         ...f.details,
@@ -1049,10 +1102,14 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
                       {cust.firstName[0]}{cust.lastName[0] || ""}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium truncate">{cust.fullName}</p>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <p className="text-sm font-medium truncate">{cust.fullName}</p>
+                        <CustomerLifecycleBadge lifecycle={customerLifecycle(cust)} />
+                      </div>
                       <p className="text-[11px] text-muted-foreground truncate">
                         {cust.mobile}
                         {cust.company && <> · {cust.company}</>}
+                        {cust.isContact && <> · Prospect</>}
                       </p>
                     </div>
                     {cust.type === "business" && (

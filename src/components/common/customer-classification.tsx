@@ -17,12 +17,68 @@ import { cn } from "@/lib/utils";
 import {
   CUSTOMER_SOURCE_BADGE,
   groupToneClasses,
+  type Customer,
   type CustomerType,
   type CustomerSource,
   type CustomerGroup,
 } from "@/lib/customer-data";
 
 const PILL = "inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-semibold uppercase tracking-wide ring-1 ring-inset whitespace-nowrap";
+
+/**
+ * Customer LIFECYCLE — has this identity done any real business with us yet?
+ *
+ *   • New       — freshly captured (a CRM prospect/contact, or a customer with
+ *                 zero tickets/invoices/repairs). They exist as an identity but
+ *                 haven't started a service/commercial relationship.
+ *   • Existing  — an established customer with at least one real transaction.
+ *
+ * This is a SEPARATE axis from Type / Source / Groups. Derived purely from the
+ * transactional counters so it can never disagree with the data.
+ */
+export type CustomerLifecycle = "new" | "existing";
+
+/** Whether a customer has any real transactional history yet. */
+export function isNewCustomer(
+  c: Pick<Customer, "totalTickets" | "totalInvoices" | "totalRepairs"> & { isContact?: boolean }
+): boolean {
+  // A virtual CRM-contact candidate is always "new" (never transacted).
+  if ((c as { isContact?: boolean }).isContact) return true;
+  return (
+    (c.totalTickets ?? 0) === 0 &&
+    (c.totalInvoices ?? 0) === 0 &&
+    (c.totalRepairs ?? 0) === 0
+  );
+}
+
+export function customerLifecycle(
+  c: Pick<Customer, "totalTickets" | "totalInvoices" | "totalRepairs"> & { isContact?: boolean }
+): CustomerLifecycle {
+  return isNewCustomer(c) ? "new" : "existing";
+}
+
+/** New (amber) vs Existing (indigo) lifecycle pill. */
+export function CustomerLifecycleBadge({
+  lifecycle,
+  className,
+}: {
+  lifecycle: CustomerLifecycle;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        PILL,
+        lifecycle === "new"
+          ? "bg-amber-50 text-amber-700 ring-amber-200"
+          : "bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20",
+        className
+      )}
+    >
+      {lifecycle === "new" ? "New" : "Existing"}
+    </span>
+  );
+}
 
 /** Customer Type badge — Personal (sky) / Business (violet). */
 export function CustomerTypeBadge({ type, className }: { type: CustomerType; className?: string }) {
@@ -82,6 +138,7 @@ export function CustomerBadges({
   type,
   source,
   groups,
+  lifecycle,
   maxGroups = 2,
   showSource = true,
   className,
@@ -89,6 +146,8 @@ export function CustomerBadges({
   type: CustomerType;
   source?: CustomerSource;
   groups?: CustomerGroup[];
+  /** When provided, renders a leading New/Existing lifecycle pill. */
+  lifecycle?: CustomerLifecycle;
   maxGroups?: number;
   showSource?: boolean;
   className?: string;
@@ -97,6 +156,7 @@ export function CustomerBadges({
   const extra = (groups ?? []).length - shown.length;
   return (
     <span className={cn("inline-flex flex-wrap items-center gap-1", className)}>
+      {lifecycle && <CustomerLifecycleBadge lifecycle={lifecycle} />}
       <CustomerTypeBadge type={type} />
       {showSource && <CustomerSourceBadge source={source} />}
       {shown.map((g) => (

@@ -54,8 +54,8 @@ import { useLeads } from "@/lib/leads-context";
 import {
   createCustomer, searchCustomers, findDuplicateClusters,
   CUSTOMER_SOURCES, CUSTOMER_SOURCE_LABEL,
-  CAPTURE_SOURCE_BADGE, CAPTURE_SOURCE_TONE,
-  type Customer, type CustomerSource,
+  customerOrigin, CUSTOMER_ORIGIN_LABEL, CUSTOMER_ORIGIN_TONE,
+  type Customer, type CustomerSource, type CustomerOrigin,
 } from "@/lib/customer-data";
 import { pointsFromInvoiceAmount, tierForLifetimeValue, thresholdsFromTiers, LOYALTY_TIER_LABELS } from "@/lib/customer-service";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -64,6 +64,7 @@ import { downloadCSV } from "@/lib/csv-utils";
 import { toast } from "@/components/ui/toaster";
 import { CustomerImportDialog } from "@/components/customers/customer-import-dialog";
 import type { Contact } from "@/lib/leads-data";
+import { unpromotedContacts } from "@/lib/customer-candidates";
 import { CustomerGroupPicker } from "@/components/common/customer-group-picker";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { Can } from "@/components/common/can";
@@ -169,7 +170,7 @@ export default function ManageCustomersPage() {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [filterType, setFilterType] = useState<"all" | "personal" | "business">("all");
-  const [filterSource, setFilterSource] = useState<"all" | CustomerSource>("all");
+  const [filterSource, setFilterSource] = useState<"all" | CustomerOrigin>("all");
   const [filterGroup, setFilterGroup] = useState<"all" | string>("all");
   const [filterHighValue, setFilterHighValue] = useState(false);
   const [showFilters, setShowFilters] = useState(false);
@@ -323,7 +324,7 @@ export default function ManageCustomersPage() {
   /* ── Filter + search (Customers tab) ────────────────────────────────── */
   const filtered = useMemo(() => customers.filter((c) => {
     if (filterType !== "all" && c.type !== filterType) return false;
-    if (filterSource !== "all" && c.source !== filterSource) return false;
+    if (filterSource !== "all" && customerOrigin(c) !== filterSource) return false;
     if (filterGroup !== "all" && !(c.groupIds ?? []).includes(filterGroup)) return false;
     if (filterHighValue && (c.lifetimeValue ?? 0) < HIGH_VALUE_THRESHOLD) return false;
     if (!search.trim()) return true;
@@ -349,7 +350,7 @@ export default function ManageCustomersPage() {
   const activeFilterCount = [filterType !== "all", filterSource !== "all", filterGroup !== "all", filterHighValue].filter(Boolean).length;
   const appliedFilters: AppliedFilter[] = [
     ...(filterType !== "all" ? [{ id: "type", label: "Type", value: filterType === "business" ? "Business" : "Personal", onClear: () => { setFilterType("all"); resetFiltersAndPage(); } }] : []),
-    ...(filterSource !== "all" ? [{ id: "source", label: "Source", value: CUSTOMER_SOURCE_LABEL[filterSource], onClear: () => { setFilterSource("all"); resetFiltersAndPage(); } }] : []),
+    ...(filterSource !== "all" ? [{ id: "source", label: "Source", value: CUSTOMER_ORIGIN_LABEL[filterSource], onClear: () => { setFilterSource("all"); resetFiltersAndPage(); } }] : []),
     ...(filterGroup !== "all" ? [{ id: "group", label: "Group", value: activeGroupList.find((g) => g.id === filterGroup)?.name ?? filterGroup, onClear: () => { setFilterGroup("all"); resetFiltersAndPage(); } }] : []),
     ...(filterHighValue ? [{ id: "highValue", value: "High Value only", onClear: () => { setFilterHighValue(false); resetFiltersAndPage(); } }] : []),
   ];
@@ -514,8 +515,8 @@ export default function ManageCustomersPage() {
                     <div className="w-44">
                       <RSelect
                         value={filterSource}
-                        onChange={(v) => { setFilterSource(v as "all" | CustomerSource); resetFiltersAndPage(); }}
-                        options={[{ label: "All Sources", value: "all" }, ...CUSTOMER_SOURCES.map((s) => ({ label: CUSTOMER_SOURCE_LABEL[s], value: s }))]}
+                        onChange={(v) => { setFilterSource(v as "all" | CustomerOrigin); resetFiltersAndPage(); }}
+                        options={[{ label: "All Sources", value: "all" }, { label: "Sales", value: "sales" }, { label: "Manual", value: "manual" }]}
                       />
                     </div>
                     {activeGroupList.length > 0 && (
@@ -720,16 +721,20 @@ export default function ManageCustomersPage() {
                           <CustomerBadges type={c.type} showSource={false} />
                         </td>
                         <td className="px-3 py-4 align-middle">
-                          {c.captureSource ? (
-                            <span className={cn(
-                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset",
-                              CAPTURE_SOURCE_TONE[c.captureSource]
-                            )}>
-                              {CAPTURE_SOURCE_BADGE[c.captureSource]}
-                            </span>
-                          ) : (
-                            <span className="text-[11px] text-muted-foreground">—</span>
-                          )}
+                          {/* Two-logic origin (RepairOX): Sales = came from a
+                              lead/CRM contact; Manual = created individually
+                              (Add Customer / Ticket / Invoice / Walk-In). */}
+                          {(() => {
+                            const origin = customerOrigin(c);
+                            return (
+                              <span className={cn(
+                                "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset",
+                                CUSTOMER_ORIGIN_TONE[origin]
+                              )}>
+                                {CUSTOMER_ORIGIN_LABEL[origin]}
+                              </span>
+                            );
+                          })()}
                         </td>
                         <td className="px-3 py-4 align-middle">
                           <p className="truncate text-[12px] text-zinc-700">{c.mobile}</p>
@@ -1031,9 +1036,12 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
   const [pageSize, setPageSize] = useState(20);
 
   // Only UNPROMOTED contacts belong on the Customer Master surface — once a
-  // Contact carries a customerId it already shows up as a real Customer, so
-  // listing it again here would double-count the same person.
-  const prospects = useMemo(() => contacts.filter((c) => !c.customerId), [contacts]);
+  // Contact is promoted to a Customer (linked by customerId, OR its phone/email
+  // already matches an existing customer) it shows up as a real Customer, so
+  // listing it here too would double-count the same person. The phone/email
+  // check also reconciles historical contacts whose customerId was never
+  // back-filled.
+  const prospects = useMemo(() => unpromotedContacts(contacts, customers), [contacts, customers]);
 
   const filtered = useMemo(() => prospects.filter((c) => {
     if (statusFilter !== "all" && (c.status ?? "active") !== statusFilter) return false;

@@ -102,6 +102,41 @@ export const CAPTURE_SOURCES: CaptureSource[] = [
   "walk_in", "lead", "ticket", "invoice", "field", "pos", "import", "manual",
 ];
 
+/* ─── Customer ORIGIN — the two-logic Source pill ──────────────────────────
+   Business rule (RepairOX): the Customer Master "Source" column shows exactly
+   TWO origins, never the per-module capture pill:
+
+     • Sales   — the customer originated from a LEAD / CRM contact (the sales
+                 pipeline). i.e. a prospect a sales person captured, later
+                 promoted to a real customer.
+     • Manual  — the customer was created individually anywhere else: the
+                 "Add Customer" button, or directly while making a Ticket /
+                 Invoice / Walk-In. No lead behind them.
+
+   A customer is "from Sales" when EITHER its marketing `source` is "sales" OR
+   it was captured through the lead module (`captureSource === "lead"`). Every
+   other origin — and a blank/unknown one — reads as Manual. This is the single
+   source of truth for the pill; do not re-derive it per surface. */
+export type CustomerOrigin = "sales" | "manual";
+
+export function customerOrigin(
+  c: Pick<Customer, "source" | "captureSource">
+): CustomerOrigin {
+  if (c.source === "sales" || c.captureSource === "lead") return "sales";
+  return "manual";
+}
+
+export const CUSTOMER_ORIGIN_LABEL: Record<CustomerOrigin, string> = {
+  sales: "Sales",
+  manual: "Manual",
+};
+
+/** Subtle tone per origin for the two-logic Source badge (RepairOX palette). */
+export const CUSTOMER_ORIGIN_TONE: Record<CustomerOrigin, string> = {
+  sales: "bg-violet-50 text-violet-700 ring-violet-200",
+  manual: "bg-zinc-50 text-zinc-600 ring-zinc-200",
+};
+
 /* ─── Customer Group (segmentation label) ──────────────────────────────
    Reusable segmentation labels (VIP, Wholesale, Corporate, Priority, …).
    Managed under Settings → Customers → Customer Groups. A customer may belong

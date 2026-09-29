@@ -13,6 +13,7 @@
 
 import { CAP, allow } from "@/lib/capabilities";
 import type { PermissionKey } from "@/lib/permissions";
+import { isInListDateRange, type ListDatePreset } from "@/lib/date-filter";
 
 /* ─── Lead ────────────────────────────────────────────────────────────── */
 
@@ -37,7 +38,12 @@ export interface Lead {
   name: string;
   number: string;
   email: string;
-  location: string;
+  location: string;         // free-text address / landmark (unchanged)
+  /* Exact map pin (Leaflet + OpenStreetMap picker). Additive — complements the
+     free-text `location` so the field team gets a navigable point. */
+  locationLat: number | null;  // decimal latitude ("" → null on persist)
+  locationLng: number | null;  // decimal longitude
+  locationMapsUrl: string;     // shareable maps URL for the picked point ("" = none)
 
   /* ── Stage 2: Qualification ── */
   device: string;           // cached display label (brand + model, or free text)
@@ -66,6 +72,21 @@ export interface Lead {
   followUpAgentId: string;   // staff id of the follow-up agent (may differ from owner)
   finalResult: string;
   followUpComments: string;
+
+  /* ── Not-Contacted lock (§ Not-Contacted accountability) ──
+     When a lead sits at contactStatus "Not Contacted" it is on a countdown.
+     `notContactedSince` is the ISO instant the lead ENTERED (or last re-entered)
+     the Not-Contacted state — set on create for a fresh Not-Contacted lead, and
+     re-stamped whenever contactStatus is set back to Not Contacted. Cleared ("")
+     the moment the lead is contacted (any other contactStatus).
+
+     After NOT_CONTACTED_LOCK_MS (48h) with no contact, the lead is LOCKED: it
+     leaves the owning Sales Agent's working set (they can no longer see the
+     flow — only that it exists as Not Contacted, every other column N/A) and
+     waits in the "Not Contacted" view for a senior/owner to REASSIGN it. A
+     reassignment (owner change) clears the lock and restarts the clock fresh
+     for the new owner. */
+  notContactedSince: string;  // ISO instant the lead entered Not-Contacted ("" = not in that state)
 
   /* ── Assignment (owner responsible for working the lead) ── */
   assignedTo: string;       // staff id of the assignee ("" = unassigned)
@@ -379,6 +400,9 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
     number: "",
     email: "",
     location: "",
+    locationLat: null,
+    locationLng: null,
+    locationMapsUrl: "",
     device: "",
     deviceCategoryId: "",
     deviceBrandId: "",
@@ -415,7 +439,22 @@ export function canAssignLeads(can: (key: PermissionKey) => boolean): boolean {
 
 /* ─── Shared filter model (used by BOTH the list and the dashboard) ─────── */
 
-export type LeadDateRange = "all" | "today" | "yesterday" | "7days" | "30days" | "thisMonth";
+/** Leads reuse the SHARED 8-option date-range vocabulary (the same one Tickets,
+ *  Walk-In, Field and the Dashboard use) so the strip + boundaries are
+ *  identical everywhere. See ListDatePreset / isInListDateRange in date-filter.ts. */
+export type LeadDateRange = ListDatePreset;
+
+/** The canonical date-range strip options (matches Tickets / Dashboard exactly). */
+export const LEAD_DATE_RANGES: { value: LeadDateRange; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "today", label: "Today" },
+  { value: "yesterday", label: "Yesterday" },
+  { value: "7days", label: "7 Days" },
+  { value: "1month", label: "1 Month" },
+  { value: "lastmonth", label: "Last Month" },
+  { value: "1year", label: "1 Year" },
+  { value: "custom", label: "Custom" },
+];
 
 /** Fields that can be filtered by an exact configured value. */
 export type LeadFilterField =
@@ -428,10 +467,25 @@ export type LeadFilterField =
 /** The complete, shared lead filter state. `field` holds per-field exact
  *  matches; `query` is the free-text search; `dateRange` filters by creation
  *  date; `followUp` narrows by follow-up timing. */
+/** The primary segment strip on the Lead Table.
+ *  - "all"          → the normal working table (excludes LOCKED not-contacted
+ *                     leads, which have aged out to the "notContacted" view).
+ *  - "notContacted" → leads currently at contactStatus "Not Contacted"
+ *                     (whether inside the grace window or locked). This is the
+ *                     accountability queue where seniors reassign stale leads.
+ *  - "followUps"    → leads with follow-up activity (mirrors Walk-In's
+ *                     Active/History follow-up view + calendar). */
+export type LeadView = "all" | "notContacted" | "followUps";
+
 export interface LeadFilters {
   query: string;
+  /** Primary segment: all / notContacted / followUps. */
+  view: LeadView;
   status: string;              // "" = all (also drives the status tabs)
   dateRange: LeadDateRange;
+  /** Custom range bounds (YYYY-MM-DD), only used when dateRange === "custom". */
+  customFrom?: string;
+  customTo?: string;
   followUp: "any" | "has" | "overdue" | "today" | "upcoming" | "none";
   /** Customer Master linkage. "existing" = the lead is linked to a Customer
    *  Master record (lead.customerId set); "new" = fresh prospect, not yet a
@@ -443,8 +497,11 @@ export interface LeadFilters {
 
 export const EMPTY_LEAD_FILTERS: LeadFilters = {
   query: "",
+  view: "all",
   status: "",
   dateRange: "all",
+  customFrom: "",
+  customTo: "",
   followUp: "any",
   customerLink: "any",
   fields: {},
@@ -466,31 +523,12 @@ export function leadIsExistingCustomer(l: Lead): boolean {
   return !!(l.customerId && l.customerId.trim()) || !!l.convertedAt;
 }
 
-function startOfToday(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  return d.getTime();
-}
-
-/** True if an ISO/date string falls within the given creation-date range. */
-export function leadInDateRange(createdAt: string, range: LeadDateRange): boolean {
-  if (range === "all") return true;
-  const t = new Date(createdAt).getTime();
-  if (isNaN(t)) return true;
-  const today = startOfToday();
-  const DAY = 86_400_000;
-  switch (range) {
-    case "today": return t >= today;
-    case "yesterday": return t >= today - DAY && t < today;
-    case "7days": return t >= today - 7 * DAY;
-    case "30days": return t >= today - 30 * DAY;
-    case "thisMonth": {
-      const d = new Date();
-      const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-      return t >= monthStart;
-    }
-    default: return true;
-  }
+/** True if an ISO/date string falls within the given creation-date range.
+ *  Delegates to the SHARED boundary logic (isInListDateRange) so Leads resolve
+ *  every preset (Today / 1 Month / Last Month / …) to the EXACT same window as
+ *  Tickets and the Dashboard. */
+export function leadInDateRange(createdAt: string, range: LeadDateRange, customFrom?: string, customTo?: string): boolean {
+  return isInListDateRange(createdAt, range, customFrom, customTo);
 }
 
 /**
@@ -510,12 +548,29 @@ export function applyLeadFilters(
 ): Lead[] {
   const q = f.query.trim().toLowerCase();
   const asOf = Date.now();
+  const view: LeadView = f.view ?? "all";
   return leads.filter((l) => {
+    // ── Primary segment (view) ──────────────────────────────────────────────
+    // notContacted: leads still at "Not Contacted" (grace window OR locked).
+    // all: the normal working table — a LOCKED not-contacted lead has aged out
+    //      to the notContacted queue and is hidden here. Follow-ups view keeps
+    //      only leads with any follow-up activity.
+    if (view === "notContacted") {
+      if (!isNotContactedStatus(l.contactStatus)) return false;
+    } else if (view === "all") {
+      if (isNotContactedLocked(l, asOf)) return false;
+    } else if (view === "followUps") {
+      const hasFu = openFollowUpsByLead
+        ? openFollowUpRowState(openFollowUpsByLead.get(l.id), asOf) !== "none"
+        : followUpState(l.followUpDate) !== "none";
+      if (!hasFu) return false;
+    }
+
     if (f.status && l.status !== f.status) return false;
     for (const [k, v] of Object.entries(f.fields)) {
       if (v && String((l as any)[k] ?? "") !== v) return false;
     }
-    if (!leadInDateRange(l.createdAt || l.date, f.dateRange)) return false;
+    if (!leadInDateRange(l.createdAt || l.date, f.dateRange, f.customFrom, f.customTo)) return false;
 
     if (f.customerLink !== "any") {
       const existing = leadIsExistingCustomer(l);
@@ -545,6 +600,59 @@ export function applyLeadFilters(
     }
     return true;
   });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   NOT-CONTACTED LOCK (accountability countdown)
+   A lead left at "Not Contacted" for longer than NOT_CONTACTED_LOCK_MS is
+   locked away from its Sales Agent and surfaced (Not Contacted, everything
+   else N/A) in the "Not Contacted" view for a senior/owner to reassign.
+   Pure, derived — never a stored "locked" flag; computed live from
+   contactStatus + notContactedSince so it always reflects reality.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** 48 hours (2 days) — the grace period before a Not-Contacted lead is locked. */
+export const NOT_CONTACTED_LOCK_MS = 48 * 60 * 60 * 1000;
+
+/** True when a contactStatus value means the lead has NOT been contacted yet.
+ *  Case-insensitive so an admin-renamed "not contacted" style value still
+ *  classifies (e.g. "Not Contacted", "Not contacted yet"). An empty status is
+ *  treated as not-contacted (a brand-new lead nobody has touched). */
+export function isNotContactedStatus(contactStatus: string): boolean {
+  const s = (contactStatus || "").trim().toLowerCase();
+  return s === "" || s.startsWith("not contacted") || s === "not contacted";
+}
+
+/** The instant the Not-Contacted lock trips for a lead, or null when the lead
+ *  is not on the countdown (already contacted). Uses `notContactedSince` when
+ *  present, else falls back to the lead's creation time so legacy rows still
+ *  age correctly. */
+export function notContactedLockAt(lead: Pick<Lead, "contactStatus" | "notContactedSince" | "createdAt" | "date">): number | null {
+  if (!isNotContactedStatus(lead.contactStatus)) return null;
+  const since = lead.notContactedSince || lead.createdAt || lead.date;
+  const t = since ? new Date(since).getTime() : NaN;
+  if (isNaN(t)) return null;
+  return t + NOT_CONTACTED_LOCK_MS;
+}
+
+/** True when a Not-Contacted lead has passed its 48h grace period and is now
+ *  LOCKED (must be reassigned by a senior before work continues). */
+export function isNotContactedLocked(
+  lead: Pick<Lead, "contactStatus" | "notContactedSince" | "createdAt" | "date">,
+  asOf: number = Date.now(),
+): boolean {
+  const at = notContactedLockAt(lead);
+  return at != null && asOf >= at;
+}
+
+/** Milliseconds remaining before a Not-Contacted lead locks (negative once
+ *  locked, null when not on the countdown). Drives the "locks in Xh" hint. */
+export function notContactedLockRemainingMs(
+  lead: Pick<Lead, "contactStatus" | "notContactedSince" | "createdAt" | "date">,
+  asOf: number = Date.now(),
+): number | null {
+  const at = notContactedLockAt(lead);
+  return at == null ? null : at - asOf;
 }
 
 /** Pinned-first ordering (preserves incoming order within each group). */

@@ -20,7 +20,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
   X, Check, ChevronRight, ChevronLeft, UserPlus, Search,
-  ClipboardList, CalendarClock, AlertCircle, ChevronDown,
+  ClipboardList, CalendarClock, AlertCircle, ChevronDown, MapPin,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -36,6 +36,7 @@ import {
 } from "@/lib/leads-data";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
+import { LocationPicker } from "@/components/leads/location-picker";
 import { cn } from "@/lib/utils";
 
 /* ─── Configurable select (searchable, options from Settings) ─────────── */
@@ -256,6 +257,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const bodyRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
+  const [mapOpen, setMapOpen] = useState(false);
 
   /* ── Single coherent draft state (survives all step changes) ── */
   const [draft, setDraft] = useState<LeadDraft>(() => {
@@ -291,6 +293,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   }, [isEdit, salesAgentsReady, currentUserId, currentUserName, currentUserIsSalesAgent, draft.assignedTo, draft.branchId]);
 
   const set = <K extends keyof LeadDraft>(key: K, val: LeadDraft[K]) => setDraft((d) => ({ ...d, [key]: val }));
+  const hasPin = draft.locationLat != null && draft.locationLng != null;
 
   // The owner is REQUIRED whenever one can actually be chosen: the user can pick
   // an owner and the store has Sales Agents, or the user is a Sales Agent
@@ -507,7 +510,32 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     </Field>
                   </div>
                   <Field label="Location">
-                    <input className={inputCls()} value={draft.location ?? ""} onChange={(e) => set("location", e.target.value)} placeholder="Address / landmark" />
+                    <div className="flex items-center gap-2">
+                      <input className={inputCls()} value={draft.location ?? ""} onChange={(e) => set("location", e.target.value)} placeholder="Address / landmark" />
+                      <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => setMapOpen(true)}>
+                        <MapPin className="h-4 w-4" /> {hasPin ? "Edit pin" : "Map"}
+                      </Button>
+                    </div>
+                    {hasPin && (
+                      <div className="mt-1.5 flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/20 px-2.5 py-1.5">
+                        <a
+                          href={draft.locationMapsUrl || undefined}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="flex min-w-0 items-center gap-1.5 text-[11.5px] font-medium text-[#4361EE] hover:underline"
+                        >
+                          <MapPin className="h-3 w-3 shrink-0" />
+                          <span className="truncate">{draft.locationLat!.toFixed(5)}, {draft.locationLng!.toFixed(5)} · Open in Maps</span>
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() => setDraft((d) => ({ ...d, locationLat: null, locationLng: null, locationMapsUrl: "" }))}
+                          className="shrink-0 text-[11px] font-medium text-muted-foreground hover:text-rose-600"
+                        >
+                          Remove pin
+                        </button>
+                      </div>
+                    )}
                   </Field>
                 </div>
               )}
@@ -645,6 +673,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <ReviewGroup title="Customer" onEdit={() => goToStage(1)} rows={[
                     ["Name", draft.name], ["Number", draft.number], ["Email", draft.email],
                     ["Region", draft.region], ["Location", draft.location],
+                    ["Map pin", hasPin ? `${draft.locationLat!.toFixed(5)}, ${draft.locationLng!.toFixed(5)}` : ""],
                     ["Customer Master", draft.customerId ? "Linked" : "New / unlinked"],
                   ]} />
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
@@ -696,6 +725,20 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
           </div>
         </div>
       </motion.div>
+
+      <LocationPicker
+        open={mapOpen}
+        onClose={() => setMapOpen(false)}
+        initial={hasPin ? { lat: draft.locationLat!, lng: draft.locationLng!, address: draft.location } : null}
+        onPick={(loc) => setDraft((d) => ({
+          ...d,
+          locationLat: loc.lat,
+          locationLng: loc.lng,
+          locationMapsUrl: loc.mapsUrl,
+          // Fill the free-text address if empty, so the label + pin agree.
+          location: d.location?.trim() ? d.location : loc.address,
+        }))}
+      />
     </>
   );
 

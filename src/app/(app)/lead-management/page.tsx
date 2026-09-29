@@ -23,6 +23,9 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import {
+  Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RcTooltip, XAxis, YAxis,
+} from "recharts";
+import {
   Inbox, Target, TrendingUp, UserPlus, Megaphone, Plus, ChevronRight,
   CheckCircle2, Clock, AlertTriangle, IndianRupee, Trophy, Route as RouteIcon,
   Flame, CalendarClock, ArrowUpRight, Smartphone, BarChart3,
@@ -50,6 +53,7 @@ import {
 import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
+import { NotepadWidget } from "@/components/dashboard/notepad-widget";
 
 /* The single shared operational date filter (drives EVERY component below). */
 const DATE_OPTIONS: { label: string; value: PerfDateRange }[] = [
@@ -187,14 +191,21 @@ export default function LeadDashboardPage() {
     return buckets;
   }, [scopedLeads, scopedFollowUps]);
 
-  const stageMeta: { key: StageKey; label: string; dot: string; bar: string; statusHint: string }[] = [
-    { key: "new", label: "New", dot: "bg-sky-500", bar: "bg-sky-500", statusHint: "new" },
-    { key: "contacted", label: "Contacted", dot: "bg-violet-500", bar: "bg-violet-500", statusHint: "contact" },
-    { key: "followUp", label: "Follow-up", dot: "bg-amber-500", bar: "bg-amber-500", statusHint: "follow" },
-    { key: "qualified", label: "Qualified", dot: "bg-indigo-500", bar: "bg-indigo-500", statusHint: "qualif" },
-    { key: "converted", label: "Converted / Won", dot: "bg-emerald-500", bar: "bg-emerald-500", statusHint: "won" },
-    { key: "lost", label: "Lost", dot: "bg-zinc-400", bar: "bg-zinc-400", statusHint: "lost" },
+  const stageMeta: { key: StageKey; label: string; hex: string; statusHint: string }[] = [
+    { key: "new", label: "New", hex: "#0EA5E9", statusHint: "new" },
+    { key: "contacted", label: "Contacted", hex: "#8B5CF6", statusHint: "contact" },
+    { key: "followUp", label: "Follow-up", hex: "#F59E0B", statusHint: "follow" },
+    { key: "qualified", label: "Qualified", hex: "#4361EE", statusHint: "qualif" },
+    { key: "converted", label: "Converted / Won", hex: "#10B981", statusHint: "won" },
+    { key: "lost", label: "Lost", hex: "#A1A1AA", statusHint: "lost" },
   ];
+
+  /* Stage → donut data (label + real count + colour), for the funnel donut. */
+  const stageChartData = useMemo(
+    () => stageMeta.map((s) => ({ key: s.key, label: s.label, value: stages[s.key].length, color: s.hex })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stages],
+  );
 
   /* ── Recent leads (newest first, real fields only) ── */
   const recentLeads = useMemo(
@@ -365,33 +376,14 @@ export default function LeadDashboardPage() {
             {perf.leads === 0 ? (
               <EmptyRow text="No leads in this period yet." />
             ) : (
-              <div className="space-y-3">
-                {stageMeta.map((s) => {
-                  const count = stages[s.key].length;
-                  const width = perf.leads > 0 ? Math.max(count > 0 ? 4 : 0, Math.round((count / perf.leads) * 100)) : 0;
-                  return (
-                    <button
-                      key={s.key}
-                      onClick={() => goToLeads({ status: firstStatusMatching(s.statusHint) })}
-                      className="group block w-full text-left"
-                    >
-                      <div className="mb-1 flex items-center justify-between text-[12px]">
-                        <span className="flex items-center gap-1.5 font-medium text-foreground">
-                          <span className={cn("h-1.5 w-1.5 rounded-full", s.dot)} />
-                          {s.label}
-                        </span>
-                        <span className="tabular-nums text-muted-foreground">
-                          {count}
-                          {perf.leads > 0 && <span className="ml-1 text-[11px]">({Math.round((count / perf.leads) * 100)}%)</span>}
-                        </span>
-                      </div>
-                      <div className="h-2.5 overflow-hidden rounded-full bg-muted">
-                        <div className={cn("h-full rounded-full transition-all group-hover:opacity-80", s.bar)} style={{ width: `${width}%` }} />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
+              <StageDonut
+                data={stageChartData}
+                total={perf.leads}
+                onSlice={(key) => {
+                  const meta = stageMeta.find((s) => s.key === key);
+                  goToLeads({ status: firstStatusMatching(meta?.statusHint ?? "") });
+                }}
+              />
             )}
           </SectionCard>
 
@@ -401,25 +393,10 @@ export default function LeadDashboardPage() {
               {perf.bySource.length === 0 ? (
                 <EmptyRow text="No leads captured yet." />
               ) : (
-                <ul className="space-y-3">
-                  {perf.bySource.slice(0, 7).map((s) => {
-                    const conv = s.leads > 0 ? Math.round((s.converted / s.leads) * 100) : 0;
-                    const width = perf.leads > 0 ? Math.max(4, Math.round((s.leads / perf.leads) * 100)) : 0;
-                    return (
-                      <li key={s.key}>
-                        <div className="mb-1 flex items-center justify-between text-[12px]">
-                          <span className="truncate font-medium text-foreground">{s.label}</span>
-                          <span className="tabular-nums text-muted-foreground">
-                            {s.leads} · {s.qualified} qual · {conv}% won
-                          </span>
-                        </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-muted">
-                          <div className="h-full rounded-full bg-[#4361EE]" style={{ width: `${width}%` }} />
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <SourceBarChart
+                  data={perf.bySource}
+                  onBar={(key) => goToLeads({ fields: { source: key } })}
+                />
               )}
             </SectionCard>
 
@@ -484,12 +461,23 @@ export default function LeadDashboardPage() {
             {recentLeads.length === 0 ? (
               <EmptyRow text="No recent leads in this period." />
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border">
-                <table className="w-full text-[13px]">
+              <div className="overflow-x-auto rounded-xl border border-border">
+                <table className="w-full min-w-[720px] text-[13px]">
+                  {/* Fixed proportions so the Lead number never wraps and Owner
+                      doesn't crowd the narrow columns. */}
+                  <colgroup>
+                    <col className="w-[72px]" />
+                    <col className="w-[22%]" />
+                    <col className="w-[18%]" />
+                    <col className="w-[16%]" />
+                    <col className="w-[13%]" />
+                    <col className="w-[14%]" />
+                    <col className="w-[12%]" />
+                  </colgroup>
                   <thead className="bg-muted/60">
                     <tr>
                       {["Lead", "Customer", "Device", "Owner", "Value", "Status", "Follow-up"].map((h, i) => (
-                        <th key={h} className={cn("px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", i >= 4 && i <= 4 ? "text-right" : "text-left")}>
+                        <th key={h} className={cn("whitespace-nowrap px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", i === 4 ? "text-right" : "text-left")}>
                           {h}
                         </th>
                       ))}
@@ -502,7 +490,7 @@ export default function LeadDashboardPage() {
                         onClick={() => openLead(l.id)}
                         className="cursor-pointer border-t border-border transition hover:bg-muted/40"
                       >
-                        <td className="px-3 py-2.5 font-semibold text-[#4361EE] tabular-nums">{l.leadNo || "—"}</td>
+                        <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-[#4361EE] tabular-nums">{l.leadNo || "—"}</td>
                         <td className="px-3 py-2.5">
                           <div className="flex items-center gap-2">
                             <Avatar name={l.name || l.leadNo} size={24} />
@@ -562,23 +550,31 @@ export default function LeadDashboardPage() {
             </Link>
           </SectionCard>
 
-          {/* Quick add prompt (IVR-fast capture) */}
+          {/* Quick add prompt (IVR-fast capture) — blue-accent gradient card,
+              matching the dashboard's colourful language. */}
           <Can permission={CAP.lead.create}>
-            <div className="rounded-2xl border border-[#B3BFF6] bg-[#FAFBFF] p-5 shadow-card">
-              <div className="flex items-center gap-2.5">
-                <span className="grid h-9 w-9 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-                  <UserPlus className="h-4 w-4" />
+            <div className="group relative overflow-hidden rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-gradient-to-br from-[#F5F7FF] via-card to-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]">
+              {/* Gradient left accent rail, same as the KPI cards. */}
+              <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-r-full bg-gradient-to-b from-[#4361EE] to-[#6366F1] opacity-80" />
+              <div className="relative flex items-center gap-2.5">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#4361EE] to-[#6366F1] text-white shadow-sm">
+                  <UserPlus className="h-5 w-5" />
                 </span>
                 <div>
                   <p className="text-sm font-bold text-foreground">Got a call?</p>
                   <p className="text-[12px] text-muted-foreground">Capture the lead in seconds.</p>
                 </div>
               </div>
-              <Button className="mt-3 w-full gap-1.5 rounded-xl" onClick={() => setShowCreate(true)}>
+              <Button className="relative mt-3 w-full gap-1.5 rounded-xl" onClick={() => setShowCreate(true)}>
                 <Plus className="h-4 w-4" /> Quick Add Lead
               </Button>
             </div>
           </Can>
+
+          {/* Notepad — same personal sticky notes as the full Notes page,
+              here as a compact rail card so a Sales Agent can jot reminders
+              without leaving their daily workspace. */}
+          <NotepadWidget />
         </div>
       </div>
 
@@ -596,6 +592,139 @@ export default function LeadDashboardPage() {
 
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   Charts — clearer, at-a-glance visuals (recharts, the app's charting lib).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* Leads by Stage — a donut of the funnel composition with a big center total
+   and an interactive legend (count + %). Far easier to read the mix at a glance
+   than six separate bars; each legend row still deep-links into the real list. */
+function StageDonut({
+  data, total, onSlice,
+}: {
+  data: { key: string; label: string; value: number; color: string }[];
+  total: number;
+  onSlice: (key: string) => void;
+}) {
+  const slices = data.filter((d) => d.value > 0);
+  return (
+    <div className="flex flex-col items-center gap-5 sm:grid sm:grid-cols-[168px_1fr] sm:items-center">
+      {/* Donut */}
+      <div className="relative h-[168px] w-[168px]">
+        <ResponsiveContainer width="100%" height="100%">
+          <PieChart>
+            <Pie
+              data={slices.length ? slices : [{ key: "empty", label: "", value: 1, color: "#E5E7EB" }]}
+              dataKey="value"
+              innerRadius={58}
+              outerRadius={80}
+              paddingAngle={slices.length > 1 ? 2 : 0}
+              stroke="none"
+              startAngle={90}
+              endAngle={-270}
+            >
+              {(slices.length ? slices : [{ color: "#E5E7EB" }]).map((d, i) => (
+                <Cell key={i} fill={d.color} className={slices.length ? "cursor-pointer outline-none" : ""} />
+              ))}
+            </Pie>
+            {slices.length > 0 && (
+              <RcTooltip
+                cursor={false}
+                contentStyle={{ borderRadius: 12, border: "1px solid #E5E7EB", fontSize: 12, padding: "6px 10px", boxShadow: "0 4px 12px -4px rgba(0,0,0,0.12)" }}
+                formatter={(v: number, _n, p) => [`${v} (${total > 0 ? Math.round((v / total) * 100) : 0}%)`, (p?.payload as { label?: string })?.label ?? ""]}
+              />
+            )}
+          </PieChart>
+        </ResponsiveContainer>
+        <div className="pointer-events-none absolute inset-0 grid place-items-center">
+          <div className="text-center">
+            <p className="font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums">{total}</p>
+            <p className="mt-1 text-[9px] font-semibold uppercase tracking-widest text-muted-foreground">Total Leads</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Legend — each row a real, clickable filter into the leads list. */}
+      <ul className="grid w-full grid-cols-1 gap-1.5 sm:grid-cols-2">
+        {data.map((d) => {
+          const share = total > 0 ? Math.round((d.value / total) * 100) : 0;
+          return (
+            <li key={d.key}>
+              <button
+                onClick={() => onSlice(d.key)}
+                className="flex w-full items-center justify-between gap-2 rounded-lg bg-zinc-50/80 px-2.5 py-1.5 text-left transition hover:bg-[#EEF1FD]"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full shadow-sm" style={{ background: d.color }} />
+                  <span className="truncate text-[12px] font-medium text-zinc-700">{d.label}</span>
+                </span>
+                <span className="shrink-0 text-[12px] font-bold tabular-nums text-zinc-900">
+                  {d.value}
+                  <span className="ml-1 text-[10px] font-medium text-muted-foreground">{share}%</span>
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+/* Source Performance — a horizontal bar chart so lengths are directly
+   comparable, plus a per-source detail line (qualified + won %) under each bar
+   for the analytical depth the old list carried. Bars deep-link to the list. */
+function SourceBarChart({
+  data, onBar,
+}: {
+  data: { key: string; label: string; leads: number; qualified: number; converted: number }[];
+  onBar: (key: string) => void;
+}) {
+  const rows = data.slice(0, 7);
+  const chartData = rows.map((s) => ({
+    key: s.key,
+    label: s.label,
+    leads: s.leads,
+    detail: `${s.qualified} qualified · ${s.leads > 0 ? Math.round((s.converted / s.leads) * 100) : 0}% won`,
+  }));
+  const height = Math.max(120, chartData.length * 46);
+  return (
+    <div style={{ height }}>
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, left: 0, bottom: 4 }} barCategoryGap={12}>
+          <XAxis type="number" hide />
+          <YAxis
+            type="category"
+            dataKey="label"
+            width={96}
+            tickLine={false}
+            axisLine={false}
+            tick={{ fontSize: 12, fontWeight: 600, fill: "#3F3F46" }}
+          />
+          <RcTooltip
+            cursor={{ fill: "#EEF1FD" }}
+            contentStyle={{ borderRadius: 12, border: "1px solid #E5E7EB", fontSize: 12, padding: "6px 10px", boxShadow: "0 4px 12px -4px rgba(0,0,0,0.12)" }}
+            formatter={(v: number, _n, p) => [`${v} leads · ${(p?.payload as { detail?: string })?.detail ?? ""}`, "Source"]}
+          />
+          <Bar
+            dataKey="leads"
+            radius={[6, 6, 6, 6]}
+            fill="#4361EE"
+            maxBarSize={22}
+            background={{ fill: "#F1F5F9", radius: 6 } as never}
+            cursor="pointer"
+            onClick={(d: { key?: string }) => d?.key && onBar(d.key)}
+          >
+            {chartData.map((_, i) => (
+              <Cell key={i} fill="#4361EE" />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
 }
 
 /* Local-date <-> YYYY-MM-DD helpers for the custom range calendar (kept local
@@ -620,13 +749,21 @@ function formatRangeLabel(from: string, to: string): string {
   return `${fmt(from)} — ${fmt(to)}`;
 }
 
-const KPI_TONES: Record<string, string> = {
-  indigo: "bg-[#EEF1FD] text-[#4361EE]",
-  emerald: "bg-emerald-50 text-emerald-600",
-  amber: "bg-amber-50 text-amber-600",
-  rose: "bg-rose-50 text-rose-600",
-  sky: "bg-sky-50 text-sky-600",
-  violet: "bg-violet-50 text-violet-600",
+/* ── Per-tone visual system — mirrors the Shop Dashboard KpiCard so the two
+   surfaces share one colourful, on-brand language: a gradient left accent rail,
+   a soft tone-tinted top wash, a colour-matched icon box and hint chip. Every
+   colour is drawn from the existing RepairOX palette. ── */
+const KPI_TONES: Record<
+  string,
+  { icon: string; hint: string; from: string; to: string; wash: string }
+> = {
+  indigo:  { icon: "bg-[#EEF1FD] text-[#4361EE]", hint: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/50", from: "#4361EE", to: "#6366F1", wash: "from-[#4361EE]/[0.07]" },
+  blue:    { icon: "bg-[#EEF1FD] text-[#4361EE]", hint: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]/50", from: "#4361EE", to: "#6366F1", wash: "from-[#4361EE]/[0.07]" },
+  emerald: { icon: "bg-emerald-50 text-emerald-600", hint: "text-emerald-700 bg-emerald-50 ring-emerald-200/50", from: "#10B981", to: "#34D399", wash: "from-emerald-500/[0.07]" },
+  amber:   { icon: "bg-amber-50 text-amber-600", hint: "text-amber-700 bg-amber-50 ring-amber-200/50", from: "#F59E0B", to: "#FBBF24", wash: "from-amber-500/[0.07]" },
+  rose:    { icon: "bg-rose-50 text-rose-600", hint: "text-rose-700 bg-rose-50 ring-rose-200/50", from: "#F43F5E", to: "#FB7185", wash: "from-rose-500/[0.07]" },
+  sky:     { icon: "bg-sky-50 text-sky-600", hint: "text-sky-700 bg-sky-50 ring-sky-200/50", from: "#0EA5E9", to: "#38BDF8", wash: "from-sky-500/[0.07]" },
+  violet:  { icon: "bg-violet-50 text-violet-600", hint: "text-violet-700 bg-violet-50 ring-violet-200/50", from: "#8B5CF6", to: "#A78BFA", wash: "from-violet-500/[0.07]" },
 };
 
 function KpiCard({
@@ -640,23 +777,40 @@ function KpiCard({
   onClick?: () => void;
   urgent?: boolean;
 }) {
+  const t = KPI_TONES[tone] ?? KPI_TONES.indigo;
   return (
     <button
       onClick={onClick}
       className={cn(
-        "group flex flex-col rounded-2xl border bg-card p-4 text-left shadow-card transition hover:border-[#4361EE]/40 hover:shadow-md",
-        urgent ? "border-red-300 bg-red-50/40" : "border-border",
+        "group relative flex flex-col overflow-hidden rounded-2xl border bg-card p-4 pl-[18px] text-left shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
+        urgent ? "border-red-300 bg-red-50/40" : "border-[#B3BFF6]/50",
       )}
     >
-      <div className="flex items-center justify-between">
-        <span className={cn("grid h-9 w-9 place-items-center rounded-lg", KPI_TONES[tone] ?? KPI_TONES.indigo)}>
+      {/* Left accent rail — instantly distinguishes each metric at a glance. */}
+      <span
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-r-full opacity-80 transition-opacity duration-300 group-hover:opacity-100"
+        style={{ background: `linear-gradient(to bottom, ${t.from}, ${t.to})` }}
+      />
+      {/* Soft top wash — tone-tinted, fades to transparent. */}
+      <div aria-hidden className={cn("pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b to-transparent", t.wash)} />
+
+      <div className="relative flex items-center justify-between">
+        <span className={cn("grid h-9 w-9 place-items-center rounded-lg", t.icon)}>
           <Icon className="h-4 w-4" />
         </span>
         <ArrowUpRight className="h-4 w-4 text-zinc-300 transition group-hover:text-[#4361EE]" />
       </div>
-      <p className={cn("mt-3 text-2xl font-extrabold tabular-nums", urgent ? "text-[#B42318]" : "text-foreground")}>{value}</p>
-      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      {hint && <p className="mt-0.5 truncate text-[11px] text-muted-foreground">{hint}</p>}
+      <p className={cn("relative mt-3 text-2xl font-extrabold tabular-nums", urgent ? "text-[#B42318]" : "text-foreground")}>{value}</p>
+      <p className="relative text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+      {hint && (
+        <p className={cn(
+          "relative mt-1.5 inline-flex w-fit items-center truncate rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+          urgent ? "text-[#B42318] bg-red-50 ring-red-200/60" : t.hint,
+        )}>
+          {hint}
+        </p>
+      )}
     </button>
   );
 }
@@ -670,7 +824,7 @@ function SectionCard({
   action?: React.ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+    <div className="rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] sm:p-6">
       <div className="mb-5 flex items-center justify-between gap-2.5 border-b border-border/70 pb-4">
         <div className="flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">

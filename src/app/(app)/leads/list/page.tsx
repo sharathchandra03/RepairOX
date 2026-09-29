@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, UserCheck, UserPlus,
+  Phone, Mail, UserCheck, UserPlus, RefreshCw, Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -22,14 +22,18 @@ import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { Can } from "@/components/common/can";
-import { CAP } from "@/lib/capabilities";
+import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadIsExistingCustomer, type LeadFollowUp,
+  isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
 } from "@/lib/leads-data";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
+import { LeadFollowUpView } from "@/components/leads/lead-followup-view";
+import { LeadFollowUpBell } from "@/components/leads/lead-followup-bell";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
@@ -52,6 +56,11 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
    original <colgroup> so freeze offsets line up exactly. */
 function leadGridColumns(multiStore: boolean): GridColumn[] {
   const cols: GridColumn[] = [
+    // Selection anchor — permanently frozen LEFT, before Lead ID. Not offered
+    // in the freeze menu (freezable:false); it is a structural selection column
+    // handled directly by frozenCellProps (not the single-anchor hook, which
+    // owns the Lead ID left anchor).
+    { key: "select", label: "", width: 44, freezable: false },
     { key: "id", label: "Lead ID", width: 84, lockedLeft: true },
   ];
   if (multiStore) cols.push({ key: "store", label: "Store", width: 132, freezable: false });
@@ -124,6 +133,33 @@ function FollowUpCell({ lead, open }: { lead: Lead; open?: LeadFollowUp }) {
       {label}
     </span>
   );
+}
+
+/** Label for a primary-view segment with an optional count badge (matches the
+ *  Walk-In follow-up tab: white pill on the active blue tab, blue pill otherwise). */
+function ViewTabLabel({ text, count, active }: { text: string; count: number; active: boolean }) {
+  return (
+    <span className="inline-flex items-center gap-2">
+      {text}
+      {count > 0 && (
+        <span
+          className={cn(
+            "inline-flex h-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-bold leading-none tabular-nums",
+            active ? "bg-white text-[#4361EE]" : "bg-[#4361EE] text-white",
+          )}
+          style={{ minWidth: 18 }}
+        >
+          {count > 99 ? "99+" : count}
+        </span>
+      )}
+    </span>
+  );
+}
+
+/** Masked cell for a LOCKED Not-Contacted lead — the flow is hidden (N/A)
+ *  until a senior reassigns the lead to a new owner. */
+function NACell() {
+  return <span className="text-[12px] font-medium text-zinc-400">N/A</span>;
 }
 
 /** Compact date+time label for an open follow-up (e.g. "27 Sep, 6:00 PM"). */
@@ -302,14 +338,8 @@ const FILTER_FIELDS: { key: LeadFilterField; label: string; optionField?: LeadFi
   { key: "finalResult",    label: "Final Result",    optionField: "finalResult" },
 ];
 
-const DATE_RANGES: { value: LeadDateRange; label: string }[] = [
-  { value: "all", label: "All time" },
-  { value: "today", label: "Today" },
-  { value: "yesterday", label: "Yesterday" },
-  { value: "7days", label: "Last 7 days" },
-  { value: "30days", label: "Last 30 days" },
-  { value: "thisMonth", label: "This month" },
-];
+// Shared 8-option date-range vocabulary (matches Tickets / Dashboard).
+const DATE_RANGES = LEAD_DATE_RANGES;
 
 const FOLLOWUP_FILTERS = [
   { value: "any", label: "Follow-up: Any" },
@@ -321,9 +351,12 @@ const FOLLOWUP_FILTERS = [
 ] as const;
 
 export default function LeadsListPage() {
-  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, salesAgents, openFollowUpsByLead } = useLeads();
+  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, salesAgents, openFollowUpsByLead } = useLeads();
   const canAssign = useCanAssignLeads();
-  const { currentUser } = usePermissions();
+  const { currentUser, can } = usePermissions();
+  // Bulk-action capability gates (granular key OR coarse fallback via CAP).
+  const canBulkStatus = allow(can, CAP.lead.stageChange);
+  const canBulkDelete = allow(can, CAP.lead.delete);
   // Multi-store: show the shared Store Context column only in the consolidated
   // All-Shops view with >1 authorized store (Design System v2 multi-store rule).
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -340,12 +373,26 @@ export default function LeadsListPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
 
+  // Width of the always-frozen selection column (sits before the Lead ID
+  // anchor). The hook owns the Lead ID left anchor, so every hook-computed left
+  // offset is shifted right by this width, and the select column itself is
+  // pinned at offset 0.
+  const selectColWidth = gridColumns.find((g) => g.key === "select")?.width ?? 0;
+
   const frozenCellProps = useCallback(
     (key: string): { className: string; style?: React.CSSProperties } => {
-      // LEFT frozen block — cumulative offset = sum of widths BEFORE this col.
+      // Selection column — always frozen at the very left edge (offset 0).
+      if (key === "select") {
+        return {
+          className: "rox-frozen rox-frozen-left",
+          style: { ["--rox-frozen-offset" as any]: "0px" },
+        };
+      }
+      // LEFT frozen block — cumulative offset = select width + sum of widths of
+      // any frozen columns BEFORE this one.
       const leftIdx = frozen.leftKeys.indexOf(key);
       if (leftIdx >= 0) {
-        let offset = 0;
+        let offset = selectColWidth;
         for (let i = 0; i < leftIdx; i++) {
           const c = gridColumns.find((g) => g.key === frozen.leftKeys[i]);
           offset += c?.width ?? 0;
@@ -362,12 +409,16 @@ export default function LeadsListPage() {
       }
       return { className: "" };
     },
-    [frozen.leftKeys, frozen.rightKey, gridColumns],
+    [frozen.leftKeys, frozen.rightKey, gridColumns, selectColWidth],
   );
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [showFilters, setShowFilters] = useState(false);
+  // ── Multiselect (matches Tickets/Walk-In) ──
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkStatus, setShowBulkStatus] = useState(false);
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [editLead, setEditLead] = useState<Lead | null>(null);
   const [detailLead, setDetailLead] = useState<Lead | null>(null);
@@ -406,11 +457,59 @@ export default function LeadsListPage() {
     return [{ label: "All", value: "" }, ...set.map((s) => ({ label: s, value: s }))];
   }, [leads]);
 
+  /* Counts for the primary view segments (Not Contacted / Follow-ups).
+     Derived from the scoped `leads` + open follow-ups — never a stored counter. */
+  const notContactedCount = useMemo(
+    () => leads.filter((l) => isNotContactedStatus(l.contactStatus)).length,
+    [leads],
+  );
+  const followUpsCount = useMemo(
+    () => leads.filter((l) => openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none").length,
+    [leads, openFollowUpsByLead],
+  );
+  const view = filters.view ?? "all";
+
+  /* ── ONE combined filter strip ────────────────────────────────────────────
+     Merges the primary VIEW segments (Not Contacted / Follow-Ups) with the
+     lifecycle STATUS filters into a single connected control with ONE "All".
+     - "All"                → view=all, status="" (the working table, unfiltered)
+     - "__notContacted__"   → view=notContacted (the accountability queue)
+     - "__followUps__"      → view=followUps (the follow-up table + calendar)
+     - any status value     → view=all, status=<that status>
+     The special view tokens are prefixed so they never collide with a real
+     configured status value. */
+  const NOT_CONTACTED_TAB = "__notContacted__";
+  const FOLLOWUPS_TAB = "__followUps__";
+  const combinedTab = view === "notContacted" ? NOT_CONTACTED_TAB
+    : view === "followUps" ? FOLLOWUPS_TAB
+    : filters.status || "all";
+  const combinedTabs = useMemo(() => {
+    // Configured lifecycle statuses (from the data), excluding the "All" entry
+    // statusTabs already prepends.
+    const statusOpts = statusTabs.filter((t) => t.value !== "").map((t) => ({ label: t.label, value: t.value }));
+    return [
+      { label: "All", value: "all" },
+      { label: <ViewTabLabel text="Not Contacted" count={notContactedCount} active={view === "notContacted"} />, value: NOT_CONTACTED_TAB },
+      { label: <ViewTabLabel text="Follow-Ups" count={followUpsCount} active={view === "followUps"} />, value: FOLLOWUPS_TAB },
+      ...statusOpts,
+    ];
+  }, [statusTabs, notContactedCount, followUpsCount, view]);
+  const onCombinedTabChange = useCallback((v: string) => {
+    if (v === NOT_CONTACTED_TAB) { setFilters((f) => ({ ...f, view: "notContacted" })); return; }
+    if (v === FOLLOWUPS_TAB) { setFilters((f) => ({ ...f, view: "followUps" })); return; }
+    // "all" or a specific status → the working view, optionally status-filtered.
+    setFilters((f) => ({ ...f, view: "all", status: v === "all" ? "" : v }));
+  }, [setFilters]);
+
   /* Reset to page 1 + scroll the grid back to the top whenever the filtered
      dataset changes (filter/search/page-size). Freeze config is untouched. */
   useEffect(() => {
     setPage(1);
     if (scrollRef.current) scrollRef.current.scrollTop = 0;
+    // A changed filter set can hide selected rows — clear the selection so the
+    // bulk bar never acts on leads the user can no longer see.
+    setSelected(new Set());
+    setShowBulkStatus(false);
   }, [filters, pageSize]);
 
   const totalPages = Math.max(1, Math.ceil(filteredLeads.length / pageSize));
@@ -419,6 +518,40 @@ export default function LeadsListPage() {
     () => filteredLeads.slice((currentPage - 1) * pageSize, currentPage * pageSize),
     [filteredLeads, currentPage, pageSize],
   );
+
+  /* ── Selection handlers (select-all spans the whole filtered set, like the
+     Tickets table; the header checkbox shows indeterminate for a partial set). */
+  const allSelected = filteredLeads.length > 0 && filteredLeads.every((l) => selected.has(l.id));
+  const someSelected = filteredLeads.some((l) => selected.has(l.id));
+  const toggleAll = useCallback(() => {
+    setSelected(allSelected ? new Set() : new Set(filteredLeads.map((l) => l.id)));
+  }, [allSelected, filteredLeads]);
+  const toggleOne = useCallback((id: string) => {
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  }, []);
+  const clearSelection = useCallback(() => { setSelected(new Set()); setShowBulkStatus(false); }, []);
+
+  /* Bulk status — apply the chosen lifecycle status to every selected lead via
+     the standard changeLeadStatus (writes status-history + terminal timestamps
+     per lead; never a raw bulk write). */
+  const statusOptions = useMemo(() => optionsFor("status").map((o) => o.value).filter(Boolean), [optionsFor]);
+  const handleBulkStatusChange = useCallback(async (status: string) => {
+    const ids = Array.from(selected);
+    await Promise.all(ids.map((id) => changeLeadStatus(id, status)));
+    toast.success(`Updated ${ids.length} lead${ids.length === 1 ? "" : "s"} to “${status}”.`);
+    setSelected(new Set());
+    setShowBulkStatus(false);
+  }, [selected, changeLeadStatus]);
+
+  /* Bulk delete — soft-delete each selected lead through the standard
+     deleteLead (permission + RLS enforced server-side). */
+  const handleBulkDelete = useCallback(async () => {
+    const ids = Array.from(selected);
+    await Promise.all(ids.map((id) => deleteLead(id)));
+    toast.success(`Deleted ${ids.length} lead${ids.length === 1 ? "" : "s"}.`);
+    setSelected(new Set());
+    setShowBulkDelete(false);
+  }, [selected, deleteLead]);
 
   const openEdit = (lead: Lead) => { setDetailLead(null); setEditLead(lead); };
   const liveDetailLead = detailLead ? leads.find((l) => l.id === detailLead.id) ?? null : null;
@@ -538,6 +671,8 @@ export default function LeadsListPage() {
         subtitle="Every enquiry in one place — capture fast, qualify when ready, follow up on time."
         actions={
           <div className="flex items-center gap-2">
+            {/* Lead follow-up bell — the current user's Due/Overdue follow-ups. */}
+            <LeadFollowUpBell onOpenLead={setDetailLead} />
             <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">
               <Link href="/leads/list" className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="List View"><List className="h-3.5 w-3.5" /></Link>
               <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
@@ -552,13 +687,39 @@ export default function LeadsListPage() {
         }
       />
 
-      {/* Status tabs + search + filter toggle */}
+      {/* DATE-RANGE strip — the SAME connected 8-option control used on Tickets,
+          Walk-In, Field and the Dashboard (All / Today / Yesterday / 7 Days /
+          1 Month / Last Month / 1 Year / Custom). Filters by lead creation date
+          via the shared boundary logic. */}
+      <div className="space-y-2">
+        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={filters.dateRange}
+            onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
+            options={LEAD_DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))}
+            size="sm"
+          />
+        </div>
+        <DateRangePicker
+          open={filters.dateRange === "custom"}
+          from={filters.customFrom || ""}
+          to={filters.customTo || ""}
+          onFromChange={(v) => setFilters((f) => ({ ...f, customFrom: v, dateRange: "custom" }))}
+          onToChange={(v) => setFilters((f) => ({ ...f, customTo: v, dateRange: "custom" }))}
+        />
+      </div>
+
+      {/* ONE connected filter strip — the primary VIEW segments (Not Contacted,
+          Follow-Ups) live alongside the lifecycle STATUS filters, with a single
+          leading "All". Picking Not Contacted / Follow-Ups switches the view;
+          picking a status filters within the working (All) view. No stacked,
+          duplicate "All" pills. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs
-            value={filters.status}
-            onChange={(v) => setFilters((f) => ({ ...f, status: v }))}
-            options={statusTabs}
+            value={combinedTab}
+            onChange={onCombinedTabChange}
+            options={combinedTabs}
             size="sm"
           />
         </div>
@@ -633,6 +794,67 @@ export default function LeadsListPage() {
         </div>
       )}
 
+      {/* Bulk selection bar — appears when one or more leads are selected.
+          Mirrors the Tickets/Walk-In bulk bar (Change Status + Delete), each
+          action permission-gated. */}
+      {someSelected && (
+        <motion.div
+          initial={{ opacity: 0, y: -6 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2"
+        >
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-xs font-semibold text-[#4361EE]">
+            {selected.size} selected
+          </span>
+          {canBulkStatus && statusOptions.length > 0 && (
+            <Button variant="soft" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkStatus((v) => !v)}>
+              <RefreshCw className="h-3 w-3" /> Change Status
+            </Button>
+          )}
+          {canBulkDelete && (
+            <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+              <Trash2 className="h-3 w-3" /> Delete
+            </Button>
+          )}
+          <button onClick={clearSelection} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+        </motion.div>
+      )}
+
+      {/* Bulk status picker — one connected row of the configured lifecycle
+          statuses. Applied via changeLeadStatus per lead. */}
+      {showBulkStatus && someSelected && canBulkStatus && (
+        <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 p-3">
+          <span className="text-xs font-medium text-indigo-700">Change {selected.size} lead{selected.size > 1 ? "s" : ""} to:</span>
+          {statusOptions.map((s) => (
+            <button
+              key={s}
+              onClick={() => void handleBulkStatusChange(s)}
+              className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold ring-1 ring-inset transition hover:scale-105", statusTone(s))}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />{s}
+            </button>
+          ))}
+          <button onClick={() => setShowBulkStatus(false)} className="ml-auto text-xs text-muted-foreground hover:text-foreground">Cancel</button>
+        </motion.div>
+      )}
+
+      {/* FOLLOW-UPS view — the Walk-In-style follow-up table + calendar. It
+          replaces the data-grid for this segment (its own Active/History table
+          and month calendar), so multiple follow-ups per lead are planned and
+          reviewed in one place. */}
+      {view === "followUps" ? (
+        <LeadFollowUpView leads={filteredLeads} onOpenLead={setDetailLead} />
+      ) : (
+      <>
+      {/* Not-Contacted accountability banner — explains the queue + the lock. */}
+      {view === "notContacted" && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12.5px] text-amber-800">
+          Leads still marked <span className="font-semibold">Not Contacted</span>. After 48 hours with no contact a lead is
+          <span className="font-semibold"> locked</span> — its Sales Agent loses access and a manager must reassign it (all other
+          columns show N/A until then). Reassigning restarts the clock and gives conversion credit to the new owner.
+        </div>
+      )}
+
       {/* Desktop Data-Grid — professional CRM/ERP table (spec).
           A single BOUNDED, DUAL-SCROLL container scrolls BOTH axes internally.
           - <thead> is `sticky top-0` relative to THIS container → frozen while
@@ -652,7 +874,7 @@ export default function LeadsListPage() {
             every grouped column gets a generous width AND the frozen offsets
             line up exactly. The min-width equals their sum; the container
             scrolls horizontally on narrower viewports. */}
-        <table className="w-full min-w-[2140px] table-fixed text-[14px]">
+        <table className="w-full min-w-[2184px] table-fixed text-[14px]">
           <colgroup>
             {gridColumns.map((c) => (
               <col key={c.key} style={{ width: c.width }} />
@@ -660,6 +882,16 @@ export default function LeadsListPage() {
           </colgroup>
           <thead className="rox-table-head sticky top-0 z-[6]">
             <tr className="text-left text-[12px] font-bold uppercase tracking-wider">
+              <th {...mergeFrozen(frozenCellProps("select"), "px-3 py-4 text-left")}>
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                  onChange={toggleAll}
+                  className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
+                  aria-label="Select all leads"
+                />
+              </th>
               <th {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 text-left")}>ID</th>
               {multiStore && <th className="px-3 py-4 text-left">Store</th>}
               <th {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 text-left")}>Date</th>
@@ -684,6 +916,12 @@ export default function LeadsListPage() {
               const fuState = openFollowUpRowState(openFollowUpsByLead.get(lead.id));
               const tint = followUpTone(fuState).rowTint;
               const tinted = !!tint || !!lead.pinnedAt;
+              // A LOCKED Not-Contacted lead: it only reaches the grid for a
+              // senior/owner (a plain Sales Agent's scope hides it). Everything
+              // but Contact Status + the reassign control is masked to N/A until
+              // it's reassigned — so the flow is not visible to anyone until a
+              // new owner picks it up.
+              const locked = isNotContactedLocked(lead);
               // Resolved SOLID colour matching the row's (semi-transparent) tint,
               // handed to the frozen cells as --rox-row-tint so they can layer
               // the SAME tint over their opaque base (no bleed-through). The
@@ -713,6 +951,16 @@ export default function LeadsListPage() {
                   tinted && "rox-frozen-tinted",
                 )}
               >
+                {/* 0 · Selection — FROZEN LEFT (before the Lead ID anchor) */}
+                <td {...mergeFrozen(frozenCellProps("select"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={selected.has(lead.id)}
+                    onChange={() => toggleOne(lead.id)}
+                    className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
+                    aria-label={`Select lead ${lead.leadNo || lead.id}`}
+                  />
+                </td>
                 {/* 1 · ID — FROZEN LEFT anchor (click opens the lead) */}
                 <td {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 align-middle")}>
                   <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="flex items-center gap-1 text-left font-semibold text-[#4361EE] hover:underline tnum">
@@ -725,38 +973,45 @@ export default function LeadsListPage() {
                   <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" /></td>
                 )}
                 {/* 2 · Date + time */}
-                <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}><DateCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <DateCell lead={lead} />}</td>
                 {/* 3 · Region */}
-                <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}><span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span>}</td>
                 {/* 4 · Source + capture channel */}
-                <td {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 align-middle")}><SourceCell lead={lead} /></td>
-                {/* 5 · Agent (owner — user id → name) */}
+                <td {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <SourceCell lead={lead} />}</td>
+                {/* 5 · Agent (owner — user id → name). Even when LOCKED this
+                    stays the reassign control — that's how a senior hands the
+                    stale lead to a new owner and unlocks the flow. */}
                 <td {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
                   {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={22} />}
                 </td>
-                {/* 6 · Contact Status */}
-                <td {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 align-middle")}><ContactStatusCell lead={lead} /></td>
+                {/* 6 · Contact Status — always shown (the reason it's here). */}
+                <td {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 align-middle")}>
+                  <ContactStatusCell lead={lead} />
+                  {locked && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wide text-amber-600">Locked · reassign to unlock</span>}
+                </td>
                 {/* 7 · Contact Info (grouped) */}
-                <td {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 align-middle")}><ContactInfoCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <ContactInfoCell lead={lead} />}</td>
                 {/* 8 · Device & Issue (grouped) */}
-                <td {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}><DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} /></td>
+                <td {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>{locked ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />}</td>
                 {/* 9 · Lead Value (pipeline) */}
-                <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}><LeadValueCell lead={lead} /></td>
+                <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <LeadValueCell lead={lead} />}</td>
                 {/* 10 · Comment */}
-                <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}><CommentCell text={lead.comments || ""} /></td>
+                <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <CommentCell text={lead.comments || ""} />}</td>
                 {/* 11 · Lead Category */}
-                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}><span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span>}</td>
                 {/* 12 · TBD (mapped via TBD_SOURCE_FIELD — re-pointable) */}
-                <td {...mergeFrozen(frozenCellProps("tbd"), "px-3 py-4 align-middle")}><span className="block truncate text-zinc-600">{String(lead[TBD_SOURCE_FIELD] || "") || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("tbd"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate text-zinc-600">{String(lead[TBD_SOURCE_FIELD] || "") || "—"}</span>}</td>
                 {/* 13 · Lead Type (= Priority: Hot/Warm/Cold) */}
-                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
                 {/* 14 · Status (+ fulfilment route) */}
                 <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")}>
+                  {locked ? <NACell /> : (<>
                   {lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}
                   <div className="mt-1.5"><FulfilmentRouteBadge lead={lead} /></div>
+                  </>)}
                 </td>
                 {/* 15 · Result */}
-                <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}><span className="block truncate font-medium text-zinc-700">{lead.result || "—"}</span></td>
+                <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate font-medium text-zinc-700">{lead.result || "—"}</span>}</td>
                 {/* Last Action — FROZEN RIGHT anchor */}
                 <td {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right align-middle")} onClick={(e) => e.stopPropagation()}>
                   <LeadActionsMenu lead={lead} onAction={handleAction} />
@@ -780,21 +1035,38 @@ export default function LeadsListPage() {
 
       {/* Mobile Cards */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
-        {paged.map((lead) => (
-          <div key={lead.id} onClick={() => setDetailLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", lead.pinnedAt && "border-[#7C5CFC]/30", followUpTone(openFollowUpRowState(openFollowUpsByLead.get(lead.id))).rowTint)}>
+        {paged.map((lead) => {
+          const mLocked = isNotContactedLocked(lead);
+          return (
+          <div key={lead.id} onClick={() => setDetailLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", followUpTone(openFollowUpRowState(openFollowUpsByLead.get(lead.id))).rowTint)}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
+                <input
+                  type="checkbox"
+                  checked={selected.has(lead.id)}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={() => toggleOne(lead.id)}
+                  className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
+                  aria-label={`Select lead ${lead.leadNo || lead.id}`}
+                />
                 <Avatar name={lead.name || lead.leadNo} size={36} />
                 <div>
                   <p className="flex items-center gap-1 font-semibold">
                     {lead.pinnedAt && <Pin className="h-3 w-3 fill-[#7C5CFC] text-[#7C5CFC]" />}
                     {lead.name || "—"}
                   </p>
-                  <p className="text-[11px] text-muted-foreground">{lead.leadNo} · {lead.source || "—"}</p>
+                  <p className="text-[11px] text-muted-foreground">{lead.leadNo}{mLocked ? "" : ` · ${lead.source || "—"}`}</p>
                 </div>
               </div>
-              {lead.status && <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span>}
+              {mLocked
+                ? <span className="inline-flex rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">Not Contacted · Locked</span>
+                : lead.status && <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span>}
             </div>
+            {mLocked ? (
+              <div className="mt-3 border-t border-border pt-3 text-[12px] text-muted-foreground">
+                Locked after 48h with no contact — a manager must reassign to unlock the flow.
+              </div>
+            ) : (
             <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[12px]">
               {getLeadDevices(lead).length > 0 ? (
                 <button type="button" onClick={(e) => { e.stopPropagation(); setDeviceDetailsLead(lead); }} className="inline-flex items-center gap-1 text-zinc-600 hover:text-[#4361EE]">
@@ -807,12 +1079,14 @@ export default function LeadsListPage() {
               {lead.priority && <span className={cn("flex items-center gap-1 font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span>}
               <FollowUpCell lead={lead} open={openFollowUpsByLead.get(lead.id)} />
             </div>
+            )}
             <div className="mt-2 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
-              <AssignBadge lead={lead} size={20} />
-              <LeadActionsMenu lead={lead} onAction={handleAction} />
+              {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={20} />}
+              {!mLocked && <LeadActionsMenu lead={lead} onAction={handleAction} />}
             </div>
           </div>
-        ))}
+          );
+        })}
         {hydrated && filteredLeads.length === 0 && (
           <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground">
             {leads.length === 0 ? "No leads yet." : "No leads match your filters."}
@@ -832,6 +1106,8 @@ export default function LeadsListPage() {
         onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
         itemLabel="lead"
       />
+      </>
+      )}
 
       {/* Create / Edit flow */}
       <LeadCaptureFlow open={showCreate} onClose={() => setShowCreate(false)} />
@@ -856,6 +1132,17 @@ export default function LeadsListPage() {
         title="Delete lead?"
         description={confirmDelete ? `${confirmDelete.leadNo} · ${confirmDelete.name || "Unnamed"} will be removed. This can't be undone.` : ""}
         confirmLabel="Delete"
+        danger
+      />
+
+      {/* Bulk delete confirm */}
+      <ConfirmDialog
+        open={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={() => void handleBulkDelete()}
+        title={`Delete ${selected.size} lead${selected.size > 1 ? "s" : ""}?`}
+        description="This action cannot be undone. All selected leads will be removed."
+        confirmLabel={`Delete ${selected.size} Lead${selected.size > 1 ? "s" : ""}`}
         danger
       />
 

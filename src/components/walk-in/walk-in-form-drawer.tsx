@@ -28,8 +28,9 @@ import { TimePicker } from "@/components/ui/time-picker";
 import { Avatar } from "@/components/ui/avatar";
 import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, type CustomerType } from "@/lib/customer-data";
+import { searchCustomerCandidates, type CustomerCandidate } from "@/lib/customer-candidates";
 import { findOrCreateCustomer } from "@/lib/customer-service";
-import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
+import { CustomerBadges, resolveGroups, CustomerLifecycleBadge, customerLifecycle } from "@/components/common/customer-classification";
 import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { useLeads } from "@/lib/leads-context";
 import { OpenLeadBanner } from "@/components/leads/open-lead-banner";
@@ -174,14 +175,18 @@ export function WalkInFormDrawer({
 
   const set = (patch: Partial<WalkIn>) => setForm((f) => ({ ...f, ...patch }));
 
-  /* ── Customer search — reuse Customer Master ── */
-  const custResults = useMemo(() => {
+  /* ── Customer search — Customer Master + un-promoted CRM contacts ──
+     A prospect captured via "Add Contact" is fetchable here too. A contact
+     candidate (isContact) has no Customer Master id yet; picking it prefills
+     the fields and leaves customerId undefined so save-time promotion links
+     the real customer. */
+  const custResults = useMemo<CustomerCandidate[]>(() => {
     if (!custQuery.trim()) return [];
-    return searchCustomers(customers, custQuery).slice(0, 6);
-  }, [customers, custQuery]);
+    return searchCustomerCandidates(customers, localContacts, custQuery).slice(0, 6);
+  }, [customers, localContacts, custQuery]);
 
-  function pickCustomer(c: (typeof customers)[number]) {
-    set({ customer: c.fullName, phone: c.mobile, altPhone: c.altMobile || "", email: c.email || form.email, customerId: c.id });
+  function pickCustomer(c: CustomerCandidate) {
+    set({ customer: c.fullName, phone: c.mobile, altPhone: c.altMobile || "", email: c.email || form.email, customerId: c.isContact ? undefined : c.id });
     setContactType(c.type);
     setCustQuery(c.fullName);
     setCustOpen(false);
@@ -422,9 +427,15 @@ export function WalkInFormDrawer({
                       className="flex w-full items-center gap-2 px-3 py-2 text-left transition hover:bg-muted"
                     >
                       <Avatar name={c.fullName} size={26} />
-                      <div className="min-w-0">
-                        <p className="truncate text-[13px] font-medium">{c.fullName}</p>
-                        <p className="text-[11px] text-muted-foreground">{c.mobile}</p>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="truncate text-[13px] font-medium">{c.fullName}</p>
+                          <CustomerLifecycleBadge lifecycle={customerLifecycle(c)} />
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">
+                          {c.mobile}
+                          {c.isContact && <> · Prospect</>}
+                        </p>
                       </div>
                     </button>
                   ))}

@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Pencil, Trash2, Phone, Mail, MessageSquare, CalendarClock, Check, X,
-  User, Tag, Wrench, ClipboardCheck, Flag, UserCheck, ChevronDown, Search,
+  User, Tag, Wrench, ClipboardCheck, Flag, UserCheck, ChevronDown, Search, MapPin,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
@@ -304,6 +304,19 @@ export function LeadDetailDrawer({
               <Cell label="Number">{lead.number}</Cell>
               <Cell label="Email">{lead.email}</Cell>
               <Cell label="Location">{lead.location}</Cell>
+              {lead.locationLat != null && lead.locationLng != null && (
+                <Cell label="Map pin" wide>
+                  <a
+                    href={lead.locationMapsUrl || `https://www.google.com/maps?q=${lead.locationLat},${lead.locationLng}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 font-medium text-[#4361EE] hover:underline"
+                  >
+                    <MapPin className="h-3.5 w-3.5" />
+                    {lead.locationLat.toFixed(5)}, {lead.locationLng.toFixed(5)} · Open in Maps
+                  </a>
+                </Cell>
+              )}
             </>
           )}
           renderEdit={(draft, set, errors) => (

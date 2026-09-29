@@ -32,7 +32,8 @@ import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDevice
 import type { InventoryItem } from "@/lib/inventory-data";
 import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
 import { findOrCreateCustomer } from "@/lib/customer-service";
-import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
+import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
+import { CustomerBadges, resolveGroups, customerLifecycle } from "@/components/common/customer-classification";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, inferCategoryFromName, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { createAssignedByOption } from "@/lib/assigned-by-data";
@@ -379,7 +380,7 @@ function NewTicketWizard() {
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
   const { tickets, invoices, addTicket, updateTicket, updateInvoice, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
   const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
-  const { updateLead, recordConversionEvent } = useLeads();
+  const { updateLead, recordConversionEvent, contacts, leads, updateContact } = useLeads();
   const { settings } = useStoreSettings();
 
   // Start on Device Details (step 3) for edit, walk-in, field-job and
@@ -707,6 +708,14 @@ function NewTicketWizard() {
     // path in the app that previously skipped duplicate detection entirely.
     let finalCustomerId = data.customerId;
     if (!finalCustomerId && data.customer.first && data.customer.phone) {
+      // Two-logic origin: if this person came from a LEAD/CRM contact, the
+      // customer is "Sales" (captureSource "lead"); otherwise it's created
+      // individually here → "Manual" (captureSource "ticket").
+      const origin = resolvePromotionOrigin(
+        { mobile: data.customer.phone.trim(), email: data.customer.email.trim() },
+        contacts,
+        leads,
+      );
       const { customer, created } = findOrCreateCustomer(
         {
           firstName: data.customer.first.trim(),
@@ -715,7 +724,8 @@ function NewTicketWizard() {
           altMobile: data.customer.altPhone.trim(),
           email: data.customer.email.trim(),
           type: data.contactType,
-          captureSource: "ticket",
+          captureSource: origin.fromLead ? "lead" : "ticket",
+          source: origin.fromLead ? "sales" : undefined,
           company: data.customer.company.trim(),
           address: data.customer.address.trim(),
           city: data.customer.city.trim(),
@@ -725,6 +735,11 @@ function NewTicketWizard() {
       );
       if (created) addCustomer(customer);
       finalCustomerId = customer.id;
+      // Link the originating CRM contact to this customer so it stops showing
+      // as an unpromoted prospect (kills the duplicate in the CRM tab).
+      if (origin.contactId) {
+        void updateContact(origin.contactId, { customerId: customer.id });
+      }
     }
 
     // Build DeviceRecord[] for multi-device storage
@@ -3123,19 +3138,24 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
 /* ---------------- Step 6: Contact Search ---------------- */
 function ContactSearch({ data, setData, onNext, isEdit }: any) {
   const { customers, customerGroups } = useStore();
+  const { contacts } = useLeads();
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(data.customerId || null);
 
-  // Live search results — show all customers regardless of type so same customer works for both
-  const allResults = q.trim().length >= 2 ? searchCustomers(customers, q) : [];
-  const results = allResults;
+  // Live search over BOTH the Customer Master AND un-promoted CRM contacts, so
+  // a contact captured via "Add Contact" is fetchable here too. Contact
+  // candidates are virtual (isContact) — selecting one prefills the draft and
+  // the save-time findOrCreateCustomer promotion turns it into a real Customer.
+  const results: CustomerCandidate[] = q.trim().length >= 2 ? searchCustomerCandidates(customers, contacts, q) : [];
 
-  // Select an existing customer and auto-populate step 7
-  const selectCustomer = (c: Customer) => {
+  // Select a candidate (real customer or contact) and auto-populate step 7.
+  const selectCustomer = (c: CustomerCandidate) => {
     setSelectedId(c.id);
     setData({
       ...data,
-      customerId: c.id,
+      // A contact-candidate has no real Customer Master id yet; leave
+      // customerId null so save-time promotion (findOrCreateCustomer) links it.
+      customerId: c.isContact ? null : c.id,
       contactType: c.type,
       gstNumber: c.gstNumber || "",
       customer: {
@@ -3152,8 +3172,28 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
     });
   };
 
-  // Selected customer object (for display)
-  const selectedCustomer = selectedId ? customers.find((c) => c.id === selectedId) : null;
+  // Selected customer object (for display). May be a real Customer Master
+  // record OR a not-yet-promoted contact — for a contact the draft holds the
+  // details (customerId stays null until save-time promotion), so fall back to
+  // the draft so the selected card renders in both cases.
+  const selectedRealCustomer = data.customerId ? customers.find((c) => c.id === data.customerId) : null;
+  const selectedCustomer = selectedRealCustomer
+    ? selectedRealCustomer
+    : selectedId
+      ? {
+          id: selectedId,
+          fullName: `${data.customer.first} ${data.customer.last}`.trim(),
+          type: data.contactType,
+          source: undefined as any,
+          groupIds: [] as string[],
+          mobile: data.customer.phone,
+          company: data.customer.company,
+          totalTickets: 0,
+          totalInvoices: 0,
+          totalRepairs: 0,
+          isContact: !data.customerId,
+        }
+      : null;
 
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
@@ -3203,7 +3243,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-sm font-semibold truncate">{c.fullName}</p>
-                        <CustomerBadges type={c.type} source={c.source} groups={resolveGroups(c.groupIds, customerGroups)} maxGroups={1} />
+                        <CustomerBadges type={c.type} source={c.source} groups={resolveGroups(c.groupIds, customerGroups)} maxGroups={1} lifecycle={customerLifecycle(c)} />
                       </div>
                       <p className="text-[11px] text-muted-foreground truncate">
                         {c.mobile}
@@ -3213,8 +3253,14 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
                     </div>
                     {/* Stats */}
                     <div className="text-right shrink-0 hidden sm:block">
-                      <p className="text-[10px] text-muted-foreground">{c.totalTickets} tickets · {formatINR(c.lifetimeValue)}</p>
-                      <p className="text-[10px] text-muted-foreground">{c.id}</p>
+                      {c.isContact ? (
+                        <p className="text-[10px] text-muted-foreground">Prospect · not yet a customer</p>
+                      ) : (
+                        <>
+                          <p className="text-[10px] text-muted-foreground">{c.totalTickets} tickets · {formatINR(c.lifetimeValue)}</p>
+                          <p className="text-[10px] text-muted-foreground">{c.id}</p>
+                        </>
+                      )}
                     </div>
                   </button>
                 ))
@@ -3242,12 +3288,12 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
                   <p className="text-sm font-semibold text-emerald-900">{selectedCustomer.fullName}</p>
-                  <CustomerBadges type={selectedCustomer.type} source={selectedCustomer.source} groups={resolveGroups(selectedCustomer.groupIds, customerGroups)} />
+                  <CustomerBadges type={selectedCustomer.type} source={selectedCustomer.source} groups={resolveGroups(selectedCustomer.groupIds, customerGroups)} lifecycle={customerLifecycle(selectedCustomer as any)} />
                 </div>
                 <p className="text-[11px] text-emerald-700">
                   {selectedCustomer.mobile}
                   {selectedCustomer.company && <> · {selectedCustomer.company}</>}
-                  <> · {selectedCustomer.id}</>
+                  {!(selectedCustomer as any).isContact && <> · {selectedCustomer.id}</>}
                 </p>
               </div>
               <button
