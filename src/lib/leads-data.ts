@@ -39,6 +39,9 @@ export interface Lead {
   number: string;
   email: string;
   location: string;         // free-text address / landmark (unchanged)
+  locationUnit: string;     // door / flat / house no. — the exact unit ("" = none).
+                            // Additive; complements `location` so the field team
+                            // knows exactly which door to reach.
   /* Exact map pin (Leaflet + OpenStreetMap picker). Additive — complements the
      free-text `location` so the field team gets a navigable point. */
   locationLat: number | null;  // decimal latitude ("" → null on persist)
@@ -348,6 +351,20 @@ export function getLeadDevices(lead: Pick<Lead,
   }];
 }
 
+/** The lead's FULL human location for handoff/display: the exact door/flat/house
+ *  number (`locationUnit`) prefixed onto the free-text address (`location`).
+ *  Use this whenever a lead's location travels to a Field Job, Walk-In, Ticket,
+ *  Customer Master address, or a detail view — so the field team always sees the
+ *  exact unit, not just the street/landmark. Empty parts are skipped. */
+export function fullLeadLocation(
+  lead: Pick<Lead, "location" | "locationUnit">
+): string {
+  return [lead.locationUnit, lead.location]
+    .map((s) => (s ?? "").trim())
+    .filter(Boolean)
+    .join(", ");
+}
+
 /* ─── Validation ──────────────────────────────────────────────────────── */
 
 export interface LeadValidation {
@@ -400,6 +417,7 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
     number: "",
     email: "",
     location: "",
+    locationUnit: "",
     locationLat: null,
     locationLng: null,
     locationMapsUrl: "",

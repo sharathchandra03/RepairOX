@@ -178,6 +178,50 @@ body {
   overscroll-behavior: none;
 }
 
+/* ─────────────────────────────────────────────────────────────────────────
+   PAGE CONTENT FILLS THE VIEWPORT (no empty canvas below short content)
+   ───────────────────────────────────────────────────────────────────────
+   The app-shell scroll column (overflow-y-auto) gives `.rox-page-main` a
+   `flex-1` height, but a page's own root wrapper (`<div class="space-y-5">`,
+   height:auto) only occupies its content height. On a short list — or a small
+   screen where few rows fit — the page stops partway and the gray app canvas
+   shows below, with the pagination footer floating in the middle.
+
+   Fix in three parts:
+   1. `.rox-page-main` becomes a flex column that is at least the full content
+      viewport tall (`min-height: 100%`). This also means a child with `h-full`
+      (e.g. the Kanban board via `h-full min-h-0`) resolves correctly.
+   2. A list page adds `.rox-page-fill` to its root wrapper (the existing
+      `space-y-5` / `space-y-6` div). That makes the root grow to fill the page
+      height and lay its own children out as a column (the `space-y-*` sibling
+      margins are preserved in flex layout).
+   3. Inside that root, the scrollable body region (table card / data grid) is
+      marked `.rox-fill` so it consumes the remaining height; the detached
+      pagination footer then sits flush at the viewport bottom — a clean END
+      with no empty gray canvas beneath it.
+   Pages that don't opt in keep their natural height (visually unchanged).
+   Applies app-wide, every breakpoint. */
+.rox-page-main {
+  display: flex;
+  flex-direction: column;
+}
+/* A page opts its root into full-height flex-column layout with this class
+   (added to the existing `space-y-5` / `space-y-6` wrapper). The `space-y-*`
+   margin rhythm is preserved (flex-column respects sibling margins). */
+.rox-page-fill {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+/* Inside a `.rox-page-fill` root, the region marked `.rox-fill` consumes the
+   remaining height so the table / data grid / footer reaches the viewport
+   bottom — a clean END with no empty gray canvas beneath it. */
+.rox-fill {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
 ::selection {
   background: hsl(231 80% 57% / 0.15);
   color: hsl(231 80% 42%);
@@ -409,22 +453,69 @@ body {
   background-image: linear-gradient(hsl(var(--muted) / 0.55), hsl(var(--muted) / 0.55));
 }
 
-/* Boundary treatment (spec §6 + §18): a subtle divider on the inner edge of
-   the frozen block, plus a soft shadow that only appears when there is
-   scrollable content underneath (toggled by data-scroll-* on the container). */
-.rox-frozen-left-edge {
-  box-shadow: inset -1px 0 0 hsl(var(--rox-table-divider));
-}
+/* Boundary treatment (spec §6 + §18): NO divider line at the frozen boundary.
+   Instead a soft 3D drop-shadow gives the frozen block a raised, floating-panel
+   look that separates it from the scrolling columns.
+
+   box-shadow on a <td>/<th> renders unreliably (table cells clip/repaint), so
+   the shadow is painted by a ::after pseudo-element that sits OUTSIDE the cell
+   edge and OVER the adjacent scrolling column via a gradient — this is robust
+   regardless of border-collapse. A gentle base shadow is always present; it
+   deepens when there is scrollable content underneath (data-scroll-*). */
+.rox-frozen-left-edge,
 .rox-frozen-right-edge {
-  box-shadow: inset 1px 0 0 hsl(var(--rox-table-divider));
+  /* Sit above the adjacent scrolling cells so the shadow strip is not
+     overpainted by their opaque backgrounds. */
+  z-index: 5;
 }
-[data-scroll-left="true"] .rox-frozen-left-edge {
-  box-shadow: inset -1px 0 0 hsl(var(--rox-table-divider)),
-    6px 0 8px -6px rgba(20, 30, 80, 0.22);
+.rox-frozen-left-edge::after,
+.rox-frozen-right-edge::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 14px;
+  pointer-events: none;
+  z-index: 6;
 }
-[data-scroll-right="true"] .rox-frozen-right-edge {
-  box-shadow: inset 1px 0 0 hsl(var(--rox-table-divider)),
-    -6px 0 8px -6px rgba(20, 30, 80, 0.22);
+/* LEFT block: shadow falls to the RIGHT, just past the cell's right edge. */
+.rox-frozen-left-edge::after {
+  left: 100%;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.14),
+    rgba(0, 0, 0, 0.05) 45%,
+    rgba(0, 0, 0, 0)
+  );
+}
+/* RIGHT block: shadow falls to the LEFT, just past the cell's left edge. */
+.rox-frozen-right-edge::after {
+  right: 100%;
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.14),
+    rgba(0, 0, 0, 0.05) 45%,
+    rgba(0, 0, 0, 0)
+  );
+}
+/* Deepen the 3D lift when content is actually scrollable underneath. */
+[data-scroll-left="true"] .rox-frozen-left-edge::after {
+  width: 18px;
+  background: linear-gradient(
+    to right,
+    rgba(0, 0, 0, 0.20),
+    rgba(0, 0, 0, 0.07) 45%,
+    rgba(0, 0, 0, 0)
+  );
+}
+[data-scroll-right="true"] .rox-frozen-right-edge::after {
+  width: 18px;
+  background: linear-gradient(
+    to left,
+    rgba(0, 0, 0, 0.20),
+    rgba(0, 0, 0, 0.07) 45%,
+    rgba(0, 0, 0, 0)
+  );
 }
 
 /* Polished, unobtrusive scrollbar for the grid scroll container (spec §10). */

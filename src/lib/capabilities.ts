@@ -74,6 +74,24 @@ export const CAP = {
     // View a store's reports.
     reportsView: ["stores_reports_view", "multi_store_access", "manage_branches"],
   },
+  /* Inventory Master capabilities. These gate the CANONICAL item record — see /
+     search an inventory item, and CREATE a new item in the Inventory Master.
+     They are DISTINCT from invoice line-item creation (CAP.invoice.*): a user
+     who can bill an invoice can SEARCH + SELECT existing inventory as a line
+     item, but may only see the "Add Inventory" (create master record) action
+     when they hold an inventory create key. Granular keys first, coarse
+     `manage_inventory` fallback; `full_access`/`*` implied by can(). */
+  inventory: {
+    // View / search existing inventory items. Any inventory-touching key grants
+    // it so invoice/ticket billers can find items to add as line items.
+    view: ["view_inventory", "create_item", "edit_item", "adjust_stock", "manage_inventory", "manage_purchases"],
+    // Create a NEW Inventory Master record (the "Add Inventory" action).
+    create: ["create_item", "manage_inventory"],
+    // Edit an existing Inventory Master record.
+    edit: ["edit_item", "manage_inventory"],
+    // Delete an Inventory Master record.
+    delete: ["delete_item", "manage_inventory"],
+  },
   /* Money-sensitive VISIBILITY gates (gap audit v3). Owners hold these via
      full_access; grant explicitly to let a role SEE these figures. */
   sensitive: {

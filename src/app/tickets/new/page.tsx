@@ -560,17 +560,26 @@ function NewTicketWizard() {
       devices: wizardDevices.length > 0 ? wizardDevices : [createWizardDevice(primaryCategoryId)],
       activeDeviceIndex: 0,
       contactType: "personal",
-      customer: {
-        first: nameParts[0] || "",
-        last: nameParts.slice(1).join(" ") || "",
-        phone: w.phone || "",
-        altPhone: "",
-        email: w.email || "",
-        address: "", postal: "", city: "", company: "",
-      },
+      customer: (() => {
+        // Pull the full address from the linked Customer Master record so the
+        // lead's location (incl. door/flat no.) carried into the customer at
+        // routing time flows all the way to the ticket.
+        const cust = w.customerId ? customers.find((c) => c.id === w.customerId) : undefined;
+        return {
+          first: nameParts[0] || "",
+          last: nameParts.slice(1).join(" ") || "",
+          phone: w.phone || "",
+          altPhone: "",
+          email: w.email || "",
+          address: cust?.address || "",
+          postal: cust?.postalCode || "",
+          city: cust?.city || "",
+          company: cust?.company || "",
+        };
+      })(),
       customerId: w.customerId || null,
     });
-  }, [fromWalkInId, walkIns, deviceModels, brands]);
+  }, [fromWalkInId, walkIns, deviceModels, brands, customers]);
 
   // Pre-fill from a Field Job (Pickup & Drop). Mirrors the walk-in prefill:
   // resolve category/brand from the Device Catalog, prefill customer/device/issue
@@ -3660,6 +3669,17 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     setData({ ...data, devices: updatedDevicesMarkAll });
   };
 
+  // Mark every UNSET item as Fail — existing pass/skip are preserved. Updates
+  // all real inspection records on the active device (not just the visuals).
+  const markAllFail = () => {
+    const updated = { ...qc };
+    qcFields.forEach((f) => { if (!updated[f]) updated[f] = "no"; });
+    const updatedDevicesMarkAllFail = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, qc: updated } : dev
+    );
+    setData({ ...data, devices: updatedDevicesMarkAllFail });
+  };
+
   // Reset clears status + notes on the active device only.
   const resetQC = () => {
     const resetDevices = data.devices.map((dev: WizardDevice, i: number) =>
@@ -3864,17 +3884,17 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
         </div>
       </section>
 
-      {/* Quick Actions — Show Failed, Mark All Pass, Reset */}
+      {/* Quick Actions — Mark All Pass, Mark All Fail, Reset */}
       <section>
         <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
           <Zap className="h-3.5 w-3.5 text-[#4361EE]" /> Quick Actions
         </div>
         <div className="flex flex-col gap-1.5">
-          <Button variant="outline" size="sm" className="w-full justify-center" onClick={() => setFilter("fail")}>
-            <XCircle className="h-3.5 w-3.5" /> Show Failed
-          </Button>
-          <Button variant="outline" size="sm" className="w-full justify-center" onClick={markAll}>
+          <Button variant="outline" size="sm" className="w-full justify-center border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800" onClick={markAll}>
             <CheckCircle2 className="h-3.5 w-3.5" /> Mark All Pass
+          </Button>
+          <Button variant="outline" size="sm" className="w-full justify-center border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" onClick={markAllFail}>
+            <XCircle className="h-3.5 w-3.5" /> Mark All Fail
           </Button>
           <Button variant="outline" size="sm" className="w-full justify-center" onClick={resetQC}>
             <RotateCcw className="h-3.5 w-3.5" /> Reset

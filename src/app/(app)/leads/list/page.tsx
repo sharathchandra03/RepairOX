@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, UserCheck, UserPlus, RefreshCw, Trash2,
+  Phone, Mail, RefreshCw, Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -234,22 +234,20 @@ function ContactInfoCell({ lead }: { lead: Lead }) {
   const phoneDigits = (lead.number || "").replace(/\D/g, "");
   const existing = leadIsExistingCustomer(lead);
   return (
-    <div className="min-w-0 leading-snug" onClick={(e) => e.stopPropagation()}>
-      <div className="flex items-center gap-1.5">
-        <p className="min-w-0 truncate font-semibold text-zinc-900">{lead.name || "—"}</p>
-        <span
-          title={existing ? "Existing customer — linked to Customer Master" : "New prospect — not yet a customer"}
-          className={cn(
-            "inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset",
-            existing
-              ? "bg-emerald-50 text-emerald-600 ring-emerald-200"
-              : "bg-amber-50 text-amber-600 ring-amber-200",
-          )}
-        >
-          {existing ? <UserCheck className="h-3 w-3" /> : <UserPlus className="h-3 w-3" />}
-          {existing ? "Existing" : "New"}
-        </span>
-      </div>
+    <div className="flex min-w-0 items-start gap-2 leading-snug" onClick={(e) => e.stopPropagation()}>
+      {/* Thin colour strip in front of the name — green = existing customer
+          (linked to Customer Master / converted), orange = new prospect.
+          Same bar pattern as the Walk-In table's type strip for uniformity. */}
+      <span
+        title={existing ? "Existing customer — linked to Customer Master" : "New prospect — not yet a customer"}
+        aria-label={existing ? "Existing customer" : "New prospect"}
+        className={cn(
+          "mt-0.5 h-8 w-1 shrink-0 rounded-full",
+          existing ? "bg-emerald-500" : "bg-amber-500",
+        )}
+      />
+      <div className="min-w-0">
+      <p className="min-w-0 truncate font-semibold text-zinc-900">{lead.name || "—"}</p>
       {lead.number && (
         <a href={`tel:${phoneDigits}`} className="mt-1 flex items-center gap-1.5 text-[12.5px] text-zinc-600 hover:text-[#4361EE] tnum">
           <Phone className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{lead.number}</span>
@@ -260,6 +258,7 @@ function ContactInfoCell({ lead }: { lead: Lead }) {
           <Mail className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{lead.email}</span>
         </a>
       )}
+      </div>
     </div>
   );
 }
@@ -664,7 +663,7 @@ export default function LeadsListPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 rox-page-fill">
       <PageHeader
         eyebrow="Sales"
         title="Leads"
@@ -865,10 +864,10 @@ export default function LeadsListPage() {
             frozenCellProps(key) so offsets stay in lockstep with the column
             widths. One coordinated scroll model — no duplicated tables, no JS
             scroll-sync. Sharp 2px frame + brand header preserved. */}
-      <div className="rox-table-card shadow-card hidden md:flex md:flex-col md:min-h-0">
+      <div className="rox-table-card rox-fill shadow-card hidden md:flex md:flex-col md:min-h-0">
         <div
           ref={scrollRef}
-          className="rox-grid-scroll max-h-[calc(100vh-300px)] overflow-auto"
+          className="rox-grid-scroll min-h-0 flex-1 overflow-auto"
         >
         {/* Explicit per-column pixel widths (deterministic with table-fixed) so
             every grouped column gets a generous width AND the frozen offsets

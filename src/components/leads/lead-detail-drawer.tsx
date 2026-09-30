@@ -296,13 +296,14 @@ export function LeadDetailDrawer({
         {/* ── Contact (inline editable) ── */}
         <EditableSection
           icon={User} title="Contact" canEdit={canEdit} lead={lead}
-          fields={["name", "number", "email", "location"]}
+          fields={["name", "number", "email", "locationUnit", "location"]}
           validate={(d) => validateLead(d, { requireOwner: false }).ok}
           renderView={() => (
             <>
               <Cell label="Name">{lead.name}</Cell>
               <Cell label="Number">{lead.number}</Cell>
               <Cell label="Email">{lead.email}</Cell>
+              {lead.locationUnit && <Cell label="Door / Flat No.">{lead.locationUnit}</Cell>}
               <Cell label="Location">{lead.location}</Cell>
               {lead.locationLat != null && lead.locationLng != null && (
                 <Cell label="Map pin" wide>
@@ -324,6 +325,7 @@ export function LeadDetailDrawer({
               <EditField label="Name" error={errors.name}><input className={editInput(!!errors.name)} value={draft.name} onChange={(e) => set("name", e.target.value)} /></EditField>
               <EditField label="Number" error={errors.number}><input className={editInput(!!errors.number)} value={draft.number} onChange={(e) => set("number", e.target.value)} inputMode="tel" /></EditField>
               <EditField label="Email" error={errors.email}><input className={editInput(!!errors.email)} value={draft.email} onChange={(e) => set("email", e.target.value)} inputMode="email" /></EditField>
+              <EditField label="Door / Flat No."><input className={editInput()} value={draft.locationUnit} onChange={(e) => set("locationUnit", e.target.value)} placeholder="Door / Flat / House no." /></EditField>
               <EditField label="Location"><input className={editInput()} value={draft.location} onChange={(e) => set("location", e.target.value)} /></EditField>
             </>
           )}

@@ -72,6 +72,7 @@ function rowToLead(r: any): Lead {
     number: r.number ?? "",
     email: r.email ?? "",
     location: r.location ?? "",
+    locationUnit: r.location_unit ?? "",
     locationLat: r.location_lat == null ? null : Number(r.location_lat),
     locationLng: r.location_lng == null ? null : Number(r.location_lng),
     locationMapsUrl: r.location_maps_url ?? "",
@@ -143,6 +144,7 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("number", l.number);
   set("email", l.email);
   set("location", l.location);
+  set("location_unit", l.locationUnit);
   // Map pin coordinates: numeric passthrough (never ""→null coerce so a real 0
   // is preserved); the shareable URL is a plain string.
   if (l.locationLat !== undefined) row.location_lat = l.locationLat;
@@ -465,7 +467,7 @@ const LEAD_OPTIONAL_COLUMNS = [
   "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id",
   "converted_at", "converted_by", "conversion_source", "attribution_mode",
   "device_category_id", "device_brand_id", "device_model_id", "discount_type", "follow_up_agent_id",
-  "location_lat", "location_lng", "location_maps_url",
+  "location_lat", "location_lng", "location_maps_url", "location_unit",
 ];
 
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -1006,7 +1008,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       leadNo: nextLeadNoLocal(),
       date, time, month,
       region: draft.region ?? "", source: draft.source ?? "", captureChannel: draft.captureChannel ?? "", agent: draft.agent ?? "",
-      name: draft.name ?? "", number: draft.number ?? "", email: draft.email ?? "", location: draft.location ?? "",
+      name: draft.name ?? "", number: draft.number ?? "", email: draft.email ?? "", location: draft.location ?? "", locationUnit: draft.locationUnit ?? "",
       locationLat: draft.locationLat ?? null, locationLng: draft.locationLng ?? null, locationMapsUrl: draft.locationMapsUrl ?? "",
       device: draft.device ?? "", deviceCategoryId: draft.deviceCategoryId ?? "", deviceBrandId: draft.deviceBrandId ?? "", deviceModelId: draft.deviceModelId ?? "",
       issue: draft.issue ?? "", category: draft.category ?? "",

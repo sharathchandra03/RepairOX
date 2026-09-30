@@ -32,7 +32,7 @@ import { normaliseRoute, FIELD_STATUS_LABEL, FIELD_STATUS_TONE } from "@/lib/fie
 import { resolveFieldRow, formatInvoiceAmount } from "@/lib/field-resolve";
 import { genWalkInId, nextWalkInNumber, walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
-import type { Lead } from "@/lib/leads-data";
+import { fullLeadLocation, type Lead } from "@/lib/leads-data";
 import type { WalkIn } from "@/lib/mock-data";
 
 export function LeadOperationsPanel({ lead }: { lead: Lead }) {
@@ -59,7 +59,7 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
     try {
       const { customerId, created } = resolveCustomer(customers, {
         name: lead.name, phone: lead.number, email: lead.email,
-        address: lead.location, source: "sales",
+        address: fullLeadLocation(lead), source: "sales",
         existingCustomerId: lead.customerId || undefined,
       });
       if (!customerId) {
@@ -107,7 +107,7 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
     try {
       const { customerId, created } = resolveCustomer(customers, {
         name: lead.name, phone: lead.number, email: lead.email,
-        address: lead.location, source: "sales",
+        address: fullLeadLocation(lead), source: "sales",
         existingCustomerId: lead.customerId || undefined,
       });
       if (created) await addCustomer(created);

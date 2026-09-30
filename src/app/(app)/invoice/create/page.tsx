@@ -23,6 +23,9 @@ import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, ident
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
+import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
+import { AddInventoryModal } from "@/components/inventory/add-inventory-modal";
+import { Can } from "@/components/common/can";
 import { searchCustomers, type Customer } from "@/lib/customer-data";
 import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
 import { findOrCreateCustomer } from "@/lib/customer-service";
@@ -81,9 +84,11 @@ type InvoiceFormDevice = {
    *  never a Parts & Services inventory line. Held as a string for the input,
    *  persisted as a number. */
   estimateValue: string;
-  /** Agreed repair/labour charge (₹) for this device — a separate financial
-   *  value that participates in pricing, distinct from the estimate and from
-   *  Parts & Services. Held as a string for the input, persisted as a number. */
+  /** Agreed repair/labour charge (₹) for this device. NOTE: this is no longer
+   *  entered in the Products step (removed — the Products step is Device + Job +
+   *  Inventory only). The field is retained for backward compatibility with
+   *  persisted invoices and the pricing/totals math; when set (e.g. legacy
+   *  data) it still participates in pricing. New invoices leave it empty. */
   repairCost: string;
   notes: string;
   parts: InvoiceLineItem[];
@@ -1277,50 +1282,99 @@ function LinkedTicketField({ form, updateForm }: { form: InvoiceFormData; update
   );
 }
 
-/* ─── Inventory Search Box (reuses ticket inventory search pattern) ──── */
-
-function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryItem) => void; onClose: () => void }) {
+/* ─── Line-item name field with inline inventory autocomplete ─────────
+   The Item cell in the line-item table is inventory-aware: typing searches the
+   Inventory Master (same store-scoped useStore().inventory, debounced) and
+   shows matching items in a dropdown. Picking one binds the line to that master
+   item (name / sku / price) via onPick — it never creates or mutates a master
+   record. Free typing still works for non-inventory / manual lines. */
+function LineItemNameInput({
+  value,
+  onChange,
+  onPick,
+  placeholder,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onPick: (item: InventoryItem) => void;
+  placeholder?: string;
+}) {
   const { inventory } = useStore();
-  const [q, setQ] = useState("");
+  const [open, setOpen] = useState(false);
+  const [debounced, setDebounced] = useState(value);
+  const wrapRef = useRef<HTMLDivElement>(null);
 
-  const results = q.trim().length >= 2
-    ? inventory.filter((item) => {
-        const query = q.toLowerCase();
-        return item.active && (item.name.toLowerCase().includes(query) || item.id.toLowerCase().includes(query) || item.category.toLowerCase().includes(query));
-      }).slice(0, 8)
-    : [];
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(value), 160);
+    return () => clearTimeout(t);
+  }, [value]);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [open]);
+
+  const query = debounced.trim().toLowerCase();
+  const results = useMemo(() => {
+    if (query.length < 1) return [];
+    return inventory
+      .filter((item) =>
+        item.active && (
+          item.name.toLowerCase().includes(query) ||
+          item.id.toLowerCase().includes(query) ||
+          item.category.toLowerCase().includes(query) ||
+          (item.hsnCode ? item.hsnCode.toLowerCase().includes(query) : false)
+        )
+      )
+      .slice(0, 8);
+  }, [inventory, query]);
+
+  const showList = open && results.length > 0;
 
   return (
-    <div className="relative">
-      <div className="flex items-center gap-2 rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD]/30 p-2.5">
-        <Search className="h-4 w-4 text-[#4361EE] shrink-0" />
-        <Input value={q} onChange={(e: any) => setQ(e.target.value)} placeholder="Search inventory by name, SKU, or category…" autoFocus className="flex-1 h-9" />
-        <button type="button" onClick={onClose} className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted transition"><X className="h-4 w-4" /></button>
-      </div>
-      {results.length > 0 && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[260px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+    <div className="relative" ref={wrapRef}>
+      <Input
+        value={value}
+        onChange={(e: any) => { onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && results.length > 0) { e.preventDefault(); onPick(results[0]); setOpen(false); }
+          if (e.key === "Escape") setOpen(false);
+        }}
+        placeholder={placeholder}
+        className="h-9"
+        autoComplete="off"
+      />
+      {showList && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
           {results.map((item) => {
             const available = item.currentStock - (item.reservedStock || 0);
+            const out = item.type === "Product" && available <= 0;
             return (
-              <button key={item.id} type="button" onClick={() => onSelect(item)}
-                className="flex w-full items-center gap-3 px-3 py-2.5 text-left transition border-b border-border last:border-0 hover:bg-indigo-50/50">
-                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Package className="h-3.5 w-3.5" /></span>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium truncate">{item.name}</p>
-                  <p className="text-[10px] text-muted-foreground">{item.id} · {item.category}</p>
+              <button
+                key={item.id}
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); onPick(item); setOpen(false); }}
+                className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left transition last:border-0 hover:bg-indigo-50/50"
+              >
+                <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Package className="h-3.5 w-3.5" /></span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[13px] font-medium">{item.name}</p>
+                  <p className="truncate text-[10px] text-muted-foreground">{item.id} · {item.category}</p>
                 </div>
-                <div className="text-right shrink-0">
-                  <p className="text-sm font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
-                  <span className="text-[10px] text-muted-foreground">Stock: {available}</span>
+                <div className="shrink-0 text-right">
+                  <p className="text-[13px] font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
+                  <span className={cn("text-[10px]", out ? "text-rose-500" : "text-muted-foreground")}>
+                    {item.type === "Service" ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
+                  </span>
                 </div>
               </button>
             );
           })}
-        </div>
-      )}
-      {q.trim().length >= 2 && results.length === 0 && (
-        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-border bg-card shadow-xl">
-          <p className="text-center text-sm text-muted-foreground py-3">No inventory items match &ldquo;{q}&rdquo;</p>
         </div>
       )}
     </div>
@@ -1330,6 +1384,7 @@ function InventorySearchBox({ onSelect, onClose }: { onSelect: (item: InventoryI
 /* ─── Step 3: Devices & Products (Multi-Device) ──────────────────────── */
 
 function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
+  const { can } = usePermissions();
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
 
@@ -1344,16 +1399,24 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
     });
     return () => { alive = false; };
   }, []);
+  // Inventory search popover (live search → add existing item as a line) and
+  // the Add Inventory modal (create a NEW Inventory Master record) are two
+  // DISTINCT workflows, tracked separately.
   const [showInventorySearch, setShowInventorySearch] = useState(false);
-  const inventorySearchRef = useRef<HTMLDivElement>(null);
+  const [showAddInventory, setShowAddInventory] = useState(false);
+  const [addInventorySeed, setAddInventorySeed] = useState("");
+  const searchWrapRef = useRef<HTMLDivElement>(null);
 
-  // Smooth scroll to inventory search when it opens
+  // Close the inventory search popover on outside click / Escape.
   useEffect(() => {
-    if (showInventorySearch && inventorySearchRef.current) {
-      setTimeout(() => {
-        inventorySearchRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
-      }, 50);
-    }
+    if (!showInventorySearch) return;
+    const onDown = (e: MouseEvent) => {
+      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target as Node)) {
+        setShowInventorySearch(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
   }, [showInventorySearch]);
 
   const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
@@ -1426,6 +1489,71 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
           }),
         };
       }),
+    }));
+  };
+
+  // Bind an EXISTING line row to an inventory item picked from the inline
+  // autocomplete in the Item cell. Fills name / sku / price / description from
+  // the master (references it, never mutates it); keeps the row's current qty
+  // and recomputes the total.
+  const setLineFromInventory = (partId: string, item: InventoryItem) => {
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => {
+        if (i !== activeIdx) return d;
+        return {
+          ...d,
+          parts: d.parts.map((p) =>
+            p.id === partId
+              ? { ...p, name: item.name, sku: item.id, price: item.regularSellingPrice, description: item.category, total: p.qty * item.regularSellingPrice }
+              : p
+          ),
+        };
+      }),
+    }));
+  };
+
+  // Add an EXISTING Inventory Master item to the active device as a line item.
+  // If the same inventory item (matched by sku) is already on the device, bump
+  // its quantity instead of adding a duplicate row — the master record is never
+  // touched, only the invoice line.
+  const addInventoryLine = (item: InventoryItem) => {
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => {
+        if (i !== activeIdx) return d;
+        const existing = d.parts.find((p) => p.sku && p.sku === item.id);
+        if (existing) {
+          return {
+            ...d,
+            parts: d.parts.map((p) =>
+              p.id === existing.id
+                ? { ...p, qty: p.qty + 1, total: (p.qty + 1) * p.price }
+                : p
+            ),
+          };
+        }
+        return {
+          ...d,
+          parts: [
+            ...d.parts,
+            { id: genLineId(), name: item.name, sku: item.id, qty: 1, price: item.regularSellingPrice, discount: 0, total: item.regularSellingPrice, description: item.category },
+          ],
+        };
+      }),
+    }));
+  };
+
+  // Add a NON-inventory line item (a manual service / charge). This is a
+  // billed invoice line with no Inventory Master record — the existing invoice
+  // line-item architecture already supports free-text items with a price.
+  const addService = () => {
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => i === activeIdx
+        ? { ...d, parts: [...d.parts, { id: genLineId(), name: "", qty: 1, price: 0, discount: 0, total: 0 }] }
+        : d
+      ),
     }));
   };
 
@@ -1564,6 +1692,13 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   </div>
                 </div>
               </div>
+              {/* Notes — moved up into the Device Details row alongside IMEI /
+                  Serial and Warranty (per the detail layout). Same field, same
+                  data + persistence; only its placement changed. */}
+              <div className="space-y-1">
+                <Label>Notes</Label>
+                <Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-9" />
+              </div>
             </div>
           </div>
 
@@ -1583,107 +1718,153 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
             </div>
           </div>
 
-          {/* Financial / Invoice Context — Estimate Value + Repair Cost are
-              structured monetary values (₹), stored numerically per device.
-              They are SEPARATE from Parts & Services inventory and from each
-              other; neither is ever an inventory line item. */}
-          <div>
-            <div className="grid grid-cols-1 gap-x-3 gap-y-2 md:grid-cols-3">
-              <div className="space-y-1">
-                <Label>Estimate Value</Label>
-                <NumericInput
-                  value={Number(activeDevice.estimateValue) || 0}
-                  onChange={(v) => setDeviceField("estimateValue", v > 0 ? String(v) : "")}
-                  min={0}
-                  iconLeft={<span className="text-[13px]">₹</span>}
-                  className="h-9"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Repair Cost</Label>
-                <NumericInput
-                  value={Number(activeDevice.repairCost) || 0}
-                  onChange={(v) => setDeviceField("repairCost", v > 0 ? String(v) : "")}
-                  min={0}
-                  iconLeft={<span className="text-[13px]">₹</span>}
-                  className="h-9"
-                />
-              </div>
-              <div className="space-y-1"><Label>Notes</Label><Input value={activeDevice.notes} onChange={(e: any) => setDeviceField("notes", e.target.value)} placeholder="Optional notes" className="h-9" /></div>
-            </div>
-          </div>
+          {/* ── Boundary before the Inventory Cost workspace ── */}
+          <div className="border-t border-border pt-4 mt-3" />
 
-          {/* Parts for this device — highlighted as the billable INVENTORY
-              section so it reads distinctly from the device/financial fields
-              above. Brand-tinted card + accent header. */}
-          <div className="mt-5 rounded-xl border border-[#4361EE]/25 bg-[#4361EE]/[0.04] px-3 pt-2 pb-4 sm:px-4">
-            <div className="flex items-center justify-between mb-2.5">
-              <p className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]"><Package className="h-3.5 w-3.5" /> Inventory Cost</p>
-              <div className="flex gap-1.5">
-                <Button size="sm" variant="outline" onClick={() => setShowInventorySearch(true)}><Search className="h-3.5 w-3.5" /> Search Item</Button>
-                <Button size="sm" onClick={addPart}><Plus className="h-3.5 w-3.5" /> Add Item</Button>
-              </div>
-            </div>
-
-            {/* Inventory Search Dropdown */}
-            {showInventorySearch && (
-              <div className="relative z-30 mb-3" ref={inventorySearchRef}>
-                <InventorySearchBox
-                  onSelect={(item) => {
-                    updateForm((f) => ({
-                      ...f,
-                      devices: f.devices.map((d, i) => i === activeIdx
-                        ? { ...d, parts: [...d.parts, { id: genLineId(), name: item.name, sku: item.id, qty: 1, price: item.regularSellingPrice, discount: 0, total: item.regularSellingPrice, description: item.category }] }
-                        : d
-                      ),
-                    }));
-                    setShowInventorySearch(false);
-                  }}
-                  onClose={() => setShowInventorySearch(false)}
-                />
-              </div>
-            )}
-
-            {/* Always-visible item entry row */}
-            {activeDevice.parts.length === 0 && !showInventorySearch && (
-              <div className="rounded-xl border border-border bg-card p-2.5">
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
-                  <div className="space-y-1"><Label>Item</Label><Input value="" onChange={() => addPart()} onFocus={() => addPart()} placeholder="Click to add an item…" className="h-9" /></div>
-                  <div className="space-y-1"><Label>Qty</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">1</div></div>
-                  <div className="space-y-1"><Label>Price</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
-                  <div className="space-y-1"><Label>Total</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm text-muted-foreground">₹0</div></div>
-                  <div className="flex items-end"><div className="h-9 w-9" /></div>
+          {/* INVENTORY COST — the primary working area of the Products step.
+              Two DISTINCT workflows live here:
+                • Search Inventory → select an existing Inventory Master item →
+                  it becomes an invoice LINE ITEM (addInventoryLine).
+                • Add Inventory   → opens the canonical Inventory Master create
+                  form (AddInventoryModal) → creates a REAL master record; the
+                  new item is then findable in Search and can be added as a line.
+              Add Service adds a non-inventory manual charge. Master creation is
+              NEVER the same action as adding a line item. */}
+          <div className="rounded-2xl border border-[#4361EE]/25 bg-gradient-to-b from-[#4361EE]/[0.05] to-transparent shadow-sm">
+            {/* Section header — clean, professional ERP inventory workspace. */}
+            <div className="flex flex-col gap-2.5 border-b border-[#4361EE]/15 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+              <div className="flex items-center gap-2.5">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white shadow-sm">
+                  <Package className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-[13px] font-bold uppercase tracking-wider text-[#3347D6]">Inventory Cost</p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {activeDevice.parts.length > 0
+                      ? `${activeDevice.parts.length} line item${activeDevice.parts.length !== 1 ? "s" : ""} · ${formatINR(deviceSubtotal)}`
+                      : "Search the inventory to bill items on this invoice"}
+                  </p>
                 </div>
               </div>
-            )}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => setShowInventorySearch((v) => !v)}>
+                  <Search className="h-3.5 w-3.5" /> Search Inventory
+                </Button>
+                <Button size="sm" variant="outline" onClick={addService}>
+                  <Plus className="h-3.5 w-3.5" /> Add Service
+                </Button>
+                {/* Add Inventory (create a master record) — only when the user
+                    holds an inventory create capability. Search/select stays
+                    available to any invoice user regardless. */}
+                <Can permission={CAP.inventory.create}>
+                  <Button size="sm" onClick={() => { setAddInventorySeed(""); setShowAddInventory(true); }}>
+                    <Plus className="h-3.5 w-3.5" /> Add Inventory
+                  </Button>
+                </Can>
+              </div>
+            </div>
 
-            {activeDevice.parts.length > 0 && (
-              <div className="space-y-2">
-                {activeDevice.parts.map((item) => (
-                  <div key={item.id} className="rounded-xl border border-border bg-card p-3">
-                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_70px_90px_90px_auto]">
-                      <div className="space-y-1"><Label>Item</Label><Input value={item.name} onChange={(e: any) => updatePart(item.id, "name", e.target.value)} placeholder="Display assembly" className="h-9" /></div>
-                      <div className="space-y-1"><Label>Qty</Label><NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} className="h-9" /></div>
-                      <div className="space-y-1"><Label>Price</Label><NumericInput value={item.price} onChange={(v) => updatePart(item.id, "price", v)} className="h-9" /></div>
-                      <div className="space-y-1"><Label>Total</Label><div className="flex h-9 items-center rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums">{formatINR(item.total)}</div></div>
-                      <div className="flex items-end"><button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 hover:bg-rose-50 transition"><Trash2 className="h-3.5 w-3.5" /></button></div>
-                    </div>
+            <div className="px-4 py-3 sm:px-5">
+              {/* Live inventory search — anchored popover, type-to-search. */}
+              {showInventorySearch && (
+                <div className="relative z-30 mb-4" ref={searchWrapRef}>
+                  <InventorySearchBox
+                    onSelect={(item) => { addInventoryLine(item); /* keep open for rapid multi-add */ }}
+                    onClose={() => setShowInventorySearch(false)}
+                    onAddInventory={(term) => {
+                      // Empty-state "+ Add Inventory" — gated too: only open the
+                      // create form when the user can create inventory.
+                      if (allow(can, CAP.inventory.create)) {
+                        setAddInventorySeed(term);
+                        setShowInventorySearch(false);
+                        setShowAddInventory(true);
+                      }
+                    }}
+                  />
+                </div>
+              )}
+
+              {/* Line-item workspace */}
+              {activeDevice.parts.length === 0 ? (
+                // Empty state — compact prompt only. The actions live in the
+                // section header above, so we DON'T repeat the three buttons
+                // here; a single "Search Inventory" link is enough to get going.
+                <button
+                  type="button"
+                  onClick={() => setShowInventorySearch(true)}
+                  className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-dashed border-[#4361EE]/30 bg-card/60 px-4 py-4 text-center transition hover:border-[#4361EE]/50 hover:bg-[#EEF1FD]/40"
+                >
+                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+                    <Search className="h-4 w-4" />
+                  </span>
+                  <span className="text-left">
+                    <span className="block text-[13px] font-semibold text-foreground">No items added yet</span>
+                    <span className="block text-[11px] text-muted-foreground">Click to search the inventory and add an item.</span>
+                  </span>
+                </button>
+              ) : (
+                <div className="rounded-xl border border-border bg-card">
+                  {/* Table header */}
+                  <div className="hidden grid-cols-[1fr_80px_110px_110px_44px] gap-2 rounded-t-xl border-b border-border bg-muted/60 px-3 py-2 sm:grid">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Item</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Qty</span>
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Price</span>
+                    <span className="text-right text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Total</span>
+                    <span />
                   </div>
-                ))}
-              </div>
-            )}
-
-            {activeDevice.parts.length > 0 && (
-              <div className="mt-3 flex justify-end">
-                <div className="rounded-xl bg-muted/60 px-4 py-2 text-sm">
-                  <span className="text-muted-foreground">Device Subtotal: </span>
-                  <span className="font-semibold tabular-nums">{formatINR(deviceSubtotal)}</span>
+                  {activeDevice.parts.map((item) => (
+                    <div key={item.id} className="grid grid-cols-1 gap-2 border-t border-border px-3 py-2.5 first:border-t-0 sm:grid-cols-[1fr_80px_110px_110px_44px] sm:items-center sm:gap-2">
+                      <div className="space-y-1 sm:space-y-0">
+                        <Label className="sm:hidden">Item</Label>
+                        <LineItemNameInput
+                          value={item.name}
+                          onChange={(v) => updatePart(item.id, "name", v)}
+                          onPick={(inv) => setLineFromInventory(item.id, inv)}
+                          placeholder="Type to search inventory, or enter a service…"
+                        />
+                      </div>
+                      <div className="space-y-1 sm:space-y-0">
+                        <Label className="sm:hidden">Qty</Label>
+                        <NumericInput value={item.qty} onChange={(v) => updatePart(item.id, "qty", v)} min={1} className="h-9" />
+                      </div>
+                      <div className="space-y-1 sm:space-y-0">
+                        <Label className="sm:hidden">Price</Label>
+                        <NumericInput value={item.price} onChange={(v) => updatePart(item.id, "price", v)} iconLeft={<span className="text-[13px]">₹</span>} className="h-9" />
+                      </div>
+                      <div className="space-y-1 sm:space-y-0">
+                        <Label className="sm:hidden">Total</Label>
+                        <div className="flex h-9 items-center justify-end rounded-xl border border-border bg-muted/40 px-3 text-sm font-semibold tabular-nums sm:border-0 sm:bg-transparent sm:px-0">{formatINR(item.total)}</div>
+                      </div>
+                      <div className="flex items-center justify-end">
+                        <button onClick={() => removePart(item.id)} className="grid h-9 w-9 place-items-center rounded-lg text-rose-500 transition hover:bg-rose-50" aria-label="Remove line item"><Trash2 className="h-3.5 w-3.5" /></button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              </div>
-            )}
+              )}
+
+              {activeDevice.parts.length > 0 && (
+                <div className="mt-3 flex justify-end">
+                  <div className="rounded-xl bg-white px-4 py-2 text-sm shadow-sm ring-1 ring-[#4361EE]/15">
+                    <span className="text-muted-foreground">Device Subtotal: </span>
+                    <span className="font-bold tabular-nums text-[#3347D6]">{formatINR(deviceSubtotal)}</span>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
+
+      {/* Add Inventory modal — creates a canonical Inventory Master record and,
+          on success, adds it to this device as a line item so the user doesn't
+          have to search for what they just created. */}
+      <AddInventoryModal
+        open={showAddInventory}
+        onClose={() => setShowAddInventory(false)}
+        initialName={addInventorySeed}
+        onCreated={(item) => addInventoryLine(item)}
+      />
     </div>
   );
 }

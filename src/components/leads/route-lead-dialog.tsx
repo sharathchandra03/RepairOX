@@ -31,7 +31,7 @@ import { allow } from "@/lib/capabilities";
 import { resolveCustomer, staffByRole } from "@/lib/field-linking";
 import { normaliseRoute, routeToFieldLeadType, FIELD_LEAD_TYPES, type FulfilmentRoute, type FieldLeadType } from "@/lib/field-data";
 import { notify } from "@/lib/notifications";
-import type { Lead } from "@/lib/leads-data";
+import { fullLeadLocation, type Lead } from "@/lib/leads-data";
 
 export function RouteLeadDialog({ lead, open, onClose }: {
   lead: Lead | null;
@@ -54,7 +54,9 @@ export function RouteLeadDialog({ lead, open, onClose }: {
   const [fieldManagerId, setFieldManagerId] = useState<string>("");
   const [ninjaId, setNinjaId] = useState<string>("");
   const [leadType, setLeadType] = useState<FieldLeadType>("pickup");
-  const [pickupAddress, setPickupAddress] = useState<string>(lead?.location || "");
+  const [pickupAddress, setPickupAddress] = useState<string>(
+    lead ? fullLeadLocation(lead) : ""
+  );
   const [pickupDate, setPickupDate] = useState<string>("");
   const [pickupTime, setPickupTime] = useState<string>("");
   const [confirming, setConfirming] = useState(false);
@@ -84,7 +86,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
       // Resolve (or create) the ONE Customer Master record for this lead.
       const { customerId, created } = resolveCustomer(customers, {
         name: lead.name, phone: lead.number, email: lead.email,
-        address: lead.location, source: "sales",
+        address: fullLeadLocation(lead), source: "sales",
         existingCustomerId: lead.customerId || undefined,
       });
       if (created) await addCustomer(created);

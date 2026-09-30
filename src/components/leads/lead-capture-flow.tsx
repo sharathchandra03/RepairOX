@@ -511,7 +511,14 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   </div>
                   <Field label="Location">
                     <div className="flex items-center gap-2">
-                      <input className={inputCls()} value={draft.location ?? ""} onChange={(e) => set("location", e.target.value)} placeholder="Address / landmark" />
+                      <input
+                        className={cn(inputCls(), "w-32 shrink-0 grow-0")}
+                        value={draft.locationUnit ?? ""}
+                        onChange={(e) => set("locationUnit", e.target.value)}
+                        placeholder="Door / Flat No."
+                        aria-label="Door / Flat / House number"
+                      />
+                      <input className={cn(inputCls(), "min-w-0 flex-1")} value={draft.location ?? ""} onChange={(e) => set("location", e.target.value)} placeholder="Address / landmark" />
                       <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => setMapOpen(true)}>
                         <MapPin className="h-4 w-4" /> {hasPin ? "Edit pin" : "Map"}
                       </Button>
@@ -672,7 +679,8 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   )}
                   <ReviewGroup title="Customer" onEdit={() => goToStage(1)} rows={[
                     ["Name", draft.name], ["Number", draft.number], ["Email", draft.email],
-                    ["Region", draft.region], ["Location", draft.location],
+                    ["Region", draft.region],
+                    ["Location", [draft.locationUnit, draft.location].filter(Boolean).join(", ")],
                     ["Map pin", hasPin ? `${draft.locationLat!.toFixed(5)}, ${draft.locationLng!.toFixed(5)}` : ""],
                     ["Customer Master", draft.customerId ? "Linked" : "New / unlinked"],
                   ]} />
