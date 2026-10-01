@@ -16,6 +16,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import {
   type KanbanBoard, type KanbanColor, type KanbanColumn, type KanbanState, type NoteColor,
   kUid, makeBoard, makeDefaultBoard, duplicateBoard, reconcileBoard, moveCard as moveCardPure,
@@ -28,25 +29,65 @@ function storageKeyFor(userId: string | null | undefined): string {
   return `${STORAGE_PREFIX}${userId ?? "anon"}`;
 }
 
-function readState(key: string): KanbanState | null {
+function isValidState(parsed: any): parsed is KanbanState {
+  return !!parsed && Array.isArray(parsed.boards);
+}
+
+function readLocalState(key: string): KanbanState | null {
   if (typeof window === "undefined") return null;
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
-    if (!parsed || !Array.isArray(parsed.boards)) return null;
-    return parsed as KanbanState;
+    return isValidState(parsed) ? (parsed as KanbanState) : null;
   } catch {
     return null;
   }
 }
 
-function writeState(key: string, state: KanbanState): void {
+function writeLocalState(key: string, state: KanbanState): void {
   if (typeof window === "undefined") return;
   try {
     window.localStorage.setItem(key, JSON.stringify(state));
   } catch {
     /* quota / unavailable */
+  }
+}
+
+/* ── DB persistence (Supabase mode) ──────────────────────────────────────────
+   The whole KanbanState is stored as ONE per-user JSONB blob via the
+   /api/lead-kanban route (service-role, scoped to auth.user.id). The shape is
+   unchanged from localStorage — the DB is just a durable, cross-device home. */
+async function loadDbState(): Promise<KanbanState | null> {
+  if (!isSupabaseConfigured || !supabase) return null;
+  try {
+    const { data: session } = await supabase.auth.getSession();
+    const token = session?.session?.access_token;
+    if (!token) return null;
+    const res = await fetch("/api/lead-kanban", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return null;
+    const json = await res.json();
+    return isValidState(json?.state) ? (json.state as KanbanState) : null;
+  } catch {
+    return null;
+  }
+}
+
+async function saveDbState(state: KanbanState): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  try {
+    const { data: session } = await supabase.auth.getSession();
+    const token = session?.session?.access_token;
+    if (!token) return;
+    await fetch("/api/lead-kanban", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+      body: JSON.stringify({ state }),
+    });
+  } catch {
+    /* network error — localStorage still holds the latest copy */
   }
 }
 
@@ -89,31 +130,95 @@ export function useLeadKanban(userId: string | null | undefined): UseLeadKanban 
   const [hydrated, setHydrated] = useState(false);
   const userIdRef = useRef(userId);
   userIdRef.current = userId;
+  // Guards against the hydration race that used to "reset all cards to column 1"
+  // on refresh: we only start persisting AFTER the authoritative load (DB in
+  // Supabase mode, else localStorage) has completed for a KNOWN user.
+  const loadedForKeyRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  /* ── Hydrate on mount / when the user changes ── */
+  /* ── Hydrate on mount / when the user changes ──
+     In Supabase mode the DB row (per auth user) is the source of truth; we fall
+     back to any local copy, then seed a default board. In local mode we read
+     localStorage. We WAIT for a real userId before hydrating under a user key
+     so a fleeting "anon" pass can never seed/overwrite the real layout. */
   useEffect(() => {
-    const saved = readState(storageKey);
-    if (saved && saved.boards.length > 0) {
-      // Ensure a valid active board.
-      const activeOk = saved.boards.some((b) => b.id === saved.activeBoardId);
-      setState({
-        boards: saved.boards,
-        activeBoardId: activeOk ? saved.activeBoardId : saved.boards[0].id,
-      });
-    } else {
-      // First run for this user → seed a sensible default personal board.
-      const def = makeDefaultBoard(userId ?? "anon");
-      setState({ boards: [def], activeBoardId: def.id });
+    let cancelled = false;
+    setHydrated(false);
+    loadedForKeyRef.current = null;
+
+    // In Supabase mode, WAIT for the real authenticated user id before touching
+    // storage. Hydrating under the transient "anon" key (before useSession
+    // resolves) is exactly what used to seed/overwrite the real layout on
+    // refresh. In local mode "anon" is a legitimate stable key, so we proceed.
+    if (isSupabaseConfigured && (userId === null || userId === undefined)) {
+      return () => { cancelled = true; };
     }
-    setHydrated(true);
+
+    (async () => {
+      let loaded: KanbanState | null = null;
+
+      // Supabase mode: prefer the DB; migrate any older local copy up on first
+      // load (so a user who had localStorage boards keeps them).
+      if (isSupabaseConfigured && supabase) {
+        loaded = await loadDbState();
+        if (cancelled) return;
+        if (!loaded) {
+          const local = readLocalState(storageKey);
+          if (local && local.boards.length > 0) {
+            loaded = local;
+            // Push the migrated local copy up to the DB so it's durable.
+            void saveDbState(local);
+          }
+        }
+      } else {
+        // Local mode.
+        loaded = readLocalState(storageKey);
+      }
+
+      if (cancelled) return;
+
+      if (loaded && loaded.boards.length > 0) {
+        const activeOk = loaded.boards.some((b) => b.id === loaded!.activeBoardId);
+        setState({
+          boards: loaded.boards,
+          activeBoardId: activeOk ? loaded.activeBoardId : loaded.boards[0].id,
+        });
+      } else {
+        // First run for this user → seed a sensible default personal board.
+        const def = makeDefaultBoard(userId ?? "anon");
+        setState({ boards: [def], activeBoardId: def.id });
+      }
+
+      loadedForKeyRef.current = storageKey;
+      setHydrated(true);
+    })();
+
+    return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [storageKey]);
 
-  /* ── Persist on change (after hydration only) ── */
+  /* ── Persist on change ──
+     Only after the authoritative load for THIS user key finished (prevents the
+     initial seed/reconcile from overwriting the just-loaded layout). Writes
+     localStorage immediately (fast cache / local-mode home) and debounces the
+     DB write. */
   useEffect(() => {
     if (!hydrated) return;
-    writeState(storageKey, state);
+    if (loadedForKeyRef.current !== storageKey) return;
+
+    writeLocalState(storageKey, state);
+
+    if (isSupabaseConfigured && supabase) {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const snapshot = state;
+      saveTimerRef.current = setTimeout(() => { void saveDbState(snapshot); }, 400);
+    }
   }, [state, hydrated, storageKey]);
+
+  // Flush any pending debounced DB save on unmount.
+  useEffect(() => () => {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+  }, []);
 
   const activeBoard = useMemo(
     () => state.boards.find((b) => b.id === state.activeBoardId) ?? state.boards[0] ?? null,

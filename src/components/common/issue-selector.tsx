@@ -20,7 +20,8 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Plus, X } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Plus, Search, X } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { cn } from "@/lib/utils";
@@ -32,28 +33,71 @@ export function IssueSelector({
   placeholder,
   /** When true, users may create a brand-new issue on the shared master. */
   allowCreate = true,
+  /** Optional override for the selected-issue pill (e.g. a thinner vertical size). */
+  pillClassName,
 }: {
   value: string;
   onChange: (v: string) => void;
   className?: string;
   placeholder?: string;
   allowCreate?: boolean;
+  pillClassName?: string;
 }) {
   const { issueLibrary, addIssueToStore } = useStore();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // Portal panel position (fixed, computed from the trigger rect) so the
+  // dropdown escapes any modal/drawer `overflow-hidden` and is never clipped.
+  const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number }>({ left: 0, width: 0 });
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
 
   const selected = parseIssueString(value);
 
+  // Position the portal panel from the trigger's rect; flip up when there's not
+  // enough room below so long lists never get clipped by the viewport edge.
+  const place = () => {
+    const el = ref.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < 280 && r.top > spaceBelow;
+    setPos(openUp
+      ? { left: r.left, width: r.width, bottom: window.innerHeight - r.top + 6 }
+      : { left: r.left, width: r.width, top: r.bottom + 6 });
+  };
+
+  // Close on outside click (trigger OR portal panel are both "inside").
   useEffect(() => {
     if (!open) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      const t = e.target as Node;
+      if (ref.current?.contains(t) || panelRef.current?.contains(t)) return;
+      setOpen(false);
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
+  }, [open]);
+
+  // Keep the panel glued to the trigger while an ancestor (modal body) scrolls
+  // or the viewport resizes. Capture phase catches inner-scroller scrolls too.
+  useEffect(() => {
+    if (!open) return;
+    place();
+    const onReflow = (e: Event) => {
+      if (panelRef.current && e.target instanceof Node && panelRef.current.contains(e.target)) return;
+      place();
+    };
+    window.addEventListener("scroll", onReflow, true);
+    window.addEventListener("resize", onReflow);
+    return () => {
+      window.removeEventListener("scroll", onReflow, true);
+      window.removeEventListener("resize", onReflow);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const filtered = useMemo(
@@ -96,16 +140,19 @@ export function IssueSelector({
   return (
     <div ref={ref} className="relative">
       <div
-        onClick={() => { setOpen(true); inputRef.current?.focus(); }}
+        onClick={() => { place(); setOpen(true); inputRef.current?.focus(); }}
         className={cn(
-          "flex min-h-[42px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2 text-sm transition-all duration-150 hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/15",
+          "flex min-h-[42px] w-full cursor-text flex-wrap items-center gap-1.5 rounded-xl border border-input bg-card px-3 py-2 text-sm transition-all duration-150 hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-1 focus-within:ring-[#4361EE]/10",
           className,
         )}
       >
         {selected.map((issue) => (
           <span
             key={issue}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1 text-[13px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1 text-[13px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40",
+              pillClassName,
+            )}
           >
             {issue}
             <button
@@ -121,47 +168,69 @@ export function IssueSelector({
         <input
           ref={inputRef}
           value={query}
-          onChange={(e) => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
+          onChange={(e) => { setQuery(e.target.value); if (!open) { place(); setOpen(true); } }}
+          onFocus={() => { place(); setOpen(true); }}
           onKeyDown={handleKeyDown}
           placeholder={selected.length === 0 ? (placeholder ?? "Search or add issues…") : "Add more…"}
-          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none focus-visible:shadow-none focus-visible:ring-0"
         />
       </div>
 
-      {open && (
-        <div className="absolute z-40 mt-1.5 max-h-56 w-full overflow-y-auto rounded-xl border border-border bg-card p-1.5 shadow-xl ring-1 ring-black/[0.03]">
-          {filtered.length > 0 ? (
-            filtered.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => addIssue(item)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#EEF1FD]/60 transition-colors"
-              >
-                {item}
-              </button>
-            ))
-          ) : !showCreate ? (
-            <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No issues found</p>
-          ) : null}
-          {/* "Add new issue" pinned to the END of the dropdown. When the user is
-              typing a non-matching name it creates exactly that; separated from
-              the list above with a divider so it's always the last action. */}
-          {showCreate && (
-            <>
-              {filtered.length > 0 && <div className="my-1 h-px bg-border" />}
-              <button
-                type="button"
-                onClick={() => addIssue(query)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors"
-              >
-                <Plus className="h-3.5 w-3.5 text-[#4361EE]" />
-                <span>Add new issue “<span className="font-semibold">{query.trim()}</span>”</span>
-              </button>
-            </>
-          )}
-        </div>
+      {/* Dropdown — portalled to <body> with fixed positioning so it is never
+          clipped by a modal/drawer `overflow-hidden` ancestor (spec: match the
+          lead form's ConfigurableSelect / AgentPicker portal behaviour). */}
+      {mounted && open && createPortal(
+        <div
+          ref={panelRef}
+          data-lead-popover-open="true"
+          style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
+          className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
+        >
+          {/* Dedicated search bar inside the panel — mirrors the other lead
+              pickers and makes "search issues" explicit. */}
+          <div className="flex items-center gap-2 border-b border-border px-2.5 py-2">
+            <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+            <input
+              autoFocus
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Search or add issues…"
+              className="w-full bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground"
+            />
+          </div>
+          <div className="max-h-56 overflow-y-auto p-1.5">
+            {filtered.length > 0 ? (
+              filtered.map((item) => (
+                <button
+                  key={item}
+                  type="button"
+                  onClick={() => addIssue(item)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#EEF1FD]/60 transition-colors"
+                >
+                  {item}
+                </button>
+              ))
+            ) : !showCreate ? (
+              <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No issues found</p>
+            ) : null}
+            {/* "Add new issue" pinned to the END of the list. */}
+            {showCreate && (
+              <>
+                {filtered.length > 0 && <div className="my-1 h-px bg-border" />}
+                <button
+                  type="button"
+                  onClick={() => addIssue(query)}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium text-[#4361EE] hover:bg-[#EEF1FD]/60 transition-colors"
+                >
+                  <Plus className="h-3.5 w-3.5 text-[#4361EE]" />
+                  <span>Add new issue “<span className="font-semibold">{query.trim()}</span>”</span>
+                </button>
+              </>
+            )}
+          </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

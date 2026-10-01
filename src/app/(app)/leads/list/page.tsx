@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
   Phone, Mail, RefreshCw, Trash2,
@@ -35,6 +35,7 @@ import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
+import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadIsExistingCustomer, type LeadFollowUp,
   isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
@@ -47,7 +48,6 @@ import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
-import { FulfilmentRouteBadge } from "@/components/leads/fulfilment-route-badge";
 import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
@@ -59,23 +59,23 @@ const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
 /* ── LEAD TABLE COLUMN CONTRACT ───────────────────────────────────────────
    The columns in VISUAL ORDER with their rendered widths. Two mandatory
-   structural anchors: "id" (Lead ID) frozen LEFT, "actions" (Last Action)
+   structural anchors: "date" (Date) frozen LEFT, "actions" (Last Action)
    frozen RIGHT. Everything between is freezable-to-left by the user. The
    conditional multi-store "store" column is not offered in the freeze menu
    (freezable:false) since it only exists in All-Shops. Widths match the
    original <colgroup> so freeze offsets line up exactly. */
 function leadGridColumns(multiStore: boolean): GridColumn[] {
   const cols: GridColumn[] = [
-    // Selection anchor — permanently frozen LEFT, before Lead ID. Not offered
+    // Selection anchor — permanently frozen LEFT, before Date. Not offered
     // in the freeze menu (freezable:false); it is a structural selection column
     // handled directly by frozenCellProps (not the single-anchor hook, which
-    // owns the Lead ID left anchor).
+    // owns the Date left anchor).
     { key: "select", label: "", width: 44, freezable: false },
-    { key: "id", label: "Lead ID", width: 84, lockedLeft: true },
+    { key: "date", label: "Date", width: 92, lockedLeft: true },
   ];
   if (multiStore) cols.push({ key: "store", label: "Store", width: 132, freezable: false });
   cols.push(
-    { key: "date", label: "Date", width: 92 },
+    { key: "id", label: "Lead ID", width: 84 },
     { key: "region", label: "Region", width: 120 },
     // MODE OF LEAD — how the lead came in (modeOfContact). Structurally separate
     // from Source (acquisition) and Capture Channel.
@@ -209,6 +209,18 @@ function formatFollowUp(date: string): string {
    workflow — no fakes. ACTION and RESULT are SYSTEM-DERIVED (read-only).
    ───────────────────────────────────────────────────────────────────────── */
 
+/* Derives a hex dot color that matches statusTone's semantic mapping. */
+function statusDotColor(status: string): string {
+  const s = status.toLowerCase();
+  if (/new/.test(s)) return "#0284c7";           // sky-600
+  if (/won|convert|qualif/.test(s)) return "#059669";  // emerald-600
+  if (/lost|drop|not interested/.test(s)) return "#71717a"; // zinc-500
+  if (/follow/.test(s)) return "#ea580c";         // orange-600
+  if (/contact|progress|proposal/.test(s)) return "#7c3aed"; // violet-600
+  if (/interest/.test(s)) return "#4361EE";       // indigo
+  return "#71717a";                               // neutral
+}
+
 /* Column 2 — DATE: date primary line, time secondary. */
 function DateCell({ lead }: { lead: Lead }) {
   const d = lead.date ? new Date(lead.date + "T00:00:00") : null;
@@ -235,15 +247,141 @@ function SourceCell({ lead }: { lead: Lead }) {
   );
 }
 
+/* ─── LeadSelectCell ─────────────────────────────────────────────────────
+   Inline-editable dropdown for lead table cells (Status, Contact Status).
+   Matches the ticket StatusPillDropdown: colored dot, framer-motion menu,
+   portal-positioned so it's never clipped by any scroll container.
+   readOnly = plain pill with no chevron (locked / gated rows). */
+function LeadSelectCell({
+  value,
+  options,
+  onChange,
+  toneClass,
+  dotColor,
+  readOnly = false,
+  placeholder = "—",
+}: {
+  value: string;
+  options: string[];
+  onChange: (v: string) => void;
+  /** Tailwind ring+bg+text classes for the pill e.g. "bg-zinc-100 text-zinc-600 ring-zinc-200" */
+  toneClass: string;
+  /** Hex color for the leading dot and selected-item tick. */
+  dotColor: string;
+  readOnly?: boolean;
+  placeholder?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const handleOpen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const dropUp = window.innerHeight - r.bottom < 280;
+      setPos({ top: dropUp ? undefined : r.bottom + 6, bottom: dropUp ? window.innerHeight - r.top + 6 : undefined, left: r.left, dropUp });
+    }
+    setOpen((o) => !o);
+  };
+
+  if (readOnly) {
+    return value
+      ? <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", toneClass)}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
+          {value}
+        </span>
+      : <span className="text-zinc-400">{placeholder}</span>;
+  }
+
+  return (
+    <div className="relative inline-flex" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={handleOpen}
+        className={cn(
+          "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full font-medium ring-1 ring-inset transition hover:shadow-sm px-2.5 py-1 text-[11px]",
+          value ? toneClass : "bg-zinc-50 text-zinc-400 ring-zinc-200",
+        )}
+        style={value ? { backgroundColor: `${dotColor}15`, color: dotColor, boxShadow: `inset 0 0 0 1px ${dotColor}30` } : undefined}
+      >
+        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: value ? dotColor : "#a1a1aa" }} />
+        {value || placeholder}
+        <ChevronDown className="h-3 w-3 opacity-60" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+            <motion.div
+              initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
+              transition={{ duration: 0.15 }}
+              style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left }}
+              className="z-[70] w-[210px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
+            >
+              {options.map((opt) => (
+                <button
+                  key={opt}
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onChange(opt); setOpen(false); }}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
+                    opt === value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground",
+                  )}
+                >
+                  <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-inset ring-black/10"
+                    style={{ backgroundColor: opt === value ? dotColor : "#a1a1aa" }} />
+                  {opt}
+                  {opt === value && <span className="ml-auto text-[9px] font-bold text-[#4361EE]">✓</span>}
+                </button>
+              ))}
+              {value && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); onChange(""); setOpen(false); }}
+                  className="mt-0.5 flex w-full items-center gap-2 rounded-lg border-t border-border/50 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-zinc-50"
+                >
+                  <X className="h-3 w-3" /> Clear
+                </button>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* Column 6 — CONTACT STATUS (current structured state; kept separate from
    Lead Status / Result / Final Result). */
-function ContactStatusCell({ lead }: { lead: Lead }) {
-  if (!lead.contactStatus) return <span className="text-zinc-400">—</span>;
-  const s = lead.contactStatus.toLowerCase();
-  const tone = s.includes("not") ? "bg-zinc-100 text-zinc-600 ring-zinc-200"
+function ContactStatusCell({ lead, options, onSave, locked }: {
+  lead: Lead;
+  options: string[];
+  onSave: (v: string) => void;
+  locked: boolean;
+}) {
+  const s = (lead.contactStatus || "").toLowerCase();
+  const toneClass = s.includes("not") ? "bg-zinc-100 text-zinc-600 ring-zinc-200"
     : s.includes("rnr") || s.includes("busy") || s.includes("switched") ? "bg-amber-50 text-amber-700 ring-amber-200"
-    : "bg-emerald-50 text-emerald-700 ring-emerald-200";
-  return <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", tone)}>{lead.contactStatus}</span>;
+    : lead.contactStatus ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+    : "bg-zinc-50 text-zinc-400 ring-zinc-200";
+  const dotColor = s.includes("not") ? "#71717a"
+    : s.includes("rnr") || s.includes("busy") || s.includes("switched") ? "#d97706"
+    : lead.contactStatus ? "#059669" : "#a1a1aa";
+  return (
+    <LeadSelectCell
+      value={lead.contactStatus || ""}
+      options={options}
+      onChange={onSave}
+      toneClass={toneClass}
+      dotColor={dotColor}
+      readOnly={locked}
+      placeholder="—"
+    />
+  );
 }
 
 /* Column 7 — CONTACT INFO (GROUPED: name + phone + email in one cell). */
@@ -337,17 +475,23 @@ function CommentCell({ text }: { text: string }) {
    NEVER an editable dropdown — the user cannot type or choose it. A subtle lock
    glyph + a "why is this?" tooltip communicate that it is system-generated. */
 function ActionCell({ wf }: { wf: LeadWorkflow }) {
+  // When the Action is driven by a LIVE Field Job, mirror the Field module's
+  // "Service Status" verbatim (exact label + tone) so the sales agent sees the
+  // live Pickup & Drop progress. Otherwise use the derived action label/tone.
+  const isFieldLive = !!wf.fieldStatus;
+  const label = isFieldLive ? wf.fieldStatusLabel : wf.actionLabel;
+  const tone = isFieldLive ? wf.fieldStatusTone : leadActionTone(wf.action);
   return (
     <span
-      title={`${wf.actionLabel} · System-derived — ${wf.reason}`}
-      aria-label={`Action: ${wf.actionLabel} (system-derived, read-only)`}
+      title={`${label} · System-derived — ${wf.reason}`}
+      aria-label={`Action: ${label} (system-derived, read-only)`}
       className={cn(
         "inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset select-none",
-        leadActionTone(wf.action),
+        tone,
       )}
     >
       <Lock className="h-2.5 w-2.5 opacity-60" aria-hidden />
-      {wf.actionLabel}
+      {label}
     </span>
   );
 }
@@ -450,7 +594,7 @@ const FOLLOWUP_FILTERS = [
 ] as const;
 
 export default function LeadsListPage() {
-  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, salesAgents, openFollowUpsByLead } = useLeads();
+  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, updateLead, salesAgents, openFollowUpsByLead } = useLeads();
   const canAssign = useCanAssignLeads();
   const { currentUser, can } = usePermissions();
 
@@ -462,6 +606,10 @@ export default function LeadsListPage() {
      RLS, so a lead never resolves an unauthorized store's records. */
   const { tickets, invoices, walkIns } = useStore();
   const { jobs: fieldJobs } = useField();
+  /* When a status becomes "Pickup Assigned" / "On site Assigned", also create
+     (or reuse) the matching Field Job in the Pickup & Drop workspace, carrying
+     the lead's agent — reuses the single field system (never a fork). */
+  const autoFieldJobForStatus = useLeadStatusFieldJob();
   const canViewTicket = allow(can, CAP.ticket.view);
   const canViewInvoice = allow(can, CAP.invoice.view);
   const workflowSources = useMemo<LeadWorkflowSources>(
@@ -497,6 +645,28 @@ export default function LeadsListPage() {
   const frozen = useFrozenColumns("leads-list", currentUser?.id, gridColumns);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
+
+  /* The grid is a BOUNDED dual-axis scroll container: it scrolls both axes
+     internally, with the <thead> sticky to its own top. We bound its height so
+     its bottom lands near the viewport bottom (leaving room for the detached
+     pagination footer). Measured from the grid's live distance to the top of
+     the viewport, so it stays correct regardless of how tall the filters above
+     it are, and re-measures on resize. */
+  const [gridMaxH, setGridMaxH] = useState<number | null>(null);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const FOOTER_RESERVE = 72; // space kept below the grid for the pagination row
+    const measure = () => {
+      const top = el.getBoundingClientRect().top; // distance from viewport top
+      setGridMaxH(Math.max(240, window.innerHeight - top - FOOTER_RESERVE));
+    };
+    measure();
+    window.addEventListener("resize", measure);
+    const ro = new ResizeObserver(measure);
+    ro.observe(document.body);
+    return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
+  }, [hydrated]);
 
   // Width of the always-frozen selection column (sits before the Lead ID
   // anchor). The hook owns the Lead ID left anchor, so every hook-computed left
@@ -660,13 +830,24 @@ export default function LeadsListPage() {
      the standard changeLeadStatus (writes status-history + terminal timestamps
      per lead; never a raw bulk write). */
   const statusOptions = useMemo(() => optionsFor("status").map((o) => o.value).filter(Boolean), [optionsFor]);
+  const contactStatusOptions = useMemo(() => optionsFor("contactStatus").map((o) => o.value).filter(Boolean), [optionsFor]);
+  const canEditLead = allow(can, CAP.lead.edit);
+  /* Apply a status change to ONE lead, then auto-create the Field Job when the
+     status is a pickup/on-site routing status. Shared by the inline dropdown
+     and the bulk action so both behave identically. */
+  const applyLeadStatus = useCallback(async (lead: Lead, status: string) => {
+    await changeLeadStatus(lead.id, status);
+    await autoFieldJobForStatus(lead, status);
+  }, [changeLeadStatus, autoFieldJobForStatus]);
+
   const handleBulkStatusChange = useCallback(async (status: string) => {
     const ids = Array.from(selected);
-    await Promise.all(ids.map((id) => changeLeadStatus(id, status)));
-    toast.success(`Updated ${ids.length} lead${ids.length === 1 ? "" : "s"} to “${status}”.`);
+    const chosen = leads.filter((l) => ids.includes(l.id));
+    await Promise.all(chosen.map((l) => applyLeadStatus(l, status)));
+    toast.success(`Updated ${chosen.length} lead${chosen.length === 1 ? "" : "s"} to “${status}”.`);
     setSelected(new Set());
     setShowBulkStatus(false);
-  }, [selected, changeLeadStatus]);
+  }, [selected, leads, applyLeadStatus]);
 
   /* Bulk delete — soft-delete each selected lead through the standard
      deleteLead (permission + RLS enforced server-side). */
@@ -824,7 +1005,7 @@ export default function LeadsListPage() {
   );
 
   return (
-    <div className="space-y-5 rox-page-fill">
+    <div className="space-y-5">
       <PageHeader
         eyebrow="Sales"
         title="Leads"
@@ -1025,11 +1206,11 @@ export default function LeadsListPage() {
             frozenCellProps(key) so offsets stay in lockstep with the column
             widths. One coordinated scroll model — no duplicated tables, no JS
             scroll-sync. Sharp 2px frame + brand header preserved. */}
-      <div className="rox-table-card rox-fill shadow-card hidden md:flex md:flex-col md:min-h-0">
-        <div
-          ref={scrollRef}
-          className="rox-grid-scroll min-h-0 flex-1 overflow-auto"
-        >
+      <div
+        ref={scrollRef}
+        className="rox-table-card rox-grid-scroll shadow-card hidden md:block overflow-auto"
+        style={gridMaxH ? { maxHeight: gridMaxH } : undefined}
+      >
         {/* Explicit per-column pixel widths (deterministic with table-fixed) so
             every grouped column gets a generous width AND the frozen offsets
             line up exactly. The min-width equals their sum; the container
@@ -1050,9 +1231,9 @@ export default function LeadsListPage() {
                   aria-label="Select all leads"
                 />
               </th>
-              <th {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 text-left")}>ID</th>
-              {multiStore && <th className="px-3 py-4 text-left">Store</th>}
               <th {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 text-left")}>Date</th>
+              {multiStore && <th className="px-3 py-4 text-left">Store</th>}
+              <th {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 text-left")}>ID</th>
               <th {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 text-left")}>Region</th>
               <th {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 text-left")}>Mode of Lead</th>
               <th {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 text-left")}>Source</th>
@@ -1137,19 +1318,19 @@ export default function LeadsListPage() {
                     aria-label={`Select lead ${lead.leadNo || lead.id}`}
                   />
                 </td>
-                {/* 1 · ID — FROZEN LEFT anchor (click opens the lead) */}
+                {/* 1 · Date + time — FROZEN LEFT anchor */}
+                <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <DateCell lead={lead} />}</td>
+                {/* Store (multi-store only) */}
+                {multiStore && (
+                  <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" /></td>
+                )}
+                {/* 2 · ID (click opens the lead) */}
                 <td {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 align-middle")}>
                   <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="flex items-center gap-1 text-left font-semibold text-[#4361EE] hover:underline tnum">
                     {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
                     {lead.leadNo || "—"}
                   </button>
                 </td>
-                {/* Store (multi-store only) */}
-                {multiStore && (
-                  <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" /></td>
-                )}
-                {/* 2 · Date + time */}
-                <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <DateCell lead={lead} />}</td>
                 {/* 3 · Region */}
                 <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span>}</td>
                 {/* 4 · Mode of Lead (how it came in — modeOfContact) */}
@@ -1162,9 +1343,14 @@ export default function LeadsListPage() {
                 <td {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
                   {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={22} />}
                 </td>
-                {/* 6 · Contact Status — always shown (the reason it's here). */}
-                <td {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 align-middle")}>
-                  <ContactStatusCell lead={lead} />
+                {/* 6 · Contact Status — inline-editable dropdown; locked rows stay read-only */}
+                <td {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
+                  <ContactStatusCell
+                    lead={lead}
+                    options={contactStatusOptions}
+                    onSave={(v) => updateLead(lead.id, { contactStatus: v })}
+                    locked={locked || !canEditLead}
+                  />
                   {locked && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wide text-amber-600">Locked · reassign to unlock</span>}
                 </td>
                 {/* 7 · Contact Info (grouped) */}
@@ -1183,11 +1369,17 @@ export default function LeadsListPage() {
                 <td {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <span className="block truncate text-zinc-600">{lead.subCategory || "—"}</span>}</td>
                 {/* 13 · Lead Type (= Priority: Hot/Warm/Cold) — gated */}
                 <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
-                {/* 14 · Status (+ fulfilment route) — gated */}
-                <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")}>
+                {/* 14 · Status (+ fulfilment route) — inline-editable dropdown (gated on canBulkStatus) */}
+                <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
                   {gated ? <NACell /> : (<>
-                  {lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}
-                  <div className="mt-1.5"><FulfilmentRouteBadge lead={lead} /></div>
+                  <LeadSelectCell
+                    value={lead.status || ""}
+                    options={statusOptions}
+                    onChange={(v) => applyLeadStatus(lead, v)}
+                    toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+                    dotColor={statusDotColor(lead.status || "")}
+                    readOnly={!canBulkStatus}
+                  />
                   </>)}
                 </td>
                 {/* 15 · ACTION — SYSTEM-DERIVED, read-only */}
@@ -1205,7 +1397,6 @@ export default function LeadsListPage() {
             })}
           </tbody>
         </table>
-        </div>
         {hydrated && filteredLeads.length === 0 && (
           <div className="flex flex-col items-center gap-2 p-12 text-center">
             <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground"><User className="h-6 w-6" /></div>

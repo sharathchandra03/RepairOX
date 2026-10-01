@@ -116,7 +116,7 @@ export function StoreMultiSelect({
     return (
       <div
         className={cn(
-          "flex h-[34px] shrink-0 items-center gap-2 rounded-xl border border-[#4361EE]/60 bg-card px-3 text-[13px] font-medium text-foreground",
+          "flex h-[34px] shrink-0 items-center gap-2 rounded-xl border border-input bg-card px-3 text-[13px] font-medium text-foreground",
           width,
           className
         )}
@@ -173,7 +173,7 @@ export function StoreMultiSelect({
             "flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all duration-150",
             open
               ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
-              : "border-[#4361EE]/60 hover:border-[#4361EE]/80"
+              : "border-input hover:border-[#4361EE]/40"
           )}
         >
           <span className="flex min-w-0 items-center gap-2 truncate text-left">

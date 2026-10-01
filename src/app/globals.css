@@ -521,12 +521,13 @@ body {
 .rox-grid-scroll {
   scrollbar-width: thin;
   scrollbar-color: hsl(var(--rox-table-divider)) transparent;
-  /* Kill the elastic RUBBER-BAND bounce entirely (the "table gets dragged and
-     opens a white gap, then snaps back" at the end of a fling). `none` (not
-     `contain`) stops BOTH scroll-chaining AND the browser's own overscroll
-     bounce/glow on this scroller, on BOTH axes. This is what freezes the
-     background so it never opens a gap at the scroll extremes. */
-  overscroll-behavior: none;
+  /* Horizontal: `contain` kills the rubber-band bounce at the left/right ends.
+     Vertical: `auto` lets a wheel event chain to the PAGE when the grid has few
+     rows (no internal vertical overflow) OR once the grid is scrolled to its
+     end — so the user can always scroll with the cursor over the table, and the
+     page keeps moving to reveal the pagination footer below. */
+  overscroll-behavior-x: contain;
+  overscroll-behavior-y: auto;
   /* Solid card background so any sub-pixel seam beside a frozen column reads as
      table-white, never a bare page gap. */
   background-color: hsl(var(--card));

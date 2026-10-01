@@ -20,7 +20,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { DragDropContext, Droppable, Draggable, type DropResult } from "@hello-pangea/dnd";
+import {
+  DndContext, DragOverlay, PointerSensor, TouchSensor, useSensor, useSensors,
+  useDroppable, pointerWithin,
+  type DragStartEvent, type DragEndEvent, type DragOverEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, useSortable, verticalListSortingStrategy, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
   Plus, Search, List, LayoutGrid, Map as MapIcon, Inbox, LayoutDashboard,
 } from "lucide-react";
@@ -140,15 +148,136 @@ export default function KanbanPage() {
     return { total, pipeline, overdue };
   }, [columnViews, openFollowUpsByLead]);
 
-  /* ── Drag end — PERSONAL placement only. No business-logic change. ── */
-  const onDragEnd = useCallback((result: DropResult) => {
-    const { source, destination, draggableId } = result;
-    if (!destination) return;
-    if (source.droppableId === destination.droppableId && source.index === destination.index) return;
-    // draggableId is the leadId. Map the visible drop index to the real index
-    // within the destination column's full cardIds (search may hide some).
-    kanban.moveCard(draggableId, destination.droppableId, destination.index);
-  }, [kanban]);
+  /* ── Drag state ──────────────────────────────────────────────────────────
+     dnd-kit drives placement. We keep a LIVE copy of each column's visible card
+     ids (`liveColumns`) so cards move between columns on-the-fly during a drag;
+     the final placement is committed to kanban.moveCard on drop. Collision uses
+     `pointerWithin`, so the column/card under the ACTUAL CURSOR is the target —
+     no "drag further" offset, correct in both directions. */
+  const [activeLeadId, setActiveLeadId] = useState<string | null>(null);
+  const [liveColumns, setLiveColumns] = useState<Record<string, string[]> | null>(null);
+  const boardScrollRef = useRef<HTMLDivElement | null>(null);
+  const autoScrollRafRef = useRef<number | null>(null);
+  const autoScrollCleanupRef = useRef<(() => void) | null>(null);
+
+  const sensors = useSensors(
+    // A small distance so a click still opens the lead (no accidental drag).
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 180, tolerance: 8 } }),
+  );
+
+  /* Auto-scroll the board container when the pointer nears the left/right edge
+     during a drag — lets you reach far columns without releasing. */
+  const startAutoScroll = useCallback((container: HTMLDivElement) => {
+    const EDGE = 90;
+    const MAX_SPEED = 18;
+    let lastX = 0;
+    const trackX = (e: MouseEvent | TouchEvent) => {
+      lastX = "touches" in e ? e.touches[0].clientX : (e as MouseEvent).clientX;
+    };
+    window.addEventListener("mousemove", trackX, { passive: true });
+    window.addEventListener("touchmove", trackX, { passive: true });
+    const tick = () => {
+      const rect = container.getBoundingClientRect();
+      const distFromLeft = lastX - rect.left;
+      const distFromRight = rect.right - lastX;
+      let delta = 0;
+      if (lastX > 0 && distFromLeft < EDGE) delta = -MAX_SPEED * (1 - Math.max(0, distFromLeft) / EDGE);
+      else if (lastX > 0 && distFromRight < EDGE) delta = MAX_SPEED * (1 - Math.max(0, distFromRight) / EDGE);
+      if (delta !== 0) container.scrollLeft += delta;
+      autoScrollRafRef.current = requestAnimationFrame(tick);
+    };
+    autoScrollRafRef.current = requestAnimationFrame(tick);
+    return () => {
+      window.removeEventListener("mousemove", trackX);
+      window.removeEventListener("touchmove", trackX);
+      if (autoScrollRafRef.current !== null) {
+        cancelAnimationFrame(autoScrollRafRef.current);
+        autoScrollRafRef.current = null;
+      }
+    };
+  }, []);
+
+  // Which column currently holds a given lead id, within the live snapshot.
+  const findColumnOf = useCallback((cols: Record<string, string[]>, leadId: string): string | null => {
+    for (const [colId, ids] of Object.entries(cols)) if (ids.includes(leadId)) return colId;
+    return null;
+  }, []);
+
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    const id = String(e.active.id);
+    setActiveLeadId(id);
+    // Seed the live snapshot from the current visible column views.
+    const snapshot: Record<string, string[]> = {};
+    for (const { col, visible } of columnViews) snapshot[col.id] = visible.map((l) => l.id);
+    setLiveColumns(snapshot);
+    if (boardScrollRef.current) autoScrollCleanupRef.current = startAutoScroll(boardScrollRef.current);
+  }, [columnViews, startAutoScroll]);
+
+  // While dragging, move the card between columns live so the user sees it land
+  // under the cursor immediately (and so empty columns accept it).
+  const handleDragOver = useCallback((e: DragOverEvent) => {
+    const { active, over } = e;
+    if (!over) return;
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    setLiveColumns((prev) => {
+      if (!prev) return prev;
+      const fromCol = findColumnOf(prev, activeId);
+      if (!fromCol) return prev;
+      // `over` is either a column droppable (id = columnId) or a card (id = leadId).
+      const toCol = prev[overId] !== undefined ? overId : findColumnOf(prev, overId);
+      if (!toCol) return prev;
+      if (fromCol === toCol) return prev; // same-column reorder handled on dragEnd
+
+      const next: Record<string, string[]> = { ...prev };
+      next[fromCol] = next[fromCol].filter((x) => x !== activeId);
+      const toArr = [...next[toCol]];
+      // Insert at the position of the card we're hovering (or end if over column).
+      const overIdx = toArr.indexOf(overId);
+      const insertAt = overIdx >= 0 ? overIdx : toArr.length;
+      toArr.splice(insertAt, 0, activeId);
+      next[toCol] = toArr;
+      return next;
+    });
+  }, [findColumnOf]);
+
+  /* ── Drag end — commit placement. PERSONAL only, no business change. ── */
+  const handleDragEnd = useCallback((e: DragEndEvent) => {
+    if (autoScrollCleanupRef.current) { autoScrollCleanupRef.current(); autoScrollCleanupRef.current = null; }
+    const { active, over } = e;
+    setActiveLeadId(null);
+
+    setLiveColumns((prev) => {
+      if (!prev || !over) return null;
+      const activeId = String(active.id);
+      const overId = String(over.id);
+      const fromCol = findColumnOf(prev, activeId);
+      const toCol = prev[overId] !== undefined ? overId : findColumnOf(prev, overId);
+      if (!fromCol || !toCol) return null;
+
+      let targetArr = prev[toCol];
+      // Same-column reorder: move within the array to the hovered card's slot.
+      if (fromCol === toCol) {
+        const oldIdx = targetArr.indexOf(activeId);
+        const overIdx = overId === toCol ? targetArr.length - 1 : targetArr.indexOf(overId);
+        if (oldIdx !== overIdx && overIdx >= 0) targetArr = arrayMove(targetArr, oldIdx, overIdx);
+      }
+      const finalIndex = Math.max(0, targetArr.indexOf(activeId));
+      // Commit to the persistent personal board.
+      kanban.moveCard(activeId, toCol, finalIndex);
+      return null; // drop the live snapshot; derived columnViews take over
+    });
+  }, [findColumnOf, kanban]);
+
+  const handleDragCancel = useCallback(() => {
+    if (autoScrollCleanupRef.current) { autoScrollCleanupRef.current(); autoScrollCleanupRef.current = null; }
+    setActiveLeadId(null);
+    setLiveColumns(null);
+  }, []);
+
+  const activeLead = activeLeadId ? leadById.get(activeLeadId) ?? null : null;
 
   const openLead = useCallback((lead: Lead) => setDetailLead(lead), []);
   const liveDetailLead = detailLead ? leads.find((l) => l.id === detailLead.id) ?? null : null;
@@ -277,40 +406,83 @@ export default function KanbanPage() {
         </div>
       )}
 
-      {/* Kanban board — wrapped in a THEMED CANVAS driven by the active board's
-          color, so the whole Kanban has a unique, board-specific identity. */}
+      {/* Kanban board — THEMED CANVAS driven by the active board's color.
+          @dnd-kit DndContext with pointerWithin collision: the column/card under
+          the ACTUAL CURSOR is the drop target — correct in both directions, no
+          "drag further" offset. DragOverlay renders the cursor-following ghost. */}
       {!activeBoard ? (
         <div className="grid min-h-0 flex-1 place-items-center rounded-2xl border border-dashed border-border bg-card text-sm text-muted-foreground">
           Loading your board…
         </div>
       ) : (
-        <div className={cn("relative mb-1 min-h-0 flex-1 overflow-hidden rounded-2xl border", theme.canvas, theme.edge)}>
-          <DragDropContext onDragEnd={onDragEnd}>
-            <div className="flex h-full min-h-0 gap-4 overflow-x-auto p-4">
+        <DndContext
+          sensors={sensors}
+          collisionDetection={pointerWithin}
+          onDragStart={handleDragStart}
+          onDragOver={handleDragOver}
+          onDragEnd={handleDragEnd}
+          onDragCancel={handleDragCancel}
+        >
+          <div className={cn("relative mb-1 min-h-0 flex-1 rounded-2xl border", theme.canvas, theme.edge)}
+            ref={boardScrollRef}
+            style={{ overflowX: "auto", overflowY: "hidden" }}
+          >
+            <div className="flex h-full min-h-0 gap-4 p-4" style={{ minWidth: "max-content" }}>
               {columnViews
                 .filter(({ col }) => columnFilter === null || col.id === columnFilter)
-                .map(({ col, visible }) => (
-                  <KanbanColumnView
-                    key={col.id}
-                    col={col}
-                    leads={visible}
-                    openFollowUpsByLead={openFollowUpsByLead}
-                    getStore={getStore}
-                    showStore={showStoreCol}
-                    noteColorOf={(leadId) => (activeBoard ? noteColorOf(activeBoard, leadId) : "default")}
-                    onChangeNote={(leadId, color) => kanban.setCardNoteColor(leadId, color)}
-                    onOpen={openLead}
-                    onCall={canCall ? callLead : undefined}
-                    onEmail={canCall ? emailLead : undefined}
-                    onWhatsApp={canCall ? waLead : undefined}
-                    onAddLead={() => setShowCreate(true)}
-                    canCreate={allow(can, CAP.lead.create)}
-                    searching={!!query.trim()}
-                  />
-                ))}
+                .map(({ col, visible }) => {
+                  // During a drag, use the LIVE snapshot so cards appear in the
+                  // column they're currently hovering; otherwise the derived view.
+                  const ids = liveColumns ? (liveColumns[col.id] ?? []) : visible.map((l) => l.id);
+                  const colLeads = ids.map((id) => leadById.get(id)).filter((l): l is Lead => !!l);
+                  return (
+                    <KanbanColumnView
+                      key={col.id}
+                      col={col}
+                      leads={colLeads}
+                      activeLeadId={activeLeadId}
+                      openFollowUpsByLead={openFollowUpsByLead}
+                      getStore={getStore}
+                      showStore={showStoreCol}
+                      noteColorOf={(leadId) => (activeBoard ? noteColorOf(activeBoard, leadId) : "default")}
+                      onChangeNote={(leadId, color) => kanban.setCardNoteColor(leadId, color)}
+                      onOpen={openLead}
+                      onCall={canCall ? callLead : undefined}
+                      onEmail={canCall ? emailLead : undefined}
+                      onWhatsApp={canCall ? waLead : undefined}
+                      onAddLead={() => setShowCreate(true)}
+                      canCreate={allow(can, CAP.lead.create)}
+                      searching={!!query.trim()}
+                    />
+                  );
+                })}
             </div>
-          </DragDropContext>
-        </div>
+          </div>
+
+          {/* Ghost — follows the cursor, never affects collision detection. */}
+          <DragOverlay dropAnimation={{ duration: 180, easing: "cubic-bezier(0.2,0,0,1)" }}>
+            {activeLead ? (
+              <div
+                style={{
+                  width: 286,
+                  transform: "rotate(3deg)",
+                  filter: "drop-shadow(0 12px 30px rgba(67,97,238,0.28)) drop-shadow(0 3px 10px rgba(0,0,0,0.16))",
+                  cursor: "grabbing",
+                }}
+              >
+                <LeadKanbanCard
+                  lead={activeLead}
+                  openFollowUp={openFollowUpsByLead.get(activeLead.id)}
+                  store={showStoreCol ? getStore(activeLead.branchId) : null}
+                  showStore={showStoreCol}
+                  dragging
+                  note={activeBoard ? noteColorOf(activeBoard, activeLead.id) : "default"}
+                  onOpen={() => {}}
+                />
+              </div>
+            ) : null}
+          </DragOverlay>
+        </DndContext>
       )}
 
       {/* Add Lead — reuses the canonical Lead Form. New lead auto-places via reconcile. */}
@@ -345,11 +517,88 @@ export default function KanbanPage() {
   );
 }
 
-/* ─── One column (droppable) ─────────────────────────────────────────────── */
+/* ─── One sortable card ──────────────────────────────────────────────────── */
+
+function SortableCard({
+  lead,
+  isActive,
+  searching,
+  openFollowUp,
+  store,
+  showStore,
+  note,
+  onChangeNote,
+  onOpen,
+  onCall,
+  onEmail,
+  onWhatsApp,
+}: {
+  lead: Lead;
+  isActive: boolean;
+  searching: boolean;
+  openFollowUp: any;
+  store: any;
+  showStore: boolean;
+  note: NoteColor;
+  onChangeNote: (color: NoteColor) => void;
+  onOpen: () => void;
+  onCall?: () => void;
+  onEmail?: () => void;
+  onWhatsApp?: () => void;
+}) {
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
+    id: lead.id,
+    disabled: searching,
+  });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+  };
+
+  // While THIS card is the one being dragged, its original slot shows a dashed
+  // indigo placeholder (the real card follows the cursor in the DragOverlay).
+  if (isActive) {
+    return (
+      <div ref={setNodeRef} style={style} {...attributes} {...listeners}>
+        <div
+          aria-hidden
+          className="rounded-xl border-2 border-dashed border-[#4361EE]/35 bg-[#EEF1FD]/40"
+          style={{ minHeight: 80 }}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ ...style, opacity: isDragging ? 0.5 : 1 }}
+      {...attributes}
+      {...listeners}
+    >
+      <LeadKanbanCard
+        lead={lead}
+        openFollowUp={openFollowUp}
+        store={store}
+        showStore={showStore}
+        note={note}
+        onChangeNote={onChangeNote}
+        onOpen={onOpen}
+        onCall={onCall}
+        onEmail={onEmail}
+        onWhatsApp={onWhatsApp}
+      />
+    </div>
+  );
+}
+
+/* ─── One column (droppable + sortable context) ──────────────────────────── */
 
 function KanbanColumnView({
   col,
   leads,
+  activeLeadId,
   openFollowUpsByLead,
   getStore,
   showStore,
@@ -365,6 +614,7 @@ function KanbanColumnView({
 }: {
   col: KanbanColumn;
   leads: Lead[];
+  activeLeadId: string | null;
   openFollowUpsByLead: Map<string, any>;
   getStore: (id: string | null | undefined) => any;
   showStore: boolean;
@@ -379,80 +629,76 @@ function KanbanColumnView({
   searching: boolean;
 }) {
   const tone = kanbanColor(col.color);
+  // The whole column body is a droppable (so cards can be dropped into empty
+  // columns too). id = the column id; cards are the sortable items.
+  const { setNodeRef, isOver } = useDroppable({ id: col.id });
+  const itemIds = leads.map((l) => l.id);
+
   return (
-    <Droppable droppableId={col.id}>
-      {(provided, snapshot) => (
-        <div
-          className={cn(
-            "flex h-full w-[286px] shrink-0 flex-col overflow-hidden rounded-2xl border shadow-sm backdrop-blur-sm transition-colors",
-            // Each column carries a light tint of its OWN dedicated color; the
-            // white cards inside pop against it. Drag-over = brand blue.
-            snapshot.isDraggingOver ? "border-[#4361EE]/40 bg-white/85" : cn(tone.soft, tone.edge),
-          )}
-        >
-          {/* Column accent bar */}
-          <div className={cn("h-1 w-full shrink-0", tone.bar)} />
-          {/* Column header */}
-          <div className="flex items-center justify-between gap-2 px-3 pt-3">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", tone.dot)} />
-              <span className="truncate text-[12px] font-semibold text-zinc-800">{col.name}</span>
-              <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-zinc-200/80 px-1 text-[10px] font-bold text-zinc-600">
-                {col.cardIds.length}
-              </span>
-            </div>
-          </div>
-
-          {/* Cards */}
-          <div
-            ref={provided.innerRef}
-            {...provided.droppableProps}
-            className="flex-1 min-h-0 space-y-2.5 overflow-y-auto px-3 py-3 rox-rail-scroll"
-          >
-            {leads.length === 0 && !snapshot.isDraggingOver && (
-              <div className="grid place-items-center rounded-xl border border-dashed border-zinc-200 py-8 text-center">
-                <Inbox className="mb-1.5 h-5 w-5 text-zinc-300" />
-                <p className="text-[11px] text-zinc-400">{searching ? "No matching leads" : "No leads in this workflow"}</p>
-              </div>
-            )}
-            {leads.map((lead, ci) => (
-              // While a search is active, dragging is disabled so a filtered
-              // (partial) view can never accidentally reorder/reassign cards.
-              <Draggable key={lead.id} draggableId={lead.id} index={ci} isDragDisabled={searching}>
-                {(prov, snap) => (
-                  <div ref={prov.innerRef} {...prov.draggableProps} {...prov.dragHandleProps}>
-                    <LeadKanbanCard
-                      lead={lead}
-                      openFollowUp={openFollowUpsByLead.get(lead.id)}
-                      store={showStore ? getStore(lead.branchId) : null}
-                      showStore={showStore}
-                      dragging={snap.isDragging}
-                      note={noteColorOf(lead.id)}
-                      onChangeNote={(c) => onChangeNote(lead.id, c)}
-                      onOpen={() => onOpen(lead)}
-                      onCall={onCall ? () => onCall(lead) : undefined}
-                      onEmail={onEmail ? () => onEmail(lead) : undefined}
-                      onWhatsApp={onWhatsApp ? () => onWhatsApp(lead) : undefined}
-                    />
-                  </div>
-                )}
-              </Draggable>
-            ))}
-            {provided.placeholder}
-          </div>
-
-          {/* Add lead */}
-          {canCreate && (
-            <button
-              type="button"
-              onClick={onAddLead}
-              className="m-3 mt-0 flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 bg-white/50 py-2.5 text-[11px] font-medium text-zinc-500 transition hover:border-zinc-400 hover:bg-white hover:text-zinc-700"
-            >
-              <Plus className="h-3.5 w-3.5" /> Add lead
-            </button>
-          )}
-        </div>
+    <div
+      className={cn(
+        "flex h-full w-[286px] shrink-0 flex-col overflow-hidden rounded-2xl border shadow-sm backdrop-blur-sm transition-colors",
+        isOver ? "border-[#4361EE]/50 bg-white/85" : cn(tone.soft, tone.edge),
       )}
-    </Droppable>
+    >
+      {/* Column accent bar */}
+      <div className={cn("h-1 w-full shrink-0", tone.bar)} />
+      {/* Column header */}
+      <div className="flex items-center justify-between gap-2 px-3 pt-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", tone.dot)} />
+          <span className="truncate text-[12px] font-semibold text-zinc-800">{col.name}</span>
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-zinc-200/80 px-1 text-[10px] font-bold text-zinc-600">
+            {col.cardIds.length}
+          </span>
+        </div>
+      </div>
+
+      {/* Cards — droppable area + sortable context */}
+      <div
+        ref={setNodeRef}
+        className="flex-1 min-h-0 space-y-2.5 overflow-y-auto px-3 py-3 rox-rail-scroll"
+      >
+        <SortableContext items={itemIds} strategy={verticalListSortingStrategy}>
+          {leads.length === 0 && (
+            <div className={cn(
+              "grid place-items-center rounded-xl border border-dashed py-8 text-center transition-colors",
+              isOver ? "border-[#4361EE]/40 bg-[#EEF1FD]/30" : "border-zinc-200",
+            )}>
+              <Inbox className="mb-1.5 h-5 w-5 text-zinc-300" />
+              <p className="text-[11px] text-zinc-400">{searching ? "No matching leads" : "No leads in this workflow"}</p>
+            </div>
+          )}
+          {leads.map((lead) => (
+            <SortableCard
+              key={lead.id}
+              lead={lead}
+              isActive={activeLeadId === lead.id}
+              searching={searching}
+              openFollowUp={openFollowUpsByLead.get(lead.id)}
+              store={showStore ? getStore(lead.branchId) : null}
+              showStore={showStore}
+              note={noteColorOf(lead.id)}
+              onChangeNote={(c) => onChangeNote(lead.id, c)}
+              onOpen={() => onOpen(lead)}
+              onCall={onCall ? () => onCall(lead) : undefined}
+              onEmail={onEmail ? () => onEmail(lead) : undefined}
+              onWhatsApp={onWhatsApp ? () => onWhatsApp(lead) : undefined}
+            />
+          ))}
+        </SortableContext>
+      </div>
+
+      {/* Add lead */}
+      {canCreate && (
+        <button
+          type="button"
+          onClick={onAddLead}
+          className="m-3 mt-0 flex shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 bg-white/50 py-2.5 text-[11px] font-medium text-zinc-500 transition hover:border-zinc-400 hover:bg-white hover:text-zinc-700"
+        >
+          <Plus className="h-3.5 w-3.5" /> Add lead
+        </button>
+      )}
+    </div>
   );
 }

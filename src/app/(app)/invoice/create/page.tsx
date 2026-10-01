@@ -30,6 +30,7 @@ import { searchCustomers, type Customer } from "@/lib/customer-data";
 import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
 import { findOrCreateCustomer } from "@/lib/customer-service";
 import { useLeads } from "@/lib/leads-context";
+import { isFinalizedInvoice } from "@/lib/leads-data";
 import { CustomerLifecycleBadge, customerLifecycle } from "@/components/common/customer-classification";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
@@ -221,7 +222,7 @@ function InvoiceWizard() {
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
   const { invoices, tickets, addInvoice, updateInvoice, customers, addCustomer } = useStore();
-  const { contacts, leads, updateContact } = useLeads();
+  const { contacts, leads, updateContact, updateLead, recordConversionEvent } = useLeads();
   const { settings, hydrated: settingsHydrated } = useStoreSettings();
   const isEdit = !!editId;
 
@@ -682,6 +683,39 @@ function InvoiceWizard() {
     return customer.id;
   }, [form.customer, form.details.invoiceType, customers, addCustomer, updateForm, contacts, leads, updateContact]);
 
+  // ── Immediate Lead update on invoice finalization (spec §29/§42/§61/§87) ──
+  // When a FINALIZED invoice (paid, non-proforma) is created, the originating
+  // Lead must reflect the revenue outcome AT ONCE — not only via realtime
+  // re-derivation. We resolve the lead STRICTLY through explicit record links
+  // (never customer identity): the lead whose linkedTicketId matches the
+  // invoice's ticketId, or whose linkedInvoiceId already points here. We stamp
+  // linkedInvoiceId + record a conversion event so the Lead Table flips to
+  // "Invoice Created · ₹value · Ticket | Invoice" instantly. Draft / proforma /
+  // unpaid invoices never trigger this (no premature revenue attribution).
+  const linkFinalizedInvoiceToLead = useCallback(async (saved: Invoice) => {
+    if (!isFinalizedInvoice({
+      id: saved.id, ticketId: saved.ticketId,
+      total: Number(saved.total || 0), status: saved.status, documentType: saved.documentType,
+    })) return;
+    // Resolve the lead by EXPLICIT relationship only.
+    const ticketId = saved.ticketId || "";
+    const lead = leads.find((l) => {
+      if (l.linkedInvoiceId && l.linkedInvoiceId === saved.id) return true;
+      if (!ticketId || !l.linkedTicketId) return false;
+      // The lead's linkedTicketId may be a ticket id or ticketNo; the invoice's
+      // ticketId may be either too — match on either representation.
+      const t = tickets.find((x) => x.id === l.linkedTicketId || x.ticketNo === l.linkedTicketId);
+      return !!t && (ticketId === t.id || ticketId === t.ticketNo || ticketId === l.linkedTicketId);
+    });
+    if (!lead) return; // No linked lead → no sales attribution (spec §91).
+    if (lead.linkedInvoiceId === saved.id) return; // Already linked — idempotent.
+    await updateLead(lead.id, { linkedInvoiceId: saved.id, conversionSource: "invoice" });
+    await recordConversionEvent(lead.id, "invoice_created", {
+      targetType: "invoice", targetId: saved.id, targetLabel: saved.id,
+      value: Number(saved.total || 0),
+    });
+  }, [leads, tickets, updateLead, recordConversionEvent]);
+
   // Submit (finalize / save)
   const handleSubmit = useCallback(async () => {
     const resolvedId = await resolveCustomerForSave();
@@ -689,8 +723,11 @@ function InvoiceWizard() {
 
     setDirty(false);
     if (isEdit) {
-      updateInvoice(editId!, invoice);
+      await updateInvoice(editId!, invoice);
       setCreatedInvoiceId(invoice.id);
+      // Finalizing an existing invoice (e.g. draft → paid) must update the
+      // originating Lead immediately too.
+      await linkFinalizedInvoiceToLead(invoice);
       router.push("/invoice");
     } else {
       // Use the id actually persisted by the store — it may differ from the
@@ -710,10 +747,14 @@ function InvoiceWizard() {
       if (fromProformaId) {
         await updateInvoice(fromProformaId, { convertedInvoiceId: savedId, proformaStatus: "converted" });
       }
+      // Immediately reflect a FINALIZED invoice on the originating Lead
+      // (linkedInvoiceId + conversion event) so the Lead Table flips to
+      // "Invoice Created · ₹value" without a refresh (spec §29/§42/§87).
+      await linkFinalizedInvoiceToLead({ ...invoice, id: savedId });
       setCreatedInvoiceId(savedId);
       setShowSuccessAnimation(true);
     }
-  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId, resolveCustomerForSave]);
+  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId, resolveCustomerForSave, linkFinalizedInvoiceToLead]);
 
   // Save Draft — persist current form to the DB with status "draft" without
   // finalizing the invoice or leaving the flow. Re-uses the same invoice store
@@ -1452,7 +1493,12 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
   useEffect(() => {
     if (!showInventorySearch) return;
     const onDown = (e: MouseEvent) => {
-      if (searchWrapRef.current && !searchWrapRef.current.contains(e.target as Node)) {
+      const target = e.target as Node;
+      // The results dropdown is portalled to <body>, so a click on a result is
+      // outside the wrapper — don't treat it (or any click inside the floating
+      // panel) as an outside click.
+      if ((target as HTMLElement)?.closest?.('[data-inventory-search-panel="true"]')) return;
+      if (searchWrapRef.current && !searchWrapRef.current.contains(target)) {
         setShowInventorySearch(false);
       }
     };

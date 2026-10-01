@@ -26,6 +26,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
+import { OpenLeadBanner } from "@/components/leads/open-lead-banner";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
 import { deriveTicketStatus, createWalkInDevice, getWalkInDevices, getRecordType, getTicketDevices, getInvoiceDevices, type Ticket, type TicketStatus, type WalkIn, type WalkInDevice, type Invoice } from "@/lib/mock-data";
@@ -186,6 +187,11 @@ type WizardData = {
   gstNumber: string;
   customer: { first: string; last: string; phone: string; altPhone: string; email: string; address: string; postal: string; city: string; company: string };
   customerId: string | null;
+  /** An OPEN Lead the user explicitly linked in the Contact step (attribution
+   *  safety net for a DIRECT ticket). Carried onto the created ticket as
+   *  linkedLeadId so the originating Sales Agent keeps credit. Never inferred
+   *  from customer history — only an explicit link sets this. */
+  linkedLeadId?: string | null;
   files: string[];
   signatureCleared: boolean;
   /* Backward-compat computed accessors — these alias into devices[activeDeviceIndex] */
@@ -204,6 +210,7 @@ const DEFAULT: WizardData = {
   gstNumber: "",
   customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" },
   customerId: null,
+  linkedLeadId: null,
   files: [],
   signatureCleared: false,
 };
@@ -880,6 +887,8 @@ function NewTicketWizard() {
       linkedFieldJobId: fromFieldJobId || (isEdit ? tickets.find((t) => t.id === editId)?.linkedFieldJobId : undefined) || undefined,
       linkedLeadId: (fromFieldJobId ? getFieldJob(fromFieldJobId)?.leadId : undefined)
         || (fromWalkInId ? walkIns.find((w) => w.id === fromWalkInId)?.linkedLeadId : undefined)
+        // A DIRECT ticket explicitly linked to an open lead in the Contact step.
+        || (data.linkedLeadId || undefined)
         || (isEdit ? tickets.find((t) => t.id === editId)?.linkedLeadId : undefined) || undefined,
       // ── Record type + Estimate lifecycle ──
       // Estimate mode → save as an ESTIMATE record starting at Waiting for
@@ -915,6 +924,17 @@ function NewTicketWizard() {
       // addTicket assigns the real sequential ticket number (T-001, …) from the
       // DB and returns it. Use that id everywhere downstream.
       const newId = await addTicket(ticketData);
+      // ── DIRECT ticket → explicitly-linked Lead (spec §26/§28/§103) ──
+      // When the Contact step linked an OPEN lead to a direct ticket (not a
+      // walk-in/field conversion, which are handled below), carry the ticket
+      // link back to that Lead and record the conversion event so the Lead
+      // Table flips to "Ticket Created" at once. The lead's Sales Agent is
+      // preserved — this only sets the operational link.
+      if (data.linkedLeadId && !fromWalkInId && !fromFieldJobId) {
+        const linkId = newId || ticketData.id;
+        await updateLead(data.linkedLeadId, { linkedTicketId: linkId, conversionSource: "ticket" });
+        await recordConversionEvent(data.linkedLeadId, "ticket_created", { targetType: "ticket", targetId: linkId, targetLabel: (newId as string) || linkId });
+      }
       // ── Estimate → Ticket conversion (atomic, spec §21/§22/§45/§46) ──
       // Only AFTER the Ticket is successfully created do we mark the source
       // Estimate "Converted Ticket" and link it to the new Ticket. If addTicket
@@ -2871,9 +2891,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }}
         className={cn(
           "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-center gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
-          open
-            ? "border-[#4361EE] ring-2 ring-[#4361EE]/10"
-            : "border-border hover:border-[#4361EE]/40",
+          "border-input hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/10",
           className
         )}
       >
@@ -2899,7 +2917,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
           onFocus={() => setOpen(true)}
           onKeyDown={handleKeyDown}
           placeholder={selected.length === 0 ? "Search or add issues…" : "Add more…"}
-          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none focus-visible:shadow-none focus-visible:ring-0"
         />
       </div>
 
@@ -3309,7 +3327,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
               <button
                 onClick={() => {
                   setSelectedId(null);
-                  setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" } });
+                  setData({ ...data, customerId: null, linkedLeadId: null, customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" } });
                 }}
                 className="shrink-0 rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-100 transition"
                 aria-label="Clear selection"
@@ -3319,6 +3337,20 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
             </div>
           </motion.div>
         )}
+
+        {/* Attribution safety net (spec §25/§102/§103): a DIRECT ticket for a
+            customer who has an OPEN lead can be linked so the originating Sales
+            Agent keeps credit. Matches on Customer id / phone / email — never
+            name, and never auto-assigns a historical agent. */}
+        <div className="mt-4 w-full max-w-lg">
+          <OpenLeadBanner
+            phone={data.customer.phone}
+            email={data.customer.email}
+            customerId={data.customerId || undefined}
+            linkedLeadId={data.linkedLeadId || undefined}
+            onLink={(lead) => setData({ ...data, linkedLeadId: lead.id })}
+          />
+        </div>
 
 
         {/* Action Buttons */}

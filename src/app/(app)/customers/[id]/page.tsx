@@ -18,12 +18,14 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
   ArrowLeft, Phone, Mail, MapPin, Building2, Tag, Gift, Ticket as TicketIcon,
-  Receipt, UserCheck, Truck,
+  Receipt, UserCheck, Truck, Target,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
+import { useLeads } from "@/lib/leads-context";
+import { customerSalesAttribution } from "@/lib/leads-data";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { formatCustomerName, formatPhone, type LoyaltyTransaction } from "@/lib/customer-service";
@@ -50,8 +52,20 @@ export default function CustomerDetailPage() {
   const { can } = usePermissions();
   const { customers, customerGroups, tickets, invoices, walkIns } = useStore();
   const { jobs: fieldJobs } = useField();
+  const { leads } = useLeads();
 
   const customer = useMemo(() => customers.find((c) => c.id === customerId), [customers, customerId]);
+
+  /* ── Sales attribution (derived, read-only) ──
+     Per-lead agent/date/result/revenue for every lead referencing THIS
+     customer. A customer worked by several agents shows several rows — the
+     history is never collapsed onto one "customer agent", and the record
+     creator is never treated as the sales agent (spec §19/§20/§52/§97). */
+  const salesAttribution = useMemo(
+    () => customerSalesAttribution(customerId, leads, { tickets, invoices }),
+    [customerId, leads, tickets, invoices],
+  );
+  const primaryAgent = salesAttribution.find((r) => r.agentName)?.agentName || "";
 
   const customerTickets = useMemo(
     () => tickets.filter((t) => t.customerId === customerId).sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || "")),
@@ -192,6 +206,60 @@ export default function CustomerDetailPage() {
         </div>
       ) : (
         <>
+          {/* Sales Attribution — derived from the customer's leads. Shows WHICH
+              Sales Agent generated each sales opportunity + its outcome and
+              finalized revenue. Identity ≠ attribution: this never comes from
+              the customer record's creator (spec §20/§52/§97). */}
+          <ActivitySection
+            title="Sales Attribution"
+            icon={<Target className="h-3.5 w-3.5" />}
+            emptyText="No sales lead has been attributed to this customer. Direct business carries no sales-agent credit."
+            headerExtra={
+              primaryAgent ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
+                  <UserCheck className="h-3 w-3" /> {primaryAgent}
+                  {salesAttribution.filter((r) => r.agentName).length > 1 && (
+                    <span className="font-normal text-violet-500">+{salesAttribution.filter((r) => r.agentName).length - 1} more</span>
+                  )}
+                </span>
+              ) : null
+            }
+          >
+            {salesAttribution.length > 0 && (
+              <RoxTableCard>
+                <colgroup><col className="w-[16%]" /><col className="w-[24%]" /><col className="w-[18%]" /><col className="w-[18%]" /><col className="w-[24%]" /></colgroup>
+                <RoxTableHead>
+                  <RoxHeadRow><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Sales Agent</th><th className="px-3 py-3">Date</th><th className="px-3 py-3">Result</th><th className="px-3 py-3">Revenue</th></RoxHeadRow>
+                </RoxTableHead>
+                <tbody>
+                  {salesAttribution.map((r) => (
+                    <RoxTableRow key={r.leadId} onClick={() => router.push(`/leads/list?lead=${r.leadId}`)} className="cursor-pointer">
+                      <RoxTableCell className="font-medium text-[#4361EE]">{r.leadNo}</RoxTableCell>
+                      <RoxTableCell className="truncate">
+                        {r.agentName ? (
+                          <span className="inline-flex items-center gap-1.5"><Avatar name={r.agentName} size={18} /> {r.agentName}</span>
+                        ) : <span className="text-muted-foreground">Unassigned</span>}
+                      </RoxTableCell>
+                      <RoxTableCell>{fmtDate(r.date)}</RoxTableCell>
+                      <RoxTableCell>
+                        <span className={cn(
+                          "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
+                          r.result === "Invoice" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                            : r.result === "Ticket" ? "bg-indigo-50 text-indigo-700 ring-indigo-200"
+                            : r.result === "Lead Won" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
+                            : r.result === "Lost" ? "bg-rose-50 text-rose-600 ring-rose-200"
+                            : r.result === "In Pipeline" ? "bg-sky-50 text-sky-700 ring-sky-200"
+                            : "bg-zinc-100 text-zinc-500 ring-zinc-200",
+                        )}>{r.result}</span>
+                      </RoxTableCell>
+                      <RoxTableCell className="tabular-nums">{r.revenue > 0 ? formatINR(r.revenue) : "—"}</RoxTableCell>
+                    </RoxTableRow>
+                  ))}
+                </tbody>
+              </RoxTableCard>
+            )}
+          </ActivitySection>
+
           <ActivitySection
             title="Tickets"
             icon={<TicketIcon className="h-3.5 w-3.5" />}
@@ -348,21 +416,26 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon?:
 }
 
 function ActivitySection({
-  title, icon, emptyText, children,
+  title, icon, emptyText, children, headerExtra,
 }: {
   title: string;
   icon: React.ReactNode;
   emptyText: string;
   children: React.ReactNode;
+  /** Optional node rendered on the right of the section header (e.g. a chip). */
+  headerExtra?: React.ReactNode;
 }) {
   const hasContent = Array.isArray((children as any))
     ? (children as any).some(Boolean)
     : !!children;
   return (
     <div className="space-y-2">
-      <div className="flex items-center gap-2 px-1">
-        <span className="grid h-6 w-6 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">{icon}</span>
-        <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">{title}</h3>
+      <div className="flex items-center justify-between gap-2 px-1">
+        <div className="flex items-center gap-2">
+          <span className="grid h-6 w-6 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">{icon}</span>
+          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">{title}</h3>
+        </div>
+        {headerExtra}
       </div>
       {hasContent ? children : (
         <div className="rounded-2xl border-2 border-zinc-300 bg-card p-6 text-center text-[13px] text-muted-foreground">

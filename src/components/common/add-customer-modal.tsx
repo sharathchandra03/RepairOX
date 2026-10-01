@@ -84,6 +84,11 @@ export function AddCustomerModal({
     city: defaultData?.city || '',
     state: defaultData?.state || '',
     postalCode: defaultData?.postalCode || '',
+    // Provenance passed by the caller (e.g. the Lead Form stamps captureSource
+    // "lead" + source "sales"). Preserved through to findOrCreateCustomer so
+    // the Customer Master records WHERE this person was captured.
+    captureSource: defaultData?.captureSource,
+    source: defaultData?.source,
   });
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>();
@@ -105,6 +110,8 @@ export function AddCustomerModal({
         city: defaultData?.city || '',
         state: defaultData?.state || '',
         postalCode: defaultData?.postalCode || '',
+        captureSource: defaultData?.captureSource,
+        source: defaultData?.source,
       });
       setError(undefined);
       setConfirmState(null);

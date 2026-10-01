@@ -39,6 +39,10 @@ import {
 import { isNotQualified } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
+import { CustomerIdentityLookup } from "@/components/common/customer-identity-lookup";
+import { AddCustomerModal } from "@/components/common/add-customer-modal";
+import type { Customer } from "@/lib/customer-data";
+import { IssueSelector } from "@/components/common/issue-selector";
 import { LocationPicker } from "@/components/leads/location-picker";
 import { cn } from "@/lib/utils";
 
@@ -421,20 +425,39 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     }));
   };
 
-  /* ── Customer identity bridge (Customer Master, no duplicates) ── */
-  const onCustomerPicked = (cid: string) => {
-    if (!cid) { set("customerId", ""); return; }
-    const c = customers.find((x) => x.id === cid);
-    if (!c) { set("customerId", cid); return; }
+  /* ── Customer identity bridge (Customer Master, no duplicates) ──
+     Linking a customer to a lead sets ONLY the customer identity (customerId +
+     cached name/phone/email/address). It NEVER touches the lead's Sales Agent:
+     an existing customer's historical agent is irrelevant to who owns THIS
+     lead (RepairOX Customer Identity Standard §6/§85). The owner stays whatever
+     the AgentPicker / self-default decided. */
+  const linkCustomer = (c: Customer) => {
     setDraft((d) => ({
       ...d,
       customerId: c.id,
+      // Fill blanks from the master, but never overwrite what the user typed.
       name: d.name || c.fullName || "",
       number: d.number || c.mobile || "",
       alternateNumber: d.alternateNumber || c.altMobile || "",
       email: d.email || c.email || "",
       location: d.location || c.address || "",
     }));
+  };
+  const onCustomerPicked = (cid: string) => {
+    if (!cid) { set("customerId", ""); return; }
+    const c = customers.find((x) => x.id === cid);
+    if (!c) { set("customerId", cid); return; }
+    linkCustomer(c);
+  };
+
+  /* ── Inline "Create New Customer" from the Lead Form (spec §8/§80/§81) ──
+     Opens the CANONICAL Add Customer modal (never a mini lead-only form),
+     prefilled with what the salesperson already typed. On create we link the
+     new customer_id straight back onto the draft and keep the current owner. */
+  const [showCreateCustomer, setShowCreateCustomer] = useState(false);
+  const onCustomerCreated = (c: Customer) => {
+    setShowCreateCustomer(false);
+    linkCustomer(c);
   };
 
   /* ── Save (create or edit) — the ONLY place validation gates ── */
@@ -582,6 +605,18 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       <input className={inputCls()} value={draft.alternateNumber ?? ""} onChange={(e) => set("alternateNumber", e.target.value)} placeholder="Secondary / office no." inputMode="tel" />
                     </Field>
                   </div>
+                  {/* Inline Customer Master identity lookup — searches as the
+                      salesperson types the phone/email. Shows "Customer Found"
+                      (Use Existing) or "No customer found" (Create New). IDENTITY
+                      ONLY — never surfaces or assigns a historical sales agent. */}
+                  <CustomerIdentityLookup
+                    phone={draft.number ?? ""}
+                    email={draft.email ?? ""}
+                    linkedCustomerId={draft.customerId || ""}
+                    onUseExisting={linkCustomer}
+                    onClearLink={() => set("customerId", "")}
+                    onCreateNew={() => setShowCreateCustomer(true)}
+                  />
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>
                       <input className={inputCls(touched && !!validation.errors.email)} value={draft.email ?? ""} onChange={(e) => set("email", e.target.value)} placeholder="name@email.com" inputMode="email" />
@@ -714,7 +749,14 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <Field label="Device">
                     <DeviceCatalogPicker value={deviceSelection} onChange={onDeviceChange} />
                   </Field>
-                  <Field label="Issue"><input className={inputCls()} value={draft.issue ?? ""} onChange={(e) => set("issue", e.target.value)} placeholder="What's the problem?" /></Field>
+                  <Field label="Issue">
+                    <IssueSelector
+                      value={draft.issue ?? ""}
+                      onChange={(v) => set("issue", v)}
+                      placeholder="Search or add issues…"
+                      pillClassName="py-0.5"
+                    />
+                  </Field>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Estimate (pipeline value)" error={touched ? validation.errors.estimate : undefined}>
                       <div className="flex">
@@ -886,9 +928,32 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
           locationLat: loc.lat,
           locationLng: loc.lng,
           locationMapsUrl: loc.mapsUrl,
-          // Fill the free-text address if empty, so the label + pin agree.
-          location: d.location?.trim() ? d.location : loc.address,
+          // Always use the newly picked address when the user explicitly confirms
+          // a pin (first time or re-pin). Fall back to the existing text only if
+          // the picker returned no address (e.g. reverse-geocode failed).
+          location: loc.address?.trim() ? loc.address : d.location ?? "",
         }))}
+      />
+
+      {/* Create a NEW Customer Master record from the Lead Form (canonical
+          modal, prefilled with the typed identity). On create we link the new
+          customer_id to the draft; the lead's Sales Agent is unchanged. */}
+      <AddCustomerModal
+        isOpen={showCreateCustomer}
+        onClose={() => setShowCreateCustomer(false)}
+        onCustomerCreated={onCustomerCreated}
+        title="New Customer"
+        description="Create the customer, then continue the lead."
+        defaultData={{
+          firstName: (draft.name ?? "").split(" ")[0] || "",
+          lastName: (draft.name ?? "").split(" ").slice(1).join(" "),
+          mobile: draft.number ?? "",
+          altMobile: draft.alternateNumber ?? "",
+          email: draft.email ?? "",
+          // A customer created from the Lead Form originated in Sales.
+          captureSource: "lead",
+          source: "sales",
+        }}
       />
     </>
   );

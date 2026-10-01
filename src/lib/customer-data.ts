@@ -336,6 +336,56 @@ function normalizeMobile(mobile: string): string {
   return digits.length >= 10 ? digits.slice(-10) : digits;
 }
 
+/**
+ * Canonical phone normalization for Customer Master identity lookups — the
+ * SAME rule the dedup matcher uses (digits only, last 10). Exported so every
+ * inline customer lookup (Lead Form, Walk-In, Ticket, Invoice, Field) compares
+ * phone numbers identically and never forks a second normalizer. "+91 98809
+ * 09012", "098809 09012" and "9880909012" all normalize equal.
+ */
+export function normalizeCustomerPhone(phone: string): string {
+  return normalizeMobile(phone);
+}
+
+/** Normalize an email for identity comparison: trim + lowercase. */
+export function normalizeCustomerEmail(email: string): string {
+  return (email || "").trim().toLowerCase();
+}
+
+/**
+ * EXACT customer-identity match for inline lookup (NOT the fuzzy duplicate
+ * detector). Given a typed phone (and optional email), return the single
+ * canonical Customer Master record that DEFINITELY is this person — matched on
+ * normalized phone (primary OR alternate), then exact email. Returns null when
+ * nothing is a certain match. This is the "CUSTOMER FOUND" signal in the Lead
+ * Form: a certain existing-identity hit, distinct from the weaker Potential
+ * Duplicate workflow (which stays for fuzzy name/city similarity).
+ *
+ * A phone shorter than 10 digits is treated as still-typing → no match (so a
+ * partial number never collides with a real customer).
+ */
+export function findCustomerByExactIdentity(
+  customers: Customer[],
+  ident: { phone?: string; email?: string },
+): Customer | null {
+  const phone = normalizeCustomerPhone(ident.phone || "");
+  const email = normalizeCustomerEmail(ident.email || "");
+
+  if (phone && phone.length >= 10) {
+    const byPhone = customers.find((c) => {
+      const m = normalizeCustomerPhone(c.mobile);
+      const am = normalizeCustomerPhone(c.altMobile || "");
+      return (m && m === phone) || (am && am === phone);
+    });
+    if (byPhone) return byPhone;
+  }
+  if (email) {
+    const byEmail = customers.find((c) => normalizeCustomerEmail(c.email) === email);
+    if (byEmail) return byEmail;
+  }
+  return null;
+}
+
 export function findDuplicates(
   customers: Customer[],
   data: { mobile: string; altMobile?: string; email?: string; firstName?: string; lastName?: string; company?: string; city?: string }

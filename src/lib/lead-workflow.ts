@@ -32,6 +32,7 @@ import type { Lead } from "@/lib/leads-data";
 import { isFinalizedInvoice, isLostStatus, isNotContactedStatus } from "@/lib/leads-data";
 import type { WalkIn, Ticket, Invoice } from "@/lib/mock-data";
 import type { FieldJob, FieldJobStatus } from "@/lib/field-data";
+import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE } from "@/lib/field-data";
 
 /* ─── Contact / qualification gate ─────────────────────────────────────────
    A progressive data-capture gate. Downstream workflow fields (device, value,
@@ -111,6 +112,29 @@ export function fieldMilestone(status: FieldJobStatus | ""): FieldMilestone {
   return "none";
 }
 
+/* ─── Status-selected routing INTENT ───────────────────────────────────────
+   When a user sets the lead's STATUS to a routing value — "Pickup Assigned",
+   "On site Assigned" or "Walkin Assigned" — that is an authoritative intent
+   that drives the derived Action/Result BEFORE any real operational record is
+   linked. The REAL linked records (field job / ticket / invoice) always win
+   over this intent once they exist (so the real field status / ticket / invoice
+   takes over). Match is case-insensitive substring so admin-renamed status
+   values (via lead_options) still classify. */
+
+export type LeadStatusIntent = "pickup" | "onsite" | "walkin" | "none";
+
+export function leadStatusIntent(status: string): LeadStatusIntent {
+  const s = (status || "").trim().toLowerCase();
+  if (!s) return "none";
+  // Walk-in intent — the customer will visit the store.
+  if (/walk\s*-?\s*in/.test(s)) return "walkin";
+  // Pickup & Drop intent — a field pickup is assigned.
+  if (/pick\s*-?\s*up/.test(s)) return "pickup";
+  // On-site / on site intent — a field on-site visit is assigned.
+  if (/on\s*-?\s*site/.test(s)) return "onsite";
+  return "none";
+}
+
 /* ─── The derived Result ───────────────────────────────────────────────────
    The Result cell evolves as the lead progresses and always reflects the
    HIGHEST-priority real outcome:
@@ -148,6 +172,8 @@ export type LeadActionKind =
   | "in_pipeline"
   | "deal"
   | "field_assigned"
+  | "walkin_assigned"   // walk-in routed/assigned, customer not yet arrived
+  | "visited_store"     // walk-in customer has arrived (ticket/invoice exists)
   | "in_transit"
   | "ticket_created"
   | "invoice_created"
@@ -161,6 +187,15 @@ export interface LeadWorkflow {
   /** System-derived ACTION — the latest meaningful operational event. */
   action: LeadActionKind;
   actionLabel: string;
+  /** When the Action is driven by a LIVE Field Job (Pickup & Drop), the exact
+   *  field service status + its tone — so the Lead Table mirrors the Field
+   *  module's "Service Status" verbatim (e.g. "Out for Pickup", "At Store").
+   *  Null when the Action is not field-driven (invoice/ticket/pipeline/etc.). */
+  fieldStatus: FieldJobStatus | null;
+  /** Tailwind ring+bg+text tone for the field status chip, when present. */
+  fieldStatusTone: string;
+  /** Human label for the field status, when present. */
+  fieldStatusLabel: string;
   /** System-derived RESULT — the highest-priority real outcome. */
   result: LeadResult;
   /** A short human explanation of WHY this action/result was derived (tooltip
@@ -214,10 +249,24 @@ export function resolveLeadFinalizedInvoice(lead: Lead, ticket: Ticket | null, i
   return null;
 }
 
-/** Resolve the linked Field Job for a lead, or null. */
+/** Resolve the Field Job for a lead, LIVE. Matches BOTH directions of the
+ *  two-way link so the lead reflects the field service status even if one side
+ *  of the link is momentarily missing:
+ *    1) the lead's explicit `linkedFieldJobId`, else
+ *    2) a Field Job whose `leadId` back-references this lead.
+ *  Prefers a non-cancelled job; a cancelled job is only returned if it's the
+ *  only match (so the "Lost" state still surfaces). */
 export function resolveLeadFieldJob(lead: Lead, fieldJobs: FieldJob[]): FieldJob | null {
-  if (!lead.linkedFieldJobId) return null;
-  return fieldJobs.find((j) => j.id === lead.linkedFieldJobId) ?? null;
+  // 1) Explicit forward link by id.
+  if (lead.linkedFieldJobId) {
+    const byId = fieldJobs.find((j) => j.id === lead.linkedFieldJobId);
+    if (byId) return byId;
+  }
+  // 2) Reverse link by the field job's own leadId back-reference.
+  const matches = fieldJobs.filter((j) => j.leadId && j.leadId === lead.id);
+  if (matches.length === 0) return null;
+  const active = matches.find((j) => j.status !== "cancelled");
+  return active ?? matches[0];
 }
 
 /** Resolve the linked Walk-In for a lead, or null. */
@@ -235,6 +284,8 @@ export const LEAD_ACTION_LABEL: Record<LeadActionKind, string> = {
   in_pipeline: "In Pipeline",
   deal: "Deal",
   field_assigned: "Field Assigned",
+  walkin_assigned: "Walkin Assigned",
+  visited_store: "Visited Store",
   in_transit: "In Transit",
   ticket_created: "Ticket Created",
   invoice_created: "Invoice Created",
@@ -257,12 +308,32 @@ export function deriveLeadWorkflow(
 ): LeadWorkflow {
   const gate = leadGateState(lead);
 
+  // Builder that fills the common fields + the field-status defaults so each
+  // return stays terse. Pass `fieldStatus` only on the live field-job branch.
+  const mk = (
+    action: LeadActionKind,
+    result: LeadResult,
+    reason: string,
+    actionLabel?: string,
+    fieldStatus: FieldJobStatus | null = null,
+  ): LeadWorkflow => ({
+    gate,
+    gated: gate === "not_contacted" || gate === "not_qualified",
+    action,
+    actionLabel: actionLabel ?? LEAD_ACTION_LABEL[action],
+    result,
+    reason,
+    fieldStatus,
+    fieldStatusTone: fieldStatus ? FIELD_STATUS_TONE[fieldStatus] : "",
+    fieldStatusLabel: fieldStatus ? FIELD_STATUS_LABEL[fieldStatus] : "",
+  });
+
   // ── Gated (Not-Contacted / Not-Qualified): no operational workflow. ──
   if (gate === "not_contacted") {
-    return { gate, gated: true, action: "not_contacted", actionLabel: LEAD_ACTION_LABEL.not_contacted, result: NA_RESULT, reason: "Lead has not been contacted yet — downstream workflow not started." };
+    return mk("not_contacted", NA_RESULT, "Lead has not been contacted yet — downstream workflow not started.");
   }
   if (gate === "not_qualified") {
-    return { gate, gated: true, action: "na", actionLabel: LEAD_ACTION_LABEL.na, result: NA_RESULT, reason: "Lead was marked Not Qualified — it never entered the operational workflow." };
+    return mk("na", NA_RESULT, "Lead was marked Not Qualified — it never entered the operational workflow.");
   }
 
   // ── Resolve the linked-record graph (live). ──
@@ -272,87 +343,124 @@ export function deriveLeadWorkflow(
   const walkIn = resolveLeadWalkIn(lead, src.walkIns);
   const fm = fieldMilestone((fieldJob?.status ?? "") as FieldJobStatus | "");
 
+  // The authoritative routing intent the user picked in Status
+  // (Pickup Assigned / On site Assigned / Walkin Assigned). It drives the
+  // Action/Result until a real operational record (field/ticket/invoice)
+  // supersedes it. A walk-in intent routes the "ticket exists" branch to
+  // "Visited Store" instead of the generic "Ticket Created".
+  const intent = leadStatusIntent(lead.status);
+  const isWalkinPath = intent === "walkin"
+    || (lead.fulfilmentRoute || "").toUpperCase() === "STORE_VISIT"
+    || !!(walkIn || lead.linkedWalkInId);
+
   const ticketNo = ticket ? (ticket.ticketNo || ticket.id) : (lead.linkedTicketId || "");
   const ticketId = ticket?.id || lead.linkedTicketId || "";
 
   // ── 1) FINALIZED INVOICE — highest priority (revenue realized). ──
+  // This is the FINAL RESULT for every path (pickup / on-site / walk-in):
+  // ₹invoice value highlighted, with the Ticket ID + Invoice ID beneath.
   if (invoice) {
     const value = Number(invoice.total || 0);
     const invoiceNo = invoice.id; // invoices use their id as the display number
-    return {
-      gate, gated: false,
-      action: "invoice_created", actionLabel: LEAD_ACTION_LABEL.invoice_created,
-      result: {
+    // A walk-in lead that reached payment has "Visited Store" as its action;
+    // pickup / on-site stay "Invoice Created".
+    const action: LeadActionKind = isWalkinPath ? "visited_store" : "invoice_created";
+    return mk(
+      action,
+      {
         kind: "invoice",
         primary: `₹${value.toLocaleString("en-IN")}`,
         invoiceValue: value,
         ticketNo, ticketId,
         invoiceNo, invoiceId: invoice.id,
       },
-      reason: `Finalized invoice ${invoiceNo}${ticketNo ? ` (from ticket ${ticketNo})` : ""} — revenue realized.`,
-    };
+      `Finalized invoice ${invoiceNo}${ticketNo ? ` (from ticket ${ticketNo})` : ""} — revenue realized${isWalkinPath ? " after the store visit" : ""}.`,
+    );
   }
 
   // ── 2) REAL LINKED TICKET (no finalized invoice yet). ──
+  // For a walk-in lead a ticket means the customer HAS arrived → "Visited
+  // Store". For pickup / on-site it reads "Ticket Created".
   if (ticketId) {
-    return {
-      gate, gated: false,
-      action: "ticket_created", actionLabel: LEAD_ACTION_LABEL.ticket_created,
-      result: { ...NA_RESULT, kind: "ticket", primary: "Ticket Created", ticketNo, ticketId },
-      reason: `Ticket ${ticketNo} created — awaiting a finalized invoice.`,
-    };
+    const action: LeadActionKind = isWalkinPath ? "visited_store" : "ticket_created";
+    return mk(
+      action,
+      { ...NA_RESULT, kind: "ticket", primary: "Ticket Created", ticketNo, ticketId },
+      isWalkinPath
+        ? `Customer visited the store — ticket ${ticketNo} created, awaiting a finalized invoice.`
+        : `Ticket ${ticketNo} created — awaiting a finalized invoice.`,
+    );
   }
 
-  // ── 3) FIELD JOB milestones (Pickup / On-Site operational authority). ──
+  // ── 3) LIVE FIELD JOB — reflect the EXACT field "Service Status". ──
+  //   Once a Field Job (Pickup & Drop / On-Site) is linked, its OWN service
+  //   status is the authority. The Action column mirrors the Field module's
+  //   Service Status VERBATIM (e.g. "Out for Pickup", "At Store", "In Repair")
+  //   so the sales agent sees the live progress. A cancelled job → Lost; every
+  //   other live status keeps the Result at "Lead Won" (no revenue until an
+  //   invoice). A completed job (no ticket yet) still shows "Completed".
   if (fieldJob) {
+    const fieldStatus = fieldJob.status as FieldJobStatus;
     if (fm === "cancelled") {
-      return { gate, gated: false, action: "lost", actionLabel: LEAD_ACTION_LABEL.lost, result: { ...NA_RESULT, kind: "lost", primary: "Lost" }, reason: "Linked field job was cancelled." };
+      return mk("lost", { ...NA_RESULT, kind: "lost", primary: "Lost" }, "Linked field job was cancelled.", undefined, fieldStatus);
     }
-    if (fm === "in_transit") {
-      return { gate, gated: false, action: "in_transit", actionLabel: LEAD_ACTION_LABEL.in_transit, result: { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" }, reason: "Field Ninja is in transit / servicing — device in motion." };
-    }
-    // at_store / completed (no ticket yet) or assigned → the field job is the
-    // accepted operational path: Lead Won, action = Field Assigned/In Transit.
-    if (fm === "at_store") {
-      return { gate, gated: false, action: "in_transit", actionLabel: LEAD_ACTION_LABEL.in_transit, result: { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" }, reason: "Device reached the store via the field job — awaiting ticket." };
-    }
-    // assigned / completed-without-ticket
-    return { gate, gated: false, action: "field_assigned", actionLabel: LEAD_ACTION_LABEL.field_assigned, result: { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" }, reason: "Field job assigned to a Ninja — sales opportunity accepted into service." };
+    // The Action KIND is a coarse bucket (for the fallback label/tone), but the
+    // cell will prefer the exact field status label+tone we carry here.
+    const action: LeadActionKind =
+      fm === "in_transit" || fm === "at_store" ? "in_transit" : "field_assigned";
+    return mk(
+      action,
+      { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" },
+      `Field service status: ${FIELD_STATUS_LABEL[fieldStatus]}${fieldJob.ninjaName ? ` · ${fieldJob.ninjaName}` : ""} — live from Pickup & Drop.`,
+      FIELD_STATUS_LABEL[fieldStatus], // actionLabel = the exact field status
+      fieldStatus,
+    );
   }
 
-  // ── 4) WALK-IN routed but customer not yet arrived (no field job/ticket). ──
-  if (walkIn || (lead.linkedWalkInId) || (lead.fulfilmentRoute || "").toUpperCase() === "STORE_VISIT") {
-    // A converted walk-in without a ticket still reads as pipeline/lead-won.
-    return {
-      gate, gated: false,
-      action: "in_pipeline", actionLabel: LEAD_ACTION_LABEL.in_pipeline,
-      result: { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" },
-      reason: "Routed to a Walk-In — sales intent accepted; awaiting the store visit.",
-    };
+  // ── 4) PICKUP / ON-SITE status intent (no field job linked yet). ──
+  //   Status set to "Pickup Assigned" / "On site Assigned" → the device is
+  //   being collected / serviced in the field: Action = "In Transit",
+  //   Result = "Lead Won" (until a ticket / invoice is generated). Once the
+  //   Field module is linked, the real field status (section 3) takes over.
+  if (intent === "pickup" || intent === "onsite") {
+    const label = intent === "pickup" ? "Pickup" : "On-site";
+    return mk(
+      "in_transit",
+      { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" },
+      `${label} assigned — device is being handled in the field; awaiting a ticket / invoice.`,
+    );
   }
 
-  // ── 5) DEAL path (link only; Deal module owns its logic). ──
+  // ── 5) WALK-IN assigned / routed but customer not yet arrived. ──
+  //   Status set to "Walkin Assigned" (or routed STORE_VISIT / a linked
+  //   walk-in) with no ticket/invoice yet → Action = "Walkin Assigned",
+  //   Result = "Lead Won". When the customer visits (ticket/invoice created)
+  //   section 1/2 flips the Action to "Visited Store".
+  if (isWalkinPath) {
+    return mk(
+      "walkin_assigned",
+      { ...NA_RESULT, kind: "lead_won", primary: "Lead Won" },
+      "Walk-in assigned — awaiting the customer's store visit (ticket / invoice).",
+    );
+  }
+
+  // ── 6) DEAL path (link only; Deal module owns its logic). ──
   if (isDealLead(lead)) {
-    return { gate, gated: false, action: "deal", actionLabel: LEAD_ACTION_LABEL.deal, result: { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" }, reason: "Lead is on the Deal path — see the linked Deal." };
+    return mk("deal", { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" }, "Lead is on the Deal path — see the linked Deal.");
   }
 
-  // ── 6) LOST / terminal negative. ──
+  // ── 7) LOST / terminal negative. ──
   if (isLostStatus(lead.status, lead.finalResult)) {
-    return { gate, gated: false, action: "lost", actionLabel: LEAD_ACTION_LABEL.lost, result: { ...NA_RESULT, kind: "lost", primary: "Lost" }, reason: "Lead is lost / dropped / not eligible." };
+    return mk("lost", { ...NA_RESULT, kind: "lost", primary: "Lost" }, "Lead is lost / dropped / not eligible.");
   }
 
-  // ── 7) FOLLOW-UP due (no operational record yet). ──
+  // ── 8) FOLLOW-UP due (no operational record yet). ──
   if (opts?.openFollowUpDue) {
-    return { gate, gated: false, action: "follow_up", actionLabel: LEAD_ACTION_LABEL.follow_up, result: { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" }, reason: "A follow-up is due — the lead is being actively worked." };
+    return mk("follow_up", { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" }, "A follow-up is due — the lead is being actively worked.");
   }
 
-  // ── 8) Default: contacted/qualified, in the pipeline. ──
-  return {
-    gate, gated: false,
-    action: "in_pipeline", actionLabel: LEAD_ACTION_LABEL.in_pipeline,
-    result: { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" },
-    reason: "Lead is qualified and progressing — no operational record yet.",
-  };
+  // ── 9) Default: contacted/qualified, in the pipeline. ──
+  return mk("in_pipeline", { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" }, "Lead is qualified and progressing — no operational record yet.");
 }
 
 /* ─── Store derivation ─────────────────────────────────────────────────────
@@ -381,6 +489,8 @@ export function leadActionTone(kind: LeadActionKind): string {
     case "invoice_created": return "bg-emerald-50 text-emerald-700 ring-emerald-200";
     case "ticket_created":  return "bg-indigo-50 text-indigo-700 ring-indigo-200";
     case "in_transit":      return "bg-violet-50 text-violet-700 ring-violet-200";
+    case "visited_store":   return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+    case "walkin_assigned": return "bg-sky-50 text-sky-700 ring-sky-200";
     case "field_assigned":  return "bg-sky-50 text-sky-700 ring-sky-200";
     case "in_pipeline":     return "bg-sky-50 text-sky-700 ring-sky-200";
     case "follow_up":       return "bg-orange-50 text-orange-700 ring-orange-200";

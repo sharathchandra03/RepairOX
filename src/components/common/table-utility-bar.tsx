@@ -114,8 +114,8 @@ export function TableSearch({
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
         className={cn(
-          "h-[34px] w-full rounded-xl border border-[#4361EE]/60 bg-card pl-9 pr-3 text-[13px] outline-none transition-all duration-150",
-          "placeholder:text-muted-foreground hover:border-[#4361EE]/80",
+          "h-[34px] w-full rounded-xl border border-input bg-card pl-9 pr-3 text-[13px] outline-none transition-all duration-150",
+          "placeholder:text-muted-foreground hover:border-[#4361EE]/40",
           "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
         )}
       />

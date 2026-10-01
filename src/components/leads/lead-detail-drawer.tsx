@@ -32,6 +32,8 @@ import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { AgentPicker } from "@/components/leads/lead-form-fields";
 import { LeadOperationsPanel } from "@/components/leads/lead-operations-panel";
+import { IssueSelector } from "@/components/common/issue-selector";
+import { parseIssueString } from "@/lib/issue-library";
 
 function formatDateTime(iso: string): string {
   if (!iso) return "";
@@ -46,6 +48,31 @@ function Cell({ label, children, wide }: { label: string; children: React.ReactN
     <div className={cn(wide && "col-span-2")}>
       <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
       <p className={cn("mt-0.5 text-[13px] font-medium", empty ? "text-zinc-300" : "text-zinc-800")}>{empty ? "—" : children}</p>
+    </div>
+  );
+}
+
+/* Issue is stored as a comma-separated string; render each issue as a pill so
+   the View surface matches the capture form (never a raw comma string). */
+function IssueCell({ value }: { value: string }) {
+  const issues = parseIssueString(value || "");
+  return (
+    <div className="col-span-2">
+      <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Issue</p>
+      {issues.length === 0 ? (
+        <p className="mt-0.5 text-[13px] font-medium text-zinc-300">—</p>
+      ) : (
+        <div className="mt-1 flex flex-wrap gap-1.5">
+          {issues.map((issue) => (
+            <span
+              key={issue}
+              className="inline-flex items-center rounded-full bg-[#EEF1FD] px-2.5 py-0.5 text-[12px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40"
+            >
+              {issue}
+            </span>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -372,7 +399,7 @@ export function LeadDetailDrawer({
             <>
               <Cell label="Device">{lead.device}</Cell>
               <Cell label="Category">{lead.category}</Cell>
-              <Cell label="Issue" wide>{lead.issue}</Cell>
+              <IssueCell value={lead.issue} />
               <Cell label="Estimate">{money(lead.estimate)}</Cell>
               <Cell label="Discount">{money(lead.discount)}</Cell>
               <Cell label="Comments" wide>{lead.comments}</Cell>
@@ -382,7 +409,7 @@ export function LeadDetailDrawer({
             <>
               <EditField label="Device"><EditSelect field="device" value={draft.device} onChange={(v) => set("device", v)} /></EditField>
               <EditField label="Category"><EditSelect field="category" value={draft.category} onChange={(v) => set("category", v)} /></EditField>
-              <EditField label="Issue" wide><input className={editInput()} value={draft.issue} onChange={(e) => set("issue", e.target.value)} /></EditField>
+              <EditField label="Issue" wide><IssueSelector value={draft.issue ?? ""} onChange={(v) => set("issue", v)} placeholder="Search or add issues…" pillClassName="py-0.5" /></EditField>
               <EditField label="Estimate" error={errors.estimate}><input className={editInput(!!errors.estimate)} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} inputMode="decimal" /></EditField>
               <EditField label="Discount" error={errors.discount}><input className={editInput(!!errors.discount)} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} inputMode="decimal" /></EditField>
               <EditField label="Comments" wide><textarea className={cn(editInput(), "h-auto min-h-[64px] py-2")} value={draft.comments} onChange={(e) => set("comments", e.target.value)} /></EditField>

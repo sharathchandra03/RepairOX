@@ -1154,6 +1154,74 @@ export function revenueWonForLead(
   return total;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   CUSTOMER SALES ATTRIBUTION (derived, read-only)
+   A single Customer may be worked by MANY Sales Agents across MANY leads
+   (spec §19/§20/§52/§97). This derives that history STRICTLY from the leads
+   that reference the customer (lead.customerId) — the lead owns sales
+   attribution, never the Customer Master. The customer's record CREATOR is
+   irrelevant here (spec §21/§85/§98). Nothing is stored; it's computed live.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+export interface CustomerSalesAttributionRow {
+  leadId: string;
+  leadNo: string;
+  /** Sales Agent user id that OWNS this lead ("" = unassigned). */
+  agentId: string;
+  /** Cached display name of the sales agent. */
+  agentName: string;
+  /** When the lead was created (its sales date). */
+  date: string;
+  /** The highest real outcome word for this lead: "Invoice" | "Ticket" |
+   *  "Lead Won" | "In Pipeline" | "Lost" | "Open". */
+  result: string;
+  /** Finalized-invoice revenue attributed to this lead (0 when none). */
+  revenue: number;
+  /** The lead's store scope (branch id) for display context. */
+  branchId: string;
+}
+
+/**
+ * Build a customer's sales-attribution history from the leads referencing it.
+ * `revenue` (store tickets+invoices) lets each row carry the FINALIZED revenue
+ * reachable from that lead (Lead→Ticket→Invoice). Ordered newest-first.
+ *
+ * A customer with multiple leads shows multiple agents — the history is NEVER
+ * collapsed onto a single "customer agent" (spec §19). An existing customer's
+ * old agent is NOT applied to a new lead; each row is that lead's own owner.
+ */
+export function customerSalesAttribution(
+  customerId: string,
+  leads: Lead[],
+  revenue?: { tickets: RevenueTicketLike[]; invoices: RevenueInvoiceLike[] },
+): CustomerSalesAttributionRow[] {
+  if (!customerId) return [];
+  const rows = leads
+    .filter((l) => l.customerId === customerId)
+    .map((l) => {
+      const rev = revenue ? revenueWonForLead(l, revenue.tickets, revenue.invoices) : 0;
+      let result: string;
+      if (rev > 0 || l.linkedInvoiceId) result = "Invoice";
+      else if (l.linkedTicketId) result = "Ticket";
+      else if (isWonStatus(l.status, l.finalResult)) result = "Lead Won";
+      else if (isLostStatus(l.status, l.finalResult)) result = "Lost";
+      else if (l.routedAt || l.linkedWalkInId || l.linkedFieldJobId) result = "In Pipeline";
+      else result = "Open";
+      return {
+        leadId: l.id,
+        leadNo: l.leadNo || l.id,
+        agentId: l.assignedTo || "",
+        agentName: l.assignedToName || l.agent || "",
+        date: l.date || (l.createdAt || "").slice(0, 10),
+        result,
+        revenue: rev,
+        branchId: l.branchId || "",
+      } as CustomerSalesAttributionRow;
+    });
+  rows.sort((a, b) => (b.date || "").localeCompare(a.date || ""));
+  return rows;
+}
+
 /** Per-route conversion counts for a lead set — based on the ROUTE + a real
  *  linked operational event, never on merely selecting a route. */
 export interface RouteConversionCounts {

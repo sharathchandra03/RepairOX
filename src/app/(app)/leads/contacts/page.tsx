@@ -17,7 +17,11 @@ import { AddContactModal } from "@/components/leads/add-contact-modal";
 import { useLeads } from "@/lib/leads-context";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/lib/permissions-context";
+import { useSession } from "@/lib/use-session";
 import { CAP, allow } from "@/lib/capabilities";
+import { SegmentedTabs } from "@/components/ui/tabs";
+import { isFinalizedInvoice, isWonStatus, type Lead } from "@/lib/leads-data";
+import { formatINR } from "@/lib/utils";
 import { cn } from "@/lib/utils";
 
 interface ContactRow {
@@ -31,6 +35,27 @@ interface ContactRow {
   lastContact: string;
   deals: number;
   tag: "customer" | "prospect" | "partner";
+  /* ── Sales attribution (derived from the contact's leads) ── */
+  /** Sales Agent user id that converted this contact ("" = none). */
+  agentId: string;
+  /** Cached display name of the converting sales agent. */
+  agentName: string;
+  /** True when a lead referencing this contact legitimately CONVERTED
+   *  (linked ticket/invoice or a won lead) — spec §47. */
+  converted: boolean;
+  /** The source lead's number for the converted relationship. */
+  sourceLeadNo: string;
+  /** Converted date (source lead date). */
+  convertedDate: string;
+  /** Finalized revenue attributed via the source lead. */
+  revenue: number;
+}
+
+/** A contact is CONVERTED when a lead that references it reached a real
+ *  operational outcome — a linked ticket/invoice or a won lead. Creating a
+ *  Customer Master record is NOT itself conversion (spec §47). */
+function leadIsConverted(l: Lead): boolean {
+  return !!l.linkedTicketId || !!l.linkedInvoiceId || isWonStatus(l.status, l.finalResult);
 }
 
 const TAG_CONFIG = {
@@ -41,7 +66,7 @@ const TAG_CONFIG = {
 
 /* Demo fallback — shown ONLY when there are no real saved contacts yet
    (fresh account / un-migrated DB), mirroring the Companies page pattern. */
-const DEMO_CONTACTS: ContactRow[] = [
+const DEMO_CONTACTS: Omit<ContactRow, "agentId" | "agentName" | "converted" | "sourceLeadNo" | "convertedDate" | "revenue">[] = [
   { id: "C-001", name: "Aarav Mehta",    email: "aarav@technova.in",    phone: "+91 98765 43210", company: "TechNova Pvt Ltd",   role: "Founder",       location: "Bengaluru", lastContact: "2h ago", deals: 3, tag: "customer" },
   { id: "C-002", name: "Bina Soni",      email: "bina@designhub.co",    phone: "+91 87654 32109", company: "DesignHub Co",       role: "CTO",           location: "Mumbai",    lastContact: "1d ago", deals: 1, tag: "prospect" },
   { id: "C-003", name: "Chetan Bhatt",   email: "chetan@gmail.com",     phone: "+91 76543 21098", company: "",                    role: "Individual",    location: "Pune",      lastContact: "3d ago", deals: 0, tag: "prospect" },
@@ -74,9 +99,16 @@ type ViewMode = "card" | "list";
 
 export default function ContactsPage() {
   const { contacts, leads, deleteContact } = useLeads();
-  const { companies } = useStore();
+  const { companies, customers, invoices, tickets } = useStore();
   const { can } = usePermissions();
+  const { id: currentUserId } = useSession();
   const canDelete = allow(can, CAP.customer.delete);
+  // Owner / manager sees ALL converted contacts (with an agent differentiation);
+  // a Sales Agent defaults to their OWN converted contacts (spec §49/§67/§70).
+  const canSeeAllContacts = allow(can, CAP.lead.performanceAll) || allow(can, CAP.lead.viewTeam);
+  // Scope strip: Converted (default) vs All. Agents effectively see only their
+  // own regardless (enforced below); owners can switch Converted ↔ All.
+  const [scope, setScope] = useState<"converted" | "all">("converted");
   // Only REAL saved contacts can be deleted — the demo fallback rows carry
   // fake ids (C-00x) with no backing record, so deletion is disabled for them.
   const hasRealContacts = contacts.length > 0;
@@ -91,8 +123,11 @@ export default function ContactsPage() {
      page's display shape. Every value is derived from actual data — deals is
      the real count of leads linked to this contact, last activity comes from
      the contact record, and the tag reflects Customer-Master promotion. */
+  const isDemo = contacts.length === 0;
   const rows = useMemo<ContactRow[]>(() => {
-    if (contacts.length === 0) return DEMO_CONTACTS;
+    if (contacts.length === 0) return DEMO_CONTACTS.map((d) => ({
+      ...d, agentId: "", agentName: "", converted: d.tag === "customer", sourceLeadNo: "", convertedDate: "", revenue: 0,
+    }));
 
     // deals per contact = number of leads that reference it (contactId).
     const dealsByContact = new Map<string, number>();
@@ -103,26 +138,65 @@ export default function ContactsPage() {
     const companyName = (id?: string) =>
       id ? companies.find((c) => c.id === id)?.name ?? "" : "";
 
-    return contacts.map((c) => ({
-      id: c.id,
-      name: c.fullName || `${c.firstName} ${c.lastName ?? ""}`.trim(),
-      email: c.email ?? "",
-      phone: c.mobile || c.phone || "",
-      company: companyName(c.companyId),
-      role: c.designation || c.role || "",
-      location: c.city || c.address || "",
-      lastContact: relativeTime(c.lastContactAt || c.updatedAt),
-      deals: dealsByContact.get(c.id) ?? 0,
-      // customerId set = promoted to Customer Master; otherwise a prospect.
-      tag: c.customerId ? "customer" : "prospect",
-    }));
-  }, [contacts, leads, companies]);
+    // Finalized revenue reachable from a lead (Lead→Ticket→Invoice).
+    const revenueForLead = (l: Lead): number => {
+      const finalized = invoices.filter((inv) => isFinalizedInvoice({
+        id: inv.id, ticketId: inv.ticketId, total: Number(inv.total || 0), status: inv.status, documentType: inv.documentType,
+      }));
+      let total = 0;
+      if (l.linkedTicketId) {
+        const t = tickets.find((x) => x.id === l.linkedTicketId || x.ticketNo === l.linkedTicketId);
+        if (t) for (const inv of finalized) if (inv.ticketId && (inv.ticketId === t.id || inv.ticketId === t.ticketNo)) total += Number(inv.total || 0);
+      }
+      if (l.linkedInvoiceId) { const d = finalized.find((inv) => inv.id === l.linkedInvoiceId); if (d) total += Number(d.total || 0); }
+      return total;
+    };
+
+    return contacts.map((c) => {
+      // Leads that belong to THIS contact — by contactId, or (once promoted) by
+      // the shared customerId. Sales attribution comes from the lead's OWNER,
+      // never the contact/customer record creator (spec §47/§76).
+      const contactLeads = leads.filter((l) =>
+        (l.contactId && l.contactId === c.id) || (c.customerId && l.customerId === c.customerId));
+      const convertedLeads = contactLeads.filter(leadIsConverted);
+      // Best converted lead = highest finalized revenue, else most recent.
+      const best = [...convertedLeads].sort((a, b) =>
+        (revenueForLead(b) - revenueForLead(a)) || (b.date || "").localeCompare(a.date || ""))[0];
+      const converted = !!best;
+      return {
+        id: c.id,
+        name: c.fullName || `${c.firstName} ${c.lastName ?? ""}`.trim(),
+        email: c.email ?? "",
+        phone: c.mobile || c.phone || "",
+        company: companyName(c.companyId),
+        role: c.designation || c.role || "",
+        location: c.city || c.address || "",
+        lastContact: relativeTime(c.lastContactAt || c.updatedAt),
+        deals: dealsByContact.get(c.id) ?? 0,
+        tag: c.customerId ? "customer" : "prospect",
+        agentId: best?.assignedTo || "",
+        agentName: best?.assignedToName || best?.agent || "",
+        converted,
+        sourceLeadNo: best?.leadNo || "",
+        convertedDate: best?.date || "",
+        revenue: best ? revenueForLead(best) : 0,
+      } as ContactRow;
+    });
+  }, [contacts, leads, companies, customers, invoices, tickets]);
 
   const filtered = useMemo(
-    () => rows.filter((c) =>
-      !query || `${c.name} ${c.email} ${c.company} ${c.location}`.toLowerCase().includes(query.toLowerCase())
-    ),
-    [query, rows]
+    () => rows.filter((c) => {
+      if (!query || `${c.name} ${c.email} ${c.company} ${c.location}`.toLowerCase().includes(query.toLowerCase())) {
+        // Scope: Converted-only unless the user explicitly switched to All.
+        // (Demo rows ignore scoping so the empty-account preview still shows.)
+        if (!isDemo && scope === "converted" && !c.converted) return false;
+        // A Sales Agent only sees contacts THEY converted (unless see-all).
+        if (!isDemo && !canSeeAllContacts && c.converted && c.agentId && currentUserId && c.agentId !== currentUserId) return false;
+        return true;
+      }
+      return false;
+    }),
+    [query, rows, scope, isDemo, canSeeAllContacts, currentUserId]
   );
 
   const deletingContact = useMemo(
@@ -204,15 +278,28 @@ export default function ContactsPage() {
 
       {/* Search & Filter */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="w-full sm:w-80">
-          <Input
-            value={query}
-            onChange={(e: any) => setQuery(e.target.value)}
-            placeholder="Search contacts..."
-            iconLeft={<Search className="h-4 w-4" />}
+        <div className="flex items-center gap-3">
+          {/* Converted (default) vs All scope — a Sales Agent sees only their
+              own converted contacts; owners see all with agent differentiation. */}
+          <SegmentedTabs
+            size="sm"
+            value={scope}
+            onChange={(v) => setScope(v as "converted" | "all")}
+            options={[
+              { label: canSeeAllContacts ? "Converted" : "My Converted", value: "converted" },
+              { label: "All", value: "all" },
+            ]}
           />
         </div>
         <div className="flex items-center gap-2">
+          <div className="w-full sm:w-80">
+            <Input
+              value={query}
+              onChange={(e: any) => setQuery(e.target.value)}
+              placeholder="Search contacts..."
+              iconLeft={<Search className="h-4 w-4" />}
+            />
+          </div>
           <ViewToggle className="flex sm:hidden" />
           <Button variant="outline" size="sm" className="shrink-0 gap-1.5 rounded-full">
             <Filter className="h-3.5 w-3.5" /> Filter
@@ -287,6 +374,13 @@ export default function ContactsPage() {
                 )}
               </div>
 
+              {contact.agentName && (
+                <div className="mt-3 flex items-center gap-1.5 text-[11px] text-violet-700">
+                  <Avatar name={contact.agentName} size={18} />
+                  <span className="font-medium">{contact.agentName}</span>
+                  {contact.revenue > 0 && <span className="ml-auto font-semibold text-emerald-700">{formatINR(contact.revenue)}</span>}
+                </div>
+              )}
               <div className="mt-4 flex items-center justify-between border-t border-border pt-3">
                 <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
                   <span>{contact.deals} deals</span>
@@ -331,10 +425,10 @@ export default function ContactsPage() {
                     </th>
                   )}
                   <th className="px-4 py-3">Contact</th>
-                  <th className="px-4 py-3">Company</th>
-                  <th className="px-4 py-3">Email</th>
+                  <th className="px-4 py-3">Sales Agent</th>
+                  <th className="px-4 py-3">Source Lead</th>
                   <th className="px-4 py-3">Phone</th>
-                  <th className="px-4 py-3">Location</th>
+                  <th className="px-4 py-3 text-right">Revenue</th>
                   <th className="px-4 py-3 text-center">Deals</th>
                   <th className="px-4 py-3">Type</th>
                   <th className="px-4 py-3 text-right">Actions</th>
@@ -358,16 +452,22 @@ export default function ContactsPage() {
                       </div>
                     </td>
                     <td className="px-4 py-3 text-zinc-700">
-                      {contact.company || <span className="text-muted-foreground">—</span>}
+                      {contact.agentName ? (
+                        <span className="inline-flex items-center gap-1.5">
+                          <Avatar name={contact.agentName} size={22} /> <span className="truncate">{contact.agentName}</span>
+                        </span>
+                      ) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 text-zinc-600">
-                      {contact.email || <span className="text-muted-foreground">—</span>}
+                      {contact.sourceLeadNo
+                        ? <span className="font-medium text-[#4361EE]">{contact.sourceLeadNo}</span>
+                        : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 tabular-nums text-zinc-600">
                       {contact.phone || <span className="text-muted-foreground">—</span>}
                     </td>
-                    <td className="px-4 py-3 text-zinc-600">
-                      {contact.location || <span className="text-muted-foreground">—</span>}
+                    <td className="px-4 py-3 text-right tabular-nums text-zinc-700">
+                      {contact.revenue > 0 ? formatINR(contact.revenue) : <span className="text-muted-foreground">—</span>}
                     </td>
                     <td className="px-4 py-3 text-center tabular-nums text-zinc-700">{contact.deals}</td>
                     <td className="px-4 py-3">
