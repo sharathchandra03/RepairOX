@@ -21,6 +21,7 @@ export function splitName(full: string): { first: string; last: string } {
 export interface ContactSeed {
   name: string;
   phone: string;
+  altPhone?: string;
   email?: string;
   address?: string;
   source?: string;
@@ -50,6 +51,7 @@ export function resolveCustomer(
   }
   const dupes = findDuplicates(customers, {
     mobile: seed.phone,
+    altMobile: seed.altPhone,
     email: seed.email,
     firstName: splitName(seed.name).first,
     lastName: splitName(seed.name).last,
@@ -63,6 +65,7 @@ export function resolveCustomer(
     firstName: first || seed.name || "Customer",
     lastName: last,
     mobile: seed.phone || "",
+    altMobile: seed.altPhone || "",
     email: seed.email || "",
     source: (seed.source as any) || "sales",
     // Captured through the Lead → routing pipeline.

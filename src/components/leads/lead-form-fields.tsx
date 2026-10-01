@@ -181,7 +181,7 @@ export function AgentPicker({
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
                 <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search sales agents…"
                   aria-label="Search sales agents"
-                  className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground" />
+                  className="w-full bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground" />
               </div>
             )}
             <div className="max-h-56 overflow-y-auto p-1">
@@ -238,13 +238,17 @@ export function deviceLabel(brandName?: string, modelName?: string, categoryName
 }
 
 function MiniSelect({
-  value, options, onChange, placeholder, disabled,
+  value, options, onChange, placeholder, disabled, searchable = true, alwaysSearch = false,
 }: {
   value: string;
   options: { id: string; name: string }[];
   onChange: (id: string, name: string) => void;
   placeholder: string;
   disabled?: boolean;
+  /** When false the dropdown never shows a search box. */
+  searchable?: boolean;
+  /** When true the search box always shows (ignores the 6+ options threshold). */
+  alwaysSearch?: boolean;
 }) {
   const { triggerRef, panelRef, open, setOpen, pos, place, mounted } = useAnchoredPanel();
   const [query, setQuery] = useState("");
@@ -263,11 +267,11 @@ function MiniSelect({
           <div className="fixed inset-0 z-[10040]" onClick={close} />
           <div ref={panelRef} data-lead-popover-open="true" style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
             className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]">
-            {options.length > 6 && (
+            {searchable && (alwaysSearch || options.length > 6) && (
               <div className="flex items-center gap-2 border-b border-border px-2.5 py-2">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
                 <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…"
-                  className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground" />
+                  className="w-full bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground" />
               </div>
             )}
             <div className="max-h-56 overflow-y-auto p-1">
@@ -333,9 +337,9 @@ export function DeviceCatalogPicker({
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <MiniSelect value={value.categoryId} options={catOptions} onChange={setCategory} placeholder="Category" />
+        <MiniSelect value={value.categoryId} options={catOptions} onChange={setCategory} placeholder="Device Category" />
         <MiniSelect value={value.brandId} options={brandOptions} onChange={setBrand} placeholder="Brand" disabled={!value.categoryId} />
-        <MiniSelect value={value.modelId} options={modelOptions} onChange={setModel} placeholder="Model" disabled={!value.brandId} />
+        <MiniSelect value={value.modelId} options={modelOptions} onChange={setModel} placeholder="Model Name" disabled={!value.brandId} alwaysSearch />
       </div>
       {value.label && (
         <p className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-medium text-[#4361EE]">

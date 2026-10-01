@@ -33,10 +33,13 @@ export interface Lead {
   /* ── Stage 1: Quick capture ── */
   region: string;
   source: string;         // acquisition source (Google / Meta / GMB / …)
+  modeOfContact: string;  // preferred contact mode (Call / WhatsApp / Email / …) — configurable
   captureChannel: string; // HOW it was captured (IVR / Form / Chat / Email / …) — separate from source
   agent: string;
+  qualification: string;  // Qualified Lead / Not Qualified Lead — configurable
   name: string;
   number: string;
+  alternateNumber: string;  // secondary phone — persisted + flows to Customer Master (altMobile).
   email: string;
   location: string;         // free-text address / landmark (unchanged)
   locationUnit: string;     // door / flat / house no. — the exact unit ("" = none).
@@ -57,6 +60,7 @@ export interface Lead {
   deviceModelId: string;    // PriceListModel.id (plm-…)
   issue: string;
   category: string;         // issue/service category (lead_options master)
+  subCategory: string;      // more specific category under `category` (lead_options master)
   estimate: number | null;  // pipeline / expected value (NOT revenue)
   discount: number | null;  // structured numeric value; unit in discountType
   discountType: "amount" | "percent"; // how `discount` is expressed
@@ -115,8 +119,19 @@ export interface Lead {
   linkedInvoiceId: string;  // eventual finalized Invoice (cached; revenue resolved live)
   contactId: string;        // CRM Contact identity (prospect stage; always preferred before promotion)
   customerId: string;       // Customer Master link once commercial/service business begins
-  convertedAt?: string;     // ISO timestamp of Contact/Lead → Customer promotion
-  convertedBy?: string;     // staff id that promoted/linked the customer
+  companyId?: string;       // Company Master reference for commercial leads
+
+  /* Normalized analytical facts. These are event-derived DB columns, never
+     manual KPIs. Empty means the historical event is unavailable — analytics
+     must show a data-quality state rather than infer a timestamp. */
+  expectedValue?: number | null; // canonical open-pipeline value; estimate is fallback
+  firstContactedAt?: string;     // first successful contact activity
+  qualifiedAt?: string;          // first time the lead reached qualification
+  convertedAt?: string;          // terminal WON / converted timestamp
+  lostAt?: string;               // terminal LOST timestamp
+  lostReason?: string;           // structured reason when available
+  nextFollowUpAt?: string;       // normalized next due instant cache
+  convertedBy?: string;          // staff id that promoted/linked the customer
   conversionSource?: "ticket" | "invoice" | "walk_in" | "field" | "manual" | string;
   /* ── Attribution mode (effort-based agent credit) ──
      How the downstream operational record became attached to this lead:
@@ -197,10 +212,13 @@ export interface LeadOption {
 export type LeadFieldKey =
   | "region"
   | "source"
+  | "modeOfContact"
   | "agent"
+  | "qualification"
   | "contactStatus"
   | "device"
   | "category"
+  | "subCategory"
   | "leadCategory"
   | "status"
   | "leadNature"
@@ -232,11 +250,14 @@ export interface LeadFieldDef {
  */
 export const LEAD_DROPDOWN_FIELDS: LeadFieldDef[] = [
   { key: "source",        label: "Source",         hint: "Where the lead came from.",                 defaults: ["Forms", "WhatsApp", "Website", "Referral", "Walk-In", "Google", "Meta", "Instagram"] },
+  { key: "modeOfContact", label: "Mode of Contact",hint: "How the lead prefers to be reached.",       defaults: ["Call", "WhatsApp", "Email", "SMS", "Walk-In", "Chat"] },
   { key: "region",        label: "Region",         hint: "City / area the lead belongs to.",          defaults: ["Bangalore", "Chennai", "Hyderabad", "Mumbai", "Delhi"] },
   { key: "agent",         label: "Agent",          hint: "Sales agent who owns the lead.",            defaults: [], usesStaff: true },
+  { key: "qualification", label: "Qualification",  hint: "Whether the lead is qualified.",            defaults: ["Qualified Lead", "Not Qualified Lead"] },
   { key: "contactStatus", label: "Contact Status", hint: "Whether the lead has been reached.",        defaults: ["Not Contacted", "Contacted", "RNR", "Busy", "Switched Off"] },
   { key: "device",        label: "Device",         hint: "Device the enquiry is about.",              defaults: ["iPhone", "Android", "iPad", "MacBook", "Laptop", "Smart Watch", "Other"] },
   { key: "category",      label: "Category",       hint: "Repair / product category.",                defaults: ["Screen", "Battery", "Motherboard", "Water Damage", "Software", "Accessory"] },
+  { key: "subCategory",   label: "Subcategory",    hint: "More specific category under Category.",     defaults: ["Display Replacement", "Glass Only", "Battery Replacement", "Charging Port", "Data Recovery", "Diagnostics"] },
   { key: "leadCategory",  label: "Lead Category",  hint: "Type of business for this lead.",           defaults: ["Repair", "Accessory", "Service", "Buy-Back", "Sales"] },
   { key: "status",        label: "Status",         hint: "Lead lifecycle stage.",                     defaults: ["New Lead", "Contacted", "Follow-Up", "Qualified", "Won", "Lost"] },
   { key: "leadNature",    label: "Lead Nature",    hint: "How warm the lead is.",                     defaults: ["Hot", "Warm", "Cold"] },
@@ -411,10 +432,13 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
   return {
     region: "",
     source: "",
+    modeOfContact: "",
     captureChannel: "",
     agent,
+    qualification: "",
     name: "",
     number: "",
+    alternateNumber: "",
     email: "",
     location: "",
     locationUnit: "",
@@ -427,6 +451,7 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
     deviceModelId: "",
     issue: "",
     category: "",
+    subCategory: "",
     estimate: null,
     discount: null,
     discountType: "amount",
@@ -478,7 +503,9 @@ export const LEAD_DATE_RANGES: { value: LeadDateRange; label: string }[] = [
 export type LeadFilterField =
   | "region" | "source" | "agent" | "assignedToName" | "contactStatus"
   | "leadCategory" | "status" | "leadNature" | "result" | "priority"
-  | "device" | "category" | "followUpAgent" | "finalResult"
+  | "device" | "category" | "subCategory" | "modeOfContact" | "qualification"
+  | "deviceCategoryId" | "deviceBrandId" | "fulfilmentRoute"
+  | "followUpAgent" | "finalResult"
   /* People filters match the structured USER ID (never the rendered name). */
   | "assignedTo" | "followUpAgentId";
 
@@ -511,6 +538,9 @@ export interface LeadFilters {
    *  exact match, so it lives as its own axis like dateRange/followUp. */
   customerLink: "any" | "existing" | "new";
   fields: Partial<Record<LeadFilterField, string>>;
+  /** Exact traceability cohort from Lead Intelligence. Hidden from the normal
+   * filter UI; every id still passes through RLS before it can appear. */
+  evidenceIds?: string[];
 }
 
 export const EMPTY_LEAD_FILTERS: LeadFilters = {
@@ -528,7 +558,7 @@ export const EMPTY_LEAD_FILTERS: LeadFilters = {
 export function hasActiveLeadFilters(f: LeadFilters): boolean {
   return (
     !!f.query.trim() || !!f.status || f.dateRange !== "all" || f.followUp !== "any" ||
-    f.customerLink !== "any" ||
+    f.customerLink !== "any" || !!f.evidenceIds?.length ||
     Object.values(f.fields).some(Boolean)
   );
 }
@@ -565,19 +595,24 @@ export function applyLeadFilters(
   openFollowUpsByLead?: Map<string, LeadFollowUp>,
 ): Lead[] {
   const q = f.query.trim().toLowerCase();
+  const evidence = f.evidenceIds?.length ? new Set(f.evidenceIds) : null;
   const asOf = Date.now();
   const view: LeadView = f.view ?? "all";
   return leads.filter((l) => {
+    if (evidence && !evidence.has(l.id)) return false;
     // ── Primary segment (view) ──────────────────────────────────────────────
     // notContacted: leads still at "Not Contacted" (grace window OR locked).
     // all: the normal working table — a LOCKED not-contacted lead has aged out
     //      to the notContacted queue and is hidden here. Follow-ups view keeps
     //      only leads with any follow-up activity.
-    if (view === "notContacted") {
+    // Exact Intelligence evidence cohorts bypass normal operational view
+    // segmentation (including the stale Not-Contacted queue) but never bypass
+    // RLS. This keeps "View leads" numerators/denominators traceable.
+    if (!evidence && view === "notContacted") {
       if (!isNotContactedStatus(l.contactStatus)) return false;
-    } else if (view === "all") {
+    } else if (!evidence && view === "all") {
       if (isNotContactedLocked(l, asOf)) return false;
-    } else if (view === "followUps") {
+    } else if (!evidence && view === "followUps") {
       const hasFu = openFollowUpsByLead
         ? openFollowUpRowState(openFollowUpsByLead.get(l.id), asOf) !== "none"
         : followUpState(l.followUpDate) !== "none";
@@ -611,7 +646,7 @@ export function applyLeadFilters(
 
     if (q) {
       const hay = [
-        l.leadNo, l.name, l.number, l.email, l.device, l.source, l.agent,
+        l.leadNo, l.name, l.number, l.alternateNumber, l.email, l.device, l.source, l.agent,
         l.status, l.leadCategory, l.priority, l.assignedToName, l.region,
       ].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;
@@ -870,7 +905,17 @@ export const LEAD_CONVERSION_EVENT_LABEL: Record<LeadConversionEventType, string
 
 export function isQualifiedStatus(status: string): boolean {
   const s = (status || "").toLowerCase();
-  return s.includes("qualified");
+  return s.includes("qualified") && !s.includes("not qualified");
+}
+/** Canonical qualification fact. Historical milestone/qualification survives a
+ * later status change to Won/Lost, so funnel counts remain cumulative. */
+export function isQualifiedLead(lead: Pick<Lead, "status" | "qualification" | "qualifiedAt" | "convertedAt" | "finalResult">): boolean {
+  const q = (lead.qualification || "").toLowerCase();
+  return !!lead.qualifiedAt
+    || !!lead.convertedAt
+    || (q.includes("qualified") && !q.includes("not qualified"))
+    || isQualifiedStatus(lead.status)
+    || isWonStatus(lead.status, lead.finalResult);
 }
 export function isWonStatus(status: string, finalResult = ""): boolean {
   const s = `${status} ${finalResult}`.toLowerCase();
@@ -879,6 +924,16 @@ export function isWonStatus(status: string, finalResult = ""): boolean {
 export function isLostStatus(status: string, finalResult = ""): boolean {
   const s = `${status} ${finalResult}`.toLowerCase();
   return s.includes("lost") || s.includes("dropped") || s.includes("not eligible");
+}
+/** Pipeline values are valid only after contact and never for explicitly
+ * Not-Qualified leads. Mirrors the qualification gate without importing the
+ * workflow module (which depends on this data module). */
+export function isLeadPipelineEligible(lead: Pick<Lead, "contactStatus" | "qualification">): boolean {
+  const contact = (lead.contactStatus || "").trim().toLowerCase();
+  const qualification = (lead.qualification || "").trim().toLowerCase();
+  if (!contact || /not\s*contacted/.test(contact)) return false;
+  if (/not\s*qualified/.test(qualification)) return false;
+  return true;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -989,11 +1044,11 @@ export function computeLeadMetrics(
     const agentDriven = isAgentDrivenLead(l);   // did the agent actually drive it?
     const rev = revenue ? revenueWonForLead(l, revenue.tickets, revenue.invoices) : 0;
 
-    if (isQualifiedStatus(l.status)) qualified += 1;
+    if (isQualifiedLead(l)) qualified += 1;
     if (won) { converted += 1; if (agentDriven) convertedAgentDriven += 1; else convertedSelfInitiated += 1; }
     if (l.linkedTicketId) { ticketsWon += 1; if (agentDriven) ticketsWonAgentDriven += 1; else ticketsWonSelfInitiated += 1; } // Ticket Won = a real linked ticket
     if (lostL) lost += 1;
-    if (!won && !lostL) pipelineValue += leadExpectedValue(l);  // pipeline = expected value of open leads
+    if (!won && !lostL && isLeadPipelineEligible(l)) pipelineValue += leadExpectedValue(l);  // gated leads never inflate pipeline
     // Revenue Won = FINALIZED invoices only (never estimate/proforma/pipeline).
     if (revenue) { revenueWon += rev; if (agentDriven) revenueWonAgentDriven += rev; else revenueWonSelfInitiated += rev; }
   }

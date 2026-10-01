@@ -35,6 +35,7 @@ import {
   CalendarPlus, CalendarClock, PhoneCall, CheckCheck, History, ChevronDown, X, XCircle,
 } from "lucide-react";
 import { TimePicker } from "@/components/ui/time-picker";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { usePermissions } from "@/lib/permissions-context";
@@ -430,7 +431,7 @@ function CompleteView({ busy, onDone }: { busy: boolean; onDone: (outcome: strin
           className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20" />
       </div>
       <label className="flex items-center gap-2 text-[12px] text-zinc-700">
-        <input type="checkbox" checked={scheduleNext} onChange={(e) => setScheduleNext(e.target.checked)} className="rounded border-input" />
+        <Checkbox checked={scheduleNext} onChange={setScheduleNext} aria-label="Schedule next follow-up" />
         Schedule next follow-up
       </label>
       {scheduleNext && (

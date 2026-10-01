@@ -66,10 +66,13 @@ function rowToLead(r: any): Lead {
     month: r.lead_month ?? "",
     region: r.region ?? "",
     source: r.source ?? "",
+    modeOfContact: r.mode_of_contact ?? "",
     captureChannel: r.capture_channel ?? "",
     agent: r.agent ?? "",
+    qualification: r.qualification ?? "",
     name: r.name ?? "",
     number: r.number ?? "",
+    alternateNumber: r.alternate_number ?? "",
     email: r.email ?? "",
     location: r.location ?? "",
     locationUnit: r.location_unit ?? "",
@@ -82,6 +85,7 @@ function rowToLead(r: any): Lead {
     deviceModelId: r.device_model_id ?? "",
     issue: r.issue ?? "",
     category: r.category ?? "",
+    subCategory: r.sub_category ?? "",
     estimate: r.estimate == null ? null : Number(r.estimate),
     discount: r.discount == null ? null : Number(r.discount),
     discountType: r.discount_type === "percent" ? "percent" : "amount",
@@ -115,7 +119,14 @@ function rowToLead(r: any): Lead {
     linkedInvoiceId: r.linked_invoice_id ?? "",
     contactId: r.contact_id ?? "",
     customerId: r.customer_id ?? "",
+    companyId: r.company_id ?? undefined,
+    expectedValue: r.expected_value == null ? null : Number(r.expected_value),
+    firstContactedAt: r.first_contacted_at ?? undefined,
+    qualifiedAt: r.qualified_at ?? undefined,
     convertedAt: r.converted_at ?? undefined,
+    lostAt: r.lost_at ?? undefined,
+    lostReason: r.lost_reason ?? undefined,
+    nextFollowUpAt: r.next_followup_at ?? undefined,
     convertedBy: r.converted_by ?? undefined,
     conversionSource: r.conversion_source ?? undefined,
     attributionMode: r.attribution_mode ?? undefined,
@@ -138,10 +149,13 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   // It is read back in rowToLead(); the derivation lives in the database.
   set("region", l.region);
   set("source", l.source);
+  set("mode_of_contact", l.modeOfContact);
   set("capture_channel", l.captureChannel);
   set("agent", l.agent);
+  set("qualification", l.qualification);
   set("name", l.name);
   set("number", l.number);
+  set("alternate_number", l.alternateNumber);
   set("email", l.email);
   set("location", l.location);
   set("location_unit", l.locationUnit);
@@ -156,6 +170,7 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("device_model_id", l.deviceModelId);
   set("issue", l.issue);
   set("category", l.category);
+  set("sub_category", l.subCategory);
   if (l.estimate !== undefined) row.estimate = l.estimate;
   if (l.discount !== undefined) row.discount = l.discount;
   set("discount_type", l.discountType);
@@ -193,7 +208,14 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   set("linked_invoice_id", l.linkedInvoiceId);
   set("contact_id", l.contactId);
   set("customer_id", l.customerId);
+  set("company_id", l.companyId);
+  if (l.expectedValue !== undefined) row.expected_value = l.expectedValue;
+  if (l.firstContactedAt !== undefined) row.first_contacted_at = l.firstContactedAt || null;
+  if (l.qualifiedAt !== undefined) row.qualified_at = l.qualifiedAt || null;
   if (l.convertedAt !== undefined) row.converted_at = l.convertedAt || null;
+  if (l.lostAt !== undefined) row.lost_at = l.lostAt || null;
+  if (l.lostReason !== undefined) row.lost_reason = l.lostReason || null;
+  if (l.nextFollowUpAt !== undefined) row.next_followup_at = l.nextFollowUpAt || null;
   if (l.convertedBy !== undefined) row.converted_by = l.convertedBy || null;
   set("conversion_source", l.conversionSource);
   if (l.attributionMode !== undefined) row.attribution_mode = l.attributionMode || null;
@@ -337,6 +359,9 @@ interface LeadsContextValue {
   filteredLeads: Lead[];
   options: LeadOption[];
   hydrated: boolean;
+  /** Data sources that failed initial loading. Analytical surfaces must never
+   * render these as legitimate zero values. */
+  loadErrors: string[];
   mode: "db" | "local";
 
   /** Shared filter state (used by list + dashboard). */
@@ -464,7 +489,8 @@ function writeLS(key: string, value: unknown) {
 /** Optional lead columns that may be absent before the migration is applied. */
 const LEAD_OPTIONAL_COLUMNS = [
   "fulfilment_route", "assigned_store", "routed_at",
-  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id",
+  "linked_walk_in_id", "linked_field_job_id", "linked_ticket_id", "linked_invoice_id", "contact_id", "customer_id", "company_id",
+  "expected_value", "first_contacted_at", "qualified_at", "lost_at", "lost_reason", "next_followup_at",
   "converted_at", "converted_by", "conversion_source", "attribution_mode",
   "device_category_id", "device_brand_id", "device_model_id", "discount_type", "follow_up_agent_id",
   "location_lat", "location_lng", "location_maps_url", "location_unit",
@@ -599,6 +625,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const [assignmentHistory, setAssignmentHistory] = useState<LeadAssignmentEvent[]>([]);
   const [conversionHistory, setConversionHistory] = useState<LeadConversionEvent[]>([]);
   const [hydrated, setHydrated] = useState(false);
+  const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [filters, setFiltersState] = useState<LeadFilters>(EMPTY_LEAD_FILTERS);
 
   const useDb = isSupabaseConfigured && !!supabase;
@@ -643,8 +670,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
         // never fall back to the whole staff directory.
         console.error("[leads] loading sales agents failed:", error.message);
         setSalesAgents([]);
+        setLoadErrors((previous) => previous.includes("salesAgents") ? previous : [...previous, "salesAgents"]);
       } else {
         setSalesAgents(((data as any[]) ?? []).map(rowToSalesAgent));
+        setLoadErrors((previous) => previous.filter((source) => source !== "salesAgents"));
       }
       setSalesAgentsReady(true);
       return;
@@ -738,6 +767,11 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
         db.from("lead_conversion_history").select("*").order("occurred_at", { ascending: false }),
       ]);
       if (!active) return;
+      setLoadErrors((previous) => [
+        ...previous.filter((source) => source === "salesAgents"),
+        ...(leadErr ? ["leads"] : []),
+        ...(fuErr ? ["followUps"] : []),
+      ]);
       if (!leadErr && leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
 
       // contacts table only exists once 0031_customer_master_integration.sql
@@ -784,6 +818,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (!authReady) return; // wait for auth so RLS reads succeed
       loadFromDb();
     } else {
+      setLoadErrors([]);
       const localLeads = readLS<Lead[]>(LEADS_KEY, []);
       let localOpts = readLS<LeadOption[]>(OPTIONS_KEY, []);
       localOpts = seedLocalOptionsIfEmpty(localOpts);
@@ -1007,11 +1042,11 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       branchId: draft.branchId ?? "",
       leadNo: nextLeadNoLocal(),
       date, time, month,
-      region: draft.region ?? "", source: draft.source ?? "", captureChannel: draft.captureChannel ?? "", agent: draft.agent ?? "",
-      name: draft.name ?? "", number: draft.number ?? "", email: draft.email ?? "", location: draft.location ?? "", locationUnit: draft.locationUnit ?? "",
+      region: draft.region ?? "", source: draft.source ?? "", modeOfContact: draft.modeOfContact ?? "", captureChannel: draft.captureChannel ?? "", agent: draft.agent ?? "", qualification: draft.qualification ?? "",
+      name: draft.name ?? "", number: draft.number ?? "", alternateNumber: draft.alternateNumber ?? "", email: draft.email ?? "", location: draft.location ?? "", locationUnit: draft.locationUnit ?? "",
       locationLat: draft.locationLat ?? null, locationLng: draft.locationLng ?? null, locationMapsUrl: draft.locationMapsUrl ?? "",
       device: draft.device ?? "", deviceCategoryId: draft.deviceCategoryId ?? "", deviceBrandId: draft.deviceBrandId ?? "", deviceModelId: draft.deviceModelId ?? "",
-      issue: draft.issue ?? "", category: draft.category ?? "",
+      issue: draft.issue ?? "", category: draft.category ?? "", subCategory: draft.subCategory ?? "",
       estimate: draft.estimate ?? null, discount: draft.discount ?? null, discountType: draft.discountType ?? "amount",
       leadCategory: draft.leadCategory ?? "", leadNature: draft.leadNature ?? "", priority: draft.priority ?? "",
       comments: draft.comments ?? "", contactStatus: draft.contactStatus ?? "", status: draft.status ?? "",
@@ -1950,7 +1985,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [options]);
 
   const value = useMemo<LeadsContextValue>(() => ({
-    leads: scopedLeads, filteredLeads, options, hydrated, mode: useDb ? "db" : "local",
+    leads: scopedLeads, filteredLeads, options, hydrated, loadErrors, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
     optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
@@ -1960,7 +1995,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     contacts, addContact, updateContact, deleteContact,
-  }), [scopedLeads, filteredLeads, options, hydrated, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
+  }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;

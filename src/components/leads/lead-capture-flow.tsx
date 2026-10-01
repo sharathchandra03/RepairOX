@@ -24,6 +24,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
+import { DateTimeField } from "@/components/ui/date-time-picker";
 import { useLeads } from "@/lib/leads-context";
 import { useSession } from "@/lib/use-session";
 import { usePermissions } from "@/lib/permissions-context";
@@ -32,8 +33,10 @@ import { useStoreContext } from "@/lib/store-context";
 import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
+  isNotContactedStatus,
   type Lead, type LeadDraft, type LeadFieldKey,
 } from "@/lib/leads-data";
+import { isNotQualified } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
 import { LocationPicker } from "@/components/leads/location-picker";
@@ -42,9 +45,10 @@ import { cn } from "@/lib/utils";
 /* ─── Configurable select (searchable, options from Settings) ─────────── */
 
 function ConfigurableSelect({
-  field, value, onChange, placeholder, extra = [], invalid,
+  field, value, onChange, placeholder, extra = [], invalid, options, labelFor,
 }: {
-  field: LeadFieldKey;
+  /** Lead-options field; omit when passing an explicit `options` list. */
+  field?: LeadFieldKey;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -52,6 +56,10 @@ function ConfigurableSelect({
    *  own saved-but-archived value so it still shows). */
   extra?: string[];
   invalid?: boolean;
+  /** Explicit option values (bypasses lead options) — e.g. a DB store list. */
+  options?: string[];
+  /** Map an option value to a display label (e.g. store id → store name). */
+  labelFor?: (value: string) => string;
 }) {
   const { optionsFor } = useLeads();
   const [open, setOpen] = useState(false);
@@ -62,16 +70,18 @@ function ConfigurableSelect({
   const [mounted, setMounted] = useState(false);
   useEffect(() => { setMounted(true); }, []);
 
+  const label = (v: string) => (labelFor ? labelFor(v) : v);
+
   const values = useMemo(() => {
-    const configured = optionsFor(field).map((o) => o.value);
-    const merged = Array.from(new Set([...extra, ...configured].filter(Boolean)));
+    const base = options ?? (field ? optionsFor(field).map((o) => o.value) : []);
+    const merged = Array.from(new Set([...extra, ...base].filter(Boolean)));
     // Keep the currently-selected value visible even if archived.
     if (value && !merged.includes(value)) merged.unshift(value);
     return merged;
-  }, [optionsFor, field, extra, value]);
+  }, [options, optionsFor, field, extra, value]);
 
   const filtered = query.trim()
-    ? values.filter((v) => v.toLowerCase().includes(query.trim().toLowerCase()))
+    ? values.filter((v) => label(v).toLowerCase().includes(query.trim().toLowerCase()))
     : values;
 
   // Position the portal panel from the trigger's rect; flip up when there's not
@@ -119,7 +129,7 @@ function ConfigurableSelect({
           open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-input hover:border-[#4361EE]/40",
         )}
       >
-        <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value || placeholder || "Select…"}</span>
+        <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value ? label(value) : (placeholder || "Select…")}</span>
         <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
       </button>
       {mounted && open && createPortal(
@@ -139,7 +149,7 @@ function ConfigurableSelect({
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search…"
-                  className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+                  className="w-full bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground"
                 />
               </div>
             )}
@@ -149,7 +159,7 @@ function ConfigurableSelect({
                   <X className="h-3 w-3" /> Clear
                 </button>
               )}
-              {filtered.length === 0 && <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No options. Add them in Settings.</p>}
+              {filtered.length === 0 && <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">{options ? "No matches." : "No options. Add them in Settings."}</p>}
               {filtered.map((v) => (
                 <button
                   key={v}
@@ -161,7 +171,7 @@ function ConfigurableSelect({
                   )}
                 >
                   <Check className={cn("h-3.5 w-3.5 text-[#4361EE]", v === value ? "opacity-100" : "opacity-0")} />
-                  <span className="truncate">{v}</span>
+                  <span className="truncate">{label(v)}</span>
                 </button>
               ))}
             </div>
@@ -209,9 +219,9 @@ const inputCls = (invalid?: boolean) =>
 
 const STAGES = [
   { id: 1, label: "Customer",      hint: "Who + how to reach" },
-  { id: 2, label: "Lead Details",  hint: "Source, agent, priority" },
+  { id: 2, label: "Lead Details",  hint: "Source, mode, agent" },
   { id: 3, label: "Device & Issue", hint: "Device, estimate" },
-  { id: 4, label: "Follow-Up",     hint: "Contact & result" },
+  { id: 4, label: "Status & Assignment", hint: "Status, priority, store" },
   { id: 5, label: "Review",        hint: "Confirm & save" },
 ];
 
@@ -237,11 +247,11 @@ export function LeadCaptureFlow({
 
 
 function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
-  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner } = useLeads();
+  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead } = useLeads();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { team, can, currentUser } = usePermissions();
   const { customers } = useStore();
-  const { activeStoreId } = useStoreContext();
+  const { activeStoreId, stores, getStore } = useStoreContext();
   const isEdit = !!editLead;
   const canSaveLead = isEdit ? allow(can, CAP.lead.edit) : allow(can, CAP.lead.create);
   // Who may pick the OWNER: first assignment needs CAP.lead.assign; changing an
@@ -258,6 +268,28 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+
+  /* Location unit field — its placeholder cycles one word per second so the
+     user sees each accepted format (Building name → House no → Street name). */
+  const UNIT_PLACEHOLDERS = ["Building name", "House no", "Street name"];
+  const [unitPlaceholderIdx, setUnitPlaceholderIdx] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setUnitPlaceholderIdx((i) => (i + 1) % UNIT_PLACEHOLDERS.length), 1000);
+    return () => clearInterval(t);
+  }, []);
+
+  /* Follow-Up due instant (date + EXACT time) as an ISO string. This precise
+     instant is what drives the datetime-accurate follow-up notification: on
+     save we call scheduleFollowUp({ dueAt }) with it. Seeded on edit from the
+     lead's open follow-up (its scheduled_at), else from the flat followUpDate. */
+  const [followUpDueAt, setFollowUpDueAt] = useState<string>(() => {
+    if (editLead) {
+      const open = openFollowUpsByLead.get(editLead.id);
+      if (open?.dueAt) return open.dueAt;
+      if (editLead.followUpDate) { const d = new Date(`${editLead.followUpDate}T09:00:00`); if (!isNaN(d.getTime())) return d.toISOString(); }
+    }
+    return "";
+  });
 
   /* ── Single coherent draft state (survives all step changes) ── */
   const [draft, setDraft] = useState<LeadDraft>(() => {
@@ -319,6 +351,23 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     return { ok: Object.keys(errors).length === 0, errors };
   }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent]);
   const showFollowUp = needsFollowUp({ result: draft.result ?? "", status: draft.status ?? "" }) || !!draft.followUpDate;
+
+  /* ── Contact / qualification GATE (progressive data capture) ──
+     • Not-Contacted  → downstream qualification/workflow sections are locked
+       (the lead is still at initial capture).
+     • Not-Qualified  → a MANDATORY reason is required, and downstream sections
+       are locked/closed (the lead never entered the operational workflow).
+     The Not-Qualified reason is stored in `finalRemarks` (an existing canonical
+     field) so it survives to Lead Detail / the Comment column, and is never
+     masked to N/A. */
+  const notQualified = isNotQualified(draft.qualification ?? "");
+  const notContacted = isNotContactedStatus(draft.contactStatus ?? "");
+  // Downstream (qualification-dependent) form sections are disabled until the
+  // lead is contacted AND not explicitly disqualified.
+  const downstreamLocked = notContacted || notQualified;
+  // A Not-Qualified lead MUST carry a reason before it can be saved.
+  const needsQualificationReason = notQualified;
+  const qualificationReasonMissing = needsQualificationReason && !(draft.finalRemarks ?? "").trim();
 
   /* ── Non-linear navigation ──
      Any step is reachable directly (click the stepper) or via Prev/Next. No
@@ -382,6 +431,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
       customerId: c.id,
       name: d.name || c.fullName || "",
       number: d.number || c.mobile || "",
+      alternateNumber: d.alternateNumber || c.altMobile || "",
       email: d.email || c.email || "",
       location: d.location || c.address || "",
     }));
@@ -390,6 +440,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   /* ── Save (create or edit) — the ONLY place validation gates ── */
   const handleSave = async () => {
     setTouched(true);
+    // NOT-QUALIFIED gate: a reason is mandatory before saving. Jump to Lead
+    // Details (step 2) where the reason field lives.
+    if (qualificationReasonMissing) {
+      goToStage(2);
+      return;
+    }
     if (!validation.ok) {
       // Jump to the step holding the first problem (the stepper stays free-form).
       const e = validation.errors;
@@ -401,15 +457,34 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     try {
       // Close ONLY when the save fully landed — a rejected owner / follow-up
       // agent change keeps the form open with the user's input intact.
+      let savedLead: Lead | null = null;
       if (isEdit && editLead) {
         const ok = await updateLead(editLead.id, draft as Partial<Lead>);
         if (!ok) return;
-        onSaved?.({ ...editLead, ...(draft as Partial<Lead>) } as Lead);
+        savedLead = { ...editLead, ...(draft as Partial<Lead>) } as Lead;
       } else {
-        const created = await addLead(draft);
-        if (!created) return;
-        onSaved?.(created);
+        savedLead = await addLead(draft);
+        if (!savedLead) return;
       }
+
+      // Precise follow-up scheduling: when a date+time is set, create/refresh a
+      // lead_followup_history record with that EXACT dueAt so the datetime-
+      // accurate notification (LeadFollowUpWatcher) fires at that instant. Skip
+      // if an open follow-up already carries the same instant (no duplicate).
+      if (followUpDueAt) {
+        const existingOpen = openFollowUpsByLead.get(savedLead.id);
+        const sameInstant = existingOpen && new Date(existingOpen.dueAt).getTime() === new Date(followUpDueAt).getTime();
+        if (!sameInstant) {
+          await scheduleFollowUp(savedLead.id, {
+            dueAt: followUpDueAt,
+            followUpUserId: draft.followUpAgentId || undefined,
+            followUpUserName: draft.followUpAgent || undefined,
+            comments: draft.followUpComments || undefined,
+          });
+        }
+      }
+
+      onSaved?.(savedLead);
       onClose();
     } finally {
       setSaving(false);
@@ -485,20 +560,26 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
               {stage === 1 && (
                 <div className="space-y-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
-                  <Field label="Find existing customer">
-                    <CustomerPicker
-                      customers={customers}
-                      value={draft.customerId || ""}
-                      onChange={onCustomerPicked}
-                      placeholder="Search by name, phone or email (reuses Customer Master)…"
-                    />
-                  </Field>
+                  {/* Customer lookup + Name share one row at equal (half) width. */}
                   <div className="grid grid-cols-2 gap-3">
+                    <Field label="Find existing customer">
+                      <CustomerPicker
+                        customers={customers}
+                        value={draft.customerId || ""}
+                        onChange={onCustomerPicked}
+                        placeholder="Search name / phone / email…"
+                      />
+                    </Field>
                     <Field label="Name" required error={touched ? validation.errors.name : undefined}>
                       <input className={inputCls(touched && !!validation.errors.name)} value={draft.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="Full name" />
                     </Field>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <Field label="Number" required error={touched ? validation.errors.number : undefined}>
                       <input className={inputCls(touched && !!validation.errors.number)} value={draft.number ?? ""} onChange={(e) => set("number", e.target.value)} placeholder="98765 43210" inputMode="tel" />
+                    </Field>
+                    <Field label="Alternate Number">
+                      <input className={inputCls()} value={draft.alternateNumber ?? ""} onChange={(e) => set("alternateNumber", e.target.value)} placeholder="Secondary / office no." inputMode="tel" />
                     </Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
@@ -512,11 +593,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <Field label="Location">
                     <div className="flex items-center gap-2">
                       <input
-                        className={cn(inputCls(), "w-32 shrink-0 grow-0")}
+                        className={cn(inputCls(), "w-36 shrink-0 grow-0")}
                         value={draft.locationUnit ?? ""}
                         onChange={(e) => set("locationUnit", e.target.value)}
-                        placeholder="Door / Flat No."
-                        aria-label="Door / Flat / House number"
+                        placeholder={UNIT_PLACEHOLDERS[unitPlaceholderIdx]}
+                        aria-label="Building name / House no / Street name"
                       />
                       <input className={cn(inputCls(), "min-w-0 flex-1")} value={draft.location ?? ""} onChange={(e) => set("location", e.target.value)} placeholder="Address / landmark" />
                       <Button type="button" variant="outline" size="sm" className="shrink-0 gap-1.5" onClick={() => setMapOpen(true)}>
@@ -544,6 +625,9 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </div>
                     )}
                   </Field>
+                  <Field label="Contact Status">
+                    <ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted" />
+                  </Field>
                 </div>
               )}
 
@@ -555,6 +639,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     <Field label="Source" required error={touched ? validation.errors.source : undefined}>
                       <ConfigurableSelect field="source" value={draft.source ?? ""} onChange={(v) => set("source", v)} placeholder="How did they reach us?" invalid={touched && !!validation.errors.source} />
                     </Field>
+                    <Field label="Mode of Contact">
+                      <ConfigurableSelect field="modeOfContact" value={draft.modeOfContact ?? ""} onChange={(v) => set("modeOfContact", v)} placeholder="Call / WhatsApp / Email / …" />
+                    </Field>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
                     <Field label="Agent (owner)" required error={touched ? validation.errors.assignedTo : undefined}>
                       <AgentPicker
                         valueId={draft.assignedTo || ""}
@@ -577,14 +666,33 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         </p>
                       )}
                     </Field>
+                    <Field label="Qualification">
+                      <ConfigurableSelect field="qualification" value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} placeholder="Qualified Lead / Not Qualified Lead" />
+                    </Field>
                   </div>
+                  {/* NOT-QUALIFIED → mandatory reason. Selecting Not Qualified
+                      requires a reason before the lead can be saved; the reason
+                      is preserved in Final Remarks (readable in Lead Detail +
+                      the Comment column) — never a throwaway UI-only value. */}
+                  {notQualified && (
+                    <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3">
+                      <Field label="Why is this lead not qualified?" required error={touched && qualificationReasonMissing ? "A reason is required to mark a lead Not Qualified." : undefined}>
+                        <Textarea
+                          value={draft.finalRemarks ?? ""}
+                          onChange={(e) => set("finalRemarks", e.target.value)}
+                          placeholder="e.g. Customer is not looking for a repair…"
+                          className={cn("min-h-[64px] text-[13px]", touched && qualificationReasonMissing && "border-rose-400")}
+                          autoFocus
+                        />
+                      </Field>
+                      <p className="mt-1.5 text-[11px] text-amber-700">
+                        Downstream sales fields (device, value, status, follow-up) stay closed for a Not-Qualified lead. Requalify the lead to reopen the workflow.
+                      </p>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Lead Category"><ConfigurableSelect field="leadCategory" value={draft.leadCategory ?? ""} onChange={(v) => set("leadCategory", v)} placeholder="Repair / Other / …" /></Field>
-                    <Field label="Lead Nature"><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Parts / Hardware" /></Field>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Priority"><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Hot / Warm / Cold" /></Field>
-                    <Field label="Contact Status"><ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted / RNR" /></Field>
+                    <Field label="Category"><ConfigurableSelect field="category" value={draft.category ?? ""} onChange={(v) => set("category", v)} placeholder="Screen / Battery / …" /></Field>
+                    <Field label="Subcategory"><ConfigurableSelect field="subCategory" value={draft.subCategory ?? ""} onChange={(v) => set("subCategory", v)} placeholder="Display / Glass / Battery / …" /></Field>
                   </div>
                   <Field label="Comments">
                     <Textarea value={draft.comments ?? ""} onChange={(e) => set("comments", e.target.value)} placeholder="Notes about this lead…" className="min-h-[70px] text-[13px]" />
@@ -594,15 +702,19 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
 
               {/* ── STEP 3 · Device & Issue ── */}
               {stage === 3 && (
-                <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue <span className="font-normal normal-case text-muted-foreground/70">— all optional</span></p>
-                  <Field label="Device (from catalog)">
+                <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue</p>
+                  {downstreamLocked && (
+                    <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
+                      {notQualified
+                        ? "This lead is Not Qualified — the operational workflow is closed. Requalify to reopen these fields."
+                        : "Complete contact to continue lead qualification. Set Contact Status to Contacted first."}
+                    </div>
+                  )}
+                  <Field label="Device">
                     <DeviceCatalogPicker value={deviceSelection} onChange={onDeviceChange} />
                   </Field>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Issue Category"><ConfigurableSelect field="category" value={draft.category ?? ""} onChange={(v) => set("category", v)} placeholder="Screen / Battery / …" /></Field>
-                    <Field label="Issue"><input className={inputCls()} value={draft.issue ?? ""} onChange={(e) => set("issue", e.target.value)} placeholder="What's the problem?" /></Field>
-                  </div>
+                  <Field label="Issue"><input className={inputCls()} value={draft.issue ?? ""} onChange={(e) => set("issue", e.target.value)} placeholder="What's the problem?" /></Field>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Estimate (pipeline value)" error={touched ? validation.errors.estimate : undefined}>
                       <div className="flex">
@@ -622,27 +734,55 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </div>
                     </Field>
                   </div>
-                </div>
+                </fieldset>
               )}
 
-              {/* ── STEP 4 · Follow-Up & Result ── */}
+              {/* ── STEP 4 · Status & Assignment ── */}
               {stage === 4 && (
-                <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Contact &amp; Result <span className="font-normal normal-case text-muted-foreground/70">— fill when known</span></p>
+                <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status &amp; Assignment</p>
+                  {downstreamLocked && (
+                    <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
+                      {notQualified
+                        ? "This lead is Not Qualified — status, follow-up and workflow are closed. Requalify to reopen them."
+                        : "Complete contact to unlock status, follow-up and workflow. Set Contact Status to Contacted first."}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Status"><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
-                    <Field label="Result"><ConfigurableSelect field="result" value={draft.result ?? ""} onChange={(v) => set("result", v)} placeholder="Latest outcome" /></Field>
+                    <Field label="Lead Nature"><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" /></Field>
+                    <Field label="Lead Priority"><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Normal / High / Urgent" /></Field>
                   </div>
-                  <Field label="Final Result"><ConfigurableSelect field="finalResult" value={draft.finalResult ?? ""} onChange={(v) => set("finalResult", v)} placeholder="Terminal outcome (only when closed)" /></Field>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Lead Status"><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
+                    <Field label="Store Assignment">
+                      <ConfigurableSelect
+                        options={stores.map((s) => s.id)}
+                        labelFor={(id) => getStore(id)?.name || id}
+                        value={draft.branchId ?? ""}
+                        onChange={(v) => set("branchId", v)}
+                        placeholder="Select a store…"
+                      />
+                    </Field>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <Field label="Result"><ConfigurableSelect field="result" value={draft.result ?? ""} onChange={(v) => set("result", v)} placeholder="Latest outcome" /></Field>
+                    <Field label="Final Result"><ConfigurableSelect field="finalResult" value={draft.finalResult ?? ""} onChange={(v) => set("finalResult", v)} placeholder="Terminal outcome (only when closed)" /></Field>
+                  </div>
 
                   <div className={cn("rounded-2xl border p-4 transition", showFollowUp ? "border-[#B3BFF6] bg-[#EEF1FD]/50" : "border-dashed border-border bg-muted/30")}>
                     <div className="mb-3 flex items-center gap-2">
                       <CalendarClock className={cn("h-4 w-4", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")} />
-                      <p className={cn("text-[12px] font-semibold", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")}>Follow-Up {showFollowUp ? "— needed" : "(optional)"}</p>
+                      <p className={cn("text-[12px] font-semibold", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")}>Follow-Up</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="Follow-Up Date" error={touched ? validation.errors.followUpDate : undefined}>
-                        <input type="date" className={inputCls(touched && !!validation.errors.followUpDate)} value={draft.followUpDate ?? ""} onChange={(e) => set("followUpDate", e.target.value)} />
+                      <Field label="Follow-Up Date &amp; Time" error={touched ? validation.errors.followUpDate : undefined}>
+                        <DateTimeField
+                          value={followUpDueAt}
+                          onChange={(iso) => { setFollowUpDueAt(iso); set("followUpDate", iso ? iso.slice(0, 10) : ""); }}
+                          title="Follow-Up Date & Time"
+                          placeholder="Pick date & time"
+                          invalid={touched && !!validation.errors.followUpDate}
+                        />
                       </Field>
                       <Field label="Follow-Up Agent" error={touched ? validation.errors.followUpAgentId : undefined}>
                         <AgentPicker
@@ -664,7 +804,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <Field label="Final Remarks">
                     <Textarea value={draft.finalRemarks ?? ""} onChange={(e) => set("finalRemarks", e.target.value)} placeholder="Closing notes…" className="min-h-[60px] text-[13px]" />
                   </Field>
-                </div>
+                </fieldset>
               )}
 
               {/* ── STEP 5 · Review ── (reflects the form state; no duplicate inputs) */}
@@ -678,26 +818,29 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     </div>
                   )}
                   <ReviewGroup title="Customer" onEdit={() => goToStage(1)} rows={[
-                    ["Name", draft.name], ["Number", draft.number], ["Email", draft.email],
-                    ["Region", draft.region],
+                    ["Name", draft.name], ["Number", draft.number], ["Alternate Number", draft.alternateNumber],
+                    ["Email", draft.email], ["Region", draft.region],
                     ["Location", [draft.locationUnit, draft.location].filter(Boolean).join(", ")],
                     ["Map pin", hasPin ? `${draft.locationLat!.toFixed(5)}, ${draft.locationLng!.toFixed(5)}` : ""],
+                    ["Contact Status", draft.contactStatus],
                     ["Customer Master", draft.customerId ? "Linked" : "New / unlinked"],
                   ]} />
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
-                    ["Source", draft.source], ["Agent (owner)", draft.assignedToName],
-                    ["Lead Category", draft.leadCategory], ["Lead Nature", draft.leadNature],
-                    ["Priority", draft.priority], ["Contact Status", draft.contactStatus],
+                    ["Source", draft.source], ["Mode of Contact", draft.modeOfContact],
+                    ["Agent (owner)", draft.assignedToName], ["Qualification", draft.qualification],
+                    ["Category", draft.category], ["Subcategory", draft.subCategory],
                     ["Comments", draft.comments],
                   ]} />
                   <ReviewGroup title="Device & Issue" onEdit={() => goToStage(3)} rows={[
-                    ["Device", draft.device], ["Issue Category", draft.category], ["Issue", draft.issue],
+                    ["Device", draft.device], ["Issue", draft.issue],
                     ["Estimate", money(draft.estimate)],
                     ["Discount", draft.discount == null ? "—" : draft.discountType === "percent" ? `${draft.discount}%` : money(draft.discount)],
                   ]} />
-                  <ReviewGroup title="Follow-Up & Result" onEdit={() => goToStage(4)} rows={[
-                    ["Status", draft.status], ["Result", draft.result], ["Final Result", draft.finalResult],
-                    ["Follow-Up Date", draft.followUpDate], ["Follow-Up Agent", draft.followUpAgent],
+                  <ReviewGroup title="Status & Assignment" onEdit={() => goToStage(4)} rows={[
+                    ["Lead Nature", draft.leadNature], ["Lead Priority", draft.priority],
+                    ["Lead Status", draft.status], ["Store", getStore(draft.branchId)?.name || ""],
+                    ["Result", draft.result], ["Final Result", draft.finalResult],
+                    ["Follow-Up Date & Time", followUpDueAt ? new Date(followUpDueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""], ["Follow-Up Agent", draft.followUpAgent],
                     ["Follow-Up Comments", draft.followUpComments], ["Final Remarks", draft.finalRemarks],
                   ]} />
                   <div className="rounded-xl border border-dashed border-border bg-muted/20 p-3 text-[11px] text-muted-foreground">
@@ -725,7 +868,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <Button size="sm" className="gap-1" onClick={() => goToStage(stage + 1)}>Next <ChevronRight className="h-4 w-4" /></Button>
                 </>
               ) : (
-                <Button size="sm" className="gap-1.5" loading={saving} disabled={saving || !canSaveLead} onClick={handleSave}>
+                <Button size="sm" className="gap-1.5" loading={saving} disabled={saving || !canSaveLead || qualificationReasonMissing} onClick={handleSave}>
                   <Check className="h-4 w-4" /> {isEdit ? "Save changes" : "Create lead"}
                 </Button>
               )}

@@ -814,11 +814,11 @@ export const navItems: NavItem[] = [
   { href: "/leads/smart-lists", label: "Smart Lists", icon: "ClipboardList" },
   { href: "/leads/map-view",   label: "Map View",     icon: "Map" },
   { href: "/leads/unattributed", label: "Unattributed", icon: "ClipboardCheck", permission: ["leads_assign", "leads_reassign", "manage_sales"] },
-  // Agent Performance — salesperson analytics (distinct from the operational
-  // Lead Dashboard). Visible to anyone who may see their OWN performance
-  // (leads_performance_view_own); the page itself renders the individual view
-  // for a Sales Agent and the owner comparison table for authorized owners.
-  { href: "/leads/performance", label: "Agent Performance", icon: "Trophy", permission: ["leads_performance_view_own", "leads_performance_view_all", "manage_sales"] },
+  // Lead Intelligence is descriptive/diagnostic and separate from the daily
+  // Lead Dashboard. Own and cross-agent scopes reuse the existing performance
+  // permissions; store scope remains independently enforced by context + RLS.
+  { href: "/leads/intelligence", label: "Lead Intelligence", icon: "Lightbulb", permission: ["leads_performance_view_own", "leads_view", "manage_sales"] },
+  { href: "/leads/intelligence/agents", label: "Agent Intelligence", icon: "Trophy", permission: ["leads_performance_view_all", "leads_view_all", "view_sales_reports", "manage_reports"] },
   { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
@@ -1913,7 +1913,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   ],
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
-    { label: "PERFORMANCE",    items: ["/leads/performance"] },
+    { label: "PERFORMANCE",    items: ["/leads/intelligence", "/leads/intelligence/agents"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },

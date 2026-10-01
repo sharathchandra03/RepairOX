@@ -18,6 +18,7 @@ import { useState } from "react";
 import { motion } from "framer-motion";
 import { Search, GripVertical } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
 import {
   ALL_COLUMNS,
@@ -152,12 +153,11 @@ export function ColumnSettingsPanel({
                     isDragging ? "bg-indigo-50 ring-1 ring-indigo-200 shadow-sm scale-[1.02]" : "hover:bg-muted/60"
                   )}
                 >
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked
                     disabled={isRequired}
                     onChange={() => toggleVisibility(id)}
-                    className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                    aria-label={`Toggle ${col.label} column`}
                   />
                   <span className="flex-1 text-xs font-medium text-foreground">{col.label}</span>
                   {isRequired && (
@@ -185,11 +185,10 @@ export function ColumnSettingsPanel({
           <div className="space-y-1 max-h-[240px] overflow-y-auto pr-1">
             {filteredHidden.map((col) => (
               <div key={col.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-muted/60 transition">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={false}
                   onChange={() => toggleVisibility(col.id)}
-                  className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
+                  aria-label={`Show ${col.label} column`}
                 />
                 <span className="flex-1 text-xs font-medium text-muted-foreground">{col.label}</span>
               </div>

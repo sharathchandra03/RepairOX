@@ -21,6 +21,7 @@ import { useMemo, useState } from "react";
 import { CalendarClock, Check, X, Plus, UserCheck, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { TimePicker } from "@/components/ui/time-picker";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
@@ -216,7 +217,7 @@ export function LeadFollowUpHistory({ lead }: { lead: Lead }) {
                     </label>
                     <textarea value={completeComments} onChange={(e) => setCompleteComments(e.target.value)} placeholder="Notes (optional)…" className="mt-2 min-h-[44px] w-full rounded-lg border border-input bg-card px-2 py-1.5 text-[13px]" />
                     <label className="mt-2 flex items-center gap-2 text-[12px] text-zinc-700">
-                      <input type="checkbox" checked={scheduleNext} onChange={(e) => setScheduleNext(e.target.checked)} className="rounded border-input" />
+                      <Checkbox checked={scheduleNext} onChange={(next) => setScheduleNext(next)} aria-label="Schedule next follow-up" />
                       Schedule next follow-up
                     </label>
                     {scheduleNext && (

@@ -5,6 +5,7 @@ import { Save, ArrowRight, RotateCcw, Award } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import {
@@ -126,15 +127,12 @@ export default function LoyaltySettingsPage() {
               <p className="text-sm font-medium">Loyalty Program</p>
               <p className="text-xs text-muted-foreground mt-0.5">Enable or disable the entire program</p>
             </div>
-            <label className="flex items-center cursor-pointer">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => setEnabled(e.target.checked)}
-                disabled={!canManage}
-                className="w-4 h-4 rounded border-input"
-              />
-            </label>
+            <Checkbox
+              checked={enabled}
+              onChange={(next) => setEnabled(next)}
+              disabled={!canManage}
+              aria-label="Enable loyalty program"
+            />
           </div>
 
           {/* Points Earning Rule */}

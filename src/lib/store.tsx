@@ -82,6 +82,9 @@ interface StoreState {
   issueLibrary: string[];
   /** True once initial DB load completes (or localStorage is read). */
   hydrated: boolean;
+  /** Critical sources that failed initial loading. Analytics must not convert
+   * these failures into legitimate zero revenue or zero-ticket results. */
+  loadErrors?: string[];
   /** "db" when Supabase is active, "local" otherwise. */
   mode: "db" | "local";
 }
@@ -1330,8 +1333,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (async () => {
       // Parallel load all business data from Supabase.
       const [
-        { data: tix },
-        { data: invs },
+        { data: tix, error: tixErr },
+        { data: invs, error: invErr },
         { data: wis },
         { data: invItems },
         { data: moves },
@@ -1394,6 +1397,10 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // list (localStorage) so issues added from Walk-In / Ticket survive
         // reloads, falling back to the seed defaults on a fresh install.
         issueLibrary: loadIssueLibrary() ?? DEFAULT_ISSUES,
+        loadErrors: [
+          ...(tixErr ? ["tickets"] : []),
+          ...(invErr ? ["invoices"] : []),
+        ],
         hydrated: true,
       }));
 

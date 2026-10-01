@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Logo } from "@/components/ui/logo";
 import { Novatrix } from "@/components/ui/novatrix-background";
 import { usePermissions } from "@/lib/permissions-context";
@@ -36,6 +37,7 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [remember, setRemember] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
@@ -206,10 +208,10 @@ export default function LoginPage() {
                 </div>
               )}
 
-              <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                <input id="remember" type="checkbox" className="h-3.5 w-3.5 rounded border-border text-brand-600 focus:ring-brand-400" />
-                <label htmlFor="remember">Remember me on this device</label>
-              </div>
+              <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer select-none">
+                <Checkbox checked={remember} onChange={setRemember} aria-label="Remember me on this device" />
+                Remember me on this device
+              </label>
 
               <Button type="submit" size="xl" loading={loading} className="w-full">
                 Login

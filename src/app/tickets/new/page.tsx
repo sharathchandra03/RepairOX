@@ -22,6 +22,7 @@ import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
@@ -4089,11 +4090,10 @@ function ConfirmationStep({ onSubmit, isEdit, data, isEstimate = false }: { onSu
       {/* Confirmation Checkbox + Submit — inline */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3 rounded-xl border border-border bg-white px-4 py-3">
         <label className="flex items-center gap-2.5 cursor-pointer select-none flex-1 min-w-0">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={confirmed}
-            onChange={(e) => setConfirmed(e.target.checked)}
-            className="h-4.5 w-4.5 rounded border-2 border-border text-[#4361EE] focus:ring-[#4361EE]/20 focus:ring-2 accent-[#4361EE] shrink-0"
+            onChange={setConfirmed}
+            aria-label={`I confirm all ${nounLower} details have been verified`}
           />
           <span className="text-[13px] font-medium text-foreground leading-tight">
             I confirm all {nounLower} details have been verified.

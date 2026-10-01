@@ -23,7 +23,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Package, X, Plus, PackageSearch } from "lucide-react";
-import { Input } from "@/components/ui/input";
 import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/inventory-data";
@@ -84,15 +83,15 @@ export function InventorySearchBox({
 
   return (
     <div className="relative">
-      <div className="flex items-center gap-2 rounded-xl border border-input bg-card p-2.5 transition-colors focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/15">
+      <div className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-1.5 transition-colors focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/15">
         <Search className="h-4 w-4 shrink-0 text-[#4361EE]" />
-        <Input
+        <input
           value={q}
-          onChange={(e: any) => setQ(e.target.value)}
+          onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKeyDown}
           placeholder={placeholder}
           autoFocus={autoFocus}
-          className="h-9 flex-1 border-0 bg-transparent shadow-none focus:ring-0"
+          className="h-8 min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground focus:ring-0"
         />
         {onClose && (
           <button
@@ -149,14 +148,16 @@ export function InventorySearchBox({
             <p className="text-sm text-muted-foreground">
               No inventory found for &ldquo;<span className="font-medium text-foreground">{debounced.trim()}</span>&rdquo;
             </p>
-            {onAddInventory && (
+            {onAddInventory ? (
               <button
                 type="button"
                 onClick={() => onAddInventory(debounced.trim())}
                 className="mt-1 inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-3.5 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[#3347D6]"
               >
-                <Plus className="h-3.5 w-3.5" /> Add Inventory
+                <Plus className="h-3.5 w-3.5" /> Add to Inventory
               </button>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">Add it in the Inventory module first.</p>
             )}
           </div>
         </div>

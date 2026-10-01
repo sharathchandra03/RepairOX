@@ -14,6 +14,7 @@ import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/com
 import { Input, Textarea, Label } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import { findContactMatches, type ContactMatch } from "@/lib/contact-service";
@@ -726,11 +727,10 @@ function SectionCommunication({
         <div className="space-y-2">
           <Label className="text-[13px] font-semibold text-foreground">WhatsApp</Label>
           <label className="flex items-center gap-2 text-[13px]">
-            <input
-              type="checkbox"
+            <Checkbox
               checked={form.whatsappSameAsPrimary}
-              onChange={(e) => set("whatsappSameAsPrimary", e.target.checked)}
-              className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]"
+              onChange={(next) => set("whatsappSameAsPrimary", next)}
+              aria-label="WhatsApp same as primary phone number"
             />
             <span className="text-zinc-600">Same as primary phone number</span>
           </label>

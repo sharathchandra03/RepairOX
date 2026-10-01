@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Input, Label, Select } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { toast } from "@/components/ui/toaster";
 import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
@@ -444,7 +445,7 @@ export function StoreManagement() {
               <p className="text-[11px] font-semibold uppercase tracking-widest text-muted-foreground">Access</p>
               <div className="rounded-xl border border-border p-3">
                 <label className="flex cursor-pointer items-start gap-2.5">
-                  <input type="checkbox" checked={createLogin} onChange={(e) => setCreateLogin(e.target.checked)} className="mt-0.5 h-4 w-4 accent-[#4361EE]" />
+                  <Checkbox checked={createLogin} onChange={setCreateLogin} className="mt-0.5" aria-label="Create a store login" />
                   <span>
                     <span className="block text-[13px] font-semibold">Create a store login</span>
                     <span className="block text-[12px] text-muted-foreground">Add a Store Manager who logs in and lands directly in this store.</span>

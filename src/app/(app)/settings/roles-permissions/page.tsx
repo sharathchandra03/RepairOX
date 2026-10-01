@@ -2178,11 +2178,10 @@ function FeatureVisibilityTab({
                       isDemo ? "border-violet-300 bg-violet-50 text-violet-700" : "border-border hover:bg-muted text-zinc-600"
                     )}
                   >
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={isDemo}
-                      onChange={(e) => toggleDemoRole(r.id, e.target.checked)}
-                      className="h-3.5 w-3.5 rounded border-zinc-300 text-violet-600 focus:ring-violet-500"
+                      onChange={(next) => toggleDemoRole(r.id, next)}
+                      aria-label={`Mark ${r.label} as demo role`}
                     />
                     <span className="flex-1 truncate">{r.label}</span>
                     {isDemo && (

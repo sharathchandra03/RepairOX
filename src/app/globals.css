@@ -474,49 +474,48 @@ body {
   position: absolute;
   top: 0;
   bottom: 0;
-  width: 14px;
+  width: 18px;
   pointer-events: none;
   z-index: 6;
+  /* --rox-scroll-x (0 → far left, 1 → far right) is set on the scroll
+     container by the scroll handler. Each edge derives its own intensity from
+     it so the shadow changes PROPORTIONALLY with position instead of a binary
+     on/off. --edge-shadow is the resolved 0..1 strength for this edge. */
+  --edge-shadow: 0;
+  transition: opacity 90ms linear;
 }
-/* LEFT block: shadow falls to the RIGHT, just past the cell's right edge. */
+/* LEFT block: shadow falls to the RIGHT, just past the cell's right edge.
+   Intensity tracks how much is hidden to the LEFT → equals the scroll fraction,
+   so it is lightest at the start and darkest at the far right. */
 .rox-frozen-left-edge::after {
   left: 100%;
+  --edge-shadow: var(--rox-scroll-x, 0);
   background: linear-gradient(
     to right,
-    rgba(0, 0, 0, 0.14),
-    rgba(0, 0, 0, 0.05) 45%,
+    rgba(0, 0, 0, calc(0.05 + 0.20 * var(--edge-shadow))),
+    rgba(0, 0, 0, calc(0.02 + 0.07 * var(--edge-shadow))) 45%,
     rgba(0, 0, 0, 0)
   );
 }
-/* RIGHT block: shadow falls to the LEFT, just past the cell's left edge. */
+/* RIGHT block: shadow falls to the LEFT, just past the cell's left edge.
+   Intensity tracks how much remains to the RIGHT → equals 1 − scroll fraction,
+   so it is darkest at the start and lightest at the far right. */
 .rox-frozen-right-edge::after {
   right: 100%;
+  --edge-shadow: calc(1 - var(--rox-scroll-x, 0));
   background: linear-gradient(
     to left,
-    rgba(0, 0, 0, 0.14),
-    rgba(0, 0, 0, 0.05) 45%,
+    rgba(0, 0, 0, calc(0.05 + 0.20 * var(--edge-shadow))),
+    rgba(0, 0, 0, calc(0.02 + 0.07 * var(--edge-shadow))) 45%,
     rgba(0, 0, 0, 0)
   );
 }
-/* Deepen the 3D lift when content is actually scrollable underneath. */
-[data-scroll-left="true"] .rox-frozen-left-edge::after {
-  width: 18px;
-  background: linear-gradient(
-    to right,
-    rgba(0, 0, 0, 0.20),
-    rgba(0, 0, 0, 0.07) 45%,
-    rgba(0, 0, 0, 0)
-  );
-}
-[data-scroll-right="true"] .rox-frozen-right-edge::after {
-  width: 18px;
-  background: linear-gradient(
-    to left,
-    rgba(0, 0, 0, 0.20),
-    rgba(0, 0, 0, 0.07) 45%,
-    rgba(0, 0, 0, 0)
-  );
-}
+/* When an edge has no scrollable content under it at all, fully hide its
+   shadow (matches spec §18 "shadow only when scrollable"). */
+.rox-frozen-left-edge::after { opacity: 0; }
+.rox-frozen-right-edge::after { opacity: 0; }
+[data-scroll-left="true"] .rox-frozen-left-edge::after { opacity: 1; }
+[data-scroll-right="true"] .rox-frozen-right-edge::after { opacity: 1; }
 
 /* Polished, unobtrusive scrollbar for the grid scroll container (spec §10). */
 .rox-grid-scroll {

@@ -25,6 +25,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Pagination } from "@/components/ui/pagination";
 import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { SegmentedTabs } from "@/components/ui/tabs";
@@ -474,7 +475,7 @@ export default function FieldPage() {
                 </div>
               </Field>
               <label className="flex h-9 cursor-pointer items-center gap-2 rounded-xl border border-border bg-card px-3 text-[12px] font-medium text-zinc-700">
-                <input type="checkbox" checked={filters.delayed} onChange={(e) => setFilters((f) => ({ ...f, delayed: e.target.checked }))} className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30" />
+                <Checkbox checked={filters.delayed} onChange={(next) => setFilters((f) => ({ ...f, delayed: next }))} aria-label="Delayed only" />
                 Delayed only
               </label>
             </div>

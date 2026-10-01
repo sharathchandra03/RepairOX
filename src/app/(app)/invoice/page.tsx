@@ -22,6 +22,7 @@ import { useStoreContext, type StoreBranch } from "@/lib/store-context";
 import { EmptyStateCharacter } from "@/components/common/empty-state-character";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Pagination } from "@/components/ui/pagination";
 import { useStore } from "@/lib/store";
 import { InvoiceFilters } from "@/components/filters/invoice-filters";
@@ -953,11 +954,11 @@ export default function InvoicePage() {
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
                 <th className="w-10 px-3 py-3">
-                  <input type="checkbox"
+                  <Checkbox
                     checked={paged.length > 0 && paged.every((inv) => selected.has(inv.id))}
-                    ref={(el) => { if (el) el.indeterminate = paged.some((inv) => selected.has(inv.id)) && !paged.every((inv) => selected.has(inv.id)); }}
+                    indeterminate={paged.some((inv) => selected.has(inv.id)) && !paged.every((inv) => selected.has(inv.id))}
                     onChange={() => { if (paged.every((inv) => selected.has(inv.id))) setSelected(new Set()); else setSelected(new Set(paged.map((inv) => inv.id))); }}
-                    className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
+                    aria-label="Select all invoices"
                   />
                 </th>
                 {activeInvCols.map((col) => (
@@ -972,9 +973,9 @@ export default function InvoicePage() {
                   className={cn("group h-[76px] cursor-pointer border-t border-zinc-500 align-middle transition", selected.has(inv.id) ? "bg-indigo-50/40" : "hover:bg-[#EEF1FD]/50")}
                 >
                   <td className="w-10 px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
-                    <input type="checkbox" checked={selected.has(inv.id)}
+                    <Checkbox checked={selected.has(inv.id)}
                       onChange={() => setSelected((prev) => { const n = new Set(prev); n.has(inv.id) ? n.delete(inv.id) : n.add(inv.id); return n; })}
-                      className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
+                      aria-label={`Select invoice ${inv.id}`}
                     />
                   </td>
                   {activeInvCols.map((col) => (
@@ -1427,7 +1428,7 @@ function InvColumnSettingsPanel({
               return (
                 <div key={id} draggable={!req} onDragStart={() => handleDragStart(id)} onDragOver={(e) => handleDragOver(e, id)} onDragEnd={handleDragEnd}
                   className={cn("flex items-center gap-2.5 rounded-lg px-3 py-2 transition-all group", dragId === id ? "bg-indigo-50 ring-1 ring-indigo-200 shadow-sm scale-[1.02]" : "hover:bg-[#EEF1FD]/60")}>
-                  <input type="checkbox" checked disabled={req} onChange={() => toggleVis(id)} className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed" />
+                  <Checkbox checked disabled={req} onChange={() => toggleVis(id)} aria-label={`Toggle ${col.label} column`} />
                   <span className="flex-1 text-xs font-medium text-foreground">{col.label}</span>
                   {req && <span className="rounded px-1.5 py-0.5 text-[9px] font-semibold bg-zinc-100 text-zinc-500 ring-1 ring-zinc-200">Required</span>}
                   {!req && <span className="cursor-grab active:cursor-grabbing text-muted-foreground/50 group-hover:text-muted-foreground transition"><GripVertical className="h-3.5 w-3.5" /></span>}
@@ -1442,7 +1443,7 @@ function InvColumnSettingsPanel({
           <div className="space-y-1 max-h-[200px] overflow-y-auto">
             {filteredHidden.map((col) => (
               <div key={col.id} className="flex items-center gap-2.5 rounded-lg px-3 py-2 hover:bg-[#EEF1FD]/60 transition">
-                <input type="checkbox" checked={false} onChange={() => toggleVis(col.id)} className="h-3.5 w-3.5 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
+                <Checkbox checked={false} onChange={() => toggleVis(col.id)} aria-label={`Show ${col.label} column`} />
                 <span className="flex-1 text-xs font-medium text-muted-foreground">{col.label}</span>
               </div>
             ))}

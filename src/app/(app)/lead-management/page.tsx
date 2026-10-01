@@ -43,7 +43,7 @@ import { useLeads } from "@/lib/leads-context";
 import { useStore } from "@/lib/store";
 import {
   type Lead, type LeadFollowUp, followUpLifecycle,
-  isQualifiedStatus, isWonStatus, isLostStatus,
+  isQualifiedLead, isWonStatus, isLostStatus,
   EMPTY_LEAD_FILTERS,
 } from "@/lib/leads-data";
 import {
@@ -181,7 +181,7 @@ export default function LeadDashboardPage() {
     for (const l of scopedLeads) {
       if (isWonStatus(l.status, l.finalResult)) { buckets.converted.push(l); continue; }
       if (isLostStatus(l.status, l.finalResult)) { buckets.lost.push(l); continue; }
-      if (isQualifiedStatus(l.status)) { buckets.qualified.push(l); continue; }
+      if (isQualifiedLead(l)) { buckets.qualified.push(l); continue; }
       if (openByLead.has(l.id) || l.followUpDate) { buckets.followUp.push(l); continue; }
       const cs = (l.contactStatus || "").toLowerCase();
       const contacted = (!!cs && !/not\s*contacted|^\s*$/.test(cs)) || !!l.linkedTicketId || !!l.linkedWalkInId || !!l.linkedFieldJobId;
@@ -261,10 +261,10 @@ export default function LeadDashboardPage() {
         actions={
           <div className="flex items-center gap-2">
             <Link
-              href="/leads/performance"
+              href={allow(can, CAP.lead.performanceAll) ? "/leads/intelligence/agents" : "/leads/intelligence"}
               className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-semibold text-zinc-600 transition hover:bg-muted sm:inline-flex"
             >
-              <BarChart3 className="h-3.5 w-3.5" /> Performance
+              <BarChart3 className="h-3.5 w-3.5" /> Intelligence
             </Link>
             <Can permission={CAP.lead.create}>
               <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>

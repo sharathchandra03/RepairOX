@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
-  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2,
+  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2, PackageSearch,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
@@ -239,6 +239,10 @@ function InvoiceWizard() {
   const [step, setStep] = useState(1);
   const [form, setForm] = useState<InvoiceFormData>(DEFAULT_FORM);
   const [dirty, setDirty] = useState(false);
+  // Set true when the user tries to advance the Products step without a
+  // complete warranty; drives the red-border indication on the field (matches
+  // the Lead form's touched-then-highlight pattern).
+  const [showProductErrors, setShowProductErrors] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
   const [pendingNav, setPendingNav] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
@@ -761,11 +765,15 @@ function InvoiceWizard() {
     // so every device carries a warranty value + duration unit.
     if (step === 3) {
       const dev = form.devices[form.activeDeviceIndex];
-      const hasWarranty = !!dev && Number(dev.warrantyValue) > 0 && !!dev.warrantyUnit;
+      // A warranty is complete when a value is entered (0 is a VALID value —
+      // e.g. "0 Days" / no warranty) AND a duration unit is chosen.
+      const hasWarranty = !!dev && dev.warrantyValue.trim() !== "" && !!dev.warrantyUnit;
       if (!hasWarranty) {
+        setShowProductErrors(true);
         toast.error("Warranty is required — enter a value and select a duration.");
         return;
       }
+      setShowProductErrors(false);
     }
     if (isDeviceStep && form.devices.length > 1 && form.activeDeviceIndex < form.devices.length - 1) {
       updateForm((f) => ({ ...f, activeDeviceIndex: f.activeDeviceIndex + 1 }));
@@ -839,8 +847,9 @@ function InvoiceWizard() {
       <div className="relative mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3 sm:px-6 lg:px-8">
         <div className="flex-1" />
 
-        {/* Back + Breadcrumb — centered group */}
-        <button onClick={goBack} disabled={step === 1} className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
+        {/* Back + Breadcrumb — centered group. Matches the Ticket flow's blue
+            hover treatment (indigo tint + brand-blue border on hover). */}
+        <button onClick={goBack} disabled={step === 1} className="grid h-10 w-10 place-items-center rounded-xl border border-black/25 bg-card text-zinc-700 shadow-card transition hover:bg-indigo-50 hover:border-[#B3BFF6] disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
           <ArrowLeft className="h-5 w-5" />
         </button>
 
@@ -858,7 +867,7 @@ function InvoiceWizard() {
         <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={savingDraft}>
           <Save className="h-3.5 w-3.5" /> {savingDraft ? "Saving…" : "Save Draft"}
         </Button>
-        <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Close">
+        <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-black/25 bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200" aria-label="Close">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -910,7 +919,7 @@ function InvoiceWizard() {
           <motion.div key={step} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
             {step === 1 && <StepCustomer form={form} updateForm={updateForm} />}
             {step === 2 && <StepDetails form={form} updateForm={updateForm} />}
-            {step === 3 && <StepProducts form={form} updateForm={updateForm} />}
+            {step === 3 && <StepProducts form={form} updateForm={updateForm} showErrors={showProductErrors} />}
             {step === 4 && <StepPricing form={form} updateForm={updateForm} totals={totals} />}
             {step === 5 && <StepNotes form={form} updateForm={updateForm} />}
             {step === 6 && <StepReview form={form} totals={totals} isEdit={isEdit} />}
@@ -1052,7 +1061,7 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
   };
 
   return (
-    <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card shadow-card">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-black/15 bg-card shadow-card">
       {/* Invoice Type — compact inline selector */}
       <div className="border-b border-border px-6 py-5 sm:px-8">
         <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Invoice Type</p>
@@ -1162,7 +1171,7 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
   const d = form.details;
   const set = (k: keyof typeof d, v: string) => updateForm((f) => ({ ...f, details: { ...f.details, [k]: v } }));
   return (
-    <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-card sm:p-10">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-black/15 bg-card p-6 shadow-card sm:p-10">
       <h2 className="font-display text-lg font-bold mb-1">Invoice Details</h2>
       <p className="text-sm text-muted-foreground mb-8">Linked ticket, dates, and assignment.</p>
       <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
@@ -1293,11 +1302,15 @@ function LineItemNameInput({
   onChange,
   onPick,
   placeholder,
+  onAddInventory,
 }: {
   value: string;
   onChange: (v: string) => void;
   onPick: (item: InventoryItem) => void;
   placeholder?: string;
+  /** When provided, an "+ Add Inventory" action shows if a search yields no
+   *  matching master item. The caller gates this on CAP.inventory.create. */
+  onAddInventory?: (searchTerm: string) => void;
 }) {
   const { inventory } = useStore();
   const [open, setOpen] = useState(false);
@@ -1333,22 +1346,29 @@ function LineItemNameInput({
       .slice(0, 8);
   }, [inventory, query]);
 
+  const hasQuery = query.length >= 1;
   const showList = open && results.length > 0;
+  const showEmpty = open && hasQuery && results.length === 0;
 
   return (
     <div className="relative" ref={wrapRef}>
-      <Input
-        value={value}
-        onChange={(e: any) => { onChange(e.target.value); setOpen(true); }}
-        onFocus={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" && results.length > 0) { e.preventDefault(); onPick(results[0]); setOpen(false); }
-          if (e.key === "Escape") setOpen(false);
-        }}
-        placeholder={placeholder}
-        className="h-9"
-        autoComplete="off"
-      />
+      {/* Search-styled field: leading icon inside, text padded clear of it so
+          the placeholder is never clipped. */}
+      <div className="flex h-9 items-center gap-2 rounded-xl border border-input bg-card px-2.5 transition-colors focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/15">
+        <Search className="h-4 w-4 shrink-0 text-[#4361EE]" />
+        <input
+          value={value}
+          onChange={(e) => { onChange(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && results.length > 0) { e.preventDefault(); onPick(results[0]); setOpen(false); }
+            if (e.key === "Escape") setOpen(false);
+          }}
+          placeholder={placeholder}
+          className="h-full min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none placeholder:text-muted-foreground focus:ring-0"
+          autoComplete="off"
+        />
+      </div>
       {showList && (
         <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
           {results.map((item) => {
@@ -1377,13 +1397,34 @@ function LineItemNameInput({
           })}
         </div>
       )}
+      {showEmpty && (
+        <div className="absolute left-0 right-0 top-full z-50 mt-1 rounded-xl border border-border bg-card p-3.5 shadow-xl">
+          <div className="flex flex-col items-center gap-1.5 text-center">
+            <span className="grid h-8 w-8 place-items-center rounded-full bg-muted text-muted-foreground"><PackageSearch className="h-4 w-4" /></span>
+            <p className="text-[13px] text-muted-foreground">
+              No inventory found for &ldquo;<span className="font-medium text-foreground">{debounced.trim()}</span>&rdquo;
+            </p>
+            {onAddInventory ? (
+              <button
+                type="button"
+                onMouseDown={(e) => { e.preventDefault(); onAddInventory(debounced.trim()); setOpen(false); }}
+                className="mt-0.5 inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-3.5 py-1.5 text-[12px] font-semibold text-white transition hover:bg-[#3347D6]"
+              >
+                <Plus className="h-3.5 w-3.5" /> Add to Inventory
+              </button>
+            ) : (
+              <p className="text-[11px] text-muted-foreground">Add it in the Inventory module first.</p>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 /* ─── Step 3: Devices & Products (Multi-Device) ──────────────────────── */
 
-function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
+function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; showErrors?: boolean }) {
   const { can } = usePermissions();
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
@@ -1562,7 +1603,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
   return (
     <div className="mx-auto max-w-5xl space-y-4">
       {/* Device Tabs */}
-      <div className="rounded-2xl border border-border bg-card shadow-card">
+      <div className="rounded-2xl border border-black/15 bg-card shadow-card">
         <div className="border-b border-border px-6 py-2.5 sm:px-8">
           <div className="flex items-center gap-3">
             <p className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({form.devices.length})</p>
@@ -1653,6 +1694,14 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
               {/* Warranty — moved beside IMEI / Serial. Same underlying logic
                   (value + duration → `warranty` label); only the placement and
                   the centered value alignment changed. */}
+              {/* Warranty is MANDATORY. When the user tries to advance without a
+                  value + duration, `showErrors` turns the field red (matching
+                  the Lead form). A value of 0 is VALID (e.g. "0 Days"). */}
+              {(() => {
+                const warrantyValueInvalid = showErrors && activeDevice.warrantyValue.trim() === "";
+                const warrantyUnitInvalid = showErrors && !activeDevice.warrantyUnit;
+                const warrantyInvalid = warrantyValueInvalid || warrantyUnitInvalid;
+                return (
               <div className="space-y-1">
                 <Label>Warranty <span className="text-rose-500">*</span></Label>
                 <div className="flex gap-1.5">
@@ -1666,21 +1715,26 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                       updateForm((f) => ({
                         ...f,
                         devices: f.devices.map((d, i) => i === activeIdx
-                          ? { ...d, warrantyValue: val, warranty: val && d.warrantyUnit ? `${val} ${d.warrantyUnit.charAt(0).toUpperCase() + d.warrantyUnit.slice(1)}` : "" }
+                          ? { ...d, warrantyValue: val, warranty: val !== "" && d.warrantyUnit ? `${val} ${d.warrantyUnit.charAt(0).toUpperCase() + d.warrantyUnit.slice(1)}` : "" }
                           : d
                         ),
                       }));
                     }}
                     placeholder="0"
-                    className="h-9 w-[72px] rounded-xl border border-input bg-card px-2.5 text-center text-sm font-medium text-foreground outline-none transition-all duration-150 hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                    className={cn(
+                      "h-9 w-[72px] rounded-xl border bg-card px-2.5 text-center text-sm font-medium text-foreground outline-none transition-all duration-150",
+                      warrantyValueInvalid
+                        ? "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-200/40"
+                        : "border-input hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                    )}
                   />
                   <div className="flex-1">
-                    <Select className="h-9" value={activeDevice.warrantyUnit} onChange={(e: any) => {
+                    <Select className={cn("h-9", warrantyUnitInvalid && "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-200/40")} value={activeDevice.warrantyUnit} onChange={(e: any) => {
                       const unit = e.target.value;
                       updateForm((f) => ({
                         ...f,
                         devices: f.devices.map((d, i) => i === activeIdx
-                          ? { ...d, warrantyUnit: unit, warranty: d.warrantyValue && unit ? `${d.warrantyValue} ${unit.charAt(0).toUpperCase() + unit.slice(1)}` : "" }
+                          ? { ...d, warrantyUnit: unit, warranty: d.warrantyValue !== "" && unit ? `${d.warrantyValue} ${unit.charAt(0).toUpperCase() + unit.slice(1)}` : "" }
                           : d
                         ),
                       }));
@@ -1691,7 +1745,12 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                     ]} />
                   </div>
                 </div>
+                {warrantyInvalid && (
+                  <p className="text-[11px] font-medium text-rose-500">Enter a warranty value and select a duration.</p>
+                )}
               </div>
+                );
+              })()}
               {/* Notes — moved up into the Device Details row alongside IMEI /
                   Serial and Warranty (per the detail layout). Same field, same
                   data + persistence; only its placement changed. */}
@@ -1730,15 +1789,15 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   new item is then findable in Search and can be added as a line.
               Add Service adds a non-inventory manual charge. Master creation is
               NEVER the same action as adding a line item. */}
-          <div className="rounded-2xl border border-[#4361EE]/25 bg-gradient-to-b from-[#4361EE]/[0.05] to-transparent shadow-sm">
+          <div className="overflow-hidden rounded-2xl border-2 border-zinc-300 bg-gradient-to-b from-[#4361EE]/[0.05] to-transparent shadow-sm">
             {/* Section header — clean, professional ERP inventory workspace. */}
-            <div className="flex flex-col gap-2.5 border-b border-[#4361EE]/15 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
+            <div className="flex flex-col gap-2.5 rounded-t-2xl border-b-2 border-zinc-300 bg-[#EEF1FD]/70 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
               <div className="flex items-center gap-2.5">
-                <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white shadow-sm">
+                <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#3347D6] text-white shadow-sm">
                   <Package className="h-4 w-4" />
                 </span>
                 <div>
-                  <p className="text-[13px] font-bold uppercase tracking-wider text-[#3347D6]">Inventory Cost</p>
+                  <p className="text-[13px] font-bold uppercase tracking-wider text-[#1E2A8A]">Inventory</p>
                   <p className="text-[11px] text-muted-foreground">
                     {activeDevice.parts.length > 0
                       ? `${activeDevice.parts.length} line item${activeDevice.parts.length !== 1 ? "s" : ""} · ${formatINR(deviceSubtotal)}`
@@ -1747,11 +1806,11 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => setShowInventorySearch((v) => !v)}>
+                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => setShowInventorySearch((v) => !v)} className={showInventorySearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
                   <Search className="h-3.5 w-3.5" /> Search Inventory
                 </Button>
-                <Button size="sm" variant="outline" onClick={addService}>
-                  <Plus className="h-3.5 w-3.5" /> Add Service
+                <Button size="sm" variant="outline" onClick={addService} className="border-[#4361EE]/30 hover:border-[#4361EE]/50">
+                  <Plus className="h-3.5 w-3.5" /> Add Row
                 </Button>
                 {/* Add Inventory (create a master record) — only when the user
                     holds an inventory create capability. Search/select stays
@@ -1803,9 +1862,9 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   </span>
                 </button>
               ) : (
-                <div className="rounded-xl border border-border bg-card">
+                <div className="overflow-hidden rounded-xl border-2 border-zinc-300 bg-card">
                   {/* Table header */}
-                  <div className="hidden grid-cols-[1fr_80px_110px_110px_44px] gap-2 rounded-t-xl border-b border-border bg-muted/60 px-3 py-2 sm:grid">
+                  <div className="hidden grid-cols-[1fr_80px_110px_110px_44px] gap-2 border-b border-zinc-300 bg-muted/60 px-3 py-2 sm:grid">
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Item</span>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Qty</span>
                     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Price</span>
@@ -1813,14 +1872,15 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
                     <span />
                   </div>
                   {activeDevice.parts.map((item) => (
-                    <div key={item.id} className="grid grid-cols-1 gap-2 border-t border-border px-3 py-2.5 first:border-t-0 sm:grid-cols-[1fr_80px_110px_110px_44px] sm:items-center sm:gap-2">
+                    <div key={item.id} className="grid grid-cols-1 gap-2 border-t border-zinc-300 px-3 py-2.5 first:border-t-0 sm:grid-cols-[1fr_80px_110px_110px_44px] sm:items-center sm:gap-2">
                       <div className="space-y-1 sm:space-y-0">
                         <Label className="sm:hidden">Item</Label>
                         <LineItemNameInput
                           value={item.name}
                           onChange={(v) => updatePart(item.id, "name", v)}
                           onPick={(inv) => setLineFromInventory(item.id, inv)}
-                          placeholder="Type to search inventory, or enter a service…"
+                          placeholder="Type to search inventory, or enter an item…"
+                          onAddInventory={allow(can, CAP.inventory.create) ? (term) => { setAddInventorySeed(term); setShowAddInventory(true); } : undefined}
                         />
                       </div>
                       <div className="space-y-1 sm:space-y-0">
@@ -1845,7 +1905,7 @@ function StepProducts({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
               {activeDevice.parts.length > 0 && (
                 <div className="mt-3 flex justify-end">
-                  <div className="rounded-xl bg-white px-4 py-2 text-sm shadow-sm ring-1 ring-[#4361EE]/15">
+                  <div className="rounded-xl border border-[#4361EE]/30 bg-white px-4 py-2 text-sm shadow-sm">
                     <span className="text-muted-foreground">Device Subtotal: </span>
                     <span className="font-bold tabular-nums text-[#3347D6]">{formatINR(deviceSubtotal)}</span>
                   </div>
@@ -1917,7 +1977,7 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8 max-w-2xl mx-auto">
+    <div className="rounded-2xl border border-black/15 bg-card p-6 shadow-card sm:p-8 max-w-2xl mx-auto">
       <h2 className="font-display text-lg font-bold mb-1">Pricing & Payment</h2>
       <p className="text-sm text-muted-foreground mb-6">Discount, tax, payment mode, and status.</p>
 
@@ -2074,7 +2134,7 @@ function StepNotes({ form, updateForm }: { form: InvoiceFormData; updateForm: (f
   const n = form.notes;
   const set = (k: keyof typeof n, v: string) => updateForm((f) => ({ ...f, notes: { ...f.notes, [k]: v } }));
   return (
-    <div className="mx-auto max-w-2xl rounded-2xl border border-border bg-card p-6 shadow-card sm:p-8">
+    <div className="mx-auto max-w-2xl rounded-2xl border border-black/15 bg-card p-6 shadow-card sm:p-8">
       <h2 className="font-display text-lg font-bold mb-1">Notes & Terms</h2>
       <p className="text-sm text-muted-foreground mb-6">Add any notes, warranty terms, or branding.</p>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -2094,7 +2154,7 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
   const statusLabel = (form.details.status || "draft").replace(/\b\w/g, (c) => c.toUpperCase());
   return (
     <div className="mx-auto w-full max-w-4xl">
-      <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
+      <div className="overflow-hidden rounded-2xl border border-black/15 bg-card shadow-card">
         {/* Header band */}
         <div className="flex items-center justify-between gap-3 border-b border-border bg-gradient-to-r from-[#4361EE]/[0.06] to-transparent px-6 py-3 sm:px-8">
           <div className="flex items-center gap-2.5">

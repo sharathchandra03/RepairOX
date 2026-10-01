@@ -85,7 +85,7 @@ export function RouteLeadDialog({ lead, open, onClose }: {
     try {
       // Resolve (or create) the ONE Customer Master record for this lead.
       const { customerId, created } = resolveCustomer(customers, {
-        name: lead.name, phone: lead.number, email: lead.email,
+        name: lead.name, phone: lead.number, altPhone: lead.alternateNumber, email: lead.email,
         address: fullLeadLocation(lead), source: "sales",
         existingCustomerId: lead.customerId || undefined,
       });

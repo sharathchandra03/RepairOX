@@ -19,6 +19,7 @@ import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
 import { Upload, FileText, FileSpreadsheet, CheckCircle2, AlertTriangle, X, Copy, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { useStore } from "@/lib/store";
 import {
   parseWalkInCsv,
@@ -374,7 +375,7 @@ export function WalkInImportModal({
 
               {stats.needsFix > 0 && (
                 <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <input type="checkbox" checked={skipInvalid} onChange={(e) => setSkipInvalid(e.target.checked)} className="h-4 w-4 rounded border-zinc-300 text-[#4361EE]" />
+                  <Checkbox checked={skipInvalid} onChange={setSkipInvalid} aria-label="Skip rows that need correction" />
                   Skip {stats.needsFix} row{stats.needsFix !== 1 ? "s" : ""} that need correction (uncheck to import them anyway)
                 </label>
               )}

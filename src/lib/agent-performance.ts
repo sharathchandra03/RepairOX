@@ -27,7 +27,8 @@ import {
   type LeadFollowUp,
   computeLeadMetrics,
   openFollowUp,
-  isQualifiedStatus,
+  isQualifiedLead,
+  isLeadPipelineEligible,
   isWonStatus,
   isLostStatus,
   leadExpectedValue,
@@ -80,7 +81,7 @@ export const STAGE_PROBABILITY = {
 /** Explainable stage-probability for a single OPEN lead. */
 export function leadStageProbability(lead: Lead, hasOpenFollowUp: boolean): number {
   if (lead.linkedTicketId) return STAGE_PROBABILITY.inFulfilment;
-  if (isQualifiedStatus(lead.status)) return STAGE_PROBABILITY.qualified;
+  if (isQualifiedLead(lead)) return STAGE_PROBABILITY.qualified;
   const contacted =
     hasOpenFollowUp ||
     !!lead.followUpDate ||
@@ -300,7 +301,7 @@ export function computeAgentPerformance(
     const hasOpen = openByLead.has(l.id);
     const won = isWonStatus(l.status, l.finalResult);
     const lost = isLostStatus(l.status, l.finalResult);
-    const qualified = isQualifiedStatus(l.status);
+    const qualified = isQualifiedLead(l);
     const rev = revenueWonForLead(l, revenue.tickets, revenue.invoices);
     const ev = leadExpectedValue(l);
     expectedValueSum += ev;
@@ -308,7 +309,7 @@ export function computeAgentPerformance(
     if (isContactedLead(l, hasOpen)) contacted += 1;
 
     // Projection: probability-weighted expected value of OPEN pipeline only.
-    if (!won && !lost) projection += ev * leadStageProbability(l, hasOpen);
+    if (!won && !lost && isLeadPipelineEligible(l)) projection += ev * leadStageProbability(l, hasOpen);
 
     // ── Source breakdown ──
     const srcKey = (l.source || "Unspecified").trim() || "Unspecified";

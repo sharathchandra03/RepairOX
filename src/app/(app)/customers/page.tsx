@@ -44,6 +44,7 @@ import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { RoxFilterPanelHeader, ActiveFiltersBar, type AppliedFilter } from "@/components/ui/rox-filter";
@@ -121,7 +122,7 @@ function KpiCard({
 export default function ManageCustomersPage() {
   const router = useRouter();
   const { customers, customerGroups, addCustomer, updateCustomer, deleteCustomer, mergeCustomersAction, loyaltyByCustomer } = useStore();
-  const { contacts, hydrated: contactsHydrated } = useLeads();
+  const { contacts, hydrated: contactsHydrated, deleteContact } = useLeads();
   const { can } = usePermissions();
   // Live loyalty earning rate for THIS store/org (Settings → Customers →
   // Loyalty). Derived loyalty points in the table recompute from lifetime value
@@ -182,6 +183,9 @@ export default function ManageCustomersPage() {
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
   const [showImport, setShowImport] = useState(false);
+  // ── Multi-select (Customers table) ──
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
 
   /* Export the WHOLE customer list (for marketing/promotions). Excel (.xlsx) is
      the primary format; CSV is offered as an alternative. */
@@ -359,6 +363,26 @@ export default function ManageCustomersPage() {
   const canEdit = allow(can, CAP.customer.edit);
   const canDelete = allow(can, CAP.customer.delete);
   const canMerge = allow(can, CAP.customer.merge);
+
+  // ── Multi-select (only over the currently VISIBLE/filtered rows) ──
+  const filteredIds = useMemo(() => filtered.map((c) => c.id), [filtered]);
+  const selectedInView = useMemo(() => filteredIds.filter((id) => selected.has(id)), [filteredIds, selected]);
+  const allSelected = filteredIds.length > 0 && selectedInView.length === filteredIds.length;
+  const someSelected = selectedInView.length > 0;
+  const toggleOne = (id: string) =>
+    setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) filteredIds.forEach((id) => next.delete(id));
+      else filteredIds.forEach((id) => next.add(id));
+      return next;
+    });
+  const handleBulkDelete = async () => {
+    await Promise.all(selectedInView.map((id) => deleteCustomer(id)));
+    setSelected(new Set());
+    setShowBulkDelete(false);
+  };
 
   return (
     <div className="space-y-6">
@@ -658,6 +682,19 @@ export default function ManageCustomersPage() {
             )}
           </AnimatePresence>
 
+          {/* Bulk action bar — appears when one or more rows are selected. */}
+          {canDelete && someSelected && (
+            <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-xs font-semibold text-[#4361EE]">
+                {selectedInView.length} selected
+              </span>
+              <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+                <Trash2 className="h-3 w-3" /> Delete
+              </Button>
+              <button onClick={() => setSelected(new Set())} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+            </div>
+          )}
+
           {/* Canonical table — sharp 2px frame, visible row separators. Plain
               (non-sticky) header: see the file-header note above for why the
               Tickets-style sticky hook doesn't apply inside Settings' nested
@@ -680,7 +717,14 @@ export default function ManageCustomersPage() {
                 </colgroup>
                 <thead className="bg-[#EEF1FD] border-b-2 border-[#4361EE]/40">
                   <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
-                    <th className="px-3 py-3" />
+                    <th className="px-3 py-3">
+                      <Checkbox
+                        checked={allSelected}
+                        indeterminate={someSelected && !allSelected}
+                        onChange={toggleAll}
+                        aria-label="Select all customers"
+                      />
+                    </th>
                     <th className="px-3 py-3 text-left whitespace-nowrap">Customer</th>
                     <th className="px-3 py-3 text-left whitespace-nowrap">Type</th>
                     <th className="px-3 py-3 text-left whitespace-nowrap">Source</th>
@@ -703,10 +747,13 @@ export default function ManageCustomersPage() {
                       <tr
                         key={c.id}
                         onClick={() => router.push(`/customers/${c.id}`)}
-                        className="rox-table-row group h-[68px] cursor-pointer border-b border-zinc-500 align-middle transition hover:bg-muted/40"
+                        className={cn(
+                          "rox-table-row group h-[68px] cursor-pointer border-b border-zinc-500 align-middle transition hover:bg-muted/40",
+                          selected.has(c.id) && "bg-[#EEF1FD]/60",
+                        )}
                       >
                         <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
-                          <input type="checkbox" className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30" onClick={(e) => e.stopPropagation()} />
+                          <Checkbox checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} aria-label={`Select ${c.fullName}`} />
                         </td>
                         <td className="px-3 py-4 align-middle">
                           <div className="flex items-center gap-2.5 min-w-0">
@@ -867,9 +914,10 @@ export default function ManageCustomersPage() {
           {/* Mobile cards */}
           <div className="grid grid-cols-1 gap-3 md:hidden">
             {paged.map((c) => (
-              <div key={c.id} onClick={() => router.push(`/customers/${c.id}`)} className="cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card">
+              <div key={c.id} onClick={() => router.push(`/customers/${c.id}`)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(c.id) && "ring-1 ring-[#4361EE]")}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2.5">
+                    {canDelete && <span onClick={(e) => e.stopPropagation()}><Checkbox checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} aria-label={`Select ${c.fullName}`} /></span>}
                     <Avatar name={c.fullName} size={36} />
                     <div>
                       <p className="font-semibold">{c.fullName}</p>
@@ -915,7 +963,13 @@ export default function ManageCustomersPage() {
       )}
 
       {tab === "contacts" && (
-        <ContactsTab contacts={contacts} hydrated={contactsHydrated} customers={customers} />
+        <ContactsTab
+          contacts={contacts}
+          hydrated={contactsHydrated}
+          customers={customers}
+          canDelete={allow(can, CAP.customer.delete)}
+          onDelete={deleteContact}
+        />
       )}
 
       {tab === "duplicates" && (
@@ -1024,16 +1078,30 @@ export default function ManageCustomersPage() {
           else if (skipped > 0) toast.info("No new customers — all rows were duplicates or empty.");
         }}
       />
+
+      {/* Bulk-delete confirm — deletes every selected customer in the current view. */}
+      <ConfirmDialog
+        open={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={handleBulkDelete}
+        title={`Delete ${selectedInView.length} customer${selectedInView.length !== 1 ? "s" : ""}?`}
+        description="The selected customers will be removed from the Customer Master. This does not delete their linked tickets, invoices or history."
+        confirmLabel={`Delete ${selectedInView.length} Customer${selectedInView.length !== 1 ? "s" : ""}`}
+        danger
+      />
     </div>
   );
 }
 
 /* ─── CRM Contacts tab ─────────────────────────────────────────────────── */
-function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; hydrated: boolean; customers: Customer[] }) {
+function ContactsTab({ contacts, hydrated, customers, canDelete, onDelete }: { contacts: Contact[]; hydrated: boolean; customers: Customer[]; canDelete: boolean; onDelete: (id: string) => Promise<void> | void }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
 
   // Only UNPROMOTED contacts belong on the Customer Master surface — once a
   // Contact is promoted to a Customer (linked by customerId, OR its phone/email
@@ -1058,6 +1126,33 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const paged = useMemo(() => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), [filtered, currentPage, pageSize]);
+
+  const deletingContact = useMemo(() => prospects.find((c) => c.id === confirmDeleteId) ?? null, [prospects, confirmDeleteId]);
+  const handleConfirmDelete = async () => {
+    if (!confirmDeleteId) return;
+    await onDelete(confirmDeleteId);
+    setConfirmDeleteId(null);
+  };
+
+  // ── Multi-select (only over the currently VISIBLE/filtered rows) ──
+  const filteredIds = useMemo(() => filtered.map((c) => c.id), [filtered]);
+  const selectedInView = useMemo(() => filteredIds.filter((id) => selected.has(id)), [filteredIds, selected]);
+  const allSelected = filteredIds.length > 0 && selectedInView.length === filteredIds.length;
+  const someSelected = selectedInView.length > 0;
+  const toggleOne = (id: string) =>
+    setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) filteredIds.forEach((id) => next.delete(id));
+      else filteredIds.forEach((id) => next.add(id));
+      return next;
+    });
+  const handleBulkDelete = async () => {
+    await Promise.all(selectedInView.map((id) => onDelete(id)));
+    setSelected(new Set());
+    setShowBulkDelete(false);
+  };
 
   return (
     <>
@@ -1093,20 +1188,44 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
         </div>
       </div>
 
+      {canDelete && someSelected && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-xs font-semibold text-[#4361EE]">
+            {selectedInView.length} selected
+          </span>
+          <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+            <Trash2 className="h-3 w-3" /> Delete
+          </Button>
+          <button onClick={() => setSelected(new Set())} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+        </div>
+      )}
+
       <div className="hidden border-2 border-zinc-300 bg-card shadow-card md:block">
         <div className="overflow-x-auto">
           <table className="w-full table-fixed text-[14px]">
             <colgroup>
-              <col className="w-[24%]" />{/* Contact */}
-              <col className="w-[19%]" />{/* Phone / Email */}
-              <col className="w-[13%]" />{/* Source */}
-              <col className="w-[15%]" />{/* Owner */}
-              <col className="w-[11%]" />{/* Status */}
+              {canDelete && <col className="w-[4%]" />}{/* Select */}
+              <col className="w-[22%]" />{/* Contact */}
+              <col className="w-[18%]" />{/* Phone / Email */}
+              <col className="w-[12%]" />{/* Source */}
+              <col className="w-[14%]" />{/* Owner */}
+              <col className="w-[10%]" />{/* Status */}
               <col className="w-[9%]" />{/* Last Contact */}
               <col className="w-[9%]" />{/* Created */}
+              {canDelete && <col className="w-[6%]" />}{/* Actions */}
             </colgroup>
             <thead className="bg-[#EEF1FD] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+                {canDelete && (
+                  <th className="px-3 py-3">
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={someSelected && !allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all contacts"
+                    />
+                  </th>
+                )}
                 <th className="px-3 py-3 text-left whitespace-nowrap">Contact</th>
                 <th className="px-3 py-3 text-left whitespace-nowrap">Phone / Email</th>
                 <th className="px-3 py-3 text-left whitespace-nowrap">Source</th>
@@ -1114,11 +1233,17 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
                 <th className="px-3 py-3 text-left whitespace-nowrap">Status</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">Last Contact</th>
                 <th className="px-3 py-3 text-right whitespace-nowrap">Created</th>
+                {canDelete && <th className="px-3 py-3 text-right whitespace-nowrap">Actions</th>}
               </tr>
             </thead>
             <tbody>
               {paged.map((c) => (
-                <tr key={c.id} className="rox-table-row group h-[68px] border-b border-zinc-500 align-middle transition hover:bg-muted/40">
+                <tr key={c.id} className={cn("rox-table-row group h-[68px] border-b border-zinc-500 align-middle transition hover:bg-muted/40", selected.has(c.id) && "bg-[#EEF1FD]/60")}>
+                  {canDelete && (
+                    <td className="px-3 py-4 align-middle">
+                      <Checkbox checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} aria-label={`Select ${c.fullName}`} />
+                    </td>
+                  )}
                   <td className="px-3 py-4 align-middle">
                     <div className="flex items-center gap-2.5 min-w-0">
                       <Avatar name={c.fullName} size={32} />
@@ -1148,6 +1273,17 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
                   </td>
                   <td className="px-3 py-4 align-middle text-right"><span className="whitespace-nowrap text-[12px] text-zinc-600 tnum">{fmtDate(c.lastContactAt)}</span></td>
                   <td className="px-3 py-4 align-middle text-right"><span className="whitespace-nowrap text-[12px] text-zinc-600 tnum">{fmtDate(c.createdAt)}</span></td>
+                  {canDelete && (
+                    <td className="px-3 py-4 align-middle text-right">
+                      <button
+                        onClick={() => setConfirmDeleteId(c.id)}
+                        title="Delete contact"
+                        className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 opacity-0 transition hover:bg-rose-50 hover:text-rose-600 group-hover:opacity-100"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -1166,9 +1302,10 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
       {/* Mobile cards */}
       <div className="grid grid-cols-1 gap-3 md:hidden">
         {paged.map((c) => (
-          <div key={c.id} className="rounded-2xl border border-border bg-card p-4 shadow-card">
+          <div key={c.id} className={cn("rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(c.id) && "ring-1 ring-[#4361EE]")}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
+                {canDelete && <Checkbox checked={selected.has(c.id)} onChange={() => toggleOne(c.id)} aria-label={`Select ${c.fullName}`} />}
                 <Avatar name={c.fullName} size={36} />
                 <div>
                   <p className="font-semibold">{c.fullName}</p>
@@ -1184,7 +1321,18 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
             </div>
             <div className="mt-3 flex items-center justify-between border-t border-border pt-3 text-[12px] text-zinc-600">
               <span>{c.source || "—"}</span>
-              <span>{fmtDate(c.createdAt)}</span>
+              <div className="flex items-center gap-3">
+                <span>{fmtDate(c.createdAt)}</span>
+                {canDelete && (
+                  <button
+                    onClick={() => setConfirmDeleteId(c.id)}
+                    title="Delete contact"
+                    className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 transition hover:bg-rose-50 hover:text-rose-600"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -1207,6 +1355,28 @@ function ContactsTab({ contacts, hydrated, customers }: { contacts: Contact[]; h
           itemLabel="contact"
         />
       )}
+
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={handleConfirmDelete}
+        title="Delete contact?"
+        description={
+          deletingContact
+            ? `${deletingContact.fullName} will be removed from CRM Contacts. This does not delete any linked lead or customer record.`
+            : "This contact will be removed."
+        }
+        confirmLabel="Delete Contact"
+      />
+
+      <ConfirmDialog
+        open={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={handleBulkDelete}
+        title={`Delete ${selectedInView.length} contact${selectedInView.length !== 1 ? "s" : ""}?`}
+        description="The selected contacts will be removed from CRM Contacts. This does not delete any linked lead or customer records."
+        confirmLabel={`Delete ${selectedInView.length} Contact${selectedInView.length !== 1 ? "s" : ""}`}
+      />
     </>
   );
 }

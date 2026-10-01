@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
@@ -1141,12 +1142,10 @@ export default function TicketsPage() {
                 {activeColumns.map((col) => (
                   <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={allSelected}
-                        ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                        indeterminate={someSelected && !allSelected}
                         onChange={toggleAll}
-                        className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
                         aria-label="Select all tickets"
                       />
                     ) : col.id === "status" ? (
@@ -1224,7 +1223,7 @@ export default function TicketsPage() {
             >
               <div className="flex items-start justify-between gap-2">
                 <div className="flex items-start gap-3">
-                  <input type="checkbox" checked={isSelected} onChange={() => toggleOne(t.id)} className="mt-1 h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer" />
+                  <Checkbox checked={isSelected} onChange={() => toggleOne(t.id)} className="mt-1" aria-label={`Select ticket ${t.ticketNo ?? t.id}`} />
                   <div className="flex items-center gap-2">
                     <Avatar name={t.customer} size={32} ticketType={getTicketType(t) ?? "na"} />
                     <div>
@@ -1545,9 +1544,7 @@ function renderCell(
       return <StoreContextCell store={store} mode="stacked" />;
     case "checkbox":
       return (
-        <input type="checkbox" checked={isSelected} onChange={toggleOne}
-          onClick={(e) => e.stopPropagation()}
-          className="h-4 w-4 rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30 cursor-pointer"
+        <Checkbox checked={isSelected} onChange={() => toggleOne()}
           aria-label={`Select ticket ${t.ticketNo ?? t.id}`} />
       );
     case "ticket":

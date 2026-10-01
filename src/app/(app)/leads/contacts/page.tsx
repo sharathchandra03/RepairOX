@@ -4,16 +4,20 @@ import { useState, useMemo } from "react";
 import { motion } from "framer-motion";
 import {
   Search, Plus, Phone, Mail, MessageSquare, Building2,
-  Filter, MapPin, LayoutGrid, List as ListIcon,
+  Filter, MapPin, LayoutGrid, List as ListIcon, Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Can } from "@/components/common/can";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { AddContactModal } from "@/components/leads/add-contact-modal";
 import { useLeads } from "@/lib/leads-context";
 import { useStore } from "@/lib/store";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 
 interface ContactRow {
@@ -69,11 +73,19 @@ function relativeTime(iso?: string): string {
 type ViewMode = "card" | "list";
 
 export default function ContactsPage() {
-  const { contacts, leads } = useLeads();
+  const { contacts, leads, deleteContact } = useLeads();
   const { companies } = useStore();
+  const { can } = usePermissions();
+  const canDelete = allow(can, CAP.customer.delete);
+  // Only REAL saved contacts can be deleted — the demo fallback rows carry
+  // fake ids (C-00x) with no backing record, so deletion is disabled for them.
+  const hasRealContacts = contacts.length > 0;
   const [query, setQuery] = useState("");
   const [showAddModal, setShowAddModal] = useState(false);
   const [view, setView] = useState<ViewMode>("list");
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [showBulkDelete, setShowBulkDelete] = useState(false);
 
   /* Map the REAL saved contacts (from lead capture + Add Contact) into the
      page's display shape. Every value is derived from actual data — deals is
@@ -112,6 +124,38 @@ export default function ContactsPage() {
     ),
     [query, rows]
   );
+
+  const deletingContact = useMemo(
+    () => rows.find((c) => c.id === confirmDeleteId) ?? null,
+    [confirmDeleteId, rows]
+  );
+
+  const handleDelete = async () => {
+    if (!confirmDeleteId) return;
+    await deleteContact(confirmDeleteId);
+    setConfirmDeleteId(null);
+  };
+
+  // ── Multi-select — only over REAL, currently-visible contacts ──
+  const selectable = canDelete && hasRealContacts;
+  const filteredIds = useMemo(() => filtered.map((c) => c.id), [filtered]);
+  const selectedInView = useMemo(() => filteredIds.filter((id) => selected.has(id)), [filteredIds, selected]);
+  const allSelected = filteredIds.length > 0 && selectedInView.length === filteredIds.length;
+  const someSelected = selectedInView.length > 0;
+  const toggleOne = (id: string) =>
+    setSelected((prev) => { const next = new Set(prev); next.has(id) ? next.delete(id) : next.add(id); return next; });
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (allSelected) filteredIds.forEach((id) => next.delete(id));
+      else filteredIds.forEach((id) => next.add(id));
+      return next;
+    });
+  const handleBulkDelete = async () => {
+    await Promise.all(selectedInView.map((id) => deleteContact(id)));
+    setSelected(new Set());
+    setShowBulkDelete(false);
+  };
 
   const ViewToggle = ({ className }: { className?: string }) => (
     <div className={cn("items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm", className)}>
@@ -176,6 +220,19 @@ export default function ContactsPage() {
         </div>
       </div>
 
+      {/* Bulk selection bar */}
+      {selectable && someSelected && (
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-indigo-200 bg-indigo-50/60 px-3 py-2">
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-xs font-semibold text-[#4361EE]">
+            {selectedInView.length} selected
+          </span>
+          <Button variant="destructive" size="sm" className="rounded-full text-xs" onClick={() => setShowBulkDelete(true)}>
+            <Trash2 className="h-3 w-3" /> Delete
+          </Button>
+          <button onClick={() => setSelected(new Set())} className="ml-1 text-xs text-muted-foreground hover:text-foreground">Clear</button>
+        </div>
+      )}
+
       {/* ---- CARD VIEW ---- */}
       {view === "card" && filtered.length > 0 && (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3">
@@ -189,6 +246,9 @@ export default function ContactsPage() {
             >
               <div className="flex items-start justify-between">
                 <div className="flex items-center gap-3">
+                  {selectable && (
+                    <Checkbox checked={selected.has(contact.id)} onChange={() => toggleOne(contact.id)} aria-label={`Select ${contact.name}`} />
+                  )}
                   <Avatar name={contact.name} size={40} />
                   <div>
                     <p className="font-semibold text-zinc-900">{contact.name}</p>
@@ -237,6 +297,15 @@ export default function ContactsPage() {
                   <button className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 transition"><Phone className="h-3.5 w-3.5" /></button>
                   <button className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-sky-50 hover:text-sky-600 transition"><Mail className="h-3.5 w-3.5" /></button>
                   <button className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-green-50 hover:text-green-600 transition"><MessageSquare className="h-3.5 w-3.5" /></button>
+                  {canDelete && hasRealContacts && (
+                    <button
+                      onClick={() => setConfirmDeleteId(contact.id)}
+                      title="Delete contact"
+                      className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  )}
                 </div>
               </div>
             </motion.div>
@@ -251,6 +320,16 @@ export default function ContactsPage() {
             <table className="w-full min-w-[860px] text-[13px]">
               <thead className="bg-muted/60">
                 <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  {selectable && (
+                    <th className="px-4 py-3 w-10">
+                      <Checkbox
+                        checked={allSelected}
+                        indeterminate={someSelected && !allSelected}
+                        onChange={toggleAll}
+                        aria-label="Select all contacts"
+                      />
+                    </th>
+                  )}
                   <th className="px-4 py-3">Contact</th>
                   <th className="px-4 py-3">Company</th>
                   <th className="px-4 py-3">Email</th>
@@ -263,7 +342,12 @@ export default function ContactsPage() {
               </thead>
               <tbody>
                 {filtered.map((contact) => (
-                  <tr key={contact.id} className="group border-t border-border transition hover:bg-muted/30">
+                  <tr key={contact.id} className={cn("group border-t border-border transition hover:bg-muted/30", selected.has(contact.id) && "bg-[#EEF1FD]/60")}>
+                    {selectable && (
+                      <td className="px-4 py-3">
+                        <Checkbox checked={selected.has(contact.id)} onChange={() => toggleOne(contact.id)} aria-label={`Select ${contact.name}`} />
+                      </td>
+                    )}
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-3">
                         <Avatar name={contact.name} size={34} />
@@ -296,6 +380,15 @@ export default function ContactsPage() {
                         <button className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-emerald-50 hover:text-emerald-600 transition"><Phone className="h-3.5 w-3.5" /></button>
                         <button className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-sky-50 hover:text-sky-600 transition"><Mail className="h-3.5 w-3.5" /></button>
                         <button className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-green-50 hover:text-green-600 transition"><MessageSquare className="h-3.5 w-3.5" /></button>
+                        {canDelete && hasRealContacts && (
+                          <button
+                            onClick={() => setConfirmDeleteId(contact.id)}
+                            title="Delete contact"
+                            className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-rose-50 hover:text-rose-600 transition"
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -320,6 +413,30 @@ export default function ContactsPage() {
 
       {/* Add Contact Modal */}
       <AddContactModal open={showAddModal} onClose={() => setShowAddModal(false)} />
+
+      {/* Delete confirmation */}
+      <ConfirmDialog
+        open={!!confirmDeleteId}
+        onClose={() => setConfirmDeleteId(null)}
+        onConfirm={handleDelete}
+        title="Delete contact?"
+        description={
+          deletingContact
+            ? `${deletingContact.name} will be removed from your contacts. This does not delete any linked lead or customer.`
+            : "This contact will be removed."
+        }
+        confirmLabel="Delete Contact"
+      />
+
+      {/* Bulk delete confirmation */}
+      <ConfirmDialog
+        open={showBulkDelete}
+        onClose={() => setShowBulkDelete(false)}
+        onConfirm={handleBulkDelete}
+        title={`Delete ${selectedInView.length} contact${selectedInView.length !== 1 ? "s" : ""}?`}
+        description="The selected contacts will be removed. This does not delete any linked lead or customer records."
+        confirmLabel={`Delete ${selectedInView.length} Contact${selectedInView.length !== 1 ? "s" : ""}`}
+      />
     </div>
   );
 }

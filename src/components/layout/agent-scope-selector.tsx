@@ -31,7 +31,7 @@ import { allow } from "@/lib/capabilities";
 import { CAP } from "@/lib/capabilities";
 import type { WorkspaceId } from "@/lib/permissions";
 
-const PERF_ROOT = "/leads/performance";
+const PERF_ROOT = "/leads/intelligence/agents";
 
 export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: WorkspaceId }) {
   const router = useRouter();
@@ -70,7 +70,7 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
       trigger={({ open, toggle }) => (
         <button
           onClick={toggle}
-          aria-label="Agent performance scope"
+          aria-label="Agent intelligence scope"
           className={cn(
             "hidden md:flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
             onPerf ? "bg-[#EEF1FD] text-[#3A4DBB]" : "bg-[#F5F7FF] text-[#3A4DBB]",
@@ -85,7 +85,7 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
     >
       {(close) => (
         <>
-          <MenuLabel>Agent Performance</MenuLabel>
+          <MenuLabel>Agent Intelligence</MenuLabel>
 
           {/* All Agents — the owner comparison table. */}
           <MenuItem

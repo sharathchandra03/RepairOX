@@ -25,6 +25,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Can } from "@/components/common/can";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
 import { TableSearch } from "@/components/common/table-utility-bar";
@@ -891,12 +892,10 @@ export default function WalkInPage() {
               <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
                 <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
                   <th className="pl-5 pr-2 py-4">
-                    <input
-                      type="checkbox"
+                    <Checkbox
                       checked={allSelected}
-                      ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                      indeterminate={someSelected && !allSelected}
                       onChange={toggleAll}
-                      className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
                       aria-label="Select all walk-ins"
                     />
                   </th>
@@ -922,11 +921,9 @@ export default function WalkInPage() {
                     className={cn("group h-[68px] border-t border-zinc-500 align-middle transition", selected.has(w.id) ? "bg-indigo-50/40" : w.pinnedAt ? "bg-amber-50/40" : "hover:bg-muted/40")}
                   >
                     <td className="pl-5 pr-2 py-4" onClick={(e) => e.stopPropagation()}>
-                      <input
-                        type="checkbox"
+                      <Checkbox
                         checked={selected.has(w.id)}
                         onChange={() => toggleOne(w.id)}
-                        className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
                         aria-label={`Select walk-in ${walkInDisplayId(w)}`}
                       />
                     </td>

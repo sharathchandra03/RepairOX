@@ -12,6 +12,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { ActiveFilterChip } from "@/components/ui/rox-filter";
@@ -21,6 +22,14 @@ import { FreezeColumnsMenu } from "@/components/common/freeze-columns-menu";
 import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
+import { useStore } from "@/lib/store";
+import { useField } from "@/lib/field-context";
+import {
+  deriveLeadWorkflow, deriveLeadStoreBranchId, isDownstreamGated,
+  leadActionTone, leadResultTone,
+  type LeadWorkflow, type LeadWorkflowSources,
+} from "@/lib/lead-workflow";
+import { Lock } from "lucide-react";
 import { Can } from "@/components/common/can";
 import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
@@ -28,7 +37,7 @@ import { cn, formatINR } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadIsExistingCustomer, type LeadFollowUp,
-  isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES,
+  isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
 } from "@/lib/leads-data";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
@@ -43,6 +52,7 @@ import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { resolveLeadEvidenceIds } from "@/lib/lead-intelligence-url";
 
 /* Page-size options for the detached pagination footer (matches Tickets). */
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -67,19 +77,28 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
   cols.push(
     { key: "date", label: "Date", width: 92 },
     { key: "region", label: "Region", width: 120 },
+    // MODE OF LEAD — how the lead came in (modeOfContact). Structurally separate
+    // from Source (acquisition) and Capture Channel.
+    { key: "mode", label: "Mode of Lead", width: 118 },
     { key: "source", label: "Source", width: 120 },
     { key: "agent", label: "Agent", width: 150 },
     { key: "contactStatus", label: "Contact Status", width: 128 },
     { key: "contactInfo", label: "Contact Info", width: 220 },
     { key: "device", label: "Device & Issue", width: 200 },
     { key: "value", label: "Lead Value", width: 120 },
-    { key: "comment", label: "Comment", width: 200 },
     { key: "leadCategory", label: "Lead Category", width: 120 },
-    { key: "tbd", label: "TBD", width: 110 },
+    { key: "comment", label: "Comment", width: 200 },
+    // SUB CATEGORY — the TBD column is now the real Sub Category field.
+    { key: "subCategory", label: "Sub Category", width: 130 },
     { key: "leadType", label: "Lead Type", width: 104 },
-    { key: "status", label: "Status", width: 140 },
-    { key: "result", label: "Result", width: 128 },
-    { key: "actions", label: "Last Action", width: 100, lockedRight: true },
+    { key: "status", label: "Status", width: 148 },
+    // ACTION — SYSTEM-DERIVED, read-only (never an editable dropdown).
+    { key: "action", label: "Action", width: 132 },
+    // STORE — derived from the actual operational record.
+    { key: "storeCol", label: "Store", width: 132 },
+    // RESULT — SYSTEM-DERIVED, read-only (₹value + Ticket + Invoice).
+    { key: "result", label: "Result", width: 150 },
+    { key: "actions", label: "Last Action", width: 90, lockedRight: true },
   );
   return cols;
 }
@@ -103,10 +122,17 @@ function useScrollEdges(ref: React.RefObject<HTMLElement>) {
     let raf = 0;
     const update = () => {
       raf = 0;
+      const maxScroll = el.scrollWidth - el.clientWidth;
       const left = el.scrollLeft > 1;
-      const right = el.scrollLeft < el.scrollWidth - el.clientWidth - 1;
+      const right = el.scrollLeft < maxScroll - 1;
       el.setAttribute("data-scroll-left", String(left));
       el.setAttribute("data-scroll-right", String(right));
+      // Proportional scroll position (0 = far left, 1 = far right). The frozen
+      // edge shadows scale with this: the LEFT edge deepens as more content is
+      // hidden to the left (fraction → 1), the RIGHT edge deepens as more
+      // content remains to the right (fraction → 0).
+      const fraction = maxScroll > 0 ? Math.min(1, Math.max(0, el.scrollLeft / maxScroll)) : 0;
+      el.style.setProperty("--rox-scroll-x", fraction.toFixed(4));
     };
     const onScroll = () => { if (!raf) raf = requestAnimationFrame(update); };
     update();
@@ -176,21 +202,12 @@ function formatFollowUp(date: string): string {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────
-   LEAD TABLE — 15-column grouped presentation (reference-driven).
+   LEAD TABLE — grouped presentation (reference-driven).
    One lead = one row. Related fields are GROUPED inside compact cells
    (Contact Info, Device & Issue, Lead Value, Source, Date) rather than split
-   into many columns. All values come from the real Lead record — no fakes.
+   into many columns. All values come from the real Lead record + derived
+   workflow — no fakes. ACTION and RESULT are SYSTEM-DERIVED (read-only).
    ───────────────────────────────────────────────────────────────────────── */
-
-/**
- * TBD column source (§Column 12). The reference "TBD" column shows a
- * device/business classification whose canonical meaning isn't yet confirmed.
- * The closest structured field in the current model is `leadNature`. This is
- * the SINGLE place the mapping lives, so the column can be re-pointed later
- * (e.g. to a dedicated classification field) WITHOUT rebuilding the table.
- */
-const TBD_SOURCE_FIELD: keyof Lead = "leadNature";
-const TBD_HEADER_LABEL = "TBD";
 
 /* Column 2 — DATE: date primary line, time secondary. */
 function DateCell({ lead }: { lead: Lead }) {
@@ -314,6 +331,83 @@ function CommentCell({ text }: { text: string }) {
   );
 }
 
+/* ── ACTION cell — SYSTEM-DERIVED, READ-ONLY ───────────────────────────────
+   Action reflects the LATEST meaningful operational event, computed live from
+   the linked records (Walk-In / Field / Ticket / Invoice) + follow-up. It is
+   NEVER an editable dropdown — the user cannot type or choose it. A subtle lock
+   glyph + a "why is this?" tooltip communicate that it is system-generated. */
+function ActionCell({ wf }: { wf: LeadWorkflow }) {
+  return (
+    <span
+      title={`${wf.actionLabel} · System-derived — ${wf.reason}`}
+      aria-label={`Action: ${wf.actionLabel} (system-derived, read-only)`}
+      className={cn(
+        "inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset select-none",
+        leadActionTone(wf.action),
+      )}
+    >
+      <Lock className="h-2.5 w-2.5 opacity-60" aria-hidden />
+      {wf.actionLabel}
+    </span>
+  );
+}
+
+/* ── RESULT cell — SYSTEM-DERIVED, READ-ONLY ───────────────────────────────
+   Result is the highest-priority real outcome. For a finalized invoice it shows
+   ₹value (primary) with the Ticket ID + Invoice ID (secondary, clickable). For
+   a ticket-only lead it shows the Ticket ID; for a routed/assigned lead "Lead
+   Won"; otherwise "In Pipeline" / "N/A". The money value is the ACTUAL finalized
+   invoice total — never the estimate. Not manually editable. */
+function ResultCell({
+  wf, canViewTicket, canViewInvoice,
+}: {
+  wf: LeadWorkflow;
+  canViewTicket: boolean;
+  canViewInvoice: boolean;
+}) {
+  const r = wf.result;
+  if (r.kind === "invoice") {
+    return (
+      <div className="leading-snug select-none" title={`System-derived — ${wf.reason}`}>
+        <p className={cn("font-bold tabular-nums", leadResultTone(r.kind))}>{r.primary}</p>
+        <div className="mt-0.5 space-y-0.5 border-t border-border/70 pt-0.5">
+          {r.ticketNo && (
+            canViewTicket
+              ? <Link href={`/tickets/${r.ticketId || r.ticketNo}`} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={`Open ticket ${r.ticketNo}`}>{r.ticketNo}</Link>
+              : <span className="block truncate text-[11px] font-medium text-zinc-500 tabular-nums">{r.ticketNo}</span>
+          )}
+          {r.invoiceNo && (
+            canViewInvoice
+              ? <Link href={`/invoice/${r.invoiceId || r.invoiceNo}`} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={`Open invoice ${r.invoiceNo}`}>{r.invoiceNo}</Link>
+              : <span className="block truncate text-[11px] font-medium text-zinc-500 tabular-nums">{r.invoiceNo}</span>
+          )}
+        </div>
+      </div>
+    );
+  }
+  if (r.kind === "ticket") {
+    return (
+      <div className="leading-snug select-none" title={`System-derived — ${wf.reason}`}>
+        <p className={cn("font-semibold text-[12.5px]", leadResultTone(r.kind))}>Ticket Created</p>
+        {r.ticketNo && (
+          canViewTicket
+            ? <Link href={`/tickets/${r.ticketId || r.ticketNo}`} onClick={(e) => e.stopPropagation()} className="mt-0.5 block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={`Open ticket ${r.ticketNo}`}>{r.ticketNo}</Link>
+            : <span className="mt-0.5 block truncate text-[11px] font-medium text-zinc-500 tabular-nums">{r.ticketNo}</span>
+        )}
+      </div>
+    );
+  }
+  // lead_won / pipeline / lost / na — a single restrained label.
+  return (
+    <span
+      title={`System-derived — ${wf.reason}`}
+      className={cn("inline-flex cursor-default items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold select-none", leadResultTone(r.kind))}
+    >
+      {r.primary}
+    </span>
+  );
+}
+
 /* ── Filter option shape (values from Lead Settings + live data) ──
    Plain values, or { label, value } pairs for structured fields (e.g. Agent →
    the USER ID as value, the name as label). Consumed by the faceted
@@ -324,14 +418,20 @@ type FilterOption = string | { label: string; value: string };
 const FILTER_FIELDS: { key: LeadFilterField; label: string; optionField?: LeadFieldKey }[] = [
   { key: "region",         label: "Region",          optionField: "region" },
   { key: "source",         label: "Source",          optionField: "source" },
+  { key: "modeOfContact",  label: "Mode of Lead",    optionField: "modeOfContact" },
   // People filters query the structured USER ID (owner / follow-up agent).
   { key: "assignedTo",     label: "Agent (owner)" },
   { key: "contactStatus",  label: "Contact Status",  optionField: "contactStatus" },
   { key: "leadCategory",   label: "Lead Category",   optionField: "leadCategory" },
+  { key: "subCategory",    label: "Sub Category",    optionField: "subCategory" },
+  { key: "qualification",  label: "Qualification",  optionField: "qualification" },
   { key: "leadNature",     label: "Lead Nature",     optionField: "leadNature" },
   { key: "result",         label: "Result",          optionField: "result" },
   { key: "priority",       label: "Priority",        optionField: "priority" },
   { key: "device",         label: "Device",          optionField: "device" },
+  { key: "deviceCategoryId", label: "Device Category" },
+  { key: "deviceBrandId",  label: "Device Brand" },
+  { key: "fulfilmentRoute", label: "Route" },
   { key: "category",       label: "Category",        optionField: "category" },
   { key: "followUpAgentId", label: "Follow-Up Agent" },
   { key: "finalResult",    label: "Final Result",    optionField: "finalResult" },
@@ -353,6 +453,32 @@ export default function LeadsListPage() {
   const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, salesAgents, openFollowUpsByLead } = useLeads();
   const canAssign = useCanAssignLeads();
   const { currentUser, can } = usePermissions();
+
+  /* ── Live operational records for SYSTEM-DERIVED Action / Result / Store ──
+     Action and Result are NEVER stored on the lead. They are derived at read
+     time from the REAL linked records — the store's tickets / invoices /
+     walk-ins and the field jobs — via `deriveLeadWorkflow` (mirrors
+     `field-resolve.ts`). These are already store-scoped by their providers +
+     RLS, so a lead never resolves an unauthorized store's records. */
+  const { tickets, invoices, walkIns } = useStore();
+  const { jobs: fieldJobs } = useField();
+  const canViewTicket = allow(can, CAP.ticket.view);
+  const canViewInvoice = allow(can, CAP.invoice.view);
+  const workflowSources = useMemo<LeadWorkflowSources>(
+    () => ({ tickets, invoices, walkIns, fieldJobs }),
+    [tickets, invoices, walkIns, fieldJobs],
+  );
+  /* Per-lead derived workflow, recomputed when leads or any linked record set
+     changes (the canonical relationships drive it — never a manual sync). */
+  const workflowByLead = useMemo(() => {
+    // NOTE: `Map` is the lucide icon in this file — use a plain record.
+    const m: Record<string, LeadWorkflow> = {};
+    for (const l of leads) {
+      const openFollowUpDue = openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none";
+      m[l.id] = deriveLeadWorkflow(l, workflowSources, { openFollowUpDue });
+    }
+    return m;
+  }, [leads, workflowSources, openFollowUpsByLead]);
   // Bulk-action capability gates (granular key OR coarse fallback via CAP).
   const canBulkStatus = allow(can, CAP.lead.stageChange);
   const canBulkDelete = allow(can, CAP.lead.delete);
@@ -581,6 +707,38 @@ export default function LeadsListPage() {
   /* Deep-link: /leads/list?lead=<id> opens that lead's detail (used by the
      assignment + follow-up-due notifications). Runs once the leads are loaded. */
   const searchParams = useSearchParams();
+  const urlFilterKey = searchParams.toString();
+  const appliedUrlFiltersRef = useRef("");
+  /* Intelligence evidence links are refresh-safe and exact. URL values are
+     allowlisted into the canonical structured filter model; RLS still decides
+     which ids can actually render. */
+  useEffect(() => {
+    if (!urlFilterKey || appliedUrlFiltersRef.current === urlFilterKey) return;
+    const recognized = ["evidenceIds", "evidenceToken", "assignedTo", "dateRange", "source", "modeOfContact", "leadCategory", "subCategory", "priority", "status", "fulfilmentRoute", "deviceCategoryId", "deviceBrandId"]
+      .some((key) => searchParams.has(key));
+    if (!recognized) return;
+    const allowedDates = new Set<LeadDateRange>(LEAD_DATE_RANGES.map((item) => item.value));
+    const requestedDate = searchParams.get("dateRange") as LeadDateRange | null;
+    const resolvedEvidenceIds = resolveLeadEvidenceIds(searchParams);
+    const evidenceTokenMissing = !!searchParams.get("evidenceToken") && resolvedEvidenceIds.length === 0;
+    const evidenceIds = evidenceTokenMissing ? ["__evidence_unavailable__"] : resolvedEvidenceIds;
+    if (evidenceTokenMissing) toast.error("Evidence cohort unavailable", { description: "This saved analytical cohort expired. Reopen the insight from Lead Intelligence." });
+    const fields: LeadFilters["fields"] = {};
+    for (const key of ["assignedTo", "source", "modeOfContact", "leadCategory", "subCategory", "priority", "fulfilmentRoute", "deviceCategoryId", "deviceBrandId"] as LeadFilterField[]) {
+      const value = searchParams.get(key);
+      if (value) fields[key] = value;
+    }
+    appliedUrlFiltersRef.current = urlFilterKey;
+    setFilters({
+      ...EMPTY_LEAD_FILTERS,
+      status: searchParams.get("status") || "",
+      dateRange: requestedDate && allowedDates.has(requestedDate) ? requestedDate : "all",
+      customFrom: searchParams.get("from") || "",
+      customTo: searchParams.get("to") || "",
+      fields,
+      evidenceIds,
+    });
+  }, [urlFilterKey, searchParams, setFilters]);
   const deepLinkLeadId = searchParams.get("lead");
   // A lead the user may not see (another agent's lead, another store) is simply
   // not returned by RLS — say so once instead of silently doing nothing.
@@ -603,6 +761,9 @@ export default function LeadsListPage() {
      state stays structured (ids for people, raw values for fields). */
   const appliedChips = useMemo(() => {
     const chips: { label: string; value: string; onClear: () => void }[] = [];
+    if (filters.evidenceIds?.length) {
+      chips.push({ label: "Intelligence evidence", value: `${filters.evidenceIds.length} leads`, onClear: () => setFilters((f) => ({ ...f, evidenceIds: [] })) });
+    }
     if (filters.dateRange !== "all") {
       chips.push({
         label: "Date",
@@ -873,7 +1034,7 @@ export default function LeadsListPage() {
             every grouped column gets a generous width AND the frozen offsets
             line up exactly. The min-width equals their sum; the container
             scrolls horizontally on narrower viewports. */}
-        <table className="w-full min-w-[2184px] table-fixed text-[14px]">
+        <table className="w-full min-w-[2822px] table-fixed text-[14px]">
           <colgroup>
             {gridColumns.map((c) => (
               <col key={c.key} style={{ width: c.width }} />
@@ -882,12 +1043,10 @@ export default function LeadsListPage() {
           <thead className="rox-table-head sticky top-0 z-[6]">
             <tr className="text-left text-[12px] font-bold uppercase tracking-wider">
               <th {...mergeFrozen(frozenCellProps("select"), "px-3 py-4 text-left")}>
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={allSelected}
-                  ref={(el) => { if (el) el.indeterminate = someSelected && !allSelected; }}
+                  indeterminate={someSelected && !allSelected}
                   onChange={toggleAll}
-                  className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
                   aria-label="Select all leads"
                 />
               </th>
@@ -895,19 +1054,24 @@ export default function LeadsListPage() {
               {multiStore && <th className="px-3 py-4 text-left">Store</th>}
               <th {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 text-left")}>Date</th>
               <th {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 text-left")}>Region</th>
+              <th {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 text-left")}>Mode of Lead</th>
               <th {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 text-left")}>Source</th>
               <th {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 text-left")}>Agent</th>
               <th {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 text-left")}>Contact Status</th>
               <th {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 text-left")}>Contact Info</th>
               <th {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 text-left")}>Device &amp; Issue</th>
               <th {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 text-left")}>Lead Value</th>
-              <th {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 text-left")}>Comment</th>
               <th {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 text-left")}>Lead Category</th>
-              <th {...mergeFrozen(frozenCellProps("tbd"), "px-3 py-4 text-left")}>{TBD_HEADER_LABEL}</th>
+              <th {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 text-left")}>Comment</th>
+              <th {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 text-left")}>Sub Category</th>
               <th {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 text-left")}>Lead Type</th>
               <th {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 text-left")}>Status</th>
-              <th {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 text-left")}>Result</th>
-              <th {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right")}><span className="sr-only">Last Action</span></th>
+              {/* ACTION + RESULT are SYSTEM-DERIVED (read-only). A small lock
+                  glyph in the header signals they are not editable. */}
+              <th {...mergeFrozen(frozenCellProps("action"), "px-3 py-4 text-left")}><span className="inline-flex items-center gap-1"><Lock className="h-3 w-3 opacity-50" aria-hidden />Action</span></th>
+              <th {...mergeFrozen(frozenCellProps("storeCol"), "px-3 py-4 text-left")}>Store</th>
+              <th {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 text-left")}><span className="inline-flex items-center gap-1"><Lock className="h-3 w-3 opacity-50" aria-hidden />Result</span></th>
+              <th {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right")}>Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -921,16 +1085,28 @@ export default function LeadsListPage() {
               // it's reassigned — so the flow is not visible to anyone until a
               // new owner picks it up.
               const locked = isNotContactedLocked(lead);
+              // System-derived workflow (Action / Result / Store) for this lead.
+              const wf = workflowByLead[lead.id] ?? deriveLeadWorkflow(lead, workflowSources);
+              // Downstream (qualification-dependent) columns render N/A when the
+              // lead is Not-Contacted or Not-Qualified (progressive gate) OR when
+              // it's a locked stale lead. Core identity is never gated.
+              const gated = locked || isDownstreamGated(lead);
+              const storeBranchId = deriveLeadStoreBranchId(lead, workflowSources);
               // Resolved SOLID colour matching the row's (semi-transparent) tint,
               // handed to the frozen cells as --rox-row-tint so they can layer
               // the SAME tint over their opaque base (no bleed-through). The
               // follow-up tint (red) wins over the pinned tint (purple), matching
               // the class order above.
+              // Must resolve to the SAME final colour as the scrolling cells'
+              // Tailwind tint (followUpTone → bg-red-100/{90,70,60}). red-100 =
+              // rgb(254 226 226); use the identical colour + alpha here so the
+              // frozen block and the middle cells composite to one shade (no
+              // seam). Pinned mirrors bg-[#7C5CFC]/[0.04].
               const rowTintVar = tint
-                ? (fuState === "overdue" ? "hsl(0 93% 82% / 0.9)"
-                  : fuState === "today" ? "hsl(0 93% 82% / 0.7)"
-                  : "hsl(0 93% 82% / 0.6)")
-                : lead.pinnedAt ? "hsl(255 92% 68% / 0.06)" : undefined;
+                ? (fuState === "overdue" ? "rgb(254 226 226 / 0.9)"
+                  : fuState === "today" ? "rgb(254 226 226 / 0.7)"
+                  : "rgb(254 226 226 / 0.6)")
+                : lead.pinnedAt ? "rgb(124 92 252 / 0.04)" : undefined;
               return (
               <motion.tr
                 key={lead.id}
@@ -938,7 +1114,10 @@ export default function LeadsListPage() {
                 onClick={() => setDetailLead(lead)}
                 style={rowTintVar ? ({ ["--rox-row-tint" as any]: rowTintVar }) : undefined}
                 className={cn(
-                  "rox-table-row group h-[76px] cursor-pointer align-middle transition hover:bg-muted/40",
+                  "rox-table-row group h-[76px] cursor-pointer align-middle transition",
+                  // Hover tint only for un-tinted rows — a tinted (pinned/overdue)
+                  // row keeps its own colour on hover so the shade never shifts.
+                  !tinted && "hover:bg-muted/40",
                   lead.pinnedAt && "bg-[#7C5CFC]/[0.04]",
                   // Whole-row urgency from the STRUCTURED open follow-up (overdue
                   // active follow-up → entire row reads red), mirroring the
@@ -952,11 +1131,9 @@ export default function LeadsListPage() {
               >
                 {/* 0 · Selection — FROZEN LEFT (before the Lead ID anchor) */}
                 <td {...mergeFrozen(frozenCellProps("select"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={selected.has(lead.id)}
                     onChange={() => toggleOne(lead.id)}
-                    className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
                     aria-label={`Select lead ${lead.leadNo || lead.id}`}
                   />
                 </td>
@@ -975,7 +1152,9 @@ export default function LeadsListPage() {
                 <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <DateCell lead={lead} />}</td>
                 {/* 3 · Region */}
                 <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span>}</td>
-                {/* 4 · Source + capture channel */}
+                {/* 4 · Mode of Lead (how it came in — modeOfContact) */}
+                <td {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate text-zinc-700">{lead.modeOfContact || "—"}</span>}</td>
+                {/* 5 · Source + capture channel */}
                 <td {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <SourceCell lead={lead} />}</td>
                 {/* 5 · Agent (owner — user id → name). Even when LOCKED this
                     stays the reassign control — that's how a senior hands the
@@ -990,27 +1169,33 @@ export default function LeadsListPage() {
                 </td>
                 {/* 7 · Contact Info (grouped) */}
                 <td {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <ContactInfoCell lead={lead} />}</td>
-                {/* 8 · Device & Issue (grouped) */}
-                <td {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>{locked ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />}</td>
-                {/* 9 · Lead Value (pipeline) */}
-                <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <LeadValueCell lead={lead} />}</td>
-                {/* 10 · Comment */}
-                <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <CommentCell text={lead.comments || ""} />}</td>
-                {/* 11 · Lead Category */}
-                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span>}</td>
-                {/* 12 · TBD (mapped via TBD_SOURCE_FIELD — re-pointable) */}
-                <td {...mergeFrozen(frozenCellProps("tbd"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate text-zinc-600">{String(lead[TBD_SOURCE_FIELD] || "") || "—"}</span>}</td>
-                {/* 13 · Lead Type (= Priority: Hot/Warm/Cold) */}
-                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
-                {/* 14 · Status (+ fulfilment route) */}
+                {/* 8 · Device & Issue (grouped) — gated until contacted+qualified */}
+                <td {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>{gated ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />}</td>
+                {/* 9 · Lead Value (pipeline) — gated */}
+                <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <LeadValueCell lead={lead} />}</td>
+                {/* 10 · Lead Category — gated */}
+                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span>}</td>
+                {/* 11 · Comment — the Not-Qualified REASON stays readable here
+                    (never masked to N/A) so the qualification decision is
+                    preserved; a plain lead shows its comments. */}
+                <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <CommentCell text={lead.comments || lead.finalRemarks || ""} />}</td>
+                {/* 12 · Sub Category — gated */}
+                <td {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <span className="block truncate text-zinc-600">{lead.subCategory || "—"}</span>}</td>
+                {/* 13 · Lead Type (= Priority: Hot/Warm/Cold) — gated */}
+                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                {/* 14 · Status (+ fulfilment route) — gated */}
                 <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")}>
-                  {locked ? <NACell /> : (<>
+                  {gated ? <NACell /> : (<>
                   {lead.status ? <span className={cn("inline-flex whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span> : <span className="text-zinc-400">—</span>}
                   <div className="mt-1.5"><FulfilmentRouteBadge lead={lead} /></div>
                   </>)}
                 </td>
-                {/* 15 · Result */}
-                <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate font-medium text-zinc-700">{lead.result || "—"}</span>}</td>
+                {/* 15 · ACTION — SYSTEM-DERIVED, read-only */}
+                <td {...mergeFrozen(frozenCellProps("action"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <ActionCell wf={wf} />}</td>
+                {/* 16 · STORE — derived from the actual operational record */}
+                <td {...mergeFrozen(frozenCellProps("storeCol"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : (storeBranchId ? <StoreContextCell store={getStore(storeBranchId)} mode="stacked" /> : <span className="text-zinc-400">—</span>)}</td>
+                {/* 17 · RESULT — SYSTEM-DERIVED, read-only (₹value + TKT + INV) */}
+                <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <ResultCell wf={wf} canViewTicket={canViewTicket} canViewInvoice={canViewInvoice} />}</td>
                 {/* Last Action — FROZEN RIGHT anchor */}
                 <td {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right align-middle")} onClick={(e) => e.stopPropagation()}>
                   <LeadActionsMenu lead={lead} onAction={handleAction} />
@@ -1040,12 +1225,9 @@ export default function LeadsListPage() {
           <div key={lead.id} onClick={() => setDetailLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", followUpTone(openFollowUpRowState(openFollowUpsByLead.get(lead.id))).rowTint)}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
-                <input
-                  type="checkbox"
+                <Checkbox
                   checked={selected.has(lead.id)}
-                  onClick={(e) => e.stopPropagation()}
                   onChange={() => toggleOne(lead.id)}
-                  className="h-4 w-4 cursor-pointer rounded border-zinc-300 text-[#4361EE] focus:ring-[#4361EE]/30"
                   aria-label={`Select lead ${lead.leadNo || lead.id}`}
                 />
                 <Avatar name={lead.name || lead.leadNo} size={36} />

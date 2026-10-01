@@ -9,6 +9,7 @@ import { SettingsPage, SettingsSection } from "@/components/settings/settings-pa
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePermissions } from "@/lib/permissions-context";
 import { PASSWORD_MIN_LENGTH } from "@/lib/auth";
 import { getSessionToken } from "@/lib/use-session-tracker";
@@ -432,8 +433,7 @@ function ChangePassword({
       </div>
 
       <label className="flex items-center gap-2 sm:col-span-2 text-[12.5px] text-muted-foreground cursor-pointer select-none">
-        <input type="checkbox" checked={revokeOthers} onChange={(e) => setRevokeOthers(e.target.checked)}
-          className="h-3.5 w-3.5 rounded border-border text-[#4361EE] focus:ring-[#4361EE]" />
+        <Checkbox checked={revokeOthers} onChange={setRevokeOthers} aria-label="Sign out my other sessions after changing the password" />
         Sign out my other sessions after changing the password
       </label>
 

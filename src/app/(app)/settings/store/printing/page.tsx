@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Ticket, Receipt, Building2, Info, Plus, Trash2, LayoutTemplate } from "lucide-react";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings, type CustomPrintTemplate } from "@/lib/store-settings";
 import { useCanEdit } from "@/lib/use-can-edit";
@@ -268,11 +269,10 @@ export default function PrintingSettingsPage() {
 
                 {/* Inherit toggle */}
                 <label className="flex items-center gap-2.5 rounded-lg border border-border bg-muted/20 px-3 py-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
+                  <Checkbox
                     checked={tpl.inheritFromStore}
-                    onChange={(e) => updateTemplate(tpl.id, { inheritFromStore: e.target.checked })}
-                    className="h-4 w-4 accent-[#4361EE]"
+                    onChange={(next) => updateTemplate(tpl.id, { inheritFromStore: next })}
+                    aria-label="Inherit from Master Default"
                   />
                   <span className="text-[12.5px]">
                     Inherit from Master Default — leave a field blank below to use the store house style.

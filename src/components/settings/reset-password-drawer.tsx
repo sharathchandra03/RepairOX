@@ -5,6 +5,7 @@ import { KeyRound, Check, Lock, Eye, EyeOff, RefreshCw, Copy, CheckCheck } from 
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { validatePassword, PASSWORD_MIN_LENGTH } from "@/lib/auth";
 
 /** Generate a readable, reasonably strong temporary password. */
@@ -156,11 +157,11 @@ export function ResetPasswordDrawer({
         )}
 
         <label className="flex cursor-pointer items-start gap-2.5 rounded-xl border border-border p-3">
-          <input
-            type="checkbox"
+          <Checkbox
             checked={temporary}
-            onChange={(e) => setTemporary(e.target.checked)}
-            className="mt-0.5 h-4 w-4 accent-[#4361EE]"
+            onChange={(next) => setTemporary(next)}
+            className="mt-0.5"
+            aria-label="Temporary password — force change at next login"
           />
           <span>
             <span className="block text-[13px] font-semibold">Temporary — force change at next login</span>

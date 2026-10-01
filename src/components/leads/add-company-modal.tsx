@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input, Textarea, Label } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
+import { Checkbox } from "@/components/ui/checkbox";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import {
@@ -783,11 +784,10 @@ export function AddCompanyModal({
                         <div className="flex flex-wrap gap-4">
                           {(["email", "phone", "whatsapp"] as const).map((ch) => (
                             <label key={ch} className="inline-flex items-center gap-2 cursor-pointer select-none">
-                              <input
-                                type="checkbox"
+                              <Checkbox
                                 checked={commPrefs[ch]}
-                                onChange={(e) => setCommPrefs((p) => ({ ...p, [ch]: e.target.checked }))}
-                                className="h-4 w-4 rounded border-border text-[#4361EE] focus:ring-[#4361EE]/20"
+                                onChange={(next) => setCommPrefs((p) => ({ ...p, [ch]: next }))}
+                                aria-label={`Communication preference: ${ch}`}
                               />
                               <span className="text-[13px] font-medium text-zinc-700 capitalize">{ch}</span>
                             </label>
