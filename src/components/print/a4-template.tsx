@@ -1,6 +1,6 @@
 "use client";
 
-import type { PrintDocumentData, PrintDeviceInfo, PrintLineItem } from "@/lib/print-utils";
+import type { PrintDocumentData, PrintDeviceInfo, PrintLineItem, PrintQuotationInfo } from "@/lib/print-utils";
 import { formatPrintCurrency, formatPrintDate, formatPrintTime, formatPrintDateTime } from "@/lib/print-utils";
 import { formatWarranty } from "@/lib/mock-data";
 
@@ -32,6 +32,9 @@ const NO_BREAK: React.CSSProperties = {
 export function A4Template({ data }: { data: PrintDocumentData }) {
   if (data.ticket) {
     return <TicketServiceReport data={data} />;
+  }
+  if (data.quotation) {
+    return <QuotationA4 data={data} />;
   }
   return <InvoiceA4 data={data} />;
 }
@@ -1098,6 +1101,198 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
       {/* ══ FOOTER (flush to bottom) ══ */}
       <footer data-pdf-atomic style={{ backgroundColor: BRAND.blue, color: BRAND.white, textAlign: "center", padding: "5px 12px", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
         {inv.footer || data.printFooter || "Thank you for choosing RepairOX!"}
+      </footer>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   QUOTATION — same RepairOX blue A4 document family as the Invoice, but a
+   purpose-built customer-facing OFFER. No tax breakdown, no paid/balance, no
+   payment status (a quotation is NOT an invoice). It leads with the quoted
+   items + offer total, then the branded customer-facing message (fixed +
+   dynamic + conditional sentences from the token engine), and a signature.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+function QuotationA4({ data }: { data: PrintDocumentData }) {
+  const { store, customer, printTitle } = data;
+  const q = data.quotation as PrintQuotationInfo;
+
+  const createdDate = formatPrintDate(q.createdAt);
+  const createdTime = formatPrintTime(q.createdAt);
+  const isLeadBased = (q.source || "").toLowerCase() === "lead";
+
+  // Build the item rows from the real quoted lines. A quotation line is an
+  // item/service PROPOSED to the customer — no tax column, so the layout is a
+  // simple #/Item/Description/Qty/Price/Total grid.
+  const rows = (q.items || []).map((it, i) => ({ idx: i + 1, ...it }));
+  const showItemsTable = rows.length > 0;
+
+  return (
+    <div
+      className="a4-page"
+      style={{
+        width: "210mm",
+        minHeight: "297mm",
+        margin: "0 auto",
+        backgroundColor: BRAND.white,
+        color: BRAND.navy,
+        fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+        fontSize: 11,
+        lineHeight: 1.4,
+        boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <div className="ticket-print-body" style={{ padding: "9mm 12mm 2mm", flex: 1 }}>
+        {/* ══ HEADER — identical store branding + doc identity as the invoice ══ */}
+        <header data-pdf-atomic style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, paddingBottom: 10, borderBottom: `2px solid ${BRAND.blue}` }}>
+          <div style={{ display: "flex", gap: 13, alignItems: "flex-start", maxWidth: "58%" }}>
+            {store.logo ? <img src={store.logo} alt="Logo" style={{ height: 56, width: 56, objectFit: "contain" }} /> : null}
+            <div>
+              <div style={{ fontSize: 15, fontWeight: 800, color: BRAND.blue, lineHeight: 1.1 }}>{store.storeName}</div>
+              {store.alternateName ? <div style={{ fontSize: 9, color: BRAND.slateLight, fontWeight: 600 }}>{store.alternateName}</div> : null}
+              <div style={{ marginTop: 5, fontSize: 9.5, color: BRAND.slate, display: "flex", flexDirection: "column", gap: 1.5 }}>
+                {store.fullAddress ? <span>{store.fullAddress}</span> : null}
+                {store.phone ? <span>{store.phone}{store.mobile && store.mobile !== store.phone ? ` · ${store.mobile}` : ""}</span> : null}
+                {store.email ? <span>{store.email}</span> : null}
+                {store.website ? <span style={{ color: BRAND.blue, fontWeight: 600 }}>{store.website}</span> : null}
+              </div>
+            </div>
+          </div>
+
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, letterSpacing: 0.5, color: BRAND.navy, textTransform: "uppercase" }}>{printTitle}</div>
+            <div style={{ marginTop: 4, display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: "4px 8px", fontSize: 9, color: BRAND.slate }}>
+              <span>{createdDate} · {createdTime}</span>
+              <span style={{ display: "inline-block", padding: "2px 8px", borderRadius: 4, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", backgroundColor: BRAND.band, color: BRAND.blue, border: `1px solid ${BRAND.border}` }}>
+                {isLeadBased ? "Lead-based" : "Quotation"}
+              </span>
+            </div>
+            <div style={{ marginTop: 6, backgroundColor: BRAND.blue, color: BRAND.white, borderRadius: 8, padding: "6px 14px", display: "inline-block", textAlign: "left", minWidth: 150 }}>
+              <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: 0.6, textTransform: "uppercase", opacity: 0.85 }}>Quotation Number</div>
+              <div style={{ fontSize: 15, fontWeight: 800, lineHeight: 1.1 }}>{q.quotationId}</div>
+            </div>
+            <div style={{ marginTop: 6, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 2 }}>
+              <Barcode value={q.quotationId} />
+              <div style={{ fontSize: 9, fontWeight: 600, color: BRAND.navy, letterSpacing: 1 }}>{q.quotationId}</div>
+            </div>
+          </div>
+        </header>
+
+        {/* ══ CUSTOMER + QUOTATION INFO ══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10, marginTop: 7 }}>
+          <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
+            <SectionHead title="Customer Details" />
+            <div style={{ padding: "7px 10px", display: "flex", flexDirection: "column", gap: 5 }}>
+              <Field label="Name" value={customer.name} />
+              {customer.phone ? <Field label="Phone" value={customer.phone} /> : null}
+              {customer.email ? <Field label="Email" value={customer.email} /> : null}
+              {customer.address ? <Field label="Location" value={customer.address} /> : null}
+            </div>
+          </div>
+
+          <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
+            <SectionHead title="Quotation Information" />
+            <div style={{ padding: "7px 10px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 14px" }}>
+              <Field label="Quotation Number" value={q.quotationId} />
+              <Field label="Date" value={`${createdDate} (${createdTime})`} />
+              {q.validUntil ? <Field label="Valid Until" value={formatPrintDate(q.validUntil)} /> : null}
+              {q.device ? <Field label="Device" value={q.device} /> : null}
+              {q.issue ? <Field label="Service" value={q.issue} /> : null}
+              {q.warranty ? <Field label="Warranty" value={q.warranty} /> : null}
+              {q.salesAgentName ? <Field label="Sales Agent" value={q.salesAgentName} /> : null}
+              {isLeadBased && q.leadNo ? <Field label="Lead" value={q.leadNo} /> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* ══ QUOTED ITEMS TABLE (no tax column — this is an offer) ══ */}
+        {showItemsTable ? (
+          <div style={{ marginTop: 7, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed", fontSize: 10 }}>
+              <colgroup>
+                <col style={{ width: "5%" }} />
+                <col style={{ width: "40%" }} />
+                <col style={{ width: "27%" }} />
+                <col style={{ width: "8%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "10%" }} />
+              </colgroup>
+              <thead>
+                <tr style={{ backgroundColor: BRAND.blue, color: BRAND.white }}>
+                  <th style={thStyle("center")}>#</th>
+                  <th style={thStyle("left")}>Item / Service</th>
+                  <th style={thStyle("left")}>Description</th>
+                  <th style={thStyle("center")}>Qty</th>
+                  <th style={thStyle("right")}>Price</th>
+                  <th style={thStyle("right")}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} data-pdf-atomic style={{ backgroundColor: i % 2 === 1 ? BRAND.bandSoft : BRAND.white, verticalAlign: "top", ...NO_BREAK }}>
+                    <td style={tdStyle("center")}>{r.idx}</td>
+                    <td style={tdStyle("left")}><div style={{ fontWeight: 700, color: BRAND.navy }}>{r.name}</div></td>
+                    <td style={tdStyle("left")}>{r.description ? <span>{r.description}</span> : <span style={{ color: BRAND.slateLight }}>—</span>}</td>
+                    <td style={tdStyle("center")}>{r.qty}</td>
+                    <td style={tdStyle("right")}>{formatPrintCurrency(r.price)}</td>
+                    <td style={{ ...tdStyle("right"), fontWeight: 800, color: BRAND.navy }}>{formatPrintCurrency(r.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {/* ══ MESSAGE + OFFER TOTAL (side-by-side) ══ */}
+        <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 10, marginTop: 7, alignItems: "stretch", ...NO_BREAK }}>
+          {/* LEFT: the branded customer-facing message */}
+          <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <SectionHead title="Quotation" />
+            <div style={{ padding: "9px 12px", display: "flex", flexDirection: "column", gap: 7, flex: 1 }}>
+              {q.message.map((p, i) => (
+                <p key={i} style={{ fontSize: 10, color: BRAND.ink, lineHeight: 1.5, margin: 0 }}>{p}</p>
+              ))}
+              {q.note ? (
+                <p style={{ fontSize: 9.5, color: BRAND.slate, lineHeight: 1.45, margin: 0, borderTop: `1px solid ${BRAND.borderSoft}`, paddingTop: 6 }}>{q.note}</p>
+              ) : null}
+            </div>
+          </div>
+
+          {/* RIGHT: the offer summary */}
+          <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <div style={{ padding: "9px 12px", display: "flex", flexDirection: "column", gap: 5, flex: 1 }}>
+              <SummaryRow label="Sub Total" value={formatPrintCurrency(q.subtotal)} />
+              {q.discount > 0 ? <SummaryRow label="Discount" value={`-${formatPrintCurrency(q.discount)}`} /> : null}
+              {q.warranty ? <SummaryRow label="Warranty" value={q.warranty} /> : null}
+              <div style={{ borderTop: `1px dashed ${BRAND.border}`, margin: "2px 0" }} />
+              <SummaryRow label="Quotation Total" value={formatPrintCurrency(q.amount)} strong accent />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: BRAND.band, borderTop: `1px solid ${BRAND.border}`, padding: "8px 12px" }}>
+              <span style={{ fontSize: 11, fontWeight: 800, color: BRAND.navy }}>Estimated Total</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: BRAND.blue }}>{formatPrintCurrency(q.amount)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* ══ SIGN-OFF (Best regards, Agent / Company / Office / Contact) ══ */}
+        <div data-pdf-atomic data-pdf-keep-with-next style={{ marginTop: 10, ...NO_BREAK }}>
+          <div style={{ fontSize: 10, color: BRAND.ink }}>Best regards,</div>
+          <div style={{ marginTop: 2, display: "flex", flexDirection: "column", gap: 1 }}>
+            {q.salesAgentName ? <div style={{ fontSize: 11, fontWeight: 800, color: BRAND.navy }}>{q.salesAgentName}</div> : null}
+            {store.storeName ? <div style={{ fontSize: 10, fontWeight: 700, color: BRAND.blue }}>{store.storeName}</div> : null}
+            {store.fullAddress ? <div style={{ fontSize: 9.5, color: BRAND.slate }}>{store.fullAddress}</div> : null}
+            {(store.phone || store.mobile) ? <div style={{ fontSize: 9.5, color: BRAND.slate }}>{store.phone || store.mobile}</div> : null}
+          </div>
+        </div>
+      </div>
+
+      {/* ══ FOOTER (flush to bottom) ══ */}
+      <footer data-pdf-atomic style={{ backgroundColor: BRAND.blue, color: BRAND.white, textAlign: "center", padding: "5px 12px", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
+        {data.printFooter || "Thank you for choosing " + (store.storeName || "us") + "!"}
       </footer>
     </div>
   );

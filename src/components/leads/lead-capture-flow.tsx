@@ -42,6 +42,7 @@ import { CustomerPicker } from "@/components/common/customer-picker";
 import { CustomerIdentityLookup } from "@/components/common/customer-identity-lookup";
 import { AddCustomerModal } from "@/components/common/add-customer-modal";
 import type { Customer } from "@/lib/customer-data";
+import { normalizeCustomerPhone, normalizeCustomerEmail } from "@/lib/customer-data";
 import { IssueSelector } from "@/components/common/issue-selector";
 import { LocationPicker } from "@/components/leads/location-picker";
 import { cn } from "@/lib/utils";
@@ -435,12 +436,15 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     setDraft((d) => ({
       ...d,
       customerId: c.id,
-      // Fill blanks from the master, but never overwrite what the user typed.
-      name: d.name || c.fullName || "",
-      number: d.number || c.mobile || "",
-      alternateNumber: d.alternateNumber || c.altMobile || "",
-      email: d.email || c.email || "",
-      location: d.location || c.address || "",
+      // Explicitly choosing "Use Existing Customer" ADOPTS that customer's
+      // identity — so the canonical name/phone/email/address overwrite whatever
+      // was typed (the typed name may have been a different spelling / wrong
+      // person). Only sales attribution is left untouched (the lead owner).
+      name: c.fullName || d.name || "",
+      number: c.mobile || d.number || "",
+      alternateNumber: c.altMobile || d.alternateNumber || "",
+      email: c.email || d.email || "",
+      location: c.address || d.location || "",
     }));
   };
   const onCustomerPicked = (cid: string) => {
@@ -458,6 +462,33 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const onCustomerCreated = (c: Customer) => {
     setShowCreateCustomer(false);
     linkCustomer(c);
+  };
+
+  /* ── Contact-field edit that stays DYNAMIC ──
+     Editing Name / Number / Email after a customer was linked means the user is
+     now describing a (potentially) DIFFERENT person. If the edited phone/email
+     no longer matches the linked customer, auto-UNLINK (clear customerId) so the
+     inline lookup re-searches live from what's actually typed — the "Customer
+     Found" card can never show a stale, no-longer-matching customer. */
+  const setContactField = (key: "name" | "number" | "email", val: string) => {
+    setDraft((d) => {
+      const next = { ...d, [key]: val };
+      if (!d.customerId) return next;
+      const linked = customers.find((x) => x.id === d.customerId);
+      if (!linked) return next;
+      const typedPhone = normalizeCustomerPhone(next.number ?? "");
+      const linkedPhone = normalizeCustomerPhone(linked.mobile);
+      const linkedAlt = normalizeCustomerPhone(linked.altMobile || "");
+      const typedEmail = normalizeCustomerEmail(next.email ?? "");
+      const linkedEmail = normalizeCustomerEmail(linked.email);
+      // Still the same person if the typed phone (10+ digits) still matches, or
+      // (no complete phone yet) the email still matches.
+      const phoneMatches = typedPhone.length >= 10 && (typedPhone === linkedPhone || (!!linkedAlt && typedPhone === linkedAlt));
+      const emailMatches = !!typedEmail && typedEmail === linkedEmail;
+      const stillSame = phoneMatches || (typedPhone.length < 10 && emailMatches);
+      if (!stillSame) next.customerId = "";
+      return next;
+    });
   };
 
   /* ── Save (create or edit) — the ONLY place validation gates ── */
@@ -594,12 +625,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       />
                     </Field>
                     <Field label="Name" required error={touched ? validation.errors.name : undefined}>
-                      <input className={inputCls(touched && !!validation.errors.name)} value={draft.name ?? ""} onChange={(e) => set("name", e.target.value)} placeholder="Full name" />
+                      <input className={inputCls(touched && !!validation.errors.name)} value={draft.name ?? ""} onChange={(e) => setContactField("name", e.target.value)} placeholder="Full name" />
                     </Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Number" required error={touched ? validation.errors.number : undefined}>
-                      <input className={inputCls(touched && !!validation.errors.number)} value={draft.number ?? ""} onChange={(e) => set("number", e.target.value)} placeholder="98765 43210" inputMode="tel" />
+                      <input className={inputCls(touched && !!validation.errors.number)} value={draft.number ?? ""} onChange={(e) => setContactField("number", e.target.value)} placeholder="98765 43210" inputMode="tel" />
                     </Field>
                     <Field label="Alternate Number">
                       <input className={inputCls()} value={draft.alternateNumber ?? ""} onChange={(e) => set("alternateNumber", e.target.value)} placeholder="Secondary / office no." inputMode="tel" />
@@ -619,7 +650,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>
-                      <input className={inputCls(touched && !!validation.errors.email)} value={draft.email ?? ""} onChange={(e) => set("email", e.target.value)} placeholder="name@email.com" inputMode="email" />
+                      <input className={inputCls(touched && !!validation.errors.email)} value={draft.email ?? ""} onChange={(e) => setContactField("email", e.target.value)} placeholder="name@email.com" inputMode="email" />
                     </Field>
                     <Field label="Region">
                       <ConfigurableSelect field="region" value={draft.region ?? ""} onChange={(v) => set("region", v)} placeholder="City / area" />

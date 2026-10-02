@@ -62,7 +62,7 @@ function leadSearchText(lead: Lead): string {
 }
 
 export default function KanbanPage() {
-  const { leads, openFollowUpsByLead, canSeeAllLeads } = useLeads();
+  const { leads, openFollowUpsByLead, canSeeAllLeads, viewAsReadOnly } = useLeads();
   const { can } = usePermissions();
   const { id: currentUserId } = useSession();
   const { stores, isAllShops, getStore, activeStoreId } = useStoreContext();
@@ -249,6 +249,9 @@ export default function KanbanPage() {
     const { active, over } = e;
     setActiveLeadId(null);
 
+    // Owner "view as agent" read-only lens: never commit a placement change.
+    if (viewAsReadOnly) { setLiveColumns(null); return; }
+
     setLiveColumns((prev) => {
       if (!prev || !over) return null;
       const activeId = String(active.id);
@@ -269,7 +272,7 @@ export default function KanbanPage() {
       kanban.moveCard(activeId, toCol, finalIndex);
       return null; // drop the live snapshot; derived columnViews take over
     });
-  }, [findColumnOf, kanban]);
+  }, [findColumnOf, kanban, viewAsReadOnly]);
 
   const handleDragCancel = useCallback(() => {
     if (autoScrollCleanupRef.current) { autoScrollCleanupRef.current(); autoScrollCleanupRef.current = null; }
@@ -310,11 +313,13 @@ export default function KanbanPage() {
                   onSelect={kanban.setActiveBoard}
                   onNewBoard={() => setShowNewBoard(true)}
                 />
-                <BoardSettingsMenu
-                  board={activeBoard}
-                  kanban={kanban}
-                  onManageColumns={() => setShowManageColumns(true)}
-                />
+                {!viewAsReadOnly && (
+                  <BoardSettingsMenu
+                    board={activeBoard}
+                    kanban={kanban}
+                    onManageColumns={() => setShowManageColumns(true)}
+                  />
+                )}
               </>
             )}
             {/* View switch — List / Kanban / Map (matches the list page toolbar). */}
@@ -323,11 +328,13 @@ export default function KanbanPage() {
               <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></span>
               <Link href="/leads/map-view" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Map View"><MapIcon className="h-3.5 w-3.5" /></Link>
             </div>
-            <Can permission={CAP.lead.create}>
-              <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> Add Lead
-              </Button>
-            </Can>
+            {!viewAsReadOnly && (
+              <Can permission={CAP.lead.create}>
+                <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Add Lead
+                </Button>
+              </Can>
+            )}
           </div>
         }
       />
@@ -445,13 +452,13 @@ export default function KanbanPage() {
                       getStore={getStore}
                       showStore={showStoreCol}
                       noteColorOf={(leadId) => (activeBoard ? noteColorOf(activeBoard, leadId) : "default")}
-                      onChangeNote={(leadId, color) => kanban.setCardNoteColor(leadId, color)}
+                      onChangeNote={viewAsReadOnly ? undefined : (leadId, color) => kanban.setCardNoteColor(leadId, color)}
                       onOpen={openLead}
                       onCall={canCall ? callLead : undefined}
                       onEmail={canCall ? emailLead : undefined}
                       onWhatsApp={canCall ? waLead : undefined}
                       onAddLead={() => setShowCreate(true)}
-                      canCreate={allow(can, CAP.lead.create)}
+                      canCreate={allow(can, CAP.lead.create) && !viewAsReadOnly}
                       searching={!!query.trim()}
                     />
                   );
@@ -512,6 +519,7 @@ export default function KanbanPage() {
         onClose={() => setDetailLead(null)}
         onEdit={(l) => setDetailLead(l)}
         onDelete={() => setDetailLead(null)}
+        readOnly={viewAsReadOnly}
       />
     </div>
   );
@@ -532,6 +540,7 @@ function SortableCard({
   onCall,
   onEmail,
   onWhatsApp,
+  readOnly,
 }: {
   lead: Lead;
   isActive: boolean;
@@ -540,15 +549,18 @@ function SortableCard({
   store: any;
   showStore: boolean;
   note: NoteColor;
-  onChangeNote: (color: NoteColor) => void;
+  onChangeNote?: (color: NoteColor) => void;
   onOpen: () => void;
   onCall?: () => void;
   onEmail?: () => void;
   onWhatsApp?: () => void;
+  readOnly?: boolean;
 }) {
   const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({
     id: lead.id,
-    disabled: searching,
+    // Dragging is disabled while searching (a partial view) AND under the
+    // owner read-only "view as agent" lens (never reorder an agent's board).
+    disabled: searching || !!readOnly,
   });
 
   const style: React.CSSProperties = {
@@ -619,7 +631,7 @@ function KanbanColumnView({
   getStore: (id: string | null | undefined) => any;
   showStore: boolean;
   noteColorOf: (leadId: string) => NoteColor;
-  onChangeNote: (leadId: string, color: NoteColor) => void;
+  onChangeNote?: (leadId: string, color: NoteColor) => void;
   onOpen: (lead: Lead) => void;
   onCall?: (lead: Lead) => void;
   onEmail?: (lead: Lead) => void;
@@ -628,6 +640,8 @@ function KanbanColumnView({
   canCreate: boolean;
   searching: boolean;
 }) {
+  // No note-color handler ⇒ owner read-only lens ⇒ dragging is disabled too.
+  const readOnly = !onChangeNote;
   const tone = kanbanColor(col.color);
   // The whole column body is a droppable (so cards can be dropped into empty
   // columns too). id = the column id; cards are the sortable items.
@@ -679,7 +693,8 @@ function KanbanColumnView({
               store={showStore ? getStore(lead.branchId) : null}
               showStore={showStore}
               note={noteColorOf(lead.id)}
-              onChangeNote={(c) => onChangeNote(lead.id, c)}
+              readOnly={readOnly}
+              onChangeNote={onChangeNote ? (c) => onChangeNote(lead.id, c) : undefined}
               onOpen={() => onOpen(lead)}
               onCall={onCall ? () => onCall(lead) : undefined}
               onEmail={onEmail ? () => onEmail(lead) : undefined}

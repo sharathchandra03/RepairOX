@@ -361,9 +361,20 @@ export type PermissionKey =
   | "deals_create"
   | "deals_edit"
   | "deals_delete"
+  /* Deal / discount-approval workflow (attached to a Lead).
+     create/edit (above) = submit & revise an approval request;
+     the keys below are the APPROVAL-side authority (separate from submitting). */
+  | "deals_comment"
+  | "deals_approve"
+  | "deals_reject"
+  | "deals_request_changes"
+  | "deals_view_all"
+  | "deals_settings"
   | "quotations_view"
+  | "quotations_view_all"
   | "quotations_create"
   | "quotations_send"
+  | "quotations_delete"
   | "quotations_convert_to_invoice"
   /* Companies & contacts */
   | "companies_view"
@@ -847,13 +858,21 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_sales_agent", label: "Sales Agent — eligible lead owner (listed in the Agent picker)" },
       { key: "leads_performance_view_own", label: "View Own Sales Performance" },
       { key: "leads_performance_view_all", label: "View All Sales Agents' Performance" },
-      { key: "deals_view", label: "View Deals" },
-      { key: "deals_create", label: "Create Deal" },
-      { key: "deals_edit", label: "Edit Deal" },
+      { key: "deals_view", label: "View Deals (own / submitted)" },
+      { key: "deals_create", label: "Create / Submit Deal (discount approval request)" },
+      { key: "deals_edit", label: "Edit / Resubmit Own Deal" },
       { key: "deals_delete", label: "Delete Deal" },
+      { key: "deals_comment", label: "Comment on Deal" },
+      { key: "deals_approve", label: "Approve Deals" },
+      { key: "deals_reject", label: "Reject Deals" },
+      { key: "deals_request_changes", label: "Request Changes on Deals" },
+      { key: "deals_view_all", label: "View All Deals (authorized stores)" },
+      { key: "deals_settings", label: "Manage Deal Settings" },
       { key: "quotations_view", label: "View Quotations" },
+      { key: "quotations_view_all", label: "View All Quotations (authorized stores)" },
       { key: "quotations_create", label: "Create / Edit Quotation" },
       { key: "quotations_send", label: "Send Quotation" },
+      { key: "quotations_delete", label: "Delete Quotation" },
       { key: "quotations_convert_to_invoice", label: "Convert Quote to Invoice" },
       { key: "companies_view", label: "View Companies" },
       { key: "companies_create", label: "Create Company" },
@@ -1239,6 +1258,10 @@ export const ROLES: RoleDef[] = [
       "leads_view", "leads_create", "leads_edit", "leads_followup", "leads_assign",
       "leads_stage_change", "leads_priority_change", "leads_pin",
       "leads_performance_view_own",
+      // Deal / discount-approval: a Sales Agent may SUBMIT & revise their own
+      // discount request and comment on it — but NOT approve/reject (that
+      // authority is a manager/owner capability; see the deals module).
+      "deals_view", "deals_create", "deals_edit", "deals_comment",
       // Comments / activities on their leads.
       "comms_call_log", "comms_activities_view",
       // Identity resolution during capture (Customer Master + CRM Contacts).

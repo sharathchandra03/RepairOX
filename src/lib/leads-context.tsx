@@ -39,7 +39,7 @@ import {
   isNotContactedStatus, isNotContactedLocked,
   computeLeadMetrics, openFollowUp, leadsOwnedBy,
   type LeadFollowUp, type LeadFollowUpDraft, type LeadAssignmentEvent, type LeadMetrics,
-  operationalRecordAttributedElsewhere,
+  operationalRecordAttributedElsewhere, findOpenLeadMatches,
   type LeadConversionEvent, type LeadConversionEventType, type LeadConversionTargetType,
   EMPTY_LEAD_FILTERS,
   type Lead, type LeadDraft, type LeadOption, type LeadFieldKey, type LeadFilters, type Contact,
@@ -50,6 +50,8 @@ const LEADS_KEY = "repairox-leads";
 const OPTIONS_KEY = "repairox-lead-options";
 const SEQ_KEY = "repairox-lead-seq";
 const CONTACTS_KEY = "repairox-contacts";
+/** Session key for the owner "View as agent" read-only scope (per tab). */
+const VIEW_AS_AGENT_KEY = "repairox-leads-view-as-agent";
 const FOLLOWUPS_KEY = "repairox-lead-followups";
 const ASSIGN_HISTORY_KEY = "repairox-lead-assignment-history";
 const CONVERSION_HISTORY_KEY = "repairox-lead-conversion-history";
@@ -396,6 +398,21 @@ interface LeadsContextValue {
   refreshSalesAgents: () => Promise<void>;
   /** Whether the signed-in user sees every lead in their store scope (vs own only). */
   canSeeAllLeads: boolean;
+
+  /* ── Owner "View as agent" scope (Option A — NOT impersonation) ──
+     An authorized owner (see-all / performanceAll) can scope the Leads
+     workspace to ONE agent's leads, READ-ONLY. The session identity never
+     changes — this is an analytical scope layered on the owner's own
+     visibility, mirroring the Agent-Intelligence "subject, not session" model. */
+  /** The agent user id currently being viewed ("" = not active / not authorized). */
+  viewAsAgentId: string;
+  /** Whether the current user may use the view-as-agent scope at all. */
+  canViewAsAgent: boolean;
+  /** True while a view-as scope is active → the Leads workspace is read-only. */
+  viewAsReadOnly: boolean;
+  /** Enter the view-as scope for an agent user id (pass "" to exit). No-op
+   *  without cross-agent authority. */
+  setViewAsAgent: (agentId: string) => void;
   /** Pin/unpin a lead so it floats to the top of the list (DB-backed). */
   pinLead: (id: string, pinned: boolean) => Promise<void>;
   /** Record the Sales service-route decision (Store / Pickup & Drop / On-Site). */
@@ -434,6 +451,19 @@ interface LeadsContextValue {
    *  to a lead — used by open-lead detection + the unattributed safety net.
    *  Writes the lead's linked_* id + a conversion event; guards duplicate attribution. */
   linkOperationalRecord: (leadId: string, kind: "walk_in" | "field_job" | "ticket" | "invoice", recordId: string, recordLabel?: string) => Promise<void>;
+  /** Attribution safety net (AUTOMATIC): when a ticket/invoice/walk-in/field
+   *  record is created for a customer identity that matches an OPEN lead, link
+   *  it back so the originating Sales Agent keeps credit — WITHOUT a manual
+   *  click. Resolves the open lead via Customer id → phone → email (never name),
+   *  skips if already attributed, and no-ops when nothing matches. Returns the
+   *  linked lead id, or "" when none. Reuses linkOperationalRecord (so it marks
+   *  back_matched + records the conversion event). */
+  autoLinkByIdentity: (
+    kind: "walk_in" | "field_job" | "ticket" | "invoice",
+    recordId: string,
+    ident: { customerId?: string; phone?: string; email?: string },
+    recordLabel?: string,
+  ) => Promise<string>;
 
   /** Derived salesperson metrics for a scope: "me" (own), "all" (loaded set),
    *  or an explicit ownerId. Computed from lead + follow-up records — never a
@@ -627,6 +657,20 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [filters, setFiltersState] = useState<LeadFilters>(EMPTY_LEAD_FILTERS);
+  /** OWNER "View as agent" scope (Option A — NOT impersonation). When an owner
+   *  (see-all / performanceAll) sets this to an agent's USER id, the Leads
+   *  workspace scopes to that agent's leads and renders READ-ONLY. The signed-in
+   *  session identity (useSession) is NEVER changed — this is an analytical
+   *  scope on top of the owner's own see-all visibility, mirroring the
+   *  Agent-Intelligence "subject, not session" model. */
+  const [viewAsAgentId, setViewAsAgentId] = useState<string>(() => {
+    // Session-scoped persistence so the read-only scope survives in-module
+    // navigation + a hard refresh on a sub-page (no ?viewAs= needed), and
+    // auto-clears when the tab closes. Never localStorage — this is a
+    // temporary analytical lens, not a saved preference.
+    if (typeof window === "undefined") return "";
+    try { return window.sessionStorage.getItem(VIEW_AS_AGENT_KEY) || ""; } catch { return ""; }
+  });
 
   const useDb = isSupabaseConfigured && !!supabase;
   const db = supabase!;
@@ -1821,6 +1865,32 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     });
   }, [updateLead, recordConversionEvent]);
 
+  /* ── Automatic attribution safety net ──
+     When an operational record is created for a customer identity that matches
+     an OPEN lead, link it back automatically so the originating Sales Agent
+     keeps credit — no manual "link" click needed. This is what makes a routed
+     Walk-In lead (which never got a two-way link at routing time) flip to
+     "Ticket Created" / "Invoice Created" the moment the ticket/invoice is made.
+     Identity match is Customer id → phone → email (never name). It is a no-op
+     when nothing matches, and linkOperationalRecord already guards against
+     double-attributing one record to two leads. */
+  const autoLinkByIdentity = useCallback(async (
+    kind: "walk_in" | "field_job" | "ticket" | "invoice",
+    recordId: string,
+    ident: { customerId?: string; phone?: string; email?: string },
+    recordLabel?: string,
+  ): Promise<string> => {
+    if (!recordId) return "";
+    if (!ident.customerId && !ident.phone && !ident.email) return "";
+    // Already attributed to a lead? Then there's nothing to recover.
+    if (operationalRecordAttributedElsewhere(leadsRef.current, kind, recordId, "")) return "";
+    const matches = findOpenLeadMatches(leadsRef.current, ident);
+    const top = matches[0];
+    if (!top) return "";
+    await linkOperationalRecord(top.lead.id, kind, recordId, recordLabel);
+    return top.lead.id;
+  }, [linkOperationalRecord]);
+
   /* ── Lead visibility scope (UI = RLS) ──
      See-all roles (CAP.lead.viewTeam ≡ DB auth_lead_see_all) see every lead
      in their store scope. Everyone else — e.g. a Sales Agent — sees only leads
@@ -1828,7 +1898,24 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
      follow-up agent or an assigned follow-up record). In DB mode RLS already
      returns exactly this set; the filter keeps local mode + optimistic state
      consistent and is defence-in-depth, never the security boundary. */
+  /** The owner may only "view as" an agent when they already have cross-agent
+   *  authority (see-all leads, or the all-agent performance key). Otherwise the
+   *  scope is ignored — a plain Sales Agent can never scope to someone else. */
+  const canViewAsAgent = canSeeAllLeads || allow(can, CAP.lead.performanceAll);
+  /** The agent id actually in effect (empty when not authorized / not set). */
+  const effectiveViewAsId = canViewAsAgent ? viewAsAgentId : "";
+  // Ref mirror so leadMetrics (a stable useCallback) can read the live scope
+  // without being re-created on every scope change.
+  const effectiveViewAsIdRef = useRef(effectiveViewAsId);
+  effectiveViewAsIdRef.current = effectiveViewAsId;
+  /** True while an owner is viewing an agent's workspace → the whole Leads
+   *  workspace is read-only (defence-in-depth; server + RLS stay the boundary). */
+  const viewAsReadOnly = !!effectiveViewAsId;
+
   const scopedLeads = useMemo(() => {
+    // OWNER view-as: scope the owner's (already see-all) visible leads down to
+    // the selected agent's leads. Never widens beyond what the owner may see.
+    if (effectiveViewAsId) return leadsOwnedBy(canSeeAllLeads ? leads : [], effectiveViewAsId);
     if (canSeeAllLeads) return leads;
     const me = currentUserId || "";
     if (!me) return [];
@@ -1846,10 +1933,29 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       if (isNotContactedLocked(l)) return false;
       return true;
     });
-  }, [leads, followUps, canSeeAllLeads, currentUserId]);
+  }, [leads, followUps, canSeeAllLeads, currentUserId, effectiveViewAsId]);
+
+  /** Set/clear the owner "view as agent" scope. Passing "" exits the scope.
+   *  No-op for a user without cross-agent authority (the scope would be
+   *  ignored anyway) — keeps the setter safe to call from the URL sync. */
+  const setViewAsAgent = useCallback((agentId: string) => {
+    const next = agentId || "";
+    setViewAsAgentId(next);
+    if (typeof window !== "undefined") {
+      try {
+        if (next) window.sessionStorage.setItem(VIEW_AS_AGENT_KEY, next);
+        else window.sessionStorage.removeItem(VIEW_AS_AGENT_KEY);
+      } catch { /* ignore */ }
+    }
+  }, []);
 
   const leadMetrics = useCallback((scope: "me" | "all" | { ownerId: string } = "all", revenue?: { tickets: any[]; invoices: any[] }): LeadMetrics => {
-    const ownerId = scope === "me" ? (currentUserIdRef.current || "") : typeof scope === "object" ? scope.ownerId : "";
+    // Under an owner "view as agent" scope, "me" resolves to the AGENT being
+    // viewed (not the owner) so a personal dashboard shows the agent's numbers.
+    // `scopedLeads` is already narrowed to that agent, so this keeps the owner
+    // filter from zeroing everything out.
+    const meId = effectiveViewAsIdRef.current || currentUserIdRef.current || "";
+    const ownerId = scope === "me" ? meId : typeof scope === "object" ? scope.ownerId : "";
     // "all" = everything the caller may see (never beyond their scope). An
     // explicit other owner requires the all-performance capability.
     if (typeof scope === "object" && scope.ownerId !== currentUserIdRef.current && !allow(can, CAP.lead.performanceAll)) {
@@ -1989,14 +2095,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     filters, setFilters, clearFilters,
     optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
+    viewAsAgentId: effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent,
     followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp,
     assignmentHistory, assignmentHistoryFor,
-    conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord,
+    conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity,
     leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

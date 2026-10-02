@@ -174,6 +174,79 @@ export function unpromotedContacts(
   });
 }
 
+/**
+ * CRM-visible contacts — the list for the CRM Contacts surface.
+ *
+ * RepairOX rule: a person who originated from a LEAD stays in CRM Contacts for
+ * the full relationship record, EVEN AFTER they become a Customer (dual
+ * presence — they appear in both Customers and CRM). This is deliberate so the
+ * sales team keeps the complete contact/opportunity trail. Only contacts that
+ * did NOT come from a lead collapse into the Customer Master once promoted
+ * (so a plain Add-Customer person isn't double-listed).
+ *
+ * A contact is lead-origin when a Lead references it (by `contactId`, or by the
+ * shared `customerId` once promoted). Each returned row carries `promoted`
+ * (linked/duplicated into the Customer Master) so the UI can badge it.
+ */
+export type CrmContact = Contact & {
+  /** True when this contact is also a Customer Master record (promoted). */
+  promoted?: boolean;
+  /** True when a Lead references this contact (origin = Sales/Lead). */
+  fromLead?: boolean;
+};
+
+export function crmVisibleContacts(
+  contacts: Contact[],
+  customers: Customer[],
+  leads: LeadLike[],
+): CrmContact[] {
+  const customerIds = new Set(customers.map((c) => c.id));
+  const customerPhones = new Set<string>();
+  const customerEmails = new Set<string>();
+  for (const c of customers) {
+    const m = normalizeContactMobile(c.mobile);
+    if (m) customerPhones.add(m);
+    const am = normalizeContactMobile(c.altMobile);
+    if (am) customerPhones.add(am);
+    const e = normalizeContactEmail(c.email);
+    if (e) customerEmails.add(e);
+  }
+  // Index lead-origin by contact id, customer id, and normalized phone/email so
+  // a lead-origin person is recognised however the lead references them.
+  const leadContactIds = new Set<string>();
+  const leadCustomerIds = new Set<string>();
+  const leadPhones = new Set<string>();
+  const leadEmails = new Set<string>();
+  for (const l of leads) {
+    if (l.contactId) leadContactIds.add(l.contactId);
+    if (l.customerId) leadCustomerIds.add(l.customerId);
+    const lp = normalizeContactMobile(l.number);
+    if (lp) leadPhones.add(lp);
+    const le = normalizeContactEmail(l.email);
+    if (le) leadEmails.add(le);
+  }
+
+  const out: CrmContact[] = [];
+  for (const ct of contacts) {
+    const m = normalizeContactMobile(ct.mobile || ct.phone);
+    const e = normalizeContactEmail(ct.email);
+    const promoted =
+      (!!ct.customerId && customerIds.has(ct.customerId)) ||
+      (!!m && customerPhones.has(m)) ||
+      (!!e && customerEmails.has(e));
+    const fromLead =
+      leadContactIds.has(ct.id) ||
+      (!!ct.customerId && leadCustomerIds.has(ct.customerId)) ||
+      (!!m && leadPhones.has(m)) ||
+      (!!e && leadEmails.has(e));
+    // Keep it if it's still an unpromoted prospect, OR it originated from a
+    // lead (dual presence). Drop only NON-lead contacts that have collapsed
+    // into the Customer Master.
+    if (!promoted || fromLead) out.push({ ...ct, promoted, fromLead });
+  }
+  return out;
+}
+
 /* ──────────────────────────────────────────────────────────────────────────
    Promotion origin — the "did this person come from Sales/a Lead?" resolver
    ────────────────────────────────────────────────────────────────────────── */

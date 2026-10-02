@@ -64,8 +64,8 @@ import { customersToCSV, downloadCustomersXLSX } from "@/lib/customer-csv";
 import { downloadCSV } from "@/lib/csv-utils";
 import { toast } from "@/components/ui/toaster";
 import { CustomerImportDialog } from "@/components/customers/customer-import-dialog";
-import type { Contact } from "@/lib/leads-data";
-import { unpromotedContacts } from "@/lib/customer-candidates";
+import type { Contact, Lead } from "@/lib/leads-data";
+import { crmVisibleContacts, type CrmContact } from "@/lib/customer-candidates";
 import { CustomerGroupPicker } from "@/components/common/customer-group-picker";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
 import { Can } from "@/components/common/can";
@@ -122,7 +122,7 @@ function KpiCard({
 export default function ManageCustomersPage() {
   const router = useRouter();
   const { customers, customerGroups, addCustomer, updateCustomer, deleteCustomer, mergeCustomersAction, loyaltyByCustomer } = useStore();
-  const { contacts, hydrated: contactsHydrated, deleteContact } = useLeads();
+  const { contacts, leads, hydrated: contactsHydrated, deleteContact } = useLeads();
   const { can } = usePermissions();
   // Live loyalty earning rate for THIS store/org (Settings → Customers →
   // Loyalty). Derived loyalty points in the table recompute from lifetime value
@@ -965,6 +965,7 @@ export default function ManageCustomersPage() {
       {tab === "contacts" && (
         <ContactsTab
           contacts={contacts}
+          leads={leads}
           hydrated={contactsHydrated}
           customers={customers}
           canDelete={allow(can, CAP.customer.delete)}
@@ -1094,7 +1095,7 @@ export default function ManageCustomersPage() {
 }
 
 /* ─── CRM Contacts tab ─────────────────────────────────────────────────── */
-function ContactsTab({ contacts, hydrated, customers, canDelete, onDelete }: { contacts: Contact[]; hydrated: boolean; customers: Customer[]; canDelete: boolean; onDelete: (id: string) => Promise<void> | void }) {
+function ContactsTab({ contacts, leads, hydrated, customers, canDelete, onDelete }: { contacts: Contact[]; leads: Lead[]; hydrated: boolean; customers: Customer[]; canDelete: boolean; onDelete: (id: string) => Promise<void> | void }) {
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [page, setPage] = useState(1);
@@ -1103,13 +1104,13 @@ function ContactsTab({ contacts, hydrated, customers, canDelete, onDelete }: { c
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkDelete, setShowBulkDelete] = useState(false);
 
-  // Only UNPROMOTED contacts belong on the Customer Master surface — once a
-  // Contact is promoted to a Customer (linked by customerId, OR its phone/email
-  // already matches an existing customer) it shows up as a real Customer, so
-  // listing it here too would double-count the same person. The phone/email
-  // check also reconciles historical contacts whose customerId was never
-  // back-filled.
-  const prospects = useMemo(() => unpromotedContacts(contacts, customers), [contacts, customers]);
+  // CRM Contacts = unpromoted prospects + every LEAD-ORIGIN person (even after
+  // they become a Customer). A person who came from a Lead stays here for the
+  // full sales relationship record (dual presence: Customers AND CRM); only a
+  // non-lead contact collapses into the Customer Master once promoted, so a
+  // plain Add-Customer person is never double-listed. Each row carries
+  // `promoted` / `fromLead` so we can badge it.
+  const prospects = useMemo<CrmContact[]>(() => crmVisibleContacts(contacts, customers, leads), [contacts, customers, leads]);
 
   const filtered = useMemo(() => prospects.filter((c) => {
     if (statusFilter !== "all" && (c.status ?? "active") !== statusFilter) return false;
@@ -1157,7 +1158,7 @@ function ContactsTab({ contacts, hydrated, customers, canDelete, onDelete }: { c
   return (
     <>
       <div className="rounded-xl border border-border bg-muted/30 px-4 py-2.5 text-[12px] text-muted-foreground">
-        Prospects captured via Lead or Walk-In intake, before they become a verified Customer. Contacts here have no service or invoice history yet.
+        People captured via Lead or Walk-In intake. Lead-origin contacts stay here for the full sales record even after they become a Customer (they appear in both Customers and CRM); other prospects move to the Customer Master once promoted.
       </div>
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1248,7 +1249,14 @@ function ContactsTab({ contacts, hydrated, customers, canDelete, onDelete }: { c
                     <div className="flex items-center gap-2.5 min-w-0">
                       <Avatar name={c.fullName} size={32} />
                       <div className="min-w-0">
-                        <p className="truncate text-[13px] font-semibold text-foreground">{c.fullName}</p>
+                        <p className="flex items-center gap-1.5 truncate text-[13px] font-semibold text-foreground">
+                          <span className="truncate">{c.fullName}</span>
+                          {c.promoted && (
+                            <span className="shrink-0 rounded-full bg-emerald-50 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-200" title="Also a Customer Master record">
+                              Customer
+                            </span>
+                          )}
+                        </p>
                         <p className="truncate text-[11px] text-muted-foreground">{c.id}</p>
                       </div>
                     </div>

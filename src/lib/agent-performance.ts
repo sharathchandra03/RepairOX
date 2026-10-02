@@ -816,3 +816,231 @@ export function conversionTier(conversionRate: number): ConversionTier {
   if (conversionRate >= CONVERSION_TIER_THRESHOLD.Silver) return "Silver";
   return "";
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INDIVIDUAL DASHBOARD ANALYTICS  (reusable, pure — shared by the Individual
+   Agent Performance page and any future Agent Intelligence surface)
+
+   Everything below is DERIVED from an already-computed AgentPerformance (and,
+   where a trend is needed, the agent's real month rows). No new data source,
+   no dummy values, no fabricated comparison. The small-sample threshold is
+   centralised so a 1/1 segment never produces a misleading claim.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** Minimum sample before a comparative/segment claim is allowed to be strong.
+ *  Below this, callers show "Not enough data" instead of a headline number.
+ *  Documented + centralised so it can be tuned in ONE place. */
+export const PERF_MIN_SAMPLE = 5;
+
+/* ── KPI trend comparison ──────────────────────────────────────────────────
+   A trend pill only appears when a VALID prior period exists. "Valid" means we
+   actually have a previous comparable value to compare against (a prior month
+   row). A delta is never shown when the previous value is absent — matching the
+   spec rule "do not display comparison text when there is no meaningful
+   comparison". */
+export interface PerfDelta {
+  /** Signed percentage change vs the previous period (rounded, e.g. 12 or -8). */
+  pct: number;
+  /** True when higher-is-better for THIS metric (drives the green/red tone). */
+  up: boolean;
+  /** The raw previous value (for tooltips). */
+  previous: number;
+  /** The raw current value (for tooltips). */
+  current: number;
+}
+
+/**
+ * Compute a trend delta between the latest and the immediately-previous period
+ * value. Returns null when there is no valid comparison (no previous period, or
+ * the previous value is 0 so a percentage is meaningless). `higherIsBetter`
+ * lets the caller mark metrics where a rise is NOT favourable (e.g. overdue
+ * follow-ups) so the tone is honest — never "green = bigger" blindly.
+ */
+export function perfDelta(
+  current: number,
+  previous: number | undefined,
+  higherIsBetter = true,
+): PerfDelta | null {
+  if (previous == null || previous === 0) return null;
+  if (!isFinite(current) || !isFinite(previous)) return null;
+  const change = ((current - previous) / Math.abs(previous)) * 100;
+  const pct = Math.round(change);
+  if (pct === 0) return null; // no movement → no pill (keeps the UI honest)
+  const rising = change > 0;
+  return { pct, up: higherIsBetter ? rising : !rising, previous, current };
+}
+
+/* ── Sparkline series from the agent's real month rows ─────────────────────
+   Builds a chronological (oldest→newest) numeric series for a KPI sparkline
+   straight from the PeriodPerformance rows. No synthetic/decorative points —
+   every point is a real month's derived value. Returns [] when fewer than two
+   months exist (the Sparkline component then shows its "not enough data"
+   state rather than a fake line). */
+export type PerfSeriesMetric =
+  | "leads" | "qualified" | "converted" | "revenueWon" | "conversionRate" | "pendingFollowUp";
+
+function metricValue(row: PeriodPerformance, metric: PerfSeriesMetric): number {
+  switch (metric) {
+    case "leads": return row.leads;
+    case "qualified": return row.qualified;
+    case "converted": return row.convertedAgentDriven;
+    case "revenueWon": return row.revenueWonAgentDriven;
+    case "conversionRate": return Math.round(row.conversionRate * 100);
+    case "pendingFollowUp": return row.pendingFollowUp;
+  }
+}
+
+/** Chronological {key,label,value} points for one metric across the agent's
+ *  month rows. `months` is the newest-first array from
+ *  computeAgentMonthlyPerformance; this reverses it to oldest→newest for the
+ *  sparkline. */
+export function perfSparkline(
+  months: PeriodPerformance[],
+  metric: PerfSeriesMetric,
+): { key: string; label: string; value: number }[] {
+  if (months.length < 2) return [];
+  return [...months]
+    .sort((a, b) => a.periodStart - b.periodStart)
+    .map((m) => ({ key: m.periodKey, label: m.periodLabel, value: metricValue(m, metric) }));
+}
+
+/** The latest + previous month values for a metric, for the KPI trend pill.
+ *  Returns previous = undefined when only one month exists (→ no pill). */
+export function perfLatestVsPrevious(
+  months: PeriodPerformance[],
+  metric: PerfSeriesMetric,
+): { current: number; previous: number | undefined } {
+  const asc = [...months].sort((a, b) => a.periodStart - b.periodStart);
+  const n = asc.length;
+  if (n === 0) return { current: 0, previous: undefined };
+  const current = metricValue(asc[n - 1], metric);
+  const previous = n >= 2 ? metricValue(asc[n - 2], metric) : undefined;
+  return { current, previous };
+}
+
+/* ── Conversion summary ────────────────────────────────────────────────────
+   The three insight cards below the monthly table. Distinct from the top KPIs:
+   this answers "once I QUALIFY a lead, how well do I convert it?" and "how much
+   revenue does each converted lead bring?" — using agent-driven (earned)
+   figures so self-initiated conversions don't inflate the agent's quality. */
+export interface ConversionSummary {
+  /** qualified → converted rate (0..1); null when no qualified leads. */
+  qualifiedToConverted: number | null;
+  convertedFromQualified: number;   // converted count credited (agent-driven)
+  qualified: number;                // qualified denominator
+  /** finalized revenue / converted lead; null when no conversions. */
+  revenuePerConverted: number | null;
+  revenueWon: number;               // agent-driven finalized revenue
+  converted: number;                // agent-driven converted count
+  pendingFollowUp: number;
+  overdueFollowUp: number;
+}
+
+export function conversionSummary(p: AgentPerformance): ConversionSummary {
+  const converted = p.convertedAgentDriven;
+  const qualified = p.qualified;
+  const revenueWon = p.revenueWonAgentDriven;
+  return {
+    qualifiedToConverted: qualified > 0 ? Math.min(1, converted / qualified) : null,
+    convertedFromQualified: converted,
+    qualified,
+    revenuePerConverted: converted > 0 ? revenueWon / converted : null,
+    revenueWon,
+    converted,
+    pendingFollowUp: p.pendingFollowUp,
+    overdueFollowUp: p.overdueFollowUp,
+  };
+}
+
+/* ── Lead conversion funnel (display rows) ─────────────────────────────────
+   Turns the structured LeadFunnel into ordered display rows with each stage's
+   share of the TOP stage (Total). Revenue Won is appended as the final
+   commercial outcome — labelled clearly as revenue, not a lead count (its
+   "count" is the number of leads that produced finalized revenue; the money is
+   carried separately so the UI never conflates a ₹ amount with a lead count). */
+export interface FunnelStage {
+  key: "total" | "qualified" | "converted" | "revenue";
+  label: string;
+  count: number;              // lead count at this stage
+  shareOfTotal: number;       // 0..1 of the Total stage
+  money?: number;             // only set on the revenue stage
+}
+
+export function funnelStages(p: AgentPerformance): FunnelStage[] {
+  const total = p.funnel.total;
+  const share = (n: number) => (total > 0 ? n / total : 0);
+  const revenueLeads = p.funnel.invoice; // leads that produced finalized revenue
+  return [
+    { key: "total", label: "Total Leads", count: total, shareOfTotal: 1 },
+    { key: "qualified", label: "Qualified", count: p.funnel.qualified, shareOfTotal: share(p.funnel.qualified) },
+    { key: "converted", label: "Converted", count: p.convertedAgentDriven, shareOfTotal: share(p.convertedAgentDriven) },
+    { key: "revenue", label: "Revenue Won", count: revenueLeads, shareOfTotal: share(revenueLeads), money: p.revenueWonAgentDriven },
+  ];
+}
+
+/* ── Converted route mix (donut) ───────────────────────────────────────────
+   byRoute carries TOTAL routed leads; this section is explicitly the mix among
+   CONVERTED operations. We use each route's `operationalDone` (a real linked
+   walk-in/field job AND a won status) as the converted count, so the donut
+   reflects actual completed conversions per route — never mere route
+   assignment. Shares are of the converted total (not all leads). */
+export interface RouteMixRow {
+  route: RoutePerfRow["route"];
+  label: string;
+  converted: number;
+  share: number;     // 0..1 of the converted total across the three routes
+  revenueWon: number;
+}
+export interface RouteMix {
+  rows: RouteMixRow[];
+  convertedTotal: number;
+}
+
+export function convertedRouteMix(p: AgentPerformance): RouteMix {
+  const base = p.byRoute.map((r) => ({
+    route: r.route,
+    label: r.label,
+    converted: r.operationalDone,
+    revenueWon: r.revenueWon,
+  }));
+  const convertedTotal = base.reduce((s, r) => s + r.converted, 0);
+  return {
+    convertedTotal,
+    rows: base.map((r) => ({ ...r, share: convertedTotal > 0 ? r.converted / convertedTotal : 0 })),
+  };
+}
+
+/* ── Top source ────────────────────────────────────────────────────────────
+   The single highest-VOLUME source (bySource is already sorted leads desc).
+   Honest labelling: this is "top by lead volume", not "best" — the caller
+   decides the wording. Returns null when there is no source data or the sample
+   is below PERF_MIN_SAMPLE (so a 1-lead source never becomes a headline). */
+export interface TopSource {
+  label: string;
+  leads: number;
+  share: number;          // 0..1 of all the agent's leads
+  qualified: number;
+  converted: number;
+  conversionRate: number; // converted / leads in this source (0..1)
+}
+
+export function topSourceByVolume(p: AgentPerformance): TopSource | null {
+  const rows = p.bySource.filter((r) => r.key !== "Unspecified");
+  const best = rows[0];
+  if (!best || best.leads < PERF_MIN_SAMPLE) return null;
+  const totalLeads = p.leads || p.bySource.reduce((s, r) => s + r.leads, 0);
+  return {
+    label: best.label,
+    leads: best.leads,
+    share: totalLeads > 0 ? best.leads / totalLeads : 0,
+    qualified: best.qualified,
+    converted: best.converted,
+    conversionRate: best.leads > 0 ? best.converted / best.leads : 0,
+  };
+}
+
+/** Source rows for a compact source-performance table (top N by volume, real
+ *  values only). Excludes the "Unspecified" bucket from the headline list. */
+export function sourcePerformanceRows(p: AgentPerformance, limit = 6): BreakdownRow[] {
+  return p.bySource.filter((r) => r.key !== "Unspecified").slice(0, limit);
+}

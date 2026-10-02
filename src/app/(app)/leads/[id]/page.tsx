@@ -1,311 +1,243 @@
 "use client";
 
-import { useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+/* ──────────────────────────────────────────────────────────────────────────
+   RepairOX — View Lead (full page).
+
+   Follows the view-detail-pages standard: header + summary cards, then a
+   `grid grid-cols-1 gap-6 lg:grid-cols-3` with a 2/3 detail column and a
+   `<PinnedRail>` utility rail. Wired to the REAL lead record (useLeads) — never
+   mock data. The rail leads with the complete LEAD JOURNEY (the spec's §32-43
+   "understand the whole journey in seconds"), then the Deal/approval panel,
+   follow-ups and quick actions.
+   ────────────────────────────────────────────────────────────────────────── */
+
+import { useMemo } from "react";
+import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Phone, Mail, MessageSquare, Star, Clock, Building2, MapPin,
-  Edit3, MoreHorizontal, CheckCircle2, Circle, Calendar, FileText,
-  Send, Target, TrendingUp, User, Tag, Globe, Zap, ChevronRight,
-  Plus, ArrowUpRight,
+  ArrowLeft, Phone, Mail, MessageSquare, User, Tag, Wrench, Flag,
+  ClipboardCheck, UserCheck, MapPin, BadgePercent, Pencil,
 } from "lucide-react";
-import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
-import { Badge } from "@/components/ui/badge";
-import { SegmentedTabs } from "@/components/ui/tabs";
+import { PinnedRail } from "@/components/common/pinned-rail";
+import { StoreContextCell } from "@/components/common/store-context-cell";
 import { cn, formatINR } from "@/lib/utils";
+import { useLeads } from "@/lib/leads-context";
+import { useDeals } from "@/lib/lead-deals-context";
+import { useStoreContext } from "@/lib/store-context";
+import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
+import {
+  deriveLeadWorkflow, type LeadWorkflowSources, LEAD_ACTION_LABEL, leadActionTone,
+} from "@/lib/lead-workflow";
+import { currentDealForLead } from "@/lib/lead-deals";
+import { useStore } from "@/lib/store";
+import { useField } from "@/lib/field-context";
+import { statusTone, priorityTone } from "@/components/leads/lead-pills";
+import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
+import { LeadDealPanel } from "@/components/deals/lead-deal-panel";
+import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
+import type { Lead } from "@/lib/leads-data";
 
-/* ── Mock lead data ── */
-const LEAD = {
-  id: "LD-001",
-  name: "Aarav Mehta",
-  email: "aarav@technova.in",
-  phone: "+91 98765 43210",
-  company: "TechNova Pvt Ltd",
-  role: "Founder & CEO",
-  location: "Bengaluru, Karnataka",
-  website: "technova.in",
-  source: "Google Ads",
-  status: "qualified" as const,
-  priority: "hot" as const,
-  score: 92,
-  value: 125000,
-  owner: "Kalai S.",
-  createdAt: "Jul 6, 2026",
-  lastActivity: "2 hours ago",
-  followUpDate: "Today, 4:00 PM",
-  tags: ["Enterprise", "Fleet", "Annual Contract"],
-};
+/* ─── Standard view-detail sub-components (match the Ticket/Invoice markup) ── */
 
-const STATUS_STYLE: Record<string, string> = {
-  new: "bg-sky-50 text-sky-700 ring-sky-200",
-  contacted: "bg-violet-50 text-violet-700 ring-violet-200",
-  qualified: "bg-indigo-50 text-indigo-700 ring-indigo-200",
-  proposal: "bg-amber-50 text-amber-700 ring-amber-200",
-  won: "bg-emerald-50 text-emerald-700 ring-emerald-200",
-  lost: "bg-zinc-100 text-zinc-500 ring-zinc-200",
-};
+function DetailSection({
+  icon: Icon, title, action, children, id,
+}: {
+  icon: React.ComponentType<{ className?: string }>;
+  title: string;
+  action?: React.ReactNode;
+  children: React.ReactNode;
+  id?: string;
+}) {
+  return (
+    <section id={id} className="scroll-mt-24 rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+      <div className="mb-5 flex items-center justify-between gap-2.5 border-b border-border/70 pb-4">
+        <div className="flex items-center gap-2.5">
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Icon className="h-4 w-4" /></span>
+          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h2>
+        </div>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
 
-/* ── Timeline data ── */
-const TIMELINE = [
-  { id: "1", type: "call",    title: "Call — Discussed fleet repair timeline",          desc: "Customer confirmed device drop-off tomorrow. Needs 50 iPhone 14 Pro screens replaced.", user: "Kalai S.", time: "2h ago", icon: Phone, color: "text-emerald-600 bg-emerald-50 ring-emerald-200" },
-  { id: "2", type: "deal",    title: "Deal moved to Qualified",                         desc: "iPhone Fleet Repair Contract advanced from Contacted stage.",                            user: "Kalai S.", time: "3h ago", icon: Target, color: "text-indigo-600 bg-indigo-50 ring-indigo-200" },
-  { id: "3", type: "email",   title: "Quotation sent — Annual Fleet Package",            desc: "3-tier pricing proposal with volume discounts attached as PDF.",                         user: "Kalai S.", time: "Yesterday", icon: Mail, color: "text-sky-600 bg-sky-50 ring-sky-200" },
-  { id: "4", type: "meeting", title: "Discovery meeting — Video call",                   desc: "45min call to understand fleet size, device mix, and SLA expectations.",                 user: "Kalai S.", time: "Jul 15", icon: Calendar, color: "text-violet-600 bg-violet-50 ring-violet-200" },
-  { id: "5", type: "note",    title: "Note — Budget approval pending",                   desc: "Aarav mentioned board approval needed for contracts above ₹1L. ETA 1 week.",            user: "Ritesh Kumar", time: "Jul 14", icon: FileText, color: "text-amber-600 bg-amber-50 ring-amber-200" },
-  { id: "6", type: "wa",      title: "WhatsApp — Shared repair portfolio",               desc: "Sent case study of similar fleet management we did for PixelCraft.",                     user: "Manoj S.", time: "Jul 12", icon: MessageSquare, color: "text-green-600 bg-green-50 ring-green-200" },
-  { id: "7", type: "created", title: "Lead created from Google Ads campaign",            desc: "Landed on repair-fleet page, submitted form with 'Annual Contract' interest.",           user: "System", time: "Jul 6", icon: Zap, color: "text-[#4361EE] bg-[#EEF1FD] ring-[#B3BFF6]" },
-];
+function DetailField({ label, value, highlight }: { label: string; value: React.ReactNode; highlight?: boolean }) {
+  const empty = value === "" || value == null || value === "—";
+  return (
+    <div>
+      <p className="text-[11px] font-medium text-muted-foreground">{label}</p>
+      <p className={cn("text-sm font-medium", highlight ? "font-bold text-foreground" : "text-foreground", empty && "text-zinc-300")}>
+        {empty ? "—" : value}
+      </p>
+    </div>
+  );
+}
 
-/* ── Tasks ── */
-const TASKS = [
-  { id: "T-1", title: "Send revised quotation with volume discount", done: false, due: "Today" },
-  { id: "T-2", title: "Schedule contract walkthrough call", done: false, due: "Tomorrow" },
-  { id: "T-3", title: "Follow up on board approval status", done: false, due: "Jul 25" },
-  { id: "T-4", title: "Share repair SLA document", done: true, due: "Jul 15" },
-];
+function SummaryCard({ label, value, tone }: { label: string; value: React.ReactNode; tone?: string }) {
+  return (
+    <div className="rounded-xl border border-border/70 bg-card/80 p-3">
+      <p className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={cn("mt-0.5 text-sm font-bold tabular-nums", tone)}>{value}</p>
+    </div>
+  );
+}
 
-/* ── Deals ── */
-const DEALS = [
-  { id: "D-001", title: "iPhone Fleet Repair Contract", value: 125000, stage: "Qualified", probability: 70 },
-  { id: "D-004", title: "Corporate Device Management", value: 450000, stage: "Discovery", probability: 25 },
-];
+function RailCard({ title, children, action }: { title: string; children: React.ReactNode; action?: React.ReactNode }) {
+  return (
+    <section className="rounded-2xl border border-border bg-card p-5 shadow-card">
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+        {action}
+      </div>
+      {children}
+    </section>
+  );
+}
 
-/* ── Notes ── */
-const NOTES = [
-  { id: "N-1", text: "Budget approval pending from board — contracts above ₹1L need sign-off. Expected within 1 week.", author: "Ritesh Kumar", time: "Jul 14" },
-  { id: "N-2", text: "Prefers WhatsApp communication over email. Responsive between 10 AM – 6 PM.", author: "Kalai S.", time: "Jul 10" },
-  { id: "N-3", text: "Previously worked with a competitor service. Switched due to inconsistent SLA. Quality is top priority.", author: "Kalai S.", time: "Jul 7" },
-];
+export default function ViewLeadPage() {
+  const params = useParams();
+  const router = useRouter();
+  const id = String(params?.id ?? "");
+  const { leads, hydrated, viewAsReadOnly } = useLeads();
+  const { currentDeal } = useDeals();
+  const { getStore } = useStoreContext();
+  const { can } = usePermissions();
+  const { tickets, invoices, walkIns } = useStore();
+  const { jobs: fieldJobs } = useField();
 
-export default function LeadDetailPage() {
-  const [activeTab, setActiveTab] = useState("timeline");
+  const lead = useMemo<Lead | undefined>(() => leads.find((l) => l.id === id || l.leadNo === id), [leads, id]);
+
+  const workflowSources = useMemo<LeadWorkflowSources>(() => ({ tickets, invoices, walkIns, fieldJobs }), [tickets, invoices, walkIns, fieldJobs]);
+  const wf = useMemo(() => lead ? deriveLeadWorkflow(lead, workflowSources, { deal: currentDeal(lead.id) ?? null }) : null, [lead, workflowSources, currentDeal]);
+
+  if (!lead) {
+    return (
+      <div className="space-y-5">
+        <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => router.push("/leads/list")}><ArrowLeft className="h-4 w-4" /> Back to Leads</Button>
+        <div className="rounded-2xl border border-border bg-card p-12 text-center shadow-card">
+          <p className="font-semibold">{hydrated ? "Lead not found" : "Loading lead…"}</p>
+          {hydrated && <p className="mt-1 text-sm text-muted-foreground">This lead may have been removed, or you don't have access to it.</p>}
+        </div>
+      </div>
+    );
+  }
+
+  const deal = currentDeal(lead.id);
+  const money = (n: number | null | undefined) => (n == null ? "—" : formatINR(n));
+  // Under the owner "view as agent" read-only lens, this detail page is view-only.
+  const canEdit = allow(can, CAP.lead.edit) && !viewAsReadOnly;
 
   return (
     <div className="space-y-5">
-      {/* Back + Actions */}
-      <div className="flex items-center justify-between">
-        <Link href="/leads/list" className="inline-flex items-center gap-1.5 text-sm font-medium text-muted-foreground hover:text-foreground transition">
-          <ArrowLeft className="h-4 w-4" /> Back to leads
-        </Link>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5 rounded-full"><Edit3 className="h-3.5 w-3.5" /> Edit</Button>
-          <Button variant="outline" size="sm" className="gap-1.5 rounded-full"><ArrowUpRight className="h-3.5 w-3.5" /> Convert</Button>
-          <Button variant="outline" size="sm" className="rounded-full"><MoreHorizontal className="h-3.5 w-3.5" /></Button>
+      {/* ── Header ── */}
+      <div className="flex flex-col gap-4">
+        <Button variant="ghost" size="sm" className="w-fit gap-1.5" onClick={() => router.push("/leads/list")}><ArrowLeft className="h-4 w-4" /> Back to Leads</Button>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <Avatar name={lead.name || lead.leadNo} size={48} />
+            <div>
+              <h1 className="font-display text-xl font-bold tracking-tight">{lead.name || "Unnamed lead"}</h1>
+              <p className="text-[13px] text-muted-foreground">
+                {lead.leadNo}{lead.assignedToName ? ` · Agent: ${lead.assignedToName}` : ""}{lead.number ? ` · ${lead.number}` : ""}
+              </p>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {lead.status && <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span>}
+            {lead.priority && <span className={cn("inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3 w-3" fill="currentColor" /> {lead.priority}</span>}
+            {canEdit && <Link href={`/leads/list?lead=${lead.id}`}><Button size="sm" variant="outline" className="gap-1.5"><Pencil className="h-3.5 w-3.5" /> Edit</Button></Link>}
+          </div>
+        </div>
+
+        {/* Summary cards */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <SummaryCard label="Lead Value" value={money(lead.estimate)} />
+          <SummaryCard label="Action" value={wf ? (wf.gated ? "N/A" : wf.actionLabel) : "—"} tone="text-[#4361EE]" />
+          <SummaryCard label="Result" value={wf ? wf.result.primary : "—"} />
+          <SummaryCard label="Source" value={lead.source || "—"} />
+          <SummaryCard label="Region" value={lead.region || "—"} />
+          <SummaryCard label="Follow-up" value={lead.followUpDate || "—"} />
         </div>
       </div>
 
-      {/* Lead Profile Header */}
-      <motion.section
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6"
-      >
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="flex items-start gap-4">
-            <Avatar name={LEAD.name} size={56} />
-            <div>
-              <div className="flex items-center gap-2.5">
-                <h1 className="font-display text-xl font-extrabold tracking-tight">{LEAD.name}</h1>
-                <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset capitalize", STATUS_STYLE[LEAD.status])}>
-                  {LEAD.status}
-                </span>
-                <span className="flex items-center gap-0.5 text-[11px] font-semibold text-rose-600">
-                  <Star className="h-3 w-3" fill="currentColor" /> Hot
-                </span>
+      {/* ── Main grid ── */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        {/* Left column — detail sections */}
+        <div className="space-y-6 lg:col-span-2">
+          {/* Lineage */}
+          {(lead.linkedWalkInId || lead.linkedFieldJobId || lead.linkedTicketId || lead.linkedInvoiceId || deal) && (
+            <DetailSection icon={Tag} title="Linked Records">
+              <div className="flex flex-wrap gap-2">
+                {deal && <Link href={`/leads/deals?deal=${deal.id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] hover:bg-muted"><BadgePercent className="h-3.5 w-3.5" /> {deal.dealNo}</Link>}
+                {lead.linkedTicketId && <Link href={`/tickets/${lead.linkedTicketId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] hover:bg-muted">Ticket {lead.linkedTicketId}</Link>}
+                {lead.linkedInvoiceId && <Link href={`/invoice/${lead.linkedInvoiceId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] hover:bg-muted">Invoice {lead.linkedInvoiceId}</Link>}
+                {lead.customerId && <Link href={`/customers/${lead.customerId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] hover:bg-muted"><User className="h-3.5 w-3.5" /> Customer</Link>}
               </div>
-              <p className="mt-0.5 text-sm text-muted-foreground">{LEAD.role} at {LEAD.company}</p>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {LEAD.tags.map((tag) => (
-                  <span key={tag} className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
-                    <Tag className="h-2.5 w-2.5" /> {tag}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
+            </DetailSection>
+          )}
 
-          {/* Communication actions */}
-          <div className="flex items-center gap-1.5">
-            <button className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-sm transition hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-200">
-              <Phone className="h-4 w-4" />
-            </button>
-            <button className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-sm transition hover:bg-sky-50 hover:text-sky-600 hover:border-sky-200">
-              <Mail className="h-4 w-4" />
-            </button>
-            <button className="grid h-10 w-10 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-sm transition hover:bg-green-50 hover:text-green-600 hover:border-green-200">
-              <MessageSquare className="h-4 w-4" />
-            </button>
-          </div>
+          <DetailSection icon={User} title="Contact Information">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+              <DetailField label="Name" value={lead.name} />
+              <DetailField label="Number" value={lead.number} />
+              <DetailField label="Email" value={lead.email} />
+              <DetailField label="Location" value={lead.location} />
+              {lead.locationUnit && <DetailField label="Door / Flat" value={lead.locationUnit} />}
+            </div>
+          </DetailSection>
+
+          <DetailSection icon={Tag} title="Lead Information">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+              <DetailField label="Lead ID" value={lead.leadNo} />
+              <DetailField label="Date" value={`${lead.date}${lead.time ? ` · ${lead.time}` : ""}`} />
+              <DetailField label="Source" value={lead.source} />
+              <DetailField label="Mode of Contact" value={lead.modeOfContact} />
+              <DetailField label="Agent (owner)" value={lead.assignedToName || lead.agent} />
+              <DetailField label="Lead Category" value={lead.leadCategory} />
+              <DetailField label="Lead Nature" value={lead.leadNature} />
+              <DetailField label="Priority" value={lead.priority} />
+              <DetailField label="Qualification" value={lead.qualification} />
+              <DetailField label="Contact Status" value={lead.contactStatus} />
+            </div>
+          </DetailSection>
+
+          <DetailSection icon={Wrench} title="Device & Issue">
+            <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+              <DetailField label="Device" value={lead.device} />
+              <DetailField label="Category" value={lead.category} />
+              <DetailField label="Issue" value={lead.issue} />
+              <DetailField label="Lead Value (estimate)" value={money(lead.estimate)} highlight />
+              <DetailField label="Discount" value={money(lead.discount)} />
+              <DetailField label="Comments" value={lead.comments} />
+            </div>
+          </DetailSection>
+
+          {/* Deal / approval — only when a Deal exists */}
+          <LeadDealPanel lead={lead} />
         </div>
 
-        {/* Quick stats */}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Score</p>
-            <p className="mt-1 text-lg font-bold text-emerald-600 tnum">{LEAD.score}</p>
-          </div>
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Pipeline Value</p>
-            <p className="mt-1 text-lg font-bold tnum">{formatINR(LEAD.value)}</p>
-          </div>
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Follow-up</p>
-            <p className="mt-1 text-sm font-semibold text-rose-600">{LEAD.followUpDate}</p>
-          </div>
-          <div className="rounded-xl bg-zinc-50 p-3">
-            <p className="text-[10px] uppercase tracking-wider text-muted-foreground">Owner</p>
-            <p className="mt-1 text-sm font-semibold">{LEAD.owner}</p>
-          </div>
-        </div>
-      </motion.section>
-
-      {/* Two-column layout: Main + Sidebar */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[1fr_320px]">
-
-        {/* Main content */}
-        <div className="space-y-5">
-          {/* Tab switcher */}
-          <SegmentedTabs
-            value={activeTab}
-            onChange={setActiveTab}
-            options={[
-              { label: "Timeline", value: "timeline" },
-              { label: "Tasks", value: "tasks" },
-              { label: "Deals", value: "deals" },
-              { label: "Notes", value: "notes" },
-            ]}
-          />
-
-          <AnimatePresence mode="wait">
-            {activeTab === "timeline" && (
-              <motion.div key="timeline" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="relative">
-                <div className="absolute left-5 top-0 bottom-0 w-px bg-border" />
-                <div className="space-y-1">
-                  {TIMELINE.map((item, i) => {
-                    const Icon = item.icon;
-                    return (
-                      <motion.div key={item.id} initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.03 * i }} className="relative flex gap-4 pl-2">
-                        <div className={cn("relative z-10 grid h-10 w-10 shrink-0 place-items-center rounded-xl ring-1", item.color)}>
-                          <Icon className="h-4 w-4" />
-                        </div>
-                        <div className="min-w-0 flex-1 rounded-2xl border border-border bg-card p-4 shadow-sm mb-3">
-                          <div className="flex items-start justify-between gap-2">
-                            <div>
-                              <p className="font-semibold text-zinc-900">{item.title}</p>
-                              <p className="mt-0.5 text-[12px] text-muted-foreground">{item.desc}</p>
-                            </div>
-                            <span className="shrink-0 text-[10px] text-muted-foreground whitespace-nowrap">{item.time}</span>
-                          </div>
-                          <p className="mt-2 text-[11px] text-muted-foreground">{item.user}</p>
-                        </div>
-                      </motion.div>
-                    );
-                  })}
-                </div>
-              </motion.div>
-            )}
-
-            {activeTab === "tasks" && (
-              <motion.div key="tasks" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-2.5">
-                {TASKS.map((task) => (
-                  <div key={task.id} className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4 shadow-sm">
-                    <button className={cn("mt-0.5 shrink-0", task.done ? "text-emerald-500" : "text-zinc-300 hover:text-[#4361EE]")}>
-                      {task.done ? <CheckCircle2 className="h-5 w-5" /> : <Circle className="h-5 w-5" />}
-                    </button>
-                    <div className="flex-1">
-                      <p className={cn("font-semibold", task.done && "line-through text-muted-foreground")}>{task.title}</p>
-                      <p className="mt-0.5 text-[11px] text-muted-foreground flex items-center gap-1"><Clock className="h-3 w-3" /> Due {task.due}</p>
-                    </div>
-                  </div>
-                ))}
-                <button className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-3 text-[12px] font-medium text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 transition">
-                  <Plus className="h-3.5 w-3.5" /> Add task
-                </button>
-              </motion.div>
-            )}
-
-            {activeTab === "deals" && (
-              <motion.div key="deals" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
-                {DEALS.map((deal) => (
-                  <div key={deal.id} className="flex items-center justify-between rounded-2xl border border-border bg-card p-4 shadow-sm">
-                    <div className="flex items-center gap-3">
-                      <div className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]">
-                        <Target className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <p className="font-semibold">{deal.title}</p>
-                        <p className="text-[11px] text-muted-foreground">{deal.stage} · {deal.probability}% probability</p>
-                      </div>
-                    </div>
-                    <p className="font-semibold tnum">{formatINR(deal.value)}</p>
-                  </div>
-                ))}
-                <button className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-3 text-[12px] font-medium text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 transition">
-                  <Plus className="h-3.5 w-3.5" /> Create deal
-                </button>
-              </motion.div>
-            )}
-
-            {activeTab === "notes" && (
-              <motion.div key="notes" initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} className="space-y-3">
-                {NOTES.map((note) => (
-                  <div key={note.id} className="rounded-2xl border border-border bg-card p-4 shadow-sm">
-                    <p className="text-[13px] text-zinc-800 leading-relaxed">{note.text}</p>
-                    <p className="mt-2.5 text-[11px] text-muted-foreground">{note.author} · {note.time}</p>
-                  </div>
-                ))}
-                <button className="flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-zinc-300 py-3 text-[12px] font-medium text-zinc-500 hover:border-zinc-400 hover:text-zinc-700 transition">
-                  <Plus className="h-3.5 w-3.5" /> Add note
-                </button>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-
-        {/* Right sidebar */}
-        <aside className="space-y-4">
-          {/* Contact details card */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Contact Details</p>
-            <div className="mt-3 space-y-2.5 text-[12.5px]">
-              <div className="flex items-center gap-2.5 text-zinc-700"><Mail className="h-3.5 w-3.5 text-zinc-400" /> {LEAD.email}</div>
-              <div className="flex items-center gap-2.5 text-zinc-700"><Phone className="h-3.5 w-3.5 text-zinc-400" /> {LEAD.phone}</div>
-              <div className="flex items-center gap-2.5 text-zinc-700"><Building2 className="h-3.5 w-3.5 text-zinc-400" /> {LEAD.company}</div>
-              <div className="flex items-center gap-2.5 text-zinc-700"><MapPin className="h-3.5 w-3.5 text-zinc-400" /> {LEAD.location}</div>
-              <div className="flex items-center gap-2.5 text-zinc-700"><Globe className="h-3.5 w-3.5 text-zinc-400" /> {LEAD.website}</div>
+        {/* Right column — pinned utility rail (Journey leads) */}
+        <PinnedRail>
+          {/* Quick Actions */}
+          <RailCard title="Quick Actions">
+            <div className="space-y-2">
+              {lead.number && <a href={`tel:${lead.number}`} className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-[13px] font-medium text-zinc-700 transition hover:bg-emerald-50 hover:text-emerald-700"><Phone className="h-4 w-4" /> Call {lead.number}</a>}
+              {lead.number && <a href={`https://wa.me/${lead.number.replace(/\D/g, "")}`} target="_blank" rel="noreferrer" className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-[13px] font-medium text-zinc-700 transition hover:bg-green-50 hover:text-green-700"><MessageSquare className="h-4 w-4" /> WhatsApp</a>}
+              {lead.email && <a href={`mailto:${lead.email}`} className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-[13px] font-medium text-zinc-700 transition hover:bg-sky-50 hover:text-sky-700"><Mail className="h-4 w-4" /> Email</a>}
+              {canEdit && <Link href={`/leads/list?lead=${lead.id}`} className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-[13px] font-medium text-zinc-700 transition hover:bg-muted"><Pencil className="h-4 w-4" /> Open full editor</Link>}
             </div>
-          </div>
+          </RailCard>
 
-          {/* Lead info card */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Lead Info</p>
-            <div className="mt-3 space-y-2.5 text-[12.5px]">
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Source</span><span className="font-medium">{LEAD.source}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Created</span><span className="font-medium">{LEAD.createdAt}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Last Activity</span><span className="font-medium">{LEAD.lastActivity}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">Owner</span><span className="font-medium">{LEAD.owner}</span></div>
-              <div className="flex items-center justify-between"><span className="text-muted-foreground">ID</span><span className="font-mono text-[11px] text-zinc-500">{LEAD.id}</span></div>
-            </div>
-          </div>
+          {/* Journey (the heart of View Lead) */}
+          <LeadJourneyTimeline lead={lead} />
 
-          {/* Conversion CTA */}
-          <div className="rounded-2xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD]/50 p-4">
-            <div className="flex items-start gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg brand-gradient text-white shadow-sm">
-                <TrendingUp className="h-4 w-4" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold">Ready to convert?</p>
-                <p className="mt-0.5 text-[11px] text-zinc-600">Turn this lead into a repair ticket — customer details auto-fill.</p>
-                <Button size="sm" className="mt-3 rounded-full gap-1.5">
-                  Convert to Ticket <ChevronRight className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </div>
-          </div>
-        </aside>
+          {/* Follow-ups */}
+          <LeadFollowUpHistory lead={lead} readOnly={viewAsReadOnly} />
+        </PinnedRail>
       </div>
     </div>
   );

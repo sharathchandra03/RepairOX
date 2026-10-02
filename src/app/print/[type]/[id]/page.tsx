@@ -5,12 +5,16 @@ import { useParams, useRouter } from "next/navigation";
 import { Printer, ArrowLeft, FileText, Receipt, Tag } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
+import { useQuotations } from "@/lib/quotations-context";
 import {
   buildTicketPrintData,
   buildInvoicePrintData,
+  buildQuotationPrintData,
   type PrintFormat,
   type PrintDocumentData,
 } from "@/lib/print-utils";
+import { buildStoreInfo } from "@/lib/print-utils";
+import { buildQuotationMessage, warrantyLabel, formatIssueList, DEFAULT_QUOTATION_POLICY } from "@/lib/quotation-data";
 import { A4Template } from "@/components/print/a4-template";
 import { ThermalTemplate } from "@/components/print/thermal-template";
 import { LabelTemplate } from "@/components/print/label-template";
@@ -27,12 +31,20 @@ function FormatSelector({
   format,
   setFormat,
   isTicket,
+  isQuotation,
 }: {
   format: PrintFormat;
   setFormat: (f: PrintFormat) => void;
   isTicket: boolean;
+  isQuotation?: boolean;
 }) {
-  const options = isTicket ? FORMAT_OPTIONS : FORMAT_OPTIONS.filter((o) => o.id !== "label");
+  // A quotation is a customer-facing A4 document only. Tickets get all three;
+  // invoices get A4 + thermal.
+  const options = isQuotation
+    ? FORMAT_OPTIONS.filter((o) => o.id === "a4")
+    : isTicket
+      ? FORMAT_OPTIONS
+      : FORMAT_OPTIONS.filter((o) => o.id !== "label");
 
   return (
     <div className="flex items-center gap-1.5">
@@ -79,6 +91,7 @@ export default function PrintPreviewPage() {
   const router = useRouter();
   const { tickets, invoices } = useStore();
   const { settings, hydrated } = useStoreSettings();
+  const { quotations } = useQuotations();
 
   const docType = (params.type as string) || "";
   const docId = decodeURIComponent((params.id as string) || "");
@@ -87,6 +100,7 @@ export default function PrintPreviewPage() {
   const [mounted, setMounted] = useState(false);
 
   const isTicket = docType === "ticket";
+  const isQuotation = docType === "quotation";
 
   // Wait for client mount to avoid hydration mismatch
   useEffect(() => {
@@ -100,13 +114,43 @@ export default function PrintPreviewPage() {
       const ticket = tickets.find((t) => t.id === docId);
       if (!ticket) return null;
       return buildTicketPrintData(settings, ticket);
+    } else if (isQuotation) {
+      const q = quotations.find((x) => x.id === docId || x.quotationNo === docId);
+      if (!q) return null;
+      const store = buildStoreInfo(settings);
+      const message = buildQuotationMessage(q, store, DEFAULT_QUOTATION_POLICY);
+      return buildQuotationPrintData(
+        settings,
+        {
+          quotationNo: q.quotationNo,
+          source: q.source,
+          leadNo: q.leadNo,
+          createdAt: q.createdAt,
+          validUntil: q.validUntil,
+          status: q.status,
+          customerName: q.customerName,
+          phone: q.phone,
+          email: q.email,
+          location: q.location,
+          salesAgentName: q.salesAgentName,
+          device: q.device,
+          issue: formatIssueList(q.issue),
+          warrantyLabel: warrantyLabel(q.warranty),
+          items: q.items.map((it) => ({ name: it.name, description: it.description, qty: it.qty, unitPrice: it.unitPrice, total: it.total })),
+          subtotal: q.subtotal,
+          discount: q.discount,
+          amount: q.amount,
+          note: q.note,
+        },
+        message.paragraphs,
+      );
     } else {
       const invoice = invoices.find((i) => i.id === docId);
       if (!invoice) return null;
       const lt = invoice.ticketId ? tickets.find((t) => t.id === invoice.ticketId) : undefined;
       return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId);
     }
-  }, [mounted, hydrated, isTicket, docId, tickets, invoices, settings]);
+  }, [mounted, hydrated, isTicket, isQuotation, docId, tickets, invoices, quotations, settings]);
 
   // Auto-print if query param is set
   useEffect(() => {
@@ -116,12 +160,15 @@ export default function PrintPreviewPage() {
     }
   }, [mounted, printData]);
 
-  // If label format selected on invoice, switch to a4
+  // If label format selected on invoice, switch to a4. A quotation is always A4.
   useEffect(() => {
     if (!isTicket && format === "label") {
       setFormat("a4");
     }
-  }, [isTicket, format]);
+    if (isQuotation && format !== "a4") {
+      setFormat("a4");
+    }
+  }, [isTicket, isQuotation, format]);
 
   // Loading state while mounting
   if (!mounted || !hydrated) {
@@ -180,7 +227,7 @@ export default function PrintPreviewPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <FormatSelector format={format} setFormat={setFormat} isTicket={isTicket} />
+            <FormatSelector format={format} setFormat={setFormat} isTicket={isTicket} isQuotation={isQuotation} />
             <button
               onClick={() => window.print()}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, background: "#4361EE", padding: "8px 16px", fontSize: 14, fontWeight: 500, color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}

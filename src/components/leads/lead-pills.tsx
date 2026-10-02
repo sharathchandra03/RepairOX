@@ -30,3 +30,33 @@ export function priorityTone(priority: string): string {
   if (/cold|low/.test(p)) return "text-sky-600";
   return "text-zinc-500";
 }
+
+/** Pill tone (bg + text + ring) for a (configurable) Lead Nature value —
+ *  Hot / Warm / Cold. Keyword-matched so admin-renamed labels still colour
+ *  sensibly; unrecognised values fall back to neutral. */
+export function leadNatureTone(nature: string): string {
+  const n = nature.toLowerCase();
+  if (/hot|urgent|high/.test(n)) return "bg-rose-50 text-rose-700 ring-rose-200";
+  if (/warm|medium/.test(n)) return "bg-amber-50 text-amber-700 ring-amber-200";
+  if (/cold|low/.test(n)) return "bg-sky-50 text-sky-700 ring-sky-200";
+  return NEUTRAL;
+}
+
+/** Hex dot/flame colour matching leadNatureTone for the leading glyph. */
+export function leadNatureDot(nature: string): string {
+  const n = nature.toLowerCase();
+  if (/hot|urgent|high/.test(n)) return "#e11d48";  // rose-600
+  if (/warm|medium/.test(n)) return "#d97706";      // amber-600
+  if (/cold|low/.test(n)) return "#0284c7";         // sky-600
+  return "#71717a";                                 // zinc-500
+}
+
+/** Emoji glyph for a (configurable) Lead Nature value — 🔥 Hot, 🌤️ Warm,
+ *  ❄️ Cold. Keyword-matched; unrecognised values get a neutral 🏷️. */
+export function leadNatureGlyph(nature: string): string {
+  const n = nature.toLowerCase();
+  if (/hot|urgent|high/.test(n)) return "🔥";
+  if (/warm|medium/.test(n)) return "🌤️";
+  if (/cold|low/.test(n)) return "❄️";
+  return "🏷️";
+}

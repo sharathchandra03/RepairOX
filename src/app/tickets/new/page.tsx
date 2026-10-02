@@ -388,7 +388,7 @@ function NewTicketWizard() {
   const closeTarget = fromPage === "dashboard" ? "/dashboard" : fromPage === "walk-in" ? "/walk-in" : fromPage === "field" ? "/field" : "/tickets";
   const { tickets, invoices, addTicket, updateTicket, updateInvoice, updateInventoryItem, inventory, customers, addCustomer, updateCustomer, brands, deviceModels, walkIns, addWalkIn, updateWalkIn } = useStore();
   const { getJob: getFieldJob, linkTicket: linkFieldTicket } = useField();
-  const { updateLead, recordConversionEvent, contacts, leads, updateContact } = useLeads();
+  const { updateLead, recordConversionEvent, autoLinkByIdentity, contacts, leads, updateContact } = useLeads();
   const { settings } = useStoreSettings();
 
   // Start on Device Details (step 3) for edit, walk-in, field-job and
@@ -924,6 +924,10 @@ function NewTicketWizard() {
       // addTicket assigns the real sequential ticket number (T-001, …) from the
       // DB and returns it. Use that id everywhere downstream.
       const newId = await addTicket(ticketData);
+      // Tracks whether the originating Lead was linked by any EXPLICIT path
+      // (direct banner link / walk-in / field conversion). When it stays false
+      // the automatic identity safety net runs after the conversion blocks.
+      let leadLinked = false;
       // ── DIRECT ticket → explicitly-linked Lead (spec §26/§28/§103) ──
       // When the Contact step linked an OPEN lead to a direct ticket (not a
       // walk-in/field conversion, which are handled below), carry the ticket
@@ -934,6 +938,7 @@ function NewTicketWizard() {
         const linkId = newId || ticketData.id;
         await updateLead(data.linkedLeadId, { linkedTicketId: linkId, conversionSource: "ticket" });
         await recordConversionEvent(data.linkedLeadId, "ticket_created", { targetType: "ticket", targetId: linkId, targetLabel: (newId as string) || linkId });
+        leadLinked = true;
       }
       // ── Estimate → Ticket conversion (atomic, spec §21/§22/§45/§46) ──
       // Only AFTER the Ticket is successfully created do we mark the source
@@ -1005,6 +1010,7 @@ function NewTicketWizard() {
         if (srcWalkIn?.linkedLeadId) {
           await updateLead(srcWalkIn.linkedLeadId, { linkedTicketId: linkId, finalResult: "Converted to Ticket", conversionSource: "ticket" });
           await recordConversionEvent(srcWalkIn.linkedLeadId, "ticket_created", { targetType: "ticket", targetId: linkId, targetLabel: (newId as string) || linkId });
+          leadLinked = true;
         }
       }
       // Field Job conversion (Pickup & Drop): link the ticket to the field job
@@ -1021,7 +1027,23 @@ function NewTicketWizard() {
         if (job?.leadId) {
           await updateLead(job.leadId, { linkedTicketId: linkId, conversionSource: "ticket" });
           await recordConversionEvent(job.leadId, "ticket_created", { targetType: "ticket", targetId: linkId, targetLabel: (newId as string) || linkId });
+          leadLinked = true;
         }
+      }
+      // ── AUTOMATIC attribution safety net (spec §25/§28/§102/§103) ──
+      // If NO explicit link fired above (direct banner link, walk-in or field
+      // conversion), try to recover the originating Lead by the customer's
+      // identity. This is what flips a ROUTED Walk-In lead (which never got a
+      // two-way link at routing time) to "Ticket Created" the moment its ticket
+      // is created — no manual "link" click. A no-op when nothing matches.
+      if (!leadLinked) {
+        const linkId = newId || ticketData.id;
+        await autoLinkByIdentity(
+          "ticket",
+          linkId,
+          { customerId: finalCustomerId || undefined, phone: ticketData.phone, email: ticketData.email },
+          (newId as string) || linkId,
+        );
       }
       // ── Ticket Type = Walk-In → auto-create/link ONE Walk-In record ──
       //

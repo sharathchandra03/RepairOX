@@ -35,7 +35,7 @@ import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
 import { fullLeadLocation, type Lead } from "@/lib/leads-data";
 import type { WalkIn } from "@/lib/mock-data";
 
-export function LeadOperationsPanel({ lead }: { lead: Lead }) {
+export function LeadOperationsPanel({ lead, readOnly = false }: { lead: Lead; readOnly?: boolean }) {
   const router = useRouter();
   const { can } = usePermissions();
   const { updateLead, recordConversionEvent } = useLeads();
@@ -177,7 +177,7 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
         ) : (
           <>
             <p className="text-[12px] text-zinc-500">Not yet linked to the Customer Master.</p>
-            {allow(can, CAP.lead.convert) && (
+            {!readOnly && allow(can, CAP.lead.convert) && (
               <Button size="sm" variant="outline" className="shrink-0 gap-1.5" loading={linkingCustomer} onClick={convertToCustomer}>
                 <UserPlus className="h-3.5 w-3.5" /> Convert to Customer
               </Button>
@@ -190,11 +190,13 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
       {!route && (
         <div className="flex items-center justify-between gap-3">
           <p className="text-[13px] text-zinc-500">Not routed yet. Decide how this customer will be served.</p>
-          <Can permission="route_leads">
-            <Button size="sm" className="shrink-0 gap-1.5" onClick={() => setRouteOpen(true)}>
-              <RouteIcon className="h-3.5 w-3.5" /> Route / Assign
-            </Button>
-          </Can>
+          {!readOnly && (
+            <Can permission="route_leads">
+              <Button size="sm" className="shrink-0 gap-1.5" onClick={() => setRouteOpen(true)}>
+                <RouteIcon className="h-3.5 w-3.5" /> Route / Assign
+              </Button>
+            </Can>
+          )}
         </div>
       )}
 
@@ -215,16 +217,20 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
           ) : (
             <div className="flex items-center justify-between gap-2">
               <p className="text-[12px] text-zinc-500">When the customer arrives, receive them without re-entering details.</p>
-              <Can permission={["receive_store_handoff", "use_pos"]}>
-                <Button size="sm" className="shrink-0 gap-1.5" loading={converting} onClick={convertToWalkIn}>
-                  <ArrowRight className="h-3.5 w-3.5" /> Convert to Walk-In
-                </Button>
-              </Can>
+              {!readOnly && (
+                <Can permission={["receive_store_handoff", "use_pos"]}>
+                  <Button size="sm" className="shrink-0 gap-1.5" loading={converting} onClick={convertToWalkIn}>
+                    <ArrowRight className="h-3.5 w-3.5" /> Convert to Walk-In
+                  </Button>
+                </Can>
+              )}
             </div>
           )}
-          <Can permission="route_leads">
-            <button onClick={() => setRouteOpen(true)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Change route</button>
-          </Can>
+          {!readOnly && (
+            <Can permission="route_leads">
+              <button onClick={() => setRouteOpen(true)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Change route</button>
+            </Can>
+          )}
         </div>
       )}
 
@@ -289,9 +295,11 @@ export function LeadOperationsPanel({ lead }: { lead: Lead }) {
           ) : (
             <p className="text-[12px] text-zinc-500">A Field Job is being set up. Track pickup and drop progress in Field.</p>
           )}
-          <Can permission="route_leads">
-            <button onClick={() => setRouteOpen(true)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Change route</button>
-          </Can>
+          {!readOnly && (
+            <Can permission="route_leads">
+              <button onClick={() => setRouteOpen(true)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Change route</button>
+            </Can>
+          )}
         </div>
       )}
 

@@ -7,7 +7,7 @@ import { qcItemLabel } from "@/lib/qc-config";
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
 export type PrintFormat = "a4" | "thermal" | "label";
-export type PrintDocumentType = "ticket" | "invoice";
+export type PrintDocumentType = "ticket" | "invoice" | "quotation";
 
 /* ─── Print Data Shapes ──────────────────────────────────────────────── */
 
@@ -162,11 +162,34 @@ export type PrintInvoiceDeviceInfo = {
   subtotal: number;
 };
 
+/* ─── Quotation print info ──────────────────────────────────────────────── */
+
+export type PrintQuotationInfo = {
+  quotationId: string;      // display number QT-####
+  source: string;           // "lead" | "standalone"
+  leadNo: string;           // originating lead reference (empty for standalone)
+  createdAt: string;
+  validUntil: string;
+  status: string;
+  salesAgentName: string;
+  device: string;
+  issue: string;
+  warranty: string;         // resolved warranty label (empty = omit)
+  items: PrintLineItem[];
+  subtotal: number;
+  discount: number;
+  amount: number;
+  note: string;
+  /** The customer-facing message paragraphs (fixed + dynamic + conditional). */
+  message: string[];
+};
+
 export type PrintDocumentData = {
   store: PrintStoreInfo;
   customer: PrintCustomerInfo;
   ticket?: PrintTicketInfo;
   invoice?: PrintInvoiceInfo;
+  quotation?: PrintQuotationInfo;
   printTitle: string;
   printDate: string;
   printTime: string;
@@ -413,6 +436,87 @@ export function buildInvoicePrintData(
   };
 }
 
+/* ─── Quotation document assembly ──────────────────────────────────────────
+   A quotation is a customer-facing OFFER rendered in the SAME document family
+   as the invoice (shared A4 design language), but it is NOT an invoice: no tax
+   breakdown, no paid/balance, no payment status. The customer-facing message is
+   built by the token engine in quotation-data (fixed + dynamic + conditional)
+   and passed in so preview / print / PDF all render from one source. */
+
+export function buildQuotationPrintData(
+  settings: StoreSettings,
+  quotation: {
+    quotationNo: string;
+    source: string;
+    leadNo: string;
+    createdAt: string;
+    validUntil: string;
+    status: string;
+    customerName: string;
+    phone: string;
+    email: string;
+    location: string;
+    salesAgentName: string;
+    device: string;
+    issue: string;
+    warrantyLabel: string;
+    items: { name: string; description?: string; qty: number; unitPrice: number; total: number }[];
+    subtotal: number;
+    discount: number;
+    amount: number;
+    note: string;
+  },
+  message: string[],
+): PrintDocumentData {
+  const now = new Date();
+  const items: PrintLineItem[] = quotation.items.map((it) => ({
+    name: it.name,
+    description: it.description,
+    qty: it.qty,
+    price: it.unitPrice,
+    discount: 0,
+    total: it.total,
+  }));
+  return {
+    store: buildStoreInfo(settings),
+    customer: {
+      name: quotation.customerName,
+      phone: quotation.phone,
+      email: quotation.email,
+      address: quotation.location || "",
+      company: "",
+    },
+    quotation: {
+      quotationId: quotation.quotationNo,
+      source: quotation.source,
+      leadNo: quotation.leadNo,
+      createdAt: quotation.createdAt,
+      validUntil: quotation.validUntil,
+      status: quotation.status,
+      salesAgentName: quotation.salesAgentName,
+      device: quotation.device,
+      issue: quotation.issue,
+      warranty: quotation.warrantyLabel,
+      items,
+      subtotal: quotation.subtotal,
+      discount: quotation.discount,
+      amount: quotation.amount,
+      note: quotation.note,
+      message,
+    },
+    printTitle: "Quotation",
+    printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
+    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    // A quotation uses the store master-default print text (its own terms /
+    // warranty / footer live in the message + warranty line, not accounting
+    // terms). Keep these blank-safe — the A4 quotation doc only renders them
+    // when present.
+    termsAndConditions: "",
+    warrantyText: "",
+    printFooter: settings.printFooter || "",
+  };
+}
+
 /* ─── Master Default + Custom Templates ──────────────────────────────────
  *
  * The store-level print fields (termsAndConditions / warrantyText / printFooter
@@ -537,4 +641,8 @@ export function getTicketPrintUrl(ticketId: string, format: PrintFormat): string
 
 export function getInvoicePrintUrl(invoiceId: string, format: PrintFormat): string {
   return `/print/invoice/${encodeURIComponent(invoiceId)}?format=${format}`;
+}
+
+export function getQuotationPrintUrl(quotationId: string, format: PrintFormat = "a4"): string {
+  return `/print/quotation/${encodeURIComponent(quotationId)}?format=${format}`;
 }

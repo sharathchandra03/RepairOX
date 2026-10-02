@@ -1,148 +1,331 @@
 "use client";
 
-import { motion } from "framer-motion";
-import { MapPin, Users, Building2, Target, Phone, Mail } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import dynamic from "next/dynamic";
+import Link from "next/link";
+import { List, LayoutGrid, Map as MapIcon, MapPinOff, ChevronDown, Building2, Check, MapPinned } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
-import { Avatar } from "@/components/ui/avatar";
+import { TableSearch } from "@/components/common/table-utility-bar";
+import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
+import { RequireCapability } from "@/components/common/require-capability";
+import { Dropdown } from "@/components/ui/dropdown";
+import { CAP } from "@/lib/capabilities";
 import { cn, formatINR } from "@/lib/utils";
+import { useLeads } from "@/lib/leads-context";
+import { useStoreContext } from "@/lib/store-context";
+import { useSession } from "@/lib/use-session";
+import { statusColor, type MappableLead } from "@/components/leads/map/lead-map";
+import {
+  loadCityScopes,
+  allCitiesBboxOf,
+  type CityScope,
+  type Bbox,
+} from "@/lib/geo/city-scopes";
+import type { Lead } from "@/lib/leads-data";
 
-interface MapLead {
-  id: string;
-  name: string;
-  company: string;
-  location: string;
-  value: number;
-  status: string;
-  lat: number;
-  lng: number;
+/* The Leaflet map touches `window`, so it is loaded client-only (no SSR). It
+   also keeps Leaflet off the bundle for every other page. */
+const LeadMap = dynamic(() => import("@/components/leads/map/lead-map").then((m) => m.LeadMap), {
+  ssr: false,
+  loading: () => (
+    <div className="grid min-h-[560px] place-items-center rounded-2xl border-2 border-zinc-200 bg-muted/20 text-sm text-muted-foreground shadow-card">
+      Loading map…
+    </div>
+  ),
+});
+
+/* Normalize a configurable status into a stable key for coloring + a readable
+   label. Mirrors the substring approach used by `statusTone` (lead-pills). */
+function statusKeyOf(status: string): string {
+  const s = (status || "").toLowerCase();
+  if (/not\s*qualif/.test(s)) return "not-qualified";
+  if (/qualif/.test(s)) return "qualified";
+  if (/follow/.test(s)) return "follow-up";
+  if (/propos|quot/.test(s)) return "proposal";
+  if (/won|convert/.test(s)) return "won";
+  if (/lost|dead|reject/.test(s)) return "lost";
+  if (/contact/.test(s)) return "contacted";
+  if (/new|open|fresh/.test(s)) return "new";
+  return "new";
 }
 
-const MAP_LEADS: MapLead[] = [
-  { id: "1", name: "Aarav Mehta",    company: "TechNova",   location: "Bengaluru",  value: 125000, status: "qualified", lat: 12.97, lng: 77.59 },
-  { id: "2", name: "Bina Soni",      company: "DesignHub",  location: "Mumbai",     value: 18000,  status: "contacted", lat: 19.07, lng: 72.87 },
-  { id: "3", name: "Diya Sen",       company: "GreenLeaf",  location: "Delhi",      value: 95000,  status: "proposal",  lat: 28.61, lng: 77.20 },
-  { id: "4", name: "Eshan Roy",      company: "CloudSync",  location: "Chennai",    value: 8500,   status: "new",       lat: 13.08, lng: 80.27 },
-  { id: "5", name: "Falguni Patel",  company: "NexaCore",   location: "Ahmedabad",  value: 280000, status: "won",       lat: 23.02, lng: 72.57 },
-  { id: "6", name: "Heena Kapoor",   company: "PixelCraft", location: "Bengaluru",  value: 72000,  status: "qualified", lat: 12.93, lng: 77.62 },
-  { id: "7", name: "Jaya Iyer",      company: "SwiftServe", location: "Hyderabad",  value: 65000,  status: "proposal",  lat: 17.38, lng: 78.48 },
-  { id: "8", name: "Gaurav Pillai",  company: "",           location: "Kochi",      value: 9800,   status: "new",       lat: 9.93,  lng: 76.26 },
-];
+/* Text used to match a lead against the search query (structured fields). */
+function leadSearchText(lead: Lead): string {
+  return [lead.leadNo, lead.name, lead.number, lead.email, lead.device, lead.region, lead.location, lead.status]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
 
-const CITY_STATS = [
-  { city: "Bengaluru", leads: 3, value: 216800, color: "bg-[#4361EE]" },
-  { city: "Mumbai",    leads: 1, value: 18000,  color: "bg-violet-500" },
-  { city: "Delhi",     leads: 1, value: 95000,  color: "bg-amber-500" },
-  { city: "Chennai",   leads: 1, value: 8500,   color: "bg-sky-500" },
-  { city: "Ahmedabad", leads: 1, value: 280000, color: "bg-emerald-500" },
-  { city: "Hyderabad", leads: 1, value: 65000,  color: "bg-rose-500" },
-  { city: "Kochi",     leads: 1, value: 9800,   color: "bg-orange-500" },
-];
+const ALL_CITIES = "__all__";
 
-const STATUS_DOT: Record<string, string> = {
-  new: "bg-sky-500",
-  contacted: "bg-violet-500",
-  qualified: "bg-indigo-500",
-  proposal: "bg-amber-500",
-  won: "bg-emerald-500",
-};
+function MapViewContent() {
+  const { leads, canSeeAllLeads } = useLeads();
+  const { id: currentUserId } = useSession();
+  const { activeStoreId } = useStoreContext();
 
-export default function MapViewPage() {
+  const [storeFilter, setStoreFilter] = useState<string[]>([]);
+  const [query, setQuery] = useState("");
+
+  // City scopes — the SAME admin-managed list the Lead form's picker uses.
+  const [cities, setCities] = useState<CityScope[]>([]);
+  const [cityId, setCityId] = useState<string>(ALL_CITIES);
+  useEffect(() => {
+    setCities(loadCityScopes());
+  }, []);
+
+  const selectedCity = cityId === ALL_CITIES ? null : cities.find((c) => c.id === cityId) ?? null;
+  const bbox: Bbox = useMemo(
+    () => (selectedCity ? selectedCity.bbox : allCitiesBboxOf(cities)),
+    [selectedCity, cities],
+  );
+
+  // Live resolution counts reported by the map.
+  const [resInfo, setResInfo] = useState({ plotted: 0, geocoding: false, unresolved: 0 });
+
+  /* ── Scope the leads exactly like the Kanban/List views ── */
+  const scoped = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return leads.filter((l) => {
+      if (!canSeeAllLeads && currentUserId) {
+        const mine =
+          l.assignedTo === currentUserId ||
+          l.createdBy === currentUserId ||
+          l.followUpAgentId === currentUserId;
+        if (!mine) return false;
+      }
+      if (activeStoreId && l.branchId && l.branchId !== activeStoreId) return false;
+      if (!matchesStoreSelection(l.branchId, storeFilter)) return false;
+      if (q && !leadSearchText(l).includes(q)) return false;
+      return true;
+    });
+  }, [leads, canSeeAllLeads, currentUserId, activeStoreId, storeFilter, query]);
+
+  /* Build the mappable set. A lead is placeable when it has a saved pin OR any
+     free-text location/region we can geocode. */
+  const mappable = useMemo<MappableLead[]>(() => {
+    return scoped
+      .map((l) => {
+        const geocodeText = [l.location, l.region].filter(Boolean).join(", ").trim();
+        const hasPin = l.locationLat != null && l.locationLng != null;
+        if (!hasPin && !geocodeText) return null;
+        return {
+          id: l.id,
+          name: l.name || l.leadNo,
+          place: l.location || l.region || "",
+          geocodeText,
+          value: l.estimate ?? l.expectedValue ?? null,
+          statusKey: statusKeyOf(l.status),
+          statusLabel: l.status || "New",
+          lat: l.locationLat,
+          lng: l.locationLng,
+        } as MappableLead;
+      })
+      .filter((x): x is MappableLead => x !== null);
+  }, [scoped]);
+
+  const noLocation = scoped.length - mappable.length;
+
+  /* ── By region (derived from REAL lead data) ── */
+  const byRegion = useMemo(() => {
+    const map = new Map<string, { leads: number; value: number }>();
+    for (const l of scoped) {
+      const key = (l.region || l.location || "Unknown").trim() || "Unknown";
+      const entry = map.get(key) ?? { leads: 0, value: 0 };
+      entry.leads += 1;
+      entry.value += l.estimate ?? l.expectedValue ?? 0;
+      map.set(key, entry);
+    }
+    return Array.from(map.entries())
+      .map(([city, v]) => ({ city, ...v }))
+      .sort((a, b) => b.leads - a.leads || b.value - a.value);
+  }, [scoped]);
+
+  /* ── Status legend (statuses actually present on mappable leads) ── */
+  const statusLegend = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const l of mappable) if (!seen.has(l.statusKey)) seen.set(l.statusKey, l.statusLabel);
+    return Array.from(seen.entries());
+  }, [mappable]);
+
+  const cityLabel = selectedCity?.label ?? "All cities";
+
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Sales"
         title="Map View"
         subtitle="Leads plotted geographically to spot coverage gaps and hot zones."
+        actions={
+          <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">
+            <Link href="/leads/list" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="List View"><List className="h-3.5 w-3.5" /></Link>
+            <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
+            <Link href="/leads/map-view" className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="Map View"><MapIcon className="h-3.5 w-3.5" /></Link>
+          </div>
+        }
       />
 
+      {/* Utility bar — City → Store → Search (right-aligned). */}
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+        <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+          <CitySelect cities={cities} value={cityId} label={cityLabel} onChange={setCityId} />
+          <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
+          <TableSearch value={query} onChange={setQuery} placeholder="Search leads…" />
+        </div>
+      </div>
+
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_320px]">
-        {/* Map placeholder */}
-        <div className="relative min-h-[500px] overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-sky-50/50 via-white to-indigo-50/30 shadow-card">
-          {/* India outline approximation with positioned dots */}
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="relative h-[400px] w-[350px]">
-              {MAP_LEADS.map((lead, i) => {
-                const top = `${100 - ((lead.lat - 8) / 22) * 100}%`;
-                const left = `${((lead.lng - 72) / 10) * 100}%`;
-                return (
-                  <motion.div
-                    key={lead.id}
-                    initial={{ scale: 0, opacity: 0 }}
-                    animate={{ scale: 1, opacity: 1 }}
-                    transition={{ delay: 0.1 * i, type: "spring", stiffness: 200 }}
-                    className="absolute group"
-                    style={{ top, left }}
-                  >
-                    <div className="relative">
-                      <div className={cn("h-4 w-4 rounded-full border-2 border-white shadow-md", STATUS_DOT[lead.status] || "bg-zinc-400")} />
-                      <div className={cn("absolute -inset-2 animate-ping rounded-full opacity-20", STATUS_DOT[lead.status] || "bg-zinc-400")} />
-                    </div>
-                    {/* Tooltip on hover */}
-                    <div className="pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 rounded-xl border border-border bg-card px-3 py-2 opacity-0 shadow-lg transition-opacity group-hover:opacity-100 whitespace-nowrap z-10">
-                      <p className="text-[11px] font-semibold">{lead.name}</p>
-                      <p className="text-[10px] text-muted-foreground">{lead.company || lead.location} · {formatINR(lead.value)}</p>
-                    </div>
-                  </motion.div>
-                );
-              })}
-            </div>
-          </div>
-          {/* Map placeholder overlay */}
-          <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-white/80 to-transparent px-5 pb-4 pt-8">
-            <p className="text-[11px] text-muted-foreground text-center">
-              Interactive map — connect Google Maps or Mapbox API for full functionality
-            </p>
+        {/* Real Leaflet / OpenStreetMap map */}
+        <div className="space-y-2">
+          <LeadMap leads={mappable} city={selectedCity} bbox={bbox} onResolved={setResInfo} />
+
+          {/* Honest resolution line. */}
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-0.5 text-[11px] text-muted-foreground">
+            <span className="inline-flex items-center gap-1.5">
+              <MapPinned className="h-3.5 w-3.5 text-[#4361EE]" />
+              <strong className="font-semibold text-zinc-700">{resInfo.plotted}</strong> of {mappable.length} placed
+            </span>
+            {resInfo.geocoding && <span className="text-[#4361EE]">resolving addresses…</span>}
+            {resInfo.unresolved > 0 && !resInfo.geocoding && (
+              <span>{resInfo.unresolved} address{resInfo.unresolved === 1 ? "" : "es"} couldn’t be located</span>
+            )}
+            {noLocation > 0 && (
+              <span className="inline-flex items-center gap-1.5">
+                <MapPinOff className="h-3.5 w-3.5" />
+                {noLocation} lead{noLocation === 1 ? "" : "s"} with no location
+              </span>
+            )}
           </div>
         </div>
 
-        {/* City breakdown sidebar */}
+        {/* Sidebar — derived from real data */}
         <div className="space-y-4">
           <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">By City</p>
-            <ul className="mt-3 space-y-3">
-              {CITY_STATS.map((city) => (
-                <li key={city.city} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <span className={cn("h-2.5 w-2.5 rounded-full", city.color)} />
-                    <span className="text-[12.5px] font-medium text-zinc-800">{city.city}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-[12px] font-semibold tnum">{city.leads}</span>
-                    <span className="ml-2 text-[11px] text-muted-foreground tnum">{formatINR(city.value)}</span>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          </div>
-
-          {/* Lead pins legend */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</p>
-            <div className="mt-3 space-y-2">
-              {Object.entries(STATUS_DOT).map(([status, color]) => (
-                <div key={status} className="flex items-center gap-2 text-[12px]">
-                  <span className={cn("h-3 w-3 rounded-full", color)} />
-                  <span className="capitalize text-zinc-700">{status}</span>
-                </div>
-              ))}
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">By Region</p>
+              <span className="text-[10px] font-medium text-muted-foreground">{byRegion.length} total</span>
             </div>
+            {byRegion.length === 0 ? (
+              <p className="mt-3 text-[12px] text-muted-foreground">No leads in scope.</p>
+            ) : (
+              <ul className="mt-3 space-y-2.5">
+                {byRegion.slice(0, 10).map((city, i) => (
+                  <li key={city.city} className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="grid h-5 w-5 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">{i + 1}</span>
+                      <span className="truncate text-[12.5px] font-medium text-zinc-800">{city.city}</span>
+                    </div>
+                    <div className="shrink-0 text-right">
+                      <span className="text-[12px] font-semibold tnum">{city.leads}</span>
+                      {city.value > 0 && (
+                        <span className="ml-2 text-[11px] text-muted-foreground tnum">{formatINR(city.value)}</span>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
 
-          {/* Quick stats */}
-          <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="text-center">
-                <p className="text-2xl font-bold tnum">{MAP_LEADS.length}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Total Leads</p>
+          {statusLegend.length > 0 && (
+            <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status</p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                {statusLegend.map(([key, label]) => (
+                  <div key={key} className="flex items-center gap-2 text-[12px]">
+                    <span className="h-3 w-3 rounded-full ring-2 ring-white" style={{ background: statusColor(key) }} />
+                    <span className="truncate capitalize text-zinc-700">{label}</span>
+                  </div>
+                ))}
               </div>
-              <div className="text-center">
-                <p className="text-2xl font-bold tnum">{CITY_STATS.length}</p>
-                <p className="text-[10px] text-muted-foreground uppercase tracking-wider">Cities</p>
-              </div>
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="rounded-2xl border border-border bg-card p-4 text-center shadow-card">
+              <p className="text-2xl font-bold tnum text-zinc-900">{resInfo.plotted}</p>
+              <p className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">Plotted</p>
+            </div>
+            <div className="rounded-2xl border border-border bg-card p-4 text-center shadow-card">
+              <p className="text-2xl font-bold tnum text-zinc-900">{byRegion.length}</p>
+              <p className="mt-0.5 text-[10px] uppercase tracking-wider text-muted-foreground">Regions</p>
             </div>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+/* ── City selector — reuses the lead-form city scopes ────────────────────── */
+function CitySelect({
+  cities,
+  value,
+  label,
+  onChange,
+}: {
+  cities: CityScope[];
+  value: string;
+  label: string;
+  onChange: (id: string) => void;
+}) {
+  return (
+    <Dropdown
+      align="left"
+      width="w-56"
+      trigger={({ toggle, open }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          className={cn(
+            "flex h-[34px] min-w-[150px] items-center gap-2 rounded-xl border bg-card px-3 text-[13px] font-medium transition-colors",
+            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-[#4361EE]/30 hover:border-[#4361EE]/50",
+          )}
+        >
+          <Building2 className="h-4 w-4 shrink-0 text-[#4361EE]" />
+          <span className="flex-1 truncate text-left text-zinc-800">{label}</span>
+          <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </button>
+      )}
+    >
+      {(close) => (
+        <div className="max-h-[320px] overflow-y-auto p-1">
+          <CityRow label="All cities" active={value === ALL_CITIES} onClick={() => { onChange(ALL_CITIES); close(); }} />
+          {cities.length > 0 && <div className="my-1 border-t border-border" />}
+          {cities.map((c) => (
+            <CityRow key={c.id} label={c.label} active={value === c.id} onClick={() => { onChange(c.id); close(); }} />
+          ))}
+          {cities.length === 0 && (
+            <p className="px-2.5 py-2 text-[11px] text-muted-foreground">
+              No cities configured. Add target cities from the Lead form’s location picker.
+            </p>
+          )}
+        </div>
+      )}
+    </Dropdown>
+  );
+}
+
+function CityRow({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={cn(
+        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] font-medium transition-colors",
+        active ? "bg-[#EEF1FD] text-[#4361EE]" : "text-foreground hover:bg-[#EEF1FD]",
+      )}
+    >
+      <span className="flex-1 truncate">{label}</span>
+      {active && <Check className="h-4 w-4 shrink-0 text-[#4361EE]" />}
+    </button>
+  );
+}
+
+export default function MapViewPage() {
+  return (
+    <RequireCapability anyOf={CAP.lead.view}>
+      <MapViewContent />
+    </RequireCapability>
   );
 }

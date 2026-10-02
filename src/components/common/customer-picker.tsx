@@ -108,13 +108,13 @@ export function CustomerPicker({
       >
         {selectedCustomer ? (
           <>
-            <span className="flex-1 text-sm font-medium text-zinc-900">
+            <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[13px] font-medium text-zinc-900">
               {formatCustomerName(selectedCustomer)}
             </span>
-            <CustomerLifecycleBadge lifecycle={customerLifecycle(selectedCustomer)} />
+            <span className="shrink-0"><CustomerLifecycleBadge lifecycle={customerLifecycle(selectedCustomer)} /></span>
             <span
               className={cn(
-                'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
+                'shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
                 selectedCustomer.type === 'business'
                   ? 'bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20'
                   : 'bg-emerald-50 text-emerald-600 ring-emerald-200'
@@ -125,7 +125,7 @@ export function CustomerPicker({
             {!disabled && (
               <button
                 onClick={handleClear}
-                className="text-zinc-400 hover:text-zinc-600"
+                className="shrink-0 text-zinc-400 hover:text-zinc-600"
               >
                 <X className="h-4 w-4" />
               </button>

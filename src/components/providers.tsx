@@ -7,6 +7,8 @@ import { StoreProvider } from "@/lib/store";
 import { StoreProvider as ActiveStoreProvider } from "@/lib/store-context";
 import { StoreSettingsProvider } from "@/lib/store-settings";
 import { LeadsProvider } from "@/lib/leads-context";
+import { DealsProvider } from "@/lib/lead-deals-context";
+import { QuotationsProvider } from "@/lib/quotations-context";
 import { FieldProvider } from "@/lib/field-context";
 import { CatalogProvider } from "@/lib/catalog-context";
 import { AccountingProvider } from "@/lib/accounting-service";
@@ -29,7 +31,11 @@ export function Providers({ children }: { children: ReactNode }) {
             <CatalogProvider>
               <AccountingProvider>
                 <LeadsProvider>
-                  <FieldProvider>{children}</FieldProvider>
+                  <DealsProvider>
+                    <QuotationsProvider>
+                      <FieldProvider>{children}</FieldProvider>
+                    </QuotationsProvider>
+                  </DealsProvider>
                 </LeadsProvider>
               </AccountingProvider>
             </CatalogProvider>

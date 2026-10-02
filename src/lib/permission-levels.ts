@@ -146,6 +146,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         "leads_export", "leads_options_manage",
         "leads_smart_lists_manage", "leads_campaigns_manage", "deals_delete", "companies_delete",
         "route_leads", "leads_view_all", "leads_performance_view_all",
+        "quotations_view_all", "quotations_delete",
       ],
     },
   },
@@ -160,6 +161,24 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     icon: "UserCheck",
     levels: {
       work: ["leads_sales_agent"],
+    },
+  },
+  {
+    // Deal / Discount-Approval workflow is its OWN module so an org can grant a
+    // Sales Agent "submit a discount request" WITHOUT giving them the approval
+    // authority (approve/reject/request-changes/view-all), and vice-versa. The
+    // tiers map to the spec: a Sales Agent gets View+Work (view own + submit +
+    // comment + resubmit); a Sales Manager/Owner gets Manage (approve / reject /
+    // request changes / view all); Full adds Deal settings.
+    id: "deals",
+    label: "Deals & Discount Approval",
+    blurb: "Discount-exception requests on leads — who can submit vs approve/reject.",
+    icon: "IndianRupee",
+    levels: {
+      view: ["deals_view"],
+      work: ["deals_create", "deals_edit", "deals_comment"],
+      manage: ["deals_approve", "deals_reject", "deals_request_changes", "deals_view_all", "deals_delete"],
+      full: ["deals_settings"],
     },
   },
   {
@@ -437,7 +456,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "full", tickets: "full", invoices: "full", walkin: "manage", leads: "manage",
       field: "manage", inventory: "manage", catalog: "manage", customers: "manage", loyalty: "manage",
       employees: "manage", accounts: "manage", reports: "manage", stores: "full",
-      employees_admin: "manage", settings: "full", account: "work",
+      employees_admin: "manage", settings: "full", account: "work", deals: "full",
     },
   },
   {
@@ -450,7 +469,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "manage", tickets: "manage", invoices: "manage", walkin: "manage", leads: "work",
       field: "manage", inventory: "manage", catalog: "work", customers: "manage", loyalty: "manage",
       employees: "view", accounts: "work", reports: "manage", stores: "view",
-      employees_admin: "view", settings: "view", account: "work",
+      employees_admin: "view", settings: "view", account: "work", deals: "manage",
     },
   },
   {
@@ -502,7 +521,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "none", invoices: "work", walkin: "work", leads: "work",
       field: "none", inventory: "none", catalog: "view", customers: "work", loyalty: "work",
       employees: "none", accounts: "none", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", deals: "work",
     },
   },
   {

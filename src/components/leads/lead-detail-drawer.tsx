@@ -12,7 +12,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Pencil, Trash2, Phone, Mail, MessageSquare, CalendarClock, Check, X,
-  User, Tag, Wrench, ClipboardCheck, Flag, UserCheck, ChevronDown, Search, MapPin,
+  User, Tag, Wrench, ClipboardCheck, Flag, UserCheck, ChevronDown, Search, MapPin, Eye,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,7 @@ import {
 import { priorityTone, statusTone } from "@/components/leads/lead-pills";
 import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
 import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
+import { LeadDealPanel } from "@/components/deals/lead-deal-panel";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { AgentPicker } from "@/components/leads/lead-form-fields";
 import { LeadOperationsPanel } from "@/components/leads/lead-operations-panel";
@@ -218,7 +219,7 @@ function EditableSection({
 }
 
 export function LeadDetailDrawer({
-  lead, open, onClose, onEdit, onDelete,
+  lead, open, onClose, onEdit, onDelete, readOnly = false,
 }: {
   lead: Lead | null;
   open: boolean;
@@ -226,11 +227,14 @@ export function LeadDetailDrawer({
   /** Retained for the list's More-menu "Edit" which opens the full 3-stage flow. */
   onEdit: (lead: Lead) => void;
   onDelete: (lead: Lead) => void;
+  /** OWNER "view as agent" read-only mode — every section is read-only, and
+   *  the Delete / Open Full Form / reassign controls are hidden. */
+  readOnly?: boolean;
 }) {
-  const canAssign = useCanAssignLeads();
+  const canAssign = useCanAssignLeads() && !readOnly;
   const { can } = usePermissions();
-  const canEdit = allow(can, CAP.lead.edit);
-  const canFollowUp = allow(can, CAP.lead.followup);
+  const canEdit = allow(can, CAP.lead.edit) && !readOnly;
+  const canFollowUp = allow(can, CAP.lead.followup) && !readOnly;
 
   if (!lead) return null;
 
@@ -248,16 +252,24 @@ export function LeadDetailDrawer({
       width="max-w-xl"
       footer={
         <div className="flex items-center justify-between">
-          <Can permission={CAP.lead.delete}>
-            <Button variant="ghost" size="sm" className="gap-1.5 text-rose-600 hover:bg-rose-50" onClick={() => onDelete(lead)}>
-              <Trash2 className="h-4 w-4" /> Delete
-            </Button>
-          </Can>
+          {!readOnly ? (
+            <Can permission={CAP.lead.delete}>
+              <Button variant="ghost" size="sm" className="gap-1.5 text-rose-600 hover:bg-rose-50" onClick={() => onDelete(lead)}>
+                <Trash2 className="h-4 w-4" /> Delete
+              </Button>
+            </Can>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200">
+              <Eye className="h-3.5 w-3.5" /> Read-only
+            </span>
+          )}
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Close</Button>
-            <Can permission={CAP.lead.edit}>
-              <Button size="sm" className="gap-1.5" onClick={() => onEdit(lead)}><Pencil className="h-4 w-4" /> Open Full Form</Button>
-            </Can>
+            {!readOnly && (
+              <Can permission={CAP.lead.edit}>
+                <Button size="sm" className="gap-1.5" onClick={() => onEdit(lead)}><Pencil className="h-4 w-4" /> Open Full Form</Button>
+              </Can>
+            )}
           </div>
         </div>
       }
@@ -299,7 +311,7 @@ export function LeadDetailDrawer({
         )}
 
         {/* Fulfilment & operations — routing + store/field hand-off (own inline actions) */}
-        <LeadOperationsPanel lead={lead} />
+        <LeadOperationsPanel lead={lead} readOnly={readOnly} />
 
         {/* Assignment — reassign inline via the AssignMenu */}
         <section className="rounded-2xl border border-border bg-card p-4">
@@ -452,8 +464,11 @@ export function LeadDetailDrawer({
           )}
         />
 
+        {/* ── Deal / discount approval (only when a Deal exists) ── */}
+        <LeadDealPanel lead={lead} />
+
         {/* ── Structured follow-up history + ownership history ── */}
-        <LeadFollowUpHistory lead={lead} />
+        <LeadFollowUpHistory lead={lead} readOnly={readOnly} />
 
         {/* ── Full customer/sales journey ── */}
         <LeadJourneyTimeline lead={lead} />

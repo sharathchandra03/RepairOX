@@ -98,11 +98,12 @@ function relativeTime(iso?: string): string {
 type ViewMode = "card" | "list";
 
 export default function ContactsPage() {
-  const { contacts, leads, deleteContact } = useLeads();
+  const { contacts, leads, deleteContact, viewAsReadOnly } = useLeads();
   const { companies, customers, invoices, tickets } = useStore();
   const { can } = usePermissions();
   const { id: currentUserId } = useSession();
-  const canDelete = allow(can, CAP.customer.delete);
+  // Owner "view as agent" read-only lens disables deletes + add.
+  const canDelete = allow(can, CAP.customer.delete) && !viewAsReadOnly;
   // Owner / manager sees ALL converted contacts (with an agent differentiation);
   // a Sales Agent defaults to their OWN converted contacts (spec §49/§67/§70).
   const canSeeAllContacts = allow(can, CAP.lead.performanceAll) || allow(can, CAP.lead.viewTeam);
@@ -267,11 +268,13 @@ export default function ContactsPage() {
         actions={
           <div className="flex items-center gap-2">
             <ViewToggle className="hidden sm:flex" />
-            <Can permission="manage_customers">
-              <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowAddModal(true)}>
-                <Plus className="h-3.5 w-3.5" /> Add Contact
-              </Button>
-            </Can>
+            {!viewAsReadOnly && (
+              <Can permission="manage_customers">
+                <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowAddModal(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Add Contact
+                </Button>
+              </Can>
+            )}
           </div>
         }
       />

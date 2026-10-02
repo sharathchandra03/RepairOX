@@ -23,7 +23,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { Search, ChevronDown, Check, X, Smartphone, UserX, UserPlus } from "lucide-react";
+import { Search, ChevronDown, Check, X, Smartphone, UserX, UserPlus, Plus } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { usePermissions } from "@/lib/permissions-context";
 import { useLeads } from "@/lib/leads-context";
@@ -238,7 +238,7 @@ export function deviceLabel(brandName?: string, modelName?: string, categoryName
 }
 
 function MiniSelect({
-  value, options, onChange, placeholder, disabled, searchable = true, alwaysSearch = false,
+  value, options, onChange, placeholder, disabled, searchable = true, alwaysSearch = false, onAdd, addLabel = "Add",
 }: {
   value: string;
   options: { id: string; name: string }[];
@@ -249,13 +249,27 @@ function MiniSelect({
   searchable?: boolean;
   /** When true the search box always shows (ignores the 6+ options threshold). */
   alwaysSearch?: boolean;
+  /** When provided, lets the user CREATE a new option by typing a value that
+   *  doesn't exist yet. Receives the trimmed typed name; the caller creates the
+   *  record and should select it. Enables inline capture when the catalog has
+   *  no matching Category / Brand / Model. */
+  onAdd?: (name: string) => void;
+  /** Verb shown on the add row (e.g. "Add brand"). */
+  addLabel?: string;
 }) {
   const { triggerRef, panelRef, open, setOpen, pos, place, mounted } = useAnchoredPanel();
   const [query, setQuery] = useState("");
   const selected = options.find((o) => o.id === value);
-  const filtered = query.trim() ? options.filter((o) => o.name.toLowerCase().includes(query.trim().toLowerCase())) : options;
+  const trimmed = query.trim();
+  const filtered = trimmed ? options.filter((o) => o.name.toLowerCase().includes(trimmed.toLowerCase())) : options;
+  // Offer "Add '<query>'" when a non-empty query has no EXACT (case-insensitive)
+  // existing option — so a salesperson can capture a brand/model that isn't in
+  // the catalog yet without leaving the lead.
+  const exactExists = !!trimmed && options.some((o) => o.name.toLowerCase() === trimmed.toLowerCase());
+  const canAdd = !!onAdd && !!trimmed && !exactExists;
   const toggle = () => { if (disabled) return; if (!open) place(); setOpen((o) => !o); };
   const close = () => { setOpen(false); setQuery(""); };
+  const doAdd = () => { if (!canAdd || !onAdd) return; onAdd(trimmed); close(); };
   return (
     <>
       <button ref={triggerRef} type="button" onClick={toggle} disabled={disabled} className={cn(triggerCls(open), disabled && "cursor-not-allowed opacity-50")}>
@@ -267,10 +281,12 @@ function MiniSelect({
           <div className="fixed inset-0 z-[10040]" onClick={close} />
           <div ref={panelRef} data-lead-popover-open="true" style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
             className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]">
-            {searchable && (alwaysSearch || options.length > 6) && (
+            {searchable && (alwaysSearch || !!onAdd || options.length > 6) && (
               <div className="flex items-center gap-2 border-b border-border px-2.5 py-2">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…"
+                <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter" && canAdd) { e.preventDefault(); doAdd(); } }}
+                  placeholder={onAdd ? "Search or type to add…" : "Search…"}
                   className="w-full bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground" />
               </div>
             )}
@@ -280,7 +296,7 @@ function MiniSelect({
                   <X className="h-3 w-3" /> Clear
                 </button>
               )}
-              {filtered.length === 0 && <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No matches.</p>}
+              {filtered.length === 0 && !canAdd && <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No matches.</p>}
               {filtered.map((o) => (
                 <button key={o.id} type="button" onClick={() => { onChange(o.id, o.name); close(); }}
                   className={cn("flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors", o.id === value ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : "hover:bg-[#EEF1FD]/60")}>
@@ -288,6 +304,13 @@ function MiniSelect({
                   <span className="truncate">{o.name}</span>
                 </button>
               ))}
+              {canAdd && (
+                <button type="button" onClick={doAdd}
+                  className="mt-0.5 flex w-full items-center gap-2 rounded-lg border-t border-border px-2.5 py-2 text-left text-[13px] font-medium text-[#4361EE] transition-colors hover:bg-[#EEF1FD]/60">
+                  <Plus className="h-3.5 w-3.5 shrink-0" />
+                  <span className="truncate">{addLabel} &ldquo;{trimmed}&rdquo;</span>
+                </button>
+              )}
             </div>
           </div>
         </>,
@@ -303,7 +326,12 @@ export function DeviceCatalogPicker({
   value: DeviceSelection;
   onChange: (next: DeviceSelection) => void;
 }) {
-  const { categories, brands, models } = useCatalog();
+  const { categories, brands, models, addCategory, addBrand, addModel } = useCatalog();
+  const { can } = usePermissions();
+  // Capturing a missing Category / Brand / Model inline writes to the shared
+  // Device Catalog, so it's gated on the catalog edit capability (same key the
+  // Price List uses). A view-tier user just picks from existing options.
+  const canAddCatalog = allow(can, CAP.settings.inventorySettings);
 
   const catOptions = useMemo(
     () => categories.filter((c) => c.enabled !== false).map((c) => ({ id: c.id, name: c.name })),
@@ -334,12 +362,33 @@ export function DeviceCatalogPicker({
     onChange({ ...value, modelId, label: deviceLabel(brandName, name, catName) });
   };
 
+  // ── Inline capture of a missing catalog entry (writes to the shared Device
+  //    Catalog, then selects the new record). Reuses the canonical add*
+  //    functions — never a duplicate device master. ──
+  const addCategoryInline = (name: string) => {
+    const cat = addCategory({ name, icon: "Box", enabled: true });
+    setCategory(cat.id, cat.name);
+  };
+  const addBrandInline = (name: string) => {
+    if (!value.categoryId) return;
+    const brand = addBrand({ name, categoryId: value.categoryId });
+    setBrand(brand.id, brand.name);
+  };
+  const addModelInline = (name: string) => {
+    if (!value.categoryId || !value.brandId) return;
+    const model = addModel({ name, brandId: value.brandId, categoryId: value.categoryId });
+    setModel(model.id, model.name);
+  };
+
   return (
     <div className="space-y-2">
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <MiniSelect value={value.categoryId} options={catOptions} onChange={setCategory} placeholder="Device Category" />
-        <MiniSelect value={value.brandId} options={brandOptions} onChange={setBrand} placeholder="Brand" disabled={!value.categoryId} />
-        <MiniSelect value={value.modelId} options={modelOptions} onChange={setModel} placeholder="Model Name" disabled={!value.brandId} alwaysSearch />
+        <MiniSelect value={value.categoryId} options={catOptions} onChange={setCategory} placeholder="Device Category"
+          onAdd={canAddCatalog ? addCategoryInline : undefined} addLabel="Add category" />
+        <MiniSelect value={value.brandId} options={brandOptions} onChange={setBrand} placeholder="Brand" disabled={!value.categoryId}
+          onAdd={canAddCatalog ? addBrandInline : undefined} addLabel="Add brand" />
+        <MiniSelect value={value.modelId} options={modelOptions} onChange={setModel} placeholder="Model Name" disabled={!value.brandId} alwaysSearch
+          onAdd={canAddCatalog ? addModelInline : undefined} addLabel="Add model" />
       </div>
       {value.label && (
         <p className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-medium text-[#4361EE]">

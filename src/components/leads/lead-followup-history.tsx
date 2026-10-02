@@ -46,10 +46,10 @@ function toIso(date: string, time: string): string {
   return new Date(`${date}T${time || "10:00"}:00`).toISOString();
 }
 
-export function LeadFollowUpHistory({ lead }: { lead: Lead }) {
+export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; readOnly?: boolean }) {
   const { can } = usePermissions();
   const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent } = useLeads();
-  const canFollowUp = allow(can, CAP.lead.followup);
+  const canFollowUp = allow(can, CAP.lead.followup) && !readOnly;
 
   const followUps = followUpsFor(lead.id);
   const open = openFollowUp(followUps);

@@ -273,13 +273,38 @@ export const CAP = {
     performanceAll: ["leads_performance_view_all", "leads_view_all", "view_sales_reports", "manage_reports"],
   },
   deal: {
-    create: ["deals_create", "manage_sales"],
-    edit: ["deals_edit", "manage_sales"],
+    // See the Deal page / a lead's deal panel. Submitting a request implies
+    // seeing one's own, so create/manage_sales fall back here.
+    view: ["deals_view", "deals_view_all", "deals_create", "deals_approve", "manage_sales"],
+    // Submit a discount-approval request (Discounted Lead → Deal). A Sales Agent
+    // who can create leads can request a deal.
+    create: ["deals_create", "leads_create", "manage_sales"],
+    // Edit / resubmit one's OWN request (after Changes Requested).
+    edit: ["deals_edit", "deals_create", "manage_sales"],
     delete: ["deals_delete", "manage_sales"],
+    // Internal approval conversation.
+    comment: ["deals_comment", "deals_create", "deals_approve", "manage_sales"],
+    // APPROVAL-side authority — SEPARATE from submitting. A Sales Agent does NOT
+    // get these by default; only managers/owners (or manage_sales fallback).
+    approve: ["deals_approve", "manage_sales"],
+    reject: ["deals_reject", "deals_approve", "manage_sales"],
+    requestChanges: ["deals_request_changes", "deals_approve", "manage_sales"],
+    // See every deal in authorized stores (the Deal queue). Review authority
+    // (approve) implies seeing the queue; manage_reports/manage_sales too.
+    viewAll: ["deals_view_all", "deals_approve", "manage_sales", "manage_reports"],
+    settings: ["deals_settings", "manage_settings"],
   },
   quotation: {
+    // See quotations. A Sales Agent who can view/work leads can view
+    // quotations; manage_sales / reports keys fall back here.
+    view: ["quotations_view", "quotations_create", "leads_view", "manage_sales", "view_sales_reports", "manage_reports"],
     create: ["quotations_create", "manage_sales"],
     send: ["quotations_send", "send_communications", "manage_sales"],
+    // See every quotation in authorized stores (owner/manager scope). Without
+    // it, a Sales Agent sees only quotations they created / own. Mirrors the
+    // lead see-all keys so UI = scope.
+    viewAll: ["quotations_view_all", "leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
+    delete: ["quotations_delete", "quotations_create", "manage_sales"],
     convertToInvoice: ["quotations_convert_to_invoice", "create_invoice", "manage_invoices"],
   },
   dashboard: {

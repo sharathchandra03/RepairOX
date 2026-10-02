@@ -802,8 +802,8 @@ export const navItems: NavItem[] = [
   { href: "/leads/kanban",     label: "Kanban",       icon: "ClipboardList", permission: ["leads_view", "manage_sales"] },
   { href: "/leads/contacts",   label: "Contacts",     icon: "BookUser", permission: "manage_customers" },
   { href: "/leads/companies",  label: "Companies",    icon: "Store", permission: "manage_customers" },
-  { href: "/leads/deals",      label: "Deals",        icon: "ClipboardList", permission: "manage_sales" },
-  { href: "/leads/quotations", label: "Quotations",   icon: "FileText", permission: "manage_sales" },
+  { href: "/leads/deals",      label: "Deals",        icon: "IndianRupee", permission: ["deals_view", "deals_view_all", "deals_approve", "manage_sales"] },
+  { href: "/leads/quotations", label: "Quotations",   icon: "FileText", permission: ["quotations_view", "quotations_view_all", "quotations_create", "manage_sales"] },
   { href: "/leads/inbox",      label: "Inbox",        icon: "Boxes", permission: "send_communications" },
   { href: "/leads/tasks",      label: "Tasks",        icon: "Ticket" },
   { href: "/leads/meetings",   label: "Meetings",     icon: "BookUser" },
@@ -819,6 +819,11 @@ export const navItems: NavItem[] = [
   // permissions; store scope remains independently enforced by context + RLS.
   { href: "/leads/intelligence", label: "Lead Intelligence", icon: "Lightbulb", permission: ["leads_performance_view_own", "leads_view", "manage_sales"] },
   { href: "/leads/intelligence/agents", label: "Agent Intelligence", icon: "Trophy", permission: ["leads_performance_view_all", "leads_view_all", "view_sales_reports", "manage_reports"] },
+  // Agent Performance — the tabular performance dashboard (ALL AGENTS leaderboard
+  // + INDIVIDUAL month-by-month), distinct from the diagnostic Intelligence
+  // pages. The page itself role-gates: own-scope agents see only their own tab,
+  // owners (performanceAll) get the all-agents leaderboard with drill-down.
+  { href: "/leads/performance", label: "Agent Performance", icon: "BarChart3", permission: ["leads_performance_view_own", "leads_performance_view_all", "leads_view", "manage_sales"] },
   { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
@@ -1913,7 +1918,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   ],
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
-    { label: "PERFORMANCE",    items: ["/leads/intelligence", "/leads/intelligence/agents"] },
+    { label: "PERFORMANCE",    items: ["/leads/performance", "/leads/intelligence", "/leads/intelligence/agents"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },

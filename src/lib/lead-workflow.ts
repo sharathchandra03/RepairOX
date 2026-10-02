@@ -33,6 +33,16 @@ import { isFinalizedInvoice, isLostStatus, isNotContactedStatus } from "@/lib/le
 import type { WalkIn, Ticket, Invoice } from "@/lib/mock-data";
 import type { FieldJob, FieldJobStatus } from "@/lib/field-data";
 import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE } from "@/lib/field-data";
+import type { LeadDeal, DealStatus } from "@/lib/lead-deals";
+
+/** The minimal quotation shape the derivation needs (status + whether it was
+ *  actually sent). Supplied by the Lead Table from the lead's current quotation
+ *  so Action can read "Quotation Created" / "Quotation Sent" — never fabricated,
+ *  always below a real ticket/invoice/field record. */
+export interface LeadWorkflowQuotation {
+  status: string;   // quotation lifecycle status
+  sentAt: string;   // ISO instant it was sent ("" = created but not sent)
+}
 
 /* ─── Contact / qualification gate ─────────────────────────────────────────
    A progressive data-capture gate. Downstream workflow fields (device, value,
@@ -171,6 +181,9 @@ export type LeadActionKind =
   | "follow_up"
   | "in_pipeline"
   | "deal"
+  | "discount_approval"   // a Deal (discount approval) is pending / in review
+  | "quotation_created"   // a quotation exists for the lead (not yet sent)
+  | "quotation_sent"      // a quotation has been sent to the customer
   | "field_assigned"
   | "walkin_assigned"   // walk-in routed/assigned, customer not yet arrived
   | "visited_store"     // walk-in customer has arrived (ticket/invoice exists)
@@ -283,6 +296,9 @@ export const LEAD_ACTION_LABEL: Record<LeadActionKind, string> = {
   follow_up: "Follow-up",
   in_pipeline: "In Pipeline",
   deal: "Deal",
+  discount_approval: "Discount Approval",
+  quotation_created: "Quotation Created",
+  quotation_sent: "Quotation Sent",
   field_assigned: "Field Assigned",
   walkin_assigned: "Walkin Assigned",
   visited_store: "Visited Store",
@@ -304,7 +320,7 @@ export const LEAD_ACTION_LABEL: Record<LeadActionKind, string> = {
 export function deriveLeadWorkflow(
   lead: Lead,
   src: LeadWorkflowSources,
-  opts?: { openFollowUpDue?: boolean },
+  opts?: { openFollowUpDue?: boolean; deal?: LeadDeal | null; quotation?: LeadWorkflowQuotation | null },
 ): LeadWorkflow {
   const gate = leadGateState(lead);
 
@@ -444,9 +460,46 @@ export function deriveLeadWorkflow(
     );
   }
 
-  // ── 6) DEAL path (link only; Deal module owns its logic). ──
+  // ── 6) DEAL / DISCOUNT APPROVAL (real Deal record attached to the lead). ──
+  //   A pending / changes-requested discount approval surfaces as the lead's
+  //   current meaningful action. It sits BELOW real operational records (a
+  //   ticket/invoice/field job always wins, §28) and does NOT win or lose the
+  //   lead: Result stays "In Pipeline". An approved/rejected deal with no
+  //   operational record yet falls through to the normal pipeline (approval is
+  //   not a conversion — the agent must still convert the customer, §24/§25).
+  const deal = opts?.deal ?? null;
+  if (deal && (deal.status === "pending_approval" || deal.status === "changes_requested")) {
+    const label = deal.status === "changes_requested" ? "Changes Requested" : "Pending Approval";
+    return mk(
+      "discount_approval",
+      { ...NA_RESULT, kind: "pipeline", primary: label },
+      `Discount approval ${deal.dealNo} is ${label.toLowerCase()} — the lead is in the Deal approval workflow.`,
+      "Discount Approval",
+    );
+  }
+
+  // ── 6b) DEAL path by status label (link only; no real deal record). ──
   if (isDealLead(lead)) {
     return mk("deal", { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" }, "Lead is on the Deal path — see the linked Deal.");
+  }
+
+  // ── 6c) QUOTATION (a customer-facing offer exists). ──
+  //   A quotation sits BELOW every real operational record (ticket / invoice /
+  //   field job / walk-in) and below the Deal approval workflow — those always
+  //   win (§62). It surfaces only when nothing more advanced has happened. A
+  //   quotation is an OFFER, never revenue: Result stays "In Pipeline". It is
+  //   derived from the lead's actual quotation record (never fabricated / never
+  //   manually typed), so a user can't fake "Quotation Sent".
+  const quotation = opts?.quotation ?? null;
+  if (quotation && !isLostStatus(lead.status, lead.finalResult)) {
+    const sent = !!(quotation.sentAt && quotation.sentAt.trim());
+    return mk(
+      sent ? "quotation_sent" : "quotation_created",
+      { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" },
+      sent
+        ? "A quotation has been sent to the customer — awaiting their decision."
+        : "A quotation has been created for this lead — review and send it.",
+    );
   }
 
   // ── 7) LOST / terminal negative. ──
@@ -495,6 +548,9 @@ export function leadActionTone(kind: LeadActionKind): string {
     case "in_pipeline":     return "bg-sky-50 text-sky-700 ring-sky-200";
     case "follow_up":       return "bg-orange-50 text-orange-700 ring-orange-200";
     case "deal":            return "bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200";
+    case "discount_approval": return "bg-amber-50 text-amber-700 ring-amber-200";
+    case "quotation_sent":    return "bg-blue-50 text-blue-700 ring-blue-200";
+    case "quotation_created": return "bg-indigo-50 text-indigo-700 ring-indigo-200";
     case "lost":            return "bg-rose-50 text-rose-600 ring-rose-200";
     case "not_contacted":   return "bg-zinc-100 text-zinc-500 ring-zinc-200";
     case "na":

@@ -371,14 +371,22 @@ export function findCustomerByExactIdentity(
   const phone = normalizeCustomerPhone(ident.phone || "");
   const email = normalizeCustomerEmail(ident.email || "");
 
+  // PHONE IS THE PRIMARY IDENTITY. When the user has typed a complete phone
+  // (10+ digits), it decides the match outright: if it matches a customer we
+  // return them; if it does NOT, we return null and DO NOT fall back to email.
+  // Falling back to email here is what made a stale carried-over email keep
+  // showing the previously-linked customer after the user typed a brand-new
+  // number — the card must track the number the user is actually entering.
   if (phone && phone.length >= 10) {
     const byPhone = customers.find((c) => {
       const m = normalizeCustomerPhone(c.mobile);
       const am = normalizeCustomerPhone(c.altMobile || "");
       return (m && m === phone) || (am && am === phone);
     });
-    if (byPhone) return byPhone;
+    return byPhone ?? null;
   }
+  // No usable phone yet (empty / still typing) → fall back to an exact email
+  // match so email-only lookups still work.
   if (email) {
     const byEmail = customers.find((c) => normalizeCustomerEmail(c.email) === email);
     if (byEmail) return byEmail;

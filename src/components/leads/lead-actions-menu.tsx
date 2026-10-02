@@ -7,22 +7,40 @@
    <Dropdown>) so it floats above the table instead of being clipped.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Route as RouteIcon } from "lucide-react";
+import { Eye, Pin, PinOff, MoreHorizontal, Pencil, Flag, Trash2, Route as RouteIcon, FileText } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { Can } from "@/components/common/can";
 import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 import type { Lead } from "@/lib/leads-data";
 
-export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete" | "route";
+export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete" | "route" | "quotation";
 
 export function LeadActionsMenu({
-  lead, onAction,
+  lead, onAction, readOnly = false,
 }: {
   lead: Lead;
   onAction: (action: LeadAction, lead: Lead) => void;
+  /** OWNER "view as agent" read-only mode — only View is offered; every
+   *  mutating control (pin/edit/priority/delete/route/quotation) is hidden. */
+  readOnly?: boolean;
 }) {
   const isPinned = !!lead.pinnedAt;
+
+  // Read-only (owner viewing an agent's workspace): offer View only.
+  if (readOnly) {
+    return (
+      <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
+        <button
+          onClick={() => onAction("view", lead)}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+          title="View lead"
+        >
+          <Eye className="h-3.5 w-3.5" />
+        </button>
+      </div>
+    );
+  }
   return (
     <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
       {/* Quick call/WhatsApp/email actions live in the Contact Info cell
@@ -69,6 +87,9 @@ export function LeadActionsMenu({
         {(close) => (
           <>
             <MenuItem icon={Eye} onClick={() => { onAction("view", lead); close(); }}>View</MenuItem>
+            <Can permission={CAP.quotation.create}>
+              <MenuItem icon={FileText} onClick={() => { onAction("quotation", lead); close(); }}>Send Quotation</MenuItem>
+            </Can>
             <Can permission="route_leads">
               <MenuItem icon={RouteIcon} onClick={() => { onAction("route", lead); close(); }}>Route / Assign</MenuItem>
             </Can>

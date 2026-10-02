@@ -33,6 +33,7 @@ export function InventorySearchBox({
   onClose,
   onAddInventory,
   autoFocus = true,
+  clearOnSelect = true,
   placeholder = "Search inventory by name, SKU, category, or HSN…",
 }: {
   onSelect: (item: InventoryItem) => void;
@@ -41,11 +42,30 @@ export function InventorySearchBox({
    *  The caller must gate this on CAP.inventory.create. */
   onAddInventory?: (searchTerm: string) => void;
   autoFocus?: boolean;
+  /** When true (default) picking a result clears the query so the dropdown
+   *  collapses and the box is ready for the next search — the "search → pick →
+   *  dropdown closes" behaviour. The box itself stays mounted for rapid
+   *  multi-add; the caller controls that via onClose. */
+  clearOnSelect?: boolean;
   placeholder?: string;
 }) {
   const { inventory } = useStore();
   const [q, setQ] = useState("");
   const [debounced, setDebounced] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  // Pick a result: notify the caller, then (by default) clear the query so the
+  // results dropdown collapses immediately. Keeps focus so the user can type
+  // the next item straight away.
+  const pick = (item: InventoryItem) => {
+    onSelect(item);
+    if (clearOnSelect) {
+      setQ("");
+      setDebounced("");
+      // Refocus the input on the next tick so rapid multi-add stays keyboard-driven.
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
+  };
 
   // Anchor the floating dropdown to the input. Portalling to <body> keeps the
   // results from being clipped by an ancestor with overflow-hidden (e.g. the
@@ -106,7 +126,7 @@ export function InventorySearchBox({
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && results.length > 0) {
       e.preventDefault();
-      onSelect(results[0]);
+      pick(results[0]);
     }
     if (e.key === "Escape" && onClose) onClose();
   };
@@ -116,7 +136,7 @@ export function InventorySearchBox({
       ? createPortal(
           <div
             data-inventory-search-panel="true"
-            className="fixed z-[60]"
+            className="fixed z-[10050]"
             style={{ left: rect.left, top: rect.top + 6, width: rect.width }}
           >
             {results.length > 0 && (
@@ -132,7 +152,7 @@ export function InventorySearchBox({
                       // blur / outside-click close logic can run.
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        onSelect(item);
+                        pick(item);
                       }}
                       className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition last:border-0 hover:bg-indigo-50/50"
                     >
@@ -194,6 +214,7 @@ export function InventorySearchBox({
       <div className="flex items-center gap-2 rounded-xl border border-input bg-card px-3 py-1.5 transition-colors focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/15">
         <Search className="h-4 w-4 shrink-0 text-[#4361EE]" />
         <input
+          ref={inputRef}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={onKeyDown}

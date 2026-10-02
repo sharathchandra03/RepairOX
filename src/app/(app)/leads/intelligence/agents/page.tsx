@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { ArrowRight, CalendarClock, IndianRupee, Trophy, UserRoundCheck, Users } from "lucide-react";
+import { ArrowRight, CalendarClock, Eye, IndianRupee, Trophy, UserRoundCheck, Users } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { NoPermission } from "@/components/common/no-permission";
 import { Avatar } from "@/components/ui/avatar";
@@ -137,7 +137,13 @@ export default function AgentIntelligencePage() {
                   <span>{s.pendingFollowUps} pending · <span className={s.overdueFollowUps ? "font-semibold text-rose-600" : ""}>{s.overdueFollowUps} overdue</span></span>
                   <span>{topSource ? `Top observed: ${topSource.label}` : `Need ${row.intelligence.minSample}+ / source`}</span>
                 </div>
-                <Link href={buildAgentIntelligenceHref(row.agent.id, effectiveFilters)} className="mt-4 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-[#B3BFF6] bg-[#EEF1FD]/55 px-3 py-2 text-[12px] font-semibold text-[#3A4DBB] transition hover:bg-[#EEF1FD]">View Analysis <ArrowRight className="h-3.5 w-3.5" /></Link>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <Link href={buildAgentIntelligenceHref(row.agent.id, effectiveFilters)} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-[#B3BFF6] bg-[#EEF1FD]/55 px-3 py-2 text-[12px] font-semibold text-[#3A4DBB] transition hover:bg-[#EEF1FD]">View Analysis <ArrowRight className="h-3.5 w-3.5" /></Link>
+                  {/* READ-ONLY workspace scope (Option A — NOT impersonation). Opens the
+                      Leads workspace scoped to this agent's leads; the owner's session
+                      identity is unchanged and no edits are possible there. */}
+                  <Link href={`/leads/list?viewAs=${encodeURIComponent(row.agent.id)}`} className="inline-flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card px-3 py-2 text-[12px] font-semibold text-zinc-600 transition hover:bg-muted"><Eye className="h-3.5 w-3.5" /> View Workspace</Link>
+                </div>
               </article>
             );
           })}
@@ -150,6 +156,8 @@ export default function AgentIntelligencePage() {
 }
 
 function Summary({ label, value, icon: Icon, attention = false }: { label: string; value: string; icon: React.ComponentType<{ className?: string }>; attention?: boolean }) {
-  return <div className="rounded-xl border border-border/70 bg-card/90 p-3 shadow-card"><span className={`grid h-7 w-7 place-items-center rounded-lg ${attention ? "bg-red-50 text-rose-600" : "bg-[#EEF1FD] text-[#4361EE]"}`}><Icon className="h-3.5 w-3.5" /></span><p className="mt-2 text-xl font-extrabold tabular-nums">{value}</p><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p></div>;
+  // Mandatory KPI box treatment (design-system §KPI): a VISIBLE 2px bordered box,
+  // never a faint border-border/70 / bg-card/80 card.
+  return <div className={`rounded-xl border-2 bg-card p-4 shadow-card transition ${attention ? "border-red-200 hover:border-red-300" : "border-zinc-200 hover:border-[#4361EE]/30"}`}><span className={`grid h-7 w-7 place-items-center rounded-lg ${attention ? "bg-red-50 text-rose-600" : "bg-[#EEF1FD] text-[#4361EE]"}`}><Icon className="h-3.5 w-3.5" /></span><p className="mt-2 text-xl font-extrabold tabular-nums">{value}</p><p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</p></div>;
 }
 function AgentMetric({ label, value }: { label: string; value: string | number }) { return <div className="text-center"><p className="text-sm font-bold tabular-nums">{value}</p><p className="mt-0.5 text-[9px] uppercase tracking-wide text-muted-foreground">{label}</p></div>; }

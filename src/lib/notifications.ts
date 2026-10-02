@@ -39,6 +39,12 @@ export type NotificationKind =
   | "drop_assignment"
   | "drop_reminder"
   | "drop_done"
+  /* Deal / discount-approval workflow (attached to a lead). */
+  | "deal_approval_requested"
+  | "deal_changes_requested"
+  | "deal_approved"
+  | "deal_rejected"
+  | "deal_resubmitted"
   | "generic";
 
 export interface AppNotification {

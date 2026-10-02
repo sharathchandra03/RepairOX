@@ -48,7 +48,10 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
       : item.href;
   // Exact match for module root pages (e.g. /operations, /lead-management) to
   // avoid them staying "active" when a sibling sub-route like /operations/reports is open.
-  const isModuleRoot = item.href === "/operations" || item.href === "/lead-management" || item.href === "/dashboard";
+  // "/leads/intelligence" (Lead Intelligence) is exact-match too, so it does NOT
+  // light up when "/leads/intelligence/agents" (Agent Intelligence) is open — the
+  // two are sibling sections, each with its own independent active pill.
+  const isModuleRoot = item.href === "/operations" || item.href === "/lead-management" || item.href === "/dashboard" || item.href === "/leads/intelligence";
   const active = !item.newTab && !comingSoon && (isModuleRoot
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(item.href + "/"));

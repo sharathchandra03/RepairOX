@@ -27,10 +27,19 @@ import { createPortal } from "react-dom";
 import { MapPin, Search, X, LocateFixed, Loader2, Check, Crosshair, Plus, Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { loadLeaflet } from "@/lib/leaflet-loader";
+import {
+  type CityScope,
+  DEFAULT_CITY_SCOPES,
+  loadCityScopes,
+  saveCityScopes,
+  resolveCityScope,
+  allCitiesBboxOf,
+} from "@/lib/geo/city-scopes";
 
-/* ── Leaflet CDN (pinned) ───────────────────────────────────────────────── */
-const LEAFLET_JS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
-const LEAFLET_CSS = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+export type { CityScope } from "@/lib/geo/city-scopes";
+export { DEFAULT_CITY_SCOPES } from "@/lib/geo/city-scopes";
+
 const NOMINATIM = "https://nominatim.openstreetmap.org";
 // Photon (Komoot) — OSM-based geocoder that does fuzzy, partial, POI-aware
 // search (shop names, landmarks, businesses) far better than raw Nominatim, and
@@ -39,114 +48,9 @@ const NOMINATIM = "https://nominatim.openstreetmap.org";
 const PHOTON = "https://photon.komoot.io";
 const PIN_ZOOM = 16;
 
-/* ── City scopes ──────────────────────────────────────────────────────────
- * We operate in specific cities, so search is CONSTRAINED to a city's bounding
- * box. This keeps results local and accurate ("MG Road" → the MG Road in the
- * chosen city, not one 500km away). Bounds are [minLng, minLat, maxLng, maxLat].
- * Add a new city here (bbox + center) and it appears in the scope selector. */
-export interface CityScope {
-  id: string;
-  label: string;
-  center: [number, number];      // [lat, lng]
-  bbox: [number, number, number, number]; // [minLng, minLat, maxLng, maxLat]
-  zoom: number;
-}
-
-/** Seed cities shipped by default. Admins can add/remove cities in the picker;
- *  the working set is persisted per browser (localStorage). */
-export const DEFAULT_CITY_SCOPES: CityScope[] = [
-  {
-    id: "bengaluru",
-    label: "Bengaluru",
-    center: [12.9716, 77.5946],
-    bbox: [77.46, 12.83, 77.78, 13.14],
-    zoom: 11,
-  },
-  {
-    id: "hyderabad",
-    label: "Hyderabad",
-    center: [17.385, 78.4867],
-    bbox: [78.24, 17.20, 78.66, 17.56],
-    zoom: 11,
-  },
-];
-
-const CITY_SCOPES_KEY = "repairox-location-target-cities";
-
-/** Load the admin-managed city list (falls back to the seed defaults). */
-function loadCityScopes(): CityScope[] {
-  if (typeof window === "undefined") return DEFAULT_CITY_SCOPES;
-  try {
-    const raw = window.localStorage.getItem(CITY_SCOPES_KEY);
-    if (!raw) return DEFAULT_CITY_SCOPES;
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed) && parsed.every(isValidScope) && parsed.length > 0) return parsed;
-    return DEFAULT_CITY_SCOPES;
-  } catch {
-    return DEFAULT_CITY_SCOPES;
-  }
-}
-
-function saveCityScopes(scopes: CityScope[]) {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(CITY_SCOPES_KEY, JSON.stringify(scopes));
-  } catch {
-    /* ignore quota / privacy-mode errors */
-  }
-}
-
-function isValidScope(s: any): s is CityScope {
-  return (
-    s && typeof s.id === "string" && typeof s.label === "string" &&
-    Array.isArray(s.center) && s.center.length === 2 &&
-    Array.isArray(s.bbox) && s.bbox.length === 4 &&
-    typeof s.zoom === "number"
-  );
-}
-
-/** Resolve a city NAME to a CityScope (center + bounding box) via Nominatim,
- *  which returns a `boundingbox` for places. Lets an admin add a city by name
- *  without knowing its coordinates. Returns null when it can't be resolved. */
-async function resolveCityScope(name: string): Promise<CityScope | null> {
-  const q = name.trim();
-  if (!q) return null;
-  try {
-    const res = await fetch(
-      `${NOMINATIM}/search?format=jsonv2&limit=1&addressdetails=1&q=${encodeURIComponent(q)}`,
-      { headers: { Accept: "application/json" } },
-    );
-    if (!res.ok) return null;
-    const data = await res.json();
-    const hit = Array.isArray(data) ? data[0] : null;
-    if (!hit || !Array.isArray(hit.boundingbox) || hit.boundingbox.length < 4) return null;
-    // Nominatim boundingbox = [minLat, maxLat, minLng, maxLng] (strings).
-    const [minLat, maxLat, minLng, maxLng] = hit.boundingbox.map(Number);
-    const lat = Number(hit.lat);
-    const lng = Number(hit.lon);
-    if ([minLat, maxLat, minLng, maxLng, lat, lng].some(Number.isNaN)) return null;
-    const label: string =
-      hit.name || (hit.display_name ? String(hit.display_name).split(",")[0] : q);
-    const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}-${Math.round(lat * 100)}${Math.round(lng * 100)}`;
-    return {
-      id,
-      label,
-      center: [lat, lng],
-      bbox: [minLng, minLat, maxLng, maxLat],
-      zoom: 11,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Combined bbox spanning every configured city (used for the "All cities"
- *  scope) — the min/max across all city boxes. */
-function allCitiesBboxOf(scopes: CityScope[]): [number, number, number, number] {
-  const xs = scopes.flatMap((c) => [c.bbox[0], c.bbox[2]]);
-  const ys = scopes.flatMap((c) => [c.bbox[1], c.bbox[3]]);
-  return [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
-}
+/* City scopes, the admin-managed city list + geocoding live in the shared geo
+   module (`@/lib/geo/city-scopes`) so the Lead Map and this picker share ONE
+   source of truth. Imported at the top of this file. */
 
 const DEFAULT_ZOOM = 5;
 
@@ -175,35 +79,6 @@ export function parseCoordinates(raw: string): { lat: number; lng: number } | nu
   if (Number.isNaN(lat) || Number.isNaN(lng)) return null;
   if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
   return { lat, lng };
-}
-
-/* ── Leaflet loader (singleton) ─────────────────────────────────────────── */
-let leafletPromise: Promise<any> | null = null;
-function loadLeaflet(): Promise<any> {
-  if (typeof window === "undefined") return Promise.reject(new Error("no window"));
-  if ((window as any).L) return Promise.resolve((window as any).L);
-  if (leafletPromise) return leafletPromise;
-  leafletPromise = new Promise((resolve, reject) => {
-    // CSS
-    if (!document.querySelector(`link[href="${LEAFLET_CSS}"]`)) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = LEAFLET_CSS;
-      link.crossOrigin = "";
-      document.head.appendChild(link);
-    }
-    // JS
-    const existing = document.querySelector(`script[src="${LEAFLET_JS}"]`) as HTMLScriptElement | null;
-    if (existing && (window as any).L) return resolve((window as any).L);
-    const script = existing ?? document.createElement("script");
-    script.src = LEAFLET_JS;
-    script.async = true;
-    script.crossOrigin = "";
-    script.addEventListener("load", () => resolve((window as any).L));
-    script.addEventListener("error", () => reject(new Error("Failed to load Leaflet")));
-    if (!existing) document.body.appendChild(script);
-  });
-  return leafletPromise;
 }
 
 async function reverseGeocode(lat: number, lng: number): Promise<string> {

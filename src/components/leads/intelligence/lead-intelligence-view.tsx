@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
   AlertTriangle, ArrowLeft, ArrowRight, BadgeIndianRupee, CalendarClock,
-  CheckCircle2, Clock3, IndianRupee, Info, Layers3, Lightbulb, Route,
+  CheckCircle2, Clock3, IndianRupee, Info, Layers3, Lightbulb, Lock, Route,
   Target, Timer, TrendingDown, TrendingUp, UserRoundCheck, Users,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -14,6 +14,8 @@ import { useLeads } from "@/lib/leads-context";
 import { useStore } from "@/lib/store";
 import { useStoreContext } from "@/lib/store-context";
 import { useCatalog } from "@/lib/catalog-context";
+import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
 import { cn, formatINR } from "@/lib/utils";
 import {
   calculateLeadIntelligence,
@@ -51,6 +53,11 @@ export function LeadIntelligenceView({
   const store = useStore();
   const { stores, activeStoreId } = useStoreContext();
   const catalog = useCatalog();
+  const { can } = usePermissions();
+  // When the viewer can analyze all agents (owner/manager) and is looking at
+  // their OWN empty cohort, steer them to Agent Intelligence rather than leaving
+  // a bare empty page. Never widen the own-scope cohort — that stays assignedTo-only.
+  const canViewAgents = !ownerContext && allow(can, CAP.lead.performanceAll);
   const [filters, setFilters] = useState<LeadIntelligenceFilters>(initialFilters);
   // Transaction providers load the active store only (or all authorized stores
   // in All Shops). Force the Lead cohort onto that same branch set so counts
@@ -90,6 +97,18 @@ export function LeadIntelligenceView({
           <ArrowLeft className="h-4 w-4" /> Back to Agent Intelligence
         </Link>
       )}
+      {/* Owner viewing another agent → make the read-only, no-impersonation
+          nature explicit. The owner is analyzing this agent, NOT acting as them;
+          anyone who needs to act does so under their own login. */}
+      {ownerContext && (
+        <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-[12px] text-amber-800">
+          <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <span className="font-semibold">Read-only analysis.</span> You&apos;re viewing {agent.name}&apos;s performance — your
+            session identity is unchanged and nothing here can be edited. To act on leads, each user works under their own login.
+          </span>
+        </div>
+      )}
       <PageHeader
         eyebrow={ownerContext ? "Agent Intelligence" : "Personal Sales Intelligence"}
         title={ownerContext ? `${agent.name} — Lead Intelligence` : "My Lead Intelligence"}
@@ -113,7 +132,7 @@ export function LeadIntelligenceView({
       </div>
 
       {result.cohort.length === 0 ? (
-        <EmptyIntelligence filters={effectiveFilters} onReset={() => setFilters({ ...EMPTY_INTELLIGENCE_FILTERS, storeIds: activeStoreId ? [activeStoreId] : [] })} />
+        <EmptyIntelligence filters={effectiveFilters} onReset={() => setFilters({ ...EMPTY_INTELLIGENCE_FILTERS, storeIds: activeStoreId ? [activeStoreId] : [] })} canViewAgents={canViewAgents} />
       ) : (
         <>
           <SummaryGrid result={result} previous={previous} evidenceHref={evidenceHref} />
@@ -177,8 +196,10 @@ function SummaryGrid({ result, previous, evidenceHref }: { result: LeadIntellige
         {items.map((item) => {
           const current = item.rate ? s.conversionRate : item.label === "Total Leads" ? s.totalLeads : item.label === "Qualified" ? s.qualified : item.label === "Converted" ? s.converted : item.label === "Revenue Won" ? s.revenueWon : item.label === "Pipeline Value" ? s.pipelineValue : undefined;
           const delta = item.previous != null && current != null && item.previous !== 0 ? (current - item.previous) / Math.abs(item.previous) : null;
+          // Mandatory KPI box treatment (design-system §KPI): a VISIBLE 2px
+          // bordered box, never a faint border-border/70 / bg-card/90 card.
           return (
-            <Link key={item.label} href={evidenceHref(item.ids)} className={cn("rounded-xl border bg-card/90 p-3 shadow-card transition hover:border-[#B3BFF6] hover:bg-[#EEF1FD]/25", item.urgent ? "border-red-200" : "border-border/70") }>
+            <Link key={item.label} href={evidenceHref(item.ids)} className={cn("rounded-xl border-2 bg-card p-4 shadow-card transition hover:bg-[#EEF1FD]/25", item.urgent ? "border-red-200 hover:border-red-300" : "border-zinc-200 hover:border-[#4361EE]/30") }>
               <div className="flex items-center justify-between gap-2">
                 <span className={cn("grid h-7 w-7 place-items-center rounded-lg", item.urgent ? "bg-red-50 text-[#B42318]" : "bg-[#EEF1FD] text-[#4361EE]")}><item.icon className="h-3.5 w-3.5" /></span>
                 {delta != null && Math.abs(delta) >= 0.01 && <span className={cn("text-[10px] font-semibold tabular-nums", delta > 0 ? "text-emerald-600" : "text-rose-600")}>{delta > 0 ? "+" : ""}{Math.round(delta * 100)}%</span>}
@@ -485,9 +506,9 @@ function MiniMetric({ label, value, attention = false }: { label: string; value:
 function EvidenceLink({ href }: { href: string }) { return <Link href={href} className="mt-2.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#4361EE] hover:underline">View leads <ArrowRight className="h-3 w-3" /></Link>; }
 function Insufficient({ text }: { text: string }) { return <div className="rounded-xl border border-dashed border-border bg-muted/15 px-3 py-4 text-center text-[11px] text-muted-foreground">{text}</div>; }
 
-function EmptyIntelligence({ filters, onReset }: { filters: LeadIntelligenceFilters; onReset: () => void }) {
+function EmptyIntelligence({ filters, onReset, canViewAgents }: { filters: LeadIntelligenceFilters; onReset: () => void; canViewAgents?: boolean }) {
   const filtered = JSON.stringify(filters) !== JSON.stringify(EMPTY_INTELLIGENCE_FILTERS);
-  return <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]"><Target className="h-5 w-5" /></span><h2 className="mt-3 text-base font-bold">No leads in this intelligence cohort</h2><p className="mx-auto mt-1 max-w-md text-[12px] text-muted-foreground">Insights appear only from real owned leads. Try another period or remove filters; no placeholder numbers will be shown.</p>{filtered && <button onClick={onReset} className="mt-3 text-[12px] font-semibold text-[#4361EE] hover:underline">Reset filters</button>}</div>;
+  return <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]"><Target className="h-5 w-5" /></span><h2 className="mt-3 text-base font-bold">No leads in this intelligence cohort</h2><p className="mx-auto mt-1 max-w-md text-[12px] text-muted-foreground">This page analyzes only the leads <span className="font-semibold">you personally own</span> (assigned to your account). Insights appear only from real owned leads — no placeholder numbers are shown.{canViewAgents ? " As an owner/manager you may not own leads directly; use Agent Intelligence to analyze your Sales Agents." : " Try another period or remove filters."}</p><div className="mt-3 flex items-center justify-center gap-4">{filtered && <button onClick={onReset} className="text-[12px] font-semibold text-[#4361EE] hover:underline">Reset filters</button>}{canViewAgents && <Link href="/leads/intelligence/agents" className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline">Open Agent Intelligence <ArrowRight className="h-3.5 w-3.5" /></Link>}</div></div>;
 }
 function DataUnavailable({ sources }: { sources: string[] }) {
   const unique = [...new Set(sources)];

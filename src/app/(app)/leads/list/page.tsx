@@ -6,7 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, RefreshCw, Trash2,
+  Phone, Mail, RefreshCw, Trash2, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { ActiveFilterChip } from "@/components/ui/rox-filter";
 import { StoreContextCell } from "@/components/common/store-context-cell";
+import { EmptyDash } from "@/components/common/empty-dash";
 import { LeadFilterPanel, type FacetDef } from "@/components/leads/lead-filter-panel";
 import { FreezeColumnsMenu } from "@/components/common/freeze-columns-menu";
 import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
@@ -35,6 +36,11 @@ import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
 import { cn, formatINR } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
+import { useDeals } from "@/lib/lead-deals-context";
+import { isDiscountedLeadValue, leadHasOpenDeal, currentDealForLead } from "@/lib/lead-deals";
+import { useQuotations } from "@/lib/quotations-context";
+import { SendQuotationFlow } from "@/components/quotations/send-quotation-flow";
+import { DealRequestModal } from "@/components/deals/deal-request-modal";
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadIsExistingCustomer, type LeadFollowUp,
@@ -48,7 +54,7 @@ import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
-import { statusTone, priorityTone } from "@/components/leads/lead-pills";
+import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph } from "@/components/leads/lead-pills";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -75,7 +81,9 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
   ];
   if (multiStore) cols.push({ key: "store", label: "Store", width: 132, freezable: false });
   cols.push(
-    { key: "id", label: "Lead ID", width: 84 },
+    // Wider than a plain "L-001" so it comfortably fits a store-prefixed id
+    // (e.g. KOR-L-0045) PLUS the conversion tick + pin without wrapping.
+    { key: "id", label: "Lead ID", width: 128 },
     { key: "region", label: "Region", width: 120 },
     // MODE OF LEAD — how the lead came in (modeOfContact). Structurally separate
     // from Source (acquisition) and Capture Channel.
@@ -90,7 +98,7 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
     { key: "comment", label: "Comment", width: 200 },
     // SUB CATEGORY — the TBD column is now the real Sub Category field.
     { key: "subCategory", label: "Sub Category", width: 130 },
-    { key: "leadType", label: "Lead Type", width: 104 },
+    { key: "leadType", label: "Lead Nature", width: 112 },
     { key: "status", label: "Status", width: 148 },
     // ACTION — SYSTEM-DERIVED, read-only (never an editable dropdown).
     { key: "action", label: "Action", width: 132 },
@@ -149,7 +157,7 @@ function useScrollEdges(ref: React.RefObject<HTMLElement>) {
    calendar-date compare. Falls back to the flat followUpDate if no record. ── */
 function FollowUpCell({ lead, open }: { lead: Lead; open?: LeadFollowUp }) {
   const fu = open ? openFollowUpRowState(open) : followUpState(lead.followUpDate);
-  if (fu === "none") return <span className="text-[12px] text-zinc-400">—</span>;
+  if (fu === "none") return <EmptyDash />;
   const t = followUpTone(fu);
   const label = fu === "overdue" ? "Overdue" : fu === "today" ? "Due today"
     : open ? formatFollowUpDateTime(open.dueAt) : formatFollowUp(lead.followUpDate);
@@ -185,7 +193,41 @@ function ViewTabLabel({ text, count, active }: { text: string; count: number; ac
 /** Masked cell for a LOCKED Not-Contacted lead — the flow is hidden (N/A)
  *  until a senior reassigns the lead to a new owner. */
 function NACell() {
-  return <span className="text-[12px] font-medium text-zinc-400">N/A</span>;
+  return <span className="block w-full text-center text-[12px] font-medium text-zinc-400">N/A</span>;
+}
+
+/** Small circular conversion tick shown next to the Lead ID — mirrors the
+ *  Ticket table's InvoiceCoverageCheck shape/size. Colour is SYSTEM-DERIVED
+ *  from the lead's workflow (never stored):
+ *    • GREEN  → a finalized Invoice exists for the lead (revenue realized).
+ *    • BLUE   → a Ticket exists (customer's device booked), no invoice yet.
+ *    • ORANGE → "Lead Won" only (routed / walk-in / field assigned), no
+ *               ticket/invoice yet.
+ *  Nothing before that (plain pipeline / gated) shows no tick. */
+function LeadStatusTick({ wf }: { wf: LeadWorkflow }) {
+  if (wf.gated) return null;
+  const kind = wf.result.kind;
+  // Invoice (green) wins, then ticket (blue), then lead-won (orange).
+  let tone: "green" | "blue" | "orange" | null = null;
+  let label = "";
+  if (kind === "invoice") { tone = "green"; label = "Invoice created — revenue realized"; }
+  else if (kind === "ticket" || wf.action === "ticket_created" || wf.action === "visited_store") { tone = "blue"; label = "Ticket created for this customer"; }
+  else if (kind === "lead_won") { tone = "orange"; label = "Lead won — awaiting ticket / invoice"; }
+  if (!tone) return null;
+  const bg =
+    tone === "green" ? "linear-gradient(135deg, #10B981 0%, #059669 100%)"
+    : tone === "blue" ? "linear-gradient(135deg, #4361EE 0%, #3049C6 100%)"
+    : "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)";
+  return (
+    <span
+      className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full text-white"
+      style={{ background: bg }}
+      title={label}
+      aria-label={label}
+    >
+      <Check className="h-2 w-2" strokeWidth={3} />
+    </span>
+  );
 }
 
 /** Compact date+time label for an open follow-up (e.g. "27 Sep, 6:00 PM"). */
@@ -238,7 +280,7 @@ function DateCell({ lead }: { lead: Lead }) {
 /* Column 4 — SOURCE: acquisition source primary; capture channel secondary
    (kept structurally separate — never flattened into one text field). */
 function SourceCell({ lead }: { lead: Lead }) {
-  if (!lead.source && !lead.captureChannel) return <span className="text-zinc-400">—</span>;
+  if (!lead.source && !lead.captureChannel) return <EmptyDash />;
   return (
     <div className="leading-snug">
       {lead.source && <p className="truncate font-medium text-zinc-700">{lead.source}</p>}
@@ -260,6 +302,7 @@ function LeadSelectCell({
   dotColor,
   readOnly = false,
   placeholder = "—",
+  glyphFor,
 }: {
   value: string;
   options: string[];
@@ -270,7 +313,15 @@ function LeadSelectCell({
   dotColor: string;
   readOnly?: boolean;
   placeholder?: string;
+  /** Optional leading glyph (e.g. an emoji per value). When provided it
+   *  replaces the plain colour dot on the pill and in each option row. */
+  glyphFor?: (value: string) => React.ReactNode;
 }) {
+  // Leading glyph for a value — the custom glyph if provided, else the dot.
+  const leadGlyph = (v: string, dot: string) =>
+    glyphFor
+      ? <span className="shrink-0 text-[12px] leading-none">{glyphFor(v)}</span>
+      : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -288,7 +339,7 @@ function LeadSelectCell({
   if (readOnly) {
     return value
       ? <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", toneClass)}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: dotColor }} />
+          {leadGlyph(value, dotColor)}
           {value}
         </span>
       : <span className="text-zinc-400">{placeholder}</span>;
@@ -306,7 +357,7 @@ function LeadSelectCell({
         )}
         style={value ? { backgroundColor: `${dotColor}15`, color: dotColor, boxShadow: `inset 0 0 0 1px ${dotColor}30` } : undefined}
       >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: value ? dotColor : "#a1a1aa" }} />
+        {value ? leadGlyph(value, dotColor) : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#a1a1aa" }} />}
         {value || placeholder}
         <ChevronDown className="h-3 w-3 opacity-60" />
       </button>
@@ -332,8 +383,10 @@ function LeadSelectCell({
                     opt === value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground",
                   )}
                 >
-                  <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-inset ring-black/10"
-                    style={{ backgroundColor: opt === value ? dotColor : "#a1a1aa" }} />
+                  {glyphFor
+                    ? <span className="shrink-0 text-[13px] leading-none">{glyphFor(opt)}</span>
+                    : <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-inset ring-black/10"
+                        style={{ backgroundColor: opt === value ? dotColor : "#a1a1aa" }} />}
                   {opt}
                   {opt === value && <span className="ml-auto text-[9px] font-bold text-[#4361EE]">✓</span>}
                 </button>
@@ -424,7 +477,7 @@ function ContactInfoCell({ lead }: { lead: Lead }) {
    has a single device or, in future, multiple. */
 function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) => void }) {
   const devices = getLeadDevices(lead);
-  if (devices.length === 0) return <span className="text-zinc-400">—</span>;
+  if (devices.length === 0) return <EmptyDash />;
   return (
     <button
       type="button"
@@ -446,7 +499,7 @@ function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) =>
 /* Column 9 — LEAD VALUE (pipeline/estimate; NEVER revenue). Shows the total
    with the discount as an optional secondary breakdown when present. */
 function LeadValueCell({ lead }: { lead: Lead }) {
-  if (lead.estimate == null) return <span className="text-zinc-400">—</span>;
+  if (lead.estimate == null) return <EmptyDash />;
   const hasDiscount = lead.discount != null && lead.discount > 0;
   const breakdown = hasDiscount
     ? lead.discountType === "percent"
@@ -463,7 +516,7 @@ function LeadValueCell({ lead }: { lead: Lead }) {
 
 /* Column 10 — COMMENT (readable preview; full text on hover via title). */
 function CommentCell({ text }: { text: string }) {
-  if (!text?.trim()) return <span className="text-zinc-400">—</span>;
+  if (!text?.trim()) return <EmptyDash />;
   return (
     <p className="line-clamp-2 whitespace-pre-line text-[13px] leading-snug text-zinc-600" title={text}>{text}</p>
   );
@@ -510,20 +563,29 @@ function ResultCell({
   canViewInvoice: boolean;
 }) {
   const r = wf.result;
+  // Ticket / Invoice id link behaviour by permission (spec: owner → full
+  // detail; a Sales Agent without view access → PRINT PREVIEW + download only).
+  //  • has view permission → go to the record's detail page.
+  //  • no view permission  → open the /print preview (view + download), never
+  //    the detail page. The print route is RLS-scoped and needs no view key.
+  const ticketHref = canViewTicket
+    ? `/tickets/${r.ticketId || r.ticketNo}`
+    : `/print/ticket/${encodeURIComponent(r.ticketId || r.ticketNo)}?format=a4`;
+  const invoiceHref = canViewInvoice
+    ? `/invoice/${r.invoiceId || r.invoiceNo}`
+    : `/print/invoice/${encodeURIComponent(r.invoiceId || r.invoiceNo)}?format=a4`;
+  const ticketTitle = canViewTicket ? `Open ticket ${r.ticketNo}` : `Print preview — ticket ${r.ticketNo}`;
+  const invoiceTitle = canViewInvoice ? `Open invoice ${r.invoiceNo}` : `Print preview — invoice ${r.invoiceNo}`;
   if (r.kind === "invoice") {
     return (
       <div className="leading-snug select-none" title={`System-derived — ${wf.reason}`}>
         <p className={cn("font-bold tabular-nums", leadResultTone(r.kind))}>{r.primary}</p>
         <div className="mt-0.5 space-y-0.5 border-t border-border/70 pt-0.5">
           {r.ticketNo && (
-            canViewTicket
-              ? <Link href={`/tickets/${r.ticketId || r.ticketNo}`} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={`Open ticket ${r.ticketNo}`}>{r.ticketNo}</Link>
-              : <span className="block truncate text-[11px] font-medium text-zinc-500 tabular-nums">{r.ticketNo}</span>
+            <Link href={ticketHref} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={ticketTitle}>{r.ticketNo}</Link>
           )}
           {r.invoiceNo && (
-            canViewInvoice
-              ? <Link href={`/invoice/${r.invoiceId || r.invoiceNo}`} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={`Open invoice ${r.invoiceNo}`}>{r.invoiceNo}</Link>
-              : <span className="block truncate text-[11px] font-medium text-zinc-500 tabular-nums">{r.invoiceNo}</span>
+            <Link href={invoiceHref} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={invoiceTitle}>{r.invoiceNo}</Link>
           )}
         </div>
       </div>
@@ -534,9 +596,7 @@ function ResultCell({
       <div className="leading-snug select-none" title={`System-derived — ${wf.reason}`}>
         <p className={cn("font-semibold text-[12.5px]", leadResultTone(r.kind))}>Ticket Created</p>
         {r.ticketNo && (
-          canViewTicket
-            ? <Link href={`/tickets/${r.ticketId || r.ticketNo}`} onClick={(e) => e.stopPropagation()} className="mt-0.5 block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={`Open ticket ${r.ticketNo}`}>{r.ticketNo}</Link>
-            : <span className="mt-0.5 block truncate text-[11px] font-medium text-zinc-500 tabular-nums">{r.ticketNo}</span>
+          <Link href={ticketHref} onClick={(e) => e.stopPropagation()} className="mt-0.5 block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={ticketTitle}>{r.ticketNo}</Link>
         )}
       </div>
     );
@@ -594,8 +654,11 @@ const FOLLOWUP_FILTERS = [
 ] as const;
 
 export default function LeadsListPage() {
-  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, updateLead, salesAgents, openFollowUpsByLead } = useLeads();
-  const canAssign = useCanAssignLeads();
+  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, updateLead, salesAgents, openFollowUpsByLead,
+    viewAsReadOnly } = useLeads();
+  // OWNER "view as agent" (Option A — NOT impersonation): when active, the whole
+  // Leads workspace is READ-ONLY. Every mutation gate ANDs in `!viewAsReadOnly`.
+  const canAssign = useCanAssignLeads() && !viewAsReadOnly;
   const { currentUser, can } = usePermissions();
 
   /* ── Live operational records for SYSTEM-DERIVED Action / Result / Store ──
@@ -606,6 +669,13 @@ export default function LeadsListPage() {
      RLS, so a lead never resolves an unauthorized store's records. */
   const { tickets, invoices, walkIns } = useStore();
   const { jobs: fieldJobs } = useField();
+  // Deals (discount approvals) — drive the Discounted Lead trigger + the
+  // system-derived "Discount Approval" action in workflowByLead.
+  const { deals } = useDeals();
+  // Quotations — drive the system-derived "Quotation Created / Sent" action and
+  // the Lead Table "Send Quotation" flow. Attribution comes from the lead.
+  const { currentQuotationForLead } = useQuotations();
+  const [quotationLead, setQuotationLead] = useState<Lead | null>(null);
   /* When a status becomes "Pickup Assigned" / "On site Assigned", also create
      (or reuse) the matching Field Job in the Pickup & Drop workspace, carrying
      the lead's agent — reuses the single field system (never a fork). */
@@ -623,13 +693,22 @@ export default function LeadsListPage() {
     const m: Record<string, LeadWorkflow> = {};
     for (const l of leads) {
       const openFollowUpDue = openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none";
-      m[l.id] = deriveLeadWorkflow(l, workflowSources, { openFollowUpDue });
+      // The lead's current Deal (if any) lets the derivation surface a pending
+      // discount approval as the Action — system-derived, never stored. The
+      // lead's current Quotation surfaces "Quotation Created / Sent" (below any
+      // real ticket/invoice/field record), also system-derived.
+      const q = currentQuotationForLead(l.id);
+      m[l.id] = deriveLeadWorkflow(l, workflowSources, {
+        openFollowUpDue,
+        deal: currentDealForLead(deals, l.id) ?? null,
+        quotation: q ? { status: q.status, sentAt: q.sentAt } : null,
+      });
     }
     return m;
-  }, [leads, workflowSources, openFollowUpsByLead]);
+  }, [leads, workflowSources, openFollowUpsByLead, deals, currentQuotationForLead]);
   // Bulk-action capability gates (granular key OR coarse fallback via CAP).
-  const canBulkStatus = allow(can, CAP.lead.stageChange);
-  const canBulkDelete = allow(can, CAP.lead.delete);
+  const canBulkStatus = allow(can, CAP.lead.stageChange) && !viewAsReadOnly;
+  const canBulkDelete = allow(can, CAP.lead.delete) && !viewAsReadOnly;
   // Multi-store: show the shared Store Context column only in the consolidated
   // All-Shops view with >1 authorized store (Design System v2 multi-store rule).
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -775,24 +854,45 @@ export default function LeadsListPage() {
      configured status value. */
   const NOT_CONTACTED_TAB = "__notContacted__";
   const FOLLOWUPS_TAB = "__followUps__";
+  // Strip 2 reflects only the VIEW now (status lives in strip 3), so the "all"
+  // view keeps "All" selected here even when a status filter is active.
   const combinedTab = view === "notContacted" ? NOT_CONTACTED_TAB
     : view === "followUps" ? FOLLOWUPS_TAB
-    : filters.status || "all";
+    : "all";
+  // Strip 2 = the primary VIEW segments ONLY: All · Not Contacted · Follow-Ups.
+  // Lifecycle STATUS filters live in their OWN strip (strip 3) below, so this
+  // strip never grows as new statuses are configured.
   const combinedTabs = useMemo(() => {
-    // Configured lifecycle statuses (from the data), excluding the "All" entry
-    // statusTabs already prepends.
-    const statusOpts = statusTabs.filter((t) => t.value !== "").map((t) => ({ label: t.label, value: t.value }));
     return [
       { label: "All", value: "all" },
       { label: <ViewTabLabel text="Not Contacted" count={notContactedCount} active={view === "notContacted"} />, value: NOT_CONTACTED_TAB },
       { label: <ViewTabLabel text="Follow-Ups" count={followUpsCount} active={view === "followUps"} />, value: FOLLOWUPS_TAB },
-      ...statusOpts,
     ];
-  }, [statusTabs, notContactedCount, followUpsCount, view]);
+  }, [notContactedCount, followUpsCount, view]);
   const onCombinedTabChange = useCallback((v: string) => {
     if (v === NOT_CONTACTED_TAB) { setFilters((f) => ({ ...f, view: "notContacted" })); return; }
     if (v === FOLLOWUPS_TAB) { setFilters((f) => ({ ...f, view: "followUps" })); return; }
-    // "all" or a specific status → the working view, optionally status-filtered.
+    // "All" → the working table view. The status filter lives in its own strip
+    // (strip 3) and is preserved — switching back to the working view doesn't
+    // wipe a chosen status.
+    setFilters((f) => ({ ...f, view: "all" }));
+  }, [setFilters]);
+
+  /* Strip 3 — the lifecycle STATUS filter strip. Lists ALL configured lead
+     statuses from Settings (lead_options "status"), so it matches the Status
+     dropdown and UPDATES LIVE when a status is renamed/added/removed in
+     Settings (the leads-realtime subscription refreshes optionsFor). Any legacy
+     status still present on existing leads but no longer in the options is
+     appended so those leads stay filterable (no silent data loss). */
+  const statusStripTabs = useMemo(() => {
+    const configured = optionsFor("status").map((o) => o.value).filter(Boolean);
+    const inUse = Array.from(new Set(leads.map((l) => l.status).filter(Boolean)));
+    const legacy = inUse.filter((s) => !configured.includes(s));
+    const all = [...configured, ...legacy];
+    return [{ label: "All", value: "all" }, ...all.map((s) => ({ label: s, value: s }))];
+  }, [optionsFor, leads]);
+  const statusStripValue = filters.status || "all";
+  const onStatusStripChange = useCallback((v: string) => {
     setFilters((f) => ({ ...f, view: "all", status: v === "all" ? "" : v }));
   }, [setFilters]);
 
@@ -831,14 +931,32 @@ export default function LeadsListPage() {
      per lead; never a raw bulk write). */
   const statusOptions = useMemo(() => optionsFor("status").map((o) => o.value).filter(Boolean), [optionsFor]);
   const contactStatusOptions = useMemo(() => optionsFor("contactStatus").map((o) => o.value).filter(Boolean), [optionsFor]);
-  const canEditLead = allow(can, CAP.lead.edit);
+  // Lead Nature (Hot / Warm / Cold) options — configured in Lead Settings
+  // (lead_options "leadNature"), live-refreshed via optionsFor. Powers the
+  // inline Lead Nature dropdown in the table.
+  const leadNatureOptions = useMemo(() => optionsFor("leadNature").map((o) => o.value).filter(Boolean), [optionsFor]);
+  const canEditLead = allow(can, CAP.lead.edit) && !viewAsReadOnly;
+
+  /* ── Discounted Lead → Deal approval trigger ──
+     When a lead's status is set to a "Discounted Lead" value, immediately open
+     the Discount Request modal (unless an open deal already exists). The Deal
+     approval workflow owns the discount reason + manager review; the lead's
+     status still records the Discounted Lead state. */
+  const [dealLead, setDealLead] = useState<Lead | null>(null);
+  const canRequestDeal = allow(can, CAP.deal.create);
+
   /* Apply a status change to ONE lead, then auto-create the Field Job when the
      status is a pickup/on-site routing status. Shared by the inline dropdown
      and the bulk action so both behave identically. */
   const applyLeadStatus = useCallback(async (lead: Lead, status: string) => {
     await changeLeadStatus(lead.id, status);
     await autoFieldJobForStatus(lead, status);
-  }, [changeLeadStatus, autoFieldJobForStatus]);
+    // Discounted Lead → open the discount approval request (don't silently save
+    // a Discounted Lead without the required Deal information).
+    if (isDiscountedLeadValue(status) && canRequestDeal && !leadHasOpenDeal(deals, lead.id)) {
+      setDealLead({ ...lead, status });
+    }
+  }, [changeLeadStatus, autoFieldJobForStatus, canRequestDeal, deals]);
 
   const handleBulkStatusChange = useCallback(async (status: string) => {
     const ids = Array.from(selected);
@@ -870,6 +988,7 @@ export default function LeadsListPage() {
       case "pin": void pinLead(lead.id, !lead.pinnedAt); break;
       case "delete": setConfirmDelete(lead); break;
       case "route": setRouteLeadTarget(lead); break;
+      case "quotation": setQuotationLead(lead); break;
     }
   };
 
@@ -888,6 +1007,12 @@ export default function LeadsListPage() {
   /* Deep-link: /leads/list?lead=<id> opens that lead's detail (used by the
      assignment + follow-up-due notifications). Runs once the leads are loaded. */
   const searchParams = useSearchParams();
+
+  /* OWNER "View as agent" scope (Option A) is owned by the Lead module LAYOUT
+     (app/(app)/leads/layout.tsx): it syncs ?viewAs=, persists the scope across
+     in-module navigation, renders the ONE read-only banner, and clears it when
+     the owner leaves the module. This page only READS viewAsReadOnly (from
+     useLeads) to lock its own controls. */
   const urlFilterKey = searchParams.toString();
   const appliedUrlFiltersRef = useRef("");
   /* Intelligence evidence links are refresh-safe and exact. URL values are
@@ -1019,11 +1144,13 @@ export default function LeadsListPage() {
               <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
               <Link href="/leads/map-view" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Map View"><Map className="h-3.5 w-3.5" /></Link>
             </div>
-            <Can permission={CAP.lead.create}>
-              <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> Add Lead
-              </Button>
-            </Can>
+            {!viewAsReadOnly && (
+              <Can permission={CAP.lead.create}>
+                <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowCreate(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Add Lead
+                </Button>
+              </Can>
+            )}
           </div>
         }
       />
@@ -1105,6 +1232,21 @@ export default function LeadsListPage() {
           </div>
         </div>
       </div>
+
+      {/* STRIP 3 — lifecycle STATUS filters (all configured lead statuses).
+          A single connected control, scrollable when it overflows. Shown only
+          in the working view (the Not-Contacted / Follow-Ups views replace the
+          table, so a status filter there is meaningless). */}
+      {view === "all" && statusStripTabs.length > 1 && (
+        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={statusStripValue}
+            onChange={onStatusStripChange}
+            options={statusStripTabs}
+            size="sm"
+          />
+        </div>
+      )}
 
       {/* Structured, faceted filter panel (slide-over) — grouped sections,
           searchable facets with live counts, and a live "Show N leads"
@@ -1245,7 +1387,7 @@ export default function LeadsListPage() {
               <th {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 text-left")}>Lead Category</th>
               <th {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 text-left")}>Comment</th>
               <th {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 text-left")}>Sub Category</th>
-              <th {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 text-left")}>Lead Type</th>
+              <th {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 text-left")}>Lead Nature</th>
               <th {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 text-left")}>Status</th>
               {/* ACTION + RESULT are SYSTEM-DERIVED (read-only). A small lock
                   glyph in the header signals they are not editable. */}
@@ -1326,15 +1468,16 @@ export default function LeadsListPage() {
                 )}
                 {/* 2 · ID (click opens the lead) */}
                 <td {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 align-middle")}>
-                  <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="flex items-center gap-1 text-left font-semibold text-[#4361EE] hover:underline tnum">
+                  <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="flex items-center gap-1.5 whitespace-nowrap text-left font-semibold text-[#4361EE] hover:underline tnum">
                     {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
-                    {lead.leadNo || "—"}
+                    <span className="truncate">{lead.leadNo || "—"}</span>
+                    <LeadStatusTick wf={wf} />
                   </button>
                 </td>
                 {/* 3 · Region */}
-                <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate uppercase text-zinc-700">{lead.region || "—"}</span>}</td>
+                <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : lead.region ? <span className="block truncate uppercase text-zinc-700">{lead.region}</span> : <EmptyDash />}</td>
                 {/* 4 · Mode of Lead (how it came in — modeOfContact) */}
-                <td {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <span className="block truncate text-zinc-700">{lead.modeOfContact || "—"}</span>}</td>
+                <td {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : lead.modeOfContact ? <span className="block truncate text-zinc-700">{lead.modeOfContact}</span> : <EmptyDash />}</td>
                 {/* 5 · Source + capture channel */}
                 <td {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <SourceCell lead={lead} />}</td>
                 {/* 5 · Agent (owner — user id → name). Even when LOCKED this
@@ -1360,15 +1503,27 @@ export default function LeadsListPage() {
                 {/* 9 · Lead Value (pipeline) — gated */}
                 <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <LeadValueCell lead={lead} />}</td>
                 {/* 10 · Lead Category — gated */}
-                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <span className="block truncate text-zinc-700">{lead.leadCategory || "—"}</span>}</td>
+                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.leadCategory ? <span className="block truncate text-zinc-700">{lead.leadCategory}</span> : <EmptyDash />}</td>
                 {/* 11 · Comment — the Not-Qualified REASON stays readable here
                     (never masked to N/A) so the qualification decision is
                     preserved; a plain lead shows its comments. */}
                 <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <CommentCell text={lead.comments || lead.finalRemarks || ""} />}</td>
                 {/* 12 · Sub Category — gated */}
-                <td {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <span className="block truncate text-zinc-600">{lead.subCategory || "—"}</span>}</td>
-                {/* 13 · Lead Type (= Priority: Hot/Warm/Cold) — gated */}
-                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.priority ? <span className={cn("inline-flex items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold", priorityTone(lead.priority))}><Flag className="h-3.5 w-3.5" fill="currentColor" /> {lead.priority}</span> : <span className="text-zinc-400">—</span>}</td>
+                <td {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.subCategory ? <span className="block truncate text-zinc-600">{lead.subCategory}</span> : <EmptyDash />}</td>
+                {/* 13 · Lead Nature (Hot / Warm / Cold) — colour-coded, inline-editable dropdown (gated on canEditLead) */}
+                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
+                  {gated ? <NACell /> : (
+                    <LeadSelectCell
+                      value={lead.leadNature || ""}
+                      options={leadNatureOptions}
+                      onChange={(v) => updateLead(lead.id, { leadNature: v })}
+                      toneClass={lead.leadNature ? leadNatureTone(lead.leadNature) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+                      dotColor={leadNatureDot(lead.leadNature || "")}
+                      glyphFor={leadNatureGlyph}
+                      readOnly={!canEditLead}
+                    />
+                  )}
+                </td>
                 {/* 14 · Status (+ fulfilment route) — inline-editable dropdown (gated on canBulkStatus) */}
                 <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
                   {gated ? <NACell /> : (<>
@@ -1385,12 +1540,12 @@ export default function LeadsListPage() {
                 {/* 15 · ACTION — SYSTEM-DERIVED, read-only */}
                 <td {...mergeFrozen(frozenCellProps("action"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <ActionCell wf={wf} />}</td>
                 {/* 16 · STORE — derived from the actual operational record */}
-                <td {...mergeFrozen(frozenCellProps("storeCol"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : (storeBranchId ? <StoreContextCell store={getStore(storeBranchId)} mode="stacked" /> : <span className="text-zinc-400">—</span>)}</td>
+                <td {...mergeFrozen(frozenCellProps("storeCol"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : (storeBranchId ? <StoreContextCell store={getStore(storeBranchId)} mode="stacked" /> : <EmptyDash />)}</td>
                 {/* 17 · RESULT — SYSTEM-DERIVED, read-only (₹value + TKT + INV) */}
                 <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <ResultCell wf={wf} canViewTicket={canViewTicket} canViewInvoice={canViewInvoice} />}</td>
                 {/* Last Action — FROZEN RIGHT anchor */}
                 <td {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right align-middle")} onClick={(e) => e.stopPropagation()}>
-                  <LeadActionsMenu lead={lead} onAction={handleAction} />
+                  <LeadActionsMenu lead={lead} onAction={handleAction} readOnly={viewAsReadOnly} />
                 </td>
               </motion.tr>
               );
@@ -1402,7 +1557,7 @@ export default function LeadsListPage() {
             <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground"><User className="h-6 w-6" /></div>
             <p className="font-semibold">{leads.length === 0 ? "No leads yet" : "No leads match your filters"}</p>
             <p className="text-sm text-muted-foreground">{leads.length === 0 ? "Capture your first lead in seconds." : "Try a different status, filter, or search."}</p>
-            {leads.length === 0 && <Can permission={CAP.lead.create}><Button size="sm" className="mt-2 gap-1.5" onClick={() => setShowCreate(true)}><Plus className="h-3.5 w-3.5" /> Add Lead</Button></Can>}
+            {leads.length === 0 && !viewAsReadOnly && <Can permission={CAP.lead.create}><Button size="sm" className="mt-2 gap-1.5" onClick={() => setShowCreate(true)}><Plus className="h-3.5 w-3.5" /> Add Lead</Button></Can>}
           </div>
         )}
         {!hydrated && <div className="p-12 text-center text-sm text-muted-foreground">Loading leads…</div>}
@@ -1426,6 +1581,7 @@ export default function LeadsListPage() {
                   <p className="flex items-center gap-1 font-semibold">
                     {lead.pinnedAt && <Pin className="h-3 w-3 fill-[#7C5CFC] text-[#7C5CFC]" />}
                     {lead.name || "—"}
+                    {!mLocked && (() => { const wf = workflowByLead[lead.id]; return wf ? <LeadStatusTick wf={wf} /> : null; })()}
                   </p>
                   <p className="text-[11px] text-muted-foreground">{lead.leadNo}{mLocked ? "" : ` · ${lead.source || "—"}`}</p>
                 </div>
@@ -1454,7 +1610,7 @@ export default function LeadsListPage() {
             )}
             <div className="mt-2 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
               {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={20} />}
-              {!mLocked && <LeadActionsMenu lead={lead} onAction={handleAction} />}
+              {!mLocked && <LeadActionsMenu lead={lead} onAction={handleAction} readOnly={viewAsReadOnly} />}
             </div>
           </div>
           );
@@ -1494,6 +1650,15 @@ export default function LeadsListPage() {
         onClose={() => setDetailLead(null)}
         onEdit={openEdit}
         onDelete={(l) => { setDetailLead(null); setConfirmDelete(l); }}
+        readOnly={viewAsReadOnly}
+      />
+
+      {/* Discounted Lead → Discount approval request */}
+      <DealRequestModal
+        open={!!dealLead}
+        onClose={() => setDealLead(null)}
+        lead={dealLead}
+        onDone={() => setDealLead(null)}
       />
 
       {/* Delete confirm */}
@@ -1523,6 +1688,13 @@ export default function LeadsListPage() {
         lead={routeLeadTarget}
         open={!!routeLeadTarget}
         onClose={() => setRouteLeadTarget(null)}
+      />
+
+      {/* Lead → Send Quotation (auto-mapped from the lead; review → send). */}
+      <SendQuotationFlow
+        lead={quotationLead}
+        open={!!quotationLead}
+        onClose={() => setQuotationLead(null)}
       />
 
       {/* Device & Issue details popup — mirrors the Ticket / Walk-In device
