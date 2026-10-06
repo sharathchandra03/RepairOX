@@ -26,6 +26,7 @@
 import type { Lead } from "@/lib/leads-data";
 import type { Customer } from "@/lib/customer-data";
 import type { InventoryItem } from "@/lib/inventory-data";
+import type { DevicePart } from "@/lib/price-list-data";
 import type { PrintStoreInfo } from "@/lib/print-utils";
 
 /* ─── Status / lifecycle ─────────────────────────────────────────────────
@@ -84,17 +85,21 @@ export function quotationSourceTone(source: QuotationSource): string {
 
 /* ─── Line items ─────────────────────────────────────────────────────────
    A quotation line is an item/service PROPOSED to the customer. When sourced
-   from Inventory it references the canonical Inventory Master item by its id
-   (sku) — selecting inventory NEVER creates/mutates a master record and NEVER
-   consumes stock. A "custom" / "service" line is a free-text proposed charge
-   with no master record (e.g. a labour / pickup charge). */
+   from the Price List (Device Catalog) it REFERENCES a canonical catalog part
+   by its id — selecting a part NEVER creates/mutates a catalog record and the
+   catalog carries no stock to reserve. When sourced from Inventory it
+   references the canonical Inventory Master item by its id (sku) — again a
+   read-only reference, never mutating the master or consuming stock. A
+   "custom" / "service" line is a free-text proposed charge with no master
+   record (e.g. a labour / pickup charge). */
 
-export type QuotationLineKind = "inventory" | "service" | "custom";
+export type QuotationLineKind = "catalog" | "inventory" | "service" | "custom";
 
 export interface QuotationLineItem {
   id: string;
   kind: QuotationLineKind;
-  /** Inventory Master id (sku) when kind === "inventory"; "" otherwise. */
+  /** Canonical reference id — catalog part id when kind === "catalog",
+   *  Inventory Master id (sku) when kind === "inventory"; "" otherwise. */
   itemId: string;
   name: string;
   /** Short free-text detail (part quality, note). Optional. */
@@ -137,6 +142,28 @@ export function inventoryToQuotationLine(item: InventoryItem, qty = 1): Quotatio
     itemId: item.id,
     name: item.name,
     description: item.category || "",
+    qty: q,
+    unitPrice: price,
+    total: round2(q * price),
+  };
+}
+
+/** Build a quotation line that REFERENCES a Price List (Device Catalog) part.
+ *  Uses the catalog part's published price; never mutates the catalog record
+ *  and the catalog carries no stock to reserve. `priceKnown === false` means
+ *  the part has no recorded price — the line starts at 0 so the agent sets it,
+ *  rather than silently quoting a fabricated amount. `deviceLabel` (brand +
+ *  model) is cached onto the description for a readable, self-explanatory line. */
+export function catalogPartToQuotationLine(part: DevicePart, deviceLabel = "", qty = 1): QuotationLineItem {
+  const q = Math.max(1, qty);
+  const price = part.priceKnown === false ? 0 : Number(part.price) || 0;
+  const descBits = [deviceLabel.trim(), part.repairCategory?.trim()].filter(Boolean);
+  return {
+    id: genQuotationLineId(),
+    kind: "catalog",
+    itemId: String(part.id),
+    name: part.partName,
+    description: descBits.join(" · "),
     qty: q,
     unitPrice: price,
     total: round2(q * price),

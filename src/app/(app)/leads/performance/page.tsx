@@ -42,6 +42,7 @@ import { cn, formatINR, initials } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
 import { useStoreContext } from "@/lib/store-context";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { useLeads } from "@/lib/leads-context";
 import { useStore } from "@/lib/store";
 import { allow, CAP } from "@/lib/capabilities";
@@ -165,10 +166,21 @@ export default function AgentPerformancePage() {
   const { can } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { stores, isAllShops } = useStoreContext();
-  const { salesAgents, leads, followUps } = useLeads();
+  // In Single-Store Lead mode there is only ONE lead store, so a store filter is
+  // meaningless clutter — hide it. Multi-Store mode keeps the full filter.
+  const leadMode = useLeadStoreMode();
+  const { salesAgents, leads, followUps, currentUserIsSalesAgent } = useLeads();
   const { tickets, invoices } = useStore();
 
-  const canAll = allow(can, CAP.lead.performanceAll);
+  // An individual Sales Agent's performance page is ALWAYS their own view — the
+  // cross-agent "All Agents" comparison + the agent scope picker are owner-only
+  // controls. A user who is themselves a Sales Agent never sees them, even if
+  // their role happens to carry a coarse reporting key (view_sales_reports /
+  // manage_reports / leads_view_all): on this page that key doesn't make them
+  // an owner of other agents' performance. True owners (who are not Sales
+  // Agents) keep the comparison + picker.
+  const isSelfSalesAgent = currentUserIsSalesAgent(isAllShops ? null : (stores[0]?.id ?? null));
+  const canAll = allow(can, CAP.lead.performanceAll) && !isSelfSalesAgent;
   const canOwn = allow(can, CAP.lead.performanceOwn);
 
   // A deep link (?agent=<id>&view=individual) opens the Individual view for a
@@ -310,7 +322,7 @@ export default function AgentPerformancePage() {
   /* The shared Store + Filters control row (used by both tabs). */
   const filterControls = (
     <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
-      <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
+      {leadMode.isMulti && <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />}
       <button
         onClick={() => setShowFilters((s) => !s)}
         className={cn(

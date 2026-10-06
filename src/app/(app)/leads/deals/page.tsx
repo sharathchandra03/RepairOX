@@ -9,13 +9,12 @@
    list. Gated by CAP.deal.view / viewAll; hidden from users without it.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import Link from "next/link";
-import { motion } from "framer-motion";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  BadgePercent, Clock, CheckCircle2, XCircle, RefreshCw, IndianRupee, Lock,
-  MoreHorizontal, Eye, ExternalLink, Link2, Ban, User as UserIcon,
+  BadgePercent, Clock, CheckCircle2, XCircle, RefreshCw, Lock,
+  ChevronDown, Check, X, MoreHorizontal, Eye, User as UserIcon, Link2, Ban,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Drawer } from "@/components/ui/drawer";
@@ -26,6 +25,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { useRoxStickyHeader } from "@/components/ui/rox-table";
 import { TableUtilityBar } from "@/components/common/table-utility-bar";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
@@ -37,11 +37,24 @@ import { toast } from "@/components/ui/toaster";
 import {
   DEAL_QUEUE_TABS, type DealQueueTab, dealInQueueTab,
   DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount, dealAgeLabel,
-  isOpenDealStatus, canAgentResubmit,
+  isOpenDealStatus, canAgentResubmit, canDecideDeal,
   type LeadDeal,
 } from "@/lib/lead-deals";
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
+
+/** The customer's offer = quoted price minus the requested discount
+ *  (absolute ₹ or percent). Returns null when the quote is unknown. */
+function customerOfferPrice(
+  leadValue: number | null,
+  discount: number | null,
+  type: "amount" | "percent",
+): number | null {
+  if (leadValue == null) return null;
+  if (discount == null) return leadValue;
+  const off = type === "percent" ? (leadValue * discount) / 100 : discount;
+  return Math.max(0, Math.round(leadValue - off));
+}
 
 /* Soft colour tints for the KPI boxes — tinted surface + matching icon chip +
    value colour, with a subtle hover lift. Kept restrained (RepairOX palette). */
@@ -56,13 +69,24 @@ const KPI_TONES = {
 export default function DealsPage() {
   const { can } = usePermissions();
   const { isAllShops, stores, getStore } = useStoreContext();
-  const { deals, hydrated, dealById, cancelDeal } = useDeals();
-  const { leads, viewAsReadOnly } = useLeads();
+  const { deals, hydrated, dealById, approveDeal, cancelDeal, reopenDeal } = useDeals();
+  const { leads, viewAsReadOnly, canSeeAllLeads } = useLeads();
   const searchParams = useSearchParams();
   const router = useRouter();
 
   const canView = allow(can, CAP.deal.view) || allow(can, CAP.deal.viewAll);
-  const multiStore = isAllShops && stores.length > 1;
+
+  /* Lead lookup — deals reference a Lead by id; Device & Issue come from the
+     linked Lead (never duplicated onto the deal). */
+  const leadById = useMemo(() => {
+    const m = new Map<string, (typeof leads)[number]>();
+    for (const l of leads) m.set(l.id, l);
+    return m;
+  }, [leads]);
+  // Deals inherit the Lead's store; a store filter/column only makes sense in
+  // Multi-Store Lead mode.
+  const leadMode = useLeadStoreMode();
+  const multiStore = isAllShops && stores.length > 1 && leadMode.isMulti;
 
   const [tab, setTab] = useState<DealQueueTab>("all");
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
@@ -70,6 +94,43 @@ export default function DealsPage() {
   const [openId, setOpenId] = useState<string | null>(null);
   const [resubmitDeal, setResubmitDeal] = useState<LeadDeal | null>(null);
   const meId = usePermissions().currentUser?.id || "";
+  const isOwner = can("full_access");
+
+  /* Visibility scope (UI = server = RLS). A MANAGER/owner who can view the whole
+     queue (deals_view_all / deals_approve / manage_sales / manage_reports, or
+     the lead see-all key) sees EVERY deal in their authorized stores — with the
+     agent name differentiating each row. An individual AGENT sees ONLY their own
+     deals: the ones they raised, or whose parent lead is in their visible leads.
+     In DB mode RLS already enforces this; this client scope is the local-mode
+     boundary + defence-in-depth so an agent never sees another agent's deal. */
+  const canSeeAllDeals = allow(can, CAP.deal.viewAll) || canSeeAllLeads;
+  const myLeadIds = useMemo(() => new Set(leads.map((l) => l.id)), [leads]);
+
+  /** Deals the current user is allowed to see (before tab/store/search). KPIs
+   *  and tab counts derive from this so an agent's numbers reflect only their
+   *  own deals, and a manager's reflect every agent's. */
+  const visibleDeals = useMemo(() => {
+    if (canSeeAllDeals) return deals;
+    return deals.filter((d) => d.createdBy === meId || d.salesAgentId === meId || myLeadIds.has(d.leadId));
+  }, [deals, canSeeAllDeals, meId, myLeadIds]);
+
+  /* Approval authority (what-you-can-do) — used to gate the inline Status
+     control. Reject / Request Changes require a mandatory reason, so they open
+     the review drawer; Approve can be applied inline (defaults to the requested
+     discount). All gated by capability + the self-approval rule. */
+  const canApprove = allow(can, CAP.deal.approve);
+  const canReject = allow(can, CAP.deal.reject);
+  const canRequestChanges = allow(can, CAP.deal.requestChanges);
+
+  /** Inline approve — authorizes the exception at the requested discount. */
+  const inlineApprove = async (d: LeadDeal) => {
+    const ok = await approveDeal(d.id, {
+      approvedDiscount: d.requestedDiscount,
+      approvedDiscountType: d.requestedDiscountType,
+    });
+    if (ok) toast.success("Deal approved", { description: `${d.dealNo} · ${formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}` });
+    else toast.error("Couldn't approve the deal");
+  };
 
   // Deep-link ?deal=<id> opens the review drawer.
   useEffect(() => {
@@ -83,7 +144,7 @@ export default function DealsPage() {
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return deals.filter((d) => {
+    return visibleDeals.filter((d) => {
       if (!dealInQueueTab(d, tab)) return false;
       if (!matchesStoreSelection(d.branchId || null, storeFilter)) return false;
       if (q) {
@@ -96,7 +157,7 @@ export default function DealsPage() {
       if (tab === "pending_approval") return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
       return new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime();
     });
-  }, [deals, tab, storeFilter, query]);
+  }, [visibleDeals, tab, storeFilter, query]);
 
   /* Pagination (canonical: 10/20/50/100 + detached footer below the table). */
   const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -115,12 +176,12 @@ export default function DealsPage() {
   const { wrapRef, theadTop } = useRoxStickyHeader();
 
   const kpis = useMemo(() => {
-    const pending = deals.filter((d) => d.status === "pending_approval").length;
-    const changes = deals.filter((d) => d.status === "changes_requested").length;
-    const approved = deals.filter((d) => d.status === "approved").length;
-    const rejected = deals.filter((d) => d.status === "rejected").length;
+    const pending = visibleDeals.filter((d) => d.status === "pending_approval").length;
+    const changes = visibleDeals.filter((d) => d.status === "changes_requested").length;
+    const approved = visibleDeals.filter((d) => d.status === "approved").length;
+    const rejected = visibleDeals.filter((d) => d.status === "rejected").length;
     return { pending, changes, approved, rejected };
-  }, [deals]);
+  }, [visibleDeals]);
 
   if (!canView) {
     return (
@@ -135,7 +196,7 @@ export default function DealsPage() {
     );
   }
 
-  const tabCount = (t: DealQueueTab) => t === "all" ? deals.length : deals.filter((d) => d.status === t).length;
+  const tabCount = (t: DealQueueTab) => t === "all" ? visibleDeals.length : visibleDeals.filter((d) => d.status === t).length;
 
   return (
     <div className="space-y-5">
@@ -175,6 +236,7 @@ export default function DealsPage() {
           the frozen table header (theadTop) pins flush beneath it. */}
       <div ref={wrapRef} className="sticky top-[60px] z-[6] -mt-2 bg-[hsl(var(--background))] pb-3 pt-2">
         <TableUtilityBar
+          hideStore={!leadMode.isMulti}
           storeValue={storeFilter}
           onStoreChange={setStoreFilter}
           searchValue={query}
@@ -200,27 +262,27 @@ export default function DealsPage() {
         <div className="[overflow-x:clip]">
           <table className="w-full table-fixed text-[14px]">
             <colgroup>
-              <col className="w-[170px]" />{/* Deal (+ reason) */}
-              {multiStore && <col className="w-[130px]" />}{/* Store */}
-              <col className="w-[90px]" />{/* Lead */}
-              <col className="w-[24%]" />{/* Customer — flexible */}
-              <col className="w-[22%]" />{/* Sales Agent — flexible */}
-              <col className="w-[120px]" />{/* Requested */}
-              <col className="w-[120px]" />{/* Lead Value */}
-              <col className="w-[140px]" />{/* Status */}
-              <col className="w-[80px]" />{/* Age */}
-              <col className="w-[100px]" />{/* Quick Actions */}
+              <col className="w-[124px]" />{/* Deal ID */}
+              {multiStore && <col className="w-[112px]" />}{/* Store */}
+              <col className="w-[15%]" />{/* Agent Name — flexible */}
+              <col className="w-[16%]" />{/* Customer Name — flexible */}
+              <col className="w-[18%]" />{/* Device & Issue — flexible */}
+              <col className="w-[106px]" />{/* Price Quoted */}
+              <col className="w-[118px]" />{/* Customer Offer */}
+              <col className="w-[146px]" />{/* Status — editable pill */}
+              <col className="w-[58px]" />{/* Age */}
+              <col className="w-[64px]" />{/* Actions */}
             </colgroup>
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE] [&>th]:py-4 [&>th]:whitespace-nowrap">
-                <th className="pl-5 pr-3">Deal</th>
+                <th className="pl-5 pr-3">Deal ID</th>
                 {multiStore && <th className="px-3">Store</th>}
-                <th className="px-3">Lead</th>
-                <th className="px-3">Customer</th>
-                <th className="px-3">Sales Agent</th>
-                <th className="px-3 text-right">Requested</th>
-                <th className="px-3 text-right">Lead Value</th>
-                <th className="px-3">Status</th>
+                <th className="px-3">Agent Name</th>
+                <th className="px-3">Customer Name</th>
+                <th className="px-3">Device &amp; Issue</th>
+                <th className="px-3 text-right">Price Quoted</th>
+                <th className="px-3 text-right">Customer Offer</th>
+                <th className="pl-[32px] pr-3">Status</th>
                 <th className="px-3 text-right">Age</th>
                 <th className="px-3 text-center">Actions</th>
               </tr>
@@ -228,7 +290,25 @@ export default function DealsPage() {
             {/* Rows match the canonical Walk-In / Ticket rhythm EXACTLY:
                 h-[68px] height, border-t border-zinc-500 separators, py-4 cells. */}
             <tbody>
-              {paged.map((d, i) => (
+              {paged.map((d, i) => {
+                const lead = leadById.get(d.leadId);
+                const device = lead?.device?.trim() || "";
+                const issue = lead?.issue?.trim() || "";
+                // The customer's offer = quoted price minus the requested
+                // discount (amount or percent). Null quote → unknown.
+                const offer = customerOfferPrice(d.leadValue, d.requestedDiscount, d.requestedDiscountType);
+                // Inline Status: for OPEN deals an authorized approver can decide
+                // (Approve/Reject/Request Changes). For TERMINAL deals (approved
+                // / rejected / cancelled) the approver can REOPEN for a fresh
+                // review. The agent's Revise & Resubmit is gated separately.
+                const hasApprovalCaps = !viewAsReadOnly && (canApprove || canReject || canRequestChanges);
+                const canDecide = hasApprovalCaps
+                  && isOpenDealStatus(d.status)
+                  && canDecideDeal(d, meId, isOwner);
+                const canReopen = hasApprovalCaps
+                  && !isOpenDealStatus(d.status)
+                  && d.status !== "cancelled";
+                return (
                 <motion.tr
                   key={d.id}
                   initial={{ opacity: 0, y: 3 }}
@@ -239,23 +319,63 @@ export default function DealsPage() {
                 >
                   <td className="pl-5 pr-3 py-4 align-middle">
                     <p className="font-semibold tabular-nums text-zinc-900">{d.dealNo}</p>
-                    <p className="truncate text-[11px] text-muted-foreground">{d.requestedReason}</p>
+                    {d.leadNo ? (
+                      <button
+                        type="button"
+                        onClick={(e) => { e.stopPropagation(); router.push(`/leads/${d.leadId}`); }}
+                        title={`Open lead ${d.leadNo}`}
+                        className="block max-w-full truncate text-[11px] font-medium text-[#4361EE] hover:underline"
+                      >
+                        {d.leadNo}
+                      </button>
+                    ) : (
+                      <span className="text-[11px] text-zinc-400">—</span>
+                    )}
                   </td>
                   {multiStore && <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(d.branchId || null)} mode="stacked" /></td>}
-                  <td className="px-3 py-4 align-middle tabular-nums font-semibold text-[#4361EE]">{d.leadNo}</td>
+                  <td className="px-3 py-4 align-middle text-zinc-700"><span className="block truncate">{d.salesAgentName || "—"}</span></td>
                   <td className="px-3 py-4 align-middle">
                     <div className="flex items-center gap-2">
                       <Avatar name={d.customerName || "—"} size={26} />
                       <span className="truncate text-zinc-700">{d.customerName || "—"}</span>
                     </div>
                   </td>
-                  <td className="px-3 py-4 align-middle text-zinc-700"><span className="block truncate">{d.salesAgentName || "—"}</span></td>
-                  <td className="px-3 py-4 text-right align-middle font-semibold tabular-nums text-[#4361EE]">{formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}</td>
-                  <td className="px-3 py-4 text-right align-middle tabular-nums text-zinc-700">{d.leadValue == null ? "—" : formatINR(d.leadValue)}</td>
                   <td className="px-3 py-4 align-middle">
-                    <span className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", dealStatusTone(d.status))}>
-                      {DEAL_STATUS_LABEL[d.status]}
-                    </span>
+                    {device || issue ? (
+                      <>
+                        <p className="truncate font-medium text-zinc-800" title={device || undefined}>{device || "—"}</p>
+                        <p className="truncate text-[11px] text-muted-foreground" title={issue || undefined}>{issue || "No issue noted"}</p>
+                      </>
+                    ) : (
+                      <span className="text-[13px] text-zinc-400">—</span>
+                    )}
+                  </td>
+                  <td className="px-3 py-4 text-right align-middle tabular-nums text-zinc-700">{d.leadValue == null ? "—" : formatINR(d.leadValue)}</td>
+                  <td className="px-3 py-4 text-right align-middle">
+                    {offer == null ? (
+                      <span className="text-[13px] text-zinc-400">—</span>
+                    ) : (
+                      <>
+                        <p className="font-semibold tabular-nums text-emerald-600">{formatINR(offer)}</p>
+                        <p className="text-[11px] text-muted-foreground">off {formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}</p>
+                      </>
+                    )}
+                  </td>
+                  <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
+                    <DealStatusCell
+                      deal={d}
+                      canDecide={canDecide}
+                      canReopen={canReopen}
+                      canApprove={canApprove}
+                      canReject={canReject}
+                      canRequestChanges={canRequestChanges}
+                      onApprove={() => inlineApprove(d)}
+                      onReject={() => setOpenId(d.id)}
+                      onRequestChanges={() => setOpenId(d.id)}
+                      onReopen={() => reopenDeal(d.id)}
+                      onResubmit={() => setResubmitDeal(d)}
+                      canResubmit={!viewAsReadOnly && canAgentResubmit(d, meId)}
+                    />
                   </td>
                   <td className="px-3 py-4 text-right align-middle text-[11px] text-muted-foreground">{dealAgeLabel(d.createdAt)}</td>
                   <td className="px-3 py-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
@@ -270,7 +390,8 @@ export default function DealsPage() {
                     />
                   </td>
                 </motion.tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -316,6 +437,151 @@ export default function DealsPage() {
         deal={resubmitDeal}
         onDone={() => setResubmitDeal(null)}
       />
+    </div>
+  );
+}
+
+/* ─── Inline Status cell ─────────────────────────────────────────────────────
+   A canonical RepairOX status pill (rounded-full, ring, tone from the shared
+   dealStatusTone helper) that doubles as an inline decision control.
+
+   • Read-only when the viewer can't decide this deal (view-tier user, a closed
+     deal, a non-approver, or the requester's own open deal) — a plain pill, no
+     chevron.
+   • Editable for an authorized approver on an OPEN deal: the pill opens a small
+     menu of decisions. APPROVE applies inline at the requested discount;
+     REJECT / REQUEST CHANGES require a mandatory reason, so they open the review
+     drawer (never a silent status change without the required input).
+   • For the requester whose deal is changes-requested, offers Revise & Resubmit.
+
+   The pill fills its cell (flex h-7 w-full) with truncation + tooltip so it
+   never resizes per row. */
+function DealStatusCell({
+  deal, canDecide, canReopen, canApprove, canReject, canRequestChanges,
+  onApprove, onReject, onRequestChanges, onReopen, onResubmit, canResubmit,
+}: {
+  deal: LeadDeal;
+  canDecide: boolean;
+  canReopen: boolean;
+  canApprove: boolean;
+  canReject: boolean;
+  canRequestChanges: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+  onRequestChanges: () => void;
+  onReopen: () => void;
+  onResubmit: () => void;
+  canResubmit: boolean;
+}) {
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
+  const btnRef = useRef<HTMLButtonElement>(null);
+
+  const label = DEAL_STATUS_LABEL[deal.status];
+  const tone = dealStatusTone(deal.status);
+  const interactive = canDecide || canReopen || canResubmit;
+
+  const handleOpen = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!open && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect();
+      const dropUp = window.innerHeight - r.bottom < 220;
+      setPos({ top: dropUp ? undefined : r.bottom + 6, bottom: dropUp ? window.innerHeight - r.top + 6 : undefined, left: r.left, dropUp });
+    }
+    setOpen((o) => !o);
+  };
+
+  // Read-only pill — same full-width geometry (minus the chevron) so it lines
+  // up with the editable pills in other rows.
+  if (!interactive) {
+    return (
+      <span
+        title={label}
+        className={cn("flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", tone)}
+      >
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        {isOpenDealStatus(deal.status) && <Lock className="h-3 w-3 shrink-0 opacity-50" />}
+      </span>
+    );
+  }
+
+  return (
+    <div className="relative block w-full" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={handleOpen}
+        title={label}
+        className={cn(
+          "flex h-7 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-left text-[11px] font-semibold ring-1 ring-inset transition hover:shadow-sm",
+          tone,
+        )}
+      >
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
+      </button>
+      <AnimatePresence>
+        {open && (
+          <>
+            <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+            <motion.div
+              initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
+              transition={{ duration: 0.15 }}
+              style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left }}
+              className="z-[70] w-[230px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
+            >
+              <p className="px-2.5 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Change status</p>
+              {canDecide && canApprove && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setOpen(false); onApprove(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-emerald-700 transition hover:bg-emerald-50"
+                >
+                  <Check className="h-3.5 w-3.5" /> Approve (at requested)
+                </button>
+              )}
+              {canDecide && canRequestChanges && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setOpen(false); onRequestChanges(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-indigo-700 transition hover:bg-indigo-50"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Request Changes…
+                </button>
+              )}
+              {canDecide && canReject && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setOpen(false); onReject(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-rose-600 transition hover:bg-rose-50"
+                >
+                  <X className="h-3.5 w-3.5" /> Reject…
+                </button>
+              )}
+              {canReopen && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setOpen(false); onReopen(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-amber-700 transition hover:bg-amber-50"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Reopen for review
+                </button>
+              )}
+              {canResubmit && (
+                <button
+                  type="button"
+                  onClick={(e) => { e.stopPropagation(); setOpen(false); onResubmit(); }}
+                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-[#4361EE] transition hover:bg-indigo-50"
+                >
+                  <RefreshCw className="h-3.5 w-3.5" /> Revise &amp; Resubmit
+                </button>
+              )}
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

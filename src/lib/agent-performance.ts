@@ -954,28 +954,43 @@ export function conversionSummary(p: AgentPerformance): ConversionSummary {
 
 /* ── Lead conversion funnel (display rows) ─────────────────────────────────
    Turns the structured LeadFunnel into ordered display rows with each stage's
-   share of the TOP stage (Total). Revenue Won is appended as the final
-   commercial outcome — labelled clearly as revenue, not a lead count (its
-   "count" is the number of leads that produced finalized revenue; the money is
-   carried separately so the UI never conflates a ₹ amount with a lead count). */
+   share of the TOP stage (Total Leads). The funnel represents LEAD COUNTS
+   only — every stage is a count of leads at that lifecycle point. Revenue Won
+   is a FINANCIAL OUTCOME, not a lead-count stage, so it is NOT included here;
+   the UI renders it as a separate footer below the funnel bars.
+
+   Stages: Total Leads → Contacted → Qualified → Converted.
+   Percentage = stage count / Total Leads (one consistent denominator). */
 export interface FunnelStage {
-  key: "total" | "qualified" | "converted" | "revenue";
+  key: "total" | "contacted" | "qualified" | "converted";
   label: string;
   count: number;              // lead count at this stage
   shareOfTotal: number;       // 0..1 of the Total stage
-  money?: number;             // only set on the revenue stage
+}
+
+/** Revenue outcome data for the funnel footer (separate from the funnel bars). */
+export interface FunnelRevenueOutcome {
+  revenueWon: number;         // agent-driven finalized revenue (₹)
+  invoiceCount: number;       // leads that produced finalized revenue
 }
 
 export function funnelStages(p: AgentPerformance): FunnelStage[] {
   const total = p.funnel.total;
   const share = (n: number) => (total > 0 ? n / total : 0);
-  const revenueLeads = p.funnel.invoice; // leads that produced finalized revenue
   return [
     { key: "total", label: "Total Leads", count: total, shareOfTotal: 1 },
+    { key: "contacted", label: "Contacted", count: p.funnel.contacted, shareOfTotal: share(p.funnel.contacted) },
     { key: "qualified", label: "Qualified", count: p.funnel.qualified, shareOfTotal: share(p.funnel.qualified) },
     { key: "converted", label: "Converted", count: p.convertedAgentDriven, shareOfTotal: share(p.convertedAgentDriven) },
-    { key: "revenue", label: "Revenue Won", count: revenueLeads, shareOfTotal: share(revenueLeads), money: p.revenueWonAgentDriven },
   ];
+}
+
+/** Revenue outcome for the funnel footer — separated from the lead-count funnel. */
+export function funnelRevenueOutcome(p: AgentPerformance): FunnelRevenueOutcome {
+  return {
+    revenueWon: p.revenueWonAgentDriven,
+    invoiceCount: p.funnel.invoice,
+  };
 }
 
 /* ── Converted route mix (donut) ───────────────────────────────────────────

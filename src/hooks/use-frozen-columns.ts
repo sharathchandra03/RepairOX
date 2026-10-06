@@ -15,13 +15,18 @@
    We never freeze an arbitrary middle column between two scrolling regions —
    the left frozen block is always a contiguous prefix of the columns.
 
-   The selection is persisted PER USER in localStorage (mirrors
-   use-pinned-filters.ts / store-multi-select.tsx). One user's freeze config
-   never affects another user. Ready to be promoted to a DB-backed
-   table_preferences table later without changing the consuming UI.
+   PERSISTENCE (dual-mode, matches use-column-order.ts / use-lead-kanban.ts):
+     • Supabase mode → the `user_table_preferences.frozen_columns` row is the
+       SOURCE OF TRUTH so the layout follows the user across browsers/devices.
+       localStorage is kept as a fast cache.
+     • Local mode    → localStorage is the home (legacy behaviour).
+   One user's freeze config never affects another user.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  readLocal, writeLocal, loadServerPref, saveServerPref, isSupabaseConfigured,
+} from "@/lib/table-preferences-store";
 
 /** A single column the grid can render (and optionally freeze). */
 export type GridColumn = {
@@ -37,6 +42,10 @@ export type GridColumn = {
   lockedRight?: boolean;
   /** Excluded from the freeze menu (e.g. conditional Store column). */
   freezable?: boolean;
+  /** Excluded from the Customize-Columns reorder list (structural / fixed
+   *  columns like the selection checkbox or a conditional column). Defaults to
+   *  true for every labelled, non-anchor column. */
+  reorderable?: boolean;
 };
 
 export type FrozenColumnsState = {
@@ -50,36 +59,19 @@ export type FrozenColumnsState = {
   toggle: (key: string) => void;
   /** Reset to default — only the two mandatory anchors frozen. */
   reset: () => void;
-  /** True once localStorage has been read (avoids SSR/hydration mismatch). */
+  /** True once the authoritative load has completed (avoids SSR/hydration). */
   hydrated: boolean;
 };
 
 const STORAGE_PREFIX = "repairox-frozen-columns::";
 
-function readPref(storageKey: string): string[] | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = window.localStorage.getItem(storageKey);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed.filter((v) => typeof v === "string") : null;
-  } catch {
-    return null;
-  }
-}
-
-function writePref(storageKey: string, keys: string[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(storageKey, JSON.stringify(keys));
-  } catch {
-    /* quota / unavailable */
-  }
-}
+/** DB save debounce (ms). Matches column-order's 400ms. */
+const SAVE_DEBOUNCE = 400;
 
 /**
- * @param gridId    A stable id for this grid (e.g. "leads-list").
- * @param userId    The signed-in user's id (per-user isolation). null → shared/anon.
+ * @param gridId    A stable id for this grid (e.g. "leads-list"). Used as the
+ *                  table_key for DB persistence.
+ * @param userId    The signed-in user's id (per-user isolation). null → anon.
  * @param columns   The grid's columns IN VISUAL ORDER (locked anchors flagged).
  */
 export function useFrozenColumns(
@@ -87,31 +79,91 @@ export function useFrozenColumns(
   userId: string | null | undefined,
   columns: GridColumn[],
 ): FrozenColumnsState {
-  const storageKey = `${STORAGE_PREFIX}${gridId}::${userId ?? "anon"}`;
-
   // Optional (user-selected) frozen keys — mandatory anchors are implicit.
   const [optionalLeft, setOptionalLeft] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
-  // Load from localStorage on mount / when the key (user) changes.
-  useEffect(() => {
-    const saved = readPref(storageKey);
-    setOptionalLeft(saved ?? []);
-    setHydrated(true);
-  }, [storageKey]);
+  const loadedForKeyRef = useRef<string | null>(null);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Persist whenever the selection changes (after hydration only).
+  /* ── Hydrate on mount / when the user changes ────────────────────────────
+     Server-first in Supabase mode, cache/local fallback otherwise. Same dual-
+     mode pattern as useColumnOrder + useLeadKanban: WAIT for the real userId
+     in Supabase mode so a fleeting "anon" pass never clobbers the real pref. */
+  useEffect(() => {
+    let cancelled = false;
+    setHydrated(false);
+    loadedForKeyRef.current = null;
+
+    if (isSupabaseConfigured && (userId === null || userId === undefined)) {
+      return () => { cancelled = true; };
+    }
+
+    (async () => {
+      let saved: string[] | null = null;
+
+      if (isSupabaseConfigured) {
+        const server = await loadServerPref(gridId, "frozenColumns");
+        if (cancelled) return;
+        if (server !== undefined) {
+          saved = server;
+        } else {
+          saved = readLocal(STORAGE_PREFIX, gridId, userId);
+        }
+        // Migrate local → server on first DB load.
+        if (server === null) {
+          const local = readLocal(STORAGE_PREFIX, gridId, userId);
+          if (local && local.length > 0) {
+            saved = local;
+            void saveServerPref(gridId, "frozenColumns", local);
+          }
+        }
+      } else {
+        saved = readLocal(STORAGE_PREFIX, gridId, userId);
+      }
+
+      if (cancelled) return;
+      setOptionalLeft(saved ?? []);
+      loadedForKeyRef.current = `${gridId}::${userId ?? "anon"}`;
+      setHydrated(true);
+    })();
+
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridId, userId]);
+
+  /* ── Persist on change ──
+     localStorage immediately (fast cache / local-mode home), server debounced.
+     Only after the authoritative load for THIS user key finished. */
   useEffect(() => {
     if (!hydrated) return;
-    writePref(storageKey, optionalLeft);
-  }, [optionalLeft, hydrated, storageKey]);
+    const currentKey = `${gridId}::${userId ?? "anon"}`;
+    if (loadedForKeyRef.current !== currentKey) return;
+
+    // localStorage: immediate.
+    writeLocal(STORAGE_PREFIX, gridId, userId, optionalLeft);
+
+    // Server: debounced.
+    if (isSupabaseConfigured) {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      const snapshot = optionalLeft.length > 0 ? optionalLeft : null;
+      saveTimerRef.current = setTimeout(() => {
+        void saveServerPref(gridId, "frozenColumns", snapshot);
+      }, SAVE_DEBOUNCE);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [optionalLeft, hydrated, gridId, userId]);
+
+  // Flush pending save on unmount.
+  useEffect(
+    () => () => { if (saveTimerRef.current) clearTimeout(saveTimerRef.current); },
+    [],
+  );
 
   const lockedLeftKey = useMemo(() => columns.find((c) => c.lockedLeft)?.key ?? null, [columns]);
   const rightKey = useMemo(() => columns.find((c) => c.lockedRight)?.key ?? null, [columns]);
 
-  // The set of columns that are ACTUALLY freezable-optional (exist, not locked,
-  // not explicitly non-freezable). Prunes any stale saved keys (e.g. a column
-  // that no longer exists or the Store column when single-store).
+  // Prune saved keys against current column set (stale-column safety).
   const validOptional = useMemo(() => {
     const freezableKeys = new Set(
       columns
@@ -121,9 +173,9 @@ export function useFrozenColumns(
     return optionalLeft.filter((k) => freezableKeys.has(k));
   }, [optionalLeft, columns]);
 
-  // The left frozen block is a CONTIGUOUS PREFIX: the mandatory left anchor,
-  // then every optional-frozen column IN VISUAL ORDER. This guarantees no
-  // scrolling column is ever trapped between two frozen regions.
+  // The left frozen block: mandatory left anchor, then optional-frozen columns
+  // IN VISUAL ORDER (contiguous prefix — no scrolling column trapped between
+  // two frozen regions).
   const leftKeys = useMemo(() => {
     const optSet = new Set(validOptional);
     const ordered = columns
@@ -135,7 +187,6 @@ export function useFrozenColumns(
   const toggle = useCallback(
     (key: string) => {
       const col = columns.find((c) => c.key === key);
-      // Mandatory anchors + non-freezable columns can't be toggled.
       if (!col || col.lockedLeft || col.lockedRight || col.freezable === false) return;
       setOptionalLeft((prev) =>
         prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],

@@ -271,6 +271,9 @@ export const CAP = {
     // Performance views (derived metrics). Own = the caller's leads only.
     performanceOwn: ["leads_performance_view_own", "leads_view", "manage_sales"],
     performanceAll: ["leads_performance_view_all", "leads_view_all", "view_sales_reports", "manage_reports"],
+    // Manage the org-level Lead Store Mode (Single/Multi) + Default Lead Store.
+    // Granular key first; coarse admin fallbacks preserve existing owner access.
+    settings: ["leads_store_mode_manage", "manage_settings", "manage_sales"],
   },
   deal: {
     // See the Deal page / a lead's deal panel. Submitting a request implies

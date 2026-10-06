@@ -1,13 +1,14 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X, Hash } from "lucide-react";
+import { Building2, Phone, MapPin, FileText, Globe, Clock, Upload, X, Hash, Target } from "lucide-react";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { TimePicker } from "@/components/ui/time-picker";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
 import { StoreNumberingSection } from "@/components/settings/store-numbering-section";
+import { LeadStoreModeSection } from "@/components/leads/settings/lead-store-mode-card";
 import { RequireCapability } from "@/components/common/require-capability";
 import { CAP } from "@/lib/capabilities";
 import { useCanEdit } from "@/lib/use-can-edit";
@@ -185,6 +186,15 @@ function StoreSettingsInner() {
           Only shown when operating inside a specific store; saves to that
           store's branch_settings independently of the fields above. */}
       <StoreNumberingSection />
+
+      {/* ── Lead Management — store mode (Single / Multi) ─────────────────
+          Controls whether Lead Management operates from ONE store (a central
+          sales desk) or across the org's stores. Independent of Shop Management
+          — a 3-shop business can keep All Shops for tickets/invoices while
+          running leads from a single store. */}
+      <SettingsSection title="Lead Management" description="Choose how Lead Management assigns stores to new leads. Saves instantly — independent of the Save Changes button above." icon={Target}>
+        <LeadStoreModeSection canEdit={canEdit} />
+      </SettingsSection>
 
       {/* Printing configuration lives under Store → Printing (a single place for
           Store, Ticket and Invoice print terms). */}

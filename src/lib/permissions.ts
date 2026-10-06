@@ -356,6 +356,9 @@ export type PermissionKey =
   | "leads_sales_agent"
   | "leads_performance_view_own"
   | "leads_performance_view_all"
+  /* Lead Management configuration — org-level Lead Store Mode (Single/Multi)
+     + Default Lead Store. Distinct from the coarse manage_settings. */
+  | "leads_store_mode_manage"
   /* Deals & quotations */
   | "deals_view"
   | "deals_create"
@@ -858,6 +861,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_sales_agent", label: "Sales Agent — eligible lead owner (listed in the Agent picker)" },
       { key: "leads_performance_view_own", label: "View Own Sales Performance" },
       { key: "leads_performance_view_all", label: "View All Sales Agents' Performance" },
+      { key: "leads_store_mode_manage", label: "Manage Lead Store Mode (Single/Multi) & Default Lead Store" },
       { key: "deals_view", label: "View Deals (own / submitted)" },
       { key: "deals_create", label: "Create / Submit Deal (discount approval request)" },
       { key: "deals_edit", label: "Edit / Resubmit Own Deal" },

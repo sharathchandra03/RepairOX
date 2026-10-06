@@ -32,7 +32,7 @@ import {
   type LeadDeal, type LeadDealComment, type LeadDealRevision, type LeadDealRequestDraft,
   type DealStatus,
   rowToLeadDeal, leadDealToRow, rowToLeadDealComment, rowToLeadDealRevision,
-  currentDealForLead, leadHasOpenDeal, canDecideDeal,
+  currentDealForLead, leadHasOpenDeal, canDecideDeal, isOpenDealStatus,
   formatDealDiscount, DEAL_STATUS_LABEL,
 } from "@/lib/lead-deals";
 import type { Lead } from "@/lib/leads-data";
@@ -98,6 +98,10 @@ interface DealsContextValue {
   requestChanges: (dealId: string, comment: string) => Promise<boolean>;
   /** Cancel an open deal (kept as history). */
   cancelDeal: (dealId: string, reason?: string) => Promise<boolean>;
+  /** Reopen a terminal deal (approved / rejected / cancelled) back to pending
+   *  for a fresh review. Approver authority only; clears the prior decision
+   *  columns and keeps the full revision history. */
+  reopenDeal: (dealId: string, reason?: string) => Promise<boolean>;
   /** Post an internal approval-thread comment. */
   addDealComment: (dealId: string, body: string) => Promise<void>;
 }
@@ -476,6 +480,36 @@ export function DealsProvider({ children }: { children: ReactNode }) {
     return true;
   }, [patchDeal, useDb, writeLocalRevision]);
 
+  /* ── Reopen a terminal deal (approved / rejected / cancelled → pending) ──
+     Lets an authorized approver re-open a closed decision for a fresh review
+     from the queue. Clears the prior decision columns, bumps the revision, and
+     keeps the full history (append-only). Approver authority is enforced by the
+     caller (UI) + DB RLS/guard; a plain agent uses Revise & Resubmit instead. */
+  const reopenDeal = useCallback(async (dealId: string, reason?: string): Promise<boolean> => {
+    const deal = dealsRef.current.find((d) => d.id === dealId);
+    if (!deal) return false;
+    if (isOpenDealStatus(deal.status)) return true; // already open — nothing to do
+    const nextRevision = (deal.revision || 1) + 1;
+    const updates: Partial<LeadDeal> = {
+      status: "pending_approval",
+      revision: nextRevision,
+      approvedDiscount: null,
+      approverId: "", approverName: "", decidedAt: "",
+      approvalComment: "", rejectionReason: "",
+    };
+    const ok = await patchDeal(dealId, updates);
+    if (!ok) {
+      toast.error("Couldn't reopen the deal", { description: "You may not have approval authority, or the deal is locked." });
+      return false;
+    }
+    const updated = { ...deal, ...updates } as LeadDeal;
+    if (!useDb) writeLocalRevision(updated, "resubmitted", reason || "Reopened for review", meIdRef.current || "", meNameRef.current || "");
+    logActivity({ module: "Lead", action: "Deal Reopened", severity: "info", entity: "Deal", reference: deal.dealNo, description: `${deal.dealNo} reopened for review (revision ${nextRevision}).` });
+    toast.success("Deal reopened", { description: `${deal.dealNo} · pending approval` });
+    notifyApprovers(updated, "deal_resubmitted");
+    return true;
+  }, [patchDeal, useDb, writeLocalRevision, notifyApprovers]);
+
   /* ── Comment ── */
   const addDealComment = useCallback(async (dealId: string, body: string) => {
     const text = (body || "").trim();
@@ -500,8 +534,8 @@ export function DealsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<DealsContextValue>(() => ({
     deals, comments, revisions, hydrated, mode: useDb ? "db" : "local",
     dealsForLead, currentDeal, commentsForDeal, revisionsForDeal, dealById,
-    requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, addDealComment,
-  }), [deals, comments, revisions, hydrated, useDb, dealsForLead, currentDeal, commentsForDeal, revisionsForDeal, dealById, requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, addDealComment]);
+    requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, reopenDeal, addDealComment,
+  }), [deals, comments, revisions, hydrated, useDb, dealsForLead, currentDeal, commentsForDeal, revisionsForDeal, dealById, requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, reopenDeal, addDealComment]);
 
   return <DealsContext.Provider value={value}>{children}</DealsContext.Provider>;
 }

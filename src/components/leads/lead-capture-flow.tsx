@@ -20,7 +20,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
   X, Check, ChevronRight, ChevronLeft, UserPlus, Search,
-  ClipboardList, CalendarClock, AlertCircle, ChevronDown, MapPin,
+  ClipboardList, CalendarClock, AlertCircle, ChevronDown, MapPin, Store,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -30,6 +30,7 @@ import { useSession } from "@/lib/use-session";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStore } from "@/lib/store";
 import { useStoreContext } from "@/lib/store-context";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
@@ -257,6 +258,10 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const { team, can, currentUser } = usePermissions();
   const { customers } = useStore();
   const { activeStoreId, stores, getStore } = useStoreContext();
+  // Lead Management Store Mode governs how the lead's store is chosen:
+  //   • SINGLE — forced to the org's Default Lead Store; the picker is hidden.
+  //   • MULTI  — the user selects from their authorized stores.
+  const leadMode = useLeadStoreMode();
   const isEdit = !!editLead;
   const canSaveLead = isEdit ? allow(can, CAP.lead.edit) : allow(can, CAP.lead.create);
   // Who may pick the OWNER: first assignment needs CAP.lead.assign; changing an
@@ -305,10 +310,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     // New lead: the logged-in user becomes the default OWNER only when they are
     // an eligible Sales Agent for this store (IVR / phone capture — no need to
     // search for yourself). Owners/managers who aren't Sales Agents pick one.
-    // The lead's store = the active store, or (All-Shops view) the creator's
-    // home store — the same store the DB would default to — so the owner is
-    // validated against the store the lead is actually saved in.
-    const storeId = activeStoreId || currentUser?.branchId || "";
+    // The lead's STORE comes from the Lead Store Mode:
+    //   • SINGLE — the configured Default Lead Store (never the active store);
+    //   • MULTI  — the active store, else the creator's home store.
+    // leadStoreForNewLead already encodes this (the DB guard enforces the same).
+    const storeId = leadMode.leadStoreForNewLead || activeStoreId || currentUser?.branchId || "";
     const selfIsAgent = !!currentUserId && currentUserIsSalesAgent(storeId || null);
     return {
       ...emptyLeadDraft(selfIsAgent ? currentUserName || "" : ""),
@@ -317,6 +323,19 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
       branchId: storeId,
     };
   });
+
+  // Lead Store Mode may resolve AFTER the form opens (org settings load async).
+  // For a NEW lead in SINGLE mode, keep the draft's store locked to the
+  // configured Default Lead Store — the agent never picks it, and it must be
+  // correct before Save (the owner is validated against it). Never touches an
+  // existing lead's historical store on edit.
+  useEffect(() => {
+    if (isEdit || !leadMode.ready || !leadMode.isSingle) return;
+    const forced = leadMode.leadStoreForNewLead;
+    if (forced && draft.branchId !== forced) {
+      setDraft((d) => ({ ...d, branchId: forced }));
+    }
+  }, [isEdit, leadMode.ready, leadMode.isSingle, leadMode.leadStoreForNewLead, draft.branchId]);
 
   // The Sales Agent directory may finish loading after the form opens — apply
   // the self-default once, only if nobody has been picked yet.
@@ -353,8 +372,18 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     if (salesAgentsReady && draft.followUpAgentId && fuChanged && !isEligibleSalesAgent(draft.followUpAgentId, store)) {
       errors.followUpAgentId = "The follow-up agent must be an active Sales Agent who can work this store.";
     }
+    // ── Lead Store Mode gate (new leads only; never blocks an existing lead) ──
+    if (!isEdit && leadMode.ready) {
+      if (leadMode.isSingle && leadMode.singleStoreMisconfigured) {
+        errors.branchId = "No Default Lead Store is configured. An administrator must set one in Lead Settings before leads can be created.";
+      } else if (leadMode.isSingle && leadMode.singleStoreInactive) {
+        errors.branchId = "The configured Lead Store is inactive. An administrator must select an active store in Lead Settings.";
+      } else if (leadMode.isMulti && !draft.branchId) {
+        errors.branchId = "Select the store this lead belongs to.";
+      }
+    }
     return { ok: Object.keys(errors).length === 0, errors };
-  }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent]);
+  }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent, leadMode.ready, leadMode.isSingle, leadMode.isMulti, leadMode.singleStoreMisconfigured, leadMode.singleStoreInactive]);
   const showFollowUp = needsFollowUp({ result: draft.result ?? "", status: draft.status ?? "" }) || !!draft.followUpDate;
 
   /* ── Contact / qualification GATE (progressive data capture) ──
@@ -827,15 +856,34 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Lead Status"><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
-                    <Field label="Store Assignment">
-                      <ConfigurableSelect
-                        options={stores.map((s) => s.id)}
-                        labelFor={(id) => getStore(id)?.name || id}
-                        value={draft.branchId ?? ""}
-                        onChange={(v) => set("branchId", v)}
-                        placeholder="Select a store…"
-                      />
-                    </Field>
+                    {/* ── Store · Lead Store Mode aware ──
+                        SINGLE mode: a NON-editable context indicator (the store
+                        is set in Lead Settings; the agent never picks it).
+                        MULTI mode: a selector limited to the user's authorized
+                        stores. On EDIT, the store stays shown read-only so the
+                        historical lead store is never silently changed. */}
+                    {leadMode.isSingle || isEdit ? (
+                      <Field label={isEdit ? "Store" : "Lead Store"}>
+                        <div className="flex h-[38px] items-center gap-1.5 rounded-xl border border-border bg-muted/40 px-3 text-[13px] font-medium text-foreground">
+                          <Store className="h-3.5 w-3.5 text-[#4361EE]" />
+                          <span className="truncate">
+                            {getStore(draft.branchId)?.name
+                              || leadMode.defaultStore?.name
+                              || (leadMode.singleStoreMisconfigured ? "No Lead Store set" : "—")}
+                          </span>
+                        </div>
+                      </Field>
+                    ) : (
+                      <Field label="Store" error={touched ? validation.errors.branchId : undefined}>
+                        <ConfigurableSelect
+                          options={leadMode.selectableStores.map((s) => s.id)}
+                          labelFor={(id) => getStore(id)?.name || id}
+                          value={draft.branchId ?? ""}
+                          onChange={(v) => set("branchId", v)}
+                          placeholder="Select a store…"
+                        />
+                      </Field>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Result"><ConfigurableSelect field="result" value={draft.result ?? ""} onChange={(v) => set("result", v)} placeholder="Latest outcome" /></Field>

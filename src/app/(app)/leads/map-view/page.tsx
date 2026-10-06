@@ -7,6 +7,7 @@ import { List, LayoutGrid, Map as MapIcon, MapPinOff, ChevronDown, Building2, Ch
 import { PageHeader } from "@/components/layout/page-header";
 import { TableSearch } from "@/components/common/table-utility-bar";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { RequireCapability } from "@/components/common/require-capability";
 import { Dropdown } from "@/components/ui/dropdown";
 import { CAP } from "@/lib/capabilities";
@@ -63,6 +64,7 @@ function MapViewContent() {
   const { leads, canSeeAllLeads } = useLeads();
   const { id: currentUserId } = useSession();
   const { activeStoreId } = useStoreContext();
+  const leadMode = useLeadStoreMode();
 
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -169,7 +171,7 @@ function MapViewContent() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
           <CitySelect cities={cities} value={cityId} label={cityLabel} onChange={setCityId} />
-          <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
+          {leadMode.isMulti && <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />}
           <TableSearch value={query} onChange={setQuery} placeholder="Search leads…" />
         </div>
       </div>

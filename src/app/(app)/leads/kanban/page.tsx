@@ -45,6 +45,7 @@ import { useSession } from "@/lib/use-session";
 import { useLeadKanban } from "@/hooks/use-lead-kanban";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
 import { StoreMultiSelect } from "@/components/common/store-multi-select";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { kanbanColor, noteColorOf, type KanbanColumn, type NoteColor } from "@/lib/lead-kanban";
 import { LeadKanbanCard } from "@/components/leads/kanban/lead-kanban-card";
 import { BoardSelector, BoardSettingsMenu, NewBoardDrawer } from "@/components/leads/kanban/board-controls";
@@ -66,6 +67,7 @@ export default function KanbanPage() {
   const { can } = usePermissions();
   const { id: currentUserId } = useSession();
   const { stores, isAllShops, getStore, activeStoreId } = useStoreContext();
+  const leadMode = useLeadStoreMode();
 
   const kanban = useLeadKanban(currentUserId);
   const { activeBoard } = kanban;
@@ -285,7 +287,8 @@ export default function KanbanPage() {
   const openLead = useCallback((lead: Lead) => setDetailLead(lead), []);
   const liveDetailLead = detailLead ? leads.find((l) => l.id === detailLead.id) ?? null : null;
 
-  const showStoreCol = isAllShops && stores.length > 1;
+  // Store filter is only meaningful in Multi-Store Lead mode.
+  const showStoreCol = isAllShops && stores.length > 1 && leadMode.isMulti;
 
   // Whole-board CANVAS theme, driven by the ACTIVE board's color (A+C). Gives
   // the Kanban a unique, board-specific identity while keeping cards readable.

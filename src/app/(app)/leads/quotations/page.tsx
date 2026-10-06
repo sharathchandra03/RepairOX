@@ -11,6 +11,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Plus, FileText, Send, Clock, CheckCircle2, Lock, Eye, Printer } from "lucide-react";
@@ -22,6 +23,7 @@ import { useRoxStickyHeader } from "@/components/ui/rox-table";
 import { toast } from "@/components/ui/toaster";
 import { TableUtilityBar } from "@/components/common/table-utility-bar";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
@@ -79,7 +81,9 @@ export default function QuotationsPage() {
   const canView = allow(can, CAP.quotation.view) || allow(can, CAP.quotation.viewAll);
   const canViewAll = allow(can, CAP.quotation.viewAll);
   const canSend = allow(can, CAP.quotation.send) && !viewAsReadOnly;
-  const multiStore = isAllShops && stores.length > 1;
+  // Quotations inherit the Lead's store; store filter/column only in Multi mode.
+  const leadMode = useLeadStoreMode();
+  const multiStore = isAllShops && stores.length > 1 && leadMode.isMulti;
   const [sendingId, setSendingId] = useState<string | null>(null);
 
   const handleSend = async (q: Quotation) => {
@@ -207,6 +211,7 @@ export default function QuotationsPage() {
           the frozen table header (theadTop) pins flush beneath it. */}
       <div ref={wrapRef} className="sticky top-[60px] z-[6] -mt-2 bg-[hsl(var(--background))] pb-3 pt-2">
         <TableUtilityBar
+          hideStore={!leadMode.isMulti}
           storeValue={storeFilter}
           onStoreChange={setStoreFilter}
           searchValue={query}
@@ -286,7 +291,20 @@ export default function QuotationsPage() {
                 >
                   <td className="pl-5 pr-3 py-4 align-middle">
                     <p className="font-semibold tabular-nums text-zinc-900">{q.quotationNo}</p>
-                    {q.leadNo ? <p className="truncate text-[11px] text-muted-foreground">Lead {q.leadNo}</p> : null}
+                    {q.leadNo ? (
+                      q.leadId ? (
+                        <Link
+                          href={`/leads/list?lead=${q.leadId}`}
+                          onClick={(e) => e.stopPropagation()}
+                          className="truncate text-[11px] font-medium text-[#4361EE] transition hover:underline"
+                          title={`Open Lead ${q.leadNo}`}
+                        >
+                          Lead {q.leadNo}
+                        </Link>
+                      ) : (
+                        <p className="truncate text-[11px] text-muted-foreground">Lead {q.leadNo}</p>
+                      )
+                    ) : null}
                   </td>
                   {multiStore && <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(q.branchId || null)} mode="stacked" /></td>}
                   <td className="px-3 py-4 align-middle">

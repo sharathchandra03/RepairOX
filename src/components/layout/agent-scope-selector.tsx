@@ -38,13 +38,17 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
   const pathname = usePathname();
   const { can } = usePermissions();
   const { activeStoreId } = useStoreContext();
-  const { salesAgents, salesAgentsReady, viewAsAgentId, setViewAsAgent } = useLeads();
+  const { salesAgents, salesAgentsReady, viewAsAgentId, setViewAsAgent, currentUserIsSalesAgent } = useLeads();
 
   // Lead-Management-only control. Never a global pill.
   if (activeWorkspace !== "leads") return null;
 
   // Owner-level only: must be able to view ALL agents' performance.
+  // A user who is themselves a Sales Agent never gets the cross-agent scope
+  // selector, even if their role carries a coarse reporting key — their page is
+  // always their own individual workspace.
   if (!allow(can, CAP.lead.performanceAll)) return null;
+  if (currentUserIsSalesAgent(activeStoreId)) return null;
 
   // Only eligible Sales Agents authorized for the active store (org-wide in
   // All Shops). Uses the SAME store-scoped directory the pickers use.

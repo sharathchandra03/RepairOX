@@ -22,7 +22,7 @@ import { ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { cn, formatINR } from "@/lib/utils";
 import { Sparkline, DonutSplit } from "@/components/reports/mini-charts";
 import {
-  conversionSummary, funnelStages, convertedRouteMix, topSourceByVolume,
+  conversionSummary, funnelStages, funnelRevenueOutcome, convertedRouteMix, topSourceByVolume,
   perfSparkline, perfLatestVsPrevious, perfDelta,
   type AgentPerformance, type PeriodPerformance, type PerfSeriesMetric,
 } from "@/lib/agent-performance";
@@ -46,7 +46,7 @@ export function PerfSection({
         <h3 className="text-[13px] font-bold uppercase tracking-wider text-foreground">{title}</h3>
         {subtitle && <p className="mt-0.5 text-[11.5px] text-muted-foreground">{subtitle}</p>}
       </div>
-      {children}
+      <div className="flex flex-1 flex-col">{children}</div>
     </section>
   );
 }
@@ -135,38 +135,37 @@ export function PerfKpiRow({ specs, months }: { specs: KpiSpec[]; months: Period
 }
 
 /* ════════════════════════════════════════════════════════════════════════
-   CONVERSION SUMMARY — three insight cards (distinct from the top KPIs).
+   CONVERSION SUMMARY — three insight cards filling the panel vertically.
+   The section is designed to match the height of its sibling panels
+   (Lead Conversion Funnel + Lead Mix) via flex distribution. Each metric
+   block has equal height/width so none dominates visually.
    ════════════════════════════════════════════════════════════════════════ */
 
 function InsightCard({
-  icon: Icon, label, value, sub, delta, tone = "blue",
+  icon: Icon, label, value, sub, tone = "blue", overdueSub,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string;
   sub?: string;
-  delta?: { pct: number; up: boolean } | null;
   tone?: Tone;
+  overdueSub?: string;
 }) {
   const t = TONE[tone];
   return (
-    <div className="rounded-xl border border-border bg-muted/20 p-4">
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2">
-          <span className={cn("grid h-7 w-7 place-items-center rounded-lg", t.chip)}>
-            <Icon className="h-3.5 w-3.5" />
-          </span>
-          <span className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
+    <div className="flex flex-col rounded-xl border border-border bg-muted/20 p-3.5">
+      {/* Icon chip + label on one line; label wraps to at most 2 lines, reserved height keeps all cards aligned */}
+      <div className="flex items-start gap-2">
+        <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", t.chip)}>
+          <Icon className="h-3.5 w-3.5" />
         </span>
-        {delta && (
-          <span className={cn("inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset", delta.up ? t.pillUp : t.pillDown)}>
-            {delta.up ? <ArrowUpRight className="h-2.5 w-2.5" /> : <ArrowDownRight className="h-2.5 w-2.5" />}
-            {Math.abs(delta.pct)}%
-          </span>
-        )}
+        <span className="min-h-[2.1em] text-[10px] font-semibold uppercase leading-tight tracking-wide text-slate-500">{label}</span>
       </div>
-      <p className="mt-2.5 font-display text-2xl font-extrabold tabular-nums text-foreground">{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
+      <p className="mt-2.5 font-display text-[24px] font-extrabold leading-none tabular-nums text-foreground">{value}</p>
+      <div className="mt-1.5">
+        {sub && <p className="text-[11px] leading-snug text-muted-foreground">{sub}</p>}
+        {overdueSub && <p className="mt-0.5 text-[11px] font-semibold text-[#B42318]">{overdueSub}</p>}
+      </div>
     </div>
   );
 }
@@ -179,7 +178,8 @@ export function ConversionSummarySection({
 }) {
   const cs = conversionSummary(perf);
   return (
-    <PerfSection title="Conversion Summary" subtitle="Key metrics for your lead performance">
+    <PerfSection title="Conversion Summary" subtitle="Key metrics for your lead performance" className="flex flex-col">
+      {/* Three equally-weighted, COMPACT metric blocks */}
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
         <InsightCard
           icon={icons.qualified}
@@ -190,18 +190,31 @@ export function ConversionSummarySection({
         />
         <InsightCard
           icon={icons.revenue}
-          label="Revenue per Converted Lead"
+          label="Revenue / Converted Lead"
           tone="emerald"
           value={cs.revenuePerConverted == null ? "N/A" : formatINR(Math.round(cs.revenuePerConverted))}
-          sub={cs.revenuePerConverted == null ? "No conversions yet" : `From ${cs.converted} conversions`}
+          sub={cs.revenuePerConverted == null ? "No conversions yet" : `From ${cs.converted} conversion${cs.converted !== 1 ? "s" : ""}`}
         />
         <InsightCard
           icon={icons.followUp}
           label="Pending Follow-ups"
           tone={cs.overdueFollowUp > 0 ? "overdue" : "amber"}
           value={String(cs.pendingFollowUp)}
-          sub={cs.overdueFollowUp > 0 ? `${cs.overdueFollowUp} overdue` : (cs.pendingFollowUp > 0 ? "Action required" : "All caught up")}
+          sub={cs.pendingFollowUp > 0 ? "Action required" : "All caught up"}
+          overdueSub={cs.overdueFollowUp > 0 ? `${cs.overdueFollowUp} overdue` : undefined}
         />
+      </div>
+      {/* Compact supporting context strip pinned to the bottom to fill the panel */}
+      <div className="mt-auto flex items-center gap-4 border-t border-border pt-3 text-[11px] text-muted-foreground">
+        <span>Qualified <strong className="ml-0.5 font-bold tabular-nums text-foreground">{cs.qualified}</strong></span>
+        <span className="h-3 w-px bg-border" />
+        <span>Converted <strong className="ml-0.5 font-bold tabular-nums text-foreground">{cs.convertedFromQualified}</strong></span>
+        {cs.overdueFollowUp > 0 && (
+          <>
+            <span className="h-3 w-px bg-border" />
+            <span>Overdue <strong className="ml-0.5 font-bold tabular-nums text-[#B42318]">{cs.overdueFollowUp}</strong></span>
+          </>
+        )}
       </div>
     </PerfSection>
   );
@@ -211,38 +224,57 @@ export function ConversionSummarySection({
    LEAD CONVERSION FUNNEL — horizontal bars, each labelled with count + share.
    ════════════════════════════════════════════════════════════════════════ */
 
+/* Coherent colour progression — primary blue → secondary blue → indigo → green.
+   NOT a different bright colour per stage; the progression reads as one journey. */
 const FUNNEL_TONE: Record<string, string> = {
-  total: "bg-[#4361EE]",
-  qualified: "bg-sky-400",
-  converted: "bg-violet-500",
-  revenue: "bg-emerald-500",
+  total: "bg-[#4361EE]",      // primary blue
+  contacted: "bg-[#60A5FA]",  // secondary blue
+  qualified: "bg-[#8B5CF6]",  // indigo/violet
+  converted: "bg-[#10B981]",  // green (outcome)
 };
 
 export function LeadConversionFunnelSection({ perf }: { perf: AgentPerformance }) {
   const stages = funnelStages(perf);
+  const revenue = funnelRevenueOutcome(perf);
   const empty = perf.funnel.total === 0;
   return (
-    <PerfSection title="Lead Conversion Funnel" subtitle="From total leads to closed revenue">
+    <PerfSection title="Lead Conversion Funnel" subtitle="How leads progress through your pipeline" className="flex flex-col">
       {empty ? (
-        <p className="py-8 text-center text-[12px] text-muted-foreground">No lead data yet.</p>
+        <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
+          <p className="text-[12px] text-muted-foreground">No lead activity yet</p>
+        </div>
       ) : (
-        <div className="space-y-3">
-          {stages.map((s) => (
-            <div key={s.key} className="flex items-center gap-3">
-              <span className="w-24 shrink-0 text-[12px] font-medium text-muted-foreground">{s.label}</span>
-              <div className="relative h-5 flex-1 overflow-hidden rounded-md bg-muted">
-                <div
-                  className={cn("h-full rounded-md transition-all", FUNNEL_TONE[s.key])}
-                  style={{ width: `${Math.max(s.shareOfTotal * 100, s.count > 0 ? 4 : 0)}%` }}
-                />
+        <div className="flex flex-1 flex-col">
+          {/* Lead-count funnel — fixed alignment columns so counts/percentages line up */}
+          <div className="flex-1 space-y-3">
+            {stages.map((s) => (
+              <div key={s.key} className="flex items-center gap-3">
+                <span className="w-[72px] shrink-0 text-[11.5px] font-medium text-muted-foreground">{s.label}</span>
+                <div className="relative h-2.5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn("absolute inset-y-0 left-0 rounded-full transition-all", FUNNEL_TONE[s.key])}
+                    style={{ width: `${s.count > 0 ? Math.max(s.shareOfTotal * 100, 3) : 0}%` }}
+                  />
+                </div>
+                <span className="w-8 shrink-0 text-right text-[13px] font-bold tabular-nums text-foreground">{s.count}</span>
+                <span className="w-10 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">
+                  {perf.funnel.total > 0 ? pct(s.shareOfTotal) : "—"}
+                </span>
               </div>
-              <span className="w-12 shrink-0 text-right text-[13px] font-bold tabular-nums text-foreground">{s.count}</span>
-              <span className="w-12 shrink-0 text-right text-[11px] tabular-nums text-muted-foreground">{pct(s.shareOfTotal)}</span>
+            ))}
+          </div>
+
+          {/* Commercial outcome — revenue (₹) shown SEPARATELY from the lead-count funnel */}
+          <div className="mt-4 flex items-end justify-between gap-3 border-t border-border pt-3">
+            <div>
+              <p className="text-[10.5px] font-semibold uppercase tracking-wide text-slate-500">Revenue Won</p>
+              <p className="mt-1 font-display text-[22px] font-extrabold leading-none tabular-nums text-emerald-600">
+                {formatINR(revenue.revenueWon)}
+              </p>
             </div>
-          ))}
-          <div className="flex items-center justify-end gap-1.5 border-t border-border pt-2.5 text-[11px] text-muted-foreground">
-            <span className="font-semibold text-emerald-600">{formatINR(perf.revenueWonAgentDriven)}</span>
-            revenue from {perf.funnel.invoice} finalized {perf.funnel.invoice === 1 ? "invoice" : "invoices"}
+            <p className="pb-0.5 text-right text-[11px] text-muted-foreground">
+              From {revenue.invoiceCount} finalized {revenue.invoiceCount === 1 ? "invoice" : "invoices"}
+            </p>
           </div>
         </div>
       )}
@@ -269,11 +301,13 @@ export function LeadRouteMixSection({
   const donutData = mix.rows.map((r) => ({ key: r.route, label: r.label, value: r.converted }));
 
   return (
-    <PerfSection title="Lead Mix (by Service Route)" subtitle="Distribution of your converted leads">
+    <PerfSection title="Lead Mix (by Service Route)" subtitle="Distribution of your converted leads" className="flex flex-col">
       {mix.convertedTotal === 0 ? (
-        <p className="py-8 text-center text-[12px] text-muted-foreground">No converted leads yet.</p>
+        <div className="flex flex-1 flex-col items-center justify-center py-8 text-center">
+          <p className="text-[12px] text-muted-foreground">No converted leads yet</p>
+        </div>
       ) : (
-        <>
+        <div className="flex-1">
           <DonutSplit
             data={donutData}
             currency={false}
@@ -291,7 +325,7 @@ export function LeadRouteMixSection({
               </div>
             ))}
           </div>
-        </>
+        </div>
       )}
 
       {/* Top Source — honest "top by volume"; hidden when sample too small. */}

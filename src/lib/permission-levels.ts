@@ -146,6 +146,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         "leads_export", "leads_options_manage",
         "leads_smart_lists_manage", "leads_campaigns_manage", "deals_delete", "companies_delete",
         "route_leads", "leads_view_all", "leads_performance_view_all",
+        "leads_store_mode_manage",
         "quotations_view_all", "quotations_delete",
       ],
     },

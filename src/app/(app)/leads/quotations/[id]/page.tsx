@@ -149,7 +149,21 @@ export default function QuotationDetailPage() {
                 </span>
               </div>
               <p className="mt-0.5 text-sm text-muted-foreground">
-                {QUOTATION_SOURCE_LABEL[q.source]}{q.leadNo ? ` · Lead ${q.leadNo}` : ""} · {fmtDateShort(q.createdAt)}
+                {QUOTATION_SOURCE_LABEL[q.source]}
+                {q.leadNo ? (
+                  <>
+                    {" · "}
+                    {q.leadId ? (
+                      <Link href={`/leads/list?lead=${q.leadId}`} className="font-medium text-[#4361EE] transition hover:underline">
+                        Lead {q.leadNo}
+                      </Link>
+                    ) : (
+                      <>Lead {q.leadNo}</>
+                    )}
+                  </>
+                ) : null}
+                {" · "}
+                {fmtDateShort(q.createdAt)}
               </p>
             </div>
           </div>

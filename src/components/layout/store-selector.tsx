@@ -18,11 +18,18 @@ import { Store, ChevronDown, Check, Building2, LayoutGrid } from "lucide-react";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { useStoreContext, ALL_SHOPS } from "@/lib/store-context";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 
 export function StoreSelector() {
   const router = useRouter();
   const pathname = usePathname();
   const onOwnerDashboard = pathname === "/owner" || pathname.startsWith("/owner/");
+  // Lead Management has its OWN store operating mode (Single/Multi) that is
+  // independent of the global multi-store architecture. On /leads/** the header
+  // store control must reflect THAT mode: a FIXED context chip (just the store
+  // name, no dropdown) in Single-Store mode; a real selector in Multi-Store.
+  const onLeadRoutes = pathname === "/leads" || pathname.startsWith("/leads/");
+  const leadMode = useLeadStoreMode();
   const {
     stores,
     activeStore,
@@ -36,6 +43,25 @@ export function StoreSelector() {
   // Hide entirely until resolved, or when there is nothing to switch (a single
   // store and no All-Shops privilege) — a lone store needs no selector.
   if (!ready) return null;
+
+  // ── Lead Management · Single-Store mode → FIXED context chip ──
+  // ONLY on /leads/** and ONLY when a Default Lead Store is actually resolved.
+  // Shows just that store name as the fixed Lead context (no dropdown, no All
+  // Shops) — the store is changed by an admin in Store Settings, not here. When
+  // the default isn't configured yet we DON'T show a dead "No Lead Store set"
+  // chip; we fall through to the normal global selector so the header stays
+  // usable (and the Settings page is where the admin fixes the config).
+  if (onLeadRoutes && leadMode.ready && leadMode.isSingle && leadMode.defaultStore) {
+    return (
+      <span
+        className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-[#E5E9F8] bg-[#F5F7FF] px-3 py-1.5 text-[12px] font-semibold text-[#3A4DBB]"
+        title="Lead Management runs from this store · change it in Settings → Store Information"
+      >
+        <Store className="h-3.5 w-3.5" />
+        <span className="max-w-[160px] truncate">{leadMode.defaultStore.name}</span>
+      </span>
+    );
+  }
   if (!canSwitchStores && !canViewAllShops) {
     // Single-store user: show a static, non-interactive context chip so they
     // always know which store they're in, without a switch affordance.

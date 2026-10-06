@@ -20,9 +20,12 @@ import { StoreContextCell } from "@/components/common/store-context-cell";
 import { EmptyDash } from "@/components/common/empty-dash";
 import { LeadFilterPanel, type FacetDef } from "@/components/leads/lead-filter-panel";
 import { FreezeColumnsMenu } from "@/components/common/freeze-columns-menu";
+import { CustomizeColumnsMenu } from "@/components/common/customize-columns-menu";
 import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
+import { useColumnOrder } from "@/hooks/use-column-order";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
+import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import {
@@ -76,37 +79,37 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
     // in the freeze menu (freezable:false); it is a structural selection column
     // handled directly by frozenCellProps (not the single-anchor hook, which
     // owns the Date left anchor).
-    { key: "select", label: "", width: 44, freezable: false },
+    { key: "select", label: "", width: 44, freezable: false, reorderable: false },
     { key: "date", label: "Date", width: 92, lockedLeft: true },
   ];
-  if (multiStore) cols.push({ key: "store", label: "Store", width: 132, freezable: false });
+  if (multiStore) cols.push({ key: "store", label: "Store", width: 132, freezable: false, reorderable: false });
   cols.push(
     // Wider than a plain "L-001" so it comfortably fits a store-prefixed id
     // (e.g. KOR-L-0045) PLUS the conversion tick + pin without wrapping.
-    { key: "id", label: "Lead ID", width: 128 },
-    { key: "region", label: "Region", width: 120 },
+    { key: "id", label: "Lead ID", width: 132 },
+    { key: "agent", label: "Agent", width: 160 },
     // MODE OF LEAD — how the lead came in (modeOfContact). Structurally separate
     // from Source (acquisition) and Capture Channel.
-    { key: "mode", label: "Mode of Lead", width: 118 },
-    { key: "source", label: "Source", width: 120 },
-    { key: "agent", label: "Agent", width: 150 },
-    { key: "contactStatus", label: "Contact Status", width: 128 },
-    { key: "contactInfo", label: "Contact Info", width: 220 },
-    { key: "device", label: "Device & Issue", width: 200 },
-    { key: "value", label: "Lead Value", width: 120 },
-    { key: "leadCategory", label: "Lead Category", width: 120 },
-    { key: "comment", label: "Comment", width: 200 },
+    { key: "mode", label: "Mode of Lead", width: 132 },
+    { key: "contactInfo", label: "Contact Info", width: 230 },
+    { key: "device", label: "Device & Issue", width: 210 },
+    { key: "comment", label: "Comment", width: 210 },
+    { key: "value", label: "Lead Value", width: 128 },
+    { key: "region", label: "Region", width: 128 },
+    { key: "source", label: "Source", width: 132 },
+    { key: "contactStatus", label: "Contact Status", width: 160 },
+    { key: "leadCategory", label: "Lead Category", width: 136 },
     // SUB CATEGORY — the TBD column is now the real Sub Category field.
-    { key: "subCategory", label: "Sub Category", width: 130 },
-    { key: "leadType", label: "Lead Nature", width: 112 },
-    { key: "status", label: "Status", width: 148 },
+    { key: "subCategory", label: "Sub Category", width: 140 },
+    { key: "leadType", label: "Lead Nature", width: 124 },
+    { key: "status", label: "Status", width: 176 },
     // ACTION — SYSTEM-DERIVED, read-only (never an editable dropdown).
-    { key: "action", label: "Action", width: 132 },
+    { key: "action", label: "Action", width: 180 },
     // STORE — derived from the actual operational record.
-    { key: "storeCol", label: "Store", width: 132 },
+    { key: "storeCol", label: "Store", width: 140 },
     // RESULT — SYSTEM-DERIVED, read-only (₹value + Ticket + Invoice).
-    { key: "result", label: "Result", width: 150 },
-    { key: "actions", label: "Last Action", width: 90, lockedRight: true },
+    { key: "result", label: "Result", width: 160 },
+    { key: "actions", label: "Last Action", width: 96, lockedRight: true },
   );
   return cols;
 }
@@ -290,10 +293,20 @@ function SourceCell({ lead }: { lead: Lead }) {
 }
 
 /* ─── LeadSelectCell ─────────────────────────────────────────────────────
-   Inline-editable dropdown for lead table cells (Status, Contact Status).
-   Matches the ticket StatusPillDropdown: colored dot, framer-motion menu,
-   portal-positioned so it's never clipped by any scroll container.
-   readOnly = plain pill with no chevron (locked / gated rows). */
+   Inline-editable dropdown for lead table cells (Status, Contact Status,
+   Lead Nature). Matches the ticket StatusPillDropdown: colored dot/glyph,
+   framer-motion menu, portal-positioned so it's never clipped by any scroll
+   container. readOnly = plain pill with no chevron (locked / gated rows).
+
+   PILL STANDARDIZATION (Lead Table pill standard):
+   The pill FILLS the full width of its cell (`w-full`) with a stable internal
+   layout — leading glyph (fixed) · truncating text (flex-1, full value in the
+   `title` tooltip) · trailing chevron (fixed). Because the table is
+   `table-fixed` with explicit `<colgroup>` widths, each pill column has one
+   stable width that NEVER depends on the current row's text length. The
+   dropdown menu width is independent of the pill width (it may be wider). No
+   per-row width measurement — purely CSS-driven, so it stays performant with
+   thousands of rows and correct under freeze / reorder / horizontal scroll. */
 function LeadSelectCell({
   value,
   options,
@@ -337,29 +350,35 @@ function LeadSelectCell({
   };
 
   if (readOnly) {
+    // Read-only pill — same full-width geometry as the editable pill (minus the
+    // chevron) so a view-tier / locked row's pill lines up with editable rows.
     return value
-      ? <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", toneClass)}>
+      ? <span
+          title={value}
+          className={cn("flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", toneClass)}
+        >
           {leadGlyph(value, dotColor)}
-          {value}
+          <span className="min-w-0 flex-1 truncate">{value}</span>
         </span>
-      : <span className="text-zinc-400">{placeholder}</span>;
+      : <span className="flex h-7 w-full items-center px-2.5 text-[11px] text-zinc-400">{placeholder}</span>;
   }
 
   return (
-    <div className="relative inline-flex" onClick={(e) => e.stopPropagation()}>
+    <div className="relative block w-full" onClick={(e) => e.stopPropagation()}>
       <button
         ref={btnRef}
         type="button"
         onClick={handleOpen}
+        title={value || undefined}
         className={cn(
-          "inline-flex cursor-pointer items-center gap-1.5 whitespace-nowrap rounded-full font-medium ring-1 ring-inset transition hover:shadow-sm px-2.5 py-1 text-[11px]",
+          "flex h-7 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-left text-[11px] font-medium ring-1 ring-inset transition hover:shadow-sm",
           value ? toneClass : "bg-zinc-50 text-zinc-400 ring-zinc-200",
         )}
         style={value ? { backgroundColor: `${dotColor}15`, color: dotColor, boxShadow: `inset 0 0 0 1px ${dotColor}30` } : undefined}
       >
         {value ? leadGlyph(value, dotColor) : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#a1a1aa" }} />}
-        {value || placeholder}
-        <ChevronDown className="h-3 w-3 opacity-60" />
+        <span className="min-w-0 flex-1 truncate">{value || placeholder}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
       </button>
       <AnimatePresence>
         {open && (
@@ -534,17 +553,20 @@ function ActionCell({ wf }: { wf: LeadWorkflow }) {
   const isFieldLive = !!wf.fieldStatus;
   const label = isFieldLive ? wf.fieldStatusLabel : wf.actionLabel;
   const tone = isFieldLive ? wf.fieldStatusTone : leadActionTone(wf.action);
+  // Full-width read-only pill (Lead Table pill standard): leading lock (fixed) ·
+  // truncating label (flex-1, full value in the title tooltip). The stable
+  // Action column width comes from the <colgroup>, never the row's label length.
   return (
     <span
       title={`${label} · System-derived — ${wf.reason}`}
       aria-label={`Action: ${label} (system-derived, read-only)`}
       className={cn(
-        "inline-flex cursor-default items-center gap-1 whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset select-none",
+        "flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
         tone,
       )}
     >
-      <Lock className="h-2.5 w-2.5 opacity-60" aria-hidden />
-      {label}
+      <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
     </span>
   );
 }
@@ -710,9 +732,13 @@ export default function LeadsListPage() {
   const canBulkStatus = allow(can, CAP.lead.stageChange) && !viewAsReadOnly;
   const canBulkDelete = allow(can, CAP.lead.delete) && !viewAsReadOnly;
   // Multi-store: show the shared Store Context column only in the consolidated
-  // All-Shops view with >1 authorized store (Design System v2 multi-store rule).
+  // All-Shops view with >1 authorized store (Design System v2 multi-store rule)
+  // AND only when Lead Management is in MULTI-STORE mode. In Single-Store mode
+  // every lead shares the one Default Lead Store, so the column is pure clutter
+  // and is hidden (the fixed store context lives in the header chip instead).
   const { isAllShops, stores, getStore } = useStoreContext();
-  const multiStore = isAllShops && stores.length > 1;
+  const leadMode = useLeadStoreMode();
+  const multiStore = isAllShops && stores.length > 1 && leadMode.isMulti;
 
   /* ── Frozen columns (professional data-grid) ──────────────────────────────
      Lead ID is permanently frozen LEFT, Last Action permanently frozen RIGHT;
@@ -721,7 +747,21 @@ export default function LeadsListPage() {
      left/right offset for any column so the header and body cells stay in
      lockstep with the real column widths. */
   const gridColumns = useMemo(() => leadGridColumns(multiStore), [multiStore]);
-  const frozen = useFrozenColumns("leads-list", currentUser?.id, gridColumns);
+  /* ── Personal column order (per-user) ──────────────────────────────────────
+     The user can rearrange the center columns via the Customize popover; the
+     order persists per-user (localStorage key, keyed by currentUser.id). It is
+     a SEPARATE preference from the frozen selection above — reordering never
+     changes which columns are frozen, and vice-versa. `orderedColumns` drives
+     the colgroup / header / body so the rendered order always matches the saved
+     preference. Structural columns (Selection, multi-store Store) and the two
+     anchors (Date left, Last Action right) keep their fixed slots. */
+  const columnOrder = useColumnOrder("lead_table", currentUser?.id, gridColumns);
+  const orderedColumns = columnOrder.orderedColumns;
+  /* Frozen selection is computed against the user's VISUAL (reordered) column
+     order so the left frozen block + its sticky offsets always follow what the
+     user actually sees. Freeze + order remain independent preferences, but the
+     frozen offsets must honour the current order to stay in lockstep. */
+  const frozen = useFrozenColumns("lead_table", currentUser?.id, orderedColumns);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
 
@@ -751,7 +791,7 @@ export default function LeadsListPage() {
   // anchor). The hook owns the Lead ID left anchor, so every hook-computed left
   // offset is shifted right by this width, and the select column itself is
   // pinned at offset 0.
-  const selectColWidth = gridColumns.find((g) => g.key === "select")?.width ?? 0;
+  const selectColWidth = orderedColumns.find((g) => g.key === "select")?.width ?? 0;
 
   const frozenCellProps = useCallback(
     (key: string): { className: string; style?: React.CSSProperties } => {
@@ -768,7 +808,7 @@ export default function LeadsListPage() {
       if (leftIdx >= 0) {
         let offset = selectColWidth;
         for (let i = 0; i < leftIdx; i++) {
-          const c = gridColumns.find((g) => g.key === frozen.leftKeys[i]);
+          const c = orderedColumns.find((g) => g.key === frozen.leftKeys[i]);
           offset += c?.width ?? 0;
         }
         const isLast = leftIdx === frozen.leftKeys.length - 1;
@@ -783,7 +823,7 @@ export default function LeadsListPage() {
       }
       return { className: "" };
     },
-    [frozen.leftKeys, frozen.rightKey, gridColumns, selectColWidth],
+    [frozen.leftKeys, frozen.rightKey, orderedColumns, selectColWidth],
   );
 
   const [page, setPage] = useState(1);
@@ -1129,6 +1169,120 @@ export default function LeadsListPage() {
     [leads, salesAgents],
   );
 
+  /* ── Per-column body renderer ──────────────────────────────────────────────
+     Maps a stable column key → its cell content for ONE lead. The table body
+     iterates the user's ordered columns and calls this, so a column's content,
+     gating and interaction are identical regardless of position (interaction is
+     tied to the stable key, never a numeric index). `locked` = stale
+     Not-Contacted lead (mask to N/A); `gated` = progressive qualification gate;
+     `storeBranchId` = derived operational store. */
+  const renderLeadCell = useCallback(
+    (
+      key: string,
+      ctx: { lead: Lead; wf: LeadWorkflow; locked: boolean; gated: boolean; storeBranchId: string | null },
+    ): React.ReactNode => {
+      const { lead, wf, locked, gated, storeBranchId } = ctx;
+      switch (key) {
+        case "select":
+          return (
+            <Checkbox
+              checked={selected.has(lead.id)}
+              onChange={() => toggleOne(lead.id)}
+              aria-label={`Select lead ${lead.leadNo || lead.id}`}
+            />
+          );
+        case "date":
+          return locked ? <NACell /> : <DateCell lead={lead} />;
+        case "store":
+          // Structural multi-store column (branch the lead belongs to).
+          return <StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" />;
+        case "id":
+          return (
+            <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="mx-auto flex items-center justify-center gap-1.5 whitespace-nowrap font-semibold text-[#4361EE] hover:underline tnum">
+              {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
+              <span className="truncate">{lead.leadNo || "—"}</span>
+              <LeadStatusTick wf={wf} />
+            </button>
+          );
+        case "agent":
+          // Even when LOCKED this stays the reassign control (hand-off to a new owner).
+          return canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={22} />;
+        case "mode":
+          // Short categorical value — CENTER-aligned so the value and the empty
+          // dash (— / N/A, both centered) read as one tidy centered column.
+          return locked ? <NACell /> : lead.modeOfContact ? <span className="block truncate text-center text-zinc-700">{lead.modeOfContact}</span> : <EmptyDash />;
+        case "contactInfo":
+          return locked ? <NACell /> : <ContactInfoCell lead={lead} />;
+        case "device":
+          return gated ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />;
+        case "comment":
+          // The Not-Qualified reason stays readable here (never masked to N/A).
+          return locked ? <NACell /> : <CommentCell text={lead.comments || lead.finalRemarks || ""} />;
+        case "value":
+          return gated ? <NACell /> : <LeadValueCell lead={lead} />;
+        case "region":
+          return locked ? <NACell /> : lead.region ? <span className="block truncate text-center uppercase text-zinc-700">{lead.region}</span> : <EmptyDash />;
+        case "source":
+          return locked ? <NACell /> : <SourceCell lead={lead} />;
+        case "contactStatus":
+          return (
+            <>
+              <ContactStatusCell
+                lead={lead}
+                options={contactStatusOptions}
+                onSave={(v) => updateLead(lead.id, { contactStatus: v })}
+                locked={locked || !canEditLead}
+              />
+              {locked && <span className="mt-1 block text-center text-[10px] font-semibold uppercase tracking-wide text-amber-600">Locked · reassign to unlock</span>}
+            </>
+          );
+        case "leadCategory":
+          return gated ? <NACell /> : lead.leadCategory ? <span className="block truncate text-center text-zinc-700">{lead.leadCategory}</span> : <EmptyDash />;
+        case "subCategory":
+          return gated ? <NACell /> : lead.subCategory ? <span className="block truncate text-center text-zinc-600">{lead.subCategory}</span> : <EmptyDash />;
+        case "leadType":
+          return gated ? <NACell /> : (
+            <LeadSelectCell
+              value={lead.leadNature || ""}
+              options={leadNatureOptions}
+              onChange={(v) => updateLead(lead.id, { leadNature: v })}
+              toneClass={lead.leadNature ? leadNatureTone(lead.leadNature) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+              dotColor={leadNatureDot(lead.leadNature || "")}
+              glyphFor={leadNatureGlyph}
+              readOnly={!canEditLead}
+            />
+          );
+        case "status":
+          return gated ? <NACell /> : (
+            <LeadSelectCell
+              value={lead.status || ""}
+              options={statusOptions}
+              onChange={(v) => applyLeadStatus(lead, v)}
+              toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+              dotColor={statusDotColor(lead.status || "")}
+              readOnly={!canBulkStatus}
+            />
+          );
+        case "action":
+          return gated ? <NACell /> : <ActionCell wf={wf} />;
+        case "storeCol":
+          return gated ? <NACell /> : (storeBranchId ? <StoreContextCell store={getStore(storeBranchId)} mode="stacked" /> : <EmptyDash />);
+        case "result":
+          return gated ? <NACell /> : <ResultCell wf={wf} canViewTicket={canViewTicket} canViewInvoice={canViewInvoice} />;
+        case "actions":
+          return <LeadActionsMenu lead={lead} onAction={handleAction} readOnly={viewAsReadOnly} />;
+        default:
+          return null;
+      }
+    },
+    [
+      selected, toggleOne, getStore, canAssign, setDeviceDetailsLead,
+      contactStatusOptions, updateLead, canEditLead, leadNatureOptions,
+      statusOptions, applyLeadStatus, canBulkStatus, canViewTicket, canViewInvoice,
+      viewAsReadOnly,
+    ],
+  );
+
   return (
     <div className="space-y-5">
       <PageHeader
@@ -1226,9 +1380,11 @@ export default function LeadsListPage() {
               </span>
             )}
           </Button>
-          {/* Freeze-columns control — desktop grid only. */}
-          <div className="hidden md:block">
-            <FreezeColumnsMenu columns={gridColumns} state={frozen} />
+          {/* Table-layout controls — desktop grid only. Customize (reorder)
+              and Freeze are two SEPARATE per-user preferences. */}
+          <div className="hidden items-center gap-2 md:flex">
+            <CustomizeColumnsMenu columns={orderedColumns} state={columnOrder} />
+            <FreezeColumnsMenu columns={orderedColumns} state={frozen} />
           </div>
         </div>
       </div>
@@ -1357,50 +1513,57 @@ export default function LeadsListPage() {
             every grouped column gets a generous width AND the frozen offsets
             line up exactly. The min-width equals their sum; the container
             scrolls horizontally on narrower viewports. */}
-        <table className="w-full min-w-[2822px] table-fixed text-[14px]">
+        <table className="w-full min-w-[2910px] table-fixed text-[14px]">
           <colgroup>
-            {gridColumns.map((c) => (
+            {orderedColumns.map((c) => (
               <col key={c.key} style={{ width: c.width }} />
             ))}
           </colgroup>
           <thead className="rox-table-head sticky top-0 z-[6]">
-            <tr className="text-left text-[12px] font-bold uppercase tracking-wider">
-              <th {...mergeFrozen(frozenCellProps("select"), "px-3 py-4 text-left")}>
-                <Checkbox
-                  checked={allSelected}
-                  indeterminate={someSelected && !allSelected}
-                  onChange={toggleAll}
-                  aria-label="Select all leads"
-                />
-              </th>
-              <th {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 text-left")}>Date</th>
-              {multiStore && <th className="px-3 py-4 text-left">Store</th>}
-              <th {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 text-left")}>ID</th>
-              <th {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 text-left")}>Region</th>
-              <th {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 text-left")}>Mode of Lead</th>
-              <th {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 text-left")}>Source</th>
-              <th {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 text-left")}>Agent</th>
-              <th {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 text-left")}>Contact Status</th>
-              <th {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 text-left")}>Contact Info</th>
-              <th {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 text-left")}>Device &amp; Issue</th>
-              <th {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 text-left")}>Lead Value</th>
-              <th {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 text-left")}>Lead Category</th>
-              <th {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 text-left")}>Comment</th>
-              <th {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 text-left")}>Sub Category</th>
-              <th {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 text-left")}>Lead Nature</th>
-              <th {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 text-left")}>Status</th>
-              {/* ACTION + RESULT are SYSTEM-DERIVED (read-only). A small lock
-                  glyph in the header signals they are not editable. */}
-              <th {...mergeFrozen(frozenCellProps("action"), "px-3 py-4 text-left")}><span className="inline-flex items-center gap-1"><Lock className="h-3 w-3 opacity-50" aria-hidden />Action</span></th>
-              <th {...mergeFrozen(frozenCellProps("storeCol"), "px-3 py-4 text-left")}>Store</th>
-              <th {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 text-left")}><span className="inline-flex items-center gap-1"><Lock className="h-3 w-3 opacity-50" aria-hidden />Result</span></th>
-              <th {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right")}>Actions</th>
+            <tr className="text-[12px] font-bold uppercase tracking-wider">
+              {orderedColumns.map((c) => {
+                // HEADER alignment: ALL headers are CENTERED to sit symmetrically
+                // over their column, EXCEPT "select" (checkbox) and "actions"
+                // (right-aligned). Long header names wrap naturally within the
+                // column width — the column never expands to fit a long header.
+                const align = c.key === "select" ? "text-left"
+                  : c.key === "actions" ? "text-right"
+                  : "text-center";
+                const pad = c.key === "id" ? "px-4 py-4" : "px-3 py-4";
+                return (
+                  <th key={c.key} {...mergeFrozen(frozenCellProps(c.key), `${pad} ${align}`)}>
+                    {c.key === "select" ? (
+                      <Checkbox
+                        checked={allSelected}
+                        indeterminate={someSelected && !allSelected}
+                        onChange={toggleAll}
+                        aria-label="Select all leads"
+                      />
+                    ) : c.key === "action" || c.key === "result" ? (
+                      // ACTION + RESULT are SYSTEM-DERIVED (read-only) — a small
+                      // lock glyph signals they are not editable.
+                      <span className="inline-flex items-center gap-1">
+                        <Lock className="h-3 w-3 opacity-50" aria-hidden />
+                        {c.key === "action" ? "Action" : "Result"}
+                      </span>
+                    ) : c.key === "id" ? (
+                      "ID"
+                    ) : (
+                      c.label
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
             {paged.map((lead, i) => {
-              const fuState = openFollowUpRowState(openFollowUpsByLead.get(lead.id));
-              const tint = followUpTone(fuState).rowTint;
+              // Whole-row urgency is now driven by the CONTACT STATUS: a
+              // Not-Contacted lead reads pinkish-red for its entire row until it
+              // is moved to Contacted (previously this tint came from the open
+              // follow-up state — that treatment is removed).
+              const notContacted = isNotContactedStatus(lead.contactStatus || "");
+              const tint = notContacted ? "bg-red-100/80" : "";
               const tinted = !!tint || !!lead.pinnedAt;
               // A LOCKED Not-Contacted lead: it only reaches the grid for a
               // senior/owner (a plain Sales Agent's scope hides it). Everything
@@ -1421,14 +1584,12 @@ export default function LeadsListPage() {
               // follow-up tint (red) wins over the pinned tint (purple), matching
               // the class order above.
               // Must resolve to the SAME final colour as the scrolling cells'
-              // Tailwind tint (followUpTone → bg-red-100/{90,70,60}). red-100 =
-              // rgb(254 226 226); use the identical colour + alpha here so the
-              // frozen block and the middle cells composite to one shade (no
-              // seam). Pinned mirrors bg-[#7C5CFC]/[0.04].
+              // Tailwind tint (bg-red-100/80). red-100 = rgb(254 226 226); use
+              // the identical colour + alpha here so the frozen block and the
+              // middle cells composite to one shade (no seam). Pinned mirrors
+              // bg-[#7C5CFC]/[0.04].
               const rowTintVar = tint
-                ? (fuState === "overdue" ? "rgb(254 226 226 / 0.9)"
-                  : fuState === "today" ? "rgb(254 226 226 / 0.7)"
-                  : "rgb(254 226 226 / 0.6)")
+                ? "rgb(254 226 226 / 0.8)"
                 : lead.pinnedAt ? "rgb(124 92 252 / 0.04)" : undefined;
               return (
               <motion.tr
@@ -1442,9 +1603,9 @@ export default function LeadsListPage() {
                   // row keeps its own colour on hover so the shade never shifts.
                   !tinted && "hover:bg-muted/40",
                   lead.pinnedAt && "bg-[#7C5CFC]/[0.04]",
-                  // Whole-row urgency from the STRUCTURED open follow-up (overdue
-                  // active follow-up → entire row reads red), mirroring the
-                  // Ticket overdue row treatment. Datetime-precise.
+                  // Whole-row urgency now reads from CONTACT STATUS: a
+                  // Not-Contacted lead tints its entire row pinkish-red until it
+                  // is marked Contacted.
                   tint,
                   // Tinted rows tell frozen cells to layer the SAME tint over
                   // their opaque base so the pinned/overdue tint shows through
@@ -1452,101 +1613,45 @@ export default function LeadsListPage() {
                   tinted && "rox-frozen-tinted",
                 )}
               >
-                {/* 0 · Selection — FROZEN LEFT (before the Lead ID anchor) */}
-                <td {...mergeFrozen(frozenCellProps("select"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
-                  <Checkbox
-                    checked={selected.has(lead.id)}
-                    onChange={() => toggleOne(lead.id)}
-                    aria-label={`Select lead ${lead.leadNo || lead.id}`}
-                  />
-                </td>
-                {/* 1 · Date + time — FROZEN LEFT anchor */}
-                <td {...mergeFrozen(frozenCellProps("date"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <DateCell lead={lead} />}</td>
-                {/* Store (multi-store only) */}
-                {multiStore && (
-                  <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" /></td>
-                )}
-                {/* 2 · ID (click opens the lead) */}
-                <td {...mergeFrozen(frozenCellProps("id"), "px-4 py-4 align-middle")}>
-                  <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="flex items-center gap-1.5 whitespace-nowrap text-left font-semibold text-[#4361EE] hover:underline tnum">
-                    {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
-                    <span className="truncate">{lead.leadNo || "—"}</span>
-                    <LeadStatusTick wf={wf} />
-                  </button>
-                </td>
-                {/* 3 · Region */}
-                <td {...mergeFrozen(frozenCellProps("region"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : lead.region ? <span className="block truncate uppercase text-zinc-700">{lead.region}</span> : <EmptyDash />}</td>
-                {/* 4 · Mode of Lead (how it came in — modeOfContact) */}
-                <td {...mergeFrozen(frozenCellProps("mode"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : lead.modeOfContact ? <span className="block truncate text-zinc-700">{lead.modeOfContact}</span> : <EmptyDash />}</td>
-                {/* 5 · Source + capture channel */}
-                <td {...mergeFrozen(frozenCellProps("source"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <SourceCell lead={lead} />}</td>
-                {/* 5 · Agent (owner — user id → name). Even when LOCKED this
-                    stays the reassign control — that's how a senior hands the
-                    stale lead to a new owner and unlocks the flow. */}
-                <td {...mergeFrozen(frozenCellProps("agent"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
-                  {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={22} />}
-                </td>
-                {/* 6 · Contact Status — inline-editable dropdown; locked rows stay read-only */}
-                <td {...mergeFrozen(frozenCellProps("contactStatus"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
-                  <ContactStatusCell
-                    lead={lead}
-                    options={contactStatusOptions}
-                    onSave={(v) => updateLead(lead.id, { contactStatus: v })}
-                    locked={locked || !canEditLead}
-                  />
-                  {locked && <span className="mt-1 block text-[10px] font-semibold uppercase tracking-wide text-amber-600">Locked · reassign to unlock</span>}
-                </td>
-                {/* 7 · Contact Info (grouped) */}
-                <td {...mergeFrozen(frozenCellProps("contactInfo"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <ContactInfoCell lead={lead} />}</td>
-                {/* 8 · Device & Issue (grouped) — gated until contacted+qualified */}
-                <td {...mergeFrozen(frozenCellProps("device"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>{gated ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />}</td>
-                {/* 9 · Lead Value (pipeline) — gated */}
-                <td {...mergeFrozen(frozenCellProps("value"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <LeadValueCell lead={lead} />}</td>
-                {/* 10 · Lead Category — gated */}
-                <td {...mergeFrozen(frozenCellProps("leadCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.leadCategory ? <span className="block truncate text-zinc-700">{lead.leadCategory}</span> : <EmptyDash />}</td>
-                {/* 11 · Comment — the Not-Qualified REASON stays readable here
-                    (never masked to N/A) so the qualification decision is
-                    preserved; a plain lead shows its comments. */}
-                <td {...mergeFrozen(frozenCellProps("comment"), "px-3 py-4 align-middle")}>{locked ? <NACell /> : <CommentCell text={lead.comments || lead.finalRemarks || ""} />}</td>
-                {/* 12 · Sub Category — gated */}
-                <td {...mergeFrozen(frozenCellProps("subCategory"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : lead.subCategory ? <span className="block truncate text-zinc-600">{lead.subCategory}</span> : <EmptyDash />}</td>
-                {/* 13 · Lead Nature (Hot / Warm / Cold) — colour-coded, inline-editable dropdown (gated on canEditLead) */}
-                <td {...mergeFrozen(frozenCellProps("leadType"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
-                  {gated ? <NACell /> : (
-                    <LeadSelectCell
-                      value={lead.leadNature || ""}
-                      options={leadNatureOptions}
-                      onChange={(v) => updateLead(lead.id, { leadNature: v })}
-                      toneClass={lead.leadNature ? leadNatureTone(lead.leadNature) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
-                      dotColor={leadNatureDot(lead.leadNature || "")}
-                      glyphFor={leadNatureGlyph}
-                      readOnly={!canEditLead}
-                    />
-                  )}
-                </td>
-                {/* 14 · Status (+ fulfilment route) — inline-editable dropdown (gated on canBulkStatus) */}
-                <td {...mergeFrozen(frozenCellProps("status"), "px-3 py-4 align-middle")} onClick={(e) => e.stopPropagation()}>
-                  {gated ? <NACell /> : (<>
-                  <LeadSelectCell
-                    value={lead.status || ""}
-                    options={statusOptions}
-                    onChange={(v) => applyLeadStatus(lead, v)}
-                    toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
-                    dotColor={statusDotColor(lead.status || "")}
-                    readOnly={!canBulkStatus}
-                  />
-                  </>)}
-                </td>
-                {/* 15 · ACTION — SYSTEM-DERIVED, read-only */}
-                <td {...mergeFrozen(frozenCellProps("action"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <ActionCell wf={wf} />}</td>
-                {/* 16 · STORE — derived from the actual operational record */}
-                <td {...mergeFrozen(frozenCellProps("storeCol"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : (storeBranchId ? <StoreContextCell store={getStore(storeBranchId)} mode="stacked" /> : <EmptyDash />)}</td>
-                {/* 17 · RESULT — SYSTEM-DERIVED, read-only (₹value + TKT + INV) */}
-                <td {...mergeFrozen(frozenCellProps("result"), "px-3 py-4 align-middle")}>{gated ? <NACell /> : <ResultCell wf={wf} canViewTicket={canViewTicket} canViewInvoice={canViewInvoice} />}</td>
-                {/* Last Action — FROZEN RIGHT anchor */}
-                <td {...mergeFrozen(frozenCellProps("actions"), "px-3 py-4 text-right align-middle")} onClick={(e) => e.stopPropagation()}>
-                  <LeadActionsMenu lead={lead} onAction={handleAction} readOnly={viewAsReadOnly} />
-                </td>
+                {/* Cells render in the USER'S saved column order (orderedColumns).
+                    Each cell's content + gating + click behaviour is unchanged —
+                    only its POSITION follows the personal layout. The two frozen
+                    anchors (Date left, Last Action right) and the structural
+                    Selection / multi-store Store columns keep their fixed slots. */}
+                {orderedColumns.map((c) => {
+                  // Columns whose cell owns interactive controls stop the row's
+                  // open-detail click (same as the original per-cell wrappers).
+                  const stops = c.key === "select" || c.key === "agent" || c.key === "device"
+                    || c.key === "contactStatus" || c.key === "leadType" || c.key === "status"
+                    || c.key === "actions";
+                  // Body alignment mirrors the (centered) headers so each column
+                  // reads as one tidy centered run. EXCEPTIONS stay as-is:
+                  //  • select  → left (checkbox)
+                  //  • actions → right (row menu)
+                  //  • genuinely multi-line / rich-text cells (Contact Info,
+                  //    Device & Issue, Comment) stay LEFT — centering wrapped
+                  //    multi-line text hurts readability.
+                  // Full-width pill cells (contactStatus / leadType / status /
+                  // action) already fill the column, so centering the <td> is a
+                  // no-op for them (the pill spans the whole width).
+                  const LEFT_COLS = new Set(["select", "contactInfo", "device", "comment"]);
+                  const bodyAlign = c.key === "actions" ? "text-right"
+                    : LEFT_COLS.has(c.key) ? "text-left"
+                    : "text-center";
+                  const pad = c.key === "id" ? `px-4 py-4 align-middle ${bodyAlign}`
+                    : `px-3 py-4 align-middle ${bodyAlign}`;
+                  return (
+                    <td
+                      key={c.key}
+                      {...mergeFrozen(frozenCellProps(c.key), pad)}
+                      onClick={stops ? (e) => e.stopPropagation() : undefined}
+                    >
+                      {renderLeadCell(c.key, {
+                        lead, wf, locked, gated, storeBranchId,
+                      })}
+                    </td>
+                  );
+                })}
               </motion.tr>
               );
             })}
@@ -1568,7 +1673,7 @@ export default function LeadsListPage() {
         {paged.map((lead) => {
           const mLocked = isNotContactedLocked(lead);
           return (
-          <div key={lead.id} onClick={() => setDetailLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", followUpTone(openFollowUpRowState(openFollowUpsByLead.get(lead.id))).rowTint)}>
+          <div key={lead.id} onClick={() => setDetailLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", isNotContactedStatus(lead.contactStatus || "") && "bg-red-100/80")}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Checkbox

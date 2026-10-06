@@ -190,6 +190,16 @@ export type StoreSettings = {
    *  Shown on invoice A4/thermal prints. */
   invoiceWarrantyText: string;
 
+  /* ── Lead Management Store Mode (Settings → Lead Management) ──
+   * Org-level config controlling HOW Lead Management operates, independent of
+   * the global multi-store architecture. 'single' = all new leads use
+   * `defaultLeadStoreId`; 'multi' = authorized users pick an authorized store.
+   * Changing the mode / default NEVER rewrites historical leads. */
+  leadStoreMode: "single" | "multi";
+  /** The store every NEW lead is assigned to in Single-Store mode ("" = none
+   *  configured yet — a configuration error that blocks lead creation). */
+  defaultLeadStoreId: string;
+
   /* ── Loyalty program configuration (Settings → Customers → Loyalty) ── */
   loyaltyConfig: {
     /** Master on/off switch. When false, awardLoyaltyForPaidInvoice in
@@ -350,6 +360,11 @@ CLAIM PROCEDURE:
 - Warranty covers the specific repair performed, not pre-existing issues.
 - Physical/liquid damage after repair voids the warranty.`,
 
+  // Lead Management defaults to Single-Store (the simplest experience). A fresh
+  // org must still pick a Default Lead Store before leads can be created.
+  leadStoreMode: "single",
+  defaultLeadStoreId: "",
+
   loyaltyConfig: {
     enabled: true,
     pointsPerRupee: 100,
@@ -432,6 +447,12 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     // the column fall back to the built-in default (NOT the store value) so
     // invoices never silently inherit store terms once this feature ships.
     invoiceWarrantyText: (row.invoice_warranty_text as string) ?? DEFAULT_STORE_SETTINGS.invoiceWarrantyText,
+    // Lead Store Mode — NULL/empty reads as the app default ('single').
+    leadStoreMode: (() => {
+      const m = typeof row.lead_store_mode === "string" ? row.lead_store_mode.toLowerCase() : "";
+      return m === "multi" ? "multi" : "single";
+    })(),
+    defaultLeadStoreId: (row.default_lead_store_id as string) ?? DEFAULT_STORE_SETTINGS.defaultLeadStoreId,
     loyaltyConfig: parseJsonColumn(row.loyalty_config, DEFAULT_STORE_SETTINGS.loyaltyConfig),
   };
 }
@@ -525,12 +546,21 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     invoiceFooter: "invoice_footer",
     invoiceSlogan: "invoice_slogan",
     invoiceWarrantyText: "invoice_warranty_text",
+    leadStoreMode: "lead_store_mode",
+    defaultLeadStoreId: "default_lead_store_id",
     loyaltyConfig: "loyalty_config",
   };
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {
     const col = map[key];
-    if (col) payload[col] = value;
+    if (!col) continue;
+    // The default-lead-store column is a uuid FK — an empty string ("none
+    // configured") must be written as NULL, never "" (which fails the cast).
+    if (col === "default_lead_store_id" && (value === "" || value == null)) {
+      payload[col] = null;
+      continue;
+    }
+    payload[col] = value;
   }
   return payload;
 }
@@ -566,6 +596,33 @@ function saveSettingsLocal(settings: StoreSettings) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch { /* storage full or unavailable */ }
+}
+
+/* ─── Resilient upsert helper ─────────────────────────────────────────
+   If the DB rejects the write because of an unknown column (migration not yet
+   applied, schema drift), drop the offending column(s) and retry. This lets
+   features like Lead Store Mode work client-side (localStorage/state) even
+   before the DBA runs the migration, and saves all OTHER settings correctly. */
+async function upsertSettingsResilient(orgId: string, payload: Record<string, unknown>, attempt = 0): Promise<void> {
+  if (!supabase || attempt > 5) return;
+  const { error } = await supabase
+    .from("organization_settings")
+    .upsert({ organization_id: orgId, ...payload }, { onConflict: "organization_id" });
+  if (!error) return;
+  // Supabase returns code "42703" (undefined_column) when a column doesn't
+  // exist yet. Extract the column name and retry without it.
+  const match = error.message?.match(/column "([^"]+)" of relation/);
+  if (match?.[1] && Object.prototype.hasOwnProperty.call(payload, match[1])) {
+    const next = { ...payload };
+    delete next[match[1]];
+    if (Object.keys(next).length > 0) {
+      // eslint-disable-next-line no-console
+      console.warn(`[StoreSettings] Retrying without missing column "${match[1]}".`);
+      return upsertSettingsResilient(orgId, next, attempt + 1);
+    }
+  }
+  // eslint-disable-next-line no-console
+  console.error("[StoreSettings] DB write failed:", error.message);
 }
 
 /* ─── Provider ───────────────────────────────────────────────────────── */
@@ -705,17 +762,7 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
         // Write to DB. Uses the authenticated user's session (RLS-enforced:
         // only admins can write to organization_settings).
         const dbPayload = settingsToDbPayload(updates);
-        supabase
-          .from("organization_settings")
-          .upsert(
-            { organization_id: orgIdRef.current, ...dbPayload },
-            { onConflict: "organization_id" }
-          )
-          .then(({ error }) => {
-            if (error) {
-              console.error("[StoreSettings] DB write failed:", error.message);
-            }
-          });
+        upsertSettingsResilient(orgIdRef.current, dbPayload);
       }
 
       return next;
