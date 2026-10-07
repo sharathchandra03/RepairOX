@@ -404,7 +404,8 @@ export function applyLeadIntelligenceFilters(
     if (filters.storeIds.length > 0 && !filters.storeIds.includes(lead.branchId)) return false;
     if (filters.source && lead.source !== filters.source) return false;
     if (filters.modeOfLead && lead.modeOfContact !== filters.modeOfLead) return false;
-    if (filters.leadCategory && lead.leadCategory !== filters.leadCategory) return false;
+    // LEAD CATEGORY filter = qualification (Qualified / Not Qualified).
+    if (filters.leadCategory && lead.qualification !== filters.leadCategory) return false;
     if (filters.subCategory && lead.subCategory !== filters.subCategory) return false;
     if (filters.priority && lead.priority !== filters.priority) return false;
     if (filters.status && lead.status !== filters.status) return false;
@@ -458,7 +459,9 @@ function labelForDimension(
   const routeLabel: Record<string, string> = { STORE_VISIT: "Walk-In", PICKUP_DROP: "Pickup & Drop", ON_SITE: "On-Site" };
   if (dimension === "source") return { key: lead.source, label: lead.source };
   if (dimension === "modeOfLead") return { key: lead.modeOfContact, label: lead.modeOfContact };
-  if (dimension === "leadCategory") return { key: lead.leadCategory, label: lead.leadCategory };
+  // LEAD CATEGORY dimension = the qualification value (Qualified / Not
+  // Qualified) — the old business-type leadCategory field was merged away.
+  if (dimension === "leadCategory") return { key: lead.qualification, label: lead.qualification };
   if (dimension === "subCategory") return { key: lead.subCategory, label: lead.subCategory };
   if (dimension === "priority") return { key: lead.priority, label: lead.priority };
   if (dimension === "deviceCategory") return { key: lead.deviceCategoryId, label: labels.deviceCategories?.[lead.deviceCategoryId] || lead.deviceCategoryId };

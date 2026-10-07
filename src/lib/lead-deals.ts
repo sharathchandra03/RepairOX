@@ -201,8 +201,11 @@ export function formatDealDiscount(value: number | null, type: "amount" | "perce
   return type === "percent" ? `${value}%` : `₹${Number(value).toLocaleString("en-IN")}`;
 }
 
-/** Compact elapsed-time ("2h", "1d", "3d") since an ISO instant. Actual
- *  elapsed time only — never an SLA prediction. */
+/** Compact elapsed-time since an ISO instant, expressed in HOURS (not a
+ *  days+hours mix). Under an hour it falls back to minutes; very old deals roll
+ *  up to weeks so the pill stays short. Actual elapsed time only — never an SLA
+ *  prediction.
+ *    42m · 1h · 5h · 23h · 72h · 2w  */
 export function dealAgeLabel(iso: string, asOf: number = Date.now()): string {
   if (!iso) return "";
   const then = new Date(iso).getTime();
@@ -212,9 +215,29 @@ export function dealAgeLabel(iso: string, asOf: number = Date.now()): string {
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins}m`;
   const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  const days = Math.floor(hrs / 24);
-  return `${days}d`;
+  // Keep hours readable up to ~2 weeks; beyond that roll up to weeks.
+  if (hrs < 24 * 14) return `${hrs}h`;
+  const weeks = Math.floor(hrs / (24 * 7));
+  return `${weeks}w`;
+}
+
+/** The exact age ("3 days, 4 hours, 12 minutes ago") for a hover tooltip, so
+ *  the compact hours label never hides the real elapsed time. */
+export function dealAgeTooltip(iso: string, asOf: number = Date.now()): string {
+  if (!iso) return "";
+  const then = new Date(iso).getTime();
+  if (isNaN(then)) return "";
+  const ms = Math.max(0, asOf - then);
+  const totalMins = Math.floor(ms / 60_000);
+  if (totalMins < 1) return "Just now";
+  const days = Math.floor(totalMins / (60 * 24));
+  const hours = Math.floor((totalMins % (60 * 24)) / 60);
+  const mins = totalMins % 60;
+  const parts: string[] = [];
+  if (days) parts.push(`${days} day${days === 1 ? "" : "s"}`);
+  if (hours) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
+  if (mins && !days) parts.push(`${mins} minute${mins === 1 ? "" : "s"}`);
+  return `${parts.join(", ")} ago`;
 }
 
 /* ─── The Deal queue tabs ──────────────────────────────────────────────────

@@ -7,9 +7,10 @@
      • MASTER VIEW      → one row per AGENT (rowKind="agent"), ranked + medals.
      • INDIVIDUAL VIEW  → one row per MONTH (rowKind="period") for one agent.
 
-   Columns (both views): Leads (Total / Qualified), Walk-In (Assign / Visited),
-   Pickup, On-Site, Revenue Won, Projection, Ticket Won, Pending F/U,
-   Conversion, and an ACTION column (View Details →).
+   Columns (both views): Total Leads, Qualified Leads, Walk-In Assigned,
+   Walk-In Visited (four INDEPENDENT first-level columns — no LEADS / WALK-IN
+   parent group), Pickup, On-Site, Revenue Won, Projection, Ticket Won,
+   Pending F/U, Conversion, and an ACTION column (View Details →).
 
    ── CONTAINER BEHAVIOUR (shared with the Owner Dashboard "Store Performance"
       table — the canonical RepairOX viewport-bounded table) ───────────────
@@ -29,15 +30,18 @@
 
    Visual standard (RepairOX Agent Performance Table v2):
      • Premium 2px outer frame (`border-zinc-300`), rounded-2xl, shadow-card.
-     • TWO-TIER grouped header with a STRONGER primary row (medium-deep
-       RepairOX blue #3B54CF) and a slightly lighter secondary row (#DDE3FB)
-       so the hierarchy is immediately visible.
-     • Subtle semantic accent lines at the bottom of each group header span
+     • SINGLE-TIER flat header (one clean row) on the strong medium-deep
+       RepairOX blue #3B54CF band. Total Leads, Qualified Leads, Walk-In
+       Assigned and Walk-In Visited are independent first-level columns — no
+       nested LEADS / WALK-IN parent group and no second child-header row.
+       Long labels wrap to two centred lines (e.g. "Walk-In / Assigned").
+     • Subtle semantic accent lines at the bottom of each header cell
        (blue for Leads, indigo for Walk-In, purple for Field, emerald for
        Revenue, blue for Projection, indigo for Ticket, amber for Follow-up,
        blue for Conversion) — never full-column backgrounds.
-     • Stronger vertical dividers at major group boundaries; softer inner
-       dividers between sub-columns.
+     • Stronger vertical dividers at the Leads/Walk-In area boundaries; a very
+       soft divider gently pairs the two Lead columns and the two Walk-In
+       columns without reviving a nested header.
      • Clean white body with a very subtle alternate-row tint (#F8FAFC),
        smooth hover (light RepairOX blue tint), top-3 ranked rows get a
        restrained left accent.
@@ -79,24 +83,35 @@ export type PerfRow = AgentPerformance | PeriodPerformance;
    primary band, SEC_* on the light secondary band, BODY_* on white rows, and
    FOOT_* on the blue-gray summary. */
 const CELL = "px-3 py-3.5 align-middle text-center";
-const HEAD_PRIMARY = "px-3 py-2 text-[10.5px] font-bold uppercase tracking-wider text-center";
-const HEAD_SECONDARY = "px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-center";
-/* Group boundary WITHIN the blue primary header — a soft translucent-white rule
-   that reads cleanly on #3B54CF (not a harsh light-blue seam). */
+/* Flat single-tier header. Labels may wrap to two lines (e.g. "Walk-In /
+   Assigned") and stay vertically centred via `leading-tight`. */
+const HEAD_PRIMARY = "px-3 py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-center leading-tight";
+/* Group boundary — stronger translucent-white rule that reads cleanly on the
+   #3B54CF primary band. Used at the left edge of each standalone metric area. */
 const HEAD_GRP_DIV = "border-l-2 border-white/25";
-/* Group / sub-column dividers in the light secondary tier — kept subtle so the
-   two header tiers read as ONE cohesive grouped header, not fragmented blocks. */
-const SEC_GRP_DIV = "border-l-2 border-[#BCC7F2]";
-const SEC_SUB_DIV = "border-l border-[#CBD4F3]";
+/* SUBTLE in-area divider — a softer white rule used to very gently pair the two
+   Lead columns and the two Walk-In columns without reviving a nested header. */
+const HEAD_SUB_DIV = "border-l border-white/10";
 const BODY_GRP_DIV = "border-l-2 border-[#E0E5F6]/70"; // group boundary in body
 const BODY_SUB_DIV = "border-l border-[#EDF0FA]";       // sub-col in body
 /* Footer dividers — RepairOX-blue rules on the blue-gray summary surface. */
 const FOOT_GRP_DIV = "border-l-2 border-[#A9B6E8]";
 const FOOT_SUB_DIV = "border-l border-[#B9C4EC]";
 
+/* ── Sticky-right ACTION column ─────────────────────────────────────────────
+   The ACTION column (View Details →) is PINNED to the right edge so it is
+   ALWAYS fully visible — even when the middle metric columns overflow and the
+   table scrolls horizontally. Each section's sticky cell carries its OWN opaque
+   background (header blue / body row surface / footer blue-gray) so scrolled
+   content never bleeds through, plus a soft left shadow that reads as the pin
+   boundary. The cell is still part of the shared colgroup, so its 120px width
+   stays pixel-aligned across header/body/footer. */
+const STICKY_ACTION = "sticky right-0 z-[2]";
+const STICKY_ACTION_SHADOW = "shadow-[-8px_0_8px_-6px_rgba(15,23,42,0.12)]";
+
 /* The table's intrinsic min width — shared by all three tables so their
    columns line up exactly inside the single horizontal-scroll wrapper. */
-const TABLE_MIN_W = "min-w-[1044px]";
+const TABLE_MIN_W = "min-w-[1200px]";
 const TABLE_BASE = "w-full table-fixed border-separate border-spacing-0 text-[13px]";
 
 /* ── Semantic accent colors for group header bottom borders ──────────── */
@@ -202,15 +217,15 @@ function accentBorder(color: string): React.CSSProperties {
 function PerfCols({ isAgent }: { isAgent: boolean }) {
   return (
     <colgroup>
-      {isAgent && <col style={{ width: "42px" }} />}
-      <col style={{ width: isAgent ? "162px" : "148px" }} />
-      <col style={{ width: "70px" }} /><col style={{ width: "94px" }} />{/* Leads: Total / Qualified */}
-      <col style={{ width: "70px" }} /><col style={{ width: "70px" }} />{/* Walk-In: Assign / Visited */}
-      <col style={{ width: "72px" }} /><col style={{ width: "72px" }} />{/* Pickup / On-Site */}
-      <col style={{ width: "122px" }} /><col style={{ width: "110px" }} />{/* Revenue / Projection */}
-      <col style={{ width: "76px" }} /><col style={{ width: "86px" }} />{/* Ticket Won / Pending F/U */}
-      <col style={{ width: "118px" }} />{/* Conversion */}
-      <col style={{ width: "132px" }} />{/* Action */}
+      {isAgent && <col style={{ width: "36px" }} />}
+      <col style={{ width: isAgent ? "150px" : "140px" }} />
+      <col style={{ width: "70px" }} /><col style={{ width: "92px" }} />{/* Total Leads / Qualified Leads */}
+      <col style={{ width: "82px" }} /><col style={{ width: "82px" }} />{/* Walk-In Assigned / Walk-In Visited */}
+      <col style={{ width: "62px" }} /><col style={{ width: "62px" }} />{/* Pickup / On-Site */}
+      <col style={{ width: "108px" }} /><col style={{ width: "92px" }} />{/* Revenue / Projection */}
+      <col style={{ width: "66px" }} /><col style={{ width: "78px" }} />{/* Ticket Won / Pending F/U */}
+      <col style={{ width: "100px" }} />{/* Conversion */}
+      <col style={{ width: "120px" }} />{/* Action */}
     </colgroup>
   );
 }
@@ -301,56 +316,56 @@ export function PerformanceTable({
           <table className={cn(TABLE_BASE, TABLE_MIN_W)}>
             <PerfCols isAgent={isAgent} />
             <thead>
-              {/* ═══ Tier 1 — PRIMARY GROUPED HEADER (stronger deep blue) ═══ */}
+              {/* ═══ SINGLE-TIER FLAT HEADER ═══
+                  Total Leads, Qualified Leads, Walk-In Assigned and Walk-In
+                  Visited are now INDEPENDENT first-level columns — no LEADS /
+                  WALK-IN parent group, no second child-header row. Every column
+                  shares the same strong RepairOX-blue header treatment and the
+                  group-strength vertical dividers so the four metrics read as
+                  four crisply separated standalone columns. */}
               <tr className="bg-[#3B54CF] text-white">
                 {isAgent && (
-                  <th rowSpan={2} className={cn(HEAD_PRIMARY, "text-white/80")} style={accentBorder("transparent")}>#</th>
+                  <th className={cn(HEAD_PRIMARY, "text-white/80")} style={accentBorder("transparent")}>#</th>
                 )}
-                <th
-                  rowSpan={2}
-                  className={cn(HEAD_PRIMARY, "text-left text-white/90")}
-                  style={accentBorder("transparent")}
-                >
+                <th className={cn(HEAD_PRIMARY, "text-left text-white/90")} style={accentBorder("transparent")}>
                   {firstColLabel}
                 </th>
-                <th colSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.leads)}>
-                  Leads
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.leads)}>
+                  Total<br />Leads
                 </th>
-                <th colSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.walkIn)}>
-                  Walk-In
+                <th className={cn(HEAD_PRIMARY, HEAD_SUB_DIV)} style={accentBorder(ACCENT.leads)}>
+                  Qualified<br />Leads
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.pickup)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.walkIn)}>
+                  Walk-In<br />Assigned
+                </th>
+                <th className={cn(HEAD_PRIMARY, HEAD_SUB_DIV)} style={accentBorder(ACCENT.walkIn)}>
+                  Walk-In<br />Visited
+                </th>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.pickup)}>
                   Pickup
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.onSite)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.onSite)}>
                   On-Site
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.revenue)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.revenue)}>
                   Revenue Won
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.projection)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.projection)}>
                   Projection
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.ticket)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.ticket)}>
                   Ticket Won
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.followUp)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.followUp)}>
                   Pending F/U
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.conversion)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.conversion)}>
                   Conversion
                 </th>
-                <th rowSpan={2} className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.action)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#3B54CF]")} style={accentBorder(ACCENT.action)}>
                   Action
                 </th>
-              </tr>
-
-              {/* ═══ Tier 2 — SECONDARY HEADER (lighter, distinct from Tier 1) ═══ */}
-              <tr className="bg-[#DDE3FB] text-[#3A4DBB]">
-                <th className={cn(HEAD_SECONDARY, SEC_GRP_DIV)}>Total</th>
-                <th className={cn(HEAD_SECONDARY, SEC_SUB_DIV)}>Qualified</th>
-                <th className={cn(HEAD_SECONDARY, SEC_GRP_DIV)}>Assign</th>
-                <th className={cn(HEAD_SECONDARY, SEC_SUB_DIV)}>Visited</th>
               </tr>
             </thead>
           </table>
@@ -392,6 +407,11 @@ export function PerformanceTable({
                     r.rank === 1 ? "border-l-amber-400" :
                     r.rank === 2 ? "border-l-zinc-400" :
                     r.rank === 3 ? "border-l-amber-600" : "";
+                  /* Opaque background for the PINNED (sticky-right) Action cell —
+                     a sticky cell needs a solid fill so the scrolled metric
+                     columns never show through it. Mirrors the row's resolved
+                     surface (highlight / alternate tint / white). */
+                  const actionBg = isMe ? "bg-[#EEF1FD]" : idx % 2 === 1 ? "bg-[#F8FAFC]" : "bg-white";
 
                   return (
                     <tr
@@ -492,8 +512,8 @@ export function PerformanceTable({
                         </span>
                       </td>
 
-                      {/* ═══ Action — View Details drill-down ═══ */}
-                      <td className={cn(CELL, BODY_GRP_DIV)}>
+                      {/* ═══ Action — View Details drill-down (pinned right) ═══ */}
+                      <td className={cn(CELL, BODY_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, actionBg)}>
                         {showReport && onReport ? (
                           <button
                             onClick={() => onReport(r)}
@@ -570,7 +590,7 @@ export function PerformanceTable({
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <BarMetric primary={pct(totals.conversionRate)} ratio={totals.conversionRate} tone="bg-[#3B54CF]" valueClass="text-[#1E293B]" trackClass="bg-white/70" />
                   </td>
-                  <td className={cn(CELL, FOOT_GRP_DIV)} />
+                  <td className={cn(CELL, FOOT_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#CBD5F5]")} />
                 </tr>
               </tfoot>
             </table>

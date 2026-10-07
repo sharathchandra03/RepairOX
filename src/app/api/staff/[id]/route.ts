@@ -209,6 +209,69 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     });
   }
 
+  // ── Additional store access: grant / revoke (multi-store) ──────────────────
+  // addStoreIds / removeStoreIds manage the user's EXTRA store grants WITHOUT
+  // touching their home branch (that's what `storeId` relocation does). This is
+  // how an owner lets a user work leads / records across several stores. The
+  // home branch can never be removed here (reassign the home store instead).
+  const addIds: string[] = Array.isArray(body.addStoreIds)
+    ? Array.from(new Set(body.addStoreIds.filter((x: unknown): x is string => typeof x === "string" && !!x)))
+    : [];
+  const removeIds: string[] = Array.isArray(body.removeStoreIds)
+    ? Array.from(new Set(body.removeStoreIds.filter((x: unknown): x is string => typeof x === "string" && !!x)))
+    : [];
+
+  if (addIds.length > 0 || removeIds.length > 0) {
+    const orgId = row.organization_id as string | null;
+    const homeId = (update.branch_id ?? row.branch_id) as string | null;
+    const finalRoleId = (update.role_id ?? row.role_id) as string | null;
+
+    // GRANT additional stores.
+    if (addIds.length > 0 && orgId) {
+      // Keep only real stores in this org, excluding the home branch.
+      const { data: validBranches } = await admin
+        .from("branches").select("id, organization_id").in("id", addIds);
+      let allowed = (validBranches ?? [])
+        .filter((b) => b.organization_id === orgId && b.id !== homeId)
+        .map((b) => b.id as string);
+
+      // Store-scope guard: a caller without multi-store authority may only grant
+      // stores THEY can themselves manage.
+      if (!callerCanDelegateAll(callerRoleId, callerPerms) && !callerPerms.has("multi_store_access")) {
+        const authorized = await callerAuthorizedBranchIds(admin, user.id, orgId);
+        if (authorized.size > 0) allowed = allowed.filter((id) => authorized.has(id));
+      }
+
+      if (allowed.length > 0) {
+        const createdById = await actingStaffId(admin, user.id);
+        try {
+          await admin.from("user_stores").upsert(
+            allowed.map((bid) => ({
+              organization_id: orgId,
+              staff_id: params.id,
+              branch_id: bid,
+              role_id: finalRoleId,
+              is_default: false,
+              status: "active",
+              created_by: createdById,
+            })),
+            { onConflict: "staff_id,branch_id" },
+          );
+        } catch { /* user_stores optional */ }
+      }
+    }
+
+    // REVOKE additional stores — never the home branch (membership only, keeps
+    // the user + their history intact, per the store-administration standard).
+    const toRemove = removeIds.filter((id) => id !== homeId);
+    if (toRemove.length > 0) {
+      try {
+        await admin.from("user_stores")
+          .delete().eq("staff_id", params.id).in("branch_id", toRemove);
+      } catch { /* user_stores optional */ }
+    }
+  }
+
   return NextResponse.json({ ok: true, member: rowToStaff(updated) });
 }
 

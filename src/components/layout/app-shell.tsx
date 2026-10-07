@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Sidebar, MobileSidebar } from "./sidebar";
 import { Topbar } from "./topbar";
 import { motion } from "framer-motion";
@@ -125,6 +125,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     const resolved = workspaceForPath(pathname);
     if (resolved && resolved !== activeWorkspace) setActiveWorkspace(resolved);
   }, [pathname]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Auto-collapse the sidebar on the Lead Table so the dense data grid gets the
+  // full horizontal workspace immediately. This fires ONCE on *entering* the
+  // Lead Table context (not on every interaction while already there), and the
+  // user's prior expanded/collapsed state is restored when they leave. The user
+  // can still manually re-expand while on the Lead Table — we never force it
+  // back collapsed on a route update that stays within the Lead Table.
+  const isLeadTable = pathname === "/leads/list" || pathname.startsWith("/leads/list/");
+  const wasLeadTable = useRef(false);
+  const collapsedBeforeLeadTable = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (isLeadTable && !wasLeadTable.current) {
+      // Entering the Lead Table: remember the current state, then collapse.
+      collapsedBeforeLeadTable.current = collapsed;
+      setCollapsed(true);
+    } else if (!isLeadTable && wasLeadTable.current) {
+      // Leaving the Lead Table: restore whatever the sidebar was before.
+      if (collapsedBeforeLeadTable.current !== null) {
+        setCollapsed(collapsedBeforeLeadTable.current);
+      }
+      collapsedBeforeLeadTable.current = null;
+    }
+    wasLeadTable.current = isLeadTable;
+  }, [isLeadTable]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // If the active workspace disappears (e.g. previewing a role without access,
   // or a permission edit revokes it), snap to the first workspace still allowed.

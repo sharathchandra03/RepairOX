@@ -10,12 +10,13 @@ import {
   CalendarDays, UserPlus, Map, BookUser, Package, Wrench,
   ClipboardCheck, Truck, Receipt, Activity, ChevronDown,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
-  IndianRupee, ReceiptIndianRupee, Building2, Trophy, Lightbulb,
+  IndianRupee, ReceiptIndianRupee, Building2, Trophy, Lightbulb, LayoutGrid,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Logo } from "@/components/ui/logo";
 import { WalkInIcon } from "@/components/ui/icon-walk-in";
 import { ThinScroll } from "@/components/layout/thin-scroll";
+import { SidebarTooltip } from "@/components/layout/sidebar-tooltip";
 import { navItems, navGroups, expandableNavGroups, type NavItem as NavItemDef, type ExpandableNavGroup } from "@/lib/mock-data";
 import { type WorkspaceId } from "@/lib/permissions";
 import { usePermissions } from "@/lib/permissions-context";
@@ -26,7 +27,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
   Store, Wallet, Settings, BarChart3, Map, BookUser, Package,
   Wrench, ClipboardCheck, Truck, Receipt, Activity,
   UsersRound, BookOpen, Landmark, FolderTree, Banknote, WalletCards, ShieldCheck,
-  IndianRupee, ReceiptIndianRupee, Building2, Trophy, Lightbulb,
+  IndianRupee, ReceiptIndianRupee, Building2, Trophy, Lightbulb, LayoutGrid,
   WalkIn: WalkInIcon,
 };
 
@@ -56,21 +57,28 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(item.href + "/"));
   return (
+    // Enter/exit (opacity+height) is for permission-driven add/remove ONLY.
+    // We deliberately do NOT use the `layout` prop here: during a collapse/expand
+    // the aside's width animates, and `layout` would re-measure + spring every
+    // item on every frame, fighting the width transition and making it feel
+    // "hard". Without it, the width transition stays perfectly smooth.
     <motion.li
-      layout
       initial={{ opacity: 0, height: 0 }}
       animate={{ opacity: 1, height: "auto" }}
       exit={{ opacity: 0, height: 0 }}
       transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
       style={{ overflow: "hidden" }}
     >
+      <SidebarTooltip label={item.label} enabled={collapsed}>
       <Link
         href={href}
         target={item.newTab ? "_blank" : undefined}
         rel={item.newTab ? "noopener noreferrer" : undefined}
-        title={collapsed ? item.label : undefined}
         className={cn(
           "group relative flex items-center rounded-xl text-sm font-medium transition-colors",
+          // Padding/justify change on the SAME curve as the width so the icon
+          // glides to centre instead of snapping.
+          "[transition:padding_360ms_cubic-bezier(0.4,0,0.2,1),background-color_200ms_ease]",
           collapsed ? "mx-auto w-10 justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5",
           active ? "text-white" : comingSoon ? "text-slate-400 hover:bg-slate-50 hover:text-slate-600" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
         )}
@@ -89,17 +97,25 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
         <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
           <Icon className={cn("h-[18px] w-[18px]", active ? "text-white" : comingSoon ? "text-zinc-300" : "text-zinc-400 group-hover:text-zinc-700")} />
         </span>
-        {!collapsed && (
-          <span className="relative flex items-center gap-2 whitespace-nowrap">
-            {item.label}
-            {comingSoon && (
-              <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 ring-1 ring-inset ring-amber-200">
-                Soon
-              </span>
-            )}
-          </span>
-        )}
+        {/* Label: fades out AND collapses its width on the same curve as the
+            aside, so the icon glides to centre instead of snapping and the text
+            never pops. Width-collapse (max-width + opacity) keeps the 72px rail
+            perfectly centred when collapsed. */}
+        <span
+          className={cn(
+            "relative flex items-center gap-2 overflow-hidden whitespace-nowrap [transition:opacity_200ms_ease,max-width_360ms_cubic-bezier(0.4,0,0.2,1),margin_360ms_cubic-bezier(0.4,0,0.2,1)]",
+            collapsed ? "pointer-events-none ml-0 max-w-0 opacity-0" : "ml-0 max-w-[180px] opacity-100"
+          )}
+        >
+          {item.label}
+          {comingSoon && (
+            <span className="inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-amber-600 ring-1 ring-inset ring-amber-200">
+              Soon
+            </span>
+          )}
+        </span>
       </Link>
+      </SidebarTooltip>
     </motion.li>
   );
 }
@@ -126,8 +142,8 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
     // In collapsed mode, show just the parent icon with a tooltip
     return (
       <li>
+        <SidebarTooltip label={group.label} enabled>
         <button
-          title={group.label}
           onClick={() => setExpanded(!expanded)}
           className={cn(
             "group relative mx-auto flex w-10 items-center justify-center rounded-xl py-2.5 text-sm font-medium transition-colors",
@@ -138,6 +154,7 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
             <Icon className={cn("h-[18px] w-[18px]", childActive ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-700")} />
           </span>
         </button>
+        </SidebarTooltip>
       </li>
     );
   }
@@ -246,9 +263,8 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
           {allowed.map((w) => {
             const Icon = WORKSPACE_ICONS[w.id];
             return (
+              <SidebarTooltip key={w.id} label={w.label} enabled>
               <button
-                key={w.id}
-                title={w.label}
                 onClick={() => onChange(w.id)}
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-lg transition",
@@ -259,6 +275,7 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
               >
                 <Icon className="h-4 w-4" />
               </button>
+              </SidebarTooltip>
             );
           })}
         </div>
@@ -319,13 +336,17 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
     <aside
       className={cn(
         "rox-sidebar z-30 hidden h-full shrink-0 flex-col border-r border-border bg-card lg:flex",
-        "transition-[width] duration-300 ease-out overflow-hidden",
+        // Smooth collapse/expand: a single, well-tuned width transition with a
+        // gentle ease-in-out curve. `will-change: width` lets the browser
+        // promote the animation so it stays fluid, and the inner content fades
+        // on the SAME curve (see below) so nothing snaps independently.
+        "overflow-hidden [transition:width_360ms_cubic-bezier(0.4,0,0.2,1)] [will-change:width]",
         collapsed ? "w-[72px]" : "rox-sidebar-expanded w-[256px]"
       )}
     >
       {/* Logo + collapse toggle */}
       <div className={cn(
-        "flex items-center pt-6 pb-4 shrink-0",
+        "flex items-center pt-6 pb-4 shrink-0 [transition:padding_360ms_cubic-bezier(0.4,0,0.2,1)]",
         collapsed ? "flex-col gap-3 px-2" : "justify-between px-4"
       )}>
         <Link href="/dashboard" className="overflow-hidden shrink-0">
@@ -384,11 +405,17 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
           if (items.length === 0 && visibleExpandables.length === 0) return null;
           return (
             <div key={group.label} className="mb-4">
-              {!collapsed && (
-                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none">
-                  {group.label}
-                </p>
-              )}
+              {/* Group heading: fades + collapses its height on the same curve
+                  so the section labels don't pop when toggling. */}
+              <p
+                className={cn(
+                  "px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none overflow-hidden [transition:opacity_200ms_ease,max-height_360ms_cubic-bezier(0.4,0,0.2,1),margin_360ms_cubic-bezier(0.4,0,0.2,1)]",
+                  collapsed ? "mb-0 max-h-0 opacity-0" : "mb-1 max-h-5 opacity-100"
+                )}
+                aria-hidden={collapsed}
+              >
+                {group.label}
+              </p>
               <ul className="space-y-0.5">
                 {/* Expandable groups (Employees, Accounts) come first in Administration */}
                 {visibleExpandables.map((eg) => (

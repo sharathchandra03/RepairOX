@@ -272,7 +272,7 @@ export default function QuotationsPage() {
                 <th className="px-3">Sales Agent</th>
                 <th className="px-3">Source</th>
                 <th className="px-3 text-right">Amount</th>
-                <th className="px-3">Status</th>
+                <th className="pl-[47px] pr-3">Status</th>
                 <th className="px-3 text-right">Date</th>
                 <th className="px-3 pr-5 text-right">Actions</th>
               </tr>
@@ -322,7 +322,7 @@ export default function QuotationsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-4 text-right align-middle font-semibold tabular-nums text-[#4361EE]">{formatINR(q.amount)}</td>
-                  <td className="px-3 py-4 align-middle">
+                  <td className="pl-[47px] pr-3 py-4 align-middle">
                     <span className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", quotationStatusTone(q.status))}>
                       {QUOTATION_STATUS_LABEL[q.status]}
                     </span>

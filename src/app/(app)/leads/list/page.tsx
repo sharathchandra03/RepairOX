@@ -2,11 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, RefreshCw, Trash2, Check,
+  Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, ChevronUp, CalendarClock, Pin,
+  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -23,13 +23,14 @@ import { FreezeColumnsMenu } from "@/components/common/freeze-columns-menu";
 import { CustomizeColumnsMenu } from "@/components/common/customize-columns-menu";
 import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
 import { useColumnOrder } from "@/hooks/use-column-order";
+import { useWorkspaceCollapsed } from "@/hooks/use-workspace-collapsed";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import {
-  deriveLeadWorkflow, deriveLeadStoreBranchId, isDownstreamGated,
+  deriveLeadWorkflow, deriveLeadStoreBranchId, isDownstreamGated, isNotQualified,
   leadActionTone, leadResultTone,
   type LeadWorkflow, type LeadWorkflowSources,
 } from "@/lib/lead-workflow";
@@ -54,10 +55,9 @@ import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { LeadFollowUpView } from "@/components/leads/lead-followup-view";
 import { LeadFollowUpBell } from "@/components/leads/lead-followup-bell";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
-import { LeadDetailDrawer } from "@/components/leads/lead-detail-drawer";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
-import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph } from "@/components/leads/lead-pills";
+import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph, qualificationTone, qualificationDot } from "@/components/leads/lead-pills";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -98,10 +98,10 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
     { key: "region", label: "Region", width: 128 },
     { key: "source", label: "Source", width: 132 },
     { key: "contactStatus", label: "Contact Status", width: 160 },
-    { key: "leadCategory", label: "Lead Category", width: 136 },
+    { key: "leadCategory", label: "Lead Category", width: 168 },
     // SUB CATEGORY — the TBD column is now the real Sub Category field.
-    { key: "subCategory", label: "Sub Category", width: 140 },
-    { key: "leadType", label: "Lead Nature", width: 124 },
+    { key: "subCategory", label: "Sub Category", width: 180 },
+    { key: "leadType", label: "Lead Nature", width: 148 },
     { key: "status", label: "Status", width: 176 },
     // ACTION — SYSTEM-DERIVED, read-only (never an editable dropdown).
     { key: "action", label: "Action", width: 180 },
@@ -109,7 +109,7 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
     { key: "storeCol", label: "Store", width: 140 },
     // RESULT — SYSTEM-DERIVED, read-only (₹value + Ticket + Invoice).
     { key: "result", label: "Result", width: 160 },
-    { key: "actions", label: "Last Action", width: 96, lockedRight: true },
+    { key: "actions", label: "Last Action", width: 128, lockedRight: true },
   );
   return cols;
 }
@@ -152,6 +152,40 @@ function useScrollEdges(ref: React.RefObject<HTMLElement>) {
     ro.observe(el);
     return () => { el.removeEventListener("scroll", onScroll); ro.disconnect(); if (raf) cancelAnimationFrame(raf); };
   }, [ref]);
+}
+
+/* ── Workspace collapse/expand bar ─────────────────────────────────────────
+   The single control that switches the Lead workspace between MANAGEMENT MODE
+   (expanded — all filters/tools visible) and WORK MODE (collapsed — the control
+   area contracts so the Lead Table maximizes its viewport). It sits in the
+   table toolbar (top-right, immediately above the table) so the user naturally
+   understands it governs the area above the table.
+
+   When collapsed it also surfaces compact, non-interactive indicators —
+   "Filters · N" and the active date range — so the user still knows filters are
+   active WITHOUT reproducing the whole filter area. There is exactly ONE
+   collapse mechanism (no duplicate toggles). Keyboard + a11y: it is a native
+   <button> (Enter/Space work) with an explicit aria-label and a tooltip. */
+function WorkspaceCollapseBar({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Show filters and expand controls" : "Collapse filters and maximize the lead table"}
+      title={collapsed ? "Show filters" : "Collapse filters and maximize table"}
+      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-semibold text-zinc-700 shadow-sm transition hover:border-[#4361EE]/40 hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/30"
+    >
+      {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+      {collapsed ? "Show Filters" : "Collapse Filters"}
+    </button>
+  );
 }
 
 /* ── Follow-up cell — mirrors the Ticket due-date reddish/pink treatment.
@@ -316,6 +350,8 @@ function LeadSelectCell({
   readOnly = false,
   placeholder = "—",
   glyphFor,
+  reasonPromptFor,
+  onChangeWithReason,
 }: {
   value: string;
   options: string[];
@@ -329,6 +365,13 @@ function LeadSelectCell({
   /** Optional leading glyph (e.g. an emoji per value). When provided it
    *  replaces the plain colour dot on the pill and in each option row. */
   glyphFor?: (value: string) => React.ReactNode;
+  /** Optional guard: when a chosen value needs a mandatory reason, return the
+   *  reason-prompt config instead of committing. The cell then shows a compact
+   *  inline reason box (textarea + Save) INSIDE the same popover — no full form.
+   *  Returning null/undefined means the value commits normally via onChange. */
+  reasonPromptFor?: (value: string) => { label: string; initial?: string } | null | undefined;
+  /** Commit a value together with its mandatory reason (used by reasonPromptFor). */
+  onChangeWithReason?: (value: string, reason: string) => void;
 }) {
   // Leading glyph for a value — the custom glyph if provided, else the dot.
   const leadGlyph = (v: string, dot: string) =>
@@ -338,6 +381,35 @@ function LeadSelectCell({
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const btnRef = useRef<HTMLButtonElement>(null);
+  // When a chosen value needs a mandatory reason, we switch the popover from the
+  // options list to a compact inline reason box instead of closing / opening a form.
+  const [reasonStep, setReasonStep] = useState<{ value: string; label: string } | null>(null);
+  const [reasonText, setReasonText] = useState("");
+  // Type-to-filter the options list (useful for long lists like Sub Category).
+  const [query, setQuery] = useState("");
+
+  const closeMenu = () => { setOpen(false); setReasonStep(null); setReasonText(""); setQuery(""); };
+
+  // Case-insensitive filtered options. The current value always remains
+  // selectable (it's shown with a ✓) so an existing value can always be changed.
+  const filteredOptions = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return options;
+    return options.filter((o) => o.toLowerCase().includes(q));
+  }, [options, query]);
+
+  // Resolve what happens when an option is picked: either commit immediately, or
+  // (when it needs a reason) switch the popover to the inline reason box.
+  const pickOption = (opt: string) => {
+    const prompt = reasonPromptFor?.(opt);
+    if (prompt) {
+      setReasonText(prompt.initial ?? "");
+      setReasonStep({ value: opt, label: prompt.label });
+      return;
+    }
+    onChange(opt);
+    closeMenu();
+  };
 
   const handleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -346,7 +418,7 @@ function LeadSelectCell({
       const dropUp = window.innerHeight - r.bottom < 280;
       setPos({ top: dropUp ? undefined : r.bottom + 6, bottom: dropUp ? window.innerHeight - r.top + 6 : undefined, left: r.left, dropUp });
     }
-    setOpen((o) => !o);
+    if (open) closeMenu(); else setOpen(true);
   };
 
   if (readOnly) {
@@ -383,41 +455,115 @@ function LeadSelectCell({
       <AnimatePresence>
         {open && (
           <>
-            <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); setOpen(false); }} />
+            <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); closeMenu(); }} />
             <motion.div
               initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
               transition={{ duration: 0.15 }}
               style={{ position: "fixed", top: pos.top, bottom: pos.bottom, left: pos.left }}
-              className="z-[70] w-[210px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
+              className={cn(
+                "z-[70] rounded-xl border border-border bg-card shadow-xl",
+                reasonStep ? "w-[260px] p-3" : "w-[220px] p-1.5",
+              )}
             >
-              {options.map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onChange(opt); setOpen(false); }}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
-                    opt === value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground",
+              {reasonStep ? (
+                /* Inline mandatory-reason box — stays in the SAME popover, writes
+                   the value + reason directly to the lead row (no full form). */
+                <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+                  <p className="text-[11px] font-semibold text-foreground">{reasonStep.label}</p>
+                  <textarea
+                    autoFocus
+                    rows={3}
+                    value={reasonText}
+                    onChange={(e) => setReasonText(e.target.value)}
+                    placeholder="Add a reason (required)…"
+                    className="w-full resize-none rounded-lg border border-input bg-card px-2.5 py-2 text-[12px] leading-snug text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                  />
+                  <div className="flex items-center justify-end gap-2 pt-0.5">
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); closeMenu(); }}
+                      className="rounded-lg px-2.5 py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-zinc-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!reasonText.trim()}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const reason = reasonText.trim();
+                        if (!reason) return;
+                        onChangeWithReason?.(reasonStep.value, reason);
+                        closeMenu();
+                      }}
+                      className="rounded-lg bg-[#4361EE] px-3 py-1.5 text-[11px] font-semibold text-white transition hover:bg-[#3049C6] disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex max-h-[280px] flex-col" onClick={(e) => e.stopPropagation()}>
+                  {/* Search box — sticky at the top so a long list stays filterable. */}
+                  <div className="sticky top-0 z-10 bg-card px-1 pb-1.5">
+                    <div className="flex items-center gap-1.5 rounded-lg border border-input bg-card px-2 focus-within:border-zinc-300">
+                      <Search className="h-3.5 w-3.5 shrink-0 text-zinc-400" />
+                      <input
+                        autoFocus
+                        value={query}
+                        onChange={(e) => setQuery(e.target.value)}
+                        placeholder="Search…"
+                        className="rox-search-input h-7 w-full bg-transparent text-[11px] text-foreground outline-none placeholder:text-zinc-400"
+                      />
+                      {query && (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); setQuery(""); }}
+                          className="shrink-0 text-zinc-400 hover:text-foreground"
+                          aria-label="Clear search"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                  {/* Scrollable options list. */}
+                  <div className="rox-rail-scroll min-h-0 flex-1 overflow-y-auto">
+                    {filteredOptions.length === 0 ? (
+                      <p className="px-3 py-4 text-center text-[11px] text-zinc-400">No matches</p>
+                    ) : (
+                      filteredOptions.map((opt) => (
+                        <button
+                          key={opt}
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); pickOption(opt); }}
+                          className={cn(
+                            "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
+                            opt === value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground",
+                          )}
+                        >
+                          {glyphFor
+                            ? <span className="shrink-0 text-[13px] leading-none">{glyphFor(opt)}</span>
+                            : <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-inset ring-black/10"
+                                style={{ backgroundColor: opt === value ? dotColor : "#a1a1aa" }} />}
+                          <span className="min-w-0 flex-1 truncate" title={opt}>{opt}</span>
+                          {opt === value && <span className="ml-auto shrink-0 text-[9px] font-bold text-[#4361EE]">✓</span>}
+                        </button>
+                      ))
+                    )}
+                  </div>
+                  {value && (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); onChange(""); closeMenu(); }}
+                      className="mt-0.5 flex w-full shrink-0 items-center gap-2 rounded-lg border-t border-border/50 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-zinc-50"
+                    >
+                      <X className="h-3 w-3" /> Clear
+                    </button>
                   )}
-                >
-                  {glyphFor
-                    ? <span className="shrink-0 text-[13px] leading-none">{glyphFor(opt)}</span>
-                    : <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-inset ring-black/10"
-                        style={{ backgroundColor: opt === value ? dotColor : "#a1a1aa" }} />}
-                  {opt}
-                  {opt === value && <span className="ml-auto text-[9px] font-bold text-[#4361EE]">✓</span>}
-                </button>
-              ))}
-              {value && (
-                <button
-                  type="button"
-                  onClick={(e) => { e.stopPropagation(); onChange(""); setOpen(false); }}
-                  className="mt-0.5 flex w-full items-center gap-2 rounded-lg border-t border-border/50 px-3 py-1.5 text-left text-[11px] text-muted-foreground hover:bg-zinc-50"
-                >
-                  <X className="h-3 w-3" /> Clear
-                </button>
+                </div>
               )}
             </motion.div>
           </>
@@ -648,9 +794,11 @@ const FILTER_FIELDS: { key: LeadFilterField; label: string; optionField?: LeadFi
   // People filters query the structured USER ID (owner / follow-up agent).
   { key: "assignedTo",     label: "Agent (owner)" },
   { key: "contactStatus",  label: "Contact Status",  optionField: "contactStatus" },
-  { key: "leadCategory",   label: "Lead Category",   optionField: "leadCategory" },
+  // LEAD CATEGORY filters the qualification field (Qualified / Not Qualified).
+  // There is ONE Lead Category facet now — the old business-type leadCategory
+  // and the separate "Qualification" facet were merged into this.
+  { key: "qualification",  label: "Lead Category",   optionField: "qualification" },
   { key: "subCategory",    label: "Sub Category",    optionField: "subCategory" },
-  { key: "qualification",  label: "Qualification",  optionField: "qualification" },
   { key: "leadNature",     label: "Lead Nature",     optionField: "leadNature" },
   { key: "result",         label: "Result",          optionField: "result" },
   { key: "priority",       label: "Priority",        optionField: "priority" },
@@ -765,6 +913,16 @@ export default function LeadsListPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
 
+  /* ── Workspace Collapse / Expand (presentation-only, per-user) ─────────────
+     MANAGEMENT MODE (expanded) ↔ WORK MODE (collapsed). Declared here beside
+     the other per-user table preferences so the height-measure effect below
+     can depend on it (collapsing shrinks the control area → the table top
+     moves up → gridMaxH recomputes → the table grows into the released space).
+     Collapsing is purely visual: it never touches filter values, table data,
+     column order, or freeze selection. Default EXPANDED. */
+  const workspace = useWorkspaceCollapsed("lead_table", currentUser?.id);
+  const controlsCollapsed = workspace.collapsed;
+
   /* The grid is a BOUNDED dual-axis scroll container: it scrolls both axes
      internally, with the <thead> sticky to its own top. We bound its height so
      its bottom lands near the viewport bottom (leaving room for the detached
@@ -781,11 +939,21 @@ export default function LeadsListPage() {
       setGridMaxH(Math.max(240, window.innerHeight - top - FOOTER_RESERVE));
     };
     measure();
+    // Re-measure as the collapse/expand height animation plays so the table's
+    // bounded height tracks the control area contracting/expanding smoothly and
+    // lands correctly once the transition settles (no stale height, no jump).
+    const raf = requestAnimationFrame(measure);
+    const settle = setTimeout(measure, 280); // just past the ~0.22s animation
     window.addEventListener("resize", measure);
     const ro = new ResizeObserver(measure);
     ro.observe(document.body);
-    return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-  }, [hydrated]);
+    return () => {
+      window.removeEventListener("resize", measure);
+      ro.disconnect();
+      cancelAnimationFrame(raf);
+      clearTimeout(settle);
+    };
+  }, [hydrated, controlsCollapsed]);
 
   // Width of the always-frozen selection column (sits before the Lead ID
   // anchor). The hook owns the Lead ID left anchor, so every hook-computed left
@@ -835,7 +1003,6 @@ export default function LeadsListPage() {
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
   const [editLead, setEditLead] = useState<Lead | null>(null);
-  const [detailLead, setDetailLead] = useState<Lead | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Lead | null>(null);
   const [routeLeadTarget, setRouteLeadTarget] = useState<Lead | null>(null);
   // Lead whose Device & Issue details popup is open (mirrors the Ticket /
@@ -975,6 +1142,12 @@ export default function LeadsListPage() {
   // (lead_options "leadNature"), live-refreshed via optionsFor. Powers the
   // inline Lead Nature dropdown in the table.
   const leadNatureOptions = useMemo(() => optionsFor("leadNature").map((o) => o.value).filter(Boolean), [optionsFor]);
+  // LEAD CATEGORY options — the qualification values (Qualified Lead / Not
+  // Qualified Lead), configured in Lead Settings under "Lead Category" (the
+  // lead_options "qualification" field). Sub Category options are separate.
+  // Live-refreshed via optionsFor. Power the inline editable dropdowns.
+  const leadCategoryOptions = useMemo(() => optionsFor("qualification").map((o) => o.value).filter(Boolean), [optionsFor]);
+  const subCategoryOptions = useMemo(() => optionsFor("subCategory").map((o) => o.value).filter(Boolean), [optionsFor]);
   const canEditLead = allow(can, CAP.lead.edit) && !viewAsReadOnly;
 
   /* ── Discounted Lead → Deal approval trigger ──
@@ -998,6 +1171,24 @@ export default function LeadsListPage() {
     }
   }, [changeLeadStatus, autoFieldJobForStatus, canRequestDeal, deals]);
 
+  /* Apply a LEAD CATEGORY (qualification) change inline from the table. Writes
+     the `qualification` field so the entire qualification gate keeps working.
+     A "Not Qualified" value REQUIRES a reason (finalRemarks) — the DB guard
+     rejects it otherwise. We capture that reason INLINE (a compact reason box
+     inside the pill popover via reasonPromptFor/onChangeWithReason) and write
+     { qualification, finalRemarks } together so the row updates immediately —
+     no full edit form. When an optional `reason` is supplied it is persisted
+     into finalRemarks alongside the qualification. */
+  const applyLeadCategory = useCallback(async (lead: Lead, value: string, reason?: string) => {
+    const updates: Partial<Lead> = { qualification: value };
+    if (isNotQualified(value)) {
+      const r = (reason ?? lead.finalRemarks ?? "").trim();
+      if (!r) return; // guarded by the inline reason box; never write a reasonless Not-Qualified
+      updates.finalRemarks = r;
+    }
+    await updateLead(lead.id, updates);
+  }, [updateLead]);
+
   const handleBulkStatusChange = useCallback(async (status: string) => {
     const ids = Array.from(selected);
     const chosen = leads.filter((l) => ids.includes(l.id));
@@ -1017,12 +1208,16 @@ export default function LeadsListPage() {
     setShowBulkDelete(false);
   }, [selected, deleteLead]);
 
-  const openEdit = (lead: Lead) => { setDetailLead(null); setEditLead(lead); };
-  const liveDetailLead = detailLead ? leads.find((l) => l.id === detailLead.id) ?? null : null;
+  const router = useRouter();
+  const openEdit = (lead: Lead) => { setEditLead(lead); };
+  /* View Lead is now a dedicated FULL PAGE (not a drawer). Opening a lead
+     navigates to /leads/<id>; the Lead Table's own filters/scope live in its
+     URL/state so returning via "Back to Leads" restores them. */
+  const openLead = useCallback((lead: Lead) => { router.push(`/leads/${lead.id}`); }, [router]);
 
   const handleAction = (action: LeadAction, lead: Lead) => {
     switch (action) {
-      case "view": setDetailLead(lead); break;
+      case "view": openLead(lead); break;
       case "edit": openEdit(lead); break;
       case "priority": openEdit(lead); break; // priority lives in the edit flow
       case "pin": void pinLead(lead.id, !lead.pinnedAt); break;
@@ -1038,11 +1233,11 @@ export default function LeadsListPage() {
     const handler = (e: Event) => {
       const id = (e as CustomEvent<{ id: string }>).detail?.id;
       const lead = leads.find((l) => l.id === id);
-      if (lead) setDetailLead(lead);
+      if (lead) openLead(lead);
     };
     window.addEventListener(LEAD_OPEN_EVENT, handler);
     return () => window.removeEventListener(LEAD_OPEN_EVENT, handler);
-  }, [leads]);
+  }, [leads, openLead]);
 
   /* Deep-link: /leads/list?lead=<id> opens that lead's detail (used by the
      assignment + follow-up-due notifications). Runs once the leads are loaded. */
@@ -1060,7 +1255,7 @@ export default function LeadsListPage() {
      which ids can actually render. */
   useEffect(() => {
     if (!urlFilterKey || appliedUrlFiltersRef.current === urlFilterKey) return;
-    const recognized = ["evidenceIds", "evidenceToken", "assignedTo", "dateRange", "source", "modeOfContact", "leadCategory", "subCategory", "priority", "status", "fulfilmentRoute", "deviceCategoryId", "deviceBrandId"]
+    const recognized = ["evidenceIds", "evidenceToken", "assignedTo", "dateRange", "source", "modeOfContact", "qualification", "subCategory", "priority", "status", "fulfilmentRoute", "deviceCategoryId", "deviceBrandId"]
       .some((key) => searchParams.has(key));
     if (!recognized) return;
     const allowedDates = new Set<LeadDateRange>(LEAD_DATE_RANGES.map((item) => item.value));
@@ -1070,7 +1265,7 @@ export default function LeadsListPage() {
     const evidenceIds = evidenceTokenMissing ? ["__evidence_unavailable__"] : resolvedEvidenceIds;
     if (evidenceTokenMissing) toast.error("Evidence cohort unavailable", { description: "This saved analytical cohort expired. Reopen the insight from Lead Intelligence." });
     const fields: LeadFilters["fields"] = {};
-    for (const key of ["assignedTo", "source", "modeOfContact", "leadCategory", "subCategory", "priority", "fulfilmentRoute", "deviceCategoryId", "deviceBrandId"] as LeadFilterField[]) {
+    for (const key of ["assignedTo", "source", "modeOfContact", "qualification", "subCategory", "priority", "fulfilmentRoute", "deviceCategoryId", "deviceBrandId"] as LeadFilterField[]) {
       const value = searchParams.get(key);
       if (value) fields[key] = value;
     }
@@ -1086,18 +1281,28 @@ export default function LeadsListPage() {
     });
   }, [urlFilterKey, searchParams, setFilters]);
   const deepLinkLeadId = searchParams.get("lead");
-  // A lead the user may not see (another agent's lead, another store) is simply
-  // not returned by RLS — say so once instead of silently doing nothing.
+  /* The ?lead=<id> param now serves two purposes:
+       • a bare ?lead=<id> (notifications) → open the full View Lead page;
+       • ?lead=<id>&action=edit|quotation  → the View Lead page's header
+         buttons return here to open the Edit (capture) flow or Send Quotation
+         flow in-place (those are modal flows that live on the list page).
+     A lead the user may not see is simply not returned by RLS — say so once. */
+  const deepLinkAction = searchParams.get("action");
   const [deepLinkChecked, setDeepLinkChecked] = useState<string | null>(null);
   useEffect(() => {
     if (!deepLinkLeadId) return;
     const lead = leads.find((l) => l.id === deepLinkLeadId);
-    if (lead) { setDetailLead(lead); return; }
+    if (lead) {
+      if (deepLinkAction === "edit") setEditLead(lead);
+      else if (deepLinkAction === "quotation") setQuotationLead(lead);
+      else openLead(lead);
+      return;
+    }
     if (hydrated && deepLinkChecked !== deepLinkLeadId) {
       setDeepLinkChecked(deepLinkLeadId);
       toast.error("Lead unavailable", { description: "This lead doesn't exist or isn't assigned to you." });
     }
-  }, [deepLinkLeadId, leads, hydrated, deepLinkChecked]);
+  }, [deepLinkLeadId, deepLinkAction, leads, hydrated, deepLinkChecked, openLead]);
 
   const activeFilters = hasActiveLeadFilters(filters);
 
@@ -1151,6 +1356,17 @@ export default function LeadsListPage() {
     return chips;
   }, [filters, salesAgents, leads, setFilters]);
 
+  /* Compact indicators shown INSIDE the collapsed-state toolbar so the user
+     still knows what is active without reopening the filters. The count mirrors
+     the applied-filter chips (real active filters only — default "All"
+     selections are never counted). The date-range label is shown separately
+     when it is not the default "All" range. */
+  const collapsedFilterCount = appliedChips.length;
+  const collapsedDateLabel =
+    filters.dateRange !== "all"
+      ? DATE_RANGES.find((d) => d.value === filters.dateRange)?.label ?? filters.dateRange
+      : null;
+
   /* Facet definitions for the structured filter panel — reuse the SAME option
      resolution as the applied chips (configured Settings values + live data;
      people fields resolve id→name). */
@@ -1197,10 +1413,16 @@ export default function LeadsListPage() {
           // Structural multi-store column (branch the lead belongs to).
           return <StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" />;
         case "id":
+          // Lead ID is LEFT-aligned with the conversion tick sitting just to its
+          // RIGHT (a small, controlled gap — NOT spread to the opposite cell
+          // edge). The id group grows naturally with a longer / store-prefixed
+          // id (e.g. "KOR-L-0045"), so the tick follows the id rather than
+          // leaving a big empty gap for short ids. The id truncates only if it
+          // would overflow the column.
           return (
-            <button onClick={(e) => { e.stopPropagation(); setDetailLead(lead); }} className="mx-auto flex items-center justify-center gap-1.5 whitespace-nowrap font-semibold text-[#4361EE] hover:underline tnum">
+            <button onClick={(e) => { e.stopPropagation(); openLead(lead); }} className="flex w-full items-center gap-2 whitespace-nowrap font-semibold text-[#4361EE] hover:underline tnum">
               {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
-              <span className="truncate">{lead.leadNo || "—"}</span>
+              <span className="min-w-0 truncate">{lead.leadNo || "—"}</span>
               <LeadStatusTick wf={wf} />
             </button>
           );
@@ -1237,9 +1459,44 @@ export default function LeadsListPage() {
             </>
           );
         case "leadCategory":
-          return gated ? <NACell /> : lead.leadCategory ? <span className="block truncate text-center text-zinc-700">{lead.leadCategory}</span> : <EmptyDash />;
+          // LEAD CATEGORY = the lead's qualification (Qualified / Not Qualified).
+          // Reads/writes `lead.qualification` so the gate keeps working; a
+          // Not-Qualified pick routes through applyLeadCategory (mandatory
+          // reason). Green = qualified, rose = not qualified.
+          // NOTE: a Not-Qualified lead is itself downstream-gated, so this cell
+          // must stay editable even when `gated` — otherwise the user could
+          // never requalify it. We only mask it when LOCKED (stale).
+          return locked ? <NACell /> : (
+            <LeadSelectCell
+              value={lead.qualification || ""}
+              options={leadCategoryOptions}
+              onChange={(v) => applyLeadCategory(lead, v)}
+              // Choosing a Not-Qualified value opens a compact inline reason box
+              // (textarea + Save) INSIDE the pill popover — no full form. The
+              // reason prefills with any existing finalRemarks so re-marking
+              // keeps the prior note.
+              reasonPromptFor={(v) =>
+                isNotQualified(v)
+                  ? { label: "Why is this lead not qualified?", initial: lead.finalRemarks || "" }
+                  : null
+              }
+              onChangeWithReason={(v, reason) => applyLeadCategory(lead, v, reason)}
+              toneClass={lead.qualification ? qualificationTone(lead.qualification) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+              dotColor={qualificationDot(lead.qualification || "")}
+              readOnly={!canEditLead}
+            />
+          );
         case "subCategory":
-          return gated ? <NACell /> : lead.subCategory ? <span className="block truncate text-center text-zinc-600">{lead.subCategory}</span> : <EmptyDash />;
+          return gated ? <NACell /> : (
+            <LeadSelectCell
+              value={lead.subCategory || ""}
+              options={subCategoryOptions}
+              onChange={(v) => updateLead(lead.id, { subCategory: v })}
+              toneClass="bg-violet-50 text-violet-700 ring-violet-200"
+              dotColor="#8B5CF6"
+              readOnly={!canEditLead}
+            />
+          );
         case "leadType":
           return gated ? <NACell /> : (
             <LeadSelectCell
@@ -1278,6 +1535,7 @@ export default function LeadsListPage() {
     [
       selected, toggleOne, getStore, canAssign, setDeviceDetailsLead,
       contactStatusOptions, updateLead, canEditLead, leadNatureOptions,
+      leadCategoryOptions, subCategoryOptions, applyLeadCategory,
       statusOptions, applyLeadStatus, canBulkStatus, canViewTicket, canViewInvoice,
       viewAsReadOnly,
     ],
@@ -1292,7 +1550,7 @@ export default function LeadsListPage() {
         actions={
           <div className="flex items-center gap-2">
             {/* Lead follow-up bell — the current user's Due/Overdue follow-ups. */}
-            <LeadFollowUpBell onOpenLead={setDetailLead} />
+            <LeadFollowUpBell onOpenLead={openLead} />
             <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">
               <Link href="/leads/list" className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="List View"><List className="h-3.5 w-3.5" /></Link>
               <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
@@ -1309,33 +1567,31 @@ export default function LeadsListPage() {
         }
       />
 
-      {/* DATE-RANGE strip — the SAME connected 8-option control used on Tickets,
-          Walk-In, Field and the Dashboard (All / Today / Yesterday / 7 Days /
-          1 Month / Last Month / 1 Year / Custom). Filters by lead creation date
-          via the shared boundary logic. */}
-      <div className="space-y-2">
-        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <SegmentedTabs
-            value={filters.dateRange}
-            onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
-            options={LEAD_DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))}
-            size="sm"
-          />
-        </div>
-        <DateRangePicker
-          open={filters.dateRange === "custom"}
-          from={filters.customFrom || ""}
-          to={filters.customTo || ""}
-          onFromChange={(v) => setFilters((f) => ({ ...f, customFrom: v, dateRange: "custom" }))}
-          onToChange={(v) => setFilters((f) => ({ ...f, customTo: v, dateRange: "custom" }))}
-        />
-      </div>
-
-      {/* ONE connected filter strip — the primary VIEW segments (Not Contacted,
-          Follow-Ups) live alongside the lifecycle STATUS filters, with a single
-          leading "All". Picking Not Contacted / Follow-Ups switches the view;
-          picking a status filters within the working (All) view. No stacked,
-          duplicate "All" pills. */}
+      {/* ── COLLAPSIBLE CONTROL AREA ───────────────────────────────────────────
+          Everything between here and the matching close tag is the
+          "Lead Management control area": the date-range strip, the combined
+          VIEW + New/Existing + Search + Filters + Customize/Freeze row, and the
+          lifecycle Status strip. In WORK MODE (collapsed) this whole block
+          contracts to height 0 (overflow-hidden, no empty containers left
+          behind) so the Lead Table expands upward into the released space.
+          State is PRESERVED — the children stay mounted, only their height
+          animates — so every filter/search/view selection survives a collapse.
+          `AnimatePresence initial={false}` keeps the first paint instant. */}
+      <AnimatePresence initial={false}>
+        {!controlsCollapsed && (
+          <motion.div
+            key="lead-controls"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="space-y-5 overflow-hidden"
+          >
+      {/* ONE connected filter strip (STRIP 1) — the primary VIEW segments (Not
+          Contacted, Follow-Ups) live alongside the lifecycle STATUS filters,
+          with a single leading "All". Picking Not Contacted / Follow-Ups
+          switches the view; picking a status filters within the working (All)
+          view. No stacked, duplicate "All" pills. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs
@@ -1389,20 +1645,100 @@ export default function LeadsListPage() {
         </div>
       </div>
 
-      {/* STRIP 3 — lifecycle STATUS filters (all configured lead statuses).
-          A single connected control, scrollable when it overflows. Shown only
-          in the working view (the Not-Contacted / Follow-Ups views replace the
-          table, so a status filter there is meaningless). */}
-      {view === "all" && statusStripTabs.length > 1 && (
+      {/* DATE-RANGE strip (STRIP 2) — the SAME connected 8-option control used on
+          Tickets, Walk-In, Field and the Dashboard (All / Today / Yesterday /
+          7 Days / 1 Month / Last Month / 1 Year / Custom). Filters by lead
+          creation date via the shared boundary logic. */}
+      <div className="space-y-2">
         <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs
-            value={statusStripValue}
-            onChange={onStatusStripChange}
-            options={statusStripTabs}
+            value={filters.dateRange}
+            onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
+            options={LEAD_DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))}
             size="sm"
           />
         </div>
-      )}
+        <DateRangePicker
+          open={filters.dateRange === "custom"}
+          from={filters.customFrom || ""}
+          to={filters.customTo || ""}
+          onFromChange={(v) => setFilters((f) => ({ ...f, customFrom: v, dateRange: "custom" }))}
+          onToChange={(v) => setFilters((f) => ({ ...f, customTo: v, dateRange: "custom" }))}
+        />
+      </div>
+
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* STRIP 3 ROW — lifecycle STATUS filters on the LEFT, sharing ONE line
+          with the Collapse/Expand control on the RIGHT (so the toggle no longer
+          needs its own row and the table gains that vertical space). The status
+          strip is part of the control area, so it animates to height 0 when
+          collapsed; the collapse control sits OUTSIDE that animation and stays
+          visible in both modes (single collapse mechanism, no duplicate). In
+          collapsed WORK MODE the compact "Filters · N" + date indicators show on
+          the left where the strip was. Only the working ("all") view shows the
+          status strip (the Not-Contacted / Follow-Ups views replace the table). */}
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 flex-1">
+          <AnimatePresence initial={false}>
+            {!controlsCollapsed && view === "all" && statusStripTabs.length > 1 && (
+              <motion.div
+                key="lead-status-strip"
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                className="overflow-hidden"
+              >
+                <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                  <SegmentedTabs
+                    value={statusStripValue}
+                    onChange={onStatusStripChange}
+                    options={statusStripTabs}
+                    size="sm"
+                  />
+                </div>
+              </motion.div>
+            )}
+          </AnimatePresence>
+          {/* Compact active-state indicators (collapsed WORK MODE only) — shown
+              where the status strip was, so the user still knows filters/date
+              are active without reproducing the whole control area. */}
+          {controlsCollapsed && (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-1">
+              <span
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset",
+                  collapsedFilterCount > 0
+                    ? "bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20"
+                    : "bg-zinc-50 text-zinc-500 ring-zinc-200",
+                )}
+                title={collapsedFilterCount > 0 ? `${collapsedFilterCount} active filter${collapsedFilterCount > 1 ? "s" : ""}` : "No filters applied"}
+              >
+                <SlidersHorizontal className="h-3 w-3" />
+                {collapsedFilterCount > 0 ? `Filters · ${collapsedFilterCount}` : "Filters"}
+              </span>
+              {collapsedDateLabel && (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200"
+                  title={`Date range: ${collapsedDateLabel}`}
+                >
+                  <CalendarClock className="h-3 w-3" />
+                  {collapsedDateLabel}
+                </span>
+              )}
+            </div>
+          )}
+        </div>
+        {/* The ONE Collapse/Expand control — on the same line as the status
+            strip (top-right), outside the collapse animation. */}
+        <WorkspaceCollapseBar
+          collapsed={controlsCollapsed}
+          onToggle={workspace.toggle}
+        />
+      </div>
 
       {/* Structured, faceted filter panel (slide-over) — grouped sections,
           searchable facets with live counts, and a live "Show N leads"
@@ -1418,8 +1754,11 @@ export default function LeadsListPage() {
         facets={filterFacets}
       />
 
-      {/* Applied-filter chips — each individually removable (Design System §3g). */}
-      {appliedChips.length > 0 && (
+      {/* Applied-filter chips — each individually removable (Design System §3g).
+          Part of the filter display, so they collapse with the control area
+          (the collapsed toolbar shows a compact "Filters · N" indicator
+          instead). State is untouched — expanding brings the chips right back. */}
+      {!controlsCollapsed && appliedChips.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {appliedChips.map((c, i) => (
             <ActiveFilterChip key={`${c.label}-${i}`} label={c.label} value={c.value} onClear={c.onClear} />
@@ -1482,7 +1821,7 @@ export default function LeadsListPage() {
           and month calendar), so multiple follow-ups per lead are planned and
           reviewed in one place. */}
       {view === "followUps" ? (
-        <LeadFollowUpView leads={filteredLeads} onOpenLead={setDetailLead} />
+        <LeadFollowUpView leads={filteredLeads} onOpenLead={openLead} />
       ) : (
       <>
       {/* Not-Contacted accountability banner — explains the queue + the lock. */}
@@ -1507,7 +1846,14 @@ export default function LeadsListPage() {
       <div
         ref={scrollRef}
         className="rox-table-card rox-grid-scroll shadow-card hidden md:block overflow-auto"
-        style={gridMaxH ? { maxHeight: gridMaxH } : undefined}
+        /* FIXED height (not max-height) so the table workspace FILLS the
+           available viewport even with only a few leads — the frame grows to
+           the bottom and the detached footer anchors near the viewport bottom
+           (no large empty gap when zoomed out / few rows). When rows exceed the
+           height the body scrolls internally with the sticky header. Measured
+           from the grid's live top so it tracks the collapsed/expanded control
+           area and the viewport. */
+        style={gridMaxH ? { height: gridMaxH } : undefined}
       >
         {/* Explicit per-column pixel widths (deterministic with table-fixed) so
             every grouped column gets a generous width AND the frozen offsets
@@ -1522,14 +1868,22 @@ export default function LeadsListPage() {
           <thead className="rox-table-head sticky top-0 z-[6]">
             <tr className="text-[12px] font-bold uppercase tracking-wider">
               {orderedColumns.map((c) => {
-                // HEADER alignment: ALL headers are CENTERED to sit symmetrically
+                // HEADER alignment: most headers are CENTERED to sit symmetrically
                 // over their column, EXCEPT "select" (checkbox) and "actions"
-                // (right-aligned). Long header names wrap naturally within the
-                // column width — the column never expands to fit a long header.
+                // (right-aligned). The multi-line / rich-text columns (Contact
+                // Info, Device & Issue, Comment) are LEFT-aligned so their header
+                // sits over their LEFT-aligned body content. Long header names
+                // wrap naturally within the column width — the column never
+                // expands to fit a long header.
+                const LEFT_HEADERS = new Set(["contactInfo", "device", "comment"]);
                 const align = c.key === "select" ? "text-left"
                   : c.key === "actions" ? "text-right"
+                  : LEFT_HEADERS.has(c.key) ? "text-left"
                   : "text-center";
-                const pad = c.key === "id" ? "px-4 py-4" : "px-3 py-4";
+                // ID header is CENTERED over the column, nudged 2px to the LEFT:
+                // the centred label shifts by (rightPad − leftPad)/2, so a 4px
+                // gap (pl-3 = 12px, pr-4 = 16px) moves it 2px left.
+                const pad = c.key === "id" ? "pl-3 pr-4 py-4" : "px-3 py-4";
                 return (
                   <th key={c.key} {...mergeFrozen(frozenCellProps(c.key), `${pad} ${align}`)}>
                     {c.key === "select" ? (
@@ -1595,7 +1949,7 @@ export default function LeadsListPage() {
               <motion.tr
                 key={lead.id}
                 initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(0.02 * i, 0.3) }}
-                onClick={() => setDetailLead(lead)}
+                onClick={() => openLead(lead)}
                 style={rowTintVar ? ({ ["--rox-row-tint" as any]: rowTintVar }) : undefined}
                 className={cn(
                   "rox-table-row group h-[76px] cursor-pointer align-middle transition",
@@ -1638,7 +1992,10 @@ export default function LeadsListPage() {
                   const bodyAlign = c.key === "actions" ? "text-right"
                     : LEFT_COLS.has(c.key) ? "text-left"
                     : "text-center";
-                  const pad = c.key === "id" ? `px-4 py-4 align-middle ${bodyAlign}`
+                  // ID body content is pushed further RIGHT than the default 16px
+                  // left padding (pl-8 = 32px) per request, keeping the normal
+                  // right padding.
+                  const pad = c.key === "id" ? `pl-8 pr-4 py-4 align-middle ${bodyAlign}`
                     : `px-3 py-4 align-middle ${bodyAlign}`;
                   return (
                     <td
@@ -1673,7 +2030,7 @@ export default function LeadsListPage() {
         {paged.map((lead) => {
           const mLocked = isNotContactedLocked(lead);
           return (
-          <div key={lead.id} onClick={() => setDetailLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", isNotContactedStatus(lead.contactStatus || "") && "bg-red-100/80")}>
+          <div key={lead.id} onClick={() => openLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", isNotContactedStatus(lead.contactStatus || "") && "bg-red-100/80")}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Checkbox
@@ -1746,17 +2103,8 @@ export default function LeadsListPage() {
       <LeadCaptureFlow open={showCreate} onClose={() => setShowCreate(false)} />
       <LeadCaptureFlow open={!!editLead} onClose={() => setEditLead(null)} editLead={editLead} />
 
-      {/* Detail drawer — always renders the LIVE lead (so inline saves, a
-          reassignment or a follow-up change show immediately); if the lead
-          leaves the user's scope (e.g. handed to another agent) it closes. */}
-      <LeadDetailDrawer
-        lead={liveDetailLead}
-        open={!!liveDetailLead}
-        onClose={() => setDetailLead(null)}
-        onEdit={openEdit}
-        onDelete={(l) => { setDetailLead(null); setConfirmDelete(l); }}
-        readOnly={viewAsReadOnly}
-      />
+      {/* View Lead is a dedicated FULL PAGE (app/(app)/leads/[id]/page.tsx) —
+          opening a lead navigates there, so there is no detail drawer here. */}
 
       {/* Discounted Lead → Discount approval request */}
       <DealRequestModal

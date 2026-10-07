@@ -150,7 +150,7 @@ export function QuickQuotationFlow({
         width="max-w-2xl"
         footer={footer}
       >
-        <div className="space-y-5">
+        <div className="-mt-2 space-y-5">
           {/* ── Customer (autocomplete search / create) ── */}
           <section className="space-y-2">
             <Label>Customer</Label>
@@ -220,7 +220,16 @@ export function QuickQuotationFlow({
           {/* ── Items ── */}
           <section className="space-y-1">
             <Label>Quoted Items</Label>
-            <QuotationItemsEditor items={draft.items} onChange={(items) => patch({ items })} />
+            <QuotationItemsEditor
+              items={draft.items}
+              onChange={(items) => patch({ items })}
+              device={{
+                categoryId: draft.deviceCategoryId,
+                brandId: draft.deviceBrandId,
+                modelId: draft.deviceModelId,
+                label: draft.device,
+              }}
+            />
           </section>
 
           {/* ── Warranty ── */}

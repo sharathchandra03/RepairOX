@@ -60,3 +60,24 @@ export function leadNatureGlyph(nature: string): string {
   if (/cold|low/.test(n)) return "❄️";
   return "🏷️";
 }
+
+/** Pill tone (bg + text + ring) for the LEAD CATEGORY = qualification value
+ *  (Qualified Lead / Not Qualified Lead). Not-Qualified is matched FIRST so it
+ *  never falls into the generic "qualif" → green branch. Keyword-matched so
+ *  admin-renamed labels still colour sensibly; empty / unrecognised → neutral. */
+export function qualificationTone(value: string): string {
+  const v = (value || "").toLowerCase();
+  if (!v) return NEUTRAL;
+  if (/not\s*-?\s*qualif|unqualif|disqualif/.test(v)) return "bg-rose-50 text-rose-700 ring-rose-200";
+  if (/qualif/.test(v)) return "bg-emerald-50 text-emerald-700 ring-emerald-200";
+  return NEUTRAL;
+}
+
+/** Hex dot colour matching qualificationTone for the leading glyph. */
+export function qualificationDot(value: string): string {
+  const v = (value || "").toLowerCase();
+  if (!v) return "#a1a1aa";                                    // zinc-400
+  if (/not\s*-?\s*qualif|unqualif|disqualif/.test(v)) return "#e11d48"; // rose-600
+  if (/qualif/.test(v)) return "#10b981";                      // emerald-500
+  return "#a1a1aa";
+}

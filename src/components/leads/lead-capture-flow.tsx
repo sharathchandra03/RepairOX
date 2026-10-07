@@ -761,7 +761,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         </p>
                       )}
                     </Field>
-                    <Field label="Qualification">
+                    <Field label="Lead Category">
                       <ConfigurableSelect field="qualification" value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} placeholder="Qualified Lead / Not Qualified Lead" />
                     </Field>
                   </div>
@@ -948,7 +948,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   ]} />
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
                     ["Source", draft.source], ["Mode of Contact", draft.modeOfContact],
-                    ["Agent (owner)", draft.assignedToName], ["Qualification", draft.qualification],
+                    ["Agent (owner)", draft.assignedToName], ["Lead Category", draft.qualification],
                     ["Category", draft.category], ["Subcategory", draft.subCategory],
                     ["Comments", draft.comments],
                   ]} />

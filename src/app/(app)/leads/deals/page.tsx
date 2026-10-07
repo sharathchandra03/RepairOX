@@ -36,7 +36,7 @@ import { useLeads } from "@/lib/leads-context";
 import { toast } from "@/components/ui/toaster";
 import {
   DEAL_QUEUE_TABS, type DealQueueTab, dealInQueueTab,
-  DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount, dealAgeLabel,
+  DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount, dealAgeLabel, dealAgeTooltip,
   isOpenDealStatus, canAgentResubmit, canDecideDeal,
   type LeadDeal,
 } from "@/lib/lead-deals";
@@ -264,14 +264,14 @@ export default function DealsPage() {
             <colgroup>
               <col className="w-[124px]" />{/* Deal ID */}
               {multiStore && <col className="w-[112px]" />}{/* Store */}
-              <col className="w-[15%]" />{/* Agent Name — flexible */}
-              <col className="w-[16%]" />{/* Customer Name — flexible */}
-              <col className="w-[18%]" />{/* Device & Issue — flexible */}
-              <col className="w-[106px]" />{/* Price Quoted */}
-              <col className="w-[118px]" />{/* Customer Offer */}
-              <col className="w-[146px]" />{/* Status — editable pill */}
-              <col className="w-[58px]" />{/* Age */}
-              <col className="w-[64px]" />{/* Actions */}
+              <col className="w-[16%]" />{/* Agent Name — flexible */}
+              <col className="w-[17%]" />{/* Customer Name — flexible */}
+              <col className="w-[22%]" />{/* Device & Issue — flexible */}
+              <col className="w-[150px]" />{/* Price Quoted */}
+              <col className="w-[162px]" />{/* Customer Offer */}
+              <col className="w-[150px]" />{/* Status — editable pill */}
+              <col className="w-[72px]" />{/* Age */}
+              <col className="w-[124px]" />{/* Actions */}
             </colgroup>
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE] [&>th]:py-4 [&>th]:whitespace-nowrap">
@@ -280,10 +280,10 @@ export default function DealsPage() {
                 <th className="px-3">Agent Name</th>
                 <th className="px-3">Customer Name</th>
                 <th className="px-3">Device &amp; Issue</th>
-                <th className="px-3 text-right">Price Quoted</th>
-                <th className="px-3 text-right">Customer Offer</th>
-                <th className="pl-[32px] pr-3">Status</th>
-                <th className="px-3 text-right">Age</th>
+                <th className="pl-3 pr-14 text-right">Price Quoted</th>
+                <th className="pl-3 pr-14 text-right">Customer Offer</th>
+                <th className="px-3 text-center">Status</th>
+                <th className="pl-3 pr-6 text-right">Age</th>
                 <th className="px-3 text-center">Actions</th>
               </tr>
             </thead>
@@ -322,7 +322,7 @@ export default function DealsPage() {
                     {d.leadNo ? (
                       <button
                         type="button"
-                        onClick={(e) => { e.stopPropagation(); router.push(`/leads/${d.leadId}`); }}
+                        onClick={(e) => { e.stopPropagation(); router.push(`/leads/${d.leadId}?from=deals`); }}
                         title={`Open lead ${d.leadNo}`}
                         className="block max-w-full truncate text-[11px] font-medium text-[#4361EE] hover:underline"
                       >
@@ -350,8 +350,8 @@ export default function DealsPage() {
                       <span className="text-[13px] text-zinc-400">—</span>
                     )}
                   </td>
-                  <td className="px-3 py-4 text-right align-middle tabular-nums text-zinc-700">{d.leadValue == null ? "—" : formatINR(d.leadValue)}</td>
-                  <td className="px-3 py-4 text-right align-middle">
+                  <td className="pl-3 pr-14 py-4 text-right align-middle tabular-nums">{d.leadValue == null ? <span className="text-zinc-400">—</span> : <span className="font-bold text-[#4361EE]">{formatINR(d.leadValue)}</span>}</td>
+                  <td className="pl-3 pr-14 py-4 text-right align-middle">
                     {offer == null ? (
                       <span className="text-[13px] text-zinc-400">—</span>
                     ) : (
@@ -377,13 +377,13 @@ export default function DealsPage() {
                       canResubmit={!viewAsReadOnly && canAgentResubmit(d, meId)}
                     />
                   </td>
-                  <td className="px-3 py-4 text-right align-middle text-[11px] text-muted-foreground">{dealAgeLabel(d.createdAt)}</td>
-                  <td className="px-3 py-4 text-center align-middle" onClick={(e) => e.stopPropagation()}>
+                  <td className="pl-3 pr-[26px] py-4 text-right align-middle text-[11px] font-medium tabular-nums text-zinc-500" title={dealAgeTooltip(d.createdAt)}>{dealAgeLabel(d.createdAt)}</td>
+                  <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
                     <DealQuickActions
                       deal={d}
                       meId={meId}
                       onView={() => setOpenId(d.id)}
-                      onViewLead={() => router.push(`/leads/${d.leadId}`)}
+                      onViewLead={() => router.push(`/leads/${d.leadId}?from=deals`)}
                       onResubmit={() => setResubmitDeal(d)}
                       onCancel={() => cancelDeal(d.id)}
                       canCancel={!viewAsReadOnly && (allow(can, CAP.deal.approve) || d.createdBy === meId)}
@@ -607,32 +607,53 @@ function DealQuickActions({
     );
   };
   return (
-    <Dropdown
-      width="w-52"
-      trigger={({ toggle }) => (
-        <button
-          onClick={toggle}
-          className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted hover:text-foreground"
-          aria-label={`Actions for ${deal.dealNo}`}
-        >
-          <MoreHorizontal className="h-4 w-4" />
-        </button>
-      )}
-    >
-      {(close) => (
-        <>
-          <MenuLabel>Deal</MenuLabel>
-          <MenuItem icon={Eye} onClick={() => { close(); onView(); }}>View Deal</MenuItem>
-          <MenuItem icon={UserIcon} onClick={() => { close(); onViewLead(); }}>View Lead</MenuItem>
-          <MenuItem icon={Link2} onClick={() => { close(); copyLink(); }}>Copy approval link</MenuItem>
-          {canAgentResubmit(deal, meId) && (
-            <MenuItem icon={RefreshCw} onClick={() => { close(); onResubmit(); }}>Revise &amp; Resubmit</MenuItem>
-          )}
-          {canCancel && isOpenDealStatus(deal.status) && (
-            <MenuItem icon={Ban} onClick={() => { close(); onCancel(); }}>Cancel request</MenuItem>
-          )}
-        </>
-      )}
-    </Dropdown>
+    <div className="flex items-center justify-center gap-1">
+      {/* Quick shortcut: View Deal (eye) */}
+      <button
+        onClick={onView}
+        title="View deal"
+        aria-label={`View deal ${deal.dealNo}`}
+        className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+      >
+        <Eye className="h-4 w-4" />
+      </button>
+      {/* Quick shortcut: View linked Lead */}
+      <button
+        onClick={onViewLead}
+        title="View lead"
+        aria-label={`View lead for ${deal.dealNo}`}
+        className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+      >
+        <UserIcon className="h-4 w-4" />
+      </button>
+      {/* Overflow menu — the rest of the actions */}
+      <Dropdown
+        width="w-52"
+        trigger={({ toggle }) => (
+          <button
+            onClick={toggle}
+            className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            aria-label={`More actions for ${deal.dealNo}`}
+          >
+            <MoreHorizontal className="h-4 w-4" />
+          </button>
+        )}
+      >
+        {(close) => (
+          <>
+            <MenuLabel>Deal</MenuLabel>
+            <MenuItem icon={Eye} onClick={() => { close(); onView(); }}>View Deal</MenuItem>
+            <MenuItem icon={UserIcon} onClick={() => { close(); onViewLead(); }}>View Lead</MenuItem>
+            <MenuItem icon={Link2} onClick={() => { close(); copyLink(); }}>Copy approval link</MenuItem>
+            {canAgentResubmit(deal, meId) && (
+              <MenuItem icon={RefreshCw} onClick={() => { close(); onResubmit(); }}>Revise &amp; Resubmit</MenuItem>
+            )}
+            {canCancel && isOpenDealStatus(deal.status) && (
+              <MenuItem icon={Ban} onClick={() => { close(); onCancel(); }}>Cancel request</MenuItem>
+            )}
+          </>
+        )}
+      </Dropdown>
+    </div>
   );
 }

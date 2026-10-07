@@ -337,6 +337,16 @@ body {
   border-radius: 10px;
 }
 
+/* Inline search inputs (dropdown search boxes, inline filters) must NOT show
+   the chunky blue focus glow — the wrapper provides a subtle border instead.
+   Reuse `.rox-search-input` on any such input so focus feedback stays quiet
+   (RepairOX design-system: focus is a colour change, never a heavy blue box). */
+.rox-search-input:focus,
+.rox-search-input:focus-visible {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
 /* Utility helpers */
 .surface {
   background: hsl(var(--card));

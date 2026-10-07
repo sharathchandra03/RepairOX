@@ -16,7 +16,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useMemo, useState } from "react";
-import { Plus, Trash2, Package, Wrench, FileText, Boxes, Smartphone, Tag } from "lucide-react";
+import { Plus, Trash2, Package, Wrench, FileText, Boxes, Smartphone, Tag, ChevronDown, ListTree } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn, formatINR } from "@/lib/utils";
@@ -88,76 +88,165 @@ export function QuotationDeviceIssue({
 
 function CatalogPartPicker({
   onAdd,
+  onAddService,
+  device,
 }: {
   onAdd: (part: Parameters<typeof catalogPartToQuotationLine>[0], deviceLabel: string) => void;
+  /** Adds a free-text service/charge line — rendered beside "Open Price List"
+   *  so both "add a line" actions live together in the header. */
+  onAddService: () => void;
+  /** The device already chosen at the top of the quotation. When a model is
+   *  present we SKIP the duplicate Category/Brand/Model picker and show that
+   *  model's Price List directly — the agent never re-enters the device. */
+  device?: { categoryId: string; brandId: string; modelId: string; label: string };
 }) {
-  const { categories, brands, models, parts, hydrated } = useCatalog();
-  const [sel, setSel] = useState<DeviceSelection>({ categoryId: "", brandId: "", modelId: "", label: "" });
+  const { brands, models, parts, hydrated } = useCatalog();
+
+  const usesTopDevice = !!device?.modelId;
+  const active: DeviceSelection = {
+    categoryId: device?.categoryId || "",
+    brandId: device?.brandId || "",
+    modelId: device?.modelId || "",
+    label: device?.label || "",
+  };
+
+  // Parts list is collapsed by default (so the box stays compact) — the agent
+  // opens it on demand with "Open Price List".
+  const [showParts, setShowParts] = useState(false);
+  // Quick in-list filter over the already-loaded parts (structured fields only).
+  const [query, setQuery] = useState("");
 
   const brandName = useMemo(
-    () => brandsForCategory(brands, sel.categoryId).find((b) => b.id === sel.brandId)?.name || "",
-    [brands, sel.categoryId, sel.brandId],
+    () => brandsForCategory(brands, active.categoryId).find((b) => b.id === active.brandId)?.name || "",
+    [brands, active.categoryId, active.brandId],
   );
   const modelName = useMemo(
-    () => modelsForBrand(models, sel.brandId).find((m) => m.id === sel.modelId)?.name || "",
-    [models, sel.brandId, sel.modelId],
+    () => modelsForBrand(models, active.brandId).find((m) => m.id === active.modelId)?.name || "",
+    [models, active.brandId, active.modelId],
   );
-  const label = [brandName, modelName].filter(Boolean).join(" ");
+  const label = usesTopDevice ? (device!.label || [brandName, modelName].filter(Boolean).join(" ")) : [brandName, modelName].filter(Boolean).join(" ");
 
   const partRows = useMemo(
-    () => (sel.modelId ? partsForModel(parts, sel.modelId) : []),
-    [parts, sel.modelId],
+    () => (active.modelId ? partsForModel(parts, active.modelId) : []),
+    [parts, active.modelId],
   );
+  // Filter the loaded parts by name / repair category (structured fields).
+  const filteredParts = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return partRows;
+    return partRows.filter(
+      (p) => p.partName?.toLowerCase().includes(q) || p.repairCategory?.toLowerCase().includes(q),
+    );
+  }, [partRows, query]);
 
-  return (
-    <div className="space-y-3 rounded-xl border border-[#4361EE]/30 bg-card p-3 shadow-sm">
-      <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-        <Tag className="h-3.5 w-3.5 text-[#4361EE]" /> Pick from Price List
-      </p>
-
-      {/* Category → Brand → Model — reuses the canonical catalog picker */}
-      <DeviceCatalogPicker value={sel} onChange={setSel} />
-
-      {/* Parts for the selected model, with their published catalog price */}
-      {sel.modelId ? (
-        partRows.length > 0 ? (
-          <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border p-1">
-            {partRows.map((p) => {
-              const unknown = p.priceKnown === false;
-              return (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => onAdd(p, label)}
-                  className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition hover:bg-[#EEF1FD]"
-                >
-                  <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">
-                    <Package className="h-3.5 w-3.5" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate text-sm font-medium text-foreground">{p.partName}</span>
-                    {p.repairCategory ? (
-                      <span className="block truncate text-[11px] text-muted-foreground">{p.repairCategory}</span>
-                    ) : null}
-                  </span>
-                  <span className={cn("shrink-0 text-sm font-semibold tabular-nums", unknown ? "text-muted-foreground" : "text-[#4361EE]")}>
-                    {unknown ? "N/A" : formatINR(p.price)}
-                  </span>
-                  <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition group-hover:text-[#4361EE]" />
-                </button>
-              );
-            })}
-          </div>
-        ) : (
+  const partsBlock = active.modelId ? (
+    partRows.length > 0 ? (
+      <div className="space-y-1.5">
+        {partRows.length > 6 ? (
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search parts…"
+            className="h-8 text-[13px]"
+          />
+        ) : null}
+        {filteredParts.length === 0 ? (
           <p className="rounded-lg border border-dashed border-border p-3 text-center text-[12px] text-muted-foreground">
-            {hydrated ? "No parts listed for this model in the Price List." : "Loading parts…"}
+            No parts match “{query.trim()}”.
           </p>
-        )
-      ) : (
-        <p className="rounded-lg border border-dashed border-border p-3 text-center text-[12px] text-muted-foreground">
-          Select a Category, Brand and Model to list its Price List parts.
+        ) : (
+      <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border border-border p-1">
+        {filteredParts.map((p) => {
+          const unknown = p.priceKnown === false;
+          return (
+            <button
+              key={p.id}
+              type="button"
+              onClick={() => onAdd(p, label)}
+              className="group flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition hover:bg-[#EEF1FD]"
+            >
+              <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">
+                <Package className="h-3.5 w-3.5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-sm font-medium text-foreground">{p.partName}</span>
+                {p.repairCategory ? (
+                  <span className="block truncate text-[11px] text-muted-foreground">{p.repairCategory}</span>
+                ) : null}
+              </span>
+              <span className={cn("shrink-0 text-sm font-semibold tabular-nums", unknown ? "text-muted-foreground" : "text-[#4361EE]")}>
+                {unknown ? "N/A" : formatINR(p.price)}
+              </span>
+              <Plus className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition group-hover:text-[#4361EE]" />
+            </button>
+          );
+        })}
+      </div>
+        )}
+      </div>
+    ) : (
+      <p className="rounded-lg border border-dashed border-border p-3 text-center text-[12px] text-muted-foreground">
+        {hydrated ? "No parts listed for this model in the Price List." : "Loading parts…"}
+      </p>
+    )
+  ) : null;
+
+  /* ── Mode A: a device/model is already selected at top ──────────────────
+     No duplicate picker — just an "Open Price List" button that reveals the
+     selected model's parts on demand (clear, compact view). */
+  if (usesTopDevice) {
+    return (
+      <div className="space-y-2 rounded-xl border border-[#4361EE]/30 bg-card p-3 shadow-sm">
+        <div className="flex items-center justify-between gap-2">
+          <p className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <Tag className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+            <span className="truncate">Price List{label ? ` · ${label}` : ""}</span>
+          </p>
+          {/* Both "add a line" actions grouped together: Add Service (free line)
+              + Open Price List (catalog parts). */}
+          <div className="flex shrink-0 items-center gap-2">
+            <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={onAddService}>
+              <Wrench className="h-3.5 w-3.5" /> Add Service
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={showParts ? "secondary" : "outline"}
+              className="gap-1.5"
+              onClick={() => setShowParts((s) => { if (s) setQuery(""); return !s; })}
+            >
+              <ListTree className="h-3.5 w-3.5" />
+              {showParts ? "Hide Price List" : "Open Price List"}
+              {!showParts && partRows.length > 0 ? (
+                <span className="rounded-full bg-[#EEF1FD] px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-[#4361EE]">
+                  {partRows.length}
+                </span>
+              ) : null}
+              <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showParts && "rotate-180")} />
+            </Button>
+          </div>
+        </div>
+        {showParts ? partsBlock : null}
+      </div>
+    );
+  }
+
+  /* ── Mode B: no device chosen at top yet → just prompt for it (NO duplicate
+     Category/Brand/Model picker — the Device section above is the one place to
+     choose it). Keeps the view clean and avoids double entry. ──────────────── */
+  return (
+    <div className="space-y-2 rounded-xl border border-[#4361EE]/30 bg-card p-3 shadow-sm">
+      <div className="flex items-center justify-between gap-2">
+        <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <Tag className="h-3.5 w-3.5 text-[#4361EE]" /> Price List
         </p>
-      )}
+        <Button type="button" size="sm" variant="outline" className="shrink-0 gap-1.5" onClick={onAddService}>
+          <Wrench className="h-3.5 w-3.5" /> Add Service
+        </Button>
+      </div>
+      <p className="rounded-lg border border-dashed border-border p-3 text-center text-[12px] text-muted-foreground">
+        Select the <span className="font-medium text-foreground">Device</span> above to open its Price List.
+      </p>
     </div>
   );
 }
@@ -167,9 +256,13 @@ function CatalogPartPicker({
 export function QuotationItemsEditor({
   items,
   onChange,
+  device,
 }: {
   items: QuotationLineItem[];
   onChange: (items: QuotationLineItem[]) => void;
+  /** The device already chosen at the top of the quotation — passed to the
+   *  Price List picker so the agent doesn't re-enter Category/Brand/Model. */
+  device?: { categoryId: string; brandId: string; modelId: string; label: string };
 }) {
   const update = (id: string, patch: Partial<QuotationLineItem>) => {
     onChange(items.map((it) => {
@@ -189,28 +282,33 @@ export function QuotationItemsEditor({
 
   return (
     <div className="space-y-3 rounded-2xl border-2 border-[#4361EE]/25 bg-[#F7FAFF] p-4">
-      {/* Highlighted header — differentiates the quoted-items section */}
+      {/* Highlighted header — differentiates the quoted-items section. Shows a
+          live item count + subtotal so the agent sees the quotation value at a
+          glance without scrolling to the table footer. */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#4361EE] text-white">
             <Boxes className="h-4 w-4" />
           </span>
-          <div>
+          <div className="min-w-0">
             <p className="text-sm font-bold text-foreground">Price List & Items</p>
-            <p className="text-[11px] text-muted-foreground">Pick parts from the Price List (with catalog price) or add a service line.</p>
+            <p className="truncate text-[11px] text-muted-foreground">Open the Price List for the selected model, or add a service line.</p>
           </div>
         </div>
+        {items.length > 0 ? (
+          <div className="shrink-0 text-right">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {items.length} {items.length === 1 ? "item" : "items"}
+            </p>
+            <p className="text-sm font-bold tabular-nums text-[#4361EE]">{formatINR(subtotal)}</p>
+          </div>
+        ) : null}
       </div>
 
-      {/* Price List part picker — browse Category → Brand → Model → part */}
-      <CatalogPartPicker onAdd={addFromCatalog} />
-
-      {/* Action row — Add Service (free line) */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Button type="button" size="sm" variant="outline" className="gap-1.5" onClick={addService}>
-          <Wrench className="h-3.5 w-3.5" /> Add Service
-        </Button>
-      </div>
+      {/* Price List part picker — uses the device chosen at top (no re-entry);
+          parts open on demand via "Open Price List". Add Service lives in the
+          picker header, beside Open Price List (both are "add a line"). */}
+      <CatalogPartPicker onAdd={addFromCatalog} onAddService={addService} device={device} />
 
       {/* Line items table (in-section look) */}
       {items.length > 0 ? (
@@ -286,8 +384,16 @@ export function QuotationItemsEditor({
           </table>
         </div>
       ) : (
-        <div className="rounded-xl border border-dashed border-border p-5 text-center text-sm text-muted-foreground">
-          No items yet. Pick a part from the Price List or Add Service to build the quotation.
+        <div className="flex flex-col items-center gap-2 rounded-xl border border-dashed border-[#4361EE]/30 bg-card/60 px-5 py-6 text-center">
+          <span className="grid h-10 w-10 place-items-center rounded-full bg-[#EEF1FD] text-[#4361EE]">
+            <Boxes className="h-5 w-5" />
+          </span>
+          <p className="text-sm font-medium text-foreground">No items added yet</p>
+          <p className="max-w-xs text-[12px] text-muted-foreground">
+            {device?.modelId
+              ? "Open the Price List to pick a part, or Add Service for a custom charge."
+              : "Select the Device above to open its Price List, or Add Service for a custom charge."}
+          </p>
         </div>
       )}
     </div>

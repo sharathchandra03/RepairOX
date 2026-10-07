@@ -4,7 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import {
   UserCog, Mail, Phone, ShieldCheck, Store, Home, KeyRound, Clock,
   CircleUser, CheckCircle2, AlertTriangle, Lock, Ban, Power, Pencil,
-  Loader2, Fingerprint, Building2, ArrowRight,
+  Loader2, Fingerprint, Building2, ArrowRight, Plus, X, Trash2,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
 import { Input, Label } from "@/components/ui/input";
 import { usePermissions } from "@/lib/permissions-context";
+import { useStoreContext } from "@/lib/store-context";
 import { allow, CAP } from "@/lib/capabilities";
 import type { TeamMember } from "@/lib/mock-data";
 import type { RoleDef } from "@/lib/permissions";
@@ -116,6 +117,7 @@ export function UserDetailsDrawer({
   onActivate: (id: string) => void;
 }) {
   const { apiFetch, can, currentUser, updateStaff } = usePermissions();
+  const { stores: allStores, canViewAllShops } = useStoreContext();
 
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<UserDetail | null>(null);
@@ -124,6 +126,10 @@ export function UserDetailsDrawer({
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
+
+  // Additional-store access management (multi-store).
+  const [addingStore, setAddingStore] = useState(false);
+  const [savingStore, setSavingStore] = useState(false);
 
   const canManage = can("manage_users") || can("edit_users") || can("full_access");
 
@@ -171,6 +177,13 @@ export function UserDetailsDrawer({
   const role = roles.find((r) => r.id === d.roleId);
   const isSelf = detail?.isSelf ?? (d.email === (currentUser?.email ?? ""));
   const canChangeStore = canManage && !isSelf && !!onChangeStore && allow(can, CAP.store.assignUsers);
+  // Managing ADDITIONAL store access needs the store-user-assign capability AND
+  // a multi-store org (more than one store the admin can see). Independent of
+  // the home-store relocation ("Change store") control.
+  const canManageStoreAccess = canManage && allow(can, CAP.store.assignUsers) && canViewAllShops && allStores.length > 1;
+  // Stores not yet granted to the user (available to add).
+  const assignedStoreIds = new Set(stores.map((s) => s.id));
+  const addableStores = allStores.filter((s) => !assignedStoreIds.has(s.id));
 
   const statusTone: "success" | "warning" | "danger" =
     d.status === "active" ? "success" : d.status === "suspended" ? "danger" : "warning";
@@ -185,6 +198,23 @@ export function UserDetailsDrawer({
     setEditingName(false);
     // Reflect immediately, then re-sync from the server.
     setDetail((prev) => (prev ? { ...prev, member: { ...prev.member, name: next } } : prev));
+    load();
+  }
+
+  /** Grant the user access to an additional store (non-home user_stores grant). */
+  async function grantStore(storeId: string) {
+    setSavingStore(true);
+    await apiFetch(`/api/staff/${d.id}`, { method: "PATCH", body: JSON.stringify({ addStoreIds: [storeId] }) });
+    setSavingStore(false);
+    setAddingStore(false);
+    load();
+  }
+
+  /** Revoke an additional store grant (never the home store). */
+  async function revokeStore(storeId: string) {
+    setSavingStore(true);
+    await apiFetch(`/api/staff/${d.id}`, { method: "PATCH", body: JSON.stringify({ removeStoreIds: [storeId] }) });
+    setSavingStore(false);
     load();
   }
 
@@ -293,17 +323,69 @@ export function UserDetailsDrawer({
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-semibold leading-tight">{s.name}</p>
                         <p className="text-[11px] text-muted-foreground">
-                          {sRole ? `${sRole.label} · this store` : "Uses primary role"}
+                          {s.isHome ? "Home store" : sRole ? `${sRole.label} · this store` : "Additional access"}
                         </p>
                       </div>
-                      {s.isHome && (
+                      {s.isHome ? (
                         <span className="inline-flex items-center gap-1 rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">
                           <Home className="h-3 w-3" /> Home
                         </span>
-                      )}
+                      ) : canManageStoreAccess && !isSelf ? (
+                        <button
+                          onClick={() => revokeStore(s.id)}
+                          disabled={savingStore}
+                          title="Remove store access"
+                          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      ) : null}
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Add additional store access (multi-store). */}
+            {canManageStoreAccess && !isSelf && (
+              <div className="pt-1">
+                {addingStore ? (
+                  <div className="rounded-xl border border-border bg-muted/20 p-2.5">
+                    <div className="mb-1.5 flex items-center justify-between">
+                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Grant access to</p>
+                      <button onClick={() => setAddingStore(false)} className="text-zinc-400 hover:text-zinc-600"><X className="h-3.5 w-3.5" /></button>
+                    </div>
+                    {addableStores.length === 0 ? (
+                      <p className="px-1 py-1 text-[12px] text-muted-foreground">This user already has access to every store.</p>
+                    ) : (
+                      <div className="max-h-[200px] space-y-1 overflow-y-auto">
+                        {addableStores.map((s) => (
+                          <button
+                            key={s.id}
+                            onClick={() => grantStore(s.id)}
+                            disabled={savingStore}
+                            className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 text-left transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD]/30 disabled:opacity-50"
+                          >
+                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">
+                              {(s.code || s.name).slice(0, 2).toUpperCase()}
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s.name}</span>
+                            {!s.isActive && <span className="shrink-0 text-[10px] text-amber-600">Inactive</span>}
+                            <Plus className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setAddingStore(true)}
+                    disabled={addableStores.length === 0}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[#4361EE]/40 px-3 py-2 text-[12px] font-medium text-[#4361EE] transition hover:bg-[#EEF1FD]/40 disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <Plus className="h-3.5 w-3.5" /> {addableStores.length === 0 ? "All stores granted" : "Add store access"}
+                  </button>
+                )}
               </div>
             )}
           </Section>

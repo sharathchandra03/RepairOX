@@ -799,7 +799,7 @@ export const navItems: NavItem[] = [
   // with no shell chrome. `href` is the stable nav key (drives permission +
   // feature-visibility); `targetHref` is where the new tab actually points.
   { href: "/leads/price-list", label: "Price List",   icon: "ClipboardList", permission: ["manage_sales", "leads_view"], newTab: true, targetHref: "/leads-price-list" },
-  { href: "/leads/kanban",     label: "Kanban",       icon: "ClipboardList", permission: ["leads_view", "manage_sales"] },
+  { href: "/leads/kanban",     label: "Kanban",       icon: "LayoutGrid", permission: ["leads_view", "manage_sales"] },
   { href: "/leads/contacts",   label: "Contacts",     icon: "BookUser", permission: "manage_customers" },
   { href: "/leads/companies",  label: "Companies",    icon: "Store", permission: "manage_customers" },
   { href: "/leads/deals",      label: "Deals",        icon: "IndianRupee", permission: ["deals_view", "deals_view_all", "deals_approve", "manage_sales"] },

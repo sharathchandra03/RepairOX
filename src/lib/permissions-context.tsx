@@ -166,6 +166,9 @@ export interface AddStaffInput {
   password?: string;
   roleId: string;
   branch: string;
+  /** Extra store ids (beyond the home branch) the user may also work in.
+   *  Each becomes a non-default active user_stores grant. Multi-store access. */
+  additionalStoreIds?: string[];
   salaryType?: SalaryType;
   salaryAmount?: number;
   department?: string;

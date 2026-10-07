@@ -63,10 +63,13 @@ function AddStaffInner() {
   // local/demo mode). The chosen store NAME is sent to /api/staff, which
   // resolves it to the store's branch_id — so the new employee is truly scoped
   // to that store's data.
-  const { stores } = useStoreContext();
+  const { stores, canViewAllShops } = useStoreContext();
   const storeOptions = stores.length > 0
     ? stores.map((s) => ({ label: s.name, value: s.name }))
     : BRANCHES.map((b) => ({ label: b, value: b }));
+  // Multi-store assignment is only meaningful when the org has >1 store AND the
+  // creator can place users across stores (owner / multi-store authority).
+  const canAssignMultipleStores = canViewAllShops && stores.length > 1;
 
   // Reception is a sensible default for a first hire (falls back to the first
   // role the caller is actually allowed to assign).
@@ -82,6 +85,9 @@ function AddStaffInner() {
   const [showPw, setShowPw] = useState(false);
   const [roleId, setRoleId] = useState(defaultRole);
   const [branch, setBranch] = useState<string>(BRANCHES[0]);
+  // Extra stores (beyond the home branch) this user may also work in. Stored as
+  // branches.id. The home store is excluded (it's granted automatically).
+  const [additionalStoreIds, setAdditionalStoreIds] = useState<string[]>([]);
   const [salaryType, setSalaryType] = useState<string>("monthly");
   const [salaryAmount, setSalaryAmount] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -124,6 +130,9 @@ function AddStaffInner() {
     }
 
     setLoading(true);
+    // Exclude the home store from the additional grants (it's granted anyway).
+    const homeStoreId = stores.find((s) => s.name === branch)?.id;
+    const extraStoreIds = additionalStoreIds.filter((id) => id !== homeStoreId);
     const result = await addStaff({
       name,
       phone,
@@ -132,6 +141,7 @@ function AddStaffInner() {
       password: hasLogin ? password : undefined,
       roleId,
       branch,
+      additionalStoreIds: canAssignMultipleStores ? extraStoreIds : undefined,
       salaryType: salaryType as any,
       salaryAmount,
     });
@@ -260,15 +270,71 @@ function AddStaffInner() {
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="branch">Store</Label>
+                <Label htmlFor="branch">Home store</Label>
                 <Select
                   id="branch"
                   value={branch}
                   onChange={(e) => setBranch(e.target.value)}
                   options={storeOptions}
                 />
+                {canAssignMultipleStores && (
+                  <p className="text-[11px] text-muted-foreground">Their primary store. Grant access to more stores below.</p>
+                )}
               </div>
             </div>
+
+            {/* Additional store access (multi-store) — only when the org has
+                more than one store and the creator can assign across stores. */}
+            {canAssignMultipleStores && (
+              <div className="space-y-2">
+                <Label>Additional store access</Label>
+                <p className="text-[11px] text-muted-foreground">
+                  Let this user work records (including leads in Multi-Store mode) in these stores too. Their home store is always included.
+                </p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  {stores.map((s) => {
+                    const isHome = s.name === branch;
+                    const checked = isHome || additionalStoreIds.includes(s.id);
+                    return (
+                      <label
+                        key={s.id}
+                        className={cn(
+                          "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-[13px] transition",
+                          isHome
+                            ? "cursor-default border-[#4361EE]/30 bg-[#EEF1FD]/50"
+                            : checked
+                            ? "cursor-pointer border-[#4361EE]/40 bg-[#EEF1FD]/30"
+                            : "cursor-pointer border-border bg-card hover:border-[#4361EE]/30",
+                        )}
+                      >
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 shrink-0 accent-[#4361EE]"
+                          checked={checked}
+                          disabled={isHome}
+                          onChange={(e) => {
+                            setAdditionalStoreIds((prev) =>
+                              e.target.checked ? [...prev, s.id] : prev.filter((id) => id !== s.id),
+                            );
+                          }}
+                        />
+                        <span className="min-w-0 flex-1 truncate font-medium">{s.name}</span>
+                        {isHome && (
+                          <span className="shrink-0 rounded-full bg-[#4361EE]/10 px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">Home</span>
+                        )}
+                        {!s.isActive && !isHome && (
+                          <span className="shrink-0 text-[10px] text-amber-600">Inactive</span>
+                        )}
+                      </label>
+                    );
+                  })}
+                </div>
+                <p className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+                  <Building2 className="mt-0.5 h-3 w-3 shrink-0 text-[#4361EE]" />
+                  To give access to every store, grant the <span className="font-medium">Multi-Store Access</span> permission in the user's role instead.
+                </p>
+              </div>
+            )}
           </section>
 
           {/* ── Salary ── */}

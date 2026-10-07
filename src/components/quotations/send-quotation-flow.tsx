@@ -271,7 +271,16 @@ export function SendQuotationFlow({
 
               <div className="space-y-1">
                 <Label>Quoted Items</Label>
-                <QuotationItemsEditor items={draft.items} onChange={(items) => patch({ items })} />
+                <QuotationItemsEditor
+                  items={draft.items}
+                  onChange={(items) => patch({ items })}
+                  device={{
+                    categoryId: draft.deviceCategoryId,
+                    brandId: draft.deviceBrandId,
+                    modelId: draft.deviceModelId,
+                    label: draft.device,
+                  }}
+                />
               </div>
 
               <div className="space-y-1">

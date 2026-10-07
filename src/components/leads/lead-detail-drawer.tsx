@@ -281,7 +281,7 @@ export function LeadDetailDrawer({
             <Avatar name={lead.name || lead.leadNo} size={44} />
             <div>
               <p className="font-display text-base font-bold">{lead.name || "—"}</p>
-              <p className="text-[12px] text-muted-foreground">{lead.leadCategory || lead.source || "Lead"}</p>
+              <p className="text-[12px] text-muted-foreground">{lead.qualification || lead.source || "Lead"}</p>
             </div>
           </div>
           <div className="flex flex-col items-end gap-1.5">
@@ -373,7 +373,7 @@ export function LeadDetailDrawer({
         {/* ── Lead (inline editable; system fields stay read-only) ── */}
         <EditableSection
           icon={Tag} title="Lead" canEdit={canEdit} lead={lead}
-          fields={["region", "source", "leadCategory", "leadNature", "priority"]}
+          fields={["region", "source", "qualification", "leadNature", "priority"]}
           renderView={() => (
             <>
               <Cell label="Lead ID">{lead.leadNo}</Cell>
@@ -383,7 +383,8 @@ export function LeadDetailDrawer({
               <Cell label="Source">{lead.source}</Cell>
               {/* AGENTS = the owner (a Sales Agent user) — changed only via Assignment. */}
               <Cell label="Agent (owner)">{lead.assignedToName || lead.agent}</Cell>
-              <Cell label="Lead Category">{lead.leadCategory}</Cell>
+              {/* LEAD CATEGORY = qualification (Qualified / Not Qualified). */}
+              <Cell label="Lead Category">{lead.qualification}</Cell>
               <Cell label="Lead Nature">{lead.leadNature}</Cell>
               <Cell label="Priority">{lead.priority}</Cell>
             </>
@@ -395,7 +396,7 @@ export function LeadDetailDrawer({
               <EditField label="Region"><EditSelect field="region" value={draft.region} onChange={(v) => set("region", v)} /></EditField>
               <EditField label="Source"><EditSelect field="source" value={draft.source} onChange={(v) => set("source", v)} /></EditField>
               <Cell label="Agent (owner)">{lead.assignedToName || lead.agent}</Cell>
-              <EditField label="Lead Category"><EditSelect field="leadCategory" value={draft.leadCategory} onChange={(v) => set("leadCategory", v)} /></EditField>
+              <EditField label="Lead Category"><EditSelect field="qualification" value={draft.qualification} onChange={(v) => set("qualification", v)} /></EditField>
               <EditField label="Lead Nature"><EditSelect field="leadNature" value={draft.leadNature} onChange={(v) => set("leadNature", v)} /></EditField>
               <EditField label="Priority"><EditSelect field="priority" value={draft.priority} onChange={(v) => set("priority", v)} /></EditField>
             </>

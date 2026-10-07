@@ -59,13 +59,18 @@ export function PerfSection({
 
 type Tone = "blue" | "emerald" | "amber" | "violet" | "rose" | "overdue";
 
-const TONE: Record<Tone, { chip: string; icon: string; spark: string; pillUp: string; pillDown: string }> = {
-  blue:    { chip: "bg-[#EEF1FD] text-[#4361EE]", icon: "#4361EE", spark: "#4361EE", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  emerald: { chip: "bg-emerald-50 text-emerald-600", icon: "#10B981", spark: "#10B981", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  amber:   { chip: "bg-amber-50 text-amber-600", icon: "#F59E0B", spark: "#F59E0B", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  violet:  { chip: "bg-violet-50 text-violet-600", icon: "#8B5CF6", spark: "#8B5CF6", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  rose:    { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  overdue: { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+/* Each tone carries: the icon CHIP (soft tint + icon colour), the sparkline/
+   icon stroke colour, a left ACCENT BAR, the headline VALUE colour, a hover
+   GLOW, and the trend-pill up/down styles. `bar` + `value` give every card a
+   clear semantic colour (not a flat monochrome strip) and keep the Individual
+   KPI row visually consistent with the All-Agents summary cards. */
+const TONE: Record<Tone, { chip: string; icon: string; spark: string; bar: string; value: string; glow: string; pillUp: string; pillDown: string }> = {
+  blue:    { chip: "bg-[#EEF1FD] text-[#4361EE]", icon: "#4361EE", spark: "#4361EE", bar: "bg-[#4361EE]", value: "text-[#2A3BA3]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(67,97,238,0.3)] hover:border-[#4361EE]/40", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  emerald: { chip: "bg-emerald-50 text-emerald-600", icon: "#10B981", spark: "#10B981", bar: "bg-emerald-500", value: "text-emerald-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(16,185,129,0.3)] hover:border-emerald-400/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  amber:   { chip: "bg-amber-50 text-amber-600", icon: "#F59E0B", spark: "#F59E0B", bar: "bg-amber-500", value: "text-amber-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(245,158,11,0.3)] hover:border-amber-400/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  violet:  { chip: "bg-violet-50 text-violet-600", icon: "#8B5CF6", spark: "#8B5CF6", bar: "bg-violet-500", value: "text-violet-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(139,92,246,0.3)] hover:border-violet-400/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  rose:    { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  overdue: { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
 };
 
 export interface KpiSpec {
@@ -90,11 +95,14 @@ function KpiCard({ spec, months }: { spec: KpiSpec; months: PeriodPerformance[] 
     <div
       onClick={spec.onClick}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-4 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:-translate-y-0.5 hover:border-[#4361EE]/40 hover:shadow-[0_8px_24px_-10px_rgba(67,97,238,0.25)]",
+        "group relative flex flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-4 pl-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:-translate-y-0.5",
+        t.glow,
         spec.onClick && "cursor-pointer",
       )}
       style={{ containerType: "inline-size" }}
     >
+      {/* Semantic left accent bar */}
+      <span className={cn("absolute inset-y-0 left-0 w-1", t.bar)} aria-hidden />
       <div className="flex items-center justify-between gap-2">
         <span className="flex items-center gap-2 min-w-0">
           <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", t.chip)}>
@@ -110,7 +118,7 @@ function KpiCard({ spec, months }: { spec: KpiSpec; months: PeriodPerformance[] 
         )}
       </div>
 
-      <p className="mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums text-foreground">
+      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", t.value)}>
         {spec.value}
       </p>
 

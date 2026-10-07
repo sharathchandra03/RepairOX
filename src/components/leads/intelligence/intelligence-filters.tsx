@@ -44,7 +44,7 @@ export function IntelligenceFilters({
   const options = useMemo(() => ({
     source: distinct(leads.map((l) => l.source)),
     modeOfLead: distinct(leads.map((l) => l.modeOfContact)),
-    leadCategory: distinct(leads.map((l) => l.leadCategory)),
+    leadCategory: distinct(leads.map((l) => l.qualification)),
     subCategory: distinct(leads.map((l) => l.subCategory)),
     priority: distinct(leads.map((l) => l.priority)),
     status: distinct(leads.map((l) => l.status)),

@@ -89,24 +89,48 @@ function Restricted() {
 }
 
 /* Summary total card (the boxes above the All-Agents leaderboard). */
+/* ── Summary KPI card (All-Agents) ──────────────────────────────────────────
+   A properly COLOURED executive KPI tile. Each metric carries a semantic tone
+   (a soft tinted icon chip, a matching left accent bar and a value colour)
+   so the row reads at a glance — acquisition / qualification / success /
+   revenue / rate — instead of a flat monochrome strip. Shares the elevated
+   card treatment (rounded-2xl, soft border, hover lift) with the Individual
+   view's KPI cards so both views feel like one family. */
+type KpiTone = "blue" | "indigo" | "amber" | "emerald" | "violet";
+
+const KPI_TONE: Record<KpiTone, { chip: string; bar: string; value: string; glow: string }> = {
+  blue:    { chip: "bg-[#EEF1FD] text-[#4361EE]", bar: "bg-[#4361EE]", value: "text-[#2A3BA3]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(67,97,238,0.3)] hover:border-[#4361EE]/40" },
+  indigo:  { chip: "bg-indigo-50 text-indigo-600", bar: "bg-indigo-500", value: "text-indigo-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(99,102,241,0.3)] hover:border-indigo-400/50" },
+  amber:   { chip: "bg-amber-50 text-amber-600", bar: "bg-amber-500", value: "text-amber-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(245,158,11,0.3)] hover:border-amber-400/50" },
+  emerald: { chip: "bg-emerald-50 text-emerald-600", bar: "bg-emerald-500", value: "text-emerald-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(16,185,129,0.3)] hover:border-emerald-400/50" },
+  violet:  { chip: "bg-violet-50 text-violet-600", bar: "bg-violet-500", value: "text-violet-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(139,92,246,0.3)] hover:border-violet-400/50" },
+};
+
 function TotalCard({
-  label, value, sub, icon: Icon,
+  label, value, sub, icon: Icon, tone = "blue",
 }: {
   label: string;
   value: string;
   sub?: string;
   icon: React.ComponentType<{ className?: string }>;
+  tone?: KpiTone;
 }) {
+  const t = KPI_TONE[tone];
   return (
-    <div className="rounded-2xl border border-border/70 bg-card/80 p-4">
+    <div className={cn(
+      "group relative flex flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-4 pl-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:-translate-y-0.5",
+      t.glow,
+    )}>
+      {/* Semantic left accent bar */}
+      <span className={cn("absolute inset-y-0 left-0 w-1", t.bar)} aria-hidden />
       <div className="flex items-center gap-2">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+        <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-lg", t.chip)}>
           <Icon className="h-4 w-4" />
         </span>
-        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+        <span className="truncate text-[11px] font-semibold uppercase tracking-wide text-slate-500">{label}</span>
       </div>
-      <p className="mt-2.5 text-2xl font-extrabold tabular-nums text-foreground">{value}</p>
-      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
+      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", t.value)}>{value}</p>
+      <p className="mt-1 text-[11px] text-muted-foreground">{sub ?? "\u00A0"}</p>
     </div>
   );
 }
@@ -390,7 +414,7 @@ export default function AgentPerformancePage() {
         sub: agentPerf.leads > 0 ? `${pct(agentPerf.qualified / agentPerf.leads)} of total` : undefined,
       },
       {
-        label: "Converted", tone: "emerald", icon: Trophy, metric: "converted",
+        label: "Converted", tone: "amber", icon: Trophy, metric: "converted",
         value: String(agentPerf.convertedAgentDriven),
         sub: `${pct(agentPerf.conversionRate)} conversion rate`,
       },
@@ -481,12 +505,12 @@ export default function AgentPerformancePage() {
 
       {/* Summary totals */}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        <TotalCard label="Agents" value={String(rankedRows.length)} icon={Users} />
-        <TotalCard label="Leads" value={String(boardTotals.leads)} icon={Users} />
-        <TotalCard label="Qualified" value={String(boardTotals.qualified)} icon={UserCheck} />
-        <TotalCard label="Converted" value={String(boardTotals.convertedAgentDriven)} sub={boardTotals.convertedSelfInitiated > 0 ? `+${boardTotals.convertedSelfInitiated} self` : undefined} icon={Trophy} />
-        <TotalCard label="Revenue Won" value={formatINR(boardTotals.revenueWonAgentDriven)} sub={boardTotals.revenueWonSelfInitiated > 0 ? `+${formatINR(boardTotals.revenueWonSelfInitiated)} self` : undefined} icon={IndianRupee} />
-        <TotalCard label="Conversion" value={pct(boardTotals.conversionRate)} icon={Target} />
+        <TotalCard label="Agents" tone="blue" value={String(rankedRows.length)} icon={Users} />
+        <TotalCard label="Leads" tone="indigo" value={String(boardTotals.leads)} icon={Users} />
+        <TotalCard label="Qualified" tone="violet" value={String(boardTotals.qualified)} sub={boardTotals.leads > 0 ? `${pct(boardTotals.qualified / boardTotals.leads)} of total` : undefined} icon={UserCheck} />
+        <TotalCard label="Converted" tone="amber" value={String(boardTotals.convertedAgentDriven)} sub={boardTotals.convertedSelfInitiated > 0 ? `+${boardTotals.convertedSelfInitiated} self` : undefined} icon={Trophy} />
+        <TotalCard label="Revenue Won" tone="emerald" value={formatINR(boardTotals.revenueWonAgentDriven)} sub={boardTotals.revenueWonSelfInitiated > 0 ? `+${formatINR(boardTotals.revenueWonSelfInitiated)} self` : undefined} icon={IndianRupee} />
+        <TotalCard label="Conversion" tone="blue" value={pct(boardTotals.conversionRate)} icon={Target} />
       </div>
 
       {/* Owner-only filters (a Sales Agent gets a read-only leaderboard). */}

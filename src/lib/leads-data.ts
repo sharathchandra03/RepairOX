@@ -253,12 +253,18 @@ export const LEAD_DROPDOWN_FIELDS: LeadFieldDef[] = [
   { key: "modeOfContact", label: "Mode of Contact",hint: "How the lead prefers to be reached.",       defaults: ["Call", "WhatsApp", "Email", "SMS", "Walk-In", "Chat"] },
   { key: "region",        label: "Region",         hint: "City / area the lead belongs to.",          defaults: ["Bangalore", "Chennai", "Hyderabad", "Mumbai", "Delhi"] },
   { key: "agent",         label: "Agent",          hint: "Sales agent who owns the lead.",            defaults: [], usesStaff: true },
-  { key: "qualification", label: "Qualification",  hint: "Whether the lead is qualified.",            defaults: ["Qualified Lead", "Not Qualified Lead"] },
+  // LEAD CATEGORY is the lead's qualification state. It keeps the underlying
+  // `qualification` field KEY (so the entire qualification GATE — gating N/A,
+  // the mandatory Not-Qualified reason, isQualifiedLead / isLeadPipelineEligible
+  // and the DB lead_qualification_guard trigger — keeps working unchanged); only
+  // the user-facing LABEL is "Lead Category". The old business-type leadCategory
+  // field (Repair / Accessory / …) has been removed — there is now ONE Lead
+  // Category showing Qualified Lead / Not Qualified Lead.
+  { key: "qualification", label: "Lead Category",  hint: "Whether the lead is qualified (Qualified / Not Qualified).", defaults: ["Qualified Lead", "Not Qualified Lead"] },
   { key: "contactStatus", label: "Contact Status", hint: "Whether the lead has been reached.",        defaults: ["Not Contacted", "Contacted", "RNR", "Busy", "Switched Off"] },
   { key: "device",        label: "Device",         hint: "Device the enquiry is about.",              defaults: ["iPhone", "Android", "iPad", "MacBook", "Laptop", "Smart Watch", "Other"] },
   { key: "category",      label: "Category",       hint: "Repair / product category.",                defaults: ["Screen", "Battery", "Motherboard", "Water Damage", "Software", "Accessory"] },
   { key: "subCategory",   label: "Subcategory",    hint: "More specific category under Category.",     defaults: ["Display Replacement", "Glass Only", "Battery Replacement", "Charging Port", "Data Recovery", "Diagnostics"] },
-  { key: "leadCategory",  label: "Lead Category",  hint: "Type of business for this lead.",           defaults: ["Repair", "Accessory", "Service", "Buy-Back", "Sales"] },
   { key: "status",        label: "Status",         hint: "Lead lifecycle stage.",                     defaults: ["New Lead", "Contacted", "Follow-Up", "Qualified", "Won", "Lost"] },
   { key: "leadNature",    label: "Lead Nature",    hint: "How warm the lead is.",                     defaults: ["Hot", "Warm", "Cold"] },
   { key: "result",        label: "Result",         hint: "Outcome of the contact.",                   defaults: ["Interested", "Not Interested", "RNR", "Follow-Up", "Converted"] },
@@ -647,7 +653,8 @@ export function applyLeadFilters(
     if (q) {
       const hay = [
         l.leadNo, l.name, l.number, l.alternateNumber, l.email, l.device, l.source, l.agent,
-        l.status, l.leadCategory, l.priority, l.assignedToName, l.region,
+        // Lead Category = qualification (Qualified / Not Qualified).
+        l.status, l.qualification, l.priority, l.assignedToName, l.region,
       ].join(" ").toLowerCase();
       if (!hay.includes(q)) return false;
     }

@@ -42,6 +42,7 @@ export async function POST(req: Request) {
   const {
     name, phone, email: rawEmail, hasLogin, password,
     roleId, branch, storeId, salaryType, salaryAmount, department, designation, createdBy,
+    additionalStoreIds,
   } = body ?? {};
 
   const email = rawEmail ? normalizeEmail(rawEmail) : "";
@@ -217,6 +218,52 @@ export async function POST(req: Request) {
         { onConflict: "staff_id,branch_id" }
       )
       .then(() => {}, () => {}); // ignore if user_stores isn't present
+  }
+
+  // ── Additional store access (multi-store) ──────────────────────────────────
+  // Grant the user access to extra stores beyond their home branch. Each becomes
+  // a non-default active user_stores row (same role as the home grant). These
+  // are what let a user work leads / records across several stores. Validated:
+  //   • only real stores in the creator's organization, and
+  //   • a creator WITHOUT multi-store authority may only grant stores THEY can
+  //     themselves access (same guard as the home store).
+  if (Array.isArray(additionalStoreIds) && additionalStoreIds.length > 0 && branchId) {
+    const requested = Array.from(new Set(
+      additionalStoreIds.filter((x: unknown): x is string => typeof x === "string" && !!x && x !== branchId),
+    ));
+    if (requested.length > 0) {
+      // Keep only real stores in this org.
+      const { data: validBranches } = await admin
+        .from("branches").select("id, organization_id").in("id", requested);
+      let allowed = (validBranches ?? [])
+        .filter((b) => b.organization_id === orgId)
+        .map((b) => b.id as string);
+
+      // Store-scope guard for a non-multi-store creator.
+      if (!callerCanDelegateAll(callerRoleId, callerPerms) && !callerPerms.has("multi_store_access")) {
+        const authorized = await creatorAuthorizedBranchIds(admin, user.id, orgId);
+        if (authorized.size > 0) allowed = allowed.filter((id) => authorized.has(id));
+      }
+
+      if (allowed.length > 0) {
+        const createdById = (await orgStaffId(admin, user.id)) ?? null;
+        await admin
+          .from("user_stores")
+          .upsert(
+            allowed.map((bid) => ({
+              organization_id: orgId,
+              staff_id: inserted.id,
+              branch_id: bid,
+              role_id: roleId,
+              is_default: false,
+              status: "active",
+              created_by: createdById,
+            })),
+            { onConflict: "staff_id,branch_id" },
+          )
+          .then(() => {}, () => {}); // best-effort — table optional
+      }
+    }
   }
 
   return NextResponse.json({ ok: true, member: rowToStaff(inserted) });
