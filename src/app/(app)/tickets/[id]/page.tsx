@@ -41,6 +41,7 @@ import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 import { qcItemLabel } from "@/lib/qc-config";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
+import { DetailSection as SharedDetailSection, DetailHero, type Accent } from "@/components/common/detail-page";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -519,7 +520,7 @@ export default function TicketDetailPage() {
   return (
     <div className="space-y-7 pb-10">
       {/* ─── Header ───────────────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-border/70 bg-gradient-to-br from-card to-[#EEF1FD]/30 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_-4px_rgba(67,97,238,0.08)] sm:p-6">
+      <DetailHero>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
             <Link href="/tickets">
@@ -658,7 +659,7 @@ export default function TicketDetailPage() {
         </div>
 
         {/* ─── Summary Cards (inside header for stronger cohesion) ─────── */}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="relative mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <SummaryCard label="Customer" value={ticket.customer} icon={User} />
           <SummaryCard label="Phone" value={ticket.phone} icon={Phone} />
           <SummaryCard label="Device" value={ticket.devices && ticket.devices.length > 1 ? `${ticket.devices.length} devices` : ticket.model} icon={Smartphone} />
@@ -666,7 +667,7 @@ export default function TicketDetailPage() {
           <SummaryCard label="Amount" value={formatINR(ticket.amount)} icon={CreditCard} />
           <SummaryCard label="Created" value={fmtDateShort(ticket.createdAt)} icon={Calendar} />
         </div>
-      </div>
+      </DetailHero>
 
       {/* ─── Main Content Grid ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -676,14 +677,14 @@ export default function TicketDetailPage() {
               (Estimate → Ticket → Proforma → Invoice), spec §33/§34/§65.
               Rendered only when a relationship exists. */}
           {lineageNodes.length > 1 && (
-            <DetailSection title="Linked Records" icon={GitBranch}>
+            <DetailSection title="Linked Records" icon={GitBranch} accent="blue">
               <DocumentLineage nodes={lineageNodes} />
             </DetailSection>
           )}
 
           {/* ── Warranty Details (only for Warranty records, spec §34/§64) ── */}
           {warranty && (
-            <DetailSection title="Warranty Details" icon={Shield}>
+            <DetailSection title="Warranty Details" icon={Shield} accent="teal">
               <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
                 <div>
                   <p className="text-[11px] font-medium text-muted-foreground mb-1">Original Ticket</p>
@@ -730,6 +731,7 @@ export default function TicketDetailPage() {
 
           {/* Customer Information */}
           <DetailSection
+            accent="green"
             title="Customer Information"
             icon={User}
             action={<SectionEditButton onClick={() => setActiveEditor("customer")} />}
@@ -746,6 +748,7 @@ export default function TicketDetailPage() {
 
           {/* Device Information */}
           <DetailSection
+            accent="indigo"
             title="Device Information"
             icon={Smartphone}
             action={
@@ -838,6 +841,7 @@ export default function TicketDetailPage() {
 
           {/* Job Details */}
           <DetailSection
+            accent="blue"
             id="section-job"
             title="Job Details"
             icon={Tag}
@@ -882,6 +886,7 @@ export default function TicketDetailPage() {
 
           {/* Assignment */}
           <DetailSection
+            accent="violet"
             title="Assignment"
             icon={Wrench}
             action={<SectionEditButton onClick={() => setActiveEditor("assignment")} />}
@@ -894,6 +899,7 @@ export default function TicketDetailPage() {
 
           {/* QC */}
           <DetailSection
+            accent="amber"
             title="QC"
             icon={Shield}
             action={
@@ -1055,6 +1061,7 @@ export default function TicketDetailPage() {
 
           {/* Billing Information */}
           <DetailSection
+            accent="emerald"
             id="section-billing"
             title="Billing / Invoice Link"
             icon={CreditCard}
@@ -1733,7 +1740,7 @@ function SectionEditButton({ onClick }: { onClick: () => void }) {
 
 function SummaryCard({ label, value, icon: Icon }: { label: string; value: string; icon: any }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card/80 p-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)] backdrop-blur-sm transition hover:border-[#B3BFF6]/50">
+    <div className="rounded-xl border border-border bg-card p-3 shadow-sm transition hover:border-[#4361EE]/30">
       <div className="flex items-center gap-2">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
           <Icon className="h-3.5 w-3.5" />
@@ -1747,20 +1754,15 @@ function SummaryCard({ label, value, icon: Icon }: { label: string; value: strin
   );
 }
 
-function DetailSection({ title, icon: Icon, children, action, id }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode; id?: string }) {
+/* View Ticket sections reuse the SHARED premium detail-page look (border +
+   soft 3D shadow + left colour-accent strip + scroll-reveal) via the
+   `common/detail-page` DetailSection, so View Ticket / View Invoice / View Lead
+   stay uniform. `accent` defaults to blue; callers may pass a semantic accent. */
+function DetailSection({ title, icon: Icon, children, action, id, accent = "blue" }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode; id?: string; accent?: Accent }) {
   return (
-    <div id={id} className="scroll-mt-24 rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
-      <div className="flex items-center justify-between gap-2.5 mb-5 pb-4 border-b border-border/70">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-            <Icon className="h-4 w-4" />
-          </span>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h2>
-        </div>
-        {action}
-      </div>
+    <SharedDetailSection title={title} icon={Icon} action={action} id={id} accent={accent}>
       {children}
-    </div>
+    </SharedDetailSection>
   );
 }
 

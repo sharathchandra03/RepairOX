@@ -115,10 +115,35 @@ function searchTickets(tickets: Ticket[], query: string): TicketResult[] {
   const results: TicketResult[] = [];
 
   for (const t of tickets) {
-    // Build a searchable string from all relevant fields
-    const imei = t.items?.map((i) => i.serial || "").join(" ") || "";
-    const deviceInfo = t.devices?.map((d) => `${d.brand} ${d.model} ${d.imei} ${d.issue}`).join(" ") || "";
-    const searchable = `${t.ticketNo || ""} ${t.id} ${t.customer} ${t.phone} ${t.device} ${t.model} ${t.issue} ${imei} ${deviceInfo} ${t.status} ${t.service || ""}`.toLowerCase();
+    // Build a searchable string from EVERY meaningful ticket field so a user
+    // can find a ticket by anything recorded on it — not just the customer /
+    // device basics. This includes the contact's company name, email, address,
+    // GST number, assigned technician, parts, and full per-device details.
+    const items = t.items?.map((i) => [i.serial, i.device, i.model, i.issue, i.service].filter(Boolean).join(" ")).join(" ") || "";
+    const deviceInfo = t.devices
+      ?.map((d) =>
+        [
+          d.brand, d.model, d.category, d.type, d.imei, d.issue, d.description,
+          d.jobType, d.source, d.assignedBy, d.assignedTo, d.accessories,
+          d.notes, d.deviceColour, d.warranty,
+          // parts on each device
+          ...(d.parts?.map((p) => `${p.name} ${p.sku}`) ?? []),
+        ].filter(Boolean).join(" "),
+      )
+      .join(" ") || "";
+    // Top-level parts (legacy / single-device tickets)
+    const partsInfo = t.parts?.map((p) => `${p.name} ${p.sku}`).join(" ") || "";
+
+    const searchable = [
+      t.ticketNo, t.id, t.customer, t.phone, t.email, t.company,
+      t.address, t.source, t.device, t.model, t.issue, t.service,
+      t.technician, t.priority, t.status, t.customerType, t.gstNumber,
+      t.internalNotes, t.warrantyIssue, t.parentTicketNo,
+      items, deviceInfo, partsInfo,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .toLowerCase();
 
     if (searchable.includes(q)) {
       results.push({
@@ -153,7 +178,14 @@ function searchInvoices(invoices: Invoice[], query: string, tickets: Ticket[]): 
 
   for (const inv of invoices) {
     const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
-    const searchable = `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.phone} ${inv.invoiceType} ${inv.serviceCategory || ""} ${inv.status} ${inv.total}`.toLowerCase();
+    const searchable = [
+      inv.id, linkedTicketNo, inv.customer, inv.phone, inv.email, inv.company,
+      inv.invoiceType, inv.serviceCategory, inv.status, inv.total,
+      inv.gstNumber, inv.employee, inv.paymentMode, inv.notes,
+    ]
+      .filter((v) => v !== undefined && v !== null && v !== "")
+      .join(" ")
+      .toLowerCase();
 
     if (searchable.includes(q)) {
       results.push({

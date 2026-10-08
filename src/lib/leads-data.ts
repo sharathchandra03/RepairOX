@@ -281,7 +281,7 @@ export const LEAD_FIELD_BY_KEY: Record<LeadFieldKey, LeadFieldDef> =
 export const LEAD_SMART_DEFAULTS: Partial<Record<LeadFieldKey, string>> = {
   priority: "Normal",
   status: "New Lead",
-  contactStatus: "Not Contacted",
+  contactStatus: "Contacted",
 };
 
 /* ─── Month derivation ────────────────────────────────────────────────── */

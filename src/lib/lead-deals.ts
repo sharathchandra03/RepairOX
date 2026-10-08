@@ -301,11 +301,25 @@ export function canDecideDeal(deal: LeadDeal, meId: string, ownerOverride = fals
 export const DISCOUNTED_LEAD_LABEL = "Discounted Lead";
 
 /** True when a lead status / lead-category value reads as the Discounted Lead
- *  trigger (substring, tolerant of admin-renamed labels). */
+ *  (a.k.a. "Deal") trigger — substring, tolerant of admin-renamed labels.
+ *
+ *  Matches both the canonical "Discounted Lead" wording AND the familiar team
+ *  term "Deal" (the label actually used in the Lead status options), so moving
+ *  a lead's status to "Deal" opens the discount-approval request.
+ *
+ *  IMPORTANT: a DOWNSTREAM / in-progress value such as "Deal in Progress"
+ *  (the state AFTER a deal already exists) must NOT re-open the request modal —
+ *  those are explicitly excluded so only the initial trigger fires. */
 export function isDiscountedLeadValue(value: string): boolean {
   const v = (value || "").trim().toLowerCase();
   if (!v) return false;
-  return v.includes("discount");
+  // Exclude downstream / progress / resolution states that merely mention
+  // "deal" but are NOT the initial trigger (e.g. "Deal in Progress",
+  // "Deal Approved", "Deal Rejected", "Deal Closed/Won/Lost").
+  if (/\b(in progress|progress|approved|rejected|closed|won|lost|cancelled|canceled|done|complete)\b/.test(v)) {
+    return false;
+  }
+  return v.includes("discount") || v.includes("deal");
 }
 
 /* ─── Row mappers (snake_case DB ↔ camelCase app) ──────────────────────────

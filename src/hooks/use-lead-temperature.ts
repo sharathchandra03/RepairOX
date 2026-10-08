@@ -56,6 +56,56 @@ function writeAll(events: LeadTemperatureEvent[]) {
   }
 }
 
+/**
+ * Append a REAL temperature transition to the shared (localStorage) history,
+ * WITHOUT needing the React hook. This is the single choke point any lead-write
+ * path (e.g. `updateLead` in leads-context, the detail drawer, the capture
+ * flow, the Lead Table inline edit) can call so that EVERY change to
+ * `lead.leadNature` is captured — not just changes made from the Temperature
+ * section. Append-only and reversible: a Hot → Cold → Warm sequence keeps all
+ * rows; nothing is overwritten.
+ *
+ * No-ops (returns null) when the raw value is unchanged, so the history never
+ * fabricates progression. Mounted hooks in the same tab refresh via the sync
+ * event dispatched by `writeAll`.
+ */
+export function recordTemperatureChange(args: {
+  leadId: string;
+  fromValue: string;
+  toValue: string;
+  changedBy: string;
+  changedByName: string;
+  reason?: string;
+}): LeadTemperatureEvent | null {
+  const from = (args.fromValue || "").trim();
+  const to = (args.toValue || "").trim();
+  if (!args.leadId || from === to) return null;
+  // Dedupe an immediate duplicate of the SAME transition (e.g. a surface that
+  // records with a reason, then updateLead's auto-record fires for the same
+  // leadNature change). Within a short window the richer (reason-carrying)
+  // first write wins and the second is skipped — history is never doubled.
+  const existing = readAll();
+  const recentDuplicate = existing.some(
+    (e) =>
+      e.leadId === args.leadId &&
+      (e.fromValue || "") === from &&
+      (e.toValue || "") === to &&
+      Date.now() - new Date(e.changedAt).getTime() < 10_000,
+  );
+  if (recentDuplicate) return null;
+  const event = makeTemperatureEvent({
+    id: uid(),
+    leadId: args.leadId,
+    fromValue: from,
+    toValue: to,
+    changedBy: args.changedBy,
+    changedByName: args.changedByName,
+    reason: args.reason,
+  });
+  writeAll([...readAll(), event]);
+  return event;
+}
+
 export interface UseLeadTemperatureResult {
   /** Whether the store has loaded from localStorage (avoids SSR flash). */
   hydrated: boolean;
@@ -107,24 +157,10 @@ export function useLeadTemperature(): UseLeadTemperatureResult {
   );
 
   const recordChange = useCallback<UseLeadTemperatureResult["recordChange"]>((args) => {
-    const from = (args.fromValue || "").trim();
-    const to = (args.toValue || "").trim();
-    // Only a REAL change is recorded. Identical raw values → no-op (the UI
-    // never fabricates progression).
-    if (from === to) return null;
-    const event = makeTemperatureEvent({
-      id: uid(),
-      leadId: args.leadId,
-      fromValue: from,
-      toValue: to,
-      changedBy: args.changedBy,
-      changedByName: args.changedByName,
-      reason: args.reason,
-    });
-    const current = readAll();
-    const next = [...current, event];
-    writeAll(next);
-    setEvents(next);
+    // Delegate to the shared choke point so the hook and any non-React writer
+    // (e.g. updateLead in leads-context) append through identical logic.
+    const event = recordTemperatureChange(args);
+    if (event) setEvents(readAll());
     return event;
   }, []);
 

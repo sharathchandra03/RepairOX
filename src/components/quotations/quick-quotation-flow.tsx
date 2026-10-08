@@ -18,7 +18,7 @@
      • Creating/sending never makes an invoice/payment/revenue or consumes stock.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { FileText, Send, Eye, Loader2 } from "lucide-react";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -62,6 +62,7 @@ export function QuickQuotationFlow({
     emptyQuotationDraft({ id: session.id || "", name: session.name || "" }, activeStoreId || ""));
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
   const [saving, setSaving] = useState(false);
   const [created, setCreated] = useState<Quotation | null>(null);
 
@@ -76,6 +77,16 @@ export function QuickQuotationFlow({
       setShowPreview(false);
     }
   }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When the preview is shown, scroll it into view so the user doesn't have to
+  // scroll manually. Wait a tick for the preview to render first.
+  useEffect(() => {
+    if (!showPreview) return;
+    const t = setTimeout(() => {
+      previewRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }, 60);
+    return () => clearTimeout(t);
+  }, [showPreview]);
 
   const patch = (p: Partial<QuotationDraft>) => setDraft((d) => ({ ...d, ...p }));
   const totals = computeQuotationTotals(draft);
@@ -257,7 +268,7 @@ export function QuickQuotationFlow({
               <Eye className="h-3.5 w-3.5" /> {showPreview ? "Hide preview" : "Show preview"}
             </Button>
             {showPreview && canGenerate ? (
-              <div className="mt-2">
+              <div ref={previewRef} className="mt-2 scroll-mt-4">
                 <QuotationPreview draft={draft} store={storeInfo} />
               </div>
             ) : null}

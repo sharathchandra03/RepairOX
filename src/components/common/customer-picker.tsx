@@ -7,7 +7,7 @@ import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { X, Phone, Mail, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CustomerLifecycleBadge, customerLifecycle } from '@/components/common/customer-classification';
+import { CustomerLifecycleBadge, CustomerTypeBadge, customerLifecycle } from '@/components/common/customer-classification';
 
 export interface CustomerPickerProps {
   value?: string; // selected customer ID
@@ -111,17 +111,8 @@ export function CustomerPicker({
             <span className="min-w-0 flex-1 truncate whitespace-nowrap text-[13px] font-medium text-zinc-900">
               {formatCustomerName(selectedCustomer)}
             </span>
-            <span className="shrink-0"><CustomerLifecycleBadge lifecycle={customerLifecycle(selectedCustomer)} /></span>
-            <span
-              className={cn(
-                'shrink-0 whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
-                selectedCustomer.type === 'business'
-                  ? 'bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20'
-                  : 'bg-emerald-50 text-emerald-600 ring-emerald-200'
-              )}
-            >
-              {selectedCustomer.type === 'business' ? 'Business' : 'Personal'}
-            </span>
+            <CustomerLifecycleBadge lifecycle={customerLifecycle(selectedCustomer)} className="shrink-0" />
+            <CustomerTypeBadge type={selectedCustomer.type} className="shrink-0" />
             {!disabled && (
               <button
                 onClick={handleClear}
@@ -204,16 +195,7 @@ export function CustomerPicker({
                         )}
                       </div>
                     </div>
-                    <span
-                      className={cn(
-                        'whitespace-nowrap rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ring-1 ring-inset',
-                        customer.type === 'business'
-                          ? 'bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20'
-                          : 'bg-emerald-50 text-emerald-600 ring-emerald-200'
-                      )}
-                    >
-                      {customer.type === 'business' ? 'Business' : 'Personal'}
-                    </span>
+                    <CustomerTypeBadge type={customer.type} className="shrink-0" />
                   </div>
                 </button>
               ))}

@@ -320,14 +320,217 @@ function MiniSelect({
   );
 }
 
-export function DeviceCatalogPicker({
-  value, onChange,
+/* ═══════════════════════════════════════════════════════════════════════
+   DEVICE MODEL SEARCH — ONE search box over EVERY model in the catalog.
+
+   Removes the Category → Brand → Model cascade friction: the user types a
+   model name (e.g. "iPhone 14", "Galaxy S23") and picks it directly, no
+   matter which category/brand it sits under. On pick it resolves the FULL
+   DeviceSelection (categoryId + brandId + modelId + label) from the shared
+   catalog, so downstream (Price List parts, quotation lines) keeps working.
+
+   It reads the canonical catalog via useCatalog() — never a second device
+   master — and sorts results A–Z (price-list-catalog standard). The brand +
+   category are shown as context on each result so same-named models across
+   brands stay distinguishable.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+export function DeviceModelSearch({
+  value, onChange, placeholder = "Search any model (e.g. iPhone 14, Galaxy S23)…",
 }: {
   value: DeviceSelection;
   onChange: (next: DeviceSelection) => void;
+  placeholder?: string;
+}) {
+  const { categories, brands, models } = useCatalog();
+  const { triggerRef, panelRef, open, setOpen, pos, place, mounted } = useAnchoredPanel();
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [query, setQuery] = useState("");
+  // Highlighted result for keyboard navigation (arrow keys + Enter).
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  // Fast lookup maps for brand / category names (resolve context + the label).
+  const brandById = useMemo(() => new Map(brands.map((b) => [b.id, b])), [brands]);
+  const catById = useMemo(() => new Map(categories.map((c) => [c.id, c])), [categories]);
+
+  // All enabled models, each enriched with its brand + category names, A–Z.
+  const allModels = useMemo(() => {
+    const rows = models
+      .filter((m) => m.status !== "discontinued")
+      .map((m) => {
+        const brand = brandById.get(m.brandId);
+        const cat = catById.get(m.categoryId);
+        return {
+          id: m.id,
+          name: m.name,
+          brandId: m.brandId,
+          categoryId: m.categoryId,
+          brandName: brand?.name || "",
+          categoryName: cat?.name || "",
+        };
+      });
+    return sortModelsAZ(rows);
+  }, [models, brandById, catById]);
+
+  const q = query.trim().toLowerCase();
+  const filtered = useMemo(() => {
+    if (!q) return allModels.slice(0, 50);
+    return allModels
+      .filter(
+        (m) =>
+          m.name.toLowerCase().includes(q) ||
+          m.brandName.toLowerCase().includes(q) ||
+          m.categoryName.toLowerCase().includes(q) ||
+          `${m.brandName} ${m.name}`.toLowerCase().includes(q),
+      )
+      .slice(0, 60);
+  }, [allModels, q]);
+
+  const openPanel = () => {
+    if (!open) {
+      place();
+      setOpen(true);
+      // Bring the field into view so the opened list isn't hidden below the
+      // fold (the panel is portalled + anchored to this trigger's rect).
+      requestAnimationFrame(() =>
+        triggerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }),
+      );
+    }
+  };
+  const close = () => { setOpen(false); setQuery(""); };
+
+  const pick = (m: { id: string; name: string; brandId: string; categoryId: string; brandName: string; categoryName: string }) => {
+    onChange({
+      categoryId: m.categoryId,
+      brandId: m.brandId,
+      modelId: m.id,
+      label: deviceLabel(m.brandName, m.name, m.categoryName),
+    });
+    close();
+    inputRef.current?.blur();
+  };
+
+  const clear = () => {
+    onChange({ categoryId: "", brandId: "", modelId: "", label: "" });
+    setQuery("");
+    openPanel();
+    inputRef.current?.focus();
+  };
+
+  // Reset the keyboard highlight to the top whenever the result set changes.
+  useEffect(() => { setActiveIdx(0); }, [q, open]);
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); openPanel(); setActiveIdx((i) => Math.min(i + 1, filtered.length - 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setActiveIdx((i) => Math.max(i - 1, 0)); }
+    else if (e.key === "Enter") { if (open && filtered[activeIdx]) { e.preventDefault(); pick(filtered[activeIdx]); } }
+    else if (e.key === "Escape") { if (open) { e.preventDefault(); close(); } }
+  };
+
+  // The main bar IS the search input. When a model is selected and the user
+  // isn't actively typing, it shows the selected label; focusing/typing lets
+  // them search again (the typed query takes over the display).
+  const displayValue = open ? query : (value.label || "");
+
+  return (
+    <>
+      <div
+        ref={triggerRef as unknown as React.RefObject<HTMLDivElement>}
+        className={cn(triggerCls(open), "cursor-text")}
+        onClick={() => { openPanel(); inputRef.current?.focus(); }}
+      >
+        <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={displayValue}
+          onFocus={openPanel}
+          onChange={(e) => { if (!open) openPanel(); setQuery(e.target.value); }}
+          onKeyDown={onKeyDown}
+          placeholder={placeholder}
+          aria-label="Search device models"
+          role="combobox"
+          aria-expanded={open}
+          className="min-w-0 flex-1 bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground"
+        />
+        {value.modelId || query ? (
+          <X
+            className="h-3.5 w-3.5 shrink-0 text-muted-foreground hover:text-rose-600"
+            onClick={(e) => { e.stopPropagation(); clear(); }}
+          />
+        ) : (
+          <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+        )}
+      </div>
+      {mounted && open && createPortal(
+        <>
+          <div className="fixed inset-0 z-[10040]" onClick={close} />
+          <div ref={panelRef} data-lead-popover-open="true" role="listbox"
+            style={{ left: pos.left, width: Math.max(pos.width, 280), top: pos.top, bottom: pos.bottom }}
+            className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]">
+            {/* Close header — always visible, gives an explicit way to dismiss
+                the model list (matches the shared SearchDropdownPanel). */}
+            <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-muted/30 px-2.5 py-1.5">
+              <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Models</span>
+              <button
+                type="button"
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={close}
+                aria-label="Close dropdown"
+                className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <div className="max-h-64 overflow-y-auto p-1">
+              {filtered.length === 0 ? (
+                <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">
+                  {q ? `No model matches “${query.trim()}”.` : "No models in the catalog yet."}
+                </p>
+              ) : (
+                filtered.map((m, i) => (
+                  <button key={m.id} type="button" role="option"
+                    aria-selected={m.id === value.modelId}
+                    onMouseEnter={() => setActiveIdx(i)}
+                    onClick={() => pick(m)}
+                    className={cn("flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+                      m.id === value.modelId ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : i === activeIdx ? "bg-[#EEF1FD]/60" : "hover:bg-[#EEF1FD]/60")}>
+                    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">
+                      <Smartphone className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate">{m.name}</span>
+                      {(m.brandName || m.categoryName) && (
+                        <span className="block truncate text-[10.5px] text-muted-foreground">
+                          {[m.brandName, m.categoryName].filter(Boolean).join(" · ")}
+                        </span>
+                      )}
+                    </span>
+                    {m.id === value.modelId && <Check className="ml-auto h-3.5 w-3.5 shrink-0 text-[#4361EE]" />}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  );
+}
+
+export function DeviceCatalogPicker({
+  value, onChange, searchFirst = true,
+}: {
+  value: DeviceSelection;
+  onChange: (next: DeviceSelection) => void;
+  /** When true (default) a single "search any model" box leads, with the
+   *  Category → Brand → Model cascade available as an optional fallback. */
+  searchFirst?: boolean;
 }) {
   const { categories, brands, models, addCategory, addBrand, addModel } = useCatalog();
   const { can } = usePermissions();
+  const [showBrowse, setShowBrowse] = useState(false);
   // Capturing a missing Category / Brand / Model inline writes to the shared
   // Device Catalog, so it's gated on the catalog edit capability (same key the
   // Price List uses). A view-tier user just picks from existing options.
@@ -380,20 +583,56 @@ export function DeviceCatalogPicker({
     setModel(model.id, model.name);
   };
 
+  // The Category → Brand → Model cascade (the precise way to drill down, or to
+  // CAPTURE a brand/model that isn't in the catalog yet).
+  const cascade = (
+    <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+      <MiniSelect value={value.categoryId} options={catOptions} onChange={setCategory} placeholder="Device Category"
+        onAdd={canAddCatalog ? addCategoryInline : undefined} addLabel="Add category" />
+      <MiniSelect value={value.brandId} options={brandOptions} onChange={setBrand} placeholder="Brand" disabled={!value.categoryId}
+        onAdd={canAddCatalog ? addBrandInline : undefined} addLabel="Add brand" />
+      <MiniSelect value={value.modelId} options={modelOptions} onChange={setModel} placeholder="Model Name" disabled={!value.brandId} alwaysSearch
+        onAdd={canAddCatalog ? addModelInline : undefined} addLabel="Add model" />
+    </div>
+  );
+
+  // Browse-by-category is only an OPTION in search-first mode; always shown
+  // (never collapsed) in the legacy cascade-only mode.
+  const browseOpen = !searchFirst || showBrowse;
+
   return (
     <div className="space-y-2">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-        <MiniSelect value={value.categoryId} options={catOptions} onChange={setCategory} placeholder="Device Category"
-          onAdd={canAddCatalog ? addCategoryInline : undefined} addLabel="Add category" />
-        <MiniSelect value={value.brandId} options={brandOptions} onChange={setBrand} placeholder="Brand" disabled={!value.categoryId}
-          onAdd={canAddCatalog ? addBrandInline : undefined} addLabel="Add brand" />
-        <MiniSelect value={value.modelId} options={modelOptions} onChange={setModel} placeholder="Model Name" disabled={!value.brandId} alwaysSearch
-          onAdd={canAddCatalog ? addModelInline : undefined} addLabel="Add model" />
-      </div>
+      {searchFirst ? (
+        <>
+          {/* ONE search box over every model, no category required. */}
+          <DeviceModelSearch value={value} onChange={onChange} />
+          <button
+            type="button"
+            onClick={() => setShowBrowse((s) => !s)}
+            className="text-[11px] font-medium text-[#4361EE] hover:underline"
+          >
+            {browseOpen ? "Hide category browse" : "Can't find it? Browse by category"}
+          </button>
+          {browseOpen && cascade}
+        </>
+      ) : (
+        cascade
+      )}
       {value.label && (
-        <p className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-medium text-[#4361EE]">
-          <Smartphone className="h-3 w-3" /> {value.label}
-        </p>
+        <div className="pt-1">
+          <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] py-1 pl-2.5 pr-1.5 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40">
+            <Smartphone className="h-3 w-3 shrink-0" />
+            <span className="truncate">{value.label}</span>
+            <button
+              type="button"
+              aria-label="Remove selected device"
+              onClick={() => onChange({ categoryId: "", brandId: "", modelId: "", label: "" })}
+              className="grid h-4 w-4 shrink-0 place-items-center rounded-full transition hover:bg-[#4361EE]/15"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        </div>
       )}
     </div>
   );

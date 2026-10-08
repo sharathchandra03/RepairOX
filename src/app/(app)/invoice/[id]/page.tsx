@@ -31,6 +31,7 @@ import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
+import { DetailSection as SharedDetailSection, DetailHero, type Accent } from "@/components/common/detail-page";
 import { GitBranch } from "lucide-react";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -294,7 +295,7 @@ export default function InvoiceDetailPage() {
   return (
     <div className="space-y-7 pb-10">
       {/* ─── Header ───────────────────────────────────────────────────── */}
-      <div className="rounded-2xl border border-border/70 bg-gradient-to-br from-card to-[#EEF1FD]/30 p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_16px_-4px_rgba(67,97,238,0.08)] sm:p-6">
+      <DetailHero>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
             <Link href="/invoice">
@@ -403,7 +404,7 @@ export default function InvoiceDetailPage() {
         </div>
 
         {/* Summary Cards */}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <div className="relative mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <SummaryCard label="Customer" value={invoice.customer} icon={User} />
           <SummaryCard label="Phone" value={invoice.phone} icon={Phone} />
           <SummaryCard label={proforma ? "Grand Total" : "Total"} value={formatINR(invoice.total)} icon={CreditCard} />
@@ -421,7 +422,7 @@ export default function InvoiceDetailPage() {
           )}
           <SummaryCard label="Created" value={fmtDateShort(invoice.createdAt)} icon={Tag} />
         </div>
-      </div>
+      </DetailHero>
 
       {/* ─── Main Content Grid ────────────────────────────────────────── */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
@@ -430,7 +431,7 @@ export default function InvoiceDetailPage() {
           {/* Linked Records / Document History — Estimate → Ticket → Proforma →
               Invoice. Only rendered when the record has any lineage. */}
           {lineageNodes.length > 1 && (
-            <DetailSection title="Linked Records" icon={GitBranch}>
+            <DetailSection title="Linked Records" icon={GitBranch} accent="blue">
               <DocumentLineage nodes={lineageNodes} />
               {proforma && invoice.convertedInvoiceId && (
                 <p className="mt-3 text-[12px] text-muted-foreground">
@@ -453,6 +454,7 @@ export default function InvoiceDetailPage() {
 
           {/* Customer Information */}
           <DetailSection
+            accent="green"
             title="Customer Information"
             icon={User}
             action={
@@ -471,6 +473,7 @@ export default function InvoiceDetailPage() {
 
           {/* Billing Details */}
           <DetailSection
+            accent="emerald"
             title="Billing Details"
             icon={Tag}
             action={
@@ -543,6 +546,7 @@ export default function InvoiceDetailPage() {
 
           {/* Invoice Items / Devices */}
           <DetailSection
+            accent="indigo"
             title={invoice.devices && invoice.devices.length > 0 ? `Devices & Parts (${invoice.devices.length})` : "Invoice Items"}
             icon={Receipt}
             action={
@@ -652,6 +656,7 @@ export default function InvoiceDetailPage() {
 
           {/* Tax & Discounts */}
           <DetailSection
+            accent="amber"
             title="Tax & Discounts"
             icon={CreditCard}
             action={
@@ -679,6 +684,7 @@ export default function InvoiceDetailPage() {
 
           {/* Payment Information */}
           <DetailSection
+            accent="emerald"
             title="Payment Information"
             icon={CheckCircle2}
             action={
@@ -714,6 +720,7 @@ export default function InvoiceDetailPage() {
 
           {/* Terms & Footer */}
           <DetailSection
+            accent="neutral"
             title="Terms & Footer"
             icon={StickyNote}
             action={
@@ -749,7 +756,7 @@ export default function InvoiceDetailPage() {
 
           {/* Related Ticket */}
           {invoice.ticketId && (
-            <DetailSection title="Related Ticket" icon={TicketIcon}>
+            <DetailSection title="Related Ticket" icon={TicketIcon} accent="blue">
               {linkedTicket ? (
                 <Link
                   href={`/tickets/${linkedTicket.id}`}
@@ -1124,7 +1131,7 @@ export default function InvoiceDetailPage() {
 
 function SummaryCard({ label, value, icon: Icon }: { label: string; value: string; icon: any }) {
   return (
-    <div className="rounded-xl border border-border/70 bg-card/80 p-3 shadow-[0_1px_2px_rgba(0,0,0,0.03)] backdrop-blur-sm transition hover:border-[#B3BFF6]/50">
+    <div className="rounded-xl border border-border bg-card p-3 shadow-sm transition hover:border-[#4361EE]/30">
       <div className="flex items-center gap-2">
         <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
           <Icon className="h-3.5 w-3.5" />
@@ -1138,20 +1145,15 @@ function SummaryCard({ label, value, icon: Icon }: { label: string; value: strin
   );
 }
 
-function DetailSection({ title, icon: Icon, children, action }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode }) {
+/* View Invoice sections reuse the SHARED premium detail-page look (border +
+   soft 3D shadow + left colour-accent strip + scroll-reveal) via the
+   `common/detail-page` DetailSection, keeping View Lead / Ticket / Invoice
+   uniform. `accent` defaults to blue; callers may pass a semantic accent. */
+function DetailSection({ title, icon: Icon, children, action, id, accent = "blue" }: { title: string; icon: any; children: React.ReactNode; action?: React.ReactNode; id?: string; accent?: Accent }) {
   return (
-    <div className="rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
-      <div className="flex items-center justify-between gap-2.5 mb-5 pb-4 border-b border-border/70">
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-            <Icon className="h-4 w-4" />
-          </span>
-          <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h2>
-        </div>
-        {action}
-      </div>
+    <SharedDetailSection title={title} icon={Icon} action={action} id={id} accent={accent}>
       {children}
-    </div>
+    </SharedDetailSection>
   );
 }
 

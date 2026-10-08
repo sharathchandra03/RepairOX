@@ -54,6 +54,7 @@ import {
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { LeadFollowUpView } from "@/components/leads/lead-followup-view";
 import { LeadFollowUpBell } from "@/components/leads/lead-followup-bell";
+import { SalesAgentsOnline } from "@/components/leads/sales-agents-online";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
@@ -1549,6 +1550,8 @@ export default function LeadsListPage() {
         subtitle="Every enquiry in one place — capture fast, qualify when ready, follow up on time."
         actions={
           <div className="flex items-center gap-2">
+            {/* Live roster of Sales Agents who are active right now (shared). */}
+            <SalesAgentsOnline />
             {/* Lead follow-up bell — the current user's Due/Overdue follow-ups. */}
             <LeadFollowUpBell onOpenLead={openLead} />
             <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">

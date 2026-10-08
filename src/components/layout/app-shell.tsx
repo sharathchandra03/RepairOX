@@ -18,6 +18,7 @@ import { ComingSoonPage } from "@/components/common/coming-soon";
 import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visibility";
 import { resetDemoData } from "@/lib/demo-mode";
 import { useSessionTracker } from "@/lib/use-session-tracker";
+import { useSalesPresenceTracker } from "@/lib/use-sales-presence";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -100,6 +101,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Record this device as a real, revocable session (Settings → Active Sessions)
   // and heartbeat its last-activity while the app is open. No effect in local mode.
   useSessionTracker();
+
+  // Publish app-wide "online" presence for the signed-in user, with an idle
+  // timeout (option C). Marks the user online whenever ANY RepairOX page is open
+  // and they are active; untracks after 5 min idle so the shared Sales Agents
+  // Online roster reflects who is actively working right now.
+  useSalesPresenceTracker({ id: currentUser?.id, name: currentUser?.name });
 
   // Route guard — once the session is restored, bounce anyone who isn't
   // signed in back to the login screen. Access is centrally controlled.

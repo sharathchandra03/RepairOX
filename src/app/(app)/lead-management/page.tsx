@@ -28,7 +28,7 @@ import {
 import {
   Inbox, Target, TrendingUp, UserPlus, Megaphone, Plus, ChevronRight,
   CheckCircle2, Clock, AlertTriangle, IndianRupee, Trophy, Route as RouteIcon,
-  Flame, CalendarClock, ArrowUpRight, Smartphone, BarChart3,
+  Flame, CalendarClock, ArrowUpRight, Smartphone,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -44,7 +44,7 @@ import { useStore } from "@/lib/store";
 import {
   type Lead, type LeadFollowUp, followUpLifecycle,
   isQualifiedLead, isWonStatus, isLostStatus,
-  EMPTY_LEAD_FILTERS,
+  EMPTY_LEAD_FILTERS, LEAD_CONVERSION_EVENT_LABEL,
 } from "@/lib/leads-data";
 import {
   computeAgentPerformance, applyPerfFilters,
@@ -52,6 +52,7 @@ import {
 } from "@/lib/agent-performance";
 import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
+import { SalesAgentsOnline } from "@/components/leads/sales-agents-online";
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 import { NotepadWidget } from "@/components/dashboard/notepad-widget";
 
@@ -74,7 +75,7 @@ export default function LeadDashboardPage() {
   const router = useRouter();
   const { can } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
-  const { leads, followUps, canSeeAllLeads, setFilters } = useLeads();
+  const { leads, followUps, canSeeAllLeads, setFilters, assignmentHistory, conversionHistory } = useLeads();
   const { tickets, invoices } = useStore();
 
   const [dateRange, setDateRange] = useState<PerfDateRange>("today");
@@ -124,6 +125,57 @@ export default function LeadDashboardPage() {
   );
 
   const revenue = useMemo(() => ({ tickets, invoices }), [tickets, invoices]);
+
+  /* "Last activity" status shown next to the online pill. Tracks the most
+     recent lead activity ACROSS every account the user is allowed to see (a
+     see-all owner sees everyone; an individual agent sees their own — bounded
+     by the same RLS/visibility scope, never bypassed). It merges real activity
+     streams — lead created/updated, (re)assignment, and conversion/handoff
+     events — picks the single most recent, and surfaces WHO did it (the saved
+     account name) + WHAT + WHEN. Presentation only; never fabricated. */
+  const lastActivityLabel = useMemo(() => {
+    type Act = { at: number; who: string; what: string };
+    const acts: Act[] = [];
+    const push = (iso?: string, who?: string, what?: string) => {
+      const t = new Date(iso || "").getTime();
+      if (!iso || Number.isNaN(t)) return;
+      acts.push({ at: t, who: (who || "").trim(), what: what || "updated a lead" });
+    };
+
+    for (const l of leads) {
+      const owner = l.assignedToName || l.agent || "";
+      // Created vs updated: if updatedAt is meaningfully after createdAt it's an edit.
+      const created = new Date(l.createdAt || l.date || "").getTime();
+      const updated = new Date(l.updatedAt || "").getTime();
+      push(l.createdAt || l.date, owner, `added lead ${l.leadNo || ""}`.trim());
+      if (!Number.isNaN(updated) && !Number.isNaN(created) && updated - created > 1000) {
+        push(l.updatedAt, owner, `updated lead ${l.leadNo || ""}`.trim());
+      }
+    }
+    for (const h of assignmentHistory) {
+      const who = h.assignedByName || h.toUserName || "";
+      const to = h.toUserName ? ` to ${h.toUserName}` : "";
+      push(h.createdAt, who, `assigned a lead${to}`);
+    }
+    for (const e of conversionHistory) {
+      const label = LEAD_CONVERSION_EVENT_LABEL[e.eventType] || "updated a lead";
+      push(e.occurredAt, e.actorName, label.toLowerCase());
+    }
+
+    if (acts.length === 0) return "";
+    acts.sort((a, b) => b.at - a.at);
+    const top = acts[0];
+    const when = formatRelativeTime(top.at);
+    // Owner / full-access sees WHO did it; everyone else sees the activity
+    // without the account name.
+    if (canSeeAllLeads) {
+      const who = top.who || "Someone";
+      return `${who} ${top.what} · ${when}`;
+    }
+    // Capitalise the leading verb for the name-less variant.
+    const what = top.what.charAt(0).toUpperCase() + top.what.slice(1);
+    return `${what} · ${when}`;
+  }, [leads, assignmentHistory, conversionHistory, canSeeAllLeads]);
 
   /* Resolve a KPI/stage keyword → the matching admin-configurable status value
      (so a click lands on the right filter without hardcoding a status enum). */
@@ -259,18 +311,21 @@ export default function LeadDashboardPage() {
         title="Lead Dashboard"
         subtitle={scopeSubtitle}
         actions={
-          <div className="flex items-center gap-2">
-            <Link
-              href={allow(can, CAP.lead.performanceAll) ? "/leads/intelligence/agents" : "/leads/intelligence"}
-              className="hidden items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-semibold text-zinc-600 transition hover:bg-muted sm:inline-flex"
-            >
-              <BarChart3 className="h-3.5 w-3.5" /> Intelligence
-            </Link>
-            <Can permission={CAP.lead.create}>
-              <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
-                <Plus className="h-3.5 w-3.5" /> Quick Add Lead
-              </Button>
-            </Can>
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex items-center gap-2">
+              <SalesAgentsOnline />
+              <Can permission={CAP.lead.create}>
+                <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
+                  <Plus className="h-3.5 w-3.5" /> Quick Add Lead
+                </Button>
+              </Can>
+            </div>
+            {lastActivityLabel && (
+              <span className="hidden items-center gap-1.5 pr-1 text-[11px] font-medium italic text-muted-foreground md:inline-flex">
+                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                {lastActivityLabel}
+              </span>
+            )}
           </div>
         }
       />
@@ -747,6 +802,20 @@ function formatRangeLabel(from: string, to: string): string {
     return d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
   };
   return `${fmt(from)} — ${fmt(to)}`;
+}
+
+/* Human relative time for the "Last updated lead …" status (just now / N min
+   ago / N hr ago / Mon DD at HH:MM for older). */
+function formatRelativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  const mins = Math.round(diff / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins} min ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
+  const d = new Date(ms);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return `on ${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", ...(sameYear ? {} : { year: "numeric" }) })} at ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 /* ── Per-tone visual system — mirrors the Shop Dashboard KpiCard so the two

@@ -201,7 +201,7 @@ export default function PrintPreviewPage() {
   }
 
   return (
-    <div className="print-page-wrapper">
+    <div className="print-page-wrapper print-screen-shell">
       {/* ── Control Bar (hidden when printing) ── */}
       <div className="print-hide" style={{ position: "sticky", top: 0, zIndex: 50, background: "#fff", borderBottom: "1px solid #e5e7eb", boxShadow: "0 1px 2px rgba(0,0,0,0.05)" }}>
         <div style={{ maxWidth: 1280, margin: "0 auto", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -238,11 +238,17 @@ export default function PrintPreviewPage() {
         </div>
       </div>
 
-      {/* ── Template Preview Area ── */}
-      <div className="print-area">
-        {format === "a4" && <A4Template data={printData} />}
-        {format === "thermal" && <ThermalTemplate data={printData} />}
-        {format === "label" && <LabelTemplate data={printData} />}
+      {/* ── Template Preview Area ──
+          Wrapped in a dedicated screen scroll region so the mouse wheel scrolls
+          the document anywhere over it (not just via the scrollbar). The
+          `.print-area` keeps its original centring; the scroll lives on the
+          outer region, which is reset to a plain block when printing. */}
+      <div className="print-scroll-region">
+        <div className="print-area">
+          {format === "a4" && <A4Template data={printData} />}
+          {format === "thermal" && <ThermalTemplate data={printData} />}
+          {format === "label" && <LabelTemplate data={printData} />}
+        </div>
       </div>
     </div>
   );

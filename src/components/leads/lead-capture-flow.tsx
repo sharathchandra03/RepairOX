@@ -136,7 +136,20 @@ function ConfigurableSelect({
         )}
       >
         <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value ? label(value) : (placeholder || "Select…")}</span>
-        <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform", open && "rotate-180")} />
+        <span className="flex shrink-0 items-center gap-1">
+          {value && (
+            <span
+              role="button"
+              tabIndex={-1}
+              aria-label="Clear selection"
+              onClick={(e) => { e.stopPropagation(); onChange(""); close(); }}
+              className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-500"
+            >
+              <X className="h-3.5 w-3.5" />
+            </span>
+          )}
+          <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+        </span>
       </button>
       {mounted && open && createPortal(
         <>
@@ -446,12 +459,16 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     label: draft.device ?? "",
   };
   const onDeviceChange = (next: DeviceSelection) => {
+    // The picker is the source of truth for the whole selection — use its label
+    // DIRECTLY (never fall back to the previous value), so removing the device
+    // (empty selection) actually clears the cached `device` label and the chip
+    // disappears instead of lingering.
     setDraft((d) => ({
       ...d,
       deviceCategoryId: next.categoryId,
       deviceBrandId: next.brandId,
       deviceModelId: next.modelId,
-      device: next.label || d.device || "",
+      device: next.label,
     }));
   };
 

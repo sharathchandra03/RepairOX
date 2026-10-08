@@ -477,6 +477,20 @@ export function deriveLeadWorkflow(
       "Discount Approval",
     );
   }
+  // An APPROVED / REJECTED deal reflects the manager's decision back on the
+  // lead (so the queue decision is visible in the Lead Table). It is NOT a
+  // conversion — approval only authorises the exception, rejection does NOT
+  // lose the lead (§24/§25) — so Result stays "In Pipeline" and a more
+  // advanced operational record above still wins.
+  if (deal && (deal.status === "approved" || deal.status === "rejected")) {
+    const approved = deal.status === "approved";
+    return mk(
+      "discount_approval",
+      { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" },
+      `Discount approval ${deal.dealNo} was ${approved ? "approved" : "rejected"} by the manager.`,
+      approved ? "Deal Approved" : "Deal Rejected",
+    );
+  }
 
   // ── 6b) DEAL path by status label (link only; no real deal record). ──
   if (isDealLead(lead)) {

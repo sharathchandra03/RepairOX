@@ -198,19 +198,20 @@ export function LeadTemperatureSection({
     if (!to || to === current) { setChanging(false); return; }
     setBusy(true);
     try {
-      // 1) Update the canonical lead temperature (never touches lead.status).
-      const ok = await updateLead(lead.id, { leadNature: to });
-      if (ok !== false) {
-        // 2) Append the reversible history event (real change only).
-        recordChange({
-          leadId: lead.id,
-          fromValue: current,
-          toValue: to,
-          changedBy: userId || "",
-          changedByName: userName || "",
-          reason,
-        });
-      }
+      // 1) Append the reversible history event FIRST, carrying the optional
+      //    reason. updateLead also records the leadNature transition at the data
+      //    layer, but it dedupes against this richer (reason-carrying) row so
+      //    the reason is preserved and history is never doubled.
+      recordChange({
+        leadId: lead.id,
+        fromValue: current,
+        toValue: to,
+        changedBy: userId || "",
+        changedByName: userName || "",
+        reason,
+      });
+      // 2) Update the canonical lead temperature (never touches lead.status).
+      await updateLead(lead.id, { leadNature: to });
       setChanging(false);
       setReason("");
     } finally {
@@ -219,10 +220,13 @@ export function LeadTemperatureSection({
   };
 
   return (
-    <section id={id} className="scroll-mt-24 rounded-2xl border border-border bg-card p-5 shadow-card sm:p-6">
+    <section id={id} className="relative scroll-mt-28 overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-card transition-shadow hover:shadow-[0_14px_40px_-24px_rgba(20,30,80,0.3)] sm:p-6">
+      {/* Left accent strip — matches the other View-Lead sections. Temperature
+          is a semantic (warm/amber) concept. */}
+      <span aria-hidden className="absolute inset-y-0 left-0 w-1 bg-amber-500" />
       <div className="mb-5 flex items-center justify-between gap-2.5 border-b border-border/70 pb-4">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Thermometer className="h-4 w-4" /></span>
+          <span className="grid h-8 w-8 place-items-center rounded-lg bg-amber-50 text-amber-600"><Thermometer className="h-4 w-4" /></span>
           <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">Lead Temperature</h2>
         </div>
         {canChange && !changing && (

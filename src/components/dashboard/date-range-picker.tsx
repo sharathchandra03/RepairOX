@@ -14,6 +14,10 @@ type DateRangePickerProps = {
   onClose: () => void;
   onApply: (range: DateRange) => void;
   initialRange?: DateRange;
+  /** Allow selecting dates in the future. Dashboard filters past data so it
+   * defaults to false; general-purpose filters (Tickets / Invoice / CRM) pass
+   * true so a future range can be picked. */
+  allowFuture?: boolean;
 };
 
 /* ── Helpers ── */
@@ -124,7 +128,7 @@ function MonthYearSelector({
 /* ── Calendar Grid ── */
 function CalendarGrid({
   year, month, range, hoverDate, onDayClick, onDayHover, onMonthYearClick,
-  onPrevMonth, onNextMonth,
+  onPrevMonth, onNextMonth, allowFuture = false,
 }: {
   year: number;
   month: number;
@@ -135,6 +139,7 @@ function CalendarGrid({
   onMonthYearClick: () => void;
   onPrevMonth: () => void;
   onNextMonth: () => void;
+  allowFuture?: boolean;
 }) {
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
@@ -185,7 +190,7 @@ function CalendarGrid({
           const isSelected = isStart || isEnd;
           const inRange = range.start && effectiveEnd && isInRange(day, range.start, effectiveEnd);
           const isToday = isSameDay(day, today);
-          const isFuture = day.getTime() > today.getTime();
+          const isFuture = !allowFuture && day.getTime() > today.getTime();
 
           return (
             <button
@@ -213,7 +218,7 @@ function CalendarGrid({
 }
 
 /* ── Main DateRangePicker ── */
-export function DateRangePicker({ open, onClose, onApply, initialRange }: DateRangePickerProps) {
+export function DateRangePicker({ open, onClose, onApply, initialRange, allowFuture = false }: DateRangePickerProps) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -353,6 +358,7 @@ export function DateRangePicker({ open, onClose, onApply, initialRange }: DateRa
                   onMonthYearClick={() => setShowSelector(true)}
                   onPrevMonth={handlePrevMonth}
                   onNextMonth={handleNextMonth}
+                  allowFuture={allowFuture}
                 />
               )}
             </div>

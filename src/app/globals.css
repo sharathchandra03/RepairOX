@@ -1138,6 +1138,25 @@ html, body {
     justify-content: center;
     padding: 32px 16px;
   }
+
+  /* Dedicated screen scroll shell for the print preview. The control bar sits
+     at the top in normal flow; the scroll region fills the rest of the viewport
+     and owns the vertical scroll, so the mouse wheel scrolls the document
+     wherever the pointer is (previously the globally-constrained body hijacked
+     the scroll and only the scrollbar worked). */
+  .print-screen-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    height: 100dvh;
+    overflow: hidden;
+  }
+
+  .print-screen-shell .print-scroll-region {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: auto;
+  }
 }
 
 /* Print media styles */
@@ -1182,9 +1201,22 @@ html, body {
     background: white !important;
   }
 
+  /* Reset the screen scroll shell/region for print (no clipping, no fixed
+     viewport height). */
+  .print-screen-shell,
+  .print-scroll-region {
+    display: block !important;
+    height: auto !important;
+    min-height: 0 !important;
+    overflow: visible !important;
+    flex: none !important;
+  }
+
   /* Ensure all wrapper elements between body and print content are visible */
   .print-page-wrapper,
   .print-page-wrapper > *,
+  .print-scroll-region,
+  .print-scroll-region > *,
   .print-area,
   .print-area > * {
     visibility: visible !important;

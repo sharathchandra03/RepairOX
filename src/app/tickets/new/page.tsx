@@ -17,6 +17,7 @@ import { CategoryWheel } from "@/components/wizard/category-wheel";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
 import { AddContactModal } from "@/components/common/add-contact-modal";
+import { SearchDropdownPanel } from "@/components/common/search-dropdown-panel";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
@@ -2945,7 +2946,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
 
       {/* Dropdown */}
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 w-full rounded-xl border border-border bg-card p-1.5 shadow-xl ring-1 ring-black/[0.03] max-h-60 overflow-y-auto">
+        <SearchDropdownPanel label="Issues" onClose={() => setOpen(false)}>
           {showCreate && (
             <button
               type="button"
@@ -2973,7 +2974,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
           ) : !showCreate ? (
             <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No issues found</p>
           ) : null}
-        </div>
+        </SearchDropdownPanel>
       )}
     </div>
   );

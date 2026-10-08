@@ -28,6 +28,7 @@ import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
 import { notify } from "@/lib/notifications";
 import { createProspectContact, findContactMatches } from "@/lib/contact-service";
+import { recordTemperatureChange } from "@/hooks/use-lead-temperature";
 import { CAP, allow } from "@/lib/capabilities";
 import {
   agentsForStore, computeLocalSalesAgents, friendlyLeadOwnershipError, isAgentEligible,
@@ -1128,6 +1129,20 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   function afterLeadCreated(created: Lead) {
     const me = currentUserIdRef.current || "";
     const by = currentUserNameRef.current || "";
+    // Seed the "initial temperature at creation" fact ONCE, so the full
+    // Hot → … history always starts from the real starting point even if the
+    // temperature is changed before anyone opens View Lead. Append-only; no-ops
+    // when the lead has no temperature.
+    if (created.leadNature) {
+      recordTemperatureChange({
+        leadId: created.id,
+        fromValue: "",
+        toValue: created.leadNature,
+        changedBy: created.createdBy || me,
+        changedByName: created.assignedToName || created.agent || by,
+        reason: "Initial temperature at lead creation.",
+      });
+    }
     toast.success("Lead created", {
       description: `${created.leadNo} · ${created.name}${created.assignedToName ? ` — owner: ${created.assignedToName}` : ""}`,
     });
@@ -1261,9 +1276,29 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       delete updates.followUpAgent;
     }
 
+    // Capture the temperature (leadNature) transition BEFORE writing, so the
+    // "from" value is the authoritative previous one. This is the single choke
+    // point: ANY surface that changes leadNature through updateLead (the detail
+    // drawer, the capture-flow edit, the Lead Table inline edit, the Temperature
+    // section) appends a reversible history event — never just the first/last.
+    const natureChange =
+      updates.leadNature !== undefined && !!current &&
+      (updates.leadNature || "").trim() !== (current.leadNature || "").trim();
+    const natureFrom = current?.leadNature || "";
+    const natureTo = (updates.leadNature || "").trim();
+
     let saved = true;
     if (Object.keys(updates).length > 0) saved = await persistLeadPatch(id, updates);
     if (!saved) return false;
+    if (natureChange) {
+      recordTemperatureChange({
+        leadId: id,
+        fromValue: natureFrom,
+        toValue: natureTo,
+        changedBy: currentUserIdRef.current || "",
+        changedByName: currentUserNameRef.current || "",
+      });
+    }
     if (fuChange) await reassignOpenFollowUpsRef.current(id, updates.followUpAgentId || "", updates.followUpAgent || "", previousFollowUpAgent);
     if (ownerChange) return assignLeadRef.current(id, assignedTo || "", assignedToName || "");
     return true;

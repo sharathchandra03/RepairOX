@@ -18,6 +18,7 @@ import { X, Plus, Check } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
 import { cn } from "@/lib/utils";
+import { SearchDropdownPanel } from "@/components/common/search-dropdown-panel";
 
 export function IssueSelector({
   value,
@@ -39,6 +40,7 @@ export function IssueSelector({
   const [query, setQuery] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const selected = parseIssueString(value);
 
@@ -49,6 +51,21 @@ export function IssueSelector({
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
+  }, [open]);
+
+  // When the dropdown opens, bring the option panel into view so the user never
+  // has to scroll manually to see the just-opened list. The panel is absolutely
+  // positioned BELOW the input, so we scroll the panel itself into view (not the
+  // input) — otherwise the input could sit at the bottom edge with its list
+  // hidden off-screen. Runs after the panel paints; `block: "nearest"` scrolls
+  // only the amount needed within the closest scroll container and no-ops when
+  // the panel is already fully visible.
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => {
+      (panelRef.current ?? containerRef.current)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    });
+    return () => cancelAnimationFrame(id);
   }, [open]);
 
   const filtered = issueLibrary
@@ -123,7 +140,7 @@ export function IssueSelector({
       </div>
 
       {open && (
-        <div className="absolute left-0 top-full z-50 mt-1.5 w-full rounded-xl border border-border bg-card p-1.5 shadow-xl ring-1 ring-black/[0.03] max-h-60 overflow-y-auto">
+        <SearchDropdownPanel ref={panelRef} label="Issues" onClose={() => setOpen(false)}>
           {showCreate && (
             <button
               type="button"
@@ -151,7 +168,7 @@ export function IssueSelector({
           ) : !showCreate ? (
             <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No issues found</p>
           ) : null}
-        </div>
+        </SearchDropdownPanel>
       )}
     </div>
   );
