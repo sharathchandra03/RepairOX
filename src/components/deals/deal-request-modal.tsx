@@ -15,7 +15,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X, BadgePercent, Info } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea, Label } from "@/components/ui/input";
-import { SegmentedTabs } from "@/components/ui/tabs";
 import { cn, formatINR } from "@/lib/utils";
 import { useDeals } from "@/lib/lead-deals-context";
 import { currentDealForLead, formatDealDiscount, type LeadDeal } from "@/lib/lead-deals";
@@ -37,26 +36,46 @@ export function DealRequestModal({
   React.useEffect(() => { setMounted(true); }, []);
 
   const resubmit = !!deal;
-  // Prefill from the existing deal (resubmit) or the lead's own discount.
-  const [type, setType] = React.useState<"amount" | "percent">("percent");
-  const [value, setValue] = React.useState<string>("");
+  // The quoted price this request is measured against.
+  const quote = (deal?.leadValue ?? lead?.estimate) ?? null;
+
+  /* The agent enters the PRICE THE CUSTOMER WANTS TO PAY (an absolute ₹). The
+     stored model keeps a `requestedDiscount` (amount off the quote) so the DB,
+     approval flow, revisions and existing deals are untouched — we convert at
+     the boundary (price ⇄ discount). `price` is the agent-facing input. */
+  const [price, setPrice] = React.useState<string>("");
   const [reason, setReason] = React.useState<string>("");
   const [saving, setSaving] = React.useState(false);
   const [touched, setTouched] = React.useState(false);
 
+  /** Convert a stored discount (amount/percent) back to the customer's price. */
+  const discountToPrice = React.useCallback(
+    (discount: number | null, type: "amount" | "percent"): string => {
+      if (quote == null || discount == null) return "";
+      const off = type === "percent" ? (quote * discount) / 100 : discount;
+      return String(Math.max(0, Math.round(quote - off)));
+    },
+    [quote],
+  );
+
   React.useEffect(() => {
     if (!open) return;
     if (deal) {
-      setType(deal.requestedDiscountType);
-      setValue(deal.requestedDiscount == null ? "" : String(deal.requestedDiscount));
+      setPrice(discountToPrice(deal.requestedDiscount, deal.requestedDiscountType));
       setReason(deal.requestedReason || "");
     } else {
-      setType(lead?.discountType === "amount" ? "amount" : "percent");
-      setValue(lead?.discount == null ? "" : String(lead.discount));
+      // Prefill from the lead's own discount if one is set, else blank.
+      setPrice(discountToPrice(lead?.discount ?? null, lead?.discountType === "amount" ? "amount" : "percent"));
       setReason("");
     }
     setTouched(false);
-  }, [open, deal, lead]);
+  }, [open, deal, lead, discountToPrice]);
+
+  // Live derived values from the entered price vs the quote.
+  const priceNum = price.trim() === "" ? null : Number(price.replace(/[^0-9.]/g, ""));
+  const offAmount = quote != null && priceNum != null ? Math.round(quote - priceNum) : null;
+  const offPct = quote != null && quote > 0 && offAmount != null ? Math.round((offAmount / quote) * 100) : null;
+  const priceInvalid = priceNum != null && quote != null && (priceNum < 0 || priceNum > quote);
 
   React.useEffect(() => {
     if (!open) return;
@@ -75,14 +94,20 @@ export function DealRequestModal({
 
   const submit = async () => {
     setTouched(true);
-    if (reasonMissing) return;
+    if (reasonMissing || priceInvalid) return;
     setSaving(true);
     try {
+      // Convert the customer's requested price → the stored discount (amount
+      // off the quote). When the quote is unknown we can't derive a discount,
+      // so the request carries no discount (price is still recorded as reason
+      // context by the agent). Clamp so the discount is never negative.
+      const requestedDiscount =
+        quote != null && priceNum != null ? Math.max(0, Math.round(quote - priceNum)) : null;
       const draft = {
-        requestedDiscount: value.trim() === "" ? null : Number(value.replace(/[^0-9.]/g, "")),
-        requestedDiscountType: type,
+        requestedDiscount,
+        requestedDiscountType: "amount" as const,
         requestedReason: reason.trim(),
-        leadValue: lead.estimate ?? null,
+        leadValue: quote,
       };
       if (resubmit && deal) {
         const ok = await resubmitDeal(deal.id, draft);
@@ -131,31 +156,45 @@ export function DealRequestModal({
                   </div>
                 )}
 
-                {/* Lead value context */}
+                {/* Price quoted context */}
                 <div className="flex items-center justify-between rounded-xl border border-border bg-muted/30 px-3.5 py-2.5">
-                  <span className="text-[12px] font-medium text-muted-foreground">Lead Value</span>
-                  <span className="text-[13px] font-semibold tabular-nums">{lead.estimate == null ? "—" : formatINR(lead.estimate)}</span>
+                  <span className="text-[12px] font-medium text-muted-foreground">Price Quoted</span>
+                  <span className="text-[13px] font-semibold tabular-nums">{quote == null ? "—" : formatINR(quote)}</span>
                 </div>
 
-                {/* Requested discount */}
+                {/* Price the customer requested (absolute ₹, not a discount) */}
                 <div className="space-y-1.5">
-                  <Label>Requested Discount</Label>
-                  <div className="flex items-stretch gap-2">
-                    <SegmentedTabs
-                      size="sm"
-                      options={[{ label: "%", value: "percent" }, { label: "₹", value: "amount" }]}
-                      value={type}
-                      onChange={(v) => setType(v as "amount" | "percent")}
-                    />
+                  <Label>Price Customer Requested</Label>
+                  <div className="relative">
+                    <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] font-medium text-muted-foreground">₹</span>
                     <input
-                      value={value}
-                      onChange={(e) => setValue(e.target.value.replace(/[^0-9.]/g, ""))}
+                      value={price}
+                      onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))}
                       inputMode="decimal"
-                      placeholder={type === "percent" ? "e.g. 20" : "e.g. 2000"}
-                      className="h-9 flex-1 rounded-lg border border-input bg-card px-3 text-[13px] outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+                      placeholder={quote != null ? `e.g. ${Math.round(quote * 0.8)}` : "e.g. 8000"}
+                      className={cn(
+                        "h-9 w-full rounded-lg border border-input bg-card pl-7 pr-3 text-[13px] tabular-nums outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15",
+                        touched && priceInvalid && "border-rose-400 focus:ring-rose-200/40",
+                      )}
                     />
                   </div>
-                  <p className="text-[11px] text-muted-foreground">The manager may approve a different amount.</p>
+                  {/* Live gap vs the quote — this is the discount being requested. */}
+                  {priceInvalid ? (
+                    <p className="text-[11px] font-medium text-rose-600">
+                      {priceNum != null && quote != null && priceNum > quote
+                        ? "The customer's price can't be higher than the quote."
+                        : "Enter a valid price."}
+                    </p>
+                  ) : offAmount != null && offAmount > 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      That&apos;s <span className="font-semibold text-rose-600 tabular-nums">−{formatINR(offAmount)}</span>
+                      {offPct != null && <span className="text-rose-600"> · {offPct}% off</span>} the quoted price. The manager may approve a different amount.
+                    </p>
+                  ) : offAmount === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">At the quoted price — no discount requested.</p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">Enter the final price the customer wants to pay.</p>
+                  )}
                 </div>
 
                 {/* Mandatory reason */}
@@ -175,7 +214,7 @@ export function DealRequestModal({
               {/* Footer */}
               <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-3.5">
                 <Button variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
-                <Button size="sm" className="gap-1.5" loading={saving} disabled={reasonMissing} onClick={submit}>
+                <Button size="sm" className="gap-1.5" loading={saving} disabled={reasonMissing || priceInvalid} onClick={submit}>
                   {resubmit ? "Resubmit for Approval" : "Submit for Approval"}
                 </Button>
               </div>

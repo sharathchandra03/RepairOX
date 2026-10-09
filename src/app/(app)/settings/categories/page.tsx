@@ -17,6 +17,7 @@ import {
   DEFAULT_CATEGORIES,
   type DeviceCategoryItem,
 } from "@/lib/device-categories";
+import { uploadCatalogImage } from "@/components/settings/catalog/upload-image";
 
 /* ─── Page ───────────────────────────────────────────────────────────── */
 
@@ -30,6 +31,8 @@ export default function CategoriesSettingsPage() {
   const [loaded, setLoaded] = useState(false);
   const [editingCategoryId, setEditingCategoryId] = useState<string | null>(null);
   const [editingCategoryLabel, setEditingCategoryLabel] = useState("");
+  // Which category's image is currently uploading (shows a spinner on its tile).
+  const [uploadingId, setUploadingId] = useState<string | null>(null);
 
   const saveCategoryLabel = () => {
     if (editingCategoryId && editingCategoryLabel.trim()) {
@@ -59,38 +62,33 @@ export default function CategoriesSettingsPage() {
     setCategories(categories.filter((c) => c.id !== id));
   };
 
-  const updateImage = (id: string, file: File) => {
-    if (file.size > 5 * 1024 * 1024) {
-      alert("Image is too large (max 5MB). Please pick a smaller file.");
-      return;
+  // Upload a category image through the CANONICAL catalog uploader, which
+  // resizes the file and stores it in Supabase Storage (bucket `catalog-images`,
+  // folder `categories/`), returning a durable PUBLIC URL. We store that URL in
+  // `image_url` — never a base64 blob living inside the DB row. The physical
+  // file then survives even if the row is later rewritten, so an image can't be
+  // silently lost by a save glitch again.
+  const updateImage = async (id: string, file: File) => {
+    setUploadingId(id);
+    try {
+      const url = await uploadCatalogImage(file, "categories");
+      if (!url) {
+        alert("Image upload failed. Please try again.");
+        return;
+      }
+      // Update local state…
+      const next = categories.map((c) => (c.id === id ? { ...c, image: url } : c));
+      setCategories(next);
+      // …and persist immediately so the image is durable without needing a
+      // separate "Save" click. saveDeviceCategories is non-destructive (upsert)
+      // and never blanks other categories' images.
+      const ok = await saveDeviceCategories(next);
+      if (!ok) {
+        alert("Image uploaded but saving to the database failed. Click Save to retry.");
+      }
+    } finally {
+      setUploadingId(null);
     }
-    // Resize on canvas to keep stored data small.
-    const reader = new FileReader();
-    reader.onload = () => {
-      const raw = reader.result as string;
-      const img = new window.Image();
-      img.onload = () => {
-        const maxDim = 512;
-        let { width, height } = img;
-        const scale = Math.min(1, maxDim / Math.max(width, height));
-        width = Math.round(width * scale);
-        height = Math.round(height * scale);
-        const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) { setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: raw } : c)); return; }
-        ctx.drawImage(img, 0, 0, width, height);
-        let out = canvas.toDataURL("image/webp", 0.7);
-        if (!out.startsWith("data:image/webp")) out = canvas.toDataURL("image/png");
-        setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: out } : c));
-      };
-      img.onerror = () => {
-        setCategories((prev) => prev.map((c) => c.id === id ? { ...c, image: raw } : c));
-      };
-      img.src = raw;
-    };
-    reader.readAsDataURL(file);
   };
 
   const handleSave = async () => {
@@ -164,15 +162,23 @@ export default function CategoriesSettingsPage() {
                     <input
                       type="file"
                       accept="image/*"
-                      className="absolute inset-0 opacity-0 cursor-pointer"
+                      disabled={uploadingId === cat.id}
+                      className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-wait"
                       onChange={(e) => {
                         const f = e.target.files?.[0];
-                        if (f) updateImage(cat.id, f);
+                        if (f) void updateImage(cat.id, f);
+                        e.target.value = "";
                       }}
                     />
-                    <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/40 text-white opacity-0 group-hover:opacity-100 transition">
-                      <Upload className="h-4 w-4" />
-                    </span>
+                    {uploadingId === cat.id ? (
+                      <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/50 text-white">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      </span>
+                    ) : (
+                      <span className="absolute inset-0 grid place-items-center rounded-xl bg-black/40 text-white opacity-0 group-hover:opacity-100 transition">
+                        <Upload className="h-4 w-4" />
+                      </span>
+                    )}
                   </label>
 
                   {/* Label — click to rename (when permitted) */}

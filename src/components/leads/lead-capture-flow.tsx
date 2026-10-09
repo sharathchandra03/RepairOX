@@ -19,7 +19,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
-  X, Check, ChevronRight, ChevronLeft, UserPlus, Search,
+  X, Check, ChevronRight, ChevronLeft, UserPlus, Search, Plus,
   ClipboardList, CalendarClock, AlertCircle, ChevronDown, MapPin, Store,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -34,8 +34,8 @@ import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
-  isNotContactedStatus,
-  type Lead, type LeadDraft, type LeadFieldKey,
+  isNotContactedStatus, suggestPartCategory, emptyLeadDevice,
+  type Lead, type LeadDraft, type LeadFieldKey, type LeadDevice,
 } from "@/lib/leads-data";
 import { isNotQualified } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 
 function ConfigurableSelect({
   field, value, onChange, placeholder, extra = [], invalid, options, labelFor,
+  allowCustom = false,
 }: {
   /** Lead-options field; omit when passing an explicit `options` list. */
   field?: LeadFieldKey;
@@ -66,11 +67,17 @@ function ConfigurableSelect({
   options?: string[];
   /** Map an option value to a display label (e.g. store id → store name). */
   labelFor?: (value: string) => string;
+  /** When true the control becomes a typeable combobox: the agent can type a
+   *  free value (saved as-is) AND pick from existing options. Used by Region so
+   *  a lead outside the configured list can still be captured + filtered. */
+  allowCustom?: boolean;
 }) {
   const { optionsFor } = useLeads();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ left: number; width: number; top?: number; bottom?: number }>({ left: 0, width: 0 });
   const [mounted, setMounted] = useState(false);
@@ -86,14 +93,20 @@ function ConfigurableSelect({
     return merged;
   }, [options, optionsFor, field, extra, value]);
 
-  const filtered = query.trim()
-    ? values.filter((v) => label(v).toLowerCase().includes(query.trim().toLowerCase()))
+  // In combobox mode the typed input IS the query; otherwise it's the in-panel
+  // search box. A free-typed value that doesn't match any existing option is
+  // offered as a "Use …" row so the agent can save a region outside the list.
+  const q = (allowCustom ? value : query).trim();
+  const filtered = q
+    ? values.filter((v) => label(v).toLowerCase().includes(q.toLowerCase()))
     : values;
+  const showCustomRow =
+    allowCustom && !!q && !values.some((v) => label(v).toLowerCase() === q.toLowerCase());
 
   // Position the portal panel from the trigger's rect; flip up when there's not
   // enough room below so long lists never get clipped by the modal edge.
   const place = () => {
-    const el = triggerRef.current;
+    const el = (allowCustom ? wrapRef.current : triggerRef.current);
     if (!el) return;
     const r = el.getBoundingClientRect();
     const spaceBelow = window.innerHeight - r.bottom;
@@ -126,31 +139,74 @@ function ConfigurableSelect({
 
   return (
     <>
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={toggle}
-        className={cn(
-          "flex h-[38px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all",
-          open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-input hover:border-[#4361EE]/40",
-        )}
-      >
-        <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value ? label(value) : (placeholder || "Select…")}</span>
-        <span className="flex shrink-0 items-center gap-1">
-          {value && (
-            <span
-              role="button"
-              tabIndex={-1}
-              aria-label="Clear selection"
-              onClick={(e) => { e.stopPropagation(); onChange(""); close(); }}
-              className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-500"
-            >
-              <X className="h-3.5 w-3.5" />
-            </span>
+      {allowCustom ? (
+        /* Typeable combobox — type a free value (saved as-is) or pick an
+           existing option from the suggestions below. */
+        <div
+          ref={wrapRef}
+          className={cn(
+            "flex h-[38px] w-full items-center gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all",
+            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-input hover:border-[#4361EE]/40",
           )}
-          <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
-        </span>
-      </button>
+        >
+          <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={(e) => { onChange(e.target.value); if (!open) { place(); setOpen(true); } }}
+            onFocus={() => { place(); setOpen(true); }}
+            placeholder={placeholder || "Type or pick…"}
+            className="min-w-0 flex-1 bg-transparent outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground"
+          />
+          <span className="flex shrink-0 items-center gap-1">
+            {value && (
+              <span
+                role="button"
+                tabIndex={-1}
+                aria-label="Clear selection"
+                onClick={(e) => { e.stopPropagation(); onChange(""); close(); inputRef.current?.focus(); }}
+                className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-500"
+              >
+                <X className="h-3.5 w-3.5" />
+              </span>
+            )}
+            <button
+              type="button"
+              tabIndex={-1}
+              aria-label="Toggle options"
+              onClick={() => { if (!open) { place(); setOpen(true); inputRef.current?.focus(); } else close(); }}
+            >
+              <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+            </button>
+          </span>
+        </div>
+      ) : (
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={toggle}
+          className={cn(
+            "flex h-[38px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all",
+            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-input hover:border-[#4361EE]/40",
+          )}
+        >
+          <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value ? label(value) : (placeholder || "Select…")}</span>
+          <span className="flex shrink-0 items-center gap-1">
+            {value && (
+              <span
+                role="button"
+                tabIndex={-1}
+                aria-label="Clear selection"
+                onClick={(e) => { e.stopPropagation(); onChange(""); close(); }}
+                className="grid h-5 w-5 place-items-center rounded-md text-muted-foreground transition-colors hover:bg-rose-50 hover:text-rose-500"
+              >
+                <X className="h-3.5 w-3.5" />
+              </span>
+            )}
+            <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
+          </span>
+        </button>
+      )}
       {mounted && open && createPortal(
         <>
           <div className="fixed inset-0 z-[10040]" onClick={close} />
@@ -160,7 +216,7 @@ function ConfigurableSelect({
             style={{ left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom }}
             className="fixed z-[10041] overflow-hidden rounded-xl border border-border bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
           >
-            {values.length > 6 && (
+            {!allowCustom && values.length > 6 && (
               <div className="flex items-center gap-2 border-b border-border px-2.5 py-2">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
                 <input
@@ -173,12 +229,27 @@ function ConfigurableSelect({
               </div>
             )}
             <div className="max-h-56 overflow-y-auto p-1">
-              {value && (
+              {!allowCustom && value && (
                 <button type="button" onClick={() => { onChange(""); close(); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12px] text-muted-foreground hover:bg-muted">
                   <X className="h-3 w-3" /> Clear
                 </button>
               )}
-              {filtered.length === 0 && <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">{options ? "No matches." : "No options. Add them in Settings."}</p>}
+              {/* Free-typed value that isn't an existing option — offer to keep it. */}
+              {showCustomRow && (
+                <button
+                  type="button"
+                  onClick={() => close()}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] text-[#4361EE] hover:bg-[#EEF1FD]/60"
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  <span className="truncate">Use “{q}”</span>
+                </button>
+              )}
+              {filtered.length === 0 && !showCustomRow && (
+                <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">
+                  {allowCustom ? "Type a region, or add options in Settings." : options ? "No matches." : "No options. Add them in Settings."}
+                </p>
+              )}
               {filtered.map((v) => (
                 <button
                   key={v}
@@ -234,6 +305,160 @@ const inputCls = (invalid?: boolean) =>
     invalid ? "border-rose-300 focus:border-rose-400 focus:ring-2 focus:ring-rose-200/40" : "border-input hover:border-[#4361EE]/40 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15",
   );
 
+/* ─── One device card (repeatable in Step 3) ──────────────────────────────
+   A self-contained unit capturing ONE device: model + repair/part category +
+   issue + estimate/discount. Identical controls to the old single-device form,
+   so the sales agent learns nothing new — adding a card just repeats it. */
+function DeviceCard({
+  index, total, device, expanded, onToggle, onChange, onRemove, invalidEstimate, invalidDiscount,
+}: {
+  index: number;
+  total: number;
+  device: LeadDevice;
+  /** Whether this card is expanded (full form) or collapsed (summary). */
+  expanded: boolean;
+  /** Toggle expand/collapse (only meaningful when total > 1). */
+  onToggle: () => void;
+  onChange: (patch: Partial<LeadDevice>) => void;
+  onRemove: () => void;
+  invalidEstimate?: boolean;
+  invalidDiscount?: boolean;
+}) {
+  const { optionsFor, fieldTitle: ft } = useLeads();
+  const selection: DeviceSelection = {
+    categoryId: device.categoryId, brandId: device.brandId, modelId: device.modelId, label: device.label,
+  };
+  // When collapsed we show a one-line summary of what's captured.
+  const issues = (device.issue || "").split(",").map((s) => s.trim()).filter(Boolean);
+  const summaryBits = [device.subCategory, device.category].filter(Boolean).join(" · ");
+  const money = (n: number | null) => (n == null ? null : `₹${Number(n).toLocaleString("en-IN")}`);
+  // A card is collapsible only in multi-device mode.
+  const collapsible = total > 1;
+
+  return (
+    <div className={cn("overflow-hidden rounded-xl border bg-muted/20 transition-colors", expanded ? "border-[#4361EE]/30" : "border-border")}>
+      {/* Header — click to expand/collapse when there are multiple devices. */}
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 px-4 py-3",
+          collapsible && "cursor-pointer select-none",
+          collapsible && !expanded && "hover:bg-muted/40",
+        )}
+        onClick={collapsible ? onToggle : undefined}
+        role={collapsible ? "button" : undefined}
+        aria-expanded={collapsible ? expanded : undefined}
+      >
+        <span className="flex min-w-0 flex-1 items-center gap-2">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-indigo-100 text-[10px] font-bold text-indigo-700">{index + 1}</span>
+          {collapsible && !expanded ? (
+            /* Collapsed summary: device name + repair/part + issues + estimate */
+            <span className="flex min-w-0 flex-1 flex-col leading-tight">
+              <span className="truncate text-[13px] font-semibold text-zinc-800">{device.label || "New device"}</span>
+              <span className="truncate text-[11.5px] text-muted-foreground">
+                {summaryBits || "Not set"}
+                {issues.length > 0 && <> · {issues.length} issue{issues.length > 1 ? "s" : ""}</>}
+              </span>
+            </span>
+          ) : (
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              {total > 1 ? `Device ${index + 1}` : "Device"}
+            </span>
+          )}
+        </span>
+
+        <span className="flex shrink-0 items-center gap-1">
+          {collapsible && !expanded && money(device.estimate) && (
+            <span className="mr-1 text-[12.5px] font-semibold text-zinc-700 tnum">{money(device.estimate)}</span>
+          )}
+          {total > 1 && (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRemove(); }}
+              className="flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-rose-600 transition hover:bg-rose-50"
+            >
+              <X className="h-3.5 w-3.5" /> Remove
+            </button>
+          )}
+          {collapsible && (
+            <span className="grid h-6 w-6 place-items-center text-muted-foreground">
+              <ChevronDown className={cn("h-4 w-4 transition-transform duration-200", expanded && "rotate-180")} />
+            </span>
+          )}
+        </span>
+      </div>
+
+      {/* Body — smooth height + fade expand/collapse. */}
+      <AnimatePresence initial={false}>
+        {(expanded || !collapsible) && (
+          <motion.div
+            key="body"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
+            style={{ overflow: "hidden" }}
+          >
+            <div className="space-y-4 px-4 pb-4">
+              <Field label={ft("device")}>
+                <DeviceCatalogPicker
+                  value={selection}
+                  onChange={(next) => onChange({ categoryId: next.categoryId, brandId: next.brandId, modelId: next.modelId, label: next.label })}
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label={ft("subCategory")}>
+                  <ConfigurableSelect
+                    field="subCategory"
+                    value={device.subCategory ?? ""}
+                    onChange={(v) => {
+                      // Auto-suggest the matching Part Category by keyword from the
+                      // org's own options; the user may still change it afterwards.
+                      const partOptions = optionsFor("category").map((o) => o.value);
+                      const suggested = suggestPartCategory(v, partOptions);
+                      onChange({ subCategory: v, ...(suggested ? { category: suggested } : {}) });
+                    }}
+                    placeholder="Display / Glass / Battery / …"
+                  />
+                </Field>
+                <Field label={ft("category")}>
+                  <ConfigurableSelect field="category" value={device.category ?? ""} onChange={(v) => onChange({ category: v })} placeholder="Screen / Battery / …" />
+                </Field>
+              </div>
+              <Field label="Issue">
+                <IssueSelector
+                  value={device.issue ?? ""}
+                  onChange={(v) => onChange({ issue: v })}
+                  placeholder="Search or add issues…"
+                  pillClassName="py-0.5"
+                />
+              </Field>
+              <div className="grid grid-cols-2 gap-3">
+                <Field label="Estimate (pipeline value)" error={invalidEstimate ? "Enter a valid amount." : undefined}>
+                  <div className="flex">
+                    <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
+                    <input className={cn(inputCls(invalidEstimate), "rounded-l-none")} value={device.estimate ?? ""} onChange={(e) => onChange({ estimate: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")) })} placeholder="0" inputMode="decimal" />
+                  </div>
+                </Field>
+                <Field label="Discount" error={invalidDiscount ? "Enter a valid amount." : undefined}>
+                  <div className="flex">
+                    <input className={cn(inputCls(invalidDiscount), "rounded-r-none")} value={device.discount ?? ""} onChange={(e) => onChange({ discount: e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")) })} placeholder="0" inputMode="decimal" />
+                    <button type="button"
+                      onClick={() => onChange({ discountType: device.discountType === "percent" ? "amount" : "percent" })}
+                      className="flex h-[38px] min-w-[46px] items-center justify-center rounded-r-xl border border-l-0 border-input bg-muted px-2.5 text-[12px] font-semibold text-zinc-700 transition hover:bg-muted/70"
+                      title="Toggle ₹ / %">
+                      {device.discountType === "percent" ? "%" : "₹"}
+                    </button>
+                  </div>
+                </Field>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 /* ─── Stage config ────────────────────────────────────────────────────── */
 
 const STAGES = [
@@ -241,7 +466,6 @@ const STAGES = [
   { id: 2, label: "Lead Details",  hint: "Source, mode, agent" },
   { id: 3, label: "Device & Issue", hint: "Device, estimate" },
   { id: 4, label: "Status & Assignment", hint: "Status, priority, store" },
-  { id: 5, label: "Review",        hint: "Confirm & save" },
 ];
 
 /* Subtle horizontal slide + fade for step transitions. `custom` is the
@@ -266,7 +490,7 @@ export function LeadCaptureFlow({
 
 
 function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
-  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead } = useLeads();
+  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft } = useLeads();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { team, can, currentUser } = usePermissions();
   const { customers } = useStore();
@@ -291,6 +515,9 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const [saving, setSaving] = useState(false);
   const [touched, setTouched] = useState(false);
   const [mapOpen, setMapOpen] = useState(false);
+  // Review is NOT a step in the flow — it is a view-only overlay opened from a
+  // highlighted pill at the top. It never participates in Next/Previous.
+  const [reviewOpen, setReviewOpen] = useState(false);
 
   /* Location unit field — its placeholder cycles one word per second so the
      user sees each accepted format (Building name → House no → Street name). */
@@ -421,6 +648,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
      step is a gate — required-field validation is enforced only at SAVE, so a
      salesperson can fill the form in whatever order the customer talks. */
   const goToStage = (next: number) => {
+    setReviewOpen(false); // leaving review-view returns to the editable step
     const clamped = Math.max(1, Math.min(STAGES.length, next));
     if (clamped === stage) return;
     setDir(clamped >= stage ? 1 : -1);
@@ -451,25 +679,83 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     return () => window.removeEventListener("keydown", handler);
   }, [stage]);
 
-  /* ── Device selection bridge (draft ⇄ DeviceCatalogPicker) ── */
-  const deviceSelection: DeviceSelection = {
-    categoryId: draft.deviceCategoryId ?? "",
-    brandId: draft.deviceBrandId ?? "",
-    modelId: draft.deviceModelId ?? "",
-    label: draft.device ?? "",
-  };
-  const onDeviceChange = (next: DeviceSelection) => {
-    // The picker is the source of truth for the whole selection — use its label
-    // DIRECTLY (never fall back to the previous value), so removing the device
-    // (empty selection) actually clears the cached `device` label and the chip
-    // disappears instead of lingering.
+  /* ── Multi-device capture (draft.devices ⇄ per-device cards) ──
+     The lead may reference several devices. We always edit a non-empty
+     `devices[]` list; device[0] is kept MIRRORED to the flat
+     device/category/subCategory/issue/estimate/discount fields so every
+     existing single-device read-site (Lead Table, View Lead, Quotation,
+     conversion, reporting) keeps working unchanged. The whole list is
+     persisted so devices 2..n are not lost. */
+
+  // The editable device list: seed from draft.devices, else synthesize ONE
+  // entry from the flat fields (new leads + legacy single-device leads).
+  const devices: LeadDevice[] = useMemo(() => {
+    if (draft.devices && draft.devices.length > 0) return draft.devices;
+    return [{
+      id: "dev-1",
+      label: draft.device ?? "",
+      categoryId: draft.deviceCategoryId ?? "",
+      brandId: draft.deviceBrandId ?? "",
+      modelId: draft.deviceModelId ?? "",
+      issue: draft.issue ?? "",
+      category: draft.category ?? "",
+      subCategory: draft.subCategory ?? "",
+      estimate: draft.estimate ?? null,
+      discount: draft.discount ?? null,
+      discountType: draft.discountType ?? "amount",
+    }];
+  }, [draft.devices, draft.device, draft.deviceCategoryId, draft.deviceBrandId, draft.deviceModelId, draft.issue, draft.category, draft.subCategory, draft.estimate, draft.discount, draft.discountType]);
+
+  // Combined pipeline total across every device (shown as context under the
+  // device list). Falls back to the single flat estimate.
+  const devicesEstimateTotal = useMemo(() => {
+    const withEst = devices.filter((d) => d.estimate != null);
+    if (withEst.length === 0) return null;
+    return withEst.reduce((s, d) => s + Number(d.estimate || 0), 0);
+  }, [devices]);
+
+  /* Commit a new device list to the draft, keeping device[0] mirrored to the
+     flat fields so nothing downstream breaks. */
+  const commitDevices = (next: LeadDevice[]) => {
+    const list = next.length > 0 ? next : [emptyLeadDevice("dev-1")];
+    const first = list[0];
     setDraft((d) => ({
       ...d,
-      deviceCategoryId: next.categoryId,
-      deviceBrandId: next.brandId,
-      deviceModelId: next.modelId,
-      device: next.label,
+      devices: list,
+      // Mirror device #1 onto the canonical flat fields.
+      device: first.label,
+      deviceCategoryId: first.categoryId,
+      deviceBrandId: first.brandId,
+      deviceModelId: first.modelId,
+      issue: first.issue,
+      category: first.category,
+      subCategory: first.subCategory,
+      estimate: first.estimate,
+      discount: first.discount,
+      discountType: first.discountType,
     }));
+  };
+
+  const updateDevice = (idx: number, patch: Partial<LeadDevice>) =>
+    commitDevices(devices.map((d, i) => (i === idx ? { ...d, ...patch } : d)));
+
+  // Which device card is currently EXPANDED (by id). In single-device mode the
+  // one card is always open; adding a device auto-expands the NEW one and
+  // collapses the others so the agent focuses on what they're filling now.
+  const [expandedDeviceId, setExpandedDeviceId] = useState<string>(() => devices[0]?.id ?? "dev-1");
+  const addDevice = () => {
+    const fresh = emptyLeadDevice();
+    commitDevices([...devices, fresh]);
+    setExpandedDeviceId(fresh.id); // open the new card, collapse the rest
+  };
+  const removeDevice = (idx: number) => {
+    const removedId = devices[idx]?.id;
+    const next = devices.filter((_, i) => i !== idx);
+    commitDevices(next);
+    // If the removed card was open, fall back to expanding the last one.
+    if (removedId && removedId === expandedDeviceId) {
+      setExpandedDeviceId(next[next.length - 1]?.id ?? "");
+    }
   };
 
   /* ── Customer identity bridge (Customer Master, no duplicates) ──
@@ -631,8 +917,8 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
           {/* Clickable stepper (free navigation) */}
           <div className="flex items-center gap-1 overflow-x-auto border-b border-border px-5 py-3 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
             {STAGES.map((s, i) => {
-              const done = stage > s.id;
-              const activeStep = stage === s.id;
+              const done = !reviewOpen && stage > s.id;
+              const activeStep = !reviewOpen && stage === s.id;
               return (
                 <button key={s.id} type="button" onClick={() => goToStage(s.id)} className="flex flex-1 items-center gap-2 text-left" title={s.hint}>
                   <span className={cn(
@@ -654,10 +940,10 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
             onFocus={(e) => { const t = e.target as HTMLElement; if (t.matches("input, textarea, select")) scrollTriggerIntoView(t); }}
             className="relative flex-1 overflow-y-auto overflow-x-hidden p-5"
           >
-            <motion.div key={stage} initial={{ opacity: 0, x: dir >= 0 ? 20 : -20 }} animate={{ opacity: 1, x: 0 }} transition={STEP_TRANSITION}>
+            <motion.div key={reviewOpen ? "review" : stage} initial={{ opacity: 0, x: dir >= 0 ? 20 : -20 }} animate={{ opacity: 1, x: 0 }} transition={STEP_TRANSITION}>
 
               {/* ── STEP 1 · Customer ── */}
-              {stage === 1 && (
+              {!reviewOpen && stage === 1 && (
                 <div className="space-y-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
                   {/* Customer lookup + Name share one row at equal (half) width. */}
@@ -698,8 +984,8 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>
                       <input className={inputCls(touched && !!validation.errors.email)} value={draft.email ?? ""} onChange={(e) => setContactField("email", e.target.value)} placeholder="name@email.com" inputMode="email" />
                     </Field>
-                    <Field label="Region">
-                      <ConfigurableSelect field="region" value={draft.region ?? ""} onChange={(v) => set("region", v)} placeholder="City / area" />
+                    <Field label={ft("region")}>
+                      <ConfigurableSelect field="region" value={draft.region ?? ""} onChange={(v) => set("region", v)} placeholder="Type or pick a city / area" allowCustom />
                     </Field>
                   </div>
                   <Field label="Location">
@@ -737,21 +1023,21 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </div>
                     )}
                   </Field>
-                  <Field label="Contact Status">
+                  <Field label={ft("contactStatus")}>
                     <ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted" />
                   </Field>
                 </div>
               )}
 
               {/* ── STEP 2 · Lead Details ── */}
-              {stage === 2 && (
+              {!reviewOpen && stage === 2 && (
                 <div className="space-y-4">
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Lead Details</p>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Source" required error={touched ? validation.errors.source : undefined}>
+                    <Field label={ft("source")} required error={touched ? validation.errors.source : undefined}>
                       <ConfigurableSelect field="source" value={draft.source ?? ""} onChange={(v) => set("source", v)} placeholder="How did they reach us?" invalid={touched && !!validation.errors.source} />
                     </Field>
-                    <Field label="Mode of Contact">
+                    <Field label={ft("modeOfContact")}>
                       <ConfigurableSelect field="modeOfContact" value={draft.modeOfContact ?? ""} onChange={(v) => set("modeOfContact", v)} placeholder="Call / WhatsApp / Email / …" />
                     </Field>
                   </div>
@@ -778,7 +1064,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         </p>
                       )}
                     </Field>
-                    <Field label="Lead Category">
+                    <Field label={ft("qualification")}>
                       <ConfigurableSelect field="qualification" value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} placeholder="Qualified Lead / Not Qualified Lead" />
                     </Field>
                   </div>
@@ -802,10 +1088,6 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </p>
                     </div>
                   )}
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Category"><ConfigurableSelect field="category" value={draft.category ?? ""} onChange={(v) => set("category", v)} placeholder="Screen / Battery / …" /></Field>
-                    <Field label="Subcategory"><ConfigurableSelect field="subCategory" value={draft.subCategory ?? ""} onChange={(v) => set("subCategory", v)} placeholder="Display / Glass / Battery / …" /></Field>
-                  </div>
                   <Field label="Comments">
                     <Textarea value={draft.comments ?? ""} onChange={(e) => set("comments", e.target.value)} placeholder="Notes about this lead…" className="min-h-[70px] text-[13px]" />
                   </Field>
@@ -813,7 +1095,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
               )}
 
               {/* ── STEP 3 · Device & Issue ── */}
-              {stage === 3 && (
+              {!reviewOpen && stage === 3 && (
                 <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
                   <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue</p>
                   {downstreamLocked && (
@@ -823,43 +1105,63 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         : "Complete contact to continue lead qualification. Set Contact Status to Contacted first."}
                     </div>
                   )}
-                  <Field label="Device">
-                    <DeviceCatalogPicker value={deviceSelection} onChange={onDeviceChange} />
-                  </Field>
-                  <Field label="Issue">
-                    <IssueSelector
-                      value={draft.issue ?? ""}
-                      onChange={(v) => set("issue", v)}
-                      placeholder="Search or add issues…"
-                      pillClassName="py-0.5"
-                    />
-                  </Field>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Estimate (pipeline value)" error={touched ? validation.errors.estimate : undefined}>
-                      <div className="flex">
-                        <span className="flex h-[38px] items-center rounded-l-xl border border-r-0 border-input bg-muted px-2.5 text-[12px] font-medium text-zinc-600">₹</span>
-                        <input className={cn(inputCls(touched && !!validation.errors.estimate), "rounded-l-none")} value={draft.estimate ?? ""} onChange={(e) => set("estimate", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
-                      </div>
-                    </Field>
-                    <Field label="Discount" error={touched ? validation.errors.discount : undefined}>
-                      <div className="flex">
-                        <input className={cn(inputCls(touched && !!validation.errors.discount), "rounded-r-none")} value={draft.discount ?? ""} onChange={(e) => set("discount", e.target.value === "" ? null : Number(e.target.value.replace(/[^0-9.]/g, "")))} placeholder="0" inputMode="decimal" />
-                        <button type="button"
-                          onClick={() => set("discountType", (draft.discountType === "percent" ? "amount" : "percent"))}
-                          className="flex h-[38px] min-w-[46px] items-center justify-center rounded-r-xl border border-l-0 border-input bg-muted px-2.5 text-[12px] font-semibold text-zinc-700 transition hover:bg-muted/70"
-                          title="Toggle ₹ / %">
-                          {draft.discountType === "percent" ? "%" : "₹"}
-                        </button>
-                      </div>
-                    </Field>
+                  {/* One card per device the customer mentioned. A single card
+                      shows by default (same as before); "Add another device"
+                      repeats the exact same fields — no new concept to learn. */}
+                  <div className="space-y-3">
+                    {devices.map((dev, i) => (
+                      <DeviceCard
+                        key={dev.id || i}
+                        index={i}
+                        total={devices.length}
+                        device={dev}
+                        expanded={devices.length === 1 || expandedDeviceId === dev.id}
+                        onToggle={() => setExpandedDeviceId((cur) => (cur === dev.id ? "" : dev.id))}
+                        onChange={(patch) => updateDevice(i, patch)}
+                        onRemove={() => removeDevice(i)}
+                        invalidEstimate={touched && dev.estimate != null && (isNaN(Number(dev.estimate)) || Number(dev.estimate) < 0)}
+                        invalidDiscount={touched && dev.discount != null && (isNaN(Number(dev.discount)) || Number(dev.discount) < 0)}
+                      />
+                    ))}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <button
+                      type="button"
+                      onClick={addDevice}
+                      className="flex items-center gap-1.5 rounded-xl border border-dashed border-[#4361EE]/40 bg-[#EEF1FD]/40 px-3 py-2 text-[12.5px] font-semibold text-[#4361EE] transition hover:bg-[#EEF1FD]"
+                    >
+                      <Plus className="h-4 w-4" /> Add another device
+                    </button>
+                    {devices.length > 1 && devicesEstimateTotal != null && (
+                      <span className="text-[12px] text-muted-foreground">
+                        {devices.length} devices · Total estimate{" "}
+                        <span className="font-semibold text-zinc-800 tnum">{money(devicesEstimateTotal)}</span>
+                      </span>
+                    )}
                   </div>
                 </fieldset>
               )}
 
               {/* ── STEP 4 · Status & Assignment ── */}
-              {stage === 4 && (
-                <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status &amp; Assignment</p>
+              {!reviewOpen && stage === 4 && (
+                <div className="space-y-4">
+                  {/* The Review pill lives at the TOP of this last step — a
+                      view-only summary toggle, never a flow step. It sits
+                      OUTSIDE the disabled fieldset so it's always clickable. */}
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Status &amp; Assignment</p>
+                    <button
+                      type="button"
+                      onClick={() => setReviewOpen(true)}
+                      title="Review all details before saving"
+                      className="flex shrink-0 items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-[12px] font-semibold text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60 transition hover:bg-[#E2E8FF]"
+                    >
+                      <ClipboardList className="h-3.5 w-3.5" />
+                      Review
+                    </button>
+                  </div>
+                  <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
                   {downstreamLocked && (
                     <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
                       {notQualified
@@ -868,11 +1170,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Lead Nature"><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" /></Field>
-                    <Field label="Lead Priority"><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Normal / High / Urgent" /></Field>
+                    <Field label={ft("leadNature")}><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" /></Field>
+                    <Field label={ft("priority")}><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Normal / High / Urgent" /></Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label="Lead Status"><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
+                    <Field label={ft("status")}><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
                     {/* ── Store · Lead Store Mode aware ──
                         SINGLE mode: a NON-editable context indicator (the store
                         is set in Lead Settings; the agent never picks it).
@@ -902,11 +1204,6 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </Field>
                     )}
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label="Result"><ConfigurableSelect field="result" value={draft.result ?? ""} onChange={(v) => set("result", v)} placeholder="Latest outcome" /></Field>
-                    <Field label="Final Result"><ConfigurableSelect field="finalResult" value={draft.finalResult ?? ""} onChange={(v) => set("finalResult", v)} placeholder="Terminal outcome (only when closed)" /></Field>
-                  </div>
-
                   <div className={cn("rounded-2xl border p-4 transition", showFollowUp ? "border-[#B3BFF6] bg-[#EEF1FD]/50" : "border-dashed border-border bg-muted/30")}>
                     <div className="mb-3 flex items-center gap-2">
                       <CalendarClock className={cn("h-4 w-4", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")} />
@@ -942,13 +1239,15 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <Field label="Final Remarks">
                     <Textarea value={draft.finalRemarks ?? ""} onChange={(e) => set("finalRemarks", e.target.value)} placeholder="Closing notes…" className="min-h-[60px] text-[13px]" />
                   </Field>
-                </fieldset>
+                  </fieldset>
+                </div>
               )}
 
-              {/* ── STEP 5 · Review ── (reflects the form state; no duplicate inputs) */}
-              {stage === 5 && (
+              {/* ── REVIEW (view-only) ── reflects the form state; no inputs.
+                  Opened from the highlighted Review pill, never a flow step. */}
+              {reviewOpen && (
                 <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Review &amp; Save</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Review</p>
                   {!validation.ok && (
                     <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-[12px] text-amber-800">
                       <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -966,18 +1265,48 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
                     ["Source", draft.source], ["Mode of Contact", draft.modeOfContact],
                     ["Agent (owner)", draft.assignedToName], ["Lead Category", draft.qualification],
-                    ["Category", draft.category], ["Subcategory", draft.subCategory],
                     ["Comments", draft.comments],
                   ]} />
-                  <ReviewGroup title="Device & Issue" onEdit={() => goToStage(3)} rows={[
-                    ["Device", draft.device], ["Issue", draft.issue],
-                    ["Estimate", money(draft.estimate)],
-                    ["Discount", draft.discount == null ? "—" : draft.discountType === "percent" ? `${draft.discount}%` : money(draft.discount)],
-                  ]} />
+                  {devices.length > 1 ? (
+                    <div className="rounded-xl border border-border bg-card p-3">
+                      <div className="mb-2 flex items-center justify-between">
+                        <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue · {devices.length} devices</span>
+                        <button type="button" onClick={() => goToStage(3)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Edit</button>
+                      </div>
+                      <div className="space-y-2.5">
+                        {devices.map((dev, i) => (
+                          <div key={dev.id || i} className="rounded-lg border border-border bg-muted/20 p-2.5">
+                            <div className="mb-1 flex items-center gap-2">
+                              <span className="grid h-5 w-5 place-items-center rounded bg-indigo-100 text-[9px] font-bold text-indigo-700">{i + 1}</span>
+                              <span className="truncate text-[13px] font-semibold text-zinc-800">{dev.label || "Device"}</span>
+                              {dev.estimate != null && <span className="ml-auto text-[12px] font-semibold text-zinc-700 tnum">{money(dev.estimate)}</span>}
+                            </div>
+                            <p className="text-[12px] text-zinc-500">
+                              {[dev.subCategory, dev.category].filter(Boolean).join(" · ") || "—"}
+                              {dev.issue ? ` — ${dev.issue}` : ""}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                      {devicesEstimateTotal != null && (
+                        <div className="mt-2.5 flex items-center justify-between border-t border-border pt-2 text-[12px]">
+                          <span className="text-muted-foreground">Total estimate</span>
+                          <span className="font-bold text-zinc-900 tnum">{money(devicesEstimateTotal)}</span>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <ReviewGroup title="Device & Issue" onEdit={() => goToStage(3)} rows={[
+                      ["Device", draft.device],
+                      ["Repair Category", draft.subCategory], ["Part Category", draft.category],
+                      ["Issue", draft.issue],
+                      ["Estimate", money(draft.estimate)],
+                      ["Discount", draft.discount == null ? "—" : draft.discountType === "percent" ? `${draft.discount}%` : money(draft.discount)],
+                    ]} />
+                  )}
                   <ReviewGroup title="Status & Assignment" onEdit={() => goToStage(4)} rows={[
                     ["Lead Nature", draft.leadNature], ["Lead Priority", draft.priority],
                     ["Lead Status", draft.status], ["Store", getStore(draft.branchId)?.name || ""],
-                    ["Result", draft.result], ["Final Result", draft.finalResult],
                     ["Follow-Up Date & Time", followUpDueAt ? new Date(followUpDueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""], ["Follow-Up Agent", draft.followUpAgent],
                     ["Follow-Up Comments", draft.followUpComments], ["Final Remarks", draft.finalRemarks],
                   ]} />
@@ -992,13 +1321,16 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
           {/* Footer */}
           <div className="flex items-center justify-between gap-2 border-t border-border p-4">
             <div>
-              {stage > 1 && (
+              {!reviewOpen && stage > 1 && (
                 <Button variant="ghost" size="sm" className="gap-1" onClick={() => goToStage(stage - 1)}><ChevronLeft className="h-4 w-4" /> Previous</Button>
+              )}
+              {reviewOpen && (
+                <Button variant="ghost" size="sm" className="gap-1" onClick={() => setReviewOpen(false)}><ChevronLeft className="h-4 w-4" /> Back to form</Button>
               )}
             </div>
             <div className="flex items-center gap-2">
               <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-              {stage < STAGES.length ? (
+              {!reviewOpen && stage < STAGES.length ? (
                 <>
                   {!isEdit && (
                     <Button variant="soft" size="sm" loading={saving} disabled={saving} onClick={handleSave}>Save now</Button>
@@ -1028,6 +1360,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
           // a pin (first time or re-pin). Fall back to the existing text only if
           // the picker returned no address (e.g. reverse-geocode failed).
           location: loc.address?.trim() ? loc.address : d.location ?? "",
+          // Classify the pin into the configured city REGION (so reporting /
+          // filters bucket it as "Bangalore", not the full street address). Only
+          // fill when the agent hasn't already set a region explicitly — never
+          // overwrite a typed region.
+          region: (d.region ?? "").trim() ? d.region : (loc.region || d.region || ""),
         }))}
       />
 

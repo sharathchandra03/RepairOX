@@ -99,6 +99,23 @@ export function inBbox(lat: number, lng: number, b: Bbox): boolean {
   return lng >= b[0] && lng <= b[2] && lat >= b[1] && lat <= b[3];
 }
 
+/** Which configured city (region) does a point fall in? Returns the matching
+ *  CityScope, or null when the point isn't inside any configured city's box.
+ *  Used to classify a map-picked address into a stable REGION bucket instead of
+ *  dumping the full street address as a brand-new region. */
+export function cityScopeForPoint(lat: number, lng: number, scopes: CityScope[]): CityScope | null {
+  const list = scopes.length ? scopes : DEFAULT_CITY_SCOPES;
+  // Prefer the smallest matching box (handles overlapping/nested city boxes).
+  let best: CityScope | null = null;
+  let bestArea = Infinity;
+  for (const c of list) {
+    if (!inBbox(lat, lng, c.bbox)) continue;
+    const area = Math.abs((c.bbox[2] - c.bbox[0]) * (c.bbox[3] - c.bbox[1]));
+    if (area < bestArea) { best = c; bestArea = area; }
+  }
+  return best;
+}
+
 /** Resolve a city NAME to a CityScope (center + bounding box) via Nominatim,
  *  which returns a `boundingbox` for places. Returns null when unresolved. */
 export async function resolveCityScope(name: string): Promise<CityScope | null> {

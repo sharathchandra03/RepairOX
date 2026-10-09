@@ -44,7 +44,42 @@ import {
   type LeadConversionEvent, type LeadConversionEventType, type LeadConversionTargetType,
   EMPTY_LEAD_FILTERS,
   type Lead, type LeadDraft, type LeadOption, type LeadFieldKey, type LeadFilters, type Contact,
+  type LeadDevice,
+  LEAD_FIELD_BY_KEY,
 } from "@/lib/leads-data";
+
+/* A field's CUSTOM TITLE is persisted as a sentinel row in the same
+   `lead_options` table (no schema change / migration needed): the row's `field`
+   column is "__label__:<fieldKey>" and its `value` holds the custom title. These
+   rows are org-wide and live-refreshed exactly like real options, and are
+   filtered out of optionsFor (which matches an exact real field key). */
+const FIELD_LABEL_PREFIX = "__label__:";
+const fieldLabelKey = (field: LeadFieldKey) => `${FIELD_LABEL_PREFIX}${field}`;
+
+/** Normalise a lead's `devices` column into a LeadDevice[]. Tolerates a jsonb
+ *  array, a JSON string, or a missing/invalid value (legacy / unmigrated). */
+function parseDevices(raw: unknown): LeadDevice[] {
+  let arr: unknown = raw;
+  if (typeof raw === "string") {
+    try { arr = JSON.parse(raw); } catch { return []; }
+  }
+  if (!Array.isArray(arr)) return [];
+  return arr
+    .filter((d): d is Record<string, unknown> => !!d && typeof d === "object")
+    .map((d, i) => ({
+      id: typeof d.id === "string" && d.id ? d.id : `dev-${i + 1}`,
+      label: typeof d.label === "string" ? d.label : "",
+      categoryId: typeof d.categoryId === "string" ? d.categoryId : "",
+      brandId: typeof d.brandId === "string" ? d.brandId : "",
+      modelId: typeof d.modelId === "string" ? d.modelId : "",
+      issue: typeof d.issue === "string" ? d.issue : "",
+      category: typeof d.category === "string" ? d.category : "",
+      subCategory: typeof d.subCategory === "string" ? d.subCategory : "",
+      estimate: d.estimate == null ? null : Number(d.estimate),
+      discount: d.discount == null ? null : Number(d.discount),
+      discountType: d.discountType === "percent" ? "percent" : "amount",
+    }));
+}
 
 /* ─── Local-storage keys (prototype mode) ─────────────────────────────── */
 const LEADS_KEY = "repairox-leads";
@@ -92,6 +127,9 @@ function rowToLead(r: any): Lead {
     estimate: r.estimate == null ? null : Number(r.estimate),
     discount: r.discount == null ? null : Number(r.discount),
     discountType: r.discount_type === "percent" ? "percent" : "amount",
+    // Multi-device list (jsonb). Tolerates a jsonb array, a JSON string, or a
+    // missing column (legacy / not-yet-migrated) → [].
+    devices: parseDevices(r.devices),
     leadCategory: r.lead_category ?? "",
     leadNature: r.lead_nature ?? "",
     priority: r.priority ?? "",
@@ -139,6 +177,50 @@ function rowToLead(r: any): Lead {
   };
 }
 
+/* ─── Option-rename cascade mapping ───────────────────────────────────────
+   When an admin RENAMES a dropdown option in Form Edit, every existing lead
+   that stored the OLD label must be migrated to the NEW label so the rename
+   reflects everywhere (table + form + filters) — otherwise those leads look
+   orphaned. These maps describe, for each configurable field:
+     • leadProp — the camelCase Lead property that stores the value.
+     • dbCol    — the leads table column (for the DB cascade).
+   Fields NOT listed (agent / followUpAgent — staff-backed, name caches owned
+   by the live staff list) are intentionally skipped: their lead values are not
+   a copy of an option label. `category`/`subCategory` also mirror into the
+   per-device `devices[]` list, handled explicitly in updateOption. */
+const OPTION_FIELD_LEAD_PROP: Partial<Record<LeadFieldKey, keyof Lead>> = {
+  region: "region",
+  source: "source",
+  modeOfContact: "modeOfContact",
+  qualification: "leadCategory", // "Lead Category" value lives on lead.leadCategory
+  contactStatus: "contactStatus",
+  device: "device",
+  category: "category",
+  subCategory: "subCategory",
+  leadCategory: "leadCategory",
+  status: "status",
+  leadNature: "leadNature",
+  result: "result",
+  priority: "priority",
+  finalResult: "finalResult",
+};
+const OPTION_FIELD_DB_COL: Partial<Record<LeadFieldKey, string>> = {
+  region: "region",
+  source: "source",
+  modeOfContact: "mode_of_contact",
+  qualification: "lead_category",
+  contactStatus: "contact_status",
+  device: "device",
+  category: "category",
+  subCategory: "sub_category",
+  leadCategory: "lead_category",
+  status: "status",
+  leadNature: "lead_nature",
+  result: "result",
+  priority: "priority",
+  finalResult: "final_result",
+};
+
 /** Build a DB row from a lead. Only maps business columns (identity + audit
  *  columns are set by the DB / caller). */
 function leadToRow(l: Partial<Lead>): Record<string, unknown> {
@@ -177,6 +259,9 @@ function leadToRow(l: Partial<Lead>): Record<string, unknown> {
   if (l.estimate !== undefined) row.estimate = l.estimate;
   if (l.discount !== undefined) row.discount = l.discount;
   set("discount_type", l.discountType);
+  // Multi-device list → jsonb. Explicit (not via set(), which would coerce an
+  // empty array oddly); Supabase encodes a JS array to jsonb automatically.
+  if (l.devices !== undefined) row.devices = l.devices ?? [];
   set("lead_category", l.leadCategory);
   set("lead_nature", l.leadNature);
   set("priority", l.priority);
@@ -481,6 +566,16 @@ interface LeadsContextValue {
   /** How many existing leads currently use this option's value (safety check). */
   countLeadsUsingOption: (field: LeadFieldKey, value: string) => number;
 
+  /** The display TITLE for a configurable field — the admin's custom label if
+   *  one is set, otherwise the built-in default from LEAD_DROPDOWN_FIELDS. Used
+   *  for the Form Edit rail/header, the Lead Table column header, the Lead Form
+   *  field label and the filter labels, so a title rename reflects everywhere.
+   *  Org-wide + live (persisted with the options). */
+  fieldTitle: (field: LeadFieldKey) => string;
+  /** Rename a field's display title. "" / the default value clears the override
+   *  (reverts to the built-in label). */
+  setFieldTitle: (field: LeadFieldKey, title: string) => Promise<void>;
+
   /* ── CRM Contacts (people, optionally linked to a Customer Master record
      and/or a Company) — see public.contacts, 0031_customer_master_integration.sql.
      Degrades gracefully (empty list, no-op writes) if that migration hasn't
@@ -525,6 +620,7 @@ const LEAD_OPTIONAL_COLUMNS = [
   "converted_at", "converted_by", "conversion_source", "attribution_mode",
   "device_category_id", "device_brand_id", "device_model_id", "discount_type", "follow_up_agent_id",
   "location_lat", "location_lng", "location_maps_url", "location_unit",
+  "devices",
 ];
 
 function isUndefinedColumnError(err: { code?: string; message?: string } | null): boolean {
@@ -1096,6 +1192,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       device: draft.device ?? "", deviceCategoryId: draft.deviceCategoryId ?? "", deviceBrandId: draft.deviceBrandId ?? "", deviceModelId: draft.deviceModelId ?? "",
       issue: draft.issue ?? "", category: draft.category ?? "", subCategory: draft.subCategory ?? "",
       estimate: draft.estimate ?? null, discount: draft.discount ?? null, discountType: draft.discountType ?? "amount",
+      devices: draft.devices ?? [],
       leadCategory: draft.leadCategory ?? "", leadNature: draft.leadNature ?? "", priority: draft.priority ?? "",
       comments: draft.comments ?? "", contactStatus: draft.contactStatus ?? "", status: draft.status ?? "",
       result: draft.result ?? "", finalRemarks: draft.finalRemarks ?? "", followUpDate: draft.followUpDate ?? "",
@@ -2076,11 +2173,74 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const updateOption = useCallback(async (id: string, value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
+
+    // The option being renamed — we need its field + previous label so the
+    // rename can cascade onto every existing lead that stored the old value.
+    const existing = optionsRef.current.find((o) => o.id === id);
+    const field = existing?.field;
+    const oldValue = existing?.value ?? "";
+    const changed = !!field && oldValue !== "" && oldValue !== trimmed;
+
     if (useDb) {
       const { error } = await db.from("lead_options").update({ value: trimmed }).eq("id", id);
       if (error) { console.error("[leads] updateOption failed:", error.message); toast.error("Option not renamed", { description: "We couldn't rename this option. Please try again." }); return; }
     }
     setOptions((prev) => { const next = prev.map((o) => (o.id === id ? { ...o, value: trimmed } : o)); if (!useDb) writeLS(OPTIONS_KEY, next); return next; });
+
+    // ── Cascade the rename onto existing leads ──────────────────────────────
+    // Keep the Lead Table / form / filters consistent: any lead whose stored
+    // value equals the OLD label is updated to the NEW label. Skipped for
+    // staff-backed fields (agent / followUpAgent) which aren't option copies.
+    if (!changed) return;
+    const leadProp = OPTION_FIELD_LEAD_PROP[field!];
+    if (!leadProp) return; // staff-backed / non-cascading field
+
+    // `category` and `subCategory` also appear inside the per-device devices[]
+    // list, so those renames must touch the mirror too.
+    const touchesDevices = field === "category" || field === "subCategory";
+    const deviceKey: keyof LeadDevice | null = field === "category" ? "category" : field === "subCategory" ? "subCategory" : null;
+
+    const migrateLead = (l: Lead): Lead | null => {
+      const flatHit = String((l as any)[leadProp] ?? "") === oldValue;
+      let devices = l.devices;
+      let deviceHit = false;
+      if (touchesDevices && deviceKey && Array.isArray(l.devices) && l.devices.length) {
+        devices = l.devices.map((d) => {
+          if (String((d as any)[deviceKey] ?? "") === oldValue) { deviceHit = true; return { ...d, [deviceKey]: trimmed }; }
+          return d;
+        });
+      }
+      if (!flatHit && !deviceHit) return null;
+      return {
+        ...l,
+        ...(flatHit ? { [leadProp]: trimmed } : {}),
+        ...(deviceHit ? { devices } : {}),
+      } as Lead;
+    };
+
+    const affected = leadsRef.current.map((l) => ({ id: l.id, next: migrateLead(l) })).filter((x) => x.next);
+    if (affected.length === 0) return;
+
+    // Optimistic local state (and local-mode persistence) first.
+    setLeads((prev) => {
+      const map = new Map(affected.map((a) => [a.id, a.next!]));
+      const next = prev.map((l) => map.get(l.id) ?? l);
+      if (!useDb) writeLS(LEADS_KEY, next);
+      return next;
+    });
+
+    if (useDb) {
+      const col = OPTION_FIELD_DB_COL[field!];
+      for (const { id: leadId, next } of affected) {
+        if (!next) continue;
+        const update: Record<string, unknown> = {};
+        if (col && String((next as any)[leadProp] ?? "") === trimmed) update[col] = trimmed;
+        if (touchesDevices) update.devices = next.devices ?? [];
+        if (Object.keys(update).length === 0) continue;
+        const { error } = await db.from("leads").update(update).eq("id", leadId);
+        if (error) console.error("[leads] updateOption cascade failed for lead", leadId, error.message);
+      }
+    }
   }, [useDb, db]);
 
   const setOptionActive = useCallback(async (id: string, activeState: boolean) => {
@@ -2108,8 +2268,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
 
   const countLeadsUsingOption = useCallback((field: LeadFieldKey, value: string) => {
     if (!value) return 0;
-    // The Lead property name matches the option field key (region, source, …).
-    return leadsRef.current.filter((l) => String((l as any)[field] ?? "") === value).length;
+    // Resolve the Lead property for this field (qualification → leadCategory,
+    // etc.). category / subCategory also live inside the per-device devices[].
+    const leadProp = OPTION_FIELD_LEAD_PROP[field] ?? (field as keyof Lead);
+    const deviceKey: keyof LeadDevice | null = field === "category" ? "category" : field === "subCategory" ? "subCategory" : null;
+    return leadsRef.current.filter((l) => {
+      if (String((l as any)[leadProp] ?? "") === value) return true;
+      if (deviceKey && Array.isArray(l.devices)) return l.devices.some((d) => String((d as any)[deviceKey] ?? "") === value);
+      return false;
+    }).length;
   }, []);
 
   const deleteOption = useCallback(async (id: string) => {
@@ -2130,6 +2297,51 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       .sort((a, b) => a.sortOrder - b.sortOrder);
   }, [options]);
 
+  /* ── Configurable field TITLES ── */
+  const fieldTitle = useCallback((field: LeadFieldKey) => {
+    const custom = options.find((o) => o.field === fieldLabelKey(field))?.value?.trim();
+    return custom || LEAD_FIELD_BY_KEY[field]?.label || field;
+  }, [options]);
+
+  const setFieldTitle = useCallback(async (field: LeadFieldKey, title: string) => {
+    const trimmed = title.trim();
+    const defaultLabel = LEAD_FIELD_BY_KEY[field]?.label ?? field;
+    const labelField = fieldLabelKey(field);
+    const existing = optionsRef.current.find((o) => o.field === labelField);
+    // Setting the title back to the default (or empty) removes the override.
+    const clearing = !trimmed || trimmed === defaultLabel;
+
+    if (clearing) {
+      if (!existing) return;
+      if (useDb) {
+        const { error } = await db.from("lead_options").delete().eq("id", existing.id);
+        if (error) { console.error("[leads] setFieldTitle(clear) failed:", error.message); toast.error("Title not reset", { description: "We couldn't reset this field title. Please try again." }); return; }
+      }
+      setOptions((prev) => { const next = prev.filter((o) => o.id !== existing.id); if (!useDb) writeLS(OPTIONS_KEY, next); return next; });
+      return;
+    }
+
+    if (existing) {
+      if (existing.value === trimmed) return;
+      if (useDb) {
+        const { error } = await db.from("lead_options").update({ value: trimmed }).eq("id", existing.id);
+        if (error) { console.error("[leads] setFieldTitle(update) failed:", error.message); toast.error("Title not renamed", { description: "We couldn't rename this field title. Please try again." }); return; }
+      }
+      setOptions((prev) => { const next = prev.map((o) => (o.id === existing.id ? { ...o, value: trimmed } : o)); if (!useDb) writeLS(OPTIONS_KEY, next); return next; });
+      return;
+    }
+
+    // First-time override — create the sentinel row (org-wide; branch_id null).
+    if (useDb) {
+      const { data, error } = await db.from("lead_options").insert({ field: labelField, value: trimmed, sort_order: 0, active: true, branch_id: null }).select("*").single();
+      if (error || !data) { console.error("[leads] setFieldTitle(create) failed:", error?.message); toast.error("Title not saved", { description: "We couldn't save this field title. Check your permissions and try again." }); return; }
+      setOptions((prev) => [...prev, rowToOption(data)]);
+      return;
+    }
+    const opt: LeadOption = { id: uid(), field: labelField as LeadFieldKey, value: trimmed, sortOrder: 0, active: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    setOptions((prev) => { const next = [...prev, opt]; writeLS(OPTIONS_KEY, next); return next; });
+  }, [useDb, db]);
+
   const value = useMemo<LeadsContextValue>(() => ({
     leads: scopedLeads, filteredLeads, options, hydrated, loadErrors, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
@@ -2141,9 +2353,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity,
     leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
+    fieldTitle, setFieldTitle,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

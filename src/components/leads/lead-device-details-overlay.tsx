@@ -64,8 +64,15 @@ type ResolvedDevice = {
   status: string;
   priority: string;
   issue: string;
-  issueCategory: string;
+  repairCategory: string; // subCategory (type of repair)
+  partCategory: string;   // category (part/component)
+  estimate: number | null;
 };
+
+/** ₹ display for a per-device estimate (— when unset). */
+function money(n: number | null): string {
+  return n == null ? "—" : `₹${Number(n).toLocaleString("en-IN")}`;
+}
 
 function DeviceBlock({ resolved, index }: { resolved: ResolvedDevice; index: number }) {
   const issues = parseIssueString(resolved.issue).join(", ");
@@ -100,8 +107,10 @@ function DeviceBlock({ resolved, index }: { resolved: ResolvedDevice; index: num
         {/* RIGHT — Service Details */}
         <div className="space-y-1.5 sm:border-l sm:border-indigo-100/70 sm:pl-6">
           <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#4361EE]">Service Details</p>
+          <Field label="Repair Cat." value={resolved.repairCategory} />
+          <Field label="Part Cat." value={resolved.partCategory} />
           <Field label="Issue" value={issues} always />
-          <Field label="Issue Category" value={resolved.issueCategory} />
+          <Field label="Estimate" value={resolved.estimate == null ? undefined : money(resolved.estimate)} />
         </div>
       </div>
     </div>
@@ -159,7 +168,9 @@ export function LeadDeviceDetailsOverlay({
         status: lead.status || "",
         priority: lead.priority || "",
         issue: d.issue || "",
-        issueCategory: d.category || "",
+        repairCategory: d.subCategory || "",
+        partCategory: d.category || "",
+        estimate: d.estimate ?? null,
       };
     });
   }, [lead, categories, brands, models]);

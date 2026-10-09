@@ -1118,11 +1118,11 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
  *  `Field`, used across the quotation's customer + info panels. */
 function QField({ label, value }: { label: string; value: string }) {
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
       <span style={{ fontSize: 8.5, fontWeight: 700, letterSpacing: 0.7, textTransform: "uppercase", color: BRAND.slateLight }}>
         {label}
       </span>
-      <span style={{ fontSize: 11.5, fontWeight: 600, color: BRAND.navy, lineHeight: 1.35, wordBreak: "break-word" }}>
+      <span style={{ fontSize: 11, fontWeight: 600, color: BRAND.navy, lineHeight: 1.3, wordBreak: "break-word" }}>
         {value || "—"}
       </span>
     </div>
@@ -1133,7 +1133,7 @@ function QField({ label, value }: { label: string; value: string }) {
  *  the compact ticket/invoice `SectionHead`. */
 function QSectionHead({ title }: { title: string }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, backgroundColor: BRAND.band, borderBottom: `1px solid ${BRAND.border}`, padding: "9px 16px" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, backgroundColor: BRAND.band, borderBottom: `1px solid ${BRAND.border}`, padding: "7px 14px" }}>
       <span style={{ width: 7, height: 7, borderRadius: 99, backgroundColor: BRAND.blue, display: "inline-block" }} />
       <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.8, textTransform: "uppercase", color: BRAND.blue }}>{title}</span>
     </div>
@@ -1147,6 +1147,9 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
   const createdDate = formatPrintDate(q.createdAt);
   const createdTime = formatPrintTime(q.createdAt);
   const isLeadBased = (q.source || "").toLowerCase() === "lead";
+  // Trimmed reference so the number pill renders only for a real value (never a
+  // blank / whitespace-only one).
+  const quotationNo = (q.quotationId || "").trim();
 
   // Build the item rows from the real quoted lines. A quotation line is an
   // item/service PROPOSED to the customer — no tax column, so the layout is a
@@ -1158,7 +1161,7 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
   // quoted line never looks cramped on a mostly-empty page.
   const qTh = (align: "left" | "center" | "right"): React.CSSProperties => ({
     textAlign: align,
-    padding: "11px 14px",
+    padding: "8px 14px",
     fontSize: 9.5,
     fontWeight: 800,
     letterSpacing: 0.5,
@@ -1167,9 +1170,9 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
   });
   const qTd = (align: "left" | "center" | "right"): React.CSSProperties => ({
     textAlign: align,
-    padding: "13px 14px",
+    padding: "9px 14px",
     fontSize: 11,
-    lineHeight: 1.4,
+    lineHeight: 1.35,
     color: BRAND.ink,
     borderTop: `1px solid ${BRAND.borderSoft}`,
     whiteSpace: align === "left" ? "normal" : "nowrap",
@@ -1194,9 +1197,9 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
         flexDirection: "column",
       }}
     >
-      <div className="ticket-print-body" style={{ padding: "16mm 16mm 4mm", flex: 1 }}>
+      <div className="ticket-print-body" style={{ padding: "10mm 16mm 4mm", flex: 1 }}>
         {/* ══ HEADER — store branding (left) + document identity (right) ══ */}
-        <header data-pdf-atomic style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, paddingBottom: 18, borderBottom: `2px solid ${BRAND.blue}` }}>
+        <header data-pdf-atomic style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, paddingBottom: 12, borderBottom: `2px solid ${BRAND.blue}` }}>
           <div style={{ display: "flex", gap: 16, alignItems: "flex-start", maxWidth: "56%" }}>
             {store.logo ? <img src={store.logo} alt="Logo" style={{ height: 60, width: 60, objectFit: "contain" }} /> : null}
             <div>
@@ -1211,30 +1214,30 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
             </div>
           </div>
 
-          <div style={{ textAlign: "right", flexShrink: 0 }}>
-            <div style={{ fontSize: 30, fontWeight: 800, letterSpacing: 1, color: BRAND.navy, textTransform: "uppercase", lineHeight: 1 }}>{printTitle}</div>
-            <div style={{ marginTop: 9, display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: "6px 10px", fontSize: 10, color: BRAND.slate }}>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 1, color: BRAND.navy, textTransform: "uppercase", lineHeight: 1 }}>{printTitle}</div>
+            {/* Quotation number — a clean, prominent reference line directly
+                under the title (no clunky box). Always shown for a real
+                quotation; falls back is handled upstream (quotationNo || id). */}
+            {quotationNo ? (
+              <div style={{ marginTop: 6, fontSize: 16, fontWeight: 800, color: BRAND.blue, letterSpacing: 0.4, lineHeight: 1 }}>
+                #{quotationNo}
+              </div>
+            ) : null}
+            <div style={{ marginTop: 8, display: "flex", justifyContent: "flex-end", alignItems: "center", flexWrap: "wrap", gap: "4px 10px", fontSize: 9.5, color: BRAND.slate }}>
               <span>{createdDate} · {createdTime}</span>
-              <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 5, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", backgroundColor: BRAND.band, color: BRAND.blue, border: `1px solid ${BRAND.border}` }}>
+              <span style={{ display: "inline-block", padding: "2px 9px", borderRadius: 5, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", backgroundColor: BRAND.band, color: BRAND.blue, border: `1px solid ${BRAND.border}` }}>
                 {isLeadBased ? "Lead-based" : "Quotation"}
               </span>
-            </div>
-            <div style={{ marginTop: 12, backgroundColor: BRAND.blue, color: BRAND.white, borderRadius: 10, padding: "10px 18px", display: "inline-block", textAlign: "left", minWidth: 170 }}>
-              <div style={{ fontSize: 8, fontWeight: 700, letterSpacing: 0.8, textTransform: "uppercase", opacity: 0.85 }}>Quotation Number</div>
-              <div style={{ fontSize: 19, fontWeight: 800, lineHeight: 1.15, marginTop: 2 }}>{q.quotationId}</div>
-            </div>
-            <div style={{ marginTop: 12, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 3 }}>
-              <Barcode value={q.quotationId} />
-              <div style={{ fontSize: 9, fontWeight: 600, color: BRAND.navy, letterSpacing: 1.5 }}>{q.quotationId}</div>
             </div>
           </div>
         </header>
 
         {/* ══ CUSTOMER + QUOTATION INFO ══ */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 18, marginTop: 20 }}>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 14, marginTop: 14 }}>
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
             <QSectionHead title="Billed To" />
-            <div style={{ padding: "16px 16px", display: "flex", flexDirection: "column", gap: 13 }}>
+            <div style={{ padding: "11px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
               <QField label="Name" value={customer.name} />
               {customer.phone ? <QField label="Phone" value={customer.phone} /> : null}
               {customer.email ? <QField label="Email" value={customer.email} /> : null}
@@ -1244,7 +1247,7 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
 
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
             <QSectionHead title="Quotation Information" />
-            <div style={{ padding: "16px 16px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "15px 18px" }}>
+            <div style={{ padding: "11px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 18px" }}>
               <QField label="Date" value={`${createdDate} · ${createdTime}`} />
               {q.validUntil ? <QField label="Valid Until" value={formatPrintDate(q.validUntil)} /> : null}
               {q.device ? <QField label="Device" value={q.device} /> : null}
@@ -1257,7 +1260,7 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
 
         {/* ══ QUOTED ITEMS TABLE (no tax column — this is an offer) ══ */}
         {showItemsTable ? (
-          <div style={{ marginTop: 22, border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
+          <div style={{ marginTop: 14, border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
             <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
               <colgroup>
                 <col style={{ width: "6%" }} />
@@ -1294,16 +1297,16 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
         ) : null}
 
         {/* ══ MESSAGE + OFFER TOTAL (side-by-side) ══ */}
-        <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 18, marginTop: 22, alignItems: "stretch", ...NO_BREAK }}>
+        <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.5fr 1fr", gap: 14, marginTop: 14, alignItems: "stretch", ...NO_BREAK }}>
           {/* LEFT: the branded customer-facing message */}
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <QSectionHead title="Your Quotation" />
-            <div style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+            <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
               {q.message.map((p, i) => (
-                <p key={i} style={{ fontSize: 11, color: BRAND.ink, lineHeight: 1.65, margin: 0 }}>{p}</p>
+                <p key={i} style={{ fontSize: 10.5, color: BRAND.ink, lineHeight: 1.5, margin: 0 }}>{p}</p>
               ))}
               {q.note ? (
-                <p style={{ fontSize: 10, color: BRAND.slate, lineHeight: 1.55, margin: 0, borderTop: `1px solid ${BRAND.borderSoft}`, paddingTop: 12 }}>{q.note}</p>
+                <p style={{ fontSize: 9.5, color: BRAND.slate, lineHeight: 1.45, margin: 0, borderTop: `1px solid ${BRAND.borderSoft}`, paddingTop: 9 }}>{q.note}</p>
               ) : null}
             </div>
           </div>
@@ -1311,28 +1314,28 @@ function QuotationA4({ data }: { data: PrintDocumentData }) {
           {/* RIGHT: the offer summary */}
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
             <QSectionHead title="Offer Summary" />
-            <div style={{ padding: "18px 18px", display: "flex", flexDirection: "column", gap: 12, flex: 1 }}>
+            <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9, flex: 1 }}>
               <QSummaryRow label="Sub Total" value={formatPrintCurrency(q.subtotal)} />
               {q.discount > 0 ? <QSummaryRow label="Discount" value={`-${formatPrintCurrency(q.discount)}`} /> : null}
               {q.warranty ? <QSummaryRow label="Warranty" value={q.warranty} /> : null}
-              <div style={{ borderTop: `1px dashed ${BRAND.border}`, margin: "4px 0" }} />
+              <div style={{ borderTop: `1px dashed ${BRAND.border}`, margin: "3px 0" }} />
               <QSummaryRow label="Quotation Total" value={formatPrintCurrency(q.amount)} strong accent />
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: BRAND.blue, padding: "16px 18px" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: BRAND.blue, padding: "12px 14px" }}>
               <span style={{ fontSize: 12, fontWeight: 800, color: BRAND.white, letterSpacing: 0.4 }}>Estimated Total</span>
-              <span style={{ fontSize: 19, fontWeight: 800, color: BRAND.white }}>{formatPrintCurrency(q.amount)}</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: BRAND.white }}>{formatPrintCurrency(q.amount)}</span>
             </div>
           </div>
         </div>
 
         {/* ══ SIGN-OFF (Best regards, Agent / Company / Office / Contact) ══ */}
-        <div data-pdf-atomic data-pdf-keep-with-next style={{ marginTop: 28, paddingTop: 18, borderTop: `1px solid ${BRAND.borderSoft}`, ...NO_BREAK }}>
-          <div style={{ fontSize: 11, color: BRAND.ink }}>Best regards,</div>
-          <div style={{ marginTop: 6, display: "flex", flexDirection: "column", gap: 2 }}>
-            {q.salesAgentName ? <div style={{ fontSize: 13, fontWeight: 800, color: BRAND.navy }}>{q.salesAgentName}</div> : null}
-            {store.storeName ? <div style={{ fontSize: 11, fontWeight: 700, color: BRAND.blue }}>{store.storeName}</div> : null}
-            {store.fullAddress ? <div style={{ fontSize: 10, color: BRAND.slate }}>{store.fullAddress}</div> : null}
-            {(store.phone || store.mobile) ? <div style={{ fontSize: 10, color: BRAND.slate }}>{store.phone || store.mobile}</div> : null}
+        <div data-pdf-atomic data-pdf-keep-with-next style={{ marginTop: 16, paddingTop: 12, borderTop: `1px solid ${BRAND.borderSoft}`, ...NO_BREAK }}>
+          <div style={{ fontSize: 10.5, color: BRAND.ink }}>Best regards,</div>
+          <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 1 }}>
+            {q.salesAgentName ? <div style={{ fontSize: 12.5, fontWeight: 800, color: BRAND.navy }}>{q.salesAgentName}</div> : null}
+            {store.storeName ? <div style={{ fontSize: 10.5, fontWeight: 700, color: BRAND.blue }}>{store.storeName}</div> : null}
+            {store.fullAddress ? <div style={{ fontSize: 9.5, color: BRAND.slate }}>{store.fullAddress}</div> : null}
+            {(store.phone || store.mobile) ? <div style={{ fontSize: 9.5, color: BRAND.slate }}>{store.phone || store.mobile}</div> : null}
           </div>
         </div>
       </div>

@@ -35,6 +35,7 @@ import {
   saveCityScopes,
   resolveCityScope,
   allCitiesBboxOf,
+  cityScopeForPoint,
 } from "@/lib/geo/city-scopes";
 
 export type { CityScope } from "@/lib/geo/city-scopes";
@@ -61,6 +62,10 @@ export interface PickedLocation {
   address: string;
   /** Shareable maps URL for the picked point. */
   mapsUrl: string;
+  /** The configured city/region the pin falls in (a stable REGION bucket), or
+   *  "" when the point isn't inside any configured city box. Callers use this to
+   *  set the lead's `region` instead of the full street address. */
+  region: string;
 }
 
 /** Build a shareable maps URL for a point. Uses Google Maps (universally
@@ -280,7 +285,7 @@ export function LocationPicker({
       mapRef.current.setView([lat, lng], Math.max(mapRef.current.getZoom(), PIN_ZOOM));
     }
     // Optimistic pin (coordinates first); resolve the address in the background.
-    setPicked({ lat, lng, address: addressHint ?? "", mapsUrl: mapsUrlFor(lat, lng) });
+    setPicked({ lat, lng, address: addressHint ?? "", mapsUrl: mapsUrlFor(lat, lng), region: "" });
     if (!addressHint) {
       setResolving(true);
       const addr = await reverseGeocode(lat, lng);
@@ -762,7 +767,17 @@ export function LocationPicker({
               size="sm"
               className="gap-1.5"
               disabled={!picked}
-              onClick={() => { if (picked) { onPick(picked); onClose(); } }}
+              onClick={() => {
+                if (!picked) return;
+                // Classify the pin into a stable REGION (configured city) rather
+                // than letting the full street address become a new region. Fall
+                // back to the actively-selected city when the pin sits just
+                // outside its box.
+                const hit = cityScopeForPoint(picked.lat, picked.lng, cities);
+                const region = hit?.label ?? (scopeId !== "all" ? scope?.label ?? "" : "");
+                onPick({ ...picked, region });
+                onClose();
+              }}
             >
               <Check className="h-4 w-4" /> Use this location
             </Button>

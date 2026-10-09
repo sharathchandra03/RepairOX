@@ -194,29 +194,64 @@ export async function saveDeviceCategories(cats: DeviceCategoryItem[]): Promise<
     const orgId = await getOrgId();
     if (!orgId) return true; // no auth — localStorage only
 
-    // Delete existing rows for this org.
-    await supabase
-      .from("device_categories")
-      .delete()
-      .eq("organization_id", orgId);
+    // Read the images currently stored in the DB so we NEVER blank an existing
+    // image_url by accident. The old implementation did a destructive
+    // delete-all + insert: a single save with image-less categories wiped every
+    // stored image. We now UPSERT, and for any category whose incoming payload
+    // carries no image we PRESERVE whatever is already stored (the user can only
+    // clear an image through the explicit remove path, never a stray save).
+    const existingImages = new Map<string, string | null>();
+    try {
+      const { data: existingRows } = await supabase
+        .from("device_categories")
+        .select("id, image_url")
+        .eq("organization_id", orgId);
+      for (const r of existingRows ?? []) {
+        existingImages.set((r as any).id, (r as any).image_url ?? null);
+      }
+    } catch {
+      // If the read fails we still proceed, but we WON'T null out images below.
+    }
 
-    // Insert fresh set.
-    const rows = cats.map((c, i) => ({
-      id: c.id,
-      organization_id: orgId,
-      label: c.label,
-      image_url: c.image ?? null,
-      sort_order: i,
-    }));
+    // Build the upsert rows. Each incoming category keeps its stored image when
+    // the payload doesn't provide one.
+    const rows = cats.map((c, i) => {
+      const incoming = c.image ?? null;
+      const stored = existingImages.has(c.id) ? existingImages.get(c.id)! : null;
+      // Preserve the stored image when the incoming payload has none.
+      const image_url = incoming ?? stored;
+      return {
+        id: c.id,
+        organization_id: orgId,
+        label: c.label,
+        image_url,
+        sort_order: i,
+      };
+    });
 
+    // Non-destructive upsert on the composite primary key (organization_id, id).
     const { error } = await supabase
       .from("device_categories")
-      .insert(rows);
+      .upsert(rows, { onConflict: "organization_id,id" });
 
     if (error) {
       console.error("[DeviceCategories] Save failed:", error.message);
       return false;
     }
+
+    // Explicitly delete ONLY the categories the user actually removed from the
+    // list (present in the DB but not in the saved set) — reordering/removal
+    // still works, but kept rows and their images are never touched.
+    const keepIds = new Set(cats.map((c) => c.id));
+    const removedIds = [...existingImages.keys()].filter((id) => !keepIds.has(id));
+    if (removedIds.length > 0) {
+      await supabase
+        .from("device_categories")
+        .delete()
+        .eq("organization_id", orgId)
+        .in("id", removedIds);
+    }
+
     return true;
   } catch (e) {
     console.error("[DeviceCategories] Save error:", e);

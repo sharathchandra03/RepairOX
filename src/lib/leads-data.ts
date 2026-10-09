@@ -64,6 +64,13 @@ export interface Lead {
   estimate: number | null;  // pipeline / expected value (NOT revenue)
   discount: number | null;  // structured numeric value; unit in discountType
   discountType: "amount" | "percent"; // how `discount` is expressed
+  /* Multi-device capture. The structured list of every device the customer
+     mentioned (each with its own repair/part category, issue, estimate). The
+     FLAT device/category/subCategory/issue/estimate/discount fields above
+     mirror devices[0] so all existing single-device read-sites keep working.
+     Empty [] for legacy / single-device leads (getLeadDevices falls back to
+     the flat fields). */
+  devices: LeadDevice[];
   leadCategory: string;
   leadNature: string;
   priority: string;
@@ -263,9 +270,11 @@ export const LEAD_DROPDOWN_FIELDS: LeadFieldDef[] = [
   { key: "qualification", label: "Lead Category",  hint: "Whether the lead is qualified (Qualified / Not Qualified).", defaults: ["Qualified Lead", "Not Qualified Lead"] },
   { key: "contactStatus", label: "Contact Status", hint: "Whether the lead has been reached.",        defaults: ["Not Contacted", "Contacted", "RNR", "Busy", "Switched Off"] },
   { key: "device",        label: "Device",         hint: "Device the enquiry is about.",              defaults: ["iPhone", "Android", "iPad", "MacBook", "Laptop", "Smart Watch", "Other"] },
-  { key: "category",      label: "Category",       hint: "Repair / product category.",                defaults: ["Screen", "Battery", "Motherboard", "Water Damage", "Software", "Accessory"] },
-  { key: "subCategory",   label: "Subcategory",    hint: "More specific category under Category.",     defaults: ["Display Replacement", "Glass Only", "Battery Replacement", "Charging Port", "Data Recovery", "Diagnostics"] },
-  { key: "status",        label: "Status",         hint: "Lead lifecycle stage.",                     defaults: ["New Lead", "Contacted", "Follow-Up", "Qualified", "Won", "Lost"] },
+  { key: "category",      label: "Part Category",  hint: "The part / component involved in the repair.", defaults: ["Screen", "Battery", "Motherboard", "Water Damage", "Software", "Accessory"] },
+  { key: "subCategory",   label: "Repair Category",hint: "The type of repair. Auto-maps a Part Category by keyword.", defaults: ["Display Replacement", "Glass Only", "Battery Replacement", "Charging Port", "Data Recovery", "Diagnostics"] },
+  // Lead Status is now the SINGLE home for the lifecycle AND the outcome
+  // (the old Result / Final Result fields are folded in here — one dropdown).
+  { key: "status",        label: "Lead Status",    hint: "Lead lifecycle stage + outcome.",           defaults: ["New Lead", "Contacted", "Follow-Up", "Interested", "Not Interested", "RNR", "Qualified", "Converted", "Won", "Lost", "Dropped"] },
   { key: "leadNature",    label: "Lead Nature",    hint: "How warm the lead is.",                     defaults: ["Hot", "Warm", "Cold"] },
   { key: "result",        label: "Result",         hint: "Outcome of the contact.",                   defaults: ["Interested", "Not Interested", "RNR", "Follow-Up", "Converted"] },
   { key: "priority",      label: "Priority",       hint: "How urgent the lead is.",                   defaults: ["Normal", "High", "Urgent", "Low"] },
@@ -283,6 +292,51 @@ export const LEAD_SMART_DEFAULTS: Partial<Record<LeadFieldKey, string>> = {
   status: "New Lead",
   contactStatus: "Contacted",
 };
+
+/* ─── Repair Category → Part Category keyword mapping ─────────────────────
+   When a Repair Category (subCategory) is chosen, we suggest the best-matching
+   Part Category (category) by keyword, picked from the org's OWN configured
+   Part Category options (never a fabricated value). This is only a convenience
+   default — the user may freely change the Part Category afterwards.
+
+   Each entry: keywords that may appear in the Repair Category value → the
+   Part Category keyword to look for among the available options. Matching is
+   case-insensitive and tolerant of admin-renamed labels. */
+const REPAIR_TO_PART_HINTS: { match: string[]; part: string }[] = [
+  { match: ["display", "screen", "lcd", "oled", "touch", "glass"], part: "screen" },
+  { match: ["battery", "charg", "power"],                           part: "battery" },
+  { match: ["motherboard", "logic", "chip", "ic", "port", "connector"], part: "motherboard" },
+  { match: ["water", "liquid", "moisture"],                         part: "water" },
+  { match: ["software", "os", "firmware", "data", "recovery", "diagnostic", "reset"], part: "software" },
+  { match: ["accessor", "case", "cable", "cover"],                  part: "accessor" },
+];
+
+/** Suggest a Part Category (`category`) value for a chosen Repair Category
+ *  (`subCategory`), picked by keyword from the supplied available Part Category
+ *  options. Returns "" when nothing matches confidently (so we never guess).
+ *  @param repairCategory the chosen subCategory value
+ *  @param partOptions    the org's configured category option values */
+export function suggestPartCategory(repairCategory: string, partOptions: string[]): string {
+  const rc = (repairCategory || "").toLowerCase();
+  if (!rc || partOptions.length === 0) return "";
+
+  // 1) Direct substring overlap between the repair category and a part option
+  //    (handles custom options like "Battery Replacement" → "Battery").
+  const direct = partOptions.find((p) => {
+    const pl = p.toLowerCase();
+    return rc.includes(pl) || pl.includes(rc);
+  });
+  if (direct) return direct;
+
+  // 2) Keyword hint table → find the first hint whose keyword appears in the
+  //    repair category, then the part option that carries the hinted keyword.
+  for (const hint of REPAIR_TO_PART_HINTS) {
+    if (!hint.match.some((kw) => rc.includes(kw))) continue;
+    const opt = partOptions.find((p) => p.toLowerCase().includes(hint.part));
+    if (opt) return opt;
+  }
+  return "";
+}
 
 /* ─── Month derivation ────────────────────────────────────────────────── */
 
@@ -356,15 +410,52 @@ export interface LeadDevice {
   brandId: string;
   modelId: string;
   issue: string;
-  /** Issue/service category (lead_options master). */
+  /** Part Category — the part/component involved (lead_options `category`). */
   category: string;
+  /** Repair Category — the type of repair (lead_options `subCategory`). */
+  subCategory: string;
+  /** Per-device pipeline estimate (NOT revenue). */
+  estimate: number | null;
+  /** Per-device discount; unit in discountType. */
+  discount: number | null;
+  discountType: "amount" | "percent";
 }
 
-/** The lead's device(s), normalised to an array (one entry today). Returns []
+/** A blank device entry (used when the agent adds another device row). */
+export function emptyLeadDevice(id?: string): LeadDevice {
+  return {
+    id: id || `dev-${Math.random().toString(36).slice(2, 9)}`,
+    label: "", categoryId: "", brandId: "", modelId: "",
+    issue: "", category: "", subCategory: "",
+    estimate: null, discount: null, discountType: "amount",
+  };
+}
+
+/** The lead's device(s), normalised to an array. Prefers the structured
+ *  `devices[]` (multi-device capture); falls back to the single flat device
+ *  fields for leads captured before multi-device, or legacy rows. Returns []
  *  when the lead has captured no device/issue information at all. */
 export function getLeadDevices(lead: Pick<Lead,
-  "id" | "device" | "deviceCategoryId" | "deviceBrandId" | "deviceModelId" | "issue" | "category"
+  "id" | "device" | "deviceCategoryId" | "deviceBrandId" | "deviceModelId" | "issue" | "category" | "subCategory" | "estimate" | "discount" | "discountType" | "devices"
 >): LeadDevice[] {
+  // Structured multi-device list is the source of truth when present.
+  const list = Array.isArray(lead.devices) ? lead.devices.filter((d) => !!d) : [];
+  if (list.length > 0) {
+    return list.map((d, i) => ({
+      id: d.id || `${lead.id}-dev-${i + 1}`,
+      label: d.label || "",
+      categoryId: d.categoryId || "",
+      brandId: d.brandId || "",
+      modelId: d.modelId || "",
+      issue: d.issue || "",
+      category: d.category || "",
+      subCategory: d.subCategory || "",
+      estimate: d.estimate ?? null,
+      discount: d.discount ?? null,
+      discountType: d.discountType === "percent" ? "percent" : "amount",
+    }));
+  }
+  // Fallback: a single device from the flat fields (back-compat).
   const hasAny = !!(lead.device || lead.deviceModelId || lead.deviceBrandId || lead.deviceCategoryId || lead.issue || lead.category);
   if (!hasAny) return [];
   return [{
@@ -375,7 +466,21 @@ export function getLeadDevices(lead: Pick<Lead,
     modelId: lead.deviceModelId || "",
     issue: lead.issue || "",
     category: lead.category || "",
+    subCategory: lead.subCategory || "",
+    estimate: lead.estimate ?? null,
+    discount: lead.discount ?? null,
+    discountType: lead.discountType === "percent" ? "percent" : "amount",
   }];
+}
+
+/** Total pipeline estimate across every captured device (device-level
+ *  estimates summed). Falls back to the flat `estimate` for legacy leads.
+ *  Returns null only when NO device carries an estimate. */
+export function leadDevicesTotalEstimate(lead: Parameters<typeof getLeadDevices>[0]): number | null {
+  const devices = getLeadDevices(lead);
+  const withEstimate = devices.filter((d) => d.estimate != null);
+  if (withEstimate.length === 0) return lead.estimate ?? null;
+  return withEstimate.reduce((sum, d) => sum + Number(d.estimate || 0), 0);
 }
 
 /** The lead's FULL human location for handoff/display: the exact door/flat/house
@@ -461,6 +566,7 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
     estimate: null,
     discount: null,
     discountType: "amount",
+    devices: [],
     leadCategory: "",
     leadNature: "",
     priority: LEAD_SMART_DEFAULTS.priority ?? "",

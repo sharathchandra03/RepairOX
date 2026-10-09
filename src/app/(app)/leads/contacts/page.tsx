@@ -49,6 +49,10 @@ interface ContactRow {
   convertedDate: string;
   /** Finalized revenue attributed via the source lead. */
   revenue: number;
+  /** Every sales-agent user id that OWNS a lead referencing this contact (plus
+   *  the contact's own creator). Used for own-vs-all scoping: an individual
+   *  only sees a contact when they appear here. */
+  ownerIds: string[];
 }
 
 /** A contact is CONVERTED when a lead that references it reached a real
@@ -66,7 +70,7 @@ const TAG_CONFIG = {
 
 /* Demo fallback — shown ONLY when there are no real saved contacts yet
    (fresh account / un-migrated DB), mirroring the Companies page pattern. */
-const DEMO_CONTACTS: Omit<ContactRow, "agentId" | "agentName" | "converted" | "sourceLeadNo" | "convertedDate" | "revenue">[] = [
+const DEMO_CONTACTS: Omit<ContactRow, "agentId" | "agentName" | "converted" | "sourceLeadNo" | "convertedDate" | "revenue" | "ownerIds">[] = [
   { id: "C-001", name: "Aarav Mehta",    email: "aarav@technova.in",    phone: "+91 98765 43210", company: "TechNova Pvt Ltd",   role: "Founder",       location: "Bengaluru", lastContact: "2h ago", deals: 3, tag: "customer" },
   { id: "C-002", name: "Bina Soni",      email: "bina@designhub.co",    phone: "+91 87654 32109", company: "DesignHub Co",       role: "CTO",           location: "Mumbai",    lastContact: "1d ago", deals: 1, tag: "prospect" },
   { id: "C-003", name: "Chetan Bhatt",   email: "chetan@gmail.com",     phone: "+91 76543 21098", company: "",                    role: "Individual",    location: "Pune",      lastContact: "3d ago", deals: 0, tag: "prospect" },
@@ -136,7 +140,7 @@ export default function ContactsPage() {
   const isDemo = contacts.length === 0;
   const rows = useMemo<ContactRow[]>(() => {
     if (contacts.length === 0) return DEMO_CONTACTS.map((d) => ({
-      ...d, agentId: "", agentName: "", converted: d.tag === "customer", sourceLeadNo: "", convertedDate: "", revenue: 0,
+      ...d, agentId: "", agentName: "", converted: d.tag === "customer", sourceLeadNo: "", convertedDate: "", revenue: 0, ownerIds: [],
     }));
 
     // deals per contact = number of leads that reference it (contactId).
@@ -173,6 +177,10 @@ export default function ContactsPage() {
       const best = [...convertedLeads].sort((a, b) =>
         (revenueForLead(b) - revenueForLead(a)) || (b.date || "").localeCompare(a.date || ""))[0];
       const converted = !!best;
+      // Every agent who owns/created a lead for this contact → own-scope key.
+      const ownerIds = Array.from(new Set(
+        contactLeads.flatMap((l) => [l.assignedTo, l.createdBy].filter(Boolean) as string[]),
+      ));
       return {
         id: c.id,
         name: c.fullName || `${c.firstName} ${c.lastName ?? ""}`.trim(),
@@ -190,6 +198,7 @@ export default function ContactsPage() {
         sourceLeadNo: best?.leadNo || "",
         convertedDate: best?.date || "",
         revenue: best ? revenueForLead(best) : 0,
+        ownerIds,
       } as ContactRow;
     });
   }, [contacts, leads, companies, customers, invoices, tickets]);
@@ -200,10 +209,12 @@ export default function ContactsPage() {
         // Scope: Converted-only unless the user explicitly switched to All.
         // (Demo rows ignore scoping so the empty-account preview still shows.)
         if (!isDemo && scope === "converted" && !c.converted) return false;
-        // Scoped to one person (a Sales Agent, or the owner's viewed agent):
-        // only contacts THAT person converted. "See all" (combined owner view)
-        // skips this.
-        if (!isDemo && !canSeeAllContacts && c.converted && c.agentId && scopeAgentId && c.agentId !== scopeAgentId) return false;
+        // Own-vs-all: unless the user holds a true see-all grant (combined owner
+        // view), they see ONLY contacts they own — i.e. a lead THEY own/created
+        // references the contact. This holds for BOTH the Converted and All
+        // scopes, so switching to "All" can never surface another agent's
+        // contacts. scopeAgentId = the viewed agent (owner lens) or self.
+        if (!isDemo && !canSeeAllContacts && scopeAgentId && !c.ownerIds.includes(scopeAgentId)) return false;
         return true;
       }
       return false;

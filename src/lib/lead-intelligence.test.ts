@@ -14,7 +14,7 @@ function lead(id: string, patch: Partial<Lead> = {}): Lead {
     qualification: "Qualified Lead", name: `Customer ${id}`, number: "9000000000", alternateNumber: "", email: "",
     location: "", locationUnit: "", locationLat: null, locationLng: null, locationMapsUrl: "",
     device: "Apple iPhone", deviceCategoryId: "cat-mobile", deviceBrandId: "plb-apple", deviceModelId: "plm-iphone",
-    issue: "Screen", category: "Repair", subCategory: "Display", estimate: 5_000, discount: null, discountType: "amount",
+    issue: "Screen", category: "Repair", subCategory: "Display", estimate: 5_000, discount: null, discountType: "amount", devices: [],
     leadCategory: "Repair", leadNature: "Hot", priority: "Hot", comments: "", contactStatus: "Contacted",
     status: "Qualified", result: "Interested", finalRemarks: "", followUpDate: "", followUpAgent: "Agent A",
     followUpAgentId: "agent-a", finalResult: "", followUpComments: "", notContactedSince: "",

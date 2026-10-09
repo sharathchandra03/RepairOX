@@ -274,7 +274,16 @@ export function QuotationItemsEditor({
   };
   const remove = (id: string) => onChange(items.filter((it) => it.id !== id));
   const addFromCatalog = (part: Parameters<typeof catalogPartToQuotationLine>[0], dLabel: string) => {
-    onChange([...items, catalogPartToQuotationLine(part, dLabel)]);
+    const line = catalogPartToQuotationLine(part, dLabel);
+    // Same catalog part already on the quotation → bump its quantity instead of
+    // adding a duplicate row (an identical item is one line, qty 2).
+    const existing = items.find((it) => it.kind === line.kind && it.itemId === line.itemId && String(line.itemId) !== "");
+    if (existing) {
+      const qty = (Number(existing.qty) || 0) + line.qty;
+      update(existing.id, { qty });
+      return;
+    }
+    onChange([...items, line]);
   };
   const addService = () => onChange([...items, createQuotationLine({ kind: "service", name: "" })]);
 

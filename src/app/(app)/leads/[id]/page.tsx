@@ -67,7 +67,8 @@ import {
   leadActionTone, leadResultTone, isNotQualified,
   resolveLeadTicket, resolveLeadFinalizedInvoice, resolveLeadFieldJob, resolveLeadWalkIn,
 } from "@/lib/lead-workflow";
-import { revenueWonForLead } from "@/lib/leads-data";
+import { revenueWonForLead, getLeadDevices, leadDevicesTotalEstimate } from "@/lib/leads-data";
+import { parseIssueString } from "@/lib/issue-library";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import { statusTone } from "@/components/leads/lead-pills";
@@ -83,6 +84,22 @@ import { LeadTemperatureSection } from "@/components/leads/lead-temperature-sect
 import { LeadQuickActions } from "@/components/leads/lead-quick-actions";
 import { LeadStickyContext } from "@/components/leads/lead-sticky-context";
 import type { Lead } from "@/lib/leads-data";
+
+/* A device's captured issues rendered as compact pills (same language as the
+   capture form). Falls back to "—" when nothing is captured. */
+function IssuePills({ value }: { value: string }) {
+  const issues = parseIssueString(value || "");
+  if (issues.length === 0) return <span className="text-[13px] text-muted-foreground">—</span>;
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {issues.map((iss, i) => (
+        <span key={i} className="inline-flex items-center rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[11.5px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#4361EE]/15">
+          {iss}
+        </span>
+      ))}
+    </div>
+  );
+}
 
 /* Commercial strip card — larger, with a semantic value tone. */
 function MoneyCard({ label, value, tone, border }: { label: string; value: React.ReactNode; tone?: string; border?: string }) {
@@ -216,6 +233,10 @@ export default function ViewLeadPage() {
   }
 
   const money = (n: number | null | undefined) => (n == null ? "—" : formatINR(n));
+  // Lead Value shown on the hero + commercial summary is the COMBINED estimate
+  // across all captured devices (multi-device aware; equals the flat estimate
+  // for a single-device lead).
+  const leadEstimateTotal = leadDevicesTotalEstimate(lead);
   const canEdit = allow(can, CAP.lead.edit) && !viewAsReadOnly;
   const canViewTicket = allow(can, CAP.ticket.view);
   const canViewInvoice = allow(can, CAP.invoice.view);
@@ -264,11 +285,13 @@ export default function ViewLeadPage() {
       },
     },
     device: {
+      // Quick-edit covers the PRIMARY device (device #1). Full multi-device
+      // editing routes to the capture wizard via the header "Edit Lead".
       title: "Edit Device & Issue", icon: Wrench,
       fields: [
         { key: "device", label: "Device", type: "text" },
-        { key: "category", label: "Category", type: "select", options: opts("category", lead.category) },
-        { key: "subCategory", label: "Sub Category", type: "select", options: opts("subCategory", lead.subCategory) },
+        { key: "subCategory", label: "Repair Category", type: "select", options: opts("subCategory", lead.subCategory) },
+        { key: "category", label: "Part Category", type: "select", options: opts("category", lead.category) },
         { key: "issue", label: "Issue", type: "textarea" },
       ],
       initial: {
@@ -311,6 +334,28 @@ export default function ViewLeadPage() {
     for (const [k, v] of Object.entries(values)) {
       if (k === "estimate" || k === "discount") patch[k] = v.trim() === "" ? null : Number(v.replace(/[^0-9.]/g, ""));
       else patch[k] = v;
+    }
+    // Device quick-edit touches the PRIMARY device — keep the structured
+    // devices[0] in sync with the flat fields so a multi-device lead doesn't
+    // drift (devices 2..n are untouched). getLeadDevices gives us the current
+    // list (flat fallback when none stored yet).
+    if (editSection === "device") {
+      const current = getLeadDevices(lead);
+      const first = current[0] ?? null;
+      const nextFirst = {
+        id: first?.id || `${lead.id}-dev-1`,
+        label: (patch.device as string) ?? lead.device ?? "",
+        categoryId: first?.categoryId ?? lead.deviceCategoryId ?? "",
+        brandId: first?.brandId ?? lead.deviceBrandId ?? "",
+        modelId: first?.modelId ?? lead.deviceModelId ?? "",
+        issue: (patch.issue as string) ?? lead.issue ?? "",
+        category: (patch.category as string) ?? lead.category ?? "",
+        subCategory: (patch.subCategory as string) ?? lead.subCategory ?? "",
+        estimate: first?.estimate ?? lead.estimate ?? null,
+        discount: first?.discount ?? lead.discount ?? null,
+        discountType: first?.discountType ?? lead.discountType ?? "amount",
+      };
+      patch.devices = [nextFirst, ...current.slice(1)];
     }
     void updateLead(lead.id, patch as Partial<Lead>);
     setEditSection(null);
@@ -380,7 +425,7 @@ export default function ViewLeadPage() {
 
             {/* Current-state summary cards (at-a-glance) */}
             <div className="relative mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-              <SummaryCard label="Lead Value" value={money(lead.estimate)} />
+              <SummaryCard label="Lead Value" value={money(leadEstimateTotal)} />
               <DerivedBadge label="Action" value={wf ? (wf.gated ? "N/A" : (wf.fieldStatusLabel || wf.actionLabel)) : "—"} tone={wf ? leadActionTone(wf.action).split(" ").find((c) => c.startsWith("text-")) || "text-[#4361EE]" : "text-[#4361EE]"} lockHint={wf?.reason || "System-derived — read-only"} />
               <DerivedBadge label="Result" value={wf ? wf.result.primary : "—"} tone={wf ? leadResultTone(wf.result.kind) : "text-foreground"} lockHint={wf?.reason || "System-derived — read-only"} />
               <SummaryCard label="Revenue Won" value={<RevenueValue amount={revenue} />} tone={revenue > 0 ? "text-emerald-700" : undefined} />
@@ -447,15 +492,73 @@ export default function ViewLeadPage() {
             </div>
           </DetailSection>
 
-          {/* Device & Issue */}
-          <DetailSection icon={Wrench} title="Device & Issue" accent="indigo" action={canEdit ? <SectionEditButton onClick={() => setEditSection("device")} /> : undefined}>
-            <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-              <DetailField label="Device" value={lead.device} highlight />
-              <DetailField label="Category" value={lead.category} />
-              <DetailField label="Sub Category" value={lead.subCategory} />
-              <DetailField label="Issue" value={lead.issue} />
-            </div>
-          </DetailSection>
+          {/* Device & Issue — one block per captured device (multi-device
+              aware; a single device reads exactly like before). */}
+          {(() => {
+            const leadDevices = getLeadDevices(lead);
+            const multi = leadDevices.length > 1;
+            const devTotal = leadDevicesTotalEstimate(lead);
+            return (
+              <DetailSection
+                icon={Wrench}
+                title={multi ? `Device & Issue · ${leadDevices.length} devices` : "Device & Issue"}
+                accent="indigo"
+                action={canEdit ? <SectionEditButton onClick={() => setEditSection("device")} /> : undefined}
+              >
+                {leadDevices.length === 0 ? (
+                  <p className="text-[13px] text-muted-foreground">No device captured.</p>
+                ) : multi ? (
+                  <div className="space-y-3">
+                    {leadDevices.map((d, i) => (
+                      <div key={d.id || i} className="rounded-xl border border-border bg-muted/20 p-4">
+                        <div className="mb-3 flex items-center gap-2 border-b border-border/70 pb-2.5">
+                          <span className="grid h-6 w-6 place-items-center rounded-md bg-indigo-100 text-[10px] font-bold text-indigo-700">{i + 1}</span>
+                          <span className="min-w-0 truncate text-[13px] font-semibold text-foreground">{d.label || "Device"}</span>
+                          {d.estimate != null && <span className="ml-auto text-[12.5px] font-semibold text-zinc-700 tnum">{money(d.estimate)}</span>}
+                        </div>
+                        <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+                          <DetailField label="Repair Category" value={d.subCategory} />
+                          <DetailField label="Part Category" value={d.category} />
+                          <DetailField
+                            label="Estimate"
+                            value={d.estimate == null ? "" : money(d.estimate)}
+                          />
+                          <DetailField
+                            label="Discount"
+                            value={d.discount == null ? "" : d.discountType === "percent" ? `${d.discount}%` : money(d.discount)}
+                          />
+                        </div>
+                        {/* Issues as pills, full-width under the grid. */}
+                        <div className="mt-3 space-y-1.5">
+                          <p className="text-[11px] font-medium text-muted-foreground">Issue</p>
+                          <IssuePills value={d.issue} />
+                        </div>
+                      </div>
+                    ))}
+                    {devTotal != null && (
+                      <div className="flex items-center justify-between rounded-xl border border-border bg-card px-4 py-2.5">
+                        <span className="text-[12px] font-medium text-muted-foreground">Total estimate</span>
+                        <span className="text-[14px] font-bold text-zinc-900 tnum">{money(devTotal)}</span>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+                      <DetailField label="Device" value={lead.device} highlight />
+                      <DetailField label="Repair Category" value={lead.subCategory} />
+                      <DetailField label="Part Category" value={lead.category} />
+                      <DetailField label="Estimate" value={lead.estimate == null ? "" : money(lead.estimate)} />
+                    </div>
+                    <div className="space-y-1.5">
+                      <p className="text-[11px] font-medium text-muted-foreground">Issue</p>
+                      <IssuePills value={lead.issue} />
+                    </div>
+                  </div>
+                )}
+              </DetailSection>
+            );
+          })()}
 
           {/* Lead Information */}
           <DetailSection icon={Tag} title="Lead Information" accent="blue" action={canEdit ? <SectionEditButton onClick={() => setEditSection("info")} /> : undefined}>
@@ -631,7 +734,7 @@ export default function ViewLeadPage() {
       {hasCommercial && (
         <DetailSection icon={IndianRupee} title="Commercial Summary" accent="emerald">
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-            <MoneyCard label="Lead Value (estimate)" value={money(lead.estimate)} />
+            <MoneyCard label="Lead Value (estimate)" value={money(leadEstimateTotal)} />
             <MoneyCard label="Quotation" value={quotation ? formatQuotationMoney(quotation.amount) : "—"} tone={quotation ? "text-[#4361EE]" : undefined} border={quotation ? "border-[#4361EE]/25" : undefined} />
             <MoneyCard label="Discount" value={money(lead.discount)} tone={lead.discount != null ? "text-amber-600" : undefined} border={lead.discount != null ? "border-amber-200" : undefined} />
             <MoneyCard label="Final Invoice" value={finalizedInvoice ? formatINR(Number(finalizedInvoice.total || 0)) : "—"} tone={finalizedInvoice ? "text-emerald-700" : undefined} border={finalizedInvoice ? "border-emerald-200" : undefined} />

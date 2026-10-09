@@ -47,7 +47,7 @@ import { SendQuotationFlow } from "@/components/quotations/send-quotation-flow";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
-  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadIsExistingCustomer, type LeadFollowUp,
+  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, type LeadFollowUp,
   isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
 } from "@/lib/leads-data";
@@ -114,6 +114,30 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
   );
   return cols;
 }
+
+/* Which table columns correspond to a configurable Lead field, so their header
+   follows the admin's custom field TITLE (Form Edit). Composite / system-derived
+   columns (Contact Info, Device & Issue, Lead Value, Action, Result, …) are not
+   listed — they are not a single configurable field. */
+const COLUMN_TO_FIELD: Record<string, LeadFieldKey | undefined> = {
+  mode: "modeOfContact",
+  region: "region",
+  source: "source",
+  contactStatus: "contactStatus",
+  leadCategory: "qualification",
+  subCategory: "subCategory",
+  leadType: "leadNature",
+  status: "status",
+};
+
+/* Per-column horizontal nudge (px) applied to BOTH the header and the body
+   cells so the whole column (heading + content) shifts together without
+   changing column widths. Negative = move left. Used to free up space for the
+   "Mode of Contact" heading: Lead Value −25px, Agent −12px. */
+const COLUMN_SHIFT_X: Record<string, number | undefined> = {
+  value: -25,
+  agent: -12,
+};
 
 /* Merge a column's frozen props (className + inline offset style) with the
    cell's own base classes. Returns a spreadable prop object for <th>/<td>. */
@@ -248,9 +272,9 @@ function LeadStatusTick({ wf }: { wf: LeadWorkflow }) {
   // Invoice (green) wins, then ticket (blue), then lead-won (orange).
   let tone: "green" | "blue" | "orange" | null = null;
   let label = "";
-  if (kind === "invoice") { tone = "green"; label = "Invoice created — revenue realized"; }
+  if (kind === "invoice") { tone = "green"; label = "🎉 Congratulations! You closed this deal — revenue is in the bank."; }
   else if (kind === "ticket" || wf.action === "ticket_created" || wf.action === "visited_store") { tone = "blue"; label = "Ticket created for this customer"; }
-  else if (kind === "lead_won") { tone = "orange"; label = "Lead won — awaiting ticket / invoice"; }
+  else if (kind === "lead_won") { tone = "orange"; label = "🏆 Lead won! The customer is on board — close it out with a ticket & invoice."; }
   if (!tone) return null;
   const bg =
     tone === "green" ? "linear-gradient(135deg, #10B981 0%, #059669 100%)"
@@ -644,18 +668,28 @@ function ContactInfoCell({ lead }: { lead: Lead }) {
 function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) => void }) {
   const devices = getLeadDevices(lead);
   if (devices.length === 0) return <EmptyDash />;
+  const first = devices[0];
+  const extra = devices.length - 1;
+  // Summarise all devices for the hover tooltip so the row stays compact.
+  const allLabels = devices.map((d) => d.label || "Device").join(", ");
   return (
     <button
       type="button"
       onClick={(e) => { e.stopPropagation(); onOpen(lead); }}
       aria-label="View device and issue details"
+      title={extra > 0 ? allLabels : undefined}
       className="group/device flex w-full min-w-0 items-center gap-1.5 rounded-lg text-left transition hover:bg-indigo-50/50"
     >
       <div className="min-w-0 flex-1 leading-snug">
-        <p className="truncate font-medium text-zinc-800">
-          <span className="truncate">{lead.device || (lead.issue ? "Device" : "—")}</span>
+        <p className="flex min-w-0 items-center gap-1.5 font-medium text-zinc-800">
+          <span className="truncate">{first.label || (first.issue ? "Device" : "—")}</span>
+          {extra > 0 && (
+            <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
+              +{extra} more
+            </span>
+          )}
         </p>
-        {lead.issue && <p className="mt-0.5 truncate text-[12.5px] text-zinc-500" title={lead.issue}>{lead.issue}</p>}
+        {first.issue && <p className="mt-0.5 truncate text-[12.5px] text-zinc-500" title={first.issue}>{first.issue}</p>}
       </div>
       <ChevronDown className="h-4 w-4 shrink-0 -rotate-90 text-zinc-400 opacity-70 transition group-hover/device:text-[#4361EE] group-hover/device:opacity-100" />
     </button>
@@ -665,7 +699,32 @@ function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) =>
 /* Column 9 — LEAD VALUE (pipeline/estimate; NEVER revenue). Shows the total
    with the discount as an optional secondary breakdown when present. */
 function LeadValueCell({ lead }: { lead: Lead }) {
-  if (lead.estimate == null) return <EmptyDash />;
+  const devices = getLeadDevices(lead);
+  const multi = devices.length > 1;
+  const total = leadDevicesTotalEstimate(lead);
+  if (total == null) return <EmptyDash />;
+  // Multi-device → total + a compact per-device breakdown (first 2, then "+N").
+  if (multi) {
+    const shown = devices.slice(0, 2);
+    const rest = devices.length - shown.length;
+    const fullBreakdown = devices
+      .map((d, i) => `${d.label || `Device ${i + 1}`}: ${d.estimate == null ? "—" : formatINR(d.estimate)}`)
+      .join("\n");
+    return (
+      <div className="leading-snug" title={fullBreakdown}>
+        <p className="font-semibold text-zinc-900 tnum">{formatINR(total)}</p>
+        <div className="mt-0.5 space-y-0.5">
+          {shown.map((d, i) => (
+            <p key={d.id || i} className="flex items-center gap-1 text-[11.5px] text-zinc-500">
+              <span className="min-w-0 max-w-[86px] truncate">{d.label || `Device ${i + 1}`}</span>
+              <span className="tnum text-zinc-600">{d.estimate == null ? "—" : formatINR(d.estimate)}</span>
+            </p>
+          ))}
+          {rest > 0 && <p className="text-[11px] text-zinc-400">+{rest} more</p>}
+        </div>
+      </div>
+    );
+  }
   const hasDiscount = lead.discount != null && lead.discount > 0;
   const breakdown = hasDiscount
     ? lead.discountType === "percent"
@@ -674,7 +733,7 @@ function LeadValueCell({ lead }: { lead: Lead }) {
     : null;
   return (
     <div className="leading-snug">
-      <p className="font-semibold text-zinc-900 tnum">{formatINR(lead.estimate)}</p>
+      <p className="font-semibold text-zinc-900 tnum">{formatINR(total)}</p>
       {breakdown && <p className="mt-0.5 text-[12px] text-zinc-500 tnum">{breakdown}</p>}
     </div>
   );
@@ -747,7 +806,7 @@ function ResultCell({
   const invoiceTitle = canViewInvoice ? `Open invoice ${r.invoiceNo}` : `Print preview — invoice ${r.invoiceNo}`;
   if (r.kind === "invoice") {
     return (
-      <div className="leading-snug select-none" title={`System-derived — ${wf.reason}`}>
+      <div className="leading-snug select-none" title="🎉 Congratulations! You closed this deal — revenue is in the bank.">
         <p className={cn("font-bold tabular-nums", leadResultTone(r.kind))}>{r.primary}</p>
         <div className="mt-0.5 space-y-0.5 border-t border-border/70 pt-0.5">
           {r.ticketNo && (
@@ -771,9 +830,15 @@ function ResultCell({
     );
   }
   // lead_won / pipeline / lost / na — a single restrained label.
+  // A friendly, human headline per outcome, with the factual system-derived
+  // reason kept as a second line so nothing is lost.
+  const resultHeadline =
+    r.kind === "lead_won"
+      ? "🏆 Lead won! The customer is on board — close it out with a ticket & invoice."
+      : null;
   return (
     <span
-      title={`System-derived — ${wf.reason}`}
+      title={resultHeadline ?? `System-derived — ${wf.reason}`}
       className={cn("inline-flex cursor-default items-center gap-1 whitespace-nowrap text-[12.5px] font-semibold select-none", leadResultTone(r.kind))}
     >
       {r.primary}
@@ -825,7 +890,7 @@ const FOLLOWUP_FILTERS = [
 ] as const;
 
 export default function LeadsListPage() {
-  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, deleteLead, pinLead, changeLeadStatus, updateLead, salesAgents, openFollowUpsByLead,
+  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, fieldTitle, deleteLead, pinLead, changeLeadStatus, updateLead, salesAgents, openFollowUpsByLead,
     viewAsReadOnly } = useLeads();
   // OWNER "view as agent" (Option A — NOT impersonation): when active, the whole
   // Leads workspace is READ-ONLY. Every mutation gate ANDs in `!viewAsReadOnly`.
@@ -895,7 +960,15 @@ export default function LeadsListPage() {
      per-user. `frozenCellProps(key)` returns the sticky className + inline
      left/right offset for any column so the header and body cells stay in
      lockstep with the real column widths. */
-  const gridColumns = useMemo(() => leadGridColumns(multiStore), [multiStore]);
+  const gridColumns = useMemo(() => {
+    const cols = leadGridColumns(multiStore);
+    // Override the header of each column that maps to a configurable field so a
+    // field-TITLE rename in Form Edit reflects here live (org-wide).
+    return cols.map((c) => {
+      const fk = COLUMN_TO_FIELD[c.key];
+      return fk ? { ...c, label: fieldTitle(fk) } : c;
+    });
+  }, [multiStore, fieldTitle]);
   /* ── Personal column order (per-user) ──────────────────────────────────────
      The user can rearrange the center columns via the Customize popover; the
      order persists per-user (localStorage key, keyed by currentUser.id). It is
@@ -1349,13 +1422,13 @@ export default function LeadsListPage() {
           ?? v;
       }
       chips.push({
-        label: field.label,
+        label: field.optionField ? fieldTitle(field.optionField) : field.label,
         value: display,
         onClear: () => setFilters((prev) => ({ ...prev, fields: { ...prev.fields, [field.key]: "" } })),
       });
     }
     return chips;
-  }, [filters, salesAgents, leads, setFilters]);
+  }, [filters, salesAgents, leads, setFilters, fieldTitle]);
 
   /* Compact indicators shown INSIDE the collapsed-state toolbar so the user
      still knows what is active without reopening the filters. The count mirrors
@@ -1375,7 +1448,7 @@ export default function LeadsListPage() {
     () =>
       FILTER_FIELDS.map((f) => ({
         key: f.key,
-        label: f.label,
+        label: f.optionField ? fieldTitle(f.optionField) : f.label,
         options: optionsForFilter(f).map((o) =>
           typeof o === "string" ? { label: o, value: o } : o,
         ),
@@ -1383,7 +1456,7 @@ export default function LeadsListPage() {
     // optionsForFilter closes over leads/salesAgents/optionsFor; recompute when
     // the dataset changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [leads, salesAgents],
+    [leads, salesAgents, fieldTitle],
   );
 
   /* ── Per-column body renderer ──────────────────────────────────────────────
@@ -1887,8 +1960,14 @@ export default function LeadsListPage() {
                 // the centred label shifts by (rightPad − leftPad)/2, so a 4px
                 // gap (pl-3 = 12px, pr-4 = 16px) moves it 2px left.
                 const pad = c.key === "id" ? "pl-3 pr-4 py-4" : "px-3 py-4";
+                // Nudge whole columns (heading + cells together) left so the
+                // "Mode of Contact" heading gets room: Lead Value −25px,
+                // Agent −12px. translateX keeps column widths unchanged.
+                const shift = COLUMN_SHIFT_X[c.key];
+                const headProps = mergeFrozen(frozenCellProps(c.key), `${pad} ${align}`);
+                if (shift) headProps.style = { ...headProps.style, transform: `translateX(${shift}px)` };
                 return (
-                  <th key={c.key} {...mergeFrozen(frozenCellProps(c.key), `${pad} ${align}`)}>
+                  <th key={c.key} {...headProps}>
                     {c.key === "select" ? (
                       <Checkbox
                         checked={allSelected}
@@ -2000,10 +2079,15 @@ export default function LeadsListPage() {
                   // right padding.
                   const pad = c.key === "id" ? `pl-8 pr-4 py-4 align-middle ${bodyAlign}`
                     : `px-3 py-4 align-middle ${bodyAlign}`;
+                  // Match the header: shift the whole column's cell content left
+                  // by the same amount (Lead Value −25px, Agent −12px).
+                  const shift = COLUMN_SHIFT_X[c.key];
+                  const cellProps = mergeFrozen(frozenCellProps(c.key), pad);
+                  if (shift) cellProps.style = { ...cellProps.style, transform: `translateX(${shift}px)` };
                   return (
                     <td
                       key={c.key}
-                      {...mergeFrozen(frozenCellProps(c.key), pad)}
+                      {...cellProps}
                       onClick={stops ? (e) => e.stopPropagation() : undefined}
                     >
                       {renderLeadCell(c.key, {

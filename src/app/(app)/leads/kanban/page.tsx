@@ -63,7 +63,7 @@ function leadSearchText(lead: Lead): string {
 }
 
 export default function KanbanPage() {
-  const { leads, openFollowUpsByLead, canSeeAllLeads, viewAsReadOnly } = useLeads();
+  const { leads, openFollowUpsByLead, canSeeAllLeads, viewAsReadOnly, currentUserIsSalesAgent } = useLeads();
   const { can } = usePermissions();
   const { id: currentUserId } = useSession();
   const { stores, isAllShops, getStore, activeStoreId } = useStoreContext();
@@ -88,9 +88,12 @@ export default function KanbanPage() {
      the personal Kanban is a personal daily workspace, not an org board. Store
      scope (active store) + the optional multi-store filter also apply. */
   const myLeads = useMemo(() => {
+    // A user who is themselves a Sales Agent is ALWAYS own-scoped on their
+    // personal Kanban, even with a coarse reporting/see-all key.
+    const seeCombined = canSeeAllLeads && !currentUserIsSalesAgent();
     return leads.filter((l) => {
       // Own-scope for non-see-all users (a personal workspace).
-      if (!canSeeAllLeads && currentUserId) {
+      if (!seeCombined && currentUserId) {
         const mine = l.assignedTo === currentUserId || l.createdBy === currentUserId || l.followUpAgentId === currentUserId;
         if (!mine) return false;
       }
@@ -100,7 +103,7 @@ export default function KanbanPage() {
       if (!matchesStoreSelection(l.branchId, storeFilter)) return false;
       return true;
     });
-  }, [leads, canSeeAllLeads, currentUserId, activeStoreId, storeFilter]);
+  }, [leads, canSeeAllLeads, currentUserIsSalesAgent, currentUserId, activeStoreId, storeFilter]);
 
   const myLeadIds = useMemo(() => myLeads.map((l) => l.id), [myLeads]);
   const leadById = useMemo(() => new Map(myLeads.map((l) => [l.id, l])), [myLeads]);

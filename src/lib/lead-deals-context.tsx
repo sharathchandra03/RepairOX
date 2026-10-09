@@ -98,6 +98,10 @@ interface DealsContextValue {
   requestChanges: (dealId: string, comment: string) => Promise<boolean>;
   /** Cancel an open deal (kept as history). */
   cancelDeal: (dealId: string, reason?: string) => Promise<boolean>;
+  /** Permanently delete one or more deals (and their comments + revisions).
+   *  Gated by CAP.deal.delete at the call site; RLS enforces it server-side.
+   *  Returns the number of deals actually removed. */
+  deleteDeals: (dealIds: string[]) => Promise<number>;
   /** Reopen a terminal deal (approved / rejected / cancelled) back to pending
    *  for a fresh review. Approver authority only; clears the prior decision
    *  columns and keeps the full revision history. */
@@ -480,6 +484,43 @@ export function DealsProvider({ children }: { children: ReactNode }) {
     return true;
   }, [patchDeal, useDb, writeLocalRevision]);
 
+  /* ── Delete (permanent) ──────────────────────────────────────────────────
+     Hard-removes the deal(s) AND their comments + revisions. Unlike cancel
+     (which keeps history), delete is destructive — used to remove bad/old
+     records. Permission is enforced at the call site (CAP.deal.delete) and by
+     RLS server-side; this never deletes the Lead/Customer/Ticket/Invoice. */
+  const deleteDeals = useCallback(async (dealIds: string[]): Promise<number> => {
+    const ids = Array.from(new Set(dealIds)).filter(Boolean);
+    if (ids.length === 0) return 0;
+    const targets = dealsRef.current.filter((d) => ids.includes(d.id));
+    if (targets.length === 0) return 0;
+
+    if (useDb) {
+      // Remove children first (defensive — FKs may or may not cascade), then
+      // the deals themselves. Child-table absence (migration not applied) is
+      // non-fatal.
+      await db.from("lead_deal_comments").delete().in("deal_id", ids);
+      await db.from("lead_deal_revisions").delete().in("deal_id", ids);
+      const { error } = await db.from("lead_deals").delete().in("id", ids);
+      if (error && !isMissingTableError(error)) {
+        console.error("[deals] deleteDeals failed:", error.message);
+        toast.error("Delete failed", { description: error.message || "Some deals could not be removed." });
+        return 0;
+      }
+    }
+
+    const idSet = new Set(ids);
+    setDeals((prev) => { const next = prev.filter((d) => !idSet.has(d.id)); if (!useDb) writeLS(DEALS_KEY, next); return next; });
+    setComments((prev) => { const next = prev.filter((c) => !idSet.has(c.dealId)); if (!useDb) writeLS(DEAL_COMMENTS_KEY, next); return next; });
+    setRevisions((prev) => { const next = prev.filter((r) => !idSet.has(r.dealId)); if (!useDb) writeLS(DEAL_REVISIONS_KEY, next); return next; });
+
+    for (const d of targets) {
+      logActivity({ module: "Lead", action: "Deal Deleted", severity: "warning", entity: "Deal", reference: d.dealNo, description: `${d.dealNo} (lead ${d.leadNo}) permanently deleted.` });
+    }
+    toast.success(targets.length === 1 ? "Deal deleted" : `${targets.length} deals deleted`, { description: targets.length === 1 ? targets[0].dealNo : undefined });
+    return targets.length;
+  }, [useDb, db]);
+
   /* ── Reopen a terminal deal (approved / rejected / cancelled → pending) ──
      Lets an authorized approver re-open a closed decision for a fresh review
      from the queue. Clears the prior decision columns, bumps the revision, and
@@ -534,8 +575,8 @@ export function DealsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<DealsContextValue>(() => ({
     deals, comments, revisions, hydrated, mode: useDb ? "db" : "local",
     dealsForLead, currentDeal, commentsForDeal, revisionsForDeal, dealById,
-    requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, reopenDeal, addDealComment,
-  }), [deals, comments, revisions, hydrated, useDb, dealsForLead, currentDeal, commentsForDeal, revisionsForDeal, dealById, requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, reopenDeal, addDealComment]);
+    requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, deleteDeals, reopenDeal, addDealComment,
+  }), [deals, comments, revisions, hydrated, useDb, dealsForLead, currentDeal, commentsForDeal, revisionsForDeal, dealById, requestDeal, resubmitDeal, approveDeal, rejectDeal, requestChanges, cancelDeal, deleteDeals, reopenDeal, addDealComment]);
 
   return <DealsContext.Provider value={value}>{children}</DealsContext.Provider>;
 }

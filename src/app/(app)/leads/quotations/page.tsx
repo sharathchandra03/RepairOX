@@ -14,11 +14,13 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
-import { Plus, FileText, Send, Clock, CheckCircle2, Lock, Eye, Printer } from "lucide-react";
+import { Plus, FileText, Send, Clock, CheckCircle2, Lock, Eye, Printer, Trash2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useRoxStickyHeader } from "@/components/ui/rox-table";
 import { toast } from "@/components/ui/toaster";
 import { TableUtilityBar } from "@/components/common/table-utility-bar";
@@ -75,7 +77,7 @@ export default function QuotationsPage() {
   const session = useSession();
   const { isAllShops, stores, getStore } = useStoreContext();
   const { settings } = useStoreSettings();
-  const { quotations, hydrated, sendQuotation } = useQuotations();
+  const { quotations, hydrated, sendQuotation, deleteQuotation } = useQuotations();
   const { viewAsReadOnly, viewAsAgentId, currentUserIsSalesAgent } = useLeads();
 
   // A user who is themselves a Sales Agent only ever sees their OWN quotations,
@@ -152,6 +154,46 @@ export default function QuotationsPage() {
 
   // Reset to page 1 when filters change.
   useMemo(() => { setPage(1); }, [tab, sourceFilter, storeFilter.join(","), query, pageSize]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ── Row selection + bulk delete (design-system row-selection standard) ──
+     Gated by CAP.quotation.delete + the owner read-only lens; server + RLS are
+     the real boundary. Select-all spans the whole FILTERED set. */
+  const canDelete = !viewAsReadOnly && allow(can, CAP.quotation.delete);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const filteredIds = useMemo(() => filtered.map((q) => q.id), [filtered]);
+  const selectedInView = useMemo(() => filteredIds.filter((id) => selected.has(id)), [filteredIds, selected]);
+  const allSelected = filteredIds.length > 0 && selectedInView.length === filteredIds.length;
+  const someSelected = selectedInView.length > 0;
+  const toggleOne = (id: string) =>
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (allSelected) filteredIds.forEach((id) => n.delete(id));
+      else filteredIds.forEach((id) => n.add(id));
+      return n;
+    });
+  // Drop selections for rows that leave the filtered set.
+  useMemo(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const keep = new Set(filteredIds);
+      const n = new Set(Array.from(prev).filter((id) => keep.has(id)));
+      return n.size === prev.size ? prev : n;
+    });
+  }, [filteredIds]); // eslint-disable-line react-hooks/exhaustive-deps
+  const runBulkDelete = async () => {
+    setDeleting(true);
+    try {
+      const ids = [...selectedInView];
+      await Promise.all(ids.map((id) => deleteQuotation(id)));
+      toast.success(ids.length === 1 ? "Quotation deleted" : `${ids.length} quotations deleted`);
+      setSelected(new Set());
+      setConfirmDelete(false);
+    } finally { setDeleting(false); }
+  };
 
   const kpis = useMemo(() => {
     const total = scoped.length;
@@ -254,6 +296,29 @@ export default function QuotationsPage() {
         />
       </div>
 
+      {/* ── Bulk-action bar — shown while rows are selected (delete-gated). ── */}
+      {canDelete && someSelected && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-[#4361EE]/20 bg-[#EEF1FD]/50 px-4 py-2.5">
+          <span className="text-[13px] font-semibold text-[#2f3fb5]">{selectedInView.length} selected</span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-[13px] font-semibold text-rose-600 transition hover:bg-rose-100"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-[13px] font-medium text-zinc-600 transition hover:bg-muted"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Quotations table — canonical rox-table foundation (sharp 2px frame,
           frozen sticky header with the brand fill, visible row separators,
           detached pagination). Matches the Walk-In / Ticket / Deals tables. ── */}
@@ -264,6 +329,7 @@ export default function QuotationsPage() {
         <div className="[overflow-x:clip]">
           <table className="w-full table-fixed text-[14px]">
             <colgroup>
+              {canDelete && <col className="w-[44px]" />}{/* Selection checkbox */}
               <col className="w-[150px]" />{/* Quotation (+ lead) */}
               {multiStore && <col className="w-[130px]" />}{/* Store */}
               <col className="w-[22%]" />{/* Customer — flexible */}
@@ -277,14 +343,24 @@ export default function QuotationsPage() {
             </colgroup>
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE] [&>th]:py-4 [&>th]:whitespace-nowrap">
-                <th className="pl-5 pr-3">Quotation</th>
+                {canDelete && (
+                  <th className="pl-5 pr-1">
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={someSelected && !allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all quotations"
+                    />
+                  </th>
+                )}
+                <th className={cn(canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>Quotation</th>
                 {multiStore && <th className="px-3">Store</th>}
                 <th className="px-3">Customer</th>
                 <th className="px-3">Device / Service</th>
                 <th className="px-3">Sales Agent</th>
                 <th className="px-3">Source</th>
                 <th className="px-3 text-right">Amount</th>
-                <th className="pl-[47px] pr-3">Status</th>
+                <th className="px-3">Status</th>
                 <th className="px-3 text-right">Date</th>
                 <th className="px-3 pr-5 text-right">Actions</th>
               </tr>
@@ -299,9 +375,21 @@ export default function QuotationsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(0.015 * i, 0.2) }}
                   onClick={() => router.push(`/leads/quotations/${q.id}`)}
-                  className="rox-table-row group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition hover:bg-muted/40"
+                  className={cn(
+                    "rox-table-row group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition",
+                    selected.has(q.id) ? "bg-[#EEF1FD]/60" : "hover:bg-muted/40",
+                  )}
                 >
-                  <td className="pl-5 pr-3 py-4 align-middle">
+                  {canDelete && (
+                    <td className="pl-5 pr-1 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.has(q.id)}
+                        onChange={() => toggleOne(q.id)}
+                        aria-label={`Select quotation ${q.quotationNo}`}
+                      />
+                    </td>
+                  )}
+                  <td className={cn("py-4 align-middle", canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>
                     <p className="font-semibold tabular-nums text-zinc-900">{q.quotationNo}</p>
                     {q.leadNo ? (
                       q.leadId ? (
@@ -334,8 +422,8 @@ export default function QuotationsPage() {
                     </span>
                   </td>
                   <td className="px-3 py-4 text-right align-middle font-semibold tabular-nums text-[#4361EE]">{formatINR(q.amount)}</td>
-                  <td className="pl-[47px] pr-3 py-4 align-middle">
-                    <span className={cn("inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", quotationStatusTone(q.status))}>
+                  <td className="px-3 py-4 align-middle">
+                    <span className={cn("inline-flex items-center justify-center rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", quotationStatusTone(q.status))}>
                       {QUOTATION_STATUS_LABEL[q.status]}
                     </span>
                   </td>
@@ -369,6 +457,15 @@ export default function QuotationsPage() {
                       >
                         <Printer className="h-3.5 w-3.5" />
                       </button>
+                      {canDelete && (
+                        <button
+                          onClick={() => { setSelected(new Set([q.id])); setConfirmDelete(true); }}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-rose-50 hover:text-rose-600"
+                          title="Delete quotation"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      )}
                     </div>
                   </td>
                 </motion.tr>
@@ -396,6 +493,20 @@ export default function QuotationsPage() {
         onPageChange={setPage}
         onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
         itemLabel="quotation"
+      />
+
+      {/* Permanent delete confirmation (bulk + single-row) */}
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => { if (!deleting) setConfirmDelete(false); }}
+        onConfirm={runBulkDelete}
+        title={selectedInView.length === 1 ? "Delete this quotation?" : `Delete ${selectedInView.length} quotations?`}
+        description={
+          selectedInView.length === 1
+            ? "This permanently removes the quotation. The linked lead, customer and any ticket/invoice are not affected. This cannot be undone."
+            : `This permanently removes ${selectedInView.length} quotations. The linked leads, customers and any tickets/invoices are not affected. This cannot be undone.`
+        }
+        confirmLabel={deleting ? "Deleting…" : "Delete"}
       />
 
       <QuickQuotationFlow open={showQuick} onClose={() => setShowQuick(false)} />

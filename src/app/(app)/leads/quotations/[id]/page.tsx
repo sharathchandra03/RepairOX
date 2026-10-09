@@ -29,6 +29,7 @@ import { useStoreContext } from "@/lib/store-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { cn, formatINR } from "@/lib/utils";
 import { useQuotations } from "@/lib/quotations-context";
+import { useLeads } from "@/lib/leads-context";
 import { getQuotationPrintUrl } from "@/lib/print-utils";
 import { useStoreSettings } from "@/lib/store-settings";
 import { sendQuotationOnWhatsApp } from "@/lib/quotation-send";
@@ -56,6 +57,7 @@ export default function QuotationDetailPage() {
   const { getStore, isAllShops, stores } = useStoreContext();
   const { settings } = useStoreSettings();
   const { quotationById, sendQuotation, setQuotationStatus, deleteQuotation } = useQuotations();
+  const { currentUserIsSalesAgent, viewAsAgentId } = useLeads();
 
   const id = decodeURIComponent((params.id as string) || "");
   const quotation = quotationById(id);
@@ -63,17 +65,24 @@ export default function QuotationDetailPage() {
   const [showDelete, setShowDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
+  // A Sales Agent is never a "view all" user (even with the perf/see-all key);
+  // they may only open their OWN quotations. Owners keep viewAll.
+  const isSelfSalesAgent = currentUserIsSalesAgent();
   const canView = allow(can, CAP.quotation.view) || allow(can, CAP.quotation.viewAll);
-  const canViewAll = allow(can, CAP.quotation.viewAll);
-  const canSend = allow(can, CAP.quotation.send);
-  const canEdit = allow(can, CAP.quotation.create);
-  const canDelete = allow(can, CAP.quotation.delete);
+  const canViewAll = allow(can, CAP.quotation.viewAll) && !isSelfSalesAgent;
+  // Under the owner lens the Send action is read-only.
+  const canSend = allow(can, CAP.quotation.send) && !viewAsAgentId;
+  const canEdit = allow(can, CAP.quotation.create) && !viewAsAgentId;
+  const canDelete = allow(can, CAP.quotation.delete) && !viewAsAgentId;
 
   const meId = session.id || currentUser?.id || "";
+  // The identity the scope check uses: the owner's viewed agent, else self.
+  const scopeId = viewAsAgentId || meId;
 
-  // Scope: a non-viewAll user may only open quotations they created / own.
+  // Scope: a non-viewAll user may only open quotations they created / own
+  // (or, under the owner lens, the viewed agent's own).
   const scopeOk = quotation
-    ? canViewAll || quotation.createdBy === meId || quotation.salesAgentId === meId
+    ? canViewAll || quotation.createdBy === scopeId || quotation.salesAgentId === scopeId
     : true;
 
   if (!canView || (quotation && !scopeOk)) {

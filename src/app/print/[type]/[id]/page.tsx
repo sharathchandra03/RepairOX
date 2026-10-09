@@ -122,7 +122,10 @@ export default function PrintPreviewPage() {
       return buildQuotationPrintData(
         settings,
         {
-          quotationNo: q.quotationNo,
+          // Always carry a usable reference: the human QT-#### when present,
+          // otherwise fall back to the stable id so the document never shows an
+          // empty "Quotation No".
+          quotationNo: q.quotationNo || q.id,
           source: q.source,
           leadNo: q.leadNo,
           createdAt: q.createdAt,

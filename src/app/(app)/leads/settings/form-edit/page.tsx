@@ -19,7 +19,7 @@ import {
 } from "@hello-pangea/dnd";
 import {
   ArrowLeft, Plus, X, Check, Pencil, EyeOff, Eye, Trash2, Lock,
-  GripVertical, ListChecks, Users,
+  GripVertical, ListChecks, Users, RotateCcw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -93,11 +93,12 @@ export default function FormEditPage() {
 /* ── Sidebar field tab ── */
 
 function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boolean; onClick: () => void }) {
-  const { options } = useLeads();
+  const { options, fieldTitle } = useLeads();
   const count = useMemo(
     () => options.filter((o) => o.field === field.key && o.active).length,
     [options, field.key],
   );
+  const title = fieldTitle(field.key);
   return (
     <button
       type="button"
@@ -115,7 +116,7 @@ function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boo
       )}>
         {field.usesStaff ? <Users className="h-3.5 w-3.5" /> : <ListChecks className="h-3.5 w-3.5" />}
       </span>
-      <span className="min-w-0 flex-1 truncate">{field.label}</span>
+      <span className="min-w-0 flex-1 truncate">{title}</span>
       <span className={cn(
         "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
         active ? "bg-[#4361EE]/10 text-[#4361EE]" : "bg-muted text-muted-foreground",
@@ -129,11 +130,20 @@ function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boo
 /* ── Option editor panel (one field at a time) ── */
 
 function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: boolean }) {
-  const { options, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption } = useLeads();
+  const { options, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle } = useLeads();
   const { team } = usePermissions();
   const [adding, setAdding] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+
+  // Inline edit of the FIELD TITLE itself (reflects in the table + form).
+  const title = fieldTitle(field.key);
+  const isCustomTitle = title !== field.label;
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [titleValue, setTitleValue] = useState(title);
+  const beginEditTitle = () => { setTitleValue(title); setEditingTitle(true); };
+  const saveTitle = () => { void setFieldTitle(field.key, titleValue); setEditingTitle(false); };
+  const resetTitle = () => { void setFieldTitle(field.key, ""); setEditingTitle(false); };
   const [confirmDelete, setConfirmDelete] = useState<{ option: LeadOption; usage: number } | null>(null);
 
   const rows = useMemo(
@@ -160,15 +170,13 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
   const handleConfirmDelete = () => {
     if (!confirmDelete) return;
     const { option, usage } = confirmDelete;
-    if (usage > 0) {
-      void setOptionActive(option.id, false);
-      toast.info("Archived instead of deleted", {
-        description: `"${option.value}" is used by ${usage} lead${usage !== 1 ? "s" : ""}, so it was archived to protect historical data.`,
-      });
-    } else {
-      void deleteOption(option.id);
-      toast.success("Option deleted", { description: `"${option.value}" was removed.` });
-    }
+    void deleteOption(option.id);
+    toast.success("Option deleted", {
+      description:
+        usage > 0
+          ? `"${option.value}" was removed from the dropdown. The ${usage} existing lead${usage !== 1 ? "s" : ""} that used it keep their value.`
+          : `"${option.value}" was removed.`,
+    });
     setConfirmDelete(null);
   };
 
@@ -184,14 +192,40 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
     <div className="rounded-2xl border border-border bg-card shadow-card">
       {/* Panel header */}
       <div className="flex items-center gap-3 border-b border-border px-5 py-4">
-        <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
           {field.usesStaff ? <Users className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className="font-display text-base font-bold text-foreground">{field.label}</h2>
+          {editingTitle ? (
+            <div className="flex items-center gap-1.5">
+              <Input
+                value={titleValue}
+                onChange={(e: any) => setTitleValue(e.target.value)}
+                onKeyDown={(e: any) => { if (e.key === "Enter") saveTitle(); if (e.key === "Escape") setEditingTitle(false); }}
+                className="h-8 max-w-[260px] text-[14px] font-bold"
+                placeholder={field.label}
+                autoFocus
+              />
+              <button onClick={saveTitle} className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-emerald-600 hover:bg-emerald-50" title="Save title"><Check className="h-3.5 w-3.5" /></button>
+              <button onClick={() => setEditingTitle(false)} className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-muted" title="Cancel"><X className="h-3.5 w-3.5" /></button>
+              {isCustomTitle && (
+                <button onClick={resetTitle} className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-muted hover:text-[#4361EE]" title={`Reset to default (“${field.label}”)`}><RotateCcw className="h-3.5 w-3.5" /></button>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-2">
+              <h2 className="min-w-0 truncate font-display text-base font-bold text-foreground">{title}</h2>
+              {canManage && (
+                <button onClick={beginEditTitle} className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-zinc-400 hover:bg-muted hover:text-[#4361EE]" title="Rename this field title"><Pencil className="h-3 w-3" /></button>
+              )}
+              {isCustomTitle && (
+                <span className="shrink-0 rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">Renamed</span>
+              )}
+            </div>
+          )}
           <p className="text-[12px] text-muted-foreground">{field.hint}</p>
         </div>
-        <span className="rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
           {rows.filter((r) => r.active).length} active
         </span>
       </div>
@@ -295,7 +329,7 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
               value={adding}
               onChange={(e: any) => setAdding(e.target.value)}
               onKeyDown={(e: any) => e.key === "Enter" && handleAdd()}
-              placeholder={`Add ${field.label.toLowerCase()}…`}
+              placeholder={`Add ${title.toLowerCase()}…`}
               className="h-9 flex-1 text-[13px]"
             />
             <Button size="sm" className="gap-1" onClick={handleAdd} disabled={!adding.trim()}>
@@ -313,16 +347,16 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
         open={!!confirmDelete}
         onClose={() => setConfirmDelete(null)}
         onConfirm={handleConfirmDelete}
-        title={confirmDelete && confirmDelete.usage > 0 ? "Archive this option?" : "Delete this option?"}
+        title="Delete this option?"
         description={
           confirmDelete
             ? confirmDelete.usage > 0
-              ? `"${confirmDelete.option.value}" is used by ${confirmDelete.usage} existing lead${confirmDelete.usage !== 1 ? "s" : ""}. To protect that data it will be archived (hidden from new leads) instead of deleted.`
+              ? `"${confirmDelete.option.value}" is used by ${confirmDelete.usage} existing lead${confirmDelete.usage !== 1 ? "s" : ""}. Deleting removes it from the dropdown for new leads — those existing leads keep their current value.`
               : `"${confirmDelete.option.value}" isn't used by any lead and will be permanently removed.`
             : ""
         }
-        confirmLabel={confirmDelete && confirmDelete.usage > 0 ? "Archive" : "Delete"}
-        danger={!confirmDelete || confirmDelete.usage === 0}
+        confirmLabel="Delete"
+        danger
       />
     </div>
   );

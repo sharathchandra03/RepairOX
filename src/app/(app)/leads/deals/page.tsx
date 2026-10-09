@@ -14,7 +14,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BadgePercent, Clock, CheckCircle2, XCircle, RefreshCw, Lock,
-  ChevronDown, Check, X, MoreHorizontal, Eye, User as UserIcon, Link2, Ban,
+  ChevronDown, Check, X, MoreHorizontal, Eye, User as UserIcon, Link2, Ban, Trash2,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Drawer } from "@/components/ui/drawer";
@@ -22,6 +22,8 @@ import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Avatar } from "@/components/ui/avatar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
+import { Checkbox } from "@/components/ui/checkbox";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useRoxStickyHeader } from "@/components/ui/rox-table";
 import { TableUtilityBar } from "@/components/common/table-utility-bar";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
@@ -43,17 +45,24 @@ import {
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
 
-/** The customer's offer = quoted price minus the requested discount
- *  (absolute ₹ or percent). Returns null when the quote is unknown. */
-function customerOfferPrice(
+/** The customer's offer vs the quoted price — a comparison, not two unrelated
+ *  numbers. From the quoted price (leadValue) and the requested discount
+ *  (absolute ₹ or percent) we derive BOTH the final price the customer wants
+ *  to pay AND the size of the cut (₹ off + % off), so the UI can show the gap
+ *  explicitly. Returns null when the quote is unknown (presentation only — no
+ *  data is fabricated). */
+function customerOfferBreakdown(
   leadValue: number | null,
   discount: number | null,
   type: "amount" | "percent",
-): number | null {
+): { quoted: number; final: number; off: number; pct: number } | null {
   if (leadValue == null) return null;
-  if (discount == null) return leadValue;
-  const off = type === "percent" ? (leadValue * discount) / 100 : discount;
-  return Math.max(0, Math.round(leadValue - off));
+  const quoted = leadValue;
+  const rawOff = discount == null ? 0 : type === "percent" ? (quoted * discount) / 100 : discount;
+  const off = Math.min(quoted, Math.max(0, Math.round(rawOff)));
+  const final = Math.max(0, quoted - off);
+  const pct = quoted > 0 ? Math.round((off / quoted) * 100) : 0;
+  return { quoted, final, off, pct };
 }
 
 /* Soft colour tints for the KPI boxes — tinted surface + matching icon chip +
@@ -69,7 +78,7 @@ const KPI_TONES = {
 export default function DealsPage() {
   const { can } = usePermissions();
   const { isAllShops, stores, getStore } = useStoreContext();
-  const { deals, hydrated, dealById, approveDeal, cancelDeal, reopenDeal } = useDeals();
+  const { deals, hydrated, dealById, approveDeal, cancelDeal, deleteDeals, reopenDeal } = useDeals();
   const { leads, viewAsReadOnly, viewAsAgentId, canSeeAllLeads, currentUserIsSalesAgent } = useLeads();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -108,7 +117,11 @@ export default function DealsPage() {
   // (not Sales Agents) see every agent's deals.
   const isSelfSalesAgent = currentUserIsSalesAgent();
   const canSeeAllDeals = (allow(can, CAP.deal.viewAll) || canSeeAllLeads) && !isSelfSalesAgent;
-  const myLeadIds = useMemo(() => new Set(leads.map((l) => l.id)), [leads]);
+  // Own-scope deals = ONLY deals the user raised or owns. We deliberately do
+  // NOT widen by "deals whose parent lead is in my `leads` array" — that array
+  // can momentarily include other agents' leads (RLS/coarse keys), which would
+  // leak another agent's deal into an individual's queue. created_by /
+  // salesAgentId are the authoritative own-scope.
 
   /** Deals the current user is allowed to see (before tab/store/search). KPIs
    *  and tab counts derive from this so an agent's numbers reflect only their
@@ -124,8 +137,8 @@ export default function DealsPage() {
       return deals.filter((d) => d.createdBy === viewAsAgentId || d.salesAgentId === viewAsAgentId);
     }
     if (canSeeAllDeals) return deals;
-    return deals.filter((d) => d.createdBy === meId || d.salesAgentId === meId || myLeadIds.has(d.leadId));
-  }, [deals, canSeeAllDeals, meId, myLeadIds, viewAsAgentId]);
+    return deals.filter((d) => d.createdBy === meId || d.salesAgentId === meId);
+  }, [deals, canSeeAllDeals, meId, viewAsAgentId]);
 
   /* Approval authority (what-you-can-do) — used to gate the inline Status
      control. Reject / Request Changes require a mandatory reason, so they open
@@ -184,6 +197,45 @@ export default function DealsPage() {
   );
   // Reset to page 1 whenever the filtered set changes shape.
   useEffect(() => { setPage(1); }, [tab, storeFilter, query, pageSize]);
+
+  /* ── Row selection + bulk delete (design-system row-selection standard) ──
+     Gated by CAP.deal.delete + the owner read-only lens; the server + RLS are
+     the real boundary. Select-all spans the whole FILTERED set (not just the
+     current page), like the Tickets table. */
+  const canDelete = !viewAsReadOnly && allow(can, CAP.deal.delete);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const filteredIds = useMemo(() => filtered.map((d) => d.id), [filtered]);
+  const selectedInView = useMemo(() => filteredIds.filter((id) => selected.has(id)), [filteredIds, selected]);
+  const allSelected = filteredIds.length > 0 && selectedInView.length === filteredIds.length;
+  const someSelected = selectedInView.length > 0;
+  const toggleOne = (id: string) =>
+    setSelected((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const toggleAll = () =>
+    setSelected((prev) => {
+      const n = new Set(prev);
+      if (allSelected) filteredIds.forEach((id) => n.delete(id));
+      else filteredIds.forEach((id) => n.add(id));
+      return n;
+    });
+  // Drop selections for rows that leave the visible/filtered set.
+  useEffect(() => {
+    setSelected((prev) => {
+      if (prev.size === 0) return prev;
+      const keep = new Set(filteredIds);
+      const n = new Set(Array.from(prev).filter((id) => keep.has(id)));
+      return n.size === prev.size ? prev : n;
+    });
+  }, [filteredIds]);
+  const runBulkDelete = async () => {
+    setDeleting(true);
+    try {
+      await deleteDeals(selectedInView);
+      setSelected(new Set());
+      setConfirmDelete(false);
+    } finally { setDeleting(false); }
+  };
 
   /* Frozen sticky header offset (pins the <thead> flush below the topbar). */
   const { wrapRef, theadTop } = useRoxStickyHeader();
@@ -268,6 +320,31 @@ export default function DealsPage() {
         />
       </div>
 
+      {/* ── Bulk-action bar — shown while rows are selected (delete-gated). ── */}
+      {canDelete && someSelected && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border-2 border-[#4361EE]/20 bg-[#EEF1FD]/50 px-4 py-2.5">
+          <span className="text-[13px] font-semibold text-[#2f3fb5]">
+            {selectedInView.length} selected
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setConfirmDelete(true)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-rose-50 px-3 py-1.5 text-[13px] font-semibold text-rose-600 transition hover:bg-rose-100"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </button>
+            <button
+              type="button"
+              onClick={() => setSelected(new Set())}
+              className="rounded-lg border border-border bg-card px-3 py-1.5 text-[13px] font-medium text-zinc-600 transition hover:bg-muted"
+            >
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* ── Deals table — canonical rox-table foundation (sharp frame, frozen
           sticky header, detached pagination). Matches the Walk-In / Ticket
           tables. ── */}
@@ -275,26 +352,37 @@ export default function DealsPage() {
         <div className="[overflow-x:clip]">
           <table className="w-full table-fixed text-[14px]">
             <colgroup>
-              <col className="w-[124px]" />{/* Deal ID */}
-              {multiStore && <col className="w-[112px]" />}{/* Store */}
-              <col className="w-[16%]" />{/* Agent Name — flexible */}
-              <col className="w-[17%]" />{/* Customer Name — flexible */}
-              <col className="w-[22%]" />{/* Device & Issue — flexible */}
-              <col className="w-[150px]" />{/* Price Quoted */}
-              <col className="w-[162px]" />{/* Customer Offer */}
-              <col className="w-[150px]" />{/* Status — editable pill */}
-              <col className="w-[72px]" />{/* Age */}
-              <col className="w-[124px]" />{/* Actions */}
+              {canDelete && <col className="w-[44px]" />}{/* Selection checkbox */}
+              <col className="w-[116px]" />{/* Deal ID */}
+              {multiStore && <col className="w-[104px]" />}{/* Store */}
+              <col className="w-[150px]" />{/* Agent Name */}
+              <col className="w-[180px]" />{/* Customer Name */}
+              <col />{/* Device & Issue — absorbs remaining width */}
+              <col className="w-[118px]" />{/* Price Quoted */}
+              <col className="w-[150px]" />{/* Customer Offer */}
+              <col className="w-[138px]" />{/* Status — editable pill */}
+              <col className="w-[64px]" />{/* Age */}
+              <col className="w-[112px]" />{/* Actions */}
             </colgroup>
             <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
               <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE] [&>th]:py-4 [&>th]:whitespace-nowrap">
-                <th className="pl-5 pr-3">Deal ID</th>
+                {canDelete && (
+                  <th className="pl-5 pr-1">
+                    <Checkbox
+                      checked={allSelected}
+                      indeterminate={someSelected && !allSelected}
+                      onChange={toggleAll}
+                      aria-label="Select all deals"
+                    />
+                  </th>
+                )}
+                <th className={cn(canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>Deal ID</th>
                 {multiStore && <th className="px-3">Store</th>}
                 <th className="px-3">Agent Name</th>
                 <th className="px-3">Customer Name</th>
                 <th className="px-3">Device &amp; Issue</th>
-                <th className="pl-3 pr-14 text-right">Price Quoted</th>
-                <th className="pl-3 pr-14 text-right">Customer Offer</th>
+                <th className="pl-3 pr-6 text-right">Price Quoted</th>
+                <th className="pl-3 pr-6 text-right">Customer Offer</th>
                 <th className="px-3 text-center">Status</th>
                 <th className="pl-3 pr-6 text-right">Age</th>
                 <th className="px-3 text-center">Actions</th>
@@ -307,9 +395,9 @@ export default function DealsPage() {
                 const lead = leadById.get(d.leadId);
                 const device = lead?.device?.trim() || "";
                 const issue = lead?.issue?.trim() || "";
-                // The customer's offer = quoted price minus the requested
-                // discount (amount or percent). Null quote → unknown.
-                const offer = customerOfferPrice(d.leadValue, d.requestedDiscount, d.requestedDiscountType);
+                // Quoted vs the customer's final offer, as a comparison (final
+                // price + the size of the cut). Null quote → unknown.
+                const offer = customerOfferBreakdown(d.leadValue, d.requestedDiscount, d.requestedDiscountType);
                 // Inline Status: for OPEN deals an authorized approver can decide
                 // (Approve/Reject/Request Changes). For TERMINAL deals (approved
                 // / rejected / cancelled) the approver can REOPEN for a fresh
@@ -328,9 +416,21 @@ export default function DealsPage() {
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: Math.min(0.015 * i, 0.2) }}
                   onClick={() => setOpenId(d.id)}
-                  className="rox-table-row group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition hover:bg-muted/40"
+                  className={cn(
+                    "rox-table-row group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition",
+                    selected.has(d.id) ? "bg-[#EEF1FD]/60" : "hover:bg-muted/40",
+                  )}
                 >
-                  <td className="pl-5 pr-3 py-4 align-middle">
+                  {canDelete && (
+                    <td className="pl-5 pr-1 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={selected.has(d.id)}
+                        onChange={() => toggleOne(d.id)}
+                        aria-label={`Select deal ${d.dealNo}`}
+                      />
+                    </td>
+                  )}
+                  <td className={cn("py-4 align-middle", canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>
                     <p className="font-semibold tabular-nums text-zinc-900">{d.dealNo}</p>
                     {d.leadNo ? (
                       <button
@@ -363,15 +463,30 @@ export default function DealsPage() {
                       <span className="text-[13px] text-zinc-400">—</span>
                     )}
                   </td>
-                  <td className="pl-3 pr-14 py-4 text-right align-middle tabular-nums">{d.leadValue == null ? <span className="text-zinc-400">—</span> : <span className="font-bold text-[#4361EE]">{formatINR(d.leadValue)}</span>}</td>
-                  <td className="pl-3 pr-14 py-4 text-right align-middle">
+                  {/* Price Quoted — the reference the agent put forward. */}
+                  <td className="pl-3 pr-6 py-4 text-right align-middle tabular-nums">{d.leadValue == null ? <span className="text-zinc-400">—</span> : <span className="font-bold text-zinc-900">{formatINR(d.leadValue)}</span>}</td>
+                  {/* Customer Offer — the PRICE THE CUSTOMER WANTS TO PAY is the
+                      dominant number (not the discount). Below it, the gap vs
+                      the quote reads as the reduction (−₹X · Y% off, rose), and
+                      a mini bar grows with the size of that cut. A deeper cut
+                      shows a bigger red gap + fuller bar. */}
+                  <td className="pl-3 pr-6 py-4 text-right align-middle">
                     {offer == null ? (
                       <span className="text-[13px] text-zinc-400">—</span>
+                    ) : offer.off <= 0 ? (
+                      <span className="font-bold tabular-nums text-zinc-900" title="At quoted price — no discount requested">{formatINR(offer.final)}</span>
                     ) : (
-                      <>
-                        <p className="font-semibold tabular-nums text-emerald-600">{formatINR(offer)}</p>
-                        <p className="text-[11px] text-muted-foreground">off {formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}</p>
-                      </>
+                      <div className="ml-auto w-[112px]">
+                        {/* The customer's requested price — the headline. */}
+                        <p className="font-bold tabular-nums text-zinc-900" title={`Customer wants to pay ${formatINR(offer.final)} against a ${formatINR(offer.quoted)} quote`}>{formatINR(offer.final)}</p>
+                        {/* The gap below the quote = the reduction. */}
+                        <p className="text-[11px] font-semibold tabular-nums text-rose-600" title={`Requested discount: ${formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}`}>
+                          −{formatINR(offer.off)} · {offer.pct}% off
+                        </p>
+                        <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-zinc-200" title={`${offer.pct}% below the quoted ${formatINR(offer.quoted)}`}>
+                          <div className="h-full rounded-full bg-rose-400" style={{ width: `${Math.min(100, offer.pct)}%` }} />
+                        </div>
+                      </div>
                     )}
                   </td>
                   <td className="px-3 py-4 align-middle" onClick={(e) => e.stopPropagation()}>
@@ -400,6 +515,8 @@ export default function DealsPage() {
                       onResubmit={() => setResubmitDeal(d)}
                       onCancel={() => cancelDeal(d.id)}
                       canCancel={!viewAsReadOnly && (allow(can, CAP.deal.approve) || d.createdBy === meId)}
+                      onDelete={() => { setSelected(new Set([d.id])); setConfirmDelete(true); }}
+                      canDelete={canDelete}
                     />
                   </td>
                 </motion.tr>
@@ -449,6 +566,20 @@ export default function DealsPage() {
         lead={resubmitDeal ? leads.find((l) => l.id === resubmitDeal.leadId) ?? null : null}
         deal={resubmitDeal}
         onDone={() => setResubmitDeal(null)}
+      />
+
+      {/* Permanent delete confirmation (bulk + single-row) */}
+      <ConfirmDialog
+        open={confirmDelete}
+        onClose={() => { if (!deleting) setConfirmDelete(false); }}
+        onConfirm={runBulkDelete}
+        title={selectedInView.length === 1 ? "Delete this deal?" : `Delete ${selectedInView.length} deals?`}
+        description={
+          selectedInView.length === 1
+            ? "This permanently removes the discount request and its approval history. The lead, customer and any ticket/invoice are not affected. This cannot be undone."
+            : `This permanently removes ${selectedInView.length} discount requests and their approval history. The linked leads, customers and any tickets/invoices are not affected. This cannot be undone.`
+        }
+        confirmLabel={deleting ? "Deleting…" : "Delete"}
       />
     </div>
   );
@@ -602,7 +733,7 @@ function DealStatusCell({
 /* ─── Quick Actions row menu (view / view lead / copy link / resubmit / cancel —
    NO delete) ──────────────────────────────────────────────────────────────── */
 function DealQuickActions({
-  deal, meId, onView, onViewLead, onResubmit, onCancel, canCancel,
+  deal, meId, onView, onViewLead, onResubmit, onCancel, canCancel, onDelete, canDelete,
 }: {
   deal: LeadDeal;
   meId: string;
@@ -611,6 +742,8 @@ function DealQuickActions({
   onResubmit: () => void;
   onCancel: () => void;
   canCancel: boolean;
+  onDelete: () => void;
+  canDelete: boolean;
 }) {
   const copyLink = () => {
     const url = `${window.location.origin}/leads/deals?deal=${deal.id}`;
@@ -663,6 +796,9 @@ function DealQuickActions({
             )}
             {canCancel && isOpenDealStatus(deal.status) && (
               <MenuItem icon={Ban} onClick={() => { close(); onCancel(); }}>Cancel request</MenuItem>
+            )}
+            {canDelete && (
+              <MenuItem icon={Trash2} danger onClick={() => { close(); onDelete(); }}>Delete deal</MenuItem>
             )}
           </>
         )}

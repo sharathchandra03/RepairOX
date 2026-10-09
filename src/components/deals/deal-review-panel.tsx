@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea, Label } from "@/components/ui/input";
-import { SegmentedTabs } from "@/components/ui/tabs";
 import { Avatar } from "@/components/ui/avatar";
 import { cn, formatINR } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -80,27 +79,46 @@ export function DealReviewPanel({
   const comments = commentsForDeal(deal.id);
   const revisions = revisionsForDeal(deal.id);
 
-  // Decision form state
+  // The quote this deal is measured against, and price⇄discount converters so
+  // the whole panel speaks in the customer's PRICE while the stored model keeps
+  // the discount (amount off the quote) untouched.
+  const quote = deal.leadValue ?? null;
+  const discountToPrice = React.useCallback(
+    (discount: number | null, type: "amount" | "percent"): number | null => {
+      if (quote == null || discount == null) return null;
+      const off = type === "percent" ? (quote * discount) / 100 : discount;
+      return Math.max(0, Math.round(quote - off));
+    },
+    [quote],
+  );
+
+  // Decision form state — the approver enters an APPROVED PRICE (absolute ₹).
   const [mode, setMode] = React.useState<null | "approve" | "reject" | "changes">(null);
-  const [apprType, setApprType] = React.useState<"amount" | "percent">(deal.requestedDiscountType);
-  const [apprValue, setApprValue] = React.useState<string>(deal.requestedDiscount == null ? "" : String(deal.requestedDiscount));
+  const requestedPrice = discountToPrice(deal.requestedDiscount, deal.requestedDiscountType);
+  const [apprPrice, setApprPrice] = React.useState<string>(requestedPrice == null ? "" : String(requestedPrice));
   const [decisionComment, setDecisionComment] = React.useState("");
   const [busy, setBusy] = React.useState(false);
   const [newComment, setNewComment] = React.useState("");
 
   React.useEffect(() => {
-    setApprType(deal.requestedDiscountType);
-    setApprValue(deal.requestedDiscount == null ? "" : String(deal.requestedDiscount));
+    const rp = discountToPrice(deal.requestedDiscount, deal.requestedDiscountType);
+    setApprPrice(rp == null ? "" : String(rp));
     setMode(null); setDecisionComment("");
-  }, [deal.id, deal.revision, deal.requestedDiscount, deal.requestedDiscountType]);
+  }, [deal.id, deal.revision, deal.requestedDiscount, deal.requestedDiscountType, discountToPrice]);
 
   const act = async () => {
     setBusy(true);
     try {
       if (mode === "approve") {
+        // Convert the approved price → stored discount (amount off the quote).
+        const apprPriceNum = apprPrice.trim() === "" ? null : Number(apprPrice.replace(/[^0-9.]/g, ""));
+        const approvedDiscount =
+          quote != null && apprPriceNum != null
+            ? Math.max(0, Math.round(quote - apprPriceNum))
+            : deal.requestedDiscount;
         await approveDeal(deal.id, {
-          approvedDiscount: apprValue.trim() === "" ? deal.requestedDiscount : Number(apprValue.replace(/[^0-9.]/g, "")),
-          approvedDiscountType: apprType,
+          approvedDiscount,
+          approvedDiscountType: "amount",
           comment: decisionComment.trim() || undefined,
         });
       } else if (mode === "reject") {
@@ -120,8 +138,12 @@ export function DealReviewPanel({
     setNewComment("");
   };
 
-  const requested = formatDealDiscount(deal.requestedDiscount, deal.requestedDiscountType);
-  const approved = formatDealDiscount(deal.approvedDiscount, deal.approvedDiscountType);
+  // Customer-facing prices (the headline) + the discount as the secondary note.
+  const approvedPrice = discountToPrice(deal.approvedDiscount, deal.approvedDiscountType);
+  const requestedPriceStr = requestedPrice == null ? "—" : formatINR(requestedPrice);
+  const approvedPriceStr = approvedPrice == null ? "—" : formatINR(approvedPrice);
+  const requestedOff = formatDealDiscount(deal.requestedDiscount, deal.requestedDiscountType);
+  const approvedOff = formatDealDiscount(deal.approvedDiscount, deal.approvedDiscountType);
 
   return (
     <div className="space-y-4">
@@ -136,14 +158,28 @@ export function DealReviewPanel({
           </div>
           <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground"><Clock className="h-3 w-3" /> {dealAgeLabel(deal.createdAt)} old</span>
         </div>
+        {/* Quoted price for context, then Requested vs Approved — all as the
+            CUSTOMER'S PRICE (headline), with the discount off as a sub-note. */}
+        <div className="border-b border-border/70 px-4 py-2.5">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] font-medium text-muted-foreground">Price Quoted</span>
+            <span className="text-[13px] font-semibold tabular-nums text-zinc-900">{quote == null ? "—" : formatINR(quote)}</span>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-3 p-4">
           <div className="rounded-xl border border-[#B3BFF6]/50 bg-[#EEF1FD]/40 p-3">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]/70">Requested</p>
-            <p className="mt-0.5 font-display text-xl font-extrabold tabular-nums text-[#4361EE]">{requested}</p>
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]/70">Customer Requested</p>
+            <p className="mt-0.5 font-display text-xl font-extrabold tabular-nums text-[#4361EE]">{requestedPriceStr}</p>
+            {deal.requestedDiscount != null && deal.requestedDiscount > 0 && (
+              <p className="text-[11px] font-medium text-rose-600">−{requestedOff} off</p>
+            )}
           </div>
           <div className={cn("rounded-xl border p-3", deal.status === "approved" ? "border-emerald-200 bg-emerald-50/60" : "border-border bg-muted/20")}>
-            <p className={cn("text-[10px] font-semibold uppercase tracking-wider", deal.status === "approved" ? "text-emerald-700/80" : "text-muted-foreground")}>Approved</p>
-            <p className={cn("mt-0.5 font-display text-xl font-extrabold tabular-nums", deal.status === "approved" ? "text-emerald-700" : "text-zinc-300")}>{deal.status === "approved" ? approved : "—"}</p>
+            <p className={cn("text-[10px] font-semibold uppercase tracking-wider", deal.status === "approved" ? "text-emerald-700/80" : "text-muted-foreground")}>Approved Price</p>
+            <p className={cn("mt-0.5 font-display text-xl font-extrabold tabular-nums", deal.status === "approved" ? "text-emerald-700" : "text-zinc-300")}>{deal.status === "approved" ? approvedPriceStr : "—"}</p>
+            {deal.status === "approved" && deal.approvedDiscount != null && deal.approvedDiscount > 0 && (
+              <p className="text-[11px] font-medium text-emerald-700">−{approvedOff} off</p>
+            )}
           </div>
         </div>
       </div>
@@ -160,15 +196,37 @@ export function DealReviewPanel({
             </div>
           ) : (
             <div className="space-y-3 rounded-xl bg-card p-3">
-              {mode === "approve" && (
-                <div className="space-y-1.5">
-                  <Label>Approved Discount</Label>
-                  <div className="flex items-stretch gap-2">
-                    <SegmentedTabs size="sm" options={[{ label: "%", value: "percent" }, { label: "₹", value: "amount" }]} value={apprType} onChange={(v) => setApprType(v as "amount" | "percent")} />
-                    <input value={apprValue} onChange={(e) => setApprValue(e.target.value.replace(/[^0-9.]/g, ""))} inputMode="decimal" placeholder="e.g. 15" className="h-9 flex-1 rounded-lg border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" />
+              {mode === "approve" && (() => {
+                const apprNum = apprPrice.trim() === "" ? null : Number(apprPrice.replace(/[^0-9.]/g, ""));
+                const apprOff = quote != null && apprNum != null ? Math.round(quote - apprNum) : null;
+                const apprPct = quote != null && quote > 0 && apprOff != null ? Math.round((apprOff / quote) * 100) : null;
+                const apprInvalid = apprNum != null && quote != null && (apprNum < 0 || apprNum > quote);
+                return (
+                  <div className="space-y-1.5">
+                    <Label>Approved Price</Label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] font-medium text-muted-foreground">₹</span>
+                      <input
+                        value={apprPrice}
+                        onChange={(e) => setApprPrice(e.target.value.replace(/[^0-9.]/g, ""))}
+                        inputMode="decimal"
+                        placeholder={requestedPrice == null ? "e.g. 8000" : String(requestedPrice)}
+                        className={cn(
+                          "h-9 w-full rounded-lg border border-input bg-card pl-7 pr-3 text-[13px] tabular-nums outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15",
+                          apprInvalid && "border-rose-400 focus:ring-rose-200/40",
+                        )}
+                      />
+                    </div>
+                    {apprInvalid ? (
+                      <p className="text-[11px] font-medium text-rose-600">The approved price can&apos;t exceed the quoted {quote == null ? "price" : formatINR(quote)}.</p>
+                    ) : apprOff != null && apprOff > 0 ? (
+                      <p className="text-[11px] text-muted-foreground">Approving <span className="font-semibold text-emerald-700 tabular-nums">{formatINR(apprNum!)}</span> — that&apos;s −{formatINR(apprOff)}{apprPct != null && ` · ${apprPct}% off`}.</p>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">The final price you authorize (may differ from the request).</p>
+                    )}
                   </div>
-                </div>
-              )}
+                );
+              })()}
               <div className="space-y-1.5">
                 <Label>{mode === "approve" ? "Comment (optional)" : mode === "reject" ? "Rejection reason (required)" : "What should the agent change? (required)"}</Label>
                 <Textarea

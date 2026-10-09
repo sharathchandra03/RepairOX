@@ -61,10 +61,17 @@ function leadSearchText(lead: Lead): string {
 const ALL_CITIES = "__all__";
 
 function MapViewContent() {
-  const { leads, canSeeAllLeads } = useLeads();
+  const { leads, canSeeAllLeads, currentUserIsSalesAgent, viewAsAgentId } = useLeads();
   const { id: currentUserId } = useSession();
   const { activeStoreId } = useStoreContext();
   const leadMode = useLeadStoreMode();
+
+  // A Sales Agent is ALWAYS own-scoped on the map (even with the perf/see-all
+  // key). The owner lens narrows the map to the viewed agent; "All Agents"
+  // (owner, no lens) shows the combined map. scopeAgentId = the person whose
+  // leads should appear when NOT seeing the combined set.
+  const seeCombined = canSeeAllLeads && !currentUserIsSalesAgent() && !viewAsAgentId;
+  const scopeAgentId = viewAsAgentId || currentUserId;
 
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const [query, setQuery] = useState("");
@@ -89,11 +96,11 @@ function MapViewContent() {
   const scoped = useMemo(() => {
     const q = query.trim().toLowerCase();
     return leads.filter((l) => {
-      if (!canSeeAllLeads && currentUserId) {
+      if (!seeCombined && scopeAgentId) {
         const mine =
-          l.assignedTo === currentUserId ||
-          l.createdBy === currentUserId ||
-          l.followUpAgentId === currentUserId;
+          l.assignedTo === scopeAgentId ||
+          l.createdBy === scopeAgentId ||
+          l.followUpAgentId === scopeAgentId;
         if (!mine) return false;
       }
       if (activeStoreId && l.branchId && l.branchId !== activeStoreId) return false;
@@ -101,7 +108,7 @@ function MapViewContent() {
       if (q && !leadSearchText(l).includes(q)) return false;
       return true;
     });
-  }, [leads, canSeeAllLeads, currentUserId, activeStoreId, storeFilter, query]);
+  }, [leads, seeCombined, scopeAgentId, activeStoreId, storeFilter, query]);
 
   /* Build the mappable set. A lead is placeable when it has a saved pin OR any
      free-text location/region we can geocode. */
@@ -128,11 +135,15 @@ function MapViewContent() {
 
   const noLocation = scoped.length - mappable.length;
 
-  /* ── By region (derived from REAL lead data) ── */
+  /* ── By region (derived from REAL lead data) ──
+     Bucket STRICTLY by the lead's Region (a stable city/area). We never fall
+     back to the free-text `location` — a full street address like
+     "Swamy Vivekananda Road, …" is NOT a region and would pollute the list with
+     a one-off bucket. A lead with no region counts under "Unknown". */
   const byRegion = useMemo(() => {
     const map = new Map<string, { leads: number; value: number }>();
     for (const l of scoped) {
-      const key = (l.region || l.location || "Unknown").trim() || "Unknown";
+      const key = (l.region || "").trim() || "Unknown";
       const entry = map.get(key) ?? { leads: 0, value: 0 };
       entry.leads += 1;
       entry.value += l.estimate ?? l.expectedValue ?? 0;

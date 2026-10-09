@@ -20,7 +20,7 @@ import { BadgePercent, ArrowUpRight } from "lucide-react";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { useDeals } from "@/lib/lead-deals-context";
-import { cn } from "@/lib/utils";
+import { cn, formatINR } from "@/lib/utils";
 import {
   DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount,
 } from "@/lib/lead-deals";
@@ -61,7 +61,18 @@ export function LeadDealPanel({ lead }: { lead: Lead }) {
         <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-3.5 py-3">
           <div>
             <p className="text-[13px] font-semibold">{deal.dealNo}</p>
-            <p className="text-[11px] text-muted-foreground">Requested {formatDealDiscount(deal.requestedDiscount, deal.requestedDiscountType)}</p>
+            {(() => {
+              const q = deal.leadValue ?? null;
+              const off = deal.requestedDiscount == null ? null : deal.requestedDiscountType === "percent" && q != null ? (q * deal.requestedDiscount) / 100 : deal.requestedDiscount;
+              const reqPrice = q != null && off != null ? Math.max(0, Math.round(q - off)) : null;
+              return (
+                <p className="text-[11px] text-muted-foreground">
+                  {reqPrice == null
+                    ? `Requested ${formatDealDiscount(deal.requestedDiscount, deal.requestedDiscountType)} off`
+                    : <>Customer price <span className="font-semibold text-zinc-700 tabular-nums">{formatINR(reqPrice)}</span>{deal.requestedDiscount && deal.requestedDiscount > 0 ? ` · −${formatDealDiscount(deal.requestedDiscount, deal.requestedDiscountType)}` : ""}</>}
+                </p>
+              );
+            })()}
           </div>
           <span className={cn("inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold ring-1 ring-inset", dealStatusTone(deal.status))}>
             {DEAL_STATUS_LABEL[deal.status]}
