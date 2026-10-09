@@ -27,6 +27,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 
 /** A single presence meta row tracked by a connected client. */
@@ -39,6 +40,78 @@ export interface PresenceMeta {
 }
 
 const CHANNEL = "sales-agents-presence";
+
+/* ──────────────────────────────────────────────────────────────────────────
+   SHARED CHANNEL MANAGER
+
+   Supabase Realtime keys channels by topic, so `supabase.channel(CHANNEL)`
+   returns the SAME underlying instance everywhere in one browser tab. The
+   tracker and the roster both need this topic (to share presence across
+   clients), but they are two separate React hooks that each want to attach
+   `.on('presence', …)` handlers. If the second hook attaches a handler AFTER
+   the first already called `.subscribe()`, supabase-js throws:
+     "cannot add `presence` callbacks … after `subscribe()`".
+
+   To avoid that race entirely we create ONE channel per topic, register ALL
+   presence handlers up front, call `.subscribe()` exactly once, and
+   reference-count the hooks that use it. The channel is torn down only when
+   the last user unsubscribes. `onSync` listeners (the roster) are added/removed
+   independently of the single underlying subscription.
+   ────────────────────────────────────────────────────────────────────────── */
+
+interface SharedChannel {
+  channel: RealtimeChannel;
+  refCount: number;
+  subscribed: boolean;
+  syncListeners: Set<() => void>;
+}
+
+const sharedChannels = new Map<string, SharedChannel>();
+
+function acquireChannel(topic: string): SharedChannel | null {
+  if (!isSupabaseConfigured || !supabase) return null;
+
+  let shared = sharedChannels.get(topic);
+  if (!shared) {
+    // A stable presence key per browser tab; actual tracking is opt-in via
+    // channel.track(), so merely joining does not make this client "online".
+    const key = `rx-${Math.random().toString(36).slice(2)}`;
+    const channel = supabase.channel(topic, { config: { presence: { key } } });
+
+    shared = { channel, refCount: 0, subscribed: false, syncListeners: new Set() };
+
+    const fire = () => shared!.syncListeners.forEach((fn) => fn());
+    // All handlers are registered BEFORE subscribe() — never after.
+    channel
+      .on("presence", { event: "sync" }, fire)
+      .on("presence", { event: "join" }, fire)
+      .on("presence", { event: "leave" }, fire);
+
+    sharedChannels.set(topic, shared);
+  }
+
+  shared.refCount += 1;
+  if (!shared.subscribed) {
+    shared.subscribed = true;
+    shared.channel.subscribe();
+  }
+  return shared;
+}
+
+function releaseChannel(topic: string) {
+  const shared = sharedChannels.get(topic);
+  if (!shared) return;
+  shared.refCount -= 1;
+  if (shared.refCount <= 0) {
+    sharedChannels.delete(topic);
+    try {
+      void shared.channel.untrack();
+    } catch {
+      /* ignore */
+    }
+    supabase?.removeChannel(shared.channel);
+  }
+}
 
 /** Mark a user "away" (offline) after this long with no interaction. */
 const IDLE_MS = 5 * 60_000; // 5 minutes
@@ -92,11 +165,10 @@ export function useSalesPresenceTracker(me: { id?: string; name?: string }) {
     let lastActivity = Date.now();
     let isActive = true;
 
-    // ── Supabase Realtime Presence path ──
+    // ── Supabase Realtime Presence path (shared channel) ──
     const useDb = isSupabaseConfigured && !!supabase;
-    const channel = useDb
-      ? supabase!.channel(CHANNEL, { config: { presence: { key: myId } } })
-      : null;
+    const shared = useDb ? acquireChannel(CHANNEL) : null;
+    const channel = shared?.channel ?? null;
 
     const track = () => {
       if (channel) {
@@ -111,9 +183,20 @@ export function useSalesPresenceTracker(me: { id?: string; name?: string }) {
     };
 
     if (channel) {
-      channel.subscribe((status) => {
-        if (status === "SUBSCRIBED" && isActive) track();
-      });
+      // The shared channel subscribes once in acquireChannel(). Track as soon
+      // as it is joined; if it's already subscribed, track immediately.
+      if (channel.state === "joined") {
+        if (isActive) track();
+      } else {
+        // Observe join via the shared sync listeners (fires on sync/join/leave).
+        const onJoined = () => {
+          if (channel.state === "joined" && isActive) {
+            track();
+            shared?.syncListeners.delete(onJoined);
+          }
+        };
+        shared?.syncListeners.add(onJoined);
+      }
     } else {
       track();
     }
@@ -154,7 +237,7 @@ export function useSalesPresenceTracker(me: { id?: string; name?: string }) {
       window.removeEventListener("beforeunload", onLeave);
       window.clearInterval(idleTimer);
       untrack();
-      if (channel) supabase?.removeChannel(channel);
+      if (shared) releaseChannel(CHANNEL);
     };
   }, [me.id, me.name]);
 }
@@ -184,13 +267,14 @@ export function useSalesPresenceRoster() {
   /* ── Supabase Realtime Presence (shared, live) ── */
   useEffect(() => {
     if (!isSupabaseConfigured || !supabase) return;
-    // A read-only observer key (never tracks, so it never appears online itself).
-    const channel = supabase.channel(CHANNEL, {
-      config: { presence: { key: `observer-${Math.random().toString(36).slice(2)}` } },
-    });
+    // Join the ONE shared channel for this topic. Presence handlers are already
+    // registered on it (before subscribe), so we only attach a sync listener —
+    // never a late `.on('presence', …)` that would throw.
+    const shared = acquireChannel(CHANNEL);
+    if (!shared) return;
 
     const sync = () => {
-      const state = channel.presenceState() as Record<string, PresenceMeta[]>;
+      const state = shared.channel.presenceState() as Record<string, PresenceMeta[]>;
       const metas: PresenceMeta[] = [];
       for (const key of Object.keys(state)) {
         for (const entry of state[key]) {
@@ -200,14 +284,12 @@ export function useSalesPresenceRoster() {
       apply(metas);
     };
 
-    channel
-      .on("presence", { event: "sync" }, sync)
-      .on("presence", { event: "join" }, sync)
-      .on("presence", { event: "leave" }, sync)
-      .subscribe();
+    shared.syncListeners.add(sync);
+    sync(); // seed with current state if already joined
 
     return () => {
-      supabase?.removeChannel(channel);
+      shared.syncListeners.delete(sync);
+      releaseChannel(CHANNEL);
     };
   }, [apply]);
 
