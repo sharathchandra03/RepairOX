@@ -70,7 +70,7 @@ export default function DealsPage() {
   const { can } = usePermissions();
   const { isAllShops, stores, getStore } = useStoreContext();
   const { deals, hydrated, dealById, approveDeal, cancelDeal, reopenDeal } = useDeals();
-  const { leads, viewAsReadOnly, canSeeAllLeads } = useLeads();
+  const { leads, viewAsReadOnly, viewAsAgentId, canSeeAllLeads, currentUserIsSalesAgent } = useLeads();
   const searchParams = useSearchParams();
   const router = useRouter();
 
@@ -103,16 +103,29 @@ export default function DealsPage() {
      deals: the ones they raised, or whose parent lead is in their visible leads.
      In DB mode RLS already enforces this; this client scope is the local-mode
      boundary + defence-in-depth so an agent never sees another agent's deal. */
-  const canSeeAllDeals = allow(can, CAP.deal.viewAll) || canSeeAllLeads;
+  // A user who is themselves a Sales Agent only ever sees their OWN deals, even
+  // if their role carries a coarse reporting/see-all key. True owners/managers
+  // (not Sales Agents) see every agent's deals.
+  const isSelfSalesAgent = currentUserIsSalesAgent();
+  const canSeeAllDeals = (allow(can, CAP.deal.viewAll) || canSeeAllLeads) && !isSelfSalesAgent;
   const myLeadIds = useMemo(() => new Set(leads.map((l) => l.id)), [leads]);
 
   /** Deals the current user is allowed to see (before tab/store/search). KPIs
    *  and tab counts derive from this so an agent's numbers reflect only their
-   *  own deals, and a manager's reflect every agent's. */
+   *  own deals, and a manager's reflect every agent's.
+   *
+   *  OWNER "view as agent" lens: when the owner has drilled into one agent, the
+   *  queue narrows to ONLY the deals that agent pushed (created / owns / their
+   *  leads), read-only — the data sits in place of the combined queue. "All
+   *  Agents" (no lens) keeps the combined queue. A plain Sales Agent never has
+   *  the lens, so they always see only their own deals via `meId`. */
   const visibleDeals = useMemo(() => {
+    if (viewAsAgentId) {
+      return deals.filter((d) => d.createdBy === viewAsAgentId || d.salesAgentId === viewAsAgentId);
+    }
     if (canSeeAllDeals) return deals;
     return deals.filter((d) => d.createdBy === meId || d.salesAgentId === meId || myLeadIds.has(d.leadId));
-  }, [deals, canSeeAllDeals, meId, myLeadIds]);
+  }, [deals, canSeeAllDeals, meId, myLeadIds, viewAsAgentId]);
 
   /* Approval authority (what-you-can-do) — used to gate the inline Status
      control. Reject / Request Changes require a mandatory reason, so they open

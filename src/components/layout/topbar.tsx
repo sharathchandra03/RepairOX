@@ -2,7 +2,7 @@
 
 import {
   HelpCircle, MoreHorizontal, ChevronDown, Menu,
-  ShoppingBag, Check, LayoutGrid, LogOut, MessageCircle,
+  ShoppingBag, Check, LayoutGrid, LogOut, MessageCircle, UserCog,
 } from "lucide-react";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { Avatar } from "@/components/ui/avatar";
@@ -210,11 +210,17 @@ export function Topbar({
                 <p className="truncate text-[11px] text-muted-foreground">{displayEmail}</p>
               </div>
               <div className="my-1 h-px bg-border" />
+              {/* My Account — personal account management, available to EVERY
+                  authenticated user regardless of Settings permission. */}
+              <MenuItem icon={UserCog} onClick={() => { router.push("/account"); close(); }}>
+                My Account
+              </MenuItem>
               {allowed.length > 1 && (
                 <MenuItem icon={LayoutGrid} onClick={() => { router.push("/workspaces"); close(); }}>
                   All modules
                 </MenuItem>
               )}
+              <div className="my-1 h-px bg-border" />
               <MenuItem icon={LogOut} danger onClick={() => { handleLogout(); close(); }}>
                 Log out
               </MenuItem>

@@ -160,6 +160,15 @@ export const CAP = {
     // Can the user even OPEN settings (read-only view)? Anything above implies it.
     viewAny: ["view_settings", "manage_settings"],
   },
+  /* Personal Account (My Account). Profile + Active Sessions are self-scoped
+     and ungated — every authenticated user manages their OWN account (the
+     server scopes every write to the caller's auth_user_id). Only Billing /
+     Subscription stays permission-controlled: it exposes organization-level
+     subscription info, so it is gated on the existing `manage_subscription`
+     key (coarse `manage_settings` fallback; `full_access`/`*` implied). */
+  account: {
+    billing: ["manage_subscription", "manage_settings"],
+  },
   customer: {
     view: ["view_customers", "manage_customers"],
     create: ["create_customer", "manage_customers"],

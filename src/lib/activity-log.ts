@@ -14,6 +14,7 @@
 import { useSyncExternalStore } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { currentRole } from "./permissions";
+import { humanizeActivity, isUserFacingActivity } from "./activity-humanize";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -117,17 +118,22 @@ function persist() {
 
 function emit() { for (const l of listeners) l(); }
 
-/** Convert an audit_log DB row to an ActivityEntry. */
+/** Convert an audit_log DB row to an ActivityEntry.
+ *  The raw row stays untouched in the DB (forensic trail); here we build the
+ *  CLEAN, user-facing version — a friendly action + description and a human
+ *  reference (never a raw UUID). See activity-humanize.ts. */
 function rowToActivity(r: any): ActivityEntry {
+  const human = humanizeActivity(r);
   return {
     id: r.id,
     ts: r.created_at ? new Date(r.created_at).getTime() : Date.now(),
     module: r.module ?? "System",
-    action: r.action ?? r.action_type ?? "Unknown",
+    action: human.action,
     severity: r.severity ?? "info",
     entity: r.entity_type ?? undefined,
-    reference: r.record_id ?? undefined,
-    description: r.description ?? "",
+    // Only a meaningful reference (doc/lead number) — a bare UUID is dropped.
+    reference: human.reference,
+    description: human.description,
     actor: r.actor ?? "System",
     role: r.role ?? undefined,
     branch: r.branch ?? undefined,
@@ -145,14 +151,20 @@ async function hydrateFromDb() {
     .from("audit_log")
     .select("*")
     .order("created_at", { ascending: false })
-    .limit(MAX_ENTRIES);
+    // Over-fetch: many raw rows are internal/noise and get filtered out below,
+    // so pull a wider slice to still fill the user-facing feed to MAX_ENTRIES.
+    .limit(MAX_ENTRIES * 4);
   // Store-to-store: individual. A concrete active store filters the feed to
   // that store. All Shops (null) leaves it consolidated (org-wide via RLS).
   if (_activeStoreId) query = query.eq("branch_id", _activeStoreId);
   const { data } = await query;
   // Replace the buffer with this store's slice (even when empty, so switching
   // to a store with no activity doesn't show the previous store's entries).
-  entries = (data ?? []).map(rowToActivity);
+  // Internal/bookkeeping rows stay in the DB trail but are hidden here.
+  entries = (data ?? [])
+    .filter((r: any) => isUserFacingActivity(r))
+    .map(rowToActivity)
+    .slice(0, MAX_ENTRIES);
   emit();
 }
 
@@ -166,6 +178,9 @@ function ensureRealtimeChannel() {
   const channel = supabase.channel("audit-log-realtime")
     .on("postgres_changes" as any, { event: "INSERT", schema: "public", table: "audit_log" }, (payload: any) => {
       if (!payload.new) return;
+      // Internal/bookkeeping writes stay in the DB trail but never surface in
+      // the user-facing feed.
+      if (!isUserFacingActivity(payload.new)) return;
       const entry = rowToActivity(payload.new);
       // Store isolation on the live path: when a concrete store is active,
       // ignore entries from other stores. In All-Shops mode (null) keep all.

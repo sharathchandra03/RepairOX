@@ -76,10 +76,14 @@ export default function QuotationsPage() {
   const { isAllShops, stores, getStore } = useStoreContext();
   const { settings } = useStoreSettings();
   const { quotations, hydrated, sendQuotation } = useQuotations();
-  const { viewAsReadOnly } = useLeads();
+  const { viewAsReadOnly, viewAsAgentId, currentUserIsSalesAgent } = useLeads();
 
+  // A user who is themselves a Sales Agent only ever sees their OWN quotations,
+  // even if their role carries a coarse reporting/see-all key. True
+  // owners/managers (not Sales Agents) see every agent's quotations.
+  const isSelfSalesAgent = currentUserIsSalesAgent();
   const canView = allow(can, CAP.quotation.view) || allow(can, CAP.quotation.viewAll);
-  const canViewAll = allow(can, CAP.quotation.viewAll);
+  const canViewAll = allow(can, CAP.quotation.viewAll) && !isSelfSalesAgent;
   const canSend = allow(can, CAP.quotation.send) && !viewAsReadOnly;
   // Quotations inherit the Lead's store; store filter/column only in Multi mode.
   const leadMode = useLeadStoreMode();
@@ -110,11 +114,19 @@ export default function QuotationsPage() {
 
   const meId = session.id || currentUser?.id || "";
 
-  // Scope: without viewAll, a user sees only quotations they created or own.
+  // Scope:
+  //   • OWNER "view as agent" lens → ONLY that agent's quotations, read-only
+  //     (the data sits in place of the combined list). "All Agents" (no lens)
+  //     keeps the combined list for a viewAll owner.
+  //   • otherwise, without viewAll, a user sees only quotations they created /
+  //     own. A plain Sales Agent never has the lens, so this stays their own.
   const scoped = useMemo(() => {
+    if (viewAsAgentId) {
+      return quotations.filter((q) => q.createdBy === viewAsAgentId || q.salesAgentId === viewAsAgentId);
+    }
     if (canViewAll) return quotations;
     return quotations.filter((q) => q.createdBy === meId || q.salesAgentId === meId);
-  }, [quotations, canViewAll, meId]);
+  }, [quotations, canViewAll, meId, viewAsAgentId]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();

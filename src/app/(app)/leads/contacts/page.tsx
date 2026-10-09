@@ -98,7 +98,7 @@ function relativeTime(iso?: string): string {
 type ViewMode = "card" | "list";
 
 export default function ContactsPage() {
-  const { contacts, leads, deleteContact, viewAsReadOnly } = useLeads();
+  const { contacts, leads, deleteContact, viewAsReadOnly, viewAsAgentId, currentUserIsSalesAgent } = useLeads();
   const { companies, customers, invoices, tickets } = useStore();
   const { can } = usePermissions();
   const { id: currentUserId } = useSession();
@@ -106,7 +106,16 @@ export default function ContactsPage() {
   const canDelete = allow(can, CAP.customer.delete) && !viewAsReadOnly;
   // Owner / manager sees ALL converted contacts (with an agent differentiation);
   // a Sales Agent defaults to their OWN converted contacts (spec §49/§67/§70).
-  const canSeeAllContacts = allow(can, CAP.lead.performanceAll) || allow(can, CAP.lead.viewTeam);
+  // A user who is themselves a Sales Agent only ever sees contacts THEY
+  // converted, even with a coarse reporting/see-all key.
+  const isSelfSalesAgent = currentUserIsSalesAgent();
+  // Owner lens narrows "see all" down to one agent: while viewing an agent the
+  // owner sees ONLY that agent's converted contacts (read-only) — never the
+  // combined set. "All Agents" (no lens) keeps the combined see-all view.
+  const canSeeAllContacts = (allow(can, CAP.lead.performanceAll) || allow(can, CAP.lead.viewTeam)) && !viewAsAgentId && !isSelfSalesAgent;
+  // The agent id a contact's attribution must match when scoped to one person:
+  // the viewed agent under the owner lens, else the signed-in user.
+  const scopeAgentId = viewAsAgentId || currentUserId;
   // Scope strip: Converted (default) vs All. Agents effectively see only their
   // own regardless (enforced below); owners can switch Converted ↔ All.
   const [scope, setScope] = useState<"converted" | "all">("converted");
@@ -191,13 +200,15 @@ export default function ContactsPage() {
         // Scope: Converted-only unless the user explicitly switched to All.
         // (Demo rows ignore scoping so the empty-account preview still shows.)
         if (!isDemo && scope === "converted" && !c.converted) return false;
-        // A Sales Agent only sees contacts THEY converted (unless see-all).
-        if (!isDemo && !canSeeAllContacts && c.converted && c.agentId && currentUserId && c.agentId !== currentUserId) return false;
+        // Scoped to one person (a Sales Agent, or the owner's viewed agent):
+        // only contacts THAT person converted. "See all" (combined owner view)
+        // skips this.
+        if (!isDemo && !canSeeAllContacts && c.converted && c.agentId && scopeAgentId && c.agentId !== scopeAgentId) return false;
         return true;
       }
       return false;
     }),
-    [query, rows, scope, isDemo, canSeeAllContacts, currentUserId]
+    [query, rows, scope, isDemo, canSeeAllContacts, scopeAgentId]
   );
 
   const deletingContact = useMemo(

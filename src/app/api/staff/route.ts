@@ -99,6 +99,9 @@ export async function POST(req: Request) {
       email,
       password,
       email_confirm: true,
+      // Carry the name the creator entered onto the auth user so it's present
+      // from the very first login (not only after a manual profile edit).
+      user_metadata: { name: name.trim() },
     });
     if (authErr || !created.user) {
       const msg = authErr?.message ?? "";
@@ -266,6 +269,38 @@ export async function POST(req: Request) {
     }
   }
 
+  // ── Activity log: write an EXPLICIT, correct audit entry for the creation ──
+  //    The generic DB audit trigger (fn_audit) can't name either party here:
+  //    this insert runs under the service role, so inside the trigger
+  //    auth.uid() is null → the actor falls back to "System", and the trigger
+  //    only records the new staff's UUID, never their name. So the feed would
+  //    read "Employee insert (<uuid>)" by System — the exact bug reported.
+  //    We know BOTH names server-side (the creator from their JWT, the new
+  //    user from the name the owner just entered), so we stamp the audit row
+  //    ourselves: actor = creator's real name, description = "<creator>
+  //    created <new user>". This is correct the moment the user is created —
+  //    no manual profile edit required.
+  const creator = await creatorDisplay(admin, user.id, user.email ?? null);
+  await admin
+    .from("audit_log")
+    .insert({
+      organization_id: orgId,
+      branch_id: branchId,
+      module: "Employee",
+      entity_type: "staff",
+      record_id: inserted.id,
+      action_type: "INSERT",
+      action: "User Created",
+      severity: "success",
+      description: `${creator.name} created ${name.trim()}`,
+      performed_by: creator.staffId,
+      actor: creator.name,
+      role: creator.roleLabel,
+      branch: branchName,
+      meta: { user: name.trim(), ...(email ? { email } : {}) },
+    })
+    .then(() => {}, () => {}); // best-effort — never fail creation on logging
+
   return NextResponse.json({ ok: true, member: rowToStaff(inserted) });
 }
 
@@ -273,6 +308,37 @@ export async function POST(req: Request) {
 async function orgStaffId(admin: SupabaseClient, authUserId: string): Promise<string | null> {
   const { data } = await admin.from("staff").select("id").eq("auth_user_id", authUserId).maybeSingle();
   return (data?.id as string) ?? null;
+}
+
+/** Resolve the CREATOR's display identity for the activity log. The creation
+ *  insert runs under the service role, so the DB audit trigger can't see who
+ *  acted; we resolve the creator's real staff name (+ role label) here instead
+ *  of letting it degrade to "System". Falls back to the auth email, then
+ *  "System", so the log is always truthful. */
+async function creatorDisplay(
+  admin: SupabaseClient,
+  authUserId: string,
+  authEmail: string | null
+): Promise<{ staffId: string | null; name: string; roleLabel: string | null }> {
+  const { data: me } = await admin
+    .from("staff")
+    .select("id, name, role_id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+  let roleLabel: string | null = null;
+  if (me?.role_id) {
+    const { data: role } = await admin
+      .from("roles")
+      .select("name")
+      .eq("id", me.role_id)
+      .maybeSingle();
+    roleLabel = (role?.name as string) ?? null;
+  }
+  return {
+    staffId: (me?.id as string) ?? null,
+    name: (me?.name as string)?.trim() || authEmail || "System",
+    roleLabel,
+  };
 }
 
 /** The set of branch ids the creator is authorized to place users in when they

@@ -27,7 +27,7 @@
    records — no dummy values, no fabricated trends.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Lock, ChevronDown, Trophy, Users, IndianRupee, Target, CalendarClock,
@@ -193,18 +193,16 @@ export default function AgentPerformancePage() {
   // In Single-Store Lead mode there is only ONE lead store, so a store filter is
   // meaningless clutter — hide it. Multi-Store mode keeps the full filter.
   const leadMode = useLeadStoreMode();
-  const { salesAgents, leads, followUps, currentUserIsSalesAgent } = useLeads();
+  const { salesAgents, leads, followUps, viewAsAgentId, setViewAsAgent } = useLeads();
   const { tickets, invoices } = useStore();
 
-  // An individual Sales Agent's performance page is ALWAYS their own view — the
-  // cross-agent "All Agents" comparison + the agent scope picker are owner-only
-  // controls. A user who is themselves a Sales Agent never sees them, even if
-  // their role happens to carry a coarse reporting key (view_sales_reports /
-  // manage_reports / leads_view_all): on this page that key doesn't make them
-  // an owner of other agents' performance. True owners (who are not Sales
-  // Agents) keep the comparison + picker.
-  const isSelfSalesAgent = currentUserIsSalesAgent(isAllShops ? null : (stores[0]?.id ?? null));
-  const canAll = allow(can, CAP.lead.performanceAll) && !isSelfSalesAgent;
+  // Agent Performance is the ONE surface where everyone — owner AND individual
+  // Sales Agent — gets the same experience: the "All Agents" ranked comparison
+  // + the "Individual" toggle + per-row View Details. Unlike the Dashboard /
+  // Deals / Quotations / Contacts (which stay strictly own-scoped for a Sales
+  // Agent), the performance leaderboard is intentionally shared so an agent can
+  // see where they rank. Gated by the own/all performance keys only.
+  const canAll = allow(can, CAP.lead.performanceAll);
   const canOwn = allow(can, CAP.lead.performanceOwn);
 
   // A deep link (?agent=<id>&view=individual) opens the Individual view for a
@@ -218,7 +216,9 @@ export default function AgentPerformancePage() {
   // Agent (own-scope) lands directly on their own Individual workspace. A
   // ?view=individual (or an ?agent= deep link) opens Individual immediately.
   const [tab, setTab] = useState<"individual" | "all">(
-    initialViewParam === "individual" || initialAgentParam ? "individual" : (canAll ? "all" : "individual"),
+    // An active owner lens (viewAsAgentId) forces the Individual view on that
+    // agent; otherwise owners default to the All-Agents table, agents to self.
+    viewAsAgentId || initialViewParam === "individual" || initialAgentParam ? "individual" : (canAll ? "all" : "individual"),
   );
 
   /* ── ONE shared filter state drives BOTH tabs + EVERY Individual section ── */
@@ -228,7 +228,17 @@ export default function AgentPerformancePage() {
   const [showFilters, setShowFilters] = useState(false);
   // Owner's Individual analytical subject. "" → resolve to self (or first
   // agent). Seeded from the ?agent= deep link when present.
-  const [scopeAgentId, setScopeAgentId] = useState<string>(initialAgentParam);
+  const [scopeAgentId, setScopeAgentId] = useState<string>(viewAsAgentId || initialAgentParam);
+
+  /* Keep the page in lockstep with the global Agents-dropdown lens: when the
+     owner picks an agent in the topbar, this page follows into that agent's
+     Individual view; when they clear it ("All Agents"), it returns to the
+     combined leaderboard. Scope-only — never navigates. */
+  useEffect(() => {
+    if (!canAll) return;
+    if (viewAsAgentId) { setScopeAgentId(viewAsAgentId); setTab("individual"); }
+    else { setTab("all"); }
+  }, [viewAsAgentId, canAll]);
 
   const revenue = useMemo(() => ({ tickets, invoices }), [tickets, invoices]);
 
@@ -294,7 +304,13 @@ export default function AgentPerformancePage() {
     <SegmentedTabs
       size="sm"
       value={tab}
-      onChange={(v) => setTab(v as "individual" | "all")}
+      onChange={(v) => {
+        const next = v as "individual" | "all";
+        setTab(next);
+        // Switching to the combined table clears the owner lens so the whole
+        // module (dashboard/deals/quotations/contacts) returns to combined too.
+        if (next === "all") setViewAsAgent("");
+      }}
       options={[
         { label: "All Agents", value: "all" },
         { label: "Individual", value: "individual" },
@@ -446,7 +462,7 @@ export default function AgentPerformancePage() {
           subtitle="Sales performance across authorized stores — derived from real records."
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              {canAll && <AgentScopePicker agents={eligibleAgents} selectedId={scopedAgent.id} onSelect={setScopeAgentId} />}
+              {canAll && <AgentScopePicker agents={eligibleAgents} selectedId={scopedAgent.id} onSelect={(id) => { setScopeAgentId(id); setViewAsAgent(id); }} />}
               {tabToggle}
             </div>
           }
@@ -533,7 +549,7 @@ export default function AgentPerformancePage() {
         // Owner "View Details" → open that agent's Individual view in-place,
         // preserving the current period/store/filter context (no navigation,
         // no impersonation — just a scope switch).
-        onReport={canAll ? (r) => { setScopeAgentId(r.agentId); setTab("individual"); } : undefined}
+        onReport={canAll ? (r) => { setScopeAgentId(r.agentId); setTab("individual"); setViewAsAgent(r.agentId); } : undefined}
         highlightAgentId={currentUserId ?? undefined}
         emptyText="No Sales Agents match the current filters. Metrics appear as soon as agents own real leads."
       />

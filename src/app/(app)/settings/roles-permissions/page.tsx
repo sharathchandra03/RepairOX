@@ -18,6 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Avatar } from "@/components/ui/avatar";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Can } from "@/components/common/can";
@@ -64,6 +65,60 @@ const ROLE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   cashier_accounts: Wallet,
   read_only_user: Eye,
 };
+
+/* ─── User category — groups roles into the four People buckets ──────────
+   Management · Sales Agent · Technicians · Accounts. A user's category is
+   derived from their ROLE (never stored separately), so adding a user with
+   any of these roles files them under the right bucket automatically. Custom
+   roles fall back to their workspaces / permission shape. */
+type UserCategory = "management" | "sales" | "technician" | "accounts";
+
+const ROLE_CATEGORY: Record<string, UserCategory> = {
+  platform_owner: "management",
+  developer_admin: "management",
+  master_shop_owner: "management",
+  shop_owner_branch_manager: "management",
+  reception: "management",
+  read_only_user: "management",
+  sales_agent: "sales",
+  sales_executive: "sales",
+  technician: "technician",
+  senior_technician: "technician",
+  field_manager: "technician",
+  ninja: "technician",
+  cashier_accounts: "accounts",
+  inventory_manager: "accounts",
+};
+
+/** Resolve the bucket for a role. Known roles use the map above; unknown
+ *  (custom) roles are classified from their permission shape so a newly
+ *  created role still lands in a sensible bucket. */
+function categoryForRole(role: RoleDef | undefined, roleId: string): UserCategory {
+  if (ROLE_CATEGORY[roleId]) return ROLE_CATEGORY[roleId];
+  const perms = role?.permissions;
+  const has = (k: string) =>
+    perms === "all" || (Array.isArray(perms) && perms.includes(k as PermissionKey));
+  // Management: can administer users / roles / branches, or full access.
+  if (perms === "all" || has("manage_users") || has("manage_roles") || has("add_user") || has("full_access"))
+    return "management";
+  // Accounts: billing / ledger / inventory ownership.
+  if (has("post_to_ledger") || has("manage_payments") || has("view_ledger") || has("manage_inventory") || has("manage_refunds"))
+    return "accounts";
+  // Sales: lead / sales ownership.
+  if (has("leads_sales_agent") || has("manage_sales") || has("route_leads") || has("leads_view"))
+    return "sales";
+  // Technician: repair / field work.
+  if (has("update_repair_status") || has("assign_technician") || has("manage_field_jobs") || has("update_pickup") || has("view_field_jobs"))
+    return "technician";
+  return "management";
+}
+
+const USER_CATEGORY_TABS: { value: UserCategory; label: string }[] = [
+  { value: "management", label: "Management" },
+  { value: "sales", label: "Sales Agent" },
+  { value: "technician", label: "Technicians" },
+  { value: "accounts", label: "Accounts" },
+];
 
 const STATUS_TONE: Record<TeamMember["status"], "success" | "warning" | "danger"> = {
   active: "success", invited: "warning", suspended: "danger",
@@ -1569,15 +1624,33 @@ function UsersTab({
   const selfEmail = currentUser?.email ?? "";
 
   const [query, setQuery] = useState("");
+  const [category, setCategory] = useState<"all" | UserCategory>("all");
   const [viewing, setViewing] = useState<TeamMember | null>(null);
   const [editing, setEditing] = useState<TeamMember | null>(null);
   const [changingStore, setChangingStore] = useState<TeamMember | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
   const [suspending, setSuspending] = useState<TeamMember | null>(null);
-  const rows = team.filter((t) =>
-    (t.name + t.email + t.roleId).toLowerCase().includes(query.toLowerCase())
-  );
+
+  // Each user's category is DERIVED from their role (never stored). Adding a
+  // user with any role files them under the matching bucket automatically.
+  const categoryOf = useMemo(() => {
+    const m = new Map<string, UserCategory>();
+    for (const t of team) m.set(t.email, categoryForRole(getRoleById(t.roleId), t.roleId));
+    return m;
+  }, [team, getRoleById]);
+
+  const categoryCounts = useMemo(() => {
+    const c: Record<UserCategory, number> = { management: 0, sales: 0, technician: 0, accounts: 0 };
+    for (const t of team) c[categoryOf.get(t.email) ?? "management"]++;
+    return c;
+  }, [team, categoryOf]);
+
+  const rows = team.filter((t) => {
+    const okQuery = (t.name + t.email + t.roleId).toLowerCase().includes(query.toLowerCase());
+    const okCategory = category === "all" || categoryOf.get(t.email) === category;
+    return okQuery && okCategory;
+  });
 
   function changeRole(email: string, roleId: string) {
     setMemberRole(email, roleId);
@@ -1607,6 +1680,22 @@ function UsersTab({
             </Button>
           </Link>
         </Can>
+      </div>
+
+      {/* Category filter strip — Management · Sales Agent · Technicians · Accounts */}
+      <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          size="sm"
+          value={category}
+          onChange={(v) => setCategory(v as "all" | UserCategory)}
+          options={[
+            { label: `All (${team.length})`, value: "all" },
+            ...USER_CATEGORY_TABS.map((c) => ({
+              label: `${c.label} (${categoryCounts[c.value]})`,
+              value: c.value,
+            })),
+          ]}
+        />
       </div>
 
       <div className="overflow-hidden rounded-2xl border-2 border-zinc-300 bg-card shadow-card">

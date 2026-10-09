@@ -6,7 +6,7 @@ import Link from "next/link";
 import { withOrigin } from "@/lib/settings-origin";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, ChevronDown, User, Building2, Users, CreditCard,
+  Search, ChevronDown, Building2, Users, CreditCard,
   Package, Ticket, FileText, UserCheck, Plug, Bell, Settings2,
   ShieldCheck, Printer, Receipt, BarChart3, Palette, Footprints, Tags,
 } from "lucide-react";
@@ -24,14 +24,11 @@ type NavChild = { label: string; href: string; anyOf?: PermissionKey[] };
 type NavSection = { id: string; label: string; icon: any; anyOf?: PermissionKey[]; children: NavChild[] };
 
 const SETTINGS_NAV: NavSection[] = [
-  {
-    id: "account", label: "Account", icon: User,
-    children: [
-      { label: "Profile", href: "/settings/account/profile" },
-      { label: "Active Sessions", href: "/settings/account/sessions" },
-      { label: "Billing", href: "/settings/account/billing" },
-    ],
-  },
+  // NOTE: Personal "Account" (Profile / Active Sessions / Billing) has moved to
+  // the global My Account page (/account), reachable from the top-right profile
+  // menu by EVERY authenticated user — see the `my-account` steering standard.
+  // It is intentionally no longer a Settings section (that avoids a duplicate
+  // account UI and keeps Settings for organization-level configuration).
   {
     id: "store", label: "Store", icon: Building2,
     children: [

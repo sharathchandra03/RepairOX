@@ -19,7 +19,6 @@
        from the nav item instead.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useRouter, usePathname } from "next/navigation";
 import { Users, ChevronDown, Check, Trophy, Eye, LogOut } from "lucide-react";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
@@ -31,11 +30,7 @@ import { allow } from "@/lib/capabilities";
 import { CAP } from "@/lib/capabilities";
 import type { WorkspaceId } from "@/lib/permissions";
 
-const PERF_ROOT = "/leads/intelligence/agents";
-
 export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: WorkspaceId }) {
-  const router = useRouter();
-  const pathname = usePathname();
   const { can } = usePermissions();
   const { activeStoreId } = useStoreContext();
   const { salesAgents, salesAgentsReady, viewAsAgentId, setViewAsAgent, currentUserIsSalesAgent } = useLeads();
@@ -54,32 +49,22 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
   // All Shops). Uses the SAME store-scoped directory the pickers use.
   const agents = agentsForStore(salesAgents, activeStoreId ?? undefined);
 
-  // The ACTIVE scope is the read-only "view as agent" scope (the whole-module
-  // lens). It is the source of truth for the selected agent + the pill label.
-  // On the Agent-Intelligence routes we also reflect the per-agent report in
-  // the URL so the control still reads correctly there.
-  const onPerf = pathname === PERF_ROOT || pathname.startsWith(PERF_ROOT + "/");
-  const perfAgentId = onPerf && pathname.startsWith(PERF_ROOT + "/")
-    ? decodeURIComponent(pathname.slice(PERF_ROOT.length + 1).split("/")[0])
-    : "";
-  const selectedId = viewAsAgentId || perfAgentId;
-  const selectedAgent = selectedId ? agents.find((a) => a.id === selectedId) : undefined;
+  // The read-only "view as agent" lens (viewAsAgentId) is the SINGLE source of
+  // truth. This control sets scope ONLY — it NEVER navigates. The owner stays
+  // on whatever page they're on; selecting an agent makes every Lead surface
+  // (Dashboard, Deals, Quotations, Contacts, Performance) show that agent's
+  // data read-only in place. "All Agents" clears the lens so every surface
+  // shows the owner's COMBINED data in place.
+  const selectedAgent = viewAsAgentId ? agents.find((a) => a.id === viewAsAgentId) : undefined;
 
-  // Enter an agent's read-only Lead workspace (Option A — NOT impersonation).
-  const enterAgent = (id: string) => {
-    setViewAsAgent(id);
-    router.push(`/leads/list?viewAs=${encodeURIComponent(id)}`);
-  };
-  // Leave the view-as scope.
+  // Scope-only setters — no routing. The data "comes and sits" where the owner
+  // already is (the module-wide scopedLeads / viewAsReadOnly lens does the rest).
+  const enterAgent = (id: string) => setViewAsAgent(id);
   const exitViewAs = () => setViewAsAgent("");
 
-  const label = viewAsAgentId
-    ? (selectedAgent?.name ?? "Agent")
-    : !onPerf
-    ? "Agents"
-    : perfAgentId
-    ? (selectedAgent?.name ?? "All Agents")
-    : "All Agents";
+  // "All Agents" is the active scope whenever no agent lens is set.
+  const allAgentsActive = !viewAsAgentId;
+  const label = viewAsAgentId ? (selectedAgent?.name ?? "Agent") : "All Agents";
 
   return (
     <Dropdown
@@ -91,7 +76,7 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
           aria-label="Agent intelligence scope"
           className={cn(
             "hidden md:flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
-            (onPerf || viewAsAgentId) ? "bg-[#EEF1FD] text-[#3A4DBB]" : "bg-[#F5F7FF] text-[#3A4DBB]",
+            viewAsAgentId ? "bg-[#EEF1FD] text-[#3A4DBB]" : "bg-[#F5F7FF] text-[#3A4DBB]",
             open ? "border-[#B3BFF6]" : "border-[#E5E9F8] hover:border-[#B3BFF6]",
           )}
         >
@@ -106,11 +91,12 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
         <>
           <MenuLabel>Agents</MenuLabel>
 
-          {/* All Agents — the owner comparison table. Also EXITS any active
-              view-as scope (returns the owner to their own full view). */}
+          {/* All Agents — clears the lens so the owner's account shows COMBINED
+              data of ALL agents, IN PLACE. No navigation: the data comes to
+              wherever the owner already is. */}
           <MenuItem
-            onClick={() => { exitViewAs(); router.push(PERF_ROOT); close(); }}
-            className={onPerf && !perfAgentId && !viewAsAgentId ? "bg-[#EEF1FD]" : ""}
+            onClick={() => { exitViewAs(); close(); }}
+            className={allAgentsActive ? "bg-[#EEF1FD]" : ""}
           >
             <span className="flex flex-1 items-center justify-between">
               <span className="flex items-center gap-2">
@@ -118,17 +104,18 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
                 <span>
                   <span className="block font-semibold">All Agents</span>
                   <span className="block text-[11px] font-normal text-muted-foreground">
-                    Ranked performance comparison
+                    Combined data across all agents
                   </span>
                 </span>
               </span>
-              {onPerf && !perfAgentId && !viewAsAgentId && <Check className="h-3.5 w-3.5 text-[#4361EE]" />}
+              {allAgentsActive && <Check className="h-3.5 w-3.5 text-[#4361EE]" />}
             </span>
           </MenuItem>
 
-          {/* Exit the read-only lens (only while one is active). */}
+          {/* Exit the read-only lens (only while one is active). Scope-only —
+              returns the owner to their own combined view without navigating. */}
           {viewAsAgentId && (
-            <MenuItem onClick={() => { exitViewAs(); router.push("/leads/list"); close(); }}>
+            <MenuItem onClick={() => { exitViewAs(); close(); }}>
               <span className="flex items-center gap-2 text-[#3A4DBB]">
                 <LogOut className="h-4 w-4" />
                 <span className="font-semibold">Exit agent view</span>

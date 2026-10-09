@@ -44,7 +44,7 @@ import { useStore } from "@/lib/store";
 import {
   type Lead, type LeadFollowUp, followUpLifecycle,
   isQualifiedLead, isWonStatus, isLostStatus,
-  EMPTY_LEAD_FILTERS, LEAD_CONVERSION_EVENT_LABEL,
+  EMPTY_LEAD_FILTERS,
 } from "@/lib/leads-data";
 import {
   computeAgentPerformance, applyPerfFilters,
@@ -53,6 +53,7 @@ import {
 import { statusTone, priorityTone } from "@/components/leads/lead-pills";
 import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { SalesAgentsOnline } from "@/components/leads/sales-agents-online";
+import { LeadActivityFeed } from "@/components/leads/lead-activity-feed";
 import { DateRangePicker, type DateRange } from "@/components/dashboard/date-range-picker";
 import { NotepadWidget } from "@/components/dashboard/notepad-widget";
 
@@ -75,8 +76,17 @@ export default function LeadDashboardPage() {
   const router = useRouter();
   const { can } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
-  const { leads, followUps, canSeeAllLeads, setFilters, assignmentHistory, conversionHistory } = useLeads();
+  const { leads, followUps, canSeeAllLeads, setFilters, salesAgents, viewAsAgentId, viewAsReadOnly, currentUserIsSalesAgent } = useLeads();
   const { tickets, invoices } = useStore();
+
+  /* A user who is themselves a Sales Agent is ALWAYS individual-scoped on the
+     dashboard — only THEIR own metrics — even if their role happens to carry a
+     coarse reporting key (view_sales_reports / manage_reports / leads_view_all).
+     That coarse key doesn't make an agent an owner of the whole floor's
+     dashboard. True owners (not Sales Agents) keep the combined view. Mirrors
+     the Agent-Performance + Agents-dropdown guard. */
+  const isSelfSalesAgent = currentUserIsSalesAgent();
+  const seeCombined = canSeeAllLeads && !isSelfSalesAgent;
 
   const [dateRange, setDateRange] = useState<PerfDateRange>("today");
   const [customFrom, setCustomFrom] = useState("");
@@ -92,12 +102,21 @@ export default function LeadDashboardPage() {
     [dateRange, customFrom, customTo],
   );
 
-  /* ── Visibility scope: the SIGNED-IN agent's own leads (owned + created +
-     follow-up responsibilities), or — for a see-all user — every lead in their
-     authorized store scope. Mirrors the RLS/scopedLeads rule exactly. ── */
+  /* ── Visibility scope (mirrors the module-wide scopedLeads lens):
+       • OWNER "view as agent" lens active → ONLY that agent's leads (read-only
+         drill-down; the owner stays on this page, the agent's data sits here).
+       • see-all user, no lens ("All Agents") → every lead in their authorized
+         store scope (COMBINED).
+       • plain Sales Agent → their own leads (owned + created + follow-up).
+     ── */
   const myLeadsAllTime = useMemo(() => {
+    // Owner drilling into a single agent (lens is owner-only; a plain agent
+    // never has viewAsAgentId set).
+    if (viewAsAgentId) {
+      return leads.filter((l) => l.assignedTo === viewAsAgentId);
+    }
     const me = currentUserId || "";
-    if (canSeeAllLeads) return leads;
+    if (seeCombined) return leads;
     if (!me) return [];
     const followUpLeadIds = new Set(
       followUps.filter((f) => f.followUpUserId === me && f.status !== "cancelled").map((f) => f.leadId),
@@ -105,7 +124,7 @@ export default function LeadDashboardPage() {
     return leads.filter((l) =>
       l.createdBy === me || l.assignedTo === me || l.followUpAgentId === me || followUpLeadIds.has(l.id),
     );
-  }, [leads, followUps, canSeeAllLeads, currentUserId]);
+  }, [leads, followUps, seeCombined, currentUserId, viewAsAgentId]);
 
   /* Apply the shared date filter → the dataset EVERY card/chart uses. */
   const scopedLeads = useMemo(
@@ -126,57 +145,6 @@ export default function LeadDashboardPage() {
 
   const revenue = useMemo(() => ({ tickets, invoices }), [tickets, invoices]);
 
-  /* "Last activity" status shown next to the online pill. Tracks the most
-     recent lead activity ACROSS every account the user is allowed to see (a
-     see-all owner sees everyone; an individual agent sees their own — bounded
-     by the same RLS/visibility scope, never bypassed). It merges real activity
-     streams — lead created/updated, (re)assignment, and conversion/handoff
-     events — picks the single most recent, and surfaces WHO did it (the saved
-     account name) + WHAT + WHEN. Presentation only; never fabricated. */
-  const lastActivityLabel = useMemo(() => {
-    type Act = { at: number; who: string; what: string };
-    const acts: Act[] = [];
-    const push = (iso?: string, who?: string, what?: string) => {
-      const t = new Date(iso || "").getTime();
-      if (!iso || Number.isNaN(t)) return;
-      acts.push({ at: t, who: (who || "").trim(), what: what || "updated a lead" });
-    };
-
-    for (const l of leads) {
-      const owner = l.assignedToName || l.agent || "";
-      // Created vs updated: if updatedAt is meaningfully after createdAt it's an edit.
-      const created = new Date(l.createdAt || l.date || "").getTime();
-      const updated = new Date(l.updatedAt || "").getTime();
-      push(l.createdAt || l.date, owner, `added lead ${l.leadNo || ""}`.trim());
-      if (!Number.isNaN(updated) && !Number.isNaN(created) && updated - created > 1000) {
-        push(l.updatedAt, owner, `updated lead ${l.leadNo || ""}`.trim());
-      }
-    }
-    for (const h of assignmentHistory) {
-      const who = h.assignedByName || h.toUserName || "";
-      const to = h.toUserName ? ` to ${h.toUserName}` : "";
-      push(h.createdAt, who, `assigned a lead${to}`);
-    }
-    for (const e of conversionHistory) {
-      const label = LEAD_CONVERSION_EVENT_LABEL[e.eventType] || "updated a lead";
-      push(e.occurredAt, e.actorName, label.toLowerCase());
-    }
-
-    if (acts.length === 0) return "";
-    acts.sort((a, b) => b.at - a.at);
-    const top = acts[0];
-    const when = formatRelativeTime(top.at);
-    // Owner / full-access sees WHO did it; everyone else sees the activity
-    // without the account name.
-    if (canSeeAllLeads) {
-      const who = top.who || "Someone";
-      return `${who} ${top.what} · ${when}`;
-    }
-    // Capitalise the leading verb for the name-less variant.
-    const what = top.what.charAt(0).toUpperCase() + top.what.slice(1);
-    return `${what} · ${when}`;
-  }, [leads, assignmentHistory, conversionHistory, canSeeAllLeads]);
-
   /* Resolve a KPI/stage keyword → the matching admin-configurable status value
      (so a click lands on the right filter without hardcoding a status enum). */
   const firstStatusMatching = useMemo(() => {
@@ -189,9 +157,19 @@ export default function LeadDashboardPage() {
 
   /* ── The one source of truth for all headline numbers — the SAME engine the
      Agent Performance page uses, so the two surfaces can never disagree. ── */
+  // The identity the headline metrics are computed for. Under the owner lens
+  // it's the viewed agent; otherwise the signed-in user.
+  const perfSubject = useMemo(() => {
+    if (viewAsAgentId) {
+      const a = salesAgents.find((x) => x.id === viewAsAgentId);
+      return { id: viewAsAgentId, name: a?.name ?? "Agent", roleLabel: a?.roleLabel ?? "Sales Agent" };
+    }
+    return { id: currentUserId ?? "", name: currentUserName, roleLabel: "Sales Agent" };
+  }, [viewAsAgentId, salesAgents, currentUserId, currentUserName]);
+
   const perf = useMemo(
     () => computeAgentPerformance(
-      { id: currentUserId ?? "", name: currentUserName, roleLabel: "Sales Agent" },
+      perfSubject,
       // The already visibility- + date-scoped set: an agent's own leads, or a
       // see-all user's whole store scope. computeAgentPerformance derives every
       // metric from exactly these records (no widening).
@@ -199,7 +177,7 @@ export default function LeadDashboardPage() {
       scopedFollowUps,
       revenue,
     ),
-    [currentUserId, currentUserName, scopedLeads, scopedFollowUps, revenue],
+    [perfSubject, scopedLeads, scopedFollowUps, revenue],
   );
 
   /* ── Follow-up panel: split real structured follow-ups into Overdue / Today /
@@ -300,7 +278,9 @@ export default function LeadDashboardPage() {
   }
 
   const dateLabel = DATE_OPTIONS.find((d) => d.value === dateRange)?.label ?? "All";
-  const scopeSubtitle = canSeeAllLeads
+  const scopeSubtitle = viewAsAgentId
+    ? `Viewing ${perfSubject.name}'s sales workspace · read-only — every card, chart and follow-up reflects the same date filter.`
+    : seeCombined
     ? "Your store's sales workspace — every card, chart and follow-up reflects the same date filter."
     : "Your personal sales workspace — only your leads and follow-ups, all reflecting the same date filter.";
 
@@ -311,21 +291,20 @@ export default function LeadDashboardPage() {
         title="Lead Dashboard"
         subtitle={scopeSubtitle}
         actions={
-          <div className="flex flex-col items-end gap-1">
+          <div className="flex flex-col items-end gap-1.5">
             <div className="flex items-center gap-2">
               <SalesAgentsOnline />
-              <Can permission={CAP.lead.create}>
-                <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
-                  <Plus className="h-3.5 w-3.5" /> Quick Add Lead
-                </Button>
-              </Can>
+              {!viewAsReadOnly && (
+                <Can permission={CAP.lead.create}>
+                  <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
+                    <Plus className="h-3.5 w-3.5" /> Quick Add Lead
+                  </Button>
+                </Can>
+              )}
             </div>
-            {lastActivityLabel && (
-              <span className="hidden items-center gap-1.5 pr-1 text-[11px] font-medium italic text-muted-foreground md:inline-flex">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                {lastActivityLabel}
-              </span>
-            )}
+            {/* Live team ticker — every LEAD update, actor name shown to all,
+                wins celebrated to keep the floor motivated. */}
+            <LeadActivityFeed />
           </div>
         }
       />
@@ -802,20 +781,6 @@ function formatRangeLabel(from: string, to: string): string {
     return d ? d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", year: "numeric" }) : "—";
   };
   return `${fmt(from)} — ${fmt(to)}`;
-}
-
-/* Human relative time for the "Last updated lead …" status (just now / N min
-   ago / N hr ago / Mon DD at HH:MM for older). */
-function formatRelativeTime(ms: number): string {
-  const diff = Date.now() - ms;
-  const mins = Math.round(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
-  const d = new Date(ms);
-  const sameYear = d.getFullYear() === new Date().getFullYear();
-  return `on ${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short", ...(sameYear ? {} : { year: "numeric" }) })} at ${d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}`;
 }
 
 /* ── Per-tone visual system — mirrors the Shop Dashboard KpiCard so the two

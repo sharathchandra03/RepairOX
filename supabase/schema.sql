@@ -550,6 +550,8 @@ declare
   v_name   text;
   v_role   text;
   v_bname  text;
+  v_subject text;   -- human-friendly label for the record (name, not just id)
+  v_desc    text;
 begin
   if (TG_OP = 'DELETE') then
     v_old := to_jsonb(OLD); v_new := null;
@@ -566,11 +568,29 @@ begin
                        v_new->>'reference',  v_old->>'reference',
                        v_new->>'expense_id', v_old->>'expense_id');
 
+  -- Acting user's own name/role/branch (NULL under the service role, e.g. the
+  -- /api/staff creation path).
   select s.name, s.role_id, s.branch
     into v_name, v_role, v_bname
   from public.staff s
   where s.auth_user_id = v_actor
   limit 1;
+
+  -- staff / Employee special-casing: the application writes an explicit,
+  -- correctly-named "User Created" entry on creation, so skip the generic
+  -- (nameless) INSERT row here; and for UPDATE/DELETE name the subject by the
+  -- staff member's NAME rather than the bare UUID.
+  if (TG_TABLE_NAME = 'staff') then
+    if (TG_OP = 'INSERT') then
+      return NEW;
+    end if;
+    v_subject := coalesce(v_new->>'name', v_old->>'name', v_record);
+  else
+    v_subject := v_record;
+  end if;
+
+  v_desc := v_module || ' ' || lower(TG_OP)
+            || (case when v_subject is not null then ' (' || v_subject || ')' else '' end);
 
   insert into public.audit_log(
     organization_id, branch_id, module, entity_type, record_id, action_type,
@@ -580,7 +600,7 @@ begin
     v_org, v_branch, v_module, TG_TABLE_NAME, v_record, TG_OP,
     initcap(lower(TG_OP)) || ' ' || v_module,
     case TG_OP when 'DELETE' then 'critical' when 'INSERT' then 'success' else 'info' end,
-    v_module || ' ' || lower(TG_OP) || (case when v_record is not null then ' (' || v_record || ')' else '' end),
+    v_desc,
     v_old, v_new, v_actor, coalesce(v_name, 'System'), v_role, v_bname
   );
 

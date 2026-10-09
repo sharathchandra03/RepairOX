@@ -119,7 +119,7 @@ export function SalesAgentsOnline() {
             </button>
           </div>
 
-          <div className="max-h-[360px] overflow-y-auto p-2">
+          <div className="h-[360px] overflow-y-auto p-2">
             {total === 0 && (
               <p className="px-2 py-6 text-center text-[12px] text-muted-foreground">
                 No sales agents configured.

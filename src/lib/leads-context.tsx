@@ -850,7 +850,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       const rows: Record<string, unknown>[] = [];
       for (const field of LEAD_DROPDOWN_FIELDS) {
         if (field.usesStaff) continue; // agent lists come from live staff
-        field.defaults.forEach((value, i) => rows.push({ field: field.key, value, sort_order: i, active: true }));
+        // branch_id: null → the option catalog is ORG-WIDE/global, visible to
+        // every user in the org (incl. a newly created Sales Agent on any
+        // store), never stamped to the seeding admin's home store.
+        field.defaults.forEach((value, i) => rows.push({ field: field.key, value, sort_order: i, active: true, branch_id: null }));
       }
       if (rows.length === 0) { setOptions([]); return; }
       const { data, error } = await db.from("lead_options").insert(rows).select("*");
@@ -2055,7 +2058,9 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     const sortOrder = existing.reduce((max, o) => Math.max(max, o.sortOrder), -1) + 1;
 
     if (useDb) {
-      const { data, error } = await db.from("lead_options").insert({ field, value: trimmed, sort_order: sortOrder, active: true }).select("*").single();
+      // branch_id: null → org-wide/global option (every store + every user,
+      // incl. new Sales Agents, sees it). Form settings are NOT per-store.
+      const { data, error } = await db.from("lead_options").insert({ field, value: trimmed, sort_order: sortOrder, active: true, branch_id: null }).select("*").single();
       if (error || !data) {
         console.error("[leads] addOption failed:", error?.message);
         toast.error("Option not added", { description: "We couldn't save this option. Check your permissions and try again." });
