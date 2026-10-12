@@ -201,6 +201,49 @@ export function formatDealDiscount(value: number | null, type: "amount" | "perce
   return type === "percent" ? `${value}%` : `₹${Number(value).toLocaleString("en-IN")}`;
 }
 
+/* ─── Customer-offer price (quote − discount) ──────────────────────────────
+   The CUSTOMER-FACING price is the lead's quote (pipeline value) minus the
+   discount, clamped to ≥ 0. This derives ONLY from the deal's own fields and
+   keeps requested / approved / actual-invoice discounts conceptually distinct
+   (this is the customer-OFFER view, not the invoice). */
+
+/** The customer-facing price after a discount is applied to a quote. Returns
+ *  null when the quote is unknown (so the UI shows "—" rather than fabricating
+ *  a number). A null/zero discount simply returns the quote. */
+export function dealCustomerPrice(
+  leadValue: number | null,
+  discount: number | null,
+  type: "amount" | "percent",
+): number | null {
+  if (leadValue == null) return null;
+  const quote = Number(leadValue);
+  if (!discount) return Math.max(0, Math.round(quote));
+  const off = type === "percent" ? (quote * Number(discount)) / 100 : Number(discount);
+  return Math.max(0, Math.round(quote - off));
+}
+
+/** The two customer-offer prices for a deal: what was REQUESTED and (once
+ *  approved) what was APPROVED. `changed` is true only when the deal is
+ *  approved AND the approved price differs from the requested price — so an
+ *  approval at the same amount shows no redundant struck-through price. */
+export function approvedVsRequestedOffer(deal: LeadDeal): {
+  requestedPrice: number | null;
+  approvedPrice: number | null;
+  changed: boolean;
+} {
+  const requestedPrice = dealCustomerPrice(deal.leadValue, deal.requestedDiscount, deal.requestedDiscountType);
+  const approvedPrice =
+    deal.status === "approved"
+      ? dealCustomerPrice(deal.leadValue, deal.approvedDiscount, deal.approvedDiscountType)
+      : null;
+  const changed =
+    deal.status === "approved" &&
+    approvedPrice != null &&
+    requestedPrice != null &&
+    approvedPrice !== requestedPrice;
+  return { requestedPrice, approvedPrice, changed };
+}
+
 /** Compact elapsed-time since an ISO instant, expressed in HOURS (not a
  *  days+hours mix). Under an hour it falls back to minutes; very old deals roll
  *  up to weeks so the pill stays short. Actual elapsed time only — never an SLA

@@ -1697,7 +1697,11 @@ export default function LeadsListPage() {
           const showDealLineage =
             wf.dealLineage === "approved" && !statusLower.includes("deal");
           return (
-            <div className="min-w-0">
+            // Top-anchor the pill so an optional sub-label grows DOWNWARD and
+            // never shifts the pill's Y. The TD is vertically centered, so this
+            // wrapper reserves the pill + one sub-label line of height and keeps
+            // the pill pinned to the top in both states (with/without subtext).
+            <div className="flex min-h-[42px] min-w-0 flex-col items-stretch justify-start">
               <LeadSelectCell
                 value={lead.status || ""}
                 options={statusOptions}

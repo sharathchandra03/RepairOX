@@ -1291,23 +1291,43 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
 
     if (useDb) {
       let row = leadToRow(updates);
-      let res = await db.from("leads").update(row).eq("id", id);
+      // Request the affected row back so an RLS-filtered UPDATE (which Postgres
+      // reports as `error: null` + 0 rows) is observable as a real failure
+      // instead of a silent fake success that reverts on the next reload.
+      let res = await db.from("leads").update(row).eq("id", id).select("id");
       // Schema-drift: the fulfilment_route / linked_* / customer_id columns are
       // added by the optional migration. Drop any the DB doesn't have and retry
       // so routing/linking never fails the user's action.
       let heal = 0;
+      let healedAway = false;
       while (res.error && isUndefinedColumnError(res.error) && Object.keys(row).length > 0 && heal < 8) {
         heal += 1;
         const col = extractMissingColumn(res.error);
         row = omitKeys(row, col ? [col] : LEAD_OPTIONAL_COLUMNS);
-        if (Object.keys(row).length === 0) { res = { error: null } as any; break; }
-        res = await db.from("leads").update(row).eq("id", id);
+        if (Object.keys(row).length === 0) { res = { error: null, data: [] } as any; healedAway = true; break; }
+        res = await db.from("leads").update(row).eq("id", id).select("id");
         if (!res.error) console.warn("[leads] updateLead: retried without missing column(s) (schema drift).");
       }
       if (res.error) {
         console.error("[leads] updateLead failed:", res.error.message);
         reportLeadError("Changes not saved", res.error.message, "We couldn't update this lead in the database. Please try again.");
         // Roll the optimistic change back to the authoritative row.
+        const { data: fresh } = await db.from("leads").select("*").eq("id", id).maybeSingle();
+        if (fresh) setLeads((prev) => prev.map((l) => (l.id === id ? applyFulfilmentOverlay([rowToLead(fresh)])[0] : l)));
+        return false;
+      }
+      // A null error with ZERO affected rows means the UPDATE was filtered out by
+      // RLS (the user isn't authorized to write this lead) — the optimistic state
+      // would otherwise look saved but silently revert on the next reload. Treat
+      // it as a failure and restore the authoritative row. (Skip when every
+      // column was healed away for schema drift — nothing was meant to persist.)
+      if (!healedAway && (res.data?.length ?? 0) === 0) {
+        console.error("[leads] updateLead affected 0 rows (likely RLS visibility).");
+        reportLeadError(
+          "Changes not saved",
+          "The update affected no rows (you may not have permission to change this lead).",
+          "We couldn't update this lead in the database. Please try again.",
+        );
         const { data: fresh } = await db.from("leads").select("*").eq("id", id).maybeSingle();
         if (fresh) setLeads((prev) => prev.map((l) => (l.id === id ? applyFulfilmentOverlay([rowToLead(fresh)])[0] : l)));
         return false;

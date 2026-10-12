@@ -24,6 +24,8 @@ import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Button } from "@/components/ui/button";
+import { Textarea, Label } from "@/components/ui/input";
 import { useRoxStickyHeader } from "@/components/ui/rox-table";
 import { TableUtilityBar } from "@/components/common/table-utility-bar";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
@@ -40,7 +42,7 @@ import { toast } from "@/components/ui/toaster";
 import {
   DEAL_QUEUE_TABS, type DealQueueTab, dealInQueueTab,
   DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount, dealAgeLabel, dealAgeTooltip,
-  isOpenDealStatus, canAgentResubmit, canDecideDeal,
+  isOpenDealStatus, canAgentResubmit, canDecideDeal, approvedVsRequestedOffer,
   type LeadDeal,
 } from "@/lib/lead-deals";
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
@@ -175,15 +177,17 @@ export default function DealsPage() {
   const canReject = allow(can, CAP.deal.reject);
   const canRequestChanges = allow(can, CAP.deal.requestChanges);
 
-  /** Inline approve — authorizes the exception at the requested discount. */
-  const inlineApprove = async (d: LeadDeal) => {
-    const ok = await approveDeal(d.id, {
-      approvedDiscount: d.requestedDiscount,
-      approvedDiscountType: d.requestedDiscountType,
-    });
-    if (ok) toast.success("Deal approved", { description: `${d.dealNo} · ${formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}` });
-    else toast.error("Couldn't approve the deal");
-  };
+  /* Approve → ask the FINAL APPROVED AMOUNT first. Choosing Approve opens a
+     small modal (prefilled with the requested price); only on confirming do we
+     persist via approveDeal. Reject / Request Changes keep routing to the
+     review drawer. The approval decision stays server-stamped — the client only
+     supplies the approver's chosen amount. */
+  const [approveFor, setApproveFor] = useState<LeadDeal | null>(null);
+
+  /** Persist the approval at the approver's chosen final price. approveDeal
+   *  already surfaces its own success/error toast, so this just forwards. */
+  const confirmApprove = async (d: LeadDeal, approvedDiscount: number | null, approvedDiscountType: "amount" | "percent", comment?: string) =>
+    approveDeal(d.id, { approvedDiscount, approvedDiscountType, comment });
 
   // Deep-link ?deal=<id> opens the review drawer.
   useEffect(() => {
@@ -428,6 +432,11 @@ export default function DealsPage() {
                 // Quoted vs the customer's final offer, as a comparison (final
                 // price + the size of the cut). Null quote → unknown.
                 const offer = customerOfferBreakdown(d.leadValue, d.requestedDiscount, d.requestedDiscountType);
+                // Once APPROVED at a different amount, show the new approved
+                // customer price with the old (requested) price struck through —
+                // the conclusion the team reached. Equal approval → no struck
+                // price (shared helper, no inline math).
+                const approvedOffer = approvedVsRequestedOffer(d);
                 // Inline Status: for OPEN deals an authorized approver can decide
                 // (Approve/Reject/Request Changes). For TERMINAL deals (approved
                 // / rejected / cancelled) the approver can REOPEN for a fresh
@@ -556,6 +565,24 @@ export default function DealsPage() {
                   <td className="pl-3 pr-6 py-4 text-right align-middle">
                     {offer == null ? (
                       <span className="text-[13px] text-zinc-400">—</span>
+                    ) : approvedOffer.changed && approvedOffer.approvedPrice != null && approvedOffer.requestedPrice != null ? (
+                      // APPROVED at a different amount → the agreed (approved)
+                      // customer price is the headline, with the previously
+                      // requested price struck through (old → new conclusion).
+                      <div className="ml-auto w-[92px]">
+                        <p
+                          className="text-[11px] font-medium tabular-nums text-zinc-400 line-through"
+                          title={`Previously requested: ${formatINR(approvedOffer.requestedPrice)}`}
+                        >
+                          {formatINR(approvedOffer.requestedPrice)}
+                        </p>
+                        <p
+                          className="font-bold tabular-nums text-emerald-700"
+                          title={`Approved price: ${formatINR(approvedOffer.approvedPrice)} (approved discount ${formatDealDiscount(d.approvedDiscount, d.approvedDiscountType)})`}
+                        >
+                          {formatINR(approvedOffer.approvedPrice)}
+                        </p>
+                      </div>
                     ) : offer.off <= 0 ? (
                       <span className="font-bold tabular-nums text-zinc-900" title="At quoted price — no discount requested">{formatINR(offer.final)}</span>
                     ) : (
@@ -580,7 +607,7 @@ export default function DealsPage() {
                       canApprove={canApprove}
                       canReject={canReject}
                       canRequestChanges={canRequestChanges}
-                      onApprove={() => inlineApprove(d)}
+                      onApprove={() => setApproveFor(d)}
                       onReject={() => setOpenId(d.id)}
                       onRequestChanges={() => setOpenId(d.id)}
                       onReopen={() => reopenDeal(d.id)}
@@ -648,6 +675,15 @@ export default function DealsPage() {
       >
         {liveOpenDeal && <DealReviewPanel deal={liveOpenDeal} onResubmit={(dl) => { setOpenId(null); setResubmitDeal(dl); }} />}
       </Drawer>
+
+      {/* Approve → final approved amount prompt (inline queue Approve). Only
+          shown for Approve; collects the final price the team concluded on. */}
+      <ApproveAmountModal
+        deal={approveFor}
+        onClose={() => setApproveFor(null)}
+        onConfirm={confirmApprove}
+      />
+
 
       {/* Revise & resubmit modal (opened from the row menu / review panel) */}
       <DealRequestModal
@@ -799,7 +835,7 @@ function DealStatusCell({
                   onClick={(e) => { e.stopPropagation(); setOpen(false); onApprove(); }}
                   className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12px] font-medium text-emerald-700 transition hover:bg-emerald-50"
                 >
-                  <Check className="h-3.5 w-3.5" /> Approve (at requested)
+                  <Check className="h-3.5 w-3.5" /> Approve…
                 </button>
               )}
               {canDecide && canRequestChanges && (
@@ -944,5 +980,144 @@ function DealQuickActions({
         )}
       </Dropdown>
     </div>
+  );
+}
+
+/* ─── Approve → final approved amount prompt ─────────────────────────────────
+   Shown ONLY when an authorized approver chooses Approve from the queue. It
+   collects the FINAL APPROVED PRICE (absolute ₹, prefilled with the requested
+   price, cannot exceed the quote — same validation as the review panel) and,
+   on confirm, persists via approveDeal (approvedDiscount = round(quote − price)).
+   The approval decision itself stays server-stamped — the client only supplies
+   the approver's chosen amount. */
+function ApproveAmountModal({
+  deal, onClose, onConfirm,
+}: {
+  deal: LeadDeal | null;
+  onClose: () => void;
+  onConfirm: (
+    deal: LeadDeal,
+    approvedDiscount: number | null,
+    approvedDiscountType: "amount" | "percent",
+    comment?: string,
+  ) => Promise<boolean>;
+}) {
+  const quote = deal?.leadValue ?? null;
+  const requestedPrice =
+    deal == null
+      ? null
+      : quote == null || deal.requestedDiscount == null
+        ? null
+        : Math.max(
+            0,
+            Math.round(
+              quote - (deal.requestedDiscountType === "percent" ? (quote * deal.requestedDiscount) / 100 : deal.requestedDiscount),
+            ),
+          );
+  const [price, setPrice] = useState<string>("");
+  const [comment, setComment] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Reset the form each time a new deal opens the prompt.
+  useEffect(() => {
+    if (deal) {
+      setPrice(requestedPrice == null ? "" : String(requestedPrice));
+      setComment("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [deal?.id]);
+
+  if (!deal) return null;
+
+  const priceNum = price.trim() === "" ? null : Number(price.replace(/[^0-9.]/g, ""));
+  const invalid = priceNum != null && quote != null && (priceNum < 0 || priceNum > quote);
+  const off = quote != null && priceNum != null ? Math.round(quote - priceNum) : null;
+  const pct = quote != null && quote > 0 && off != null ? Math.round((off / quote) * 100) : null;
+
+  const confirm = async () => {
+    setBusy(true);
+    try {
+      // Convert the approved price → stored discount (amount off the quote).
+      // Fall back to the requested discount when the quote is unknown.
+      const approvedDiscount =
+        quote != null && priceNum != null ? Math.max(0, Math.round(quote - priceNum)) : deal.requestedDiscount;
+      const ok = await onConfirm(deal, approvedDiscount, "amount", comment.trim() || undefined);
+      if (ok) onClose();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <AnimatePresence>
+      <motion.div
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        exit={{ opacity: 0 }}
+      >
+        <div className="absolute inset-0 bg-zinc-900/40 backdrop-blur-[1px]" onClick={() => { if (!busy) onClose(); }} />
+        <motion.div
+          initial={{ opacity: 0, y: 10, scale: 0.97 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 10, scale: 0.97 }}
+          transition={{ duration: 0.18 }}
+          className="relative z-[101] w-full max-w-md overflow-hidden rounded-2xl border border-border bg-card shadow-2xl"
+        >
+          <div className="flex items-center gap-2.5 border-b border-border/70 bg-emerald-50/60 px-5 py-3.5">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-emerald-100 text-emerald-700"><CheckCircle2 className="h-4 w-4" /></span>
+            <div className="min-w-0">
+              <p className="text-[13px] font-bold text-foreground">Approve {deal.dealNo}</p>
+              <p className="truncate text-[11px] text-muted-foreground">Lead {deal.leadNo} · {deal.customerName || "—"}</p>
+            </div>
+          </div>
+          <div className="space-y-3.5 p-5">
+            <div className="flex items-center justify-between rounded-xl border border-border bg-muted/20 px-3.5 py-2.5">
+              <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Price Quoted</span>
+              <span className="text-[13px] font-semibold tabular-nums text-zinc-900">{quote == null ? "—" : formatINR(quote)}</span>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Final approved price</Label>
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[13px] font-medium text-muted-foreground">₹</span>
+                <input
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value.replace(/[^0-9.]/g, ""))}
+                  inputMode="decimal"
+                  autoFocus
+                  placeholder={requestedPrice == null ? "e.g. 8000" : String(requestedPrice)}
+                  className={cn(
+                    "h-9 w-full rounded-lg border border-input bg-card pl-7 pr-3 text-[13px] tabular-nums outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15",
+                    invalid && "border-rose-400 focus:ring-rose-200/40",
+                  )}
+                />
+              </div>
+              {invalid ? (
+                <p className="text-[11px] font-medium text-rose-600">The approved price can&apos;t exceed the quoted {quote == null ? "price" : formatINR(quote)}.</p>
+              ) : off != null && off > 0 ? (
+                <p className="text-[11px] text-muted-foreground">Approving <span className="font-semibold tabular-nums text-emerald-700">{formatINR(priceNum!)}</span> — that&apos;s −{formatINR(off)}{pct != null && ` · ${pct}% off`}.</p>
+              ) : (
+                <p className="text-[11px] text-muted-foreground">The final price you authorize (may differ from the request).</p>
+              )}
+            </div>
+            <div className="space-y-1.5">
+              <Label>Comment (optional)</Label>
+              <Textarea
+                value={comment}
+                onChange={(e) => setComment(e.target.value)}
+                placeholder="e.g. Proceed with this price."
+                className="min-h-[64px] text-[13px]"
+              />
+            </div>
+          </div>
+          <div className="flex items-center justify-end gap-2 border-t border-border/70 px-5 py-3">
+            <Button size="sm" variant="ghost" onClick={() => { if (!busy) onClose(); }}>Cancel</Button>
+            <Button size="sm" className="gap-1.5 bg-emerald-600 hover:bg-emerald-700" loading={busy} disabled={invalid} onClick={confirm}>
+              <Check className="h-3.5 w-3.5" /> Confirm Approval
+            </Button>
+          </div>
+        </motion.div>
+      </motion.div>
+    </AnimatePresence>
   );
 }
