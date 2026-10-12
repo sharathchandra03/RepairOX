@@ -606,6 +606,7 @@ export default function ViewLeadPage() {
               composer honours the owner read-only lens + CAP.deal.comment. */}
           {deal && allow(can, CAP.deal.view) && (
             <DetailSection
+              id="deal-conversation"
               icon={BadgePercent}
               title="Deal / Approval"
               accent="amber"
