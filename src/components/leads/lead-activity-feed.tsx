@@ -98,7 +98,9 @@ function relTime(ms: number): string {
   const hrs = Math.floor(mins / 60);
   if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
   const d = new Date(ms);
-  return `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`;
+  const date = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
+  const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+  return `${date}, ${time}`;
 }
 
 const WIN_KINDS = new Set<FeedKind>(["won", "invoice_created", "ticket_created"]);
@@ -183,10 +185,10 @@ export function LeadActivityFeed() {
   return (
     <div
       className={cn(
-        "hidden min-w-0 max-w-[460px] items-center gap-2 rounded-full border px-2.5 py-1 md:inline-flex",
+        "hidden min-w-0 max-w-[460px] items-center gap-2 rounded-full border-[1.5px] px-3 py-1.5 shadow-[0_1px_2px_rgba(20,30,80,0.06)] md:inline-flex",
         cur.win
-          ? "border-emerald-200 bg-gradient-to-r from-emerald-50 to-amber-50"
-          : "border-border bg-muted/40",
+          ? "border-emerald-300 bg-gradient-to-r from-emerald-50 to-amber-50"
+          : "border-zinc-300 bg-card",
       )}
       aria-live="polite"
       title="Live lead activity across your team"

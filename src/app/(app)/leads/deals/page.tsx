@@ -35,6 +35,7 @@ import { CAP, allow } from "@/lib/capabilities";
 import { cn, formatINR } from "@/lib/utils";
 import { useDeals } from "@/lib/lead-deals-context";
 import { useLeads } from "@/lib/leads-context";
+import { type Lead, getLeadDevices } from "@/lib/leads-data";
 import { toast } from "@/components/ui/toaster";
 import {
   DEAL_QUEUE_TABS, type DealQueueTab, dealInQueueTab,
@@ -45,6 +46,7 @@ import {
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
 import { DealConversationPopover } from "@/components/deals/deal-conversation-popover";
+import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
 
 /** The customer's offer vs the quoted price — a comparison, not two unrelated
@@ -108,6 +110,9 @@ export default function DealsPage() {
      comment button). Anchored to the trigger via its bounding rect, portalled
      so the data-grid overflow never clips it — NO navigation. */
   const [chatDeal, setChatDeal] = useState<{ dealId: string; rect: DOMRect | null } | null>(null);
+  /* Lead whose Device & Issue details popup is open — reuses the SAME overlay
+     the Lead Table uses, so the deal's device details read identically. */
+  const [deviceDetailsLead, setDeviceDetailsLead] = useState<Lead | null>(null);
   const meId = usePermissions().currentUser?.id || "";
   const isOwner = can("full_access");
   // Per-user "new message" signal for the internal Deal conversation (the ONE
@@ -382,9 +387,9 @@ export default function DealsPage() {
               {canDelete && <col className="w-[44px]" />}{/* Selection checkbox */}
               <col className="w-[116px]" />{/* Deal ID */}
               {multiStore && <col className="w-[104px]" />}{/* Store */}
-              <col className="w-[180px]" />{/* Customer Name */}
-              <col />{/* Device & Issue — absorbs remaining width */}
-              <col className="w-[150px]" />{/* Agent Name */}
+              <col className="w-[170px]" />{/* Customer Name */}
+              <col className="w-[230px]" />{/* Device & Issue — roomy for the model name */}
+              <col className="w-[140px]" />{/* Agent Name */}
               <col className="w-[118px]" />{/* Price Quoted */}
               <col className="w-[118px]" />{/* Customer Offer */}
               <col className="w-[168px]" />{/* Status — editable pill */}
@@ -406,7 +411,7 @@ export default function DealsPage() {
                 <th className={cn(canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>Deal ID</th>
                 {multiStore && <th className="px-3">Store</th>}
                 <th className="px-3">Customer Name</th>
-                <th className="px-3">Device &amp; Issue</th>
+                <th className="px-3 text-center">Device &amp; Issue</th>
                 <th className="pl-[22px] pr-3 text-center">Agent Name</th>
                 <th className="pl-3 pr-6 text-right">Price Quoted</th>
                 <th className="pl-3 pr-6 text-right">Customer Offer</th>
@@ -420,8 +425,6 @@ export default function DealsPage() {
             <tbody>
               {paged.map((d, i) => {
                 const lead = leadById.get(d.leadId);
-                const device = lead?.device?.trim() || "";
-                const issue = lead?.issue?.trim() || "";
                 // Quoted vs the customer's final offer, as a comparison (final
                 // price + the size of the cut). Null quote → unknown.
                 const offer = customerOfferBreakdown(d.leadValue, d.requestedDiscount, d.requestedDiscountType);
@@ -496,14 +499,51 @@ export default function DealsPage() {
                     </div>
                   </td>
                   <td className="px-3 py-4 align-middle">
-                    {device || issue ? (
-                      <>
-                        <p className="truncate font-medium text-zinc-800" title={device || undefined}>{device || "—"}</p>
-                        <p className="truncate text-[11px] text-muted-foreground" title={issue || undefined}>{issue || "No issue noted"}</p>
-                      </>
-                    ) : (
-                      <span className="text-[13px] text-zinc-400">—</span>
-                    )}
+                    {(() => {
+                      /* Mirror the Lead Table's DeviceIssueCell EXACTLY: device
+                         primary + issue secondary, a "+N more" badge for a
+                         multi-device lead, and a > chevron affordance. Clicking
+                         opens the SAME catalog-resolved Device & Issue popup.
+                         Device data comes from the linked Lead (never duplicated
+                         onto the deal). Stops row-click so it opens the device
+                         popup, not the deal drawer. */
+                      const devices = lead ? getLeadDevices(lead) : [];
+                      if (devices.length === 0) return <span className="text-[13px] text-zinc-400">—</span>;
+                      const firstDev = devices[0];
+                      const extra = devices.length - 1;
+                      const allLabels = devices.map((dv) => dv.label || "Device").join(", ");
+                      return (
+                        <button
+                          type="button"
+                          onClick={(e) => { e.stopPropagation(); if (lead) setDeviceDetailsLead(lead); }}
+                          aria-label="View device and issue details"
+                          title={extra > 0 ? `${devices.length} devices: ${allLabels}` : "View device & issue details"}
+                          className="group/device flex w-full min-w-0 items-center gap-2 rounded-lg text-left transition hover:bg-indigo-50/50"
+                        >
+                          <div className="min-w-0 flex-1 leading-snug">
+                            {/* Model name gets priority — allowed up to 2 lines
+                                so it reads properly instead of clamping early. */}
+                            <p className="line-clamp-2 break-words font-medium text-zinc-800" title={firstDev.label || undefined}>
+                              {firstDev.label || (firstDev.issue ? "Device" : "—")}
+                            </p>
+                            {firstDev.issue && <p className="mt-0.5 truncate text-[12.5px] text-zinc-500" title={firstDev.issue}>{firstDev.issue}</p>}
+                          </div>
+                          {/* Multi-device → a COMPACT chip showing the number of
+                              OTHER (unseen) devices (+N), not the total, and not a
+                              wide "+N more" badge that steals the name's room. */}
+                          {extra > 0 && (
+                            <span
+                              className="grid h-5 shrink-0 place-items-center rounded-full bg-indigo-100 px-1.5 text-[11px] font-bold text-indigo-700"
+                              title={`${extra} more device${extra === 1 ? "" : "s"}`}
+                              aria-label={`${extra} more devices`}
+                            >
+                              +{extra}
+                            </span>
+                          )}
+                          <ChevronDown className="h-4 w-4 shrink-0 -rotate-90 text-zinc-400 opacity-70 transition group-hover/device:text-[#4361EE] group-hover/device:opacity-100" />
+                        </button>
+                      );
+                    })()}
                   </td>
                   <td className="pl-[22px] pr-3 py-4 align-middle text-center text-zinc-700"><span className="block truncate">{d.salesAgentName || "—"}</span></td>
                   {/* Price Quoted — the reference the agent put forward. */}
@@ -630,6 +670,15 @@ export default function DealsPage() {
             : `This permanently removes ${selectedInView.length} discount requests and their approval history. The linked leads, customers and any tickets/invoices are not affected. This cannot be undone.`
         }
         confirmLabel={deleting ? "Deleting…" : "Delete"}
+      />
+
+      {/* Device & Issue details popup — the SAME overlay the Lead Table uses, so
+          a deal's device details read identically (catalog-resolved, single or
+          multiple devices). Opened from the Device & Issue cell. */}
+      <LeadDeviceDetailsOverlay
+        lead={deviceDetailsLead}
+        open={!!deviceDetailsLead}
+        onClose={() => setDeviceDetailsLead(null)}
       />
 
       {/* In-place deal-conversation chat popover (Quick Actions comment button).
@@ -825,7 +874,7 @@ function DealQuickActions({
   };
   const hasUnread = unread > 0;
   return (
-    <div className="flex items-center justify-center gap-1">
+    <div className="flex items-center justify-center gap-0.5">
       {/* Quick shortcut: Comment — opens the SAME chat popover (reusing
           DealConversation) to continue the conversation. Carries the unread
           count badge; opening it marks seen and clears the badge/dot. */}
@@ -833,9 +882,9 @@ function DealQuickActions({
         onClick={(e) => onComment(e.currentTarget)}
         title={hasUnread ? `Deal conversation · ${unread} new message${unread === 1 ? "" : "s"}` : "Deal conversation"}
         aria-label={hasUnread ? `Deal conversation for ${deal.dealNo}, ${unread} new messages` : `Deal conversation for ${deal.dealNo}`}
-        className="relative grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        className="relative inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
       >
-        <MessageSquare className="h-4 w-4" />
+        <MessageSquare className="h-3.5 w-3.5" />
         {hasUnread && (
           <span
             aria-hidden
@@ -850,18 +899,18 @@ function DealQuickActions({
         onClick={onView}
         title="View deal"
         aria-label={`View deal ${deal.dealNo}`}
-        className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
       >
-        <Eye className="h-4 w-4" />
+        <Eye className="h-3.5 w-3.5" />
       </button>
       {/* Quick shortcut: View linked Lead */}
       <button
         onClick={onViewLead}
         title="View lead"
         aria-label={`View lead for ${deal.dealNo}`}
-        className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+        className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
       >
-        <UserIcon className="h-4 w-4" />
+        <UserIcon className="h-3.5 w-3.5" />
       </button>
       {/* Overflow menu — the rest of the actions */}
       <Dropdown
@@ -869,7 +918,7 @@ function DealQuickActions({
         trigger={({ toggle }) => (
           <button
             onClick={toggle}
-            className="grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
             aria-label={`More actions for ${deal.dealNo}`}
           >
             <MoreHorizontal className="h-4 w-4" />

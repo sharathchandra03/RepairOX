@@ -122,7 +122,7 @@ function EditSelect({ field, value, onChange, extra = [] }: { field: LeadFieldKe
             {values.length > 6 && (
               <div className="flex items-center gap-2 border-b border-border px-2.5 py-1.5">
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
-                <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="w-full bg-transparent text-[12px] outline-none" />
+                <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search…" className="rox-search-input w-full bg-transparent text-[12px] outline-none" />
               </div>
             )}
             <div className="max-h-48 overflow-y-auto p-1">

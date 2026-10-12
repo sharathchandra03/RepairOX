@@ -1,0 +1,20 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "non-blocking",
+      "confidence": "likely",
+      "title": "List-page dealConvoByLead memo not reactive to bare markSeen",
+      "detail": "dealConvoByLead depends on [leads, deals, comments, dealHasUnread], and dealHasUnread keeps a stable identity across markSeen (it reads seenRef.current, not state), so the list dots won't clear in-place from a markSeen alone. Non-blocking because the only list-page markSeen path (handleAction('comment')) immediately router.push()es to View Lead and the component re-hydrates seen from localStorage on return; the memo also recomputes when comments change. Consider adding a seen-derived dependency or a comment if a future in-place mark-seen is added to the list.",
+      "file": "src/app/(app)/leads/list/page.tsx"
+    },
+    {
+      "severity": "non-blocking",
+      "confidence": "confirmed",
+      "title": "Deal-row dot colour differs from Lead-row dots",
+      "detail": "Deal rows use bg-amber-500 while Lead rows use bg-rose-500. This is pre-existing (prior commit 4a0e17c) and matches the Deal section's amber accent; it was left intact per the task scope. Cosmetic only.",
+      "file": "src/app/(app)/leads/deals/page.tsx"
+    }
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/deal-comment-shortcut-review.md"
+}

@@ -102,17 +102,17 @@ export function SalesAgentsOnline() {
             left: Math.max(12, Math.min(rect.right - 300, window.innerWidth - 312)),
           }}
         >
-          <div className="flex items-center justify-between border-b border-border/70 px-4 py-3">
+          <div className="flex items-center justify-between border-b border-[#25D366]/20 bg-[#E8F8EF] px-4 py-3">
             <div>
               <p className="text-[13px] font-bold text-foreground">Sales Agents</p>
               <p className="text-[11px] text-muted-foreground">
-                <span className="font-semibold text-emerald-600">{onlineCount} online</span>
+                <span className="font-bold text-[#128C3E]">{onlineCount} online</span>
                 {" · "}{total} total
               </p>
             </div>
             <button
               onClick={() => setOpen(false)}
-              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition hover:bg-muted"
+              className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#25D366]/10 hover:text-foreground"
               aria-label="Close"
             >
               <X className="h-4 w-4" />
@@ -161,18 +161,21 @@ export function SalesAgentsOnline() {
         ref={btnRef}
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "inline-flex items-center gap-2 rounded-full border border-[#4361EE] bg-card px-3 py-1.5 text-[12px] font-semibold text-[#4361EE] transition hover:bg-[#EEF1FD]",
-          open && "bg-[#EEF1FD] ring-2 ring-[#4361EE]/15",
+          "inline-flex items-center gap-2.5 rounded-full border border-white/25 bg-[#22c35e] px-3 py-1.5 text-[12px] font-semibold text-white shadow-[0_1px_2px_rgba(16,24,40,0.08),0_4px_12px_-4px_rgba(37,211,102,0.45)] transition hover:bg-[#1eb257]",
+          open && "ring-2 ring-[#25D366]/30",
         )}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
         <span className="relative flex items-center">
-          <Users className="h-3.5 w-3.5" />
-          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-emerald-500 ring-2 ring-card" />
+          <Users className="h-3.5 w-3.5 text-white" />
+          <span className="absolute -right-1 -top-1 h-2 w-2 rounded-full bg-[#4ade80] ring-2 ring-[#22c35e]" />
         </span>
-        <span className="hidden sm:inline">
-          <span className="font-bold text-emerald-600">{onlineCount}</span> Online
+        <span className="hidden items-center sm:inline-flex">
+          <span className="mr-2 h-3.5 w-px bg-white/35" aria-hidden="true" />
+          <span>
+            <span className="font-bold">{onlineCount}</span> Online
+          </span>
         </span>
       </button>
       {panel}

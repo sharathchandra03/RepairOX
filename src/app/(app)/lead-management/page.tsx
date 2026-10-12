@@ -302,7 +302,10 @@ export default function LeadDashboardPage() {
                 <SalesAgentsOnline />
                 {!viewAsReadOnly && (
                   <Can permission={CAP.lead.create}>
-                    <Button size="sm" className="gap-1.5 rounded-full animate-module-breathe" onClick={() => setShowCreate(true)}>
+                    <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
+                      {/* Thin glowing breathing border — matches the Shop
+                          dashboard "Add New" button and the POS pill. */}
+                      <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
                       <Plus className="h-3.5 w-3.5" /> Quick Add Lead
                     </Button>
                   </Can>

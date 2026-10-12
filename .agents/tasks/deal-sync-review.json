@@ -1,0 +1,8 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    "Non-blocking: the row renderer's fallback deriveLeadWorkflow(lead, workflowSources) call (page.tsx ~2065) passes no `deal`, so dealLineage is null in that path and the sub-line is suppressed. Only reachable if the workflowByLead memo misses a lead, which does not happen in practice. Could pass `deal` for symmetry.",
+    "Informational: View Lead ([id]/page.tsx) shows the new action labels (In Approval / Deal Approved / Deal Rejected) via DerivedBadge but not the 'Deal → stage' sub-line, which is a Lead-Table-only affordance per the task scope."
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/deal-sync-review.md"
+}

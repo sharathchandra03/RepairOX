@@ -78,7 +78,7 @@ export function NotepadWidget() {
             <h3 className="text-[12px] font-bold uppercase tracking-wider text-foreground">Notepad</h3>
             <p className="text-[11px] text-muted-foreground">
               Private to you · this store
-              {pinnedCount > 0 && <span className="ml-1 text-[#4361EE]">· {pinnedCount} pinned</span>}
+              {pinnedCount > 0 && <span className="ml-1 text-amber-600">· {pinnedCount} pinned</span>}
             </p>
           </div>
         </div>
@@ -86,7 +86,7 @@ export function NotepadWidget() {
           type="button"
           onClick={() => addNote({ color: COLORS[0].token })}
           title="New note"
-          className="inline-flex items-center gap-1 rounded-full bg-[#4361EE] px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm transition hover:bg-[#3A56D4] active:scale-95"
+          className="inline-flex items-center gap-1 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 px-3 py-1.5 text-[11px] font-semibold text-white shadow-sm transition hover:from-amber-500 hover:to-amber-600 active:scale-95"
         >
           <Plus className="h-3.5 w-3.5" /> New
         </button>
@@ -105,7 +105,7 @@ export function NotepadWidget() {
             <button
               type="button"
               onClick={() => addNote({ color: COLORS[0].token })}
-              className="mt-3 inline-flex items-center gap-1 rounded-full bg-[#4361EE] px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:bg-[#3A56D4]"
+              className="mt-3 inline-flex items-center gap-1 rounded-full bg-gradient-to-br from-amber-400 to-amber-500 px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:from-amber-500 hover:to-amber-600"
             >
               <Plus className="h-3.5 w-3.5" /> Add your first note
             </button>
@@ -159,7 +159,7 @@ function NoteCard({
       className={cn(
         "group relative flex flex-col overflow-hidden rounded-xl border pl-3.5 pr-3 py-2.5 shadow-sm transition-shadow hover:shadow-md",
         cfg.body,
-        note.pinnedAt ? "border-[#4361EE]/50 ring-1 ring-[#4361EE]/10" : cfg.border,
+        note.pinnedAt ? "border-amber-400/60 ring-1 ring-amber-400/15" : cfg.border,
       )}
     >
       {/* Saturated left accent stripe — the sticky-note colour cue. */}
@@ -175,8 +175,8 @@ function NoteCard({
         />
         <div className="flex shrink-0 items-center gap-0.5">
           {note.pinnedAt && (
-            <span className="grid h-6 w-6 place-items-center rounded-lg text-[#4361EE] group-hover:hidden">
-              <Pin className="h-3.5 w-3.5 fill-[#4361EE]" />
+            <span className="grid h-6 w-6 place-items-center rounded-lg text-amber-500 group-hover:hidden">
+              <Pin className="h-3.5 w-3.5 fill-amber-500" />
             </span>
           )}
           <div className="hidden items-center gap-0.5 group-hover:flex">
@@ -186,7 +186,7 @@ function NoteCard({
               title={note.pinnedAt ? "Unpin" : "Pin to top"}
               className={cn(
                 "grid h-6 w-6 place-items-center rounded-lg transition hover:bg-black/5",
-                note.pinnedAt ? "text-[#4361EE]" : "text-muted-foreground hover:text-foreground",
+                note.pinnedAt ? "text-amber-500" : "text-muted-foreground hover:text-foreground",
               )}
             >
               {note.pinnedAt ? <PinOff className="h-3.5 w-3.5" /> : <Pin className="h-3.5 w-3.5" />}

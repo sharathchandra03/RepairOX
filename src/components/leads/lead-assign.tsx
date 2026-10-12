@@ -141,7 +141,7 @@ export function AssignMenu({ lead, compact }: { lead: Lead; compact?: boolean })
                   autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
                   placeholder="Search sales agents…"
                   aria-label="Search sales agents"
-                  className="w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
+                  className="rox-search-input w-full bg-transparent text-[13px] outline-none placeholder:text-muted-foreground"
                 />
               </div>
             )}

@@ -1918,8 +1918,8 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   ],
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
-    { label: "PERFORMANCE",    items: ["/leads/performance", "/leads/intelligence", "/leads/intelligence/agents"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
+    { label: "PERFORMANCE",    items: ["/leads/performance", "/leads/intelligence", "/leads/intelligence/agents"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },
     { label: "GENERAL",        items: ["/leads/reports", "/leads/settings"] },
