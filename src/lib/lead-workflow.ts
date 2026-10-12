@@ -214,6 +214,13 @@ export interface LeadWorkflow {
   /** A short human explanation of WHY this action/result was derived (tooltip
    *  / "why is this?" — keeps the read-only cell explainable, spec §31/§46). */
   reason: string;
+  /** The Deal (discount approval) lineage context, INDEPENDENT of the primary
+   *  action. When a deal has been decided (approved / rejected) or is pending,
+   *  this carries that status so the Lead Table can show a "Deal → <current
+   *  stage>" sub-indicator UNDER the primary pill once the agent moves the lead
+   *  to a downstream operational stage. Null when there is no deal context.
+   *  Approval/rejection is NOT a conversion — this never changes the Result. */
+  dealLineage: "approved" | "rejected" | "pending" | null;
 }
 
 /** The live business slice the derivation reads from (a slice of the store +
@@ -296,7 +303,7 @@ export const LEAD_ACTION_LABEL: Record<LeadActionKind, string> = {
   follow_up: "Follow-up",
   in_pipeline: "In Pipeline",
   deal: "Deal",
-  discount_approval: "Discount Approval",
+  discount_approval: "In Approval",
   quotation_created: "Quotation Created",
   quotation_sent: "Quotation Sent",
   field_assigned: "Field Assigned",
@@ -324,14 +331,29 @@ export function deriveLeadWorkflow(
 ): LeadWorkflow {
   const gate = leadGateState(lead);
 
+  // ── Deal (discount approval) lineage, computed ONCE up front. ──
+  //   This is INDEPENDENT of the primary action: it carries the deal's
+  //   approval status so EVERY branch below can surface the "Deal → <current
+  //   stage>" context without the deal branch having to win the cascade. The
+  //   primary action/actionLabel still reflects the highest real outcome.
+  const dealForLineage = opts?.deal ?? null;
+  const dealLineage: "approved" | "rejected" | "pending" | null =
+    dealForLineage?.status === "approved" ? "approved"
+      : dealForLineage?.status === "rejected" ? "rejected"
+      : dealForLineage?.status === "pending_approval" || dealForLineage?.status === "changes_requested" ? "pending"
+      : null;
+
   // Builder that fills the common fields + the field-status defaults so each
   // return stays terse. Pass `fieldStatus` only on the live field-job branch.
+  // `lineage` lets a branch override the carried deal lineage (the deal branch
+  // itself passes null so we never render a redundant "Deal → Deal Approved").
   const mk = (
     action: LeadActionKind,
     result: LeadResult,
     reason: string,
     actionLabel?: string,
     fieldStatus: FieldJobStatus | null = null,
+    lineage: "approved" | "rejected" | "pending" | null = dealLineage,
   ): LeadWorkflow => ({
     gate,
     gated: gate === "not_contacted" || gate === "not_qualified",
@@ -342,6 +364,7 @@ export function deriveLeadWorkflow(
     fieldStatus,
     fieldStatusTone: fieldStatus ? FIELD_STATUS_TONE[fieldStatus] : "",
     fieldStatusLabel: fieldStatus ? FIELD_STATUS_LABEL[fieldStatus] : "",
+    dealLineage: lineage,
   });
 
   // ── Gated (Not-Contacted / Not-Qualified): no operational workflow. ──
@@ -433,6 +456,23 @@ export function deriveLeadWorkflow(
     );
   }
 
+  // ── 3b) PENDING / IN-REVIEW DEAL — approval must happen first. ──
+  //   A pending (or changes-requested) discount approval is a BLOCKING sales
+  //   step: it must be resolved before the lead proceeds, so it surfaces as the
+  //   primary action ABOVE a routing INTENT (pickup / on-site / walk-in) but
+  //   still BELOW any REAL operational record (invoice/ticket/field job above,
+  //   §28). It never wins or loses the lead — Result stays "In Pipeline".
+  const deal = opts?.deal ?? null;
+  if (deal && (deal.status === "pending_approval" || deal.status === "changes_requested")) {
+    const label = deal.status === "changes_requested" ? "Changes Requested" : "In Approval";
+    return mk(
+      "discount_approval",
+      { ...NA_RESULT, kind: "pipeline", primary: label },
+      `Discount approval ${deal.dealNo} is ${deal.status === "changes_requested" ? "awaiting requested changes" : "pending approval"} — the lead is in the Deal approval workflow.`,
+      label,
+    );
+  }
+
   // ── 4) PICKUP / ON-SITE status intent (no field job linked yet). ──
   //   Status set to "Pickup Assigned" / "On site Assigned" → the device is
   //   being collected / serviced in the field: Action = "In Transit",
@@ -460,28 +500,18 @@ export function deriveLeadWorkflow(
     );
   }
 
-  // ── 6) DEAL / DISCOUNT APPROVAL (real Deal record attached to the lead). ──
-  //   A pending / changes-requested discount approval surfaces as the lead's
-  //   current meaningful action. It sits BELOW real operational records (a
-  //   ticket/invoice/field job always wins, §28) and does NOT win or lose the
-  //   lead: Result stays "In Pipeline". An approved/rejected deal with no
-  //   operational record yet falls through to the normal pipeline (approval is
-  //   not a conversion — the agent must still convert the customer, §24/§25).
-  const deal = opts?.deal ?? null;
-  if (deal && (deal.status === "pending_approval" || deal.status === "changes_requested")) {
-    const label = deal.status === "changes_requested" ? "Changes Requested" : "Pending Approval";
-    return mk(
-      "discount_approval",
-      { ...NA_RESULT, kind: "pipeline", primary: label },
-      `Discount approval ${deal.dealNo} is ${label.toLowerCase()} — the lead is in the Deal approval workflow.`,
-      "Discount Approval",
-    );
-  }
-  // An APPROVED / REJECTED deal reflects the manager's decision back on the
-  // lead (so the queue decision is visible in the Lead Table). It is NOT a
-  // conversion — approval only authorises the exception, rejection does NOT
-  // lose the lead (§24/§25) — so Result stays "In Pipeline" and a more
-  // advanced operational record above still wins.
+  // ── 6) DECIDED DEAL — the manager has APPROVED / REJECTED the discount. ──
+  //   A pending deal is handled above (§3b, as a blocking step). Here an
+  //   APPROVED / REJECTED deal with NO downstream operational stage yet
+  //   surfaces the decision as the primary pill ("Deal Approved" / "Deal
+  //   Rejected"). Once the agent moves the lead to a downstream stage (pickup /
+  //   on-site / walk-in / ticket / field — the branches ABOVE), those win as
+  //   the primary action and the decided-deal context rides along as the
+  //   `dealLineage` sub-indicator ("Deal → <stage>"). It is NOT a conversion —
+  //   approval only authorises the exception, rejection does NOT lose the lead
+  //   (§24/§25) — so Result stays "In Pipeline". We pass lineage=null here so
+  //   the primary pill IS the deal pill and no redundant "Deal → Deal Approved"
+  //   sub-line is shown.
   if (deal && (deal.status === "approved" || deal.status === "rejected")) {
     const approved = deal.status === "approved";
     return mk(
@@ -489,6 +519,8 @@ export function deriveLeadWorkflow(
       { ...NA_RESULT, kind: "pipeline", primary: "In Pipeline" },
       `Discount approval ${deal.dealNo} was ${approved ? "approved" : "rejected"} by the manager.`,
       approved ? "Deal Approved" : "Deal Rejected",
+      null,
+      null,
     );
   }
 

@@ -796,21 +796,38 @@ function ActionCell({ wf }: { wf: LeadWorkflow }) {
   const isFieldLive = !!wf.fieldStatus;
   const label = isFieldLive ? wf.fieldStatusLabel : wf.actionLabel;
   const tone = isFieldLive ? wf.fieldStatusTone : leadActionTone(wf.action);
+  // Deal lineage sub-indicator: once a deal is APPROVED and the agent has moved
+  // the lead to a downstream operational stage, the primary pill shows that
+  // stage (highest-outcome-wins) and we keep the Deal context visible as a
+  // small muted line beneath — "Deal → <current stage>". We only render it when
+  // the primary pill is NOT itself the deal pill (guard against a redundant
+  // "Deal → Deal Approved").
+  const showDealLineage = wf.dealLineage === "approved" && wf.action !== "discount_approval";
   // Full-width read-only pill (Lead Table pill standard): leading lock (fixed) ·
   // truncating label (flex-1, full value in the title tooltip). The stable
   // Action column width comes from the <colgroup>, never the row's label length.
   return (
-    <span
-      title={`${label} · System-derived — ${wf.reason}`}
-      aria-label={`Action: ${label} (system-derived, read-only)`}
-      className={cn(
-        "flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
-        tone,
+    <div className="min-w-0 select-none">
+      <span
+        title={`${label} · System-derived — ${wf.reason}`}
+        aria-label={`Action: ${label} (system-derived, read-only)`}
+        className={cn(
+          "flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
+          tone,
+        )}
+      >
+        <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{label}</span>
+      </span>
+      {showDealLineage && (
+        <p
+          className="mt-0.5 w-full min-w-0 truncate px-0.5 text-[10px] font-medium text-muted-foreground"
+          title={`Deal → ${label} — this lead's discount was approved; it has since progressed to "${label}".`}
+        >
+          Deal → {label}
+        </p>
       )}
-    >
-      <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden />
-      <span className="min-w-0 flex-1 truncate">{label}</span>
-    </span>
+    </div>
   );
 }
 
