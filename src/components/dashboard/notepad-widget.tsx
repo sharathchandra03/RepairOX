@@ -66,12 +66,12 @@ export function NotepadWidget() {
   const pinnedCount = notes.filter((n) => n.pinnedAt).length;
 
   return (
-    <div className="overflow-hidden rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-card shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)]">
-      {/* Header — tinted strip so the Notepad reads as its own workspace, with a
-          gradient icon chip matching the "Got a call?" card. */}
-      <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-gradient-to-r from-[#F5F7FF] to-transparent px-5 py-4">
+    <div className="overflow-hidden rounded-2xl border-[2.2px] border-amber-200/80 bg-amber-50 shadow-card">
+      {/* Header — warm amber paper wash so the Notepad reads as a real yellow
+          legal/sticky notepad, with an amber icon chip. */}
+      <div className="flex items-center justify-between gap-2 border-b border-amber-200/70 bg-gradient-to-r from-amber-100 to-transparent px-5 py-4">
         <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-[#4361EE] to-[#6366F1] text-white shadow-sm">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-amber-400 to-amber-500 text-white shadow-sm">
             <StickyNote className="h-4 w-4" />
           </span>
           <div>
@@ -92,10 +92,10 @@ export function NotepadWidget() {
         </button>
       </div>
 
-      <div className="p-4">
+      <div className="p-5">
         {ready && notes.length === 0 && (
-          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[#B3BFF6]/70 bg-[#F5F7FF]/50 py-9 text-center">
-            <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]">
+          <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-amber-300/70 bg-amber-100/40 py-9 text-center">
+            <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">
               <StickyNote className="h-5 w-5" />
             </div>
             <p className="text-[13px] font-semibold text-foreground">No notes yet</p>
@@ -113,7 +113,7 @@ export function NotepadWidget() {
         )}
 
         {notes.length > 0 && (
-          <div className="space-y-2.5">
+          <div className="space-y-3">
             <AnimatePresence initial={false}>
               {notes.map((note) => (
                 <NoteCard
@@ -208,7 +208,7 @@ function NoteCard({
         onChange={(e) => setBody(e.target.value)}
         onBlur={() => body !== note.body && onChange({ body })}
         placeholder="Write a note…"
-        rows={3}
+        rows={5}
         className="resize-none bg-transparent text-[12px] leading-relaxed text-foreground/90 placeholder:text-muted-foreground/60 focus:outline-none"
       />
 

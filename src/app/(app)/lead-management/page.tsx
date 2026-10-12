@@ -26,7 +26,7 @@ import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RcTooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  Inbox, Target, TrendingUp, UserPlus, Megaphone, Plus, ChevronRight,
+  Inbox, Target, TrendingUp, Megaphone, Plus, ChevronRight,
   CheckCircle2, Clock, AlertTriangle, IndianRupee, Trophy, Route as RouteIcon,
   Flame, CalendarClock, ArrowUpRight, Smartphone,
 } from "lucide-react";
@@ -286,57 +286,64 @@ export default function LeadDashboardPage() {
 
   return (
     <div className="space-y-5 pb-8">
-      <PageHeader
-        eyebrow="Sales"
-        title="Lead Dashboard"
-        subtitle={scopeSubtitle}
-        actions={
-          <div className="flex flex-col items-end gap-1.5">
-            <div className="flex items-center gap-2">
-              <SalesAgentsOnline />
-              {!viewAsReadOnly && (
-                <Can permission={CAP.lead.create}>
-                  <Button size="sm" className="gap-1.5 rounded-full" onClick={() => setShowCreate(true)}>
-                    <Plus className="h-3.5 w-3.5" /> Quick Add Lead
-                  </Button>
-                </Can>
-              )}
+      {/* ── Sticky header band: the title row (Quick Add + online/activity) and
+          the shared date-filter strip stay pinned flush below the app topbar
+          (h-[60px]) while everything below scrolls. The negative page gutters
+          make the opaque background span the full content width so scrolling
+          content never bleeds through at the edges. ── */}
+      <div className="sticky top-[60px] z-[7] -mx-4 bg-[hsl(var(--background))] px-4 pt-2 pb-3 sm:-mx-6 sm:px-6 lg:-mx-8 lg:px-8">
+        <PageHeader
+          eyebrow="Sales"
+          title="Lead Dashboard"
+          subtitle={scopeSubtitle}
+          actions={
+            <div className="flex flex-col items-end gap-1.5">
+              <div className="flex items-center gap-2">
+                <SalesAgentsOnline />
+                {!viewAsReadOnly && (
+                  <Can permission={CAP.lead.create}>
+                    <Button size="sm" className="gap-1.5 rounded-full animate-module-breathe" onClick={() => setShowCreate(true)}>
+                      <Plus className="h-3.5 w-3.5" /> Quick Add Lead
+                    </Button>
+                  </Can>
+                )}
+              </div>
+              {/* Live team ticker — every LEAD update, actor name shown to all,
+                  wins celebrated to keep the floor motivated. */}
+              <LeadActivityFeed />
             </div>
-            {/* Live team ticker — every LEAD update, actor name shown to all,
-                wins celebrated to keep the floor motivated. */}
-            <LeadActivityFeed />
-          </div>
-        }
-      />
+          }
+        />
 
-      {/* ── Shared date filter (drives EVERY component) ── */}
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <SegmentedTabs
-            size="sm"
-            options={DATE_OPTIONS}
-            value={dateRange}
-            onChange={(v) => {
-              const next = v as PerfDateRange;
-              if (next === "custom") {
-                // Selecting Custom always opens the calendar to pick a range.
-                setShowCalendar(true);
-                setDateRange("custom");
-              } else {
-                setDateRange(next);
-              }
-            }}
-          />
+        {/* ── Shared date filter (drives EVERY component) ── */}
+        <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+            <SegmentedTabs
+              size="sm"
+              options={DATE_OPTIONS}
+              value={dateRange}
+              onChange={(v) => {
+                const next = v as PerfDateRange;
+                if (next === "custom") {
+                  // Selecting Custom always opens the calendar to pick a range.
+                  setShowCalendar(true);
+                  setDateRange("custom");
+                } else {
+                  setDateRange(next);
+                }
+              }}
+            />
+          </div>
+          {dateRange === "custom" && (customFrom || customTo) && (
+            <button
+              onClick={() => setShowCalendar(true)}
+              className="inline-flex h-[34px] items-center gap-1.5 rounded-xl border border-input bg-card px-3 text-[13px] font-medium text-foreground transition hover:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+            >
+              <CalendarClock className="h-3.5 w-3.5 text-[#4361EE]" />
+              {formatRangeLabel(customFrom, customTo)}
+            </button>
+          )}
         </div>
-        {dateRange === "custom" && (customFrom || customTo) && (
-          <button
-            onClick={() => setShowCalendar(true)}
-            className="inline-flex h-[34px] items-center gap-1.5 rounded-xl border border-input bg-card px-3 text-[13px] font-medium text-foreground transition hover:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
-          >
-            <CalendarClock className="h-3.5 w-3.5 text-[#4361EE]" />
-            {formatRangeLabel(customFrom, customTo)}
-          </button>
-        )}
       </div>
 
       {/* Custom-range calendar (matches the app date-range picker). */}
@@ -483,77 +490,6 @@ export default function LeadDashboardPage() {
             </p>
           </SectionCard>
 
-          {/* Recent leads */}
-          <SectionCard
-            title="Recent Leads" icon={Inbox}
-            action={
-              <button onClick={() => goToLeads()} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">
-                Open list <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            }
-          >
-            {recentLeads.length === 0 ? (
-              <EmptyRow text="No recent leads in this period." />
-            ) : (
-              <div className="overflow-x-auto rounded-xl border border-border">
-                <table className="w-full min-w-[720px] text-[13px]">
-                  {/* Fixed proportions so the Lead number never wraps and Owner
-                      doesn't crowd the narrow columns. */}
-                  <colgroup>
-                    <col className="w-[72px]" />
-                    <col className="w-[22%]" />
-                    <col className="w-[18%]" />
-                    <col className="w-[16%]" />
-                    <col className="w-[13%]" />
-                    <col className="w-[14%]" />
-                    <col className="w-[12%]" />
-                  </colgroup>
-                  <thead className="bg-muted/60">
-                    <tr>
-                      {["Lead", "Customer", "Device", "Owner", "Value", "Status", "Follow-up"].map((h, i) => (
-                        <th key={h} className={cn("whitespace-nowrap px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", i === 4 ? "text-right" : "text-left")}>
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {recentLeads.map((l) => (
-                      <tr
-                        key={l.id}
-                        onClick={() => openLead(l.id)}
-                        className="cursor-pointer border-t border-border transition hover:bg-muted/40"
-                      >
-                        <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-[#4361EE] tabular-nums">{l.leadNo || "—"}</td>
-                        <td className="px-3 py-2.5">
-                          <div className="flex items-center gap-2">
-                            <Avatar name={l.name || l.leadNo} size={24} />
-                            <span className="truncate font-medium text-foreground">{l.name || "—"}</span>
-                          </div>
-                        </td>
-                        <td className="px-3 py-2.5 text-muted-foreground">
-                          <span className="flex items-center gap-1.5">
-                            {l.device && <Smartphone className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
-                            <span className="truncate">{l.device || "—"}</span>
-                          </span>
-                        </td>
-                        <td className="px-3 py-2.5 text-muted-foreground">{l.assignedToName || l.agent || "Unassigned"}</td>
-                        <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{l.estimate != null ? formatINR(l.estimate) : "—"}</td>
-                        <td className="px-3 py-2.5">
-                          {l.status ? (
-                            <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", statusTone(l.status))}>
-                              {l.status}
-                            </span>
-                          ) : <span className="text-zinc-400">—</span>}
-                        </td>
-                        <td className="px-3 py-2.5"><RecentFollowUpCell lead={l} followUps={scopedFollowUps} /></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </SectionCard>
         </div>
 
         {/* RIGHT (1/3): follow-up command panel */}
@@ -584,33 +520,88 @@ export default function LeadDashboardPage() {
             </Link>
           </SectionCard>
 
-          {/* Quick add prompt (IVR-fast capture) — blue-accent gradient card,
-              matching the dashboard's colourful language. */}
-          <Can permission={CAP.lead.create}>
-            <div className="group relative overflow-hidden rounded-2xl border-[2.2px] border-[#B3BFF6]/50 bg-gradient-to-br from-[#F5F7FF] via-card to-card p-5 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]">
-              {/* Gradient left accent rail, same as the KPI cards. */}
-              <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-r-full bg-gradient-to-b from-[#4361EE] to-[#6366F1] opacity-80" />
-              <div className="relative flex items-center gap-2.5">
-                <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-[#4361EE] to-[#6366F1] text-white shadow-sm">
-                  <UserPlus className="h-5 w-5" />
-                </span>
-                <div>
-                  <p className="text-sm font-bold text-foreground">Got a call?</p>
-                  <p className="text-[12px] text-muted-foreground">Capture the lead in seconds.</p>
-                </div>
-              </div>
-              <Button className="relative mt-3 w-full gap-1.5 rounded-xl" onClick={() => setShowCreate(true)}>
-                <Plus className="h-4 w-4" /> Quick Add Lead
-              </Button>
-            </div>
-          </Can>
-
           {/* Notepad — same personal sticky notes as the full Notes page,
               here as a compact rail card so a Sales Agent can jot reminders
-              without leaving their daily workspace. */}
+              without leaving their daily workspace. Moved up into the space
+              freed by removing the old "Got a call?" card. */}
           <NotepadWidget />
         </div>
       </div>
+
+      {/* Recent leads — a FULL-WIDTH row below the main grid so the table
+          spans the entire content width and aligns with the KPI cards above
+          (previously capped at the 2/3 left column, which left a gap on the
+          right under the "All" filter). */}
+      <SectionCard
+        title="Recent Leads" icon={Inbox}
+        action={
+          <button onClick={() => goToLeads()} className="inline-flex items-center gap-1 text-[12px] font-semibold text-[#4361EE] hover:underline">
+            Open list <ChevronRight className="h-3.5 w-3.5" />
+          </button>
+        }
+      >
+        {recentLeads.length === 0 ? (
+          <EmptyRow text="No recent leads in this period." />
+        ) : (
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full min-w-[720px] text-[13px]">
+              {/* Fixed proportions so the Lead number never wraps and Owner
+                  doesn't crowd the narrow columns. */}
+              <colgroup>
+                <col className="w-[72px]" />
+                <col className="w-[22%]" />
+                <col className="w-[18%]" />
+                <col className="w-[16%]" />
+                <col className="w-[13%]" />
+                <col className="w-[14%]" />
+                <col className="w-[12%]" />
+              </colgroup>
+              <thead className="bg-muted/60">
+                <tr>
+                  {["Lead", "Customer", "Device", "Owner", "Value", "Status", "Follow-up"].map((h, i) => (
+                    <th key={h} className={cn("whitespace-nowrap px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", i === 4 ? "text-right" : "text-left")}>
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {recentLeads.map((l) => (
+                  <tr
+                    key={l.id}
+                    onClick={() => openLead(l.id)}
+                    className="cursor-pointer border-t border-border transition hover:bg-muted/40"
+                  >
+                    <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-[#4361EE] tabular-nums">{l.leadNo || "—"}</td>
+                    <td className="px-3 py-2.5">
+                      <div className="flex items-center gap-2">
+                        <Avatar name={l.name || l.leadNo} size={24} />
+                        <span className="truncate font-medium text-foreground">{l.name || "—"}</span>
+                      </div>
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground">
+                      <span className="flex items-center gap-1.5">
+                        {l.device && <Smartphone className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
+                        <span className="truncate">{l.device || "—"}</span>
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-muted-foreground">{l.assignedToName || l.agent || "Unassigned"}</td>
+                    <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{l.estimate != null ? formatINR(l.estimate) : "—"}</td>
+                    <td className="px-3 py-2.5">
+                      {l.status ? (
+                        <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", statusTone(l.status))}>
+                          {l.status}
+                        </span>
+                      ) : <span className="text-zinc-400">—</span>}
+                    </td>
+                    <td className="px-3 py-2.5"><RecentFollowUpCell lead={l} followUps={scopedFollowUps} /></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SectionCard>
 
       {/* Quick Add — the REAL capture flow (same as the Leads list), gated. */}
       <Can permission={CAP.lead.create}>
