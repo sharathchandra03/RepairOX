@@ -43,6 +43,7 @@ import { cn, formatINR } from "@/lib/utils";
 import { useLeads, LEAD_OPEN_EVENT } from "@/lib/leads-context";
 import { useDeals } from "@/lib/lead-deals-context";
 import { isDiscountedLeadValue, leadHasOpenDeal, currentDealForLead } from "@/lib/lead-deals";
+import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
 import { useQuotations } from "@/lib/quotations-context";
 import { SendQuotationFlow } from "@/components/quotations/send-quotation-flow";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
@@ -796,38 +797,21 @@ function ActionCell({ wf }: { wf: LeadWorkflow }) {
   const isFieldLive = !!wf.fieldStatus;
   const label = isFieldLive ? wf.fieldStatusLabel : wf.actionLabel;
   const tone = isFieldLive ? wf.fieldStatusTone : leadActionTone(wf.action);
-  // Deal lineage sub-indicator: once a deal is APPROVED and the agent has moved
-  // the lead to a downstream operational stage, the primary pill shows that
-  // stage (highest-outcome-wins) and we keep the Deal context visible as a
-  // small muted line beneath — "Deal → <current stage>". We only render it when
-  // the primary pill is NOT itself the deal pill (guard against a redundant
-  // "Deal → Deal Approved").
-  const showDealLineage = wf.dealLineage === "approved" && wf.action !== "discount_approval";
   // Full-width read-only pill (Lead Table pill standard): leading lock (fixed) ·
   // truncating label (flex-1, full value in the title tooltip). The stable
   // Action column width comes from the <colgroup>, never the row's label length.
   return (
-    <div className="min-w-0 select-none">
-      <span
-        title={`${label} · System-derived — ${wf.reason}`}
-        aria-label={`Action: ${label} (system-derived, read-only)`}
-        className={cn(
-          "flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
-          tone,
-        )}
-      >
-        <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden />
-        <span className="min-w-0 flex-1 truncate">{label}</span>
-      </span>
-      {showDealLineage && (
-        <p
-          className="mt-0.5 w-full min-w-0 truncate px-0.5 text-[10px] font-medium text-muted-foreground"
-          title={`Deal → ${label} — this lead's discount was approved; it has since progressed to "${label}".`}
-        >
-          Deal → {label}
-        </p>
+    <span
+      title={`${label} · System-derived — ${wf.reason}`}
+      aria-label={`Action: ${label} (system-derived, read-only)`}
+      className={cn(
+        "flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
+        tone,
       )}
-    </div>
+    >
+      <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+    </span>
   );
 }
 
@@ -960,8 +944,13 @@ export default function LeadsListPage() {
   const { tickets, invoices, walkIns } = useStore();
   const { jobs: fieldJobs } = useField();
   // Deals (discount approvals) — drive the Discounted Lead trigger + the
-  // system-derived "Discount Approval" action in workflowByLead.
-  const { deals } = useDeals();
+  // system-derived "Discount Approval" action in workflowByLead. `comments`
+  // feeds the per-lead deal-conversation unread signal (shared tracker).
+  const { deals, comments } = useDeals();
+  // Per-user "new message" read-marker for the internal Deal conversation — the
+  // ONE shared tracker (same hook the Deals queue + View Lead use). Every dot
+  // reads from it; opening the conversation calls markSeen(dealId).
+  const { markSeen: markDealSeen, hasUnread: dealHasUnread } = useDealConversationSeen(currentUser?.id);
   // Quotations — drive the system-derived "Quotation Created / Sent" action and
   // the Lead Table "Send Quotation" flow. Attribution comes from the lead.
   const { currentQuotationForLead } = useQuotations();
@@ -996,6 +985,37 @@ export default function LeadsListPage() {
     }
     return m;
   }, [leads, workflowSources, openFollowUpsByLead, deals, currentQuotationForLead]);
+
+  /* Per-lead Deal conversation signal (presentation only — never changes deal/
+     approval/notification logic). For each lead with a current deal we resolve:
+       • dealId     — the deal whose conversation the shortcut opens / marks seen
+       • hasConvo   — the deal has at least one message (shortcut shows only then)
+       • unread     — the latest message is newer than this user's last-seen AND
+                      wasn't authored by them (shared hasUnread rule).
+     Recomputes when leads / deals / comments change (realtime or local), so the
+     dots clear reactively once markSeen updates the tracker's state. */
+  const dealConvoByLead = useMemo(() => {
+    // Latest comment per deal (single pass over the shared comments array).
+    // NOTE: `Map` is the lucide icon in this file — use a plain record.
+    const latestByDeal: Record<string, (typeof comments)[number]> = {};
+    for (const c of comments) {
+      const prev = latestByDeal[c.dealId];
+      if (!prev || new Date(c.createdAt).getTime() > new Date(prev.createdAt).getTime()) latestByDeal[c.dealId] = c;
+    }
+    const m: Record<string, { dealId: string; hasConvo: boolean; unread: boolean }> = {};
+    for (const l of leads) {
+      const deal = currentDealForLead(deals, l.id);
+      if (!deal) continue;
+      const latest = latestByDeal[deal.id];
+      const hasConvo = !!latest;
+      m[l.id] = {
+        dealId: deal.id,
+        hasConvo,
+        unread: hasConvo && dealHasUnread(deal, latest?.createdAt, latest?.authorId),
+      };
+    }
+    return m;
+  }, [leads, deals, comments, dealHasUnread]);
   // Bulk-action capability gates (granular key OR coarse fallback via CAP).
   const canBulkStatus = allow(can, CAP.lead.stageChange) && !viewAsReadOnly;
   const canBulkDelete = allow(can, CAP.lead.delete) && !viewAsReadOnly;
@@ -1352,6 +1372,14 @@ export default function LeadsListPage() {
       case "delete": setConfirmDelete(lead); break;
       case "route": setRouteLeadTarget(lead); break;
       case "quotation": setQuotationLead(lead); break;
+      case "comment": {
+        // Open the FULL-PAGE View Lead Deal conversation (never a drawer) and
+        // mark it seen so the unread dots clear. Reuses the ONE shared tracker.
+        const info = dealConvoByLead[lead.id];
+        if (info?.dealId) markDealSeen(info.dealId);
+        router.push(`/leads/${lead.id}#deal-conversation`);
+        break;
+      }
     }
   };
 
@@ -1549,6 +1577,16 @@ export default function LeadsListPage() {
           // would overflow the column.
           return (
             <button onClick={(e) => { e.stopPropagation(); openLead(lead); }} className="flex w-full items-center gap-2 whitespace-nowrap font-semibold text-[#4361EE] hover:underline tnum">
+              {/* Unread deal-conversation marker — a small red dot at the very
+                  start of the row, before the pin + lead number. Clears once the
+                  user reads the conversation (shared tracker). */}
+              {dealConvoByLead[lead.id]?.unread && (
+                <span
+                  aria-label="Unread deal conversation"
+                  title="New message in the deal conversation"
+                  className="h-2 w-2 shrink-0 rounded-full bg-rose-500"
+                />
+              )}
               {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
               <span className="min-w-0 truncate">{lead.leadNo || "—"}</span>
               <LeadStatusTick wf={wf} />
@@ -1637,17 +1675,40 @@ export default function LeadsListPage() {
               readOnly={!canEditLead}
             />
           );
-        case "status":
-          return gated ? <NACell /> : (
-            <LeadSelectCell
-              value={lead.status || ""}
-              options={statusOptions}
-              onChange={(v) => applyLeadStatus(lead, v)}
-              toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
-              dotColor={statusDotColor(lead.status || "")}
-              readOnly={!canBulkStatus}
-            />
+        case "status": {
+          if (gated) return <NACell />;
+          // Deal lineage sub-indicator (under the Lead Stage pill): once a deal
+          // is APPROVED, keep the Deal origin visible as a muted "Deal → <current
+          // stage>" line. The word "Deal" is CONSTANT; the text after the arrow
+          // mirrors the lead's CURRENT stage (lead.status) so it follows the
+          // process toward the final result. Shown ONLY for approved deals, and
+          // suppressed while the stage is still a bare "Deal" status (no
+          // downstream stage) to avoid a redundant "Deal → Deal".
+          const statusLower = (lead.status || "").toLowerCase();
+          const stageLabel = lead.status || wf.actionLabel;
+          const showDealLineage =
+            wf.dealLineage === "approved" && !statusLower.includes("deal");
+          return (
+            <div className="min-w-0">
+              <LeadSelectCell
+                value={lead.status || ""}
+                options={statusOptions}
+                onChange={(v) => applyLeadStatus(lead, v)}
+                toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+                dotColor={statusDotColor(lead.status || "")}
+                readOnly={!canBulkStatus}
+              />
+              {showDealLineage && (
+                <p
+                  className="mt-0.5 w-full min-w-0 truncate px-0.5 text-[10px] font-medium text-muted-foreground"
+                  title={`Deal → ${stageLabel}`}
+                >
+                  Deal → {stageLabel}
+                </p>
+              )}
+            </div>
           );
+        }
         case "action":
           return gated ? <NACell /> : <ActionCell wf={wf} />;
         case "storeCol":
@@ -1655,7 +1716,15 @@ export default function LeadsListPage() {
         case "result":
           return gated ? <NACell /> : <ResultCell wf={wf} canViewTicket={canViewTicket} canViewInvoice={canViewInvoice} />;
         case "actions":
-          return <LeadActionsMenu lead={lead} onAction={handleAction} readOnly={viewAsReadOnly} />;
+          return (
+            <LeadActionsMenu
+              lead={lead}
+              onAction={handleAction}
+              readOnly={viewAsReadOnly}
+              hasDealConversation={!!dealConvoByLead[lead.id]?.hasConvo}
+              dealUnread={!!dealConvoByLead[lead.id]?.unread}
+            />
+          );
         default:
           return null;
       }
@@ -1665,7 +1734,7 @@ export default function LeadsListPage() {
       contactStatusOptions, updateLead, canEditLead, leadNatureOptions,
       leadCategoryOptions, subCategoryOptions, applyLeadCategory,
       statusOptions, applyLeadStatus, canBulkStatus, canViewTicket, canViewInvoice,
-      viewAsReadOnly,
+      viewAsReadOnly, dealConvoByLead,
     ],
   );
 
@@ -2182,6 +2251,15 @@ export default function LeadsListPage() {
                 <Avatar name={lead.name || lead.leadNo} size={36} />
                 <div>
                   <p className="flex items-center gap-1 font-semibold">
+                    {/* Unread deal-conversation marker (parity with the desktop
+                        Lead ID cell) — a small red dot before the pin + name. */}
+                    {dealConvoByLead[lead.id]?.unread && (
+                      <span
+                        aria-label="Unread deal conversation"
+                        title="New message in the deal conversation"
+                        className="h-2 w-2 shrink-0 rounded-full bg-rose-500"
+                      />
+                    )}
                     {lead.pinnedAt && <Pin className="h-3 w-3 fill-[#7C5CFC] text-[#7C5CFC]" />}
                     {lead.name || "—"}
                     {!mLocked && (() => { const wf = workflowByLead[lead.id]; return wf ? <LeadStatusTick wf={wf} /> : null; })()}
@@ -2213,7 +2291,15 @@ export default function LeadsListPage() {
             )}
             <div className="mt-2 flex items-center justify-between" onClick={(e) => e.stopPropagation()}>
               {canAssign ? <AssignMenu lead={lead} compact /> : <AssignBadge lead={lead} size={20} />}
-              {!mLocked && <LeadActionsMenu lead={lead} onAction={handleAction} readOnly={viewAsReadOnly} />}
+              {!mLocked && (
+                <LeadActionsMenu
+                  lead={lead}
+                  onAction={handleAction}
+                  readOnly={viewAsReadOnly}
+                  hasDealConversation={!!dealConvoByLead[lead.id]?.hasConvo}
+                  dealUnread={!!dealConvoByLead[lead.id]?.unread}
+                />
+              )}
             </div>
           </div>
           );
