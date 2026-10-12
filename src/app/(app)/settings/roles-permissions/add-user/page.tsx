@@ -71,10 +71,17 @@ function AddStaffInner() {
   // creator can place users across stores (owner / multi-store authority).
   const canAssignMultipleStores = canViewAllShops && stores.length > 1;
 
-  // Reception is a sensible default for a first hire (falls back to the first
-  // role the caller is actually allowed to assign).
+  // Branch Manager / Store Manager is the default for a new hire. Prefer a
+  // store-manager id, then a branch-manager id, then the canonical
+  // "shop_owner_branch_manager" (RepairOX's Branch Manager role), and finally
+  // fall back to the first role the caller is actually allowed to assign.
+  // Only ever default to a role within assignableRoles (never one the server
+  // would reject).
   const defaultRole =
-    assignableRoles.find((r) => r.id === "reception")?.id ?? assignableRoles[0]?.id ?? allRoles[0].id;
+    assignableRoles.find((r) => r.id === "store_manager")?.id
+    ?? assignableRoles.find((r) => r.id === "branch_manager")?.id
+    ?? assignableRoles.find((r) => r.id === "shop_owner_branch_manager")?.id
+    ?? assignableRoles[0]?.id ?? allRoles[0].id;
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -93,11 +100,13 @@ function AddStaffInner() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // Default the store to the first real store once the list loads (so we never
-  // submit a stale placeholder that doesn't match an actual store).
+  // Default the store once the list loads (so we never submit a stale
+  // placeholder that doesn't match an actual store). Prefer "Indiranagar"
+  // (case-insensitive) when it exists, otherwise fall back to the first store.
   useEffect(() => {
     if (stores.length > 0 && !stores.some((s) => s.name === branch)) {
-      setBranch(stores[0].name);
+      const indiranagar = stores.find((s) => s.name.trim().toLowerCase() === "indiranagar");
+      setBranch((indiranagar ?? stores[0]).name);
     }
   }, [stores]); // eslint-disable-line react-hooks/exhaustive-deps
 

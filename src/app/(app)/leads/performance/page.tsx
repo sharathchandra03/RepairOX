@@ -189,7 +189,7 @@ export default function AgentPerformancePage() {
   const searchParams = useSearchParams();
   const { can } = usePermissions();
   const { id: currentUserId, name: currentUserName } = useSession();
-  const { stores, isAllShops } = useStoreContext();
+  const { activeStoreId, isAllShops } = useStoreContext();
   // In Single-Store Lead mode there is only ONE lead store, so a store filter is
   // meaningless clutter — hide it. Multi-Store mode keeps the full filter.
   const leadMode = useLeadStoreMode();
@@ -242,10 +242,15 @@ export default function AgentPerformancePage() {
 
   const revenue = useMemo(() => ({ tickets, invoices }), [tickets, invoices]);
 
-  /* Eligible agents in the active store scope (org-wide in All Shops). */
+  /* Eligible agents in the active store scope (org-wide in All Shops).
+     Match against the CURRENTLY-SELECTED store (activeStoreId), not stores[0]
+     (the first of the accessible-stores list, which need not be the selected
+     one). An agent whose authorized stores include the active store — e.g.
+     their home store = Indiranagar when Indiranagar is selected — is included.
+     In All Shops (activeStoreId null) the scope is org-wide. */
   const eligibleAgents = useMemo(
-    () => agentsForStore(salesAgents, isAllShops ? undefined : (stores[0]?.id ?? undefined)),
-    [salesAgents, isAllShops, stores],
+    () => agentsForStore(salesAgents, isAllShops ? undefined : (activeStoreId ?? undefined)),
+    [salesAgents, isAllShops, activeStoreId],
   );
 
   /* The signed-in agent's own identity row. */
