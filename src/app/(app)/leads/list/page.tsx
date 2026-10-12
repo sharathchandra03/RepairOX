@@ -47,6 +47,7 @@ import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
 import { useQuotations } from "@/lib/quotations-context";
 import { SendQuotationFlow } from "@/components/quotations/send-quotation-flow";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
+import { DealConversationPopover } from "@/components/deals/deal-conversation-popover";
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, type LeadFollowUp,
@@ -946,15 +947,19 @@ export default function LeadsListPage() {
   // Deals (discount approvals) — drive the Discounted Lead trigger + the
   // system-derived "Discount Approval" action in workflowByLead. `comments`
   // feeds the per-lead deal-conversation unread signal (shared tracker).
-  const { deals, comments } = useDeals();
+  const { deals, comments, dealById } = useDeals();
   // Per-user "new message" read-marker for the internal Deal conversation — the
   // ONE shared tracker (same hook the Deals queue + View Lead use). Every dot
   // reads from it; opening the conversation calls markSeen(dealId).
-  const { markSeen: markDealSeen, hasUnread: dealHasUnread } = useDealConversationSeen(currentUser?.id);
+  const { markSeen: markDealSeen, unreadCount: dealUnreadCount } = useDealConversationSeen(currentUser?.id);
   // Quotations — drive the system-derived "Quotation Created / Sent" action and
   // the Lead Table "Send Quotation" flow. Attribution comes from the lead.
   const { currentQuotationForLead } = useQuotations();
   const [quotationLead, setQuotationLead] = useState<Lead | null>(null);
+  /* In-place deal-conversation chat popover (opened from the Last Action chat
+     icon). It anchors to the trigger via its live bounding rect so the table's
+     overflow never clips it — NO navigation to View Lead. */
+  const [dealChat, setDealChat] = useState<{ dealId: string; leadNo: string; rect: DOMRect | null } | null>(null);
   /* When a status becomes "Pickup Assigned" / "On site Assigned", also create
      (or reuse) the matching Field Job in the Pickup & Drop workspace, carrying
      the lead's agent — reuses the single field system (never a fork). */
@@ -988,34 +993,31 @@ export default function LeadsListPage() {
 
   /* Per-lead Deal conversation signal (presentation only — never changes deal/
      approval/notification logic). For each lead with a current deal we resolve:
-       • dealId     — the deal whose conversation the shortcut opens / marks seen
+       • dealId     — the deal whose conversation the chat popover opens / marks seen
        • hasConvo   — the deal has at least one message (shortcut shows only then)
-       • unread     — the latest message is newer than this user's last-seen AND
-                      wasn't authored by them (shared hasUnread rule).
+       • unread     — unread message COUNT for this user (newer than last-seen AND
+                      authored by someone else — the shared tracker's rule).
      Recomputes when leads / deals / comments change (realtime or local), so the
-     dots clear reactively once markSeen updates the tracker's state. */
+     dots/badges clear reactively once markSeen updates the tracker's state. */
   const dealConvoByLead = useMemo(() => {
-    // Latest comment per deal (single pass over the shared comments array).
+    // Group comments per deal (single pass over the shared comments array).
     // NOTE: `Map` is the lucide icon in this file — use a plain record.
-    const latestByDeal: Record<string, (typeof comments)[number]> = {};
-    for (const c of comments) {
-      const prev = latestByDeal[c.dealId];
-      if (!prev || new Date(c.createdAt).getTime() > new Date(prev.createdAt).getTime()) latestByDeal[c.dealId] = c;
-    }
-    const m: Record<string, { dealId: string; hasConvo: boolean; unread: boolean }> = {};
+    const byDeal: Record<string, (typeof comments)[number][]> = {};
+    for (const c of comments) (byDeal[c.dealId] ??= []).push(c);
+    const m: Record<string, { dealId: string; hasConvo: boolean; unread: number }> = {};
     for (const l of leads) {
       const deal = currentDealForLead(deals, l.id);
       if (!deal) continue;
-      const latest = latestByDeal[deal.id];
-      const hasConvo = !!latest;
+      const dealComments = byDeal[deal.id] ?? [];
+      const hasConvo = dealComments.length > 0;
       m[l.id] = {
         dealId: deal.id,
         hasConvo,
-        unread: hasConvo && dealHasUnread(deal, latest?.createdAt, latest?.authorId),
+        unread: hasConvo ? dealUnreadCount(deal, dealComments) : 0,
       };
     }
     return m;
-  }, [leads, deals, comments, dealHasUnread]);
+  }, [leads, deals, comments, dealUnreadCount]);
   // Bulk-action capability gates (granular key OR coarse fallback via CAP).
   const canBulkStatus = allow(can, CAP.lead.stageChange) && !viewAsReadOnly;
   const canBulkDelete = allow(can, CAP.lead.delete) && !viewAsReadOnly;
@@ -1363,7 +1365,7 @@ export default function LeadsListPage() {
      URL/state so returning via "Back to Leads" restores them. */
   const openLead = useCallback((lead: Lead) => { router.push(`/leads/${lead.id}`); }, [router]);
 
-  const handleAction = (action: LeadAction, lead: Lead) => {
+  const handleAction = (action: LeadAction, lead: Lead, anchor?: HTMLElement) => {
     switch (action) {
       case "view": openLead(lead); break;
       case "edit": openEdit(lead); break;
@@ -1373,11 +1375,17 @@ export default function LeadsListPage() {
       case "route": setRouteLeadTarget(lead); break;
       case "quotation": setQuotationLead(lead); break;
       case "comment": {
-        // Open the FULL-PAGE View Lead Deal conversation (never a drawer) and
-        // mark it seen so the unread dots clear. Reuses the ONE shared tracker.
+        // Open an IN-PLACE chat popover anchored to the icon (NO navigation to
+        // View Lead) and mark it seen so the unread count/dots clear instantly.
+        // Reuses the ONE shared tracker + the ONE DealConversation thread.
         const info = dealConvoByLead[lead.id];
-        if (info?.dealId) markDealSeen(info.dealId);
-        router.push(`/leads/${lead.id}#deal-conversation`);
+        if (!info?.dealId) break;
+        markDealSeen(info.dealId);
+        setDealChat({
+          dealId: info.dealId,
+          leadNo: lead.leadNo || "",
+          rect: anchor ? anchor.getBoundingClientRect() : null,
+        });
         break;
       }
     }
@@ -1580,11 +1588,11 @@ export default function LeadsListPage() {
               {/* Unread deal-conversation marker — a small red dot at the very
                   start of the row, before the pin + lead number. Clears once the
                   user reads the conversation (shared tracker). */}
-              {dealConvoByLead[lead.id]?.unread && (
+              {(dealConvoByLead[lead.id]?.unread ?? 0) > 0 && (
                 <span
                   aria-label="Unread deal conversation"
                   title="New message in the deal conversation"
-                  className="h-2 w-2 shrink-0 rounded-full bg-rose-500"
+                  className="h-2 w-2 shrink-0 rounded-full bg-rose-400 ring-2 ring-rose-100"
                 />
               )}
               {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
@@ -1722,7 +1730,7 @@ export default function LeadsListPage() {
               onAction={handleAction}
               readOnly={viewAsReadOnly}
               hasDealConversation={!!dealConvoByLead[lead.id]?.hasConvo}
-              dealUnread={!!dealConvoByLead[lead.id]?.unread}
+              dealUnreadCount={dealConvoByLead[lead.id]?.unread ?? 0}
             />
           );
         default:
@@ -2253,11 +2261,11 @@ export default function LeadsListPage() {
                   <p className="flex items-center gap-1 font-semibold">
                     {/* Unread deal-conversation marker (parity with the desktop
                         Lead ID cell) — a small red dot before the pin + name. */}
-                    {dealConvoByLead[lead.id]?.unread && (
+                    {(dealConvoByLead[lead.id]?.unread ?? 0) > 0 && (
                       <span
                         aria-label="Unread deal conversation"
                         title="New message in the deal conversation"
-                        className="h-2 w-2 shrink-0 rounded-full bg-rose-500"
+                        className="h-2 w-2 shrink-0 rounded-full bg-rose-400 ring-2 ring-rose-100"
                       />
                     )}
                     {lead.pinnedAt && <Pin className="h-3 w-3 fill-[#7C5CFC] text-[#7C5CFC]" />}
@@ -2297,7 +2305,7 @@ export default function LeadsListPage() {
                   onAction={handleAction}
                   readOnly={viewAsReadOnly}
                   hasDealConversation={!!dealConvoByLead[lead.id]?.hasConvo}
-                  dealUnread={!!dealConvoByLead[lead.id]?.unread}
+                  dealUnreadCount={dealConvoByLead[lead.id]?.unread ?? 0}
                 />
               )}
             </div>
@@ -2384,6 +2392,23 @@ export default function LeadsListPage() {
         open={!!deviceDetailsLead}
         onClose={() => setDeviceDetailsLead(null)}
       />
+
+      {/* In-place deal-conversation chat popover (opened from the Last Action
+          chat icon). Reuses the ONE shared DealConversation thread; portalled so
+          it isn't clipped by the data-grid overflow. */}
+      {dealChat && (() => {
+        const deal = dealById(dealChat.dealId);
+        if (!deal) return null;
+        return (
+          <DealConversationPopover
+            deal={deal}
+            anchorRect={dealChat.rect}
+            readOnly={viewAsReadOnly}
+            subtitle={`${deal.dealNo}${dealChat.leadNo ? ` · Lead ${dealChat.leadNo}` : ""}`}
+            onClose={() => setDealChat(null)}
+          />
+        );
+      })()}
     </div>
   );
 }

@@ -14,7 +14,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   BadgePercent, Clock, CheckCircle2, XCircle, RefreshCw, Lock,
-  ChevronDown, Check, X, MoreHorizontal, Eye, User as UserIcon, Link2, Ban, Trash2,
+  ChevronDown, Check, X, MoreHorizontal, Eye, User as UserIcon, Link2, Ban, Trash2, MessageSquare,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Drawer } from "@/components/ui/drawer";
@@ -44,6 +44,7 @@ import {
 } from "@/lib/lead-deals";
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
+import { DealConversationPopover } from "@/components/deals/deal-conversation-popover";
 import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
 
 /** The customer's offer vs the quoted price — a comparison, not two unrelated
@@ -103,17 +104,25 @@ export default function DealsPage() {
   const [query, setQuery] = useState("");
   const [openId, setOpenId] = useState<string | null>(null);
   const [resubmitDeal, setResubmitDeal] = useState<LeadDeal | null>(null);
+  /* In-place deal-conversation chat popover (opened from the Quick Actions
+     comment button). Anchored to the trigger via its bounding rect, portalled
+     so the data-grid overflow never clips it — NO navigation. */
+  const [chatDeal, setChatDeal] = useState<{ dealId: string; rect: DOMRect | null } | null>(null);
   const meId = usePermissions().currentUser?.id || "";
   const isOwner = can("full_access");
-  // Per-user "new message" signal for the internal Deal conversation.
-  const { markSeen, hasUnread } = useDealConversationSeen(meId);
-  /** The latest comment per deal (for the subtle unread dot). Recomputes when
-   *  the comments change (realtime / local). */
-  const latestCommentByDeal = useMemo(() => {
-    const m = new Map<string, (typeof comments)[number]>();
+  // Per-user "new message" signal for the internal Deal conversation (the ONE
+  // shared tracker — same hook the Lead Table + View Lead use). markSeen is
+  // reactive, so clearing on one surface clears every dot/badge here too.
+  const { markSeen, unreadCount } = useDealConversationSeen(meId);
+  /** Comments grouped per deal — drives the subtle unread dot (start of row)
+   *  AND the Quick Actions comment-button count badge. Recomputes when the
+   *  comments change (realtime / local). */
+  const commentsByDeal = useMemo(() => {
+    const m = new Map<string, (typeof comments)[number][]>();
     for (const c of comments) {
-      const prev = m.get(c.dealId);
-      if (!prev || new Date(c.createdAt).getTime() > new Date(prev.createdAt).getTime()) m.set(c.dealId, c);
+      const arr = m.get(c.dealId);
+      if (arr) arr.push(c);
+      else m.set(c.dealId, [c]);
     }
     return m;
   }, [comments]);
@@ -373,12 +382,12 @@ export default function DealsPage() {
               {canDelete && <col className="w-[44px]" />}{/* Selection checkbox */}
               <col className="w-[116px]" />{/* Deal ID */}
               {multiStore && <col className="w-[104px]" />}{/* Store */}
-              <col className="w-[150px]" />{/* Agent Name */}
               <col className="w-[180px]" />{/* Customer Name */}
               <col />{/* Device & Issue — absorbs remaining width */}
+              <col className="w-[150px]" />{/* Agent Name */}
               <col className="w-[118px]" />{/* Price Quoted */}
-              <col className="w-[150px]" />{/* Customer Offer */}
-              <col className="w-[138px]" />{/* Status — editable pill */}
+              <col className="w-[118px]" />{/* Customer Offer */}
+              <col className="w-[168px]" />{/* Status — editable pill */}
               <col className="w-[64px]" />{/* Age */}
               <col className="w-[112px]" />{/* Actions */}
             </colgroup>
@@ -396,9 +405,9 @@ export default function DealsPage() {
                 )}
                 <th className={cn(canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>Deal ID</th>
                 {multiStore && <th className="px-3">Store</th>}
-                <th className="px-3">Agent Name</th>
                 <th className="px-3">Customer Name</th>
                 <th className="px-3">Device &amp; Issue</th>
+                <th className="pl-[22px] pr-3 text-center">Agent Name</th>
                 <th className="pl-3 pr-6 text-right">Price Quoted</th>
                 <th className="pl-3 pr-6 text-right">Customer Offer</th>
                 <th className="px-3 text-center">Status</th>
@@ -452,12 +461,16 @@ export default function DealsPage() {
                     <p className="flex items-center gap-1.5 font-semibold tabular-nums text-zinc-900">
                       {d.dealNo}
                       {(() => {
-                        const latest = latestCommentByDeal.get(d.id);
-                        return hasUnread(d, latest?.createdAt, latest?.authorId) ? (
+                        // SAME soft-red start-of-row dot as the Lead Table — a
+                        // lightweight presence indicator (count lives on the
+                        // Quick Actions comment button). Clears reactively once
+                        // the user reads on any surface (markSeen).
+                        const unread = unreadCount(d, commentsByDeal.get(d.id) ?? []);
+                        return unread > 0 ? (
                           <span
-                            aria-label="New message"
+                            aria-label="Unread deal conversation"
                             title="New message in the deal conversation"
-                            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+                            className="inline-block h-2 w-2 shrink-0 rounded-full bg-rose-400 ring-2 ring-rose-100"
                           />
                         ) : null;
                       })()}
@@ -476,7 +489,6 @@ export default function DealsPage() {
                     )}
                   </td>
                   {multiStore && <td className="px-3 py-4 align-middle"><StoreContextCell store={getStore(d.branchId || null)} mode="stacked" /></td>}
-                  <td className="px-3 py-4 align-middle text-zinc-700"><span className="block truncate">{d.salesAgentName || "—"}</span></td>
                   <td className="px-3 py-4 align-middle">
                     <div className="flex items-center gap-2">
                       <Avatar name={d.customerName || "—"} size={26} />
@@ -493,6 +505,7 @@ export default function DealsPage() {
                       <span className="text-[13px] text-zinc-400">—</span>
                     )}
                   </td>
+                  <td className="pl-[22px] pr-3 py-4 align-middle text-center text-zinc-700"><span className="block truncate">{d.salesAgentName || "—"}</span></td>
                   {/* Price Quoted — the reference the agent put forward. */}
                   <td className="pl-3 pr-6 py-4 text-right align-middle tabular-nums">{d.leadValue == null ? <span className="text-zinc-400">—</span> : <span className="font-bold text-zinc-900">{formatINR(d.leadValue)}</span>}</td>
                   {/* Customer Offer — the PRICE THE CUSTOMER WANTS TO PAY is the
@@ -506,12 +519,12 @@ export default function DealsPage() {
                     ) : offer.off <= 0 ? (
                       <span className="font-bold tabular-nums text-zinc-900" title="At quoted price — no discount requested">{formatINR(offer.final)}</span>
                     ) : (
-                      <div className="ml-auto w-[112px]">
+                      <div className="ml-auto w-[92px]">
                         {/* The customer's requested price — the headline. */}
                         <p className="font-bold tabular-nums text-zinc-900" title={`Customer wants to pay ${formatINR(offer.final)} against a ${formatINR(offer.quoted)} quote`}>{formatINR(offer.final)}</p>
                         {/* The gap below the quote = the reduction. */}
-                        <p className="text-[11px] font-semibold tabular-nums text-rose-600" title={`Requested discount: ${formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}`}>
-                          −{formatINR(offer.off)} · {offer.pct}% off
+                        <p className="text-[10px] font-semibold tabular-nums text-rose-600" title={`Requested discount: ${formatDealDiscount(d.requestedDiscount, d.requestedDiscountType)}`}>
+                          −{formatINR(offer.off)} · {offer.pct}%
                         </p>
                         <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-zinc-200" title={`${offer.pct}% below the quoted ${formatINR(offer.quoted)}`}>
                           <div className="h-full rounded-full bg-rose-400" style={{ width: `${Math.min(100, offer.pct)}%` }} />
@@ -540,6 +553,13 @@ export default function DealsPage() {
                     <DealQuickActions
                       deal={d}
                       meId={meId}
+                      unread={unreadCount(d, commentsByDeal.get(d.id) ?? [])}
+                      onComment={(anchor) => {
+                        // Open the SAME chat popover (reusing DealConversation)
+                        // and mark seen so the badge/dot clear instantly.
+                        markSeen(d.id);
+                        setChatDeal({ dealId: d.id, rect: anchor ? anchor.getBoundingClientRect() : null });
+                      }}
                       onView={() => setOpenId(d.id)}
                       onViewLead={() => router.push(`/leads/${d.leadId}?from=deals`)}
                       onResubmit={() => setResubmitDeal(d)}
@@ -611,6 +631,23 @@ export default function DealsPage() {
         }
         confirmLabel={deleting ? "Deleting…" : "Delete"}
       />
+
+      {/* In-place deal-conversation chat popover (Quick Actions comment button).
+          Reuses the ONE shared DealConversation thread; portalled so the
+          data-grid overflow never clips it. */}
+      {chatDeal && (() => {
+        const deal = dealById(chatDeal.dealId);
+        if (!deal) return null;
+        return (
+          <DealConversationPopover
+            deal={deal}
+            anchorRect={chatDeal.rect}
+            readOnly={viewAsReadOnly}
+            subtitle={`${deal.dealNo}${deal.leadNo ? ` · Lead ${deal.leadNo}` : ""}`}
+            onClose={() => setChatDeal(null)}
+          />
+        );
+      })()}
     </div>
   );
 }
@@ -763,10 +800,14 @@ function DealStatusCell({
 /* ─── Quick Actions row menu (view / view lead / copy link / resubmit / cancel —
    NO delete) ──────────────────────────────────────────────────────────────── */
 function DealQuickActions({
-  deal, meId, onView, onViewLead, onResubmit, onCancel, canCancel, onDelete, canDelete,
+  deal, meId, unread, onComment, onView, onViewLead, onResubmit, onCancel, canCancel, onDelete, canDelete,
 }: {
   deal: LeadDeal;
   meId: string;
+  /** Unread deal-conversation message count for the current user. */
+  unread: number;
+  /** Open the in-place chat popover anchored to the comment button. */
+  onComment: (anchor?: HTMLElement) => void;
   onView: () => void;
   onViewLead: () => void;
   onResubmit: () => void;
@@ -782,8 +823,28 @@ function DealQuickActions({
       () => toast.error("Couldn't copy link"),
     );
   };
+  const hasUnread = unread > 0;
   return (
     <div className="flex items-center justify-center gap-1">
+      {/* Quick shortcut: Comment — opens the SAME chat popover (reusing
+          DealConversation) to continue the conversation. Carries the unread
+          count badge; opening it marks seen and clears the badge/dot. */}
+      <button
+        onClick={(e) => onComment(e.currentTarget)}
+        title={hasUnread ? `Deal conversation · ${unread} new message${unread === 1 ? "" : "s"}` : "Deal conversation"}
+        aria-label={hasUnread ? `Deal conversation for ${deal.dealNo}, ${unread} new messages` : `Deal conversation for ${deal.dealNo}`}
+        className="relative grid h-8 w-8 place-items-center rounded-lg border border-border text-muted-foreground transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+      >
+        <MessageSquare className="h-4 w-4" />
+        {hasUnread && (
+          <span
+            aria-hidden
+            className="absolute -right-1 -top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-1 ring-white"
+          >
+            {unread > 9 ? "9+" : unread}
+          </span>
+        )}
+      </button>
       {/* Quick shortcut: View Deal (eye) */}
       <button
         onClick={onView}

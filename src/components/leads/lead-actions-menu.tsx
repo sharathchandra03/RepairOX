@@ -16,49 +16,60 @@ import type { Lead } from "@/lib/leads-data";
 
 export type LeadAction = "view" | "edit" | "pin" | "priority" | "delete" | "route" | "quotation" | "comment";
 
+/** Action handler. The `anchor` (3rd arg) is only passed for the "comment"
+ *  action — it is the chat trigger element, so the list page can anchor the
+ *  in-place conversation popover to it. */
+export type LeadActionHandler = (action: LeadAction, lead: Lead, anchor?: HTMLElement) => void;
+
 /** The deal-conversation shortcut button. Shown ONLY when the lead has a deal
- *  with an existing conversation; opening it jumps to the full-page View Lead
- *  Deal conversation. A small red dot marks unread messages for this user.
+ *  with an existing conversation; clicking it opens a compact in-place chat
+ *  popover (handled by the list page via onAction("comment")) — it does NOT
+ *  navigate to View Lead. An unread-COUNT badge (a small number pill) shows
+ *  when there are unread messages for this user; count 0 → no badge.
  *  Presentational — the list page decides when it renders (hasDealConversation)
- *  and whether the dot shows (dealUnread). */
+ *  and passes the live unread count. The button also forwards its own bounding
+ *  rect so the popover can anchor to it. */
 function DealConversationButton({
-  lead, onAction, unread,
+  lead, onAction, unreadCount = 0,
 }: {
   lead: Lead;
-  onAction: (action: LeadAction, lead: Lead) => void;
-  unread?: boolean;
+  onAction: (action: LeadAction, lead: Lead, anchor?: HTMLElement) => void;
+  unreadCount?: number;
 }) {
+  const hasUnread = unreadCount > 0;
   return (
     <button
-      onClick={() => onAction("comment", lead)}
+      onClick={(e) => onAction("comment", lead, e.currentTarget)}
       className="relative inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
-      title={unread ? "Deal conversation · new message" : "Deal conversation"}
-      aria-label={unread ? "Deal conversation, new message" : "Deal conversation"}
+      title={hasUnread ? `Deal conversation · ${unreadCount} new message${unreadCount === 1 ? "" : "s"}` : "Deal conversation"}
+      aria-label={hasUnread ? `Deal conversation, ${unreadCount} new messages` : "Deal conversation"}
     >
       <MessageSquare className="h-3.5 w-3.5" />
-      {unread && (
+      {hasUnread && (
         <span
           aria-hidden
-          className="absolute right-1 top-1 h-1.5 w-1.5 rounded-full bg-rose-500 ring-1 ring-white"
-        />
+          className="absolute -right-1 -top-1 inline-flex h-4 min-w-[16px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-1 ring-white"
+        >
+          {unreadCount > 9 ? "9+" : unreadCount}
+        </span>
       )}
     </button>
   );
 }
 
 export function LeadActionsMenu({
-  lead, onAction, readOnly = false, hasDealConversation = false, dealUnread = false,
+  lead, onAction, readOnly = false, hasDealConversation = false, dealUnreadCount = 0,
 }: {
   lead: Lead;
-  onAction: (action: LeadAction, lead: Lead) => void;
+  onAction: LeadActionHandler;
   /** OWNER "view as agent" read-only mode — only View is offered; every
    *  mutating control (pin/edit/priority/delete/route/quotation) is hidden.
-   *  The deal-conversation shortcut still shows (it only reads/navigates). */
+   *  The deal-conversation shortcut still shows (it only reads/opens the chat). */
   readOnly?: boolean;
   /** The lead has a deal with an existing conversation → show the chat icon. */
   hasDealConversation?: boolean;
-  /** The deal conversation has unread messages for the current user. */
-  dealUnread?: boolean;
+  /** Number of unread deal-conversation messages for the current user. */
+  dealUnreadCount?: number;
 }) {
   const isPinned = !!lead.pinnedAt;
 
@@ -67,7 +78,7 @@ export function LeadActionsMenu({
   if (readOnly) {
     return (
       <div className="flex items-center justify-end gap-0.5" onClick={(e) => e.stopPropagation()}>
-        {hasDealConversation && <DealConversationButton lead={lead} onAction={onAction} unread={dealUnread} />}
+        {hasDealConversation && <DealConversationButton lead={lead} onAction={onAction} unreadCount={dealUnreadCount} />}
         <button
           onClick={() => onAction("view", lead)}
           className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
@@ -85,7 +96,7 @@ export function LeadActionsMenu({
           into the neighbouring Result column on row hover. */}
 
       {/* Deal conversation shortcut — only when a deal conversation exists. */}
-      {hasDealConversation && <DealConversationButton lead={lead} onAction={onAction} unread={dealUnread} />}
+      {hasDealConversation && <DealConversationButton lead={lead} onAction={onAction} unreadCount={dealUnreadCount} />}
 
       {/* View */}
       <button

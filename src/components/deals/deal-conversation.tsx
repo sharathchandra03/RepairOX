@@ -39,12 +39,20 @@ export function DealConversation({
   deal,
   readOnly,
   heading = true,
+  compact = false,
+  threadMaxHeight,
 }: {
   deal: LeadDeal;
   /** Honour the owner "view as agent" read-only lens — hides the composer. */
   readOnly?: boolean;
   /** Show the compact "Deal Conversation" header (default true). */
   heading?: boolean;
+  /** Compact (popover) variant — denser thread + autofocus-friendly composer.
+   *  Reuses the SAME thread + composer; it only tightens the max thread height. */
+  compact?: boolean;
+  /** Override the scrollable thread's max height (px). Defaults: 320 (full),
+   *  240 (compact). */
+  threadMaxHeight?: number;
 }) {
   const { can } = usePermissions();
   const { addDealComment, commentsForDeal } = useDeals();
@@ -86,7 +94,10 @@ export function DealConversation({
           No messages yet. Discuss this discount request with the approver here.
         </p>
       ) : (
-        <ol className="max-h-[320px] space-y-2 overflow-y-auto pr-0.5">
+        <ol
+          className="space-y-2 overflow-y-auto pr-0.5"
+          style={{ maxHeight: threadMaxHeight ?? (compact ? 240 : 320) }}
+        >
           {comments.map((c) => (
             <li key={c.id} className="flex gap-2.5">
               <Avatar name={c.authorName || "User"} size={26} />
