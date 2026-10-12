@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -436,13 +437,46 @@ function LeadSelectCell({
     closeMenu();
   };
 
+  // The menu is portalled to <body> so its `position: fixed` coords resolve
+  // against the viewport (never the frozen-column sticky/overflow context).
+  // Guard the portal so it only runs client-side (Next.js SSR).
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
+  // Compute the menu position from the trigger rect: viewport-aware drop-up and
+  // a horizontal clamp so a right-edge pill doesn't push the menu off-screen.
+  const computePos = useCallback(() => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const dropUp = window.innerHeight - r.bottom < 280;
+    const menuWidth = reasonStep ? 260 : 220;
+    const left = Math.max(8, Math.min(r.left, window.innerWidth - menuWidth - 8));
+    setPos({
+      top: dropUp ? undefined : r.bottom + 6,
+      bottom: dropUp ? window.innerHeight - r.top + 6 : undefined,
+      left,
+      dropUp,
+    });
+  }, [reasonStep]);
+
+  // Keep the menu glued to its pill: recompute on scroll (capture phase, so the
+  // inner grid scroll container is caught too) and on resize while open.
+  useEffect(() => {
+    if (!open) return;
+    computePos();
+    const onScroll = () => computePos();
+    const onResize = () => computePos();
+    window.addEventListener("scroll", onScroll, true);
+    window.addEventListener("resize", onResize);
+    return () => {
+      window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
+    };
+  }, [open, computePos]);
+
   const handleOpen = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (!open && btnRef.current) {
-      const r = btnRef.current.getBoundingClientRect();
-      const dropUp = window.innerHeight - r.bottom < 280;
-      setPos({ top: dropUp ? undefined : r.bottom + 6, bottom: dropUp ? window.innerHeight - r.top + 6 : undefined, left: r.left, dropUp });
-    }
+    if (!open) computePos();
     if (open) closeMenu(); else setOpen(true);
   };
 
@@ -477,10 +511,11 @@ function LeadSelectCell({
         <span className="min-w-0 flex-1 truncate">{value || placeholder}</span>
         <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
       </button>
-      <AnimatePresence>
-        {open && (
-          <>
-            <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); closeMenu(); }} />
+      {mounted && createPortal(
+        <AnimatePresence>
+          {open && (
+            <>
+              <div className="fixed inset-0 z-[60]" onClick={(e) => { e.stopPropagation(); closeMenu(); }} />
             <motion.div
               initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -591,9 +626,11 @@ function LeadSelectCell({
                 </div>
               )}
             </motion.div>
-          </>
-        )}
-      </AnimatePresence>
+            </>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
     </div>
   );
 }
