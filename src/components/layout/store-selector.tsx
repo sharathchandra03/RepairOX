@@ -25,10 +25,18 @@ export function StoreSelector() {
   const pathname = usePathname();
   const onOwnerDashboard = pathname === "/owner" || pathname.startsWith("/owner/");
   // Lead Management has its OWN store operating mode (Single/Multi) that is
-  // independent of the global multi-store architecture. On /leads/** the header
-  // store control must reflect THAT mode: a FIXED context chip (just the store
-  // name, no dropdown) in Single-Store mode; a real selector in Multi-Store.
-  const onLeadRoutes = pathname === "/leads" || pathname.startsWith("/leads/");
+  // independent of the global multi-store architecture. On the Lead Management
+  // routes the header store control must reflect THAT mode: a FIXED context chip
+  // (just the store name, no dropdown) in Single-Store mode; a real selector in
+  // Multi-Store. The Lead DASHBOARD lives at /lead-management (the module root),
+  // while every other lead surface is under /leads/** — so BOTH bases count as
+  // lead routes, otherwise the dashboard would keep the switchable dropdown in
+  // Single mode while the rest of the module correctly hides it.
+  const onLeadRoutes =
+    pathname === "/leads" ||
+    pathname.startsWith("/leads/") ||
+    pathname === "/lead-management" ||
+    pathname.startsWith("/lead-management/");
   const leadMode = useLeadStoreMode();
   const {
     stores,
