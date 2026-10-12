@@ -42,7 +42,7 @@ import { toast } from "@/components/ui/toaster";
 import {
   DEAL_QUEUE_TABS, type DealQueueTab, dealInQueueTab,
   DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount, dealAgeLabel, dealAgeTooltip,
-  isOpenDealStatus, canAgentResubmit, canDecideDeal, approvedVsRequestedOffer,
+  isOpenDealStatus, canAgentResubmit, canDecideDeal, approvedVsRequestedOffer, dealCustomerPrice,
   type LeadDeal,
 } from "@/lib/lead-deals";
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
@@ -1003,17 +1003,10 @@ function ApproveAmountModal({
   ) => Promise<boolean>;
 }) {
   const quote = deal?.leadValue ?? null;
+  // The requested customer price (quote − requested discount) prefills the
+  // input. Reuses the shared dealCustomerPrice helper — no inline math.
   const requestedPrice =
-    deal == null
-      ? null
-      : quote == null || deal.requestedDiscount == null
-        ? null
-        : Math.max(
-            0,
-            Math.round(
-              quote - (deal.requestedDiscountType === "percent" ? (quote * deal.requestedDiscount) / 100 : deal.requestedDiscount),
-            ),
-          );
+    deal == null ? null : dealCustomerPrice(deal.leadValue, deal.requestedDiscount, deal.requestedDiscountType);
   const [price, setPrice] = useState<string>("");
   const [comment, setComment] = useState("");
   const [busy, setBusy] = useState(false);
