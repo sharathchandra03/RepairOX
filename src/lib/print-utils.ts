@@ -7,7 +7,7 @@ import { qcItemLabel } from "@/lib/qc-config";
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
 export type PrintFormat = "a4" | "thermal" | "label";
-export type PrintDocumentType = "ticket" | "invoice" | "quotation";
+export type PrintDocumentType = "ticket" | "invoice" | "quotation" | "diagnostic";
 
 /* ─── Print Data Shapes ──────────────────────────────────────────────── */
 
@@ -190,6 +190,13 @@ export type PrintDocumentData = {
   ticket?: PrintTicketInfo;
   invoice?: PrintInvoiceInfo;
   quotation?: PrintQuotationInfo;
+  /** Diagnostic-report mode: when present, the shared Ticket A4 renders a
+   *  diagnostic variant — a highlighted "QC FAILED" banner + a highlighted
+   *  "Device Condition" box carrying this comment — and OMITS Terms &
+   *  Conditions and Warranty Information. The comment is NOT persisted; it
+   *  travels only via the print URL query param → this field → the rendered
+   *  document. */
+  diagnostic?: { comment: string };
   printTitle: string;
   printDate: string;
   printTime: string;
@@ -395,6 +402,39 @@ export function buildTicketPrintData(
     // of truth. They no longer inherit from Store Information.
     termsAndConditions: settings.ticketTerms,
     warrantyText: settings.ticketWarrantyText,
+    printFooter: settings.ticketFooter,
+  };
+}
+
+/* ─── Diagnostic Report document assembly ─────────────────────────────────
+   A Diagnostic Report is a post-QC document rendered in the SAME A4 family as
+   the ticket Service Report (shared BRAND design language), but it is NOT a
+   service report: it OMITS Terms & Conditions and Warranty, highlights a
+   "QC FAILED" banner, and carries a free-text "Device Condition" comment typed
+   after the QC check. The comment is NOT persisted anywhere — it is passed in
+   here (sourced from the print URL query param) so preview = print = PDF all
+   render from one source. Reuses the real ticket's store / customer / device
+   data via the same builders as a normal ticket print. */
+
+export function buildDiagnosticReportPrintData(
+  settings: StoreSettings,
+  ticket: Ticket,
+  comment: string,
+): PrintDocumentData {
+  const now = new Date();
+  return {
+    store: buildStoreInfo(settings),
+    customer: buildCustomerFromTicket(ticket),
+    ticket: buildTicketInfo(ticket),
+    diagnostic: { comment },
+    printTitle: "Diagnostic Report",
+    printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
+    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    // A diagnostic report intentionally carries NO Terms & Conditions and NO
+    // Warranty block — the A4 diagnostic variant suppresses both regardless,
+    // but we keep them blank so no stray text can leak in.
+    termsAndConditions: "",
+    warrantyText: "",
     printFooter: settings.ticketFooter,
   };
 }
@@ -645,4 +685,15 @@ export function getInvoicePrintUrl(invoiceId: string, format: PrintFormat): stri
 
 export function getQuotationPrintUrl(quotationId: string, format: PrintFormat = "a4"): string {
   return `/print/quotation/${encodeURIComponent(quotationId)}?format=${format}`;
+}
+
+/** Diagnostic Report print URL. The device-condition comment is carried only in
+ *  the query string (nothing is persisted). A4 only — a diagnostic report is a
+ *  full-page document. */
+export function getDiagnosticReportPrintUrl(
+  ticketId: string,
+  comment: string,
+  format: PrintFormat = "a4",
+): string {
+  return `/print/diagnostic/${encodeURIComponent(ticketId)}?format=${format}&comment=${encodeURIComponent(comment)}`;
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { Eye, ArrowRightLeft, MessageCircle, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown, Pin, PinOff, TicketCheck } from "lucide-react";
+import { Eye, ArrowRightLeft, MessageCircle, Mail, Printer, Pencil, MoreHorizontal, Trash2, AlertTriangle, Receipt, FileDown, Pin, PinOff, TicketCheck, Stethoscope } from "lucide-react";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { PushToInvoiceIcon } from "@/components/tickets/push-to-invoice-icon";
 import { isEstimate, type Ticket } from "@/lib/mock-data";
@@ -22,6 +22,10 @@ export type TicketAction =
   | "priority"
   | "pin"
   | "invoice"
+  /** Open the Diagnostic Report entry page for this ticket (post-QC device
+   *  condition → printable diagnostic doc). Gated by the print capability; not
+   *  shown for estimates. */
+  | "diagnostic-report"
   /** Estimate-only: convert this Estimate into a new Ticket (opens the
    *  confirmation popup → prefilled Ticket flow). Never shown for Tickets. */
   | "push-to-ticket"
@@ -191,6 +195,14 @@ export function TicketActionsMenu({ ticket, onAction, hasInvoice = false, canPus
             {canPrint && (
             <MenuItem icon={Printer} onClick={() => { onAction("print", ticket); close(); }}>
               Print
+            </MenuItem>
+            )}
+            {/* 4b. Diagnostic Report — post-QC device condition document.
+                   Reuses the print capability; not shown for estimates (the
+                   QC-after-repair flow applies to repair tickets). */}
+            {canPrint && !estimate && (
+            <MenuItem icon={Stethoscope} onClick={() => { onAction("diagnostic-report", ticket); close(); }}>
+              Diagnostic Report
             </MenuItem>
             )}
             {/* 5. WhatsApp Receipt */}

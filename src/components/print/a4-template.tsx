@@ -97,6 +97,11 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
   const { store, customer, ticket, printTitle } = data;
   const t = ticket!;
 
+  // Diagnostic-report mode: suppress Terms & Warranty, show a highlighted
+  // "QC FAILED" banner + a highlighted "Device Condition" box with the typed
+  // comment. Presentation only — the underlying ticket data is unchanged.
+  const diagnostic = data.diagnostic;
+
   const isBusiness = t.customerType === "business";
   const createdDate = formatPrintDate(t.createdAt);
   const createdTime = formatPrintTime(t.createdAt);
@@ -321,6 +326,46 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
           </div>
         </header>
 
+        {/* ══ DIAGNOSTIC: HIGHLIGHTED "QC FAILED" BANNER ══
+             Rendered only in diagnostic mode. Reuses the rose/red QC-failed
+             colour language already used by the per-device QC band so the
+             document stays within the shared palette. */}
+        {diagnostic ? (
+          <div
+            data-pdf-atomic
+            style={{
+              marginTop: 9,
+              backgroundColor: "#FEF2F2",
+              border: `1.5px solid ${BRAND.rose}`,
+              borderRadius: 8,
+              padding: "9px 14px",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              ...NO_BREAK,
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                padding: "3px 10px",
+                borderRadius: 5,
+                backgroundColor: BRAND.rose,
+                color: BRAND.white,
+                fontSize: 11,
+                fontWeight: 800,
+                letterSpacing: 1,
+                textTransform: "uppercase",
+              }}
+            >
+              QC Failed
+            </span>
+            <span style={{ fontSize: 10, fontWeight: 700, color: "#991B1B", letterSpacing: 0.3 }}>
+              This device did not pass quality-control inspection. See the device condition noted below.
+            </span>
+          </div>
+        ) : null}
+
         {/* ══ CUSTOMER + TICKET INFO ══ */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10, marginTop: 9 }}>
           {/* CUSTOMER DETAILS */}
@@ -465,6 +510,23 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
           </table>
         </div>
 
+        {/* ══ DIAGNOSTIC: HIGHLIGHTED "DEVICE CONDITION" BOX ══
+             The typed QC/condition notes — the justification of the diagnostic
+             report. Highlighted (rose) so it reads as the key finding. */}
+        {diagnostic ? (
+          <div data-pdf-atomic style={{ marginTop: 9, border: `1.5px solid ${BRAND.rose}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, backgroundColor: "#FEE2E2", borderBottom: `1px solid ${BRAND.rose}`, padding: "5px 10px" }}>
+              <span style={{ width: 6, height: 6, borderRadius: 99, backgroundColor: BRAND.rose, display: "inline-block" }} />
+              <span style={{ fontSize: 9.5, fontWeight: 800, letterSpacing: 0.5, textTransform: "uppercase", color: BRAND.rose }}>Device Condition</span>
+            </div>
+            <div style={{ padding: "8px 12px", backgroundColor: "#FFF7F7" }}>
+              <div style={{ fontSize: 10, color: BRAND.ink, lineHeight: 1.5, whiteSpace: "pre-wrap", wordBreak: "break-word" }}>
+                {diagnostic.comment?.trim() ? diagnostic.comment : "—"}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {/* ══ SUPPORTING INFO + SUMMARY (side-by-side) ══
              All device info lives in the Item/Service table above; the space to
              the LEFT of the Price Breakdown is used for a compact recap so it is
@@ -555,8 +617,8 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
           </div>
         </div>
 
-        {/* ══ TERMS & CONDITIONS ══ */}
-        {data.termsAndConditions ? (
+        {/* ══ TERMS & CONDITIONS ══ (omitted in diagnostic mode) */}
+        {!diagnostic && data.termsAndConditions ? (
           <div data-pdf-atomic style={{ marginTop: 8, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
             <SectionHead title="Terms & Conditions" />
             <div style={{ padding: "5px 12px" }}>
@@ -566,7 +628,7 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
         ) : null}
 
         {/* ══ WARRANTY INFORMATION ══ */}
-        {data.warrantyText ? (
+        {!diagnostic && data.warrantyText ? (
           <div data-pdf-atomic style={{ marginTop: 7, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
             <SectionHead title="Warranty Information" />
             <div style={{ padding: "5px 12px" }}>

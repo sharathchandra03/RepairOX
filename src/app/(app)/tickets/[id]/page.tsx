@@ -9,7 +9,7 @@ import {
   User, Smartphone, Wrench, CreditCard, AlertTriangle,
   CheckCircle2, Phone, Mail, Building2, MapPin, Shield,
   Package, Hash, Calendar, Tag, CircleDot, Receipt, Ban, GitBranch,
-  Ticket as TicketIcon,
+  Ticket as TicketIcon, Stethoscope,
 } from "lucide-react";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -40,6 +40,7 @@ import { PushToInvoiceDialog } from "@/components/tickets/push-to-invoice-dialog
 import { loadDeviceCategories, categoryLabel } from "@/lib/device-categories";
 import { qcItemLabel } from "@/lib/qc-config";
 import { PinnedRail } from "@/components/common/pinned-rail";
+import { useDiagnosticReport } from "@/hooks/use-diagnostic-report";
 import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 import { DetailSection as SharedDetailSection, DetailHero, type Accent } from "@/components/common/detail-page";
 
@@ -202,6 +203,9 @@ export default function TicketDetailPage() {
   const canEditWarranty = allow(can, CAP.warranty.edit);
   const canTransferTicket = allow(can, CAP.ticket.transfer);
   const canPrintTicket = allow(can, CAP.ticket.print);
+  // Lightweight (localStorage, non-DB) marker of whether a Diagnostic Report
+  // was generated for this ticket — drives the header mention.
+  const { hydrated: diagHydrated, hasReport: hasDiagnosticReport, generatedAt: diagnosticGeneratedAt } = useDiagnosticReport();
   const { settings } = useStoreSettings();
   const ticketId = params.id as string;
   const [editingNotes, setEditingNotes] = useState(false);
@@ -559,6 +563,18 @@ export default function TicketDetailPage() {
                     {PRIORITY_LABEL[ticket.priority]}
                   </span>
                 )}
+                {/* Diagnostic Report generated — read-only mention (localStorage
+                    marker; no DB). Links back to the entry page to re-open it. */}
+                {diagHydrated && hasDiagnosticReport(ticket.id) && (
+                  <button
+                    onClick={() => router.push(`/tickets/${ticket.id}/diagnostic-report`)}
+                    title={diagnosticGeneratedAt(ticket.id) ? `Generated ${getElapsedLabel(diagnosticGeneratedAt(ticket.id)!)}` : "Diagnostic Report generated"}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF2F2] px-2.5 py-1 text-[11px] font-medium text-[#B91C1C] ring-1 ring-inset ring-[#BE123C]/30 transition hover:bg-[#FEE2E2]"
+                  >
+                    <Stethoscope className="h-3 w-3" />
+                    Diagnostic Report generated
+                  </button>
+                )}
                 {/* Estimate → converted Ticket link (spec §31/§64). */}
                 {estimate && convertedTicket && (
                   <button
@@ -650,6 +666,7 @@ export default function TicketDetailPage() {
                   {canPrintTicket && <MenuItem icon={Printer} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=a4`); close(); }}>Print A4</MenuItem>}
                   {canPrintTicket && <MenuItem icon={Receipt} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=thermal`); close(); }}>Print Thermal</MenuItem>}
                   {canPrintTicket && <MenuItem icon={Tag} onClick={() => { router.push(`/print/ticket/${ticket.id}?format=label`); close(); }}>Print Label</MenuItem>}
+                  {canPrintTicket && !estimate && <MenuItem icon={Stethoscope} onClick={() => { router.push(`/tickets/${ticket.id}/diagnostic-report`); close(); }}>Diagnostic Report</MenuItem>}
                   {canDeleteTicket && <div className="my-1 border-t border-border" />}
                   {canDeleteTicket && <MenuItem icon={Trash2} danger onClick={() => { setShowDelete(true); close(); }}>Delete {estimate ? "Estimate" : "Ticket"}</MenuItem>}
                 </>

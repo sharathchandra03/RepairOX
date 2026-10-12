@@ -658,6 +658,7 @@ export default function TicketsPage() {
     if (action === "view") { router.push(`/tickets/${ticket.id}`); return; }
     if (action === "edit") { router.push(`/tickets/${ticket.id}`); return; }
     if (action === "print-preview") { router.push(`/print/ticket/${encodeURIComponent(ticket.id)}?format=a4`); return; }
+    if (action === "diagnostic-report") { router.push(`/tickets/${ticket.id}/diagnostic-report`); return; }
     if (action === "download-pdf") { downloadTicket(ticket); return; }
     if (action === "invoice" || action === "push-to-proforma") {
       // Push to Invoice (Ticket) / Push to Proforma (Estimate) — both open the

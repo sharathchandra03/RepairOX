@@ -10,6 +10,7 @@ import {
   buildTicketPrintData,
   buildInvoicePrintData,
   buildQuotationPrintData,
+  buildDiagnosticReportPrintData,
   type PrintFormat,
   type PrintDocumentData,
 } from "@/lib/print-utils";
@@ -32,15 +33,18 @@ function FormatSelector({
   setFormat,
   isTicket,
   isQuotation,
+  isDiagnostic,
 }: {
   format: PrintFormat;
   setFormat: (f: PrintFormat) => void;
   isTicket: boolean;
   isQuotation?: boolean;
+  isDiagnostic?: boolean;
 }) {
-  // A quotation is a customer-facing A4 document only. Tickets get all three;
-  // invoices get A4 + thermal.
-  const options = isQuotation
+  // A quotation and a diagnostic report are A4-only full-page documents.
+  // Tickets get all three; invoices get A4 + thermal.
+  const a4Only = isQuotation || isDiagnostic;
+  const options = a4Only
     ? FORMAT_OPTIONS.filter((o) => o.id === "a4")
     : isTicket
       ? FORMAT_OPTIONS
@@ -84,6 +88,14 @@ function getAutoFromUrl(): boolean {
   return params.get("auto") === "1";
 }
 
+/** Diagnostic Report: read the (non-persisted) Device Condition comment from
+ *  the URL query string. Empty when absent. */
+function getCommentFromUrl(): string {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  return params.get("comment") ?? "";
+}
+
 /* ─── Page Component ─────────────────────────────────────────────────── */
 
 export default function PrintPreviewPage() {
@@ -98,19 +110,29 @@ export default function PrintPreviewPage() {
 
   const [format, setFormat] = useState<PrintFormat>(getFormatFromUrl);
   const [mounted, setMounted] = useState(false);
+  // The diagnostic Device Condition comment lives only in the URL (never
+  // persisted). Read it into state on mount so the memo can depend on it
+  // without touching `window` during SSR.
+  const [comment, setComment] = useState("");
 
   const isTicket = docType === "ticket";
   const isQuotation = docType === "quotation";
+  const isDiagnostic = docType === "diagnostic";
 
   // Wait for client mount to avoid hydration mismatch
   useEffect(() => {
     setMounted(true);
+    setComment(getCommentFromUrl());
   }, []);
 
   // Build print data (only after mount AND settings hydrated)
   const printData: PrintDocumentData | null = useMemo(() => {
     if (!mounted || !hydrated || !docId) return null;
-    if (isTicket) {
+    if (isDiagnostic) {
+      const ticket = tickets.find((t) => t.id === docId);
+      if (!ticket) return null;
+      return buildDiagnosticReportPrintData(settings, ticket, comment);
+    } else if (isTicket) {
       const ticket = tickets.find((t) => t.id === docId);
       if (!ticket) return null;
       return buildTicketPrintData(settings, ticket);
@@ -153,7 +175,7 @@ export default function PrintPreviewPage() {
       const lt = invoice.ticketId ? tickets.find((t) => t.id === invoice.ticketId) : undefined;
       return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId);
     }
-  }, [mounted, hydrated, isTicket, isQuotation, docId, tickets, invoices, quotations, settings]);
+  }, [mounted, hydrated, isTicket, isQuotation, isDiagnostic, comment, docId, tickets, invoices, quotations, settings]);
 
   // Auto-print if query param is set
   useEffect(() => {
@@ -168,10 +190,10 @@ export default function PrintPreviewPage() {
     if (!isTicket && format === "label") {
       setFormat("a4");
     }
-    if (isQuotation && format !== "a4") {
+    if ((isQuotation || isDiagnostic) && format !== "a4") {
       setFormat("a4");
     }
-  }, [isTicket, isQuotation, format]);
+  }, [isTicket, isQuotation, isDiagnostic, format]);
 
   // Loading state while mounting
   if (!mounted || !hydrated) {
@@ -230,7 +252,7 @@ export default function PrintPreviewPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <FormatSelector format={format} setFormat={setFormat} isTicket={isTicket} isQuotation={isQuotation} />
+            <FormatSelector format={format} setFormat={setFormat} isTicket={isTicket} isQuotation={isQuotation} isDiagnostic={isDiagnostic} />
             <button
               onClick={() => window.print()}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, background: "#4361EE", padding: "8px 16px", fontSize: 14, fontWeight: 500, color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}
