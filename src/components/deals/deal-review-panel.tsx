@@ -13,12 +13,12 @@
 import * as React from "react";
 import Link from "next/link";
 import {
-  Check, X, MessageSquarePlus, Clock, User, Tag, FileText, BadgePercent,
+  Check, X, Clock, User, Tag, FileText, BadgePercent,
   CheckCircle2, XCircle, RefreshCw, Ban, Send,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea, Label } from "@/components/ui/input";
-import { Avatar } from "@/components/ui/avatar";
+import { DealConversation } from "@/components/deals/deal-conversation";
 import { cn, formatINR } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
@@ -65,18 +65,16 @@ export function DealReviewPanel({
   const { can, currentUser } = usePermissions();
   const meId = currentUser?.id || "";
   const isOwner = can("full_access");
-  const { approveDeal, rejectDeal, requestChanges, cancelDeal, addDealComment, commentsForDeal, revisionsForDeal } = useDeals();
+  const { approveDeal, rejectDeal, requestChanges, cancelDeal, revisionsForDeal } = useDeals();
 
   const canApprove = allow(can, CAP.deal.approve);
   const canReject = allow(can, CAP.deal.reject);
   const canRequestChanges = allow(can, CAP.deal.requestChanges);
-  const canComment = allow(can, CAP.deal.comment);
   // A top-authority owner may decide a deal they raised; everyone else can't.
   const isDecider = canDecideDeal(deal, meId, isOwner) && (canApprove || canReject || canRequestChanges);
   const isSelfBlocked = deal.createdBy === meId && !isOwner && isOpenDealStatus(deal.status) && (canApprove || canReject || canRequestChanges);
   const isMine = deal.createdBy === meId || deal.salesAgentId === meId;
 
-  const comments = commentsForDeal(deal.id);
   const revisions = revisionsForDeal(deal.id);
 
   // The quote this deal is measured against, and price⇄discount converters so
@@ -98,7 +96,6 @@ export function DealReviewPanel({
   const [apprPrice, setApprPrice] = React.useState<string>(requestedPrice == null ? "" : String(requestedPrice));
   const [decisionComment, setDecisionComment] = React.useState("");
   const [busy, setBusy] = React.useState(false);
-  const [newComment, setNewComment] = React.useState("");
 
   React.useEffect(() => {
     const rp = discountToPrice(deal.requestedDiscount, deal.requestedDiscountType);
@@ -130,12 +127,6 @@ export function DealReviewPanel({
       }
       setMode(null); setDecisionComment("");
     } finally { setBusy(false); }
-  };
-
-  const postComment = async () => {
-    if (!newComment.trim()) return;
-    await addDealComment(deal.id, newComment.trim());
-    setNewComment("");
   };
 
   // Customer-facing prices (the headline) + the discount as the secondary note.
@@ -308,30 +299,10 @@ export function DealReviewPanel({
         </p>
       )}
 
-      {/* ── Internal comment thread ── */}
-      <div className="space-y-2">
-        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Approval Conversation</p>
-        {comments.length === 0 && <p className="text-[12px] text-muted-foreground">No comments yet.</p>}
-        <ol className="space-y-2">
-          {comments.map((c) => (
-            <li key={c.id} className="flex gap-2.5">
-              <Avatar name={c.authorName || "User"} size={26} />
-              <div className="min-w-0 flex-1 rounded-lg border border-border bg-card px-3 py-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-[12px] font-semibold text-foreground">{c.authorName || "User"}</span>
-                  <span className="text-[10px] text-muted-foreground">{fmt(c.createdAt)}</span>
-                </div>
-                <p className="mt-0.5 whitespace-pre-wrap text-[12.5px] text-zinc-700">{c.body}</p>
-              </div>
-            </li>
-          ))}
-        </ol>
-        {canComment && (
-          <div className="flex items-end gap-2">
-            <Textarea value={newComment} onChange={(e) => setNewComment(e.target.value)} placeholder="Add a comment…" className="min-h-[40px] text-[13px]" />
-            <Button size="sm" className="gap-1.5" disabled={!newComment.trim()} onClick={postComment}><MessageSquarePlus className="h-3.5 w-3.5" /> Post</Button>
-          </div>
-        )}
+      {/* ── Internal conversation — PROMINENT: directly below the decision
+          actions / banner, above the Approval History. ONE shared thread. ── */}
+      <div className="rounded-2xl border border-[#4361EE]/15 bg-[#EEF1FD]/20 p-3">
+        <DealConversation deal={deal} />
       </div>
 
       {/* ── Revision / approval history ── */}

@@ -78,6 +78,9 @@ import {
 import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE, FULFILMENT_ROUTE_LABEL, normaliseRoute } from "@/lib/field-data";
 import { DEAL_STATUS_LABEL, dealStatusTone, formatDealDiscount } from "@/lib/lead-deals";
 import { QUOTATION_STATUS_LABEL, quotationStatusTone, formatQuotationMoney } from "@/lib/quotation-data";
+import { DealConversation } from "@/components/deals/deal-conversation";
+import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
+import { useSession } from "@/lib/use-session";
 import { LeadJourneyTimeline } from "@/components/leads/lead-journey-timeline";
 import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
 import { LeadTemperatureSection } from "@/components/leads/lead-temperature-section";
@@ -187,8 +190,10 @@ export default function ViewLeadPage() {
     : { href: "/leads/list", label: "Back to Leads" };
 
   const { leads, hydrated, viewAsReadOnly, updateLead, optionsFor } = useLeads();
-  const { currentDeal } = useDeals();
+  const { currentDeal, commentsForDeal } = useDeals();
   const { currentQuotationForLead } = useQuotations();
+  const { id: currentUserId } = useSession();
+  const { markSeen, hasUnread } = useDealConversationSeen(currentUserId);
   const { getStore } = useStoreContext();
   const { can } = usePermissions();
   const { tickets, invoices, walkIns, customers } = useStore();
@@ -219,6 +224,16 @@ export default function ViewLeadPage() {
      are a lightweight complement to the full capture flow (header "Edit Lead");
      each saves through the canonical updateLead. */
   const [editSection, setEditSection] = useState<null | "customer" | "device" | "info" | "remarks">(null);
+
+  /* Deal conversation unread signal (per-user). Opening/viewing the lead's
+     Deal section marks it seen, so the subtle "new message" dot clears. */
+  const dealComments = deal ? commentsForDeal(deal.id) : [];
+  const latestDealComment = dealComments.length ? dealComments[dealComments.length - 1] : null;
+  const dealHasUnread = !!(deal && hasUnread(deal, latestDealComment?.createdAt, latestDealComment?.authorId));
+  const dealId = deal?.id;
+  useEffect(() => {
+    if (dealId) markSeen(dealId);
+  }, [dealId, latestDealComment?.id, markSeen]);
 
   if (!lead) {
     return (
@@ -584,13 +599,26 @@ export default function ViewLeadPage() {
             <LeadTemperatureSection lead={lead} readOnly={viewAsReadOnly} id="temperature" />
           </Reveal>
 
-          {/* Deal / approval — only renders when a Deal exists (no empty band) */}
-          {deal && (
+          {/* Deal / approval — only renders when a Deal exists (no empty band).
+              A concise summary + the SHARED internal conversation so the agent /
+              approver can read and reply to the deal discussion inline, right on
+              the record page (not a drawer). Gated by CAP.deal.view; the
+              composer honours the owner read-only lens + CAP.deal.comment. */}
+          {deal && allow(can, CAP.deal.view) && (
             <DetailSection
               icon={BadgePercent}
               title="Deal / Approval"
               accent="amber"
-              action={allow(can, CAP.deal.view) ? <Link href={`/leads/deals?deal=${deal.id}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline"><ExternalLink className="h-3 w-3" /> View Deal</Link> : undefined}
+              action={
+                <div className="flex items-center gap-3">
+                  {dealHasUnread && (
+                    <span className="inline-flex items-center gap-1 text-[11px] font-medium text-amber-700">
+                      <span aria-hidden className="h-1.5 w-1.5 rounded-full bg-amber-500" /> New message
+                    </span>
+                  )}
+                  <Link href={`/leads/deals?deal=${deal.id}`} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline"><ExternalLink className="h-3 w-3" /> View Deal</Link>
+                </div>
+              }
             >
               <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
                 <DetailField label="Deal ID" value={deal.dealNo} />
@@ -599,6 +627,10 @@ export default function ViewLeadPage() {
                 <DetailField label="Approved Discount" value={deal.approvedDiscount != null ? formatDealDiscount(deal.approvedDiscount, deal.approvedDiscountType) : "—"} />
                 <DetailField label="Approver" value={deal.approverName} />
                 <DetailField label="Reason" value={deal.requestedReason} />
+              </div>
+              {/* Internal conversation — read & reply inline (never a drawer). */}
+              <div className="mt-5 border-t border-border/70 pt-4">
+                <DealConversation deal={deal} readOnly={viewAsReadOnly} />
               </div>
             </DetailSection>
           )}

@@ -551,6 +551,58 @@ export function DealsProvider({ children }: { children: ReactNode }) {
     return true;
   }, [patchDeal, useDb, writeLocalRevision, notifyApprovers]);
 
+  /* ── Notify the OTHER party of a new conversation message ──────────────────
+     A comment is INTERNAL approval communication between the Sales Agent and
+     the approver — never a customer channel. Direction is derived from who
+     authored it:
+       • author is the Sales Agent (the lead owner / requester) → notify the
+         APPROVER_ROLES (same recipient pattern as notifyApprovers);
+       • author is anyone else (an approver / manager) → notify the Sales Agent
+         (same recipient pattern as notifyAgent).
+     The author is NEVER notified of their own message. One comment → exactly
+     one notification per recipient (dedupeKey keyed on the comment id). */
+  const notifyCommentPosted = useCallback((deal: LeadDeal, comment: LeadDealComment) => {
+    const authorId = comment.authorId || meIdRef.current || "";
+    const preview = comment.body.length > 80 ? `${comment.body.slice(0, 80)}…` : comment.body;
+    const title = `New message on ${deal.dealNo}`;
+    const body = `${preview} · Lead ${deal.leadNo}`;
+    const authorIsAgent = !!authorId && (authorId === deal.salesAgentId || authorId === deal.createdBy);
+    if (authorIsAgent) {
+      // Agent → approvers. (Same targeting as notifyApprovers.)
+      for (const role of APPROVER_ROLES) {
+        notify({
+          kind: "deal_comment", recipientRole: role, title, body,
+          href: `/leads/deals?deal=${deal.id}`,
+          reference: deal.dealNo,
+          dedupeKey: `deal_comment:${comment.id}:${role}`,
+        });
+      }
+    } else {
+      // Approver → the Sales Agent. (Same targeting as notifyAgent; skip self.)
+      if (!deal.salesAgentId || deal.salesAgentId === authorId) return;
+      notify({
+        kind: "deal_comment", recipientId: deal.salesAgentId, title, body,
+        href: `/leads/list?lead=${deal.leadId}`,
+        reference: deal.dealNo,
+        dedupeKey: `deal_comment:${comment.id}`,
+      });
+    }
+  }, []);
+
+  /* Side effects after a comment is stored (audit + notify the other party).
+     Resilient: when the deal can't be resolved we still kept the comment —
+     just skip the notify/audit (the comment is never lost). */
+  const afterComment = useCallback((dealId: string, comment: LeadDealComment) => {
+    const deal = dealsRef.current.find((d) => d.id === dealId);
+    if (!deal) return;
+    logActivity({
+      module: "Lead", action: "Deal Comment", severity: "info", entity: "Deal",
+      reference: deal.dealNo,
+      description: `${comment.authorName || "A user"} commented on ${deal.dealNo} (lead ${deal.leadNo}).`,
+    });
+    notifyCommentPosted(deal, comment);
+  }, [notifyCommentPosted]);
+
   /* ── Comment ── */
   const addDealComment = useCallback(async (dealId: string, body: string) => {
     const text = (body || "").trim();
@@ -565,12 +617,21 @@ export function DealsProvider({ children }: { children: ReactNode }) {
         if (!isMissingTableError(error)) { console.error("[deals] addDealComment failed:", error.message); toast.error("Comment not saved"); }
         return;
       }
-      setComments((prev) => [...prev, rowToLeadDealComment(data)]);
+      const created = rowToLeadDealComment(data);
+      setComments((prev) => [...prev, created]);
+      // The DB stamps author_id/author_name; if the row didn't echo them back,
+      // fall back to the current user so notification routing stays correct.
+      afterComment(dealId, {
+        ...created,
+        authorId: created.authorId || meIdRef.current || "",
+        authorName: created.authorName || meNameRef.current || "",
+      });
       return;
     }
     const c: LeadDealComment = { id: uid(), dealId, authorId: meIdRef.current || "", authorName: meNameRef.current || "", body: text, createdAt: nowIso };
     setComments((prev) => { const next = [...prev, c]; writeLS(DEAL_COMMENTS_KEY, next); return next; });
-  }, [useDb, db]);
+    afterComment(dealId, c);
+  }, [useDb, db, afterComment]);
 
   const value = useMemo<DealsContextValue>(() => ({
     deals, comments, revisions, hydrated, mode: useDb ? "db" : "local",

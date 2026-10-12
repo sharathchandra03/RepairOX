@@ -45,6 +45,7 @@ export type NotificationKind =
   | "deal_approved"
   | "deal_rejected"
   | "deal_resubmitted"
+  | "deal_comment"
   | "generic";
 
 export interface AppNotification {

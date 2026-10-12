@@ -44,6 +44,7 @@ import {
 } from "@/lib/lead-deals";
 import { DealReviewPanel } from "@/components/deals/deal-review-panel";
 import { DealRequestModal } from "@/components/deals/deal-request-modal";
+import { useDealConversationSeen } from "@/hooks/use-deal-conversation-seen";
 
 /** The customer's offer vs the quoted price — a comparison, not two unrelated
  *  numbers. From the quoted price (leadValue) and the requested discount
@@ -78,7 +79,7 @@ const KPI_TONES = {
 export default function DealsPage() {
   const { can } = usePermissions();
   const { isAllShops, stores, getStore } = useStoreContext();
-  const { deals, hydrated, dealById, approveDeal, cancelDeal, deleteDeals, reopenDeal } = useDeals();
+  const { deals, comments, hydrated, dealById, approveDeal, cancelDeal, deleteDeals, reopenDeal } = useDeals();
   const { leads, viewAsReadOnly, viewAsAgentId, canSeeAllLeads, currentUserIsSalesAgent } = useLeads();
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -104,6 +105,18 @@ export default function DealsPage() {
   const [resubmitDeal, setResubmitDeal] = useState<LeadDeal | null>(null);
   const meId = usePermissions().currentUser?.id || "";
   const isOwner = can("full_access");
+  // Per-user "new message" signal for the internal Deal conversation.
+  const { markSeen, hasUnread } = useDealConversationSeen(meId);
+  /** The latest comment per deal (for the subtle unread dot). Recomputes when
+   *  the comments change (realtime / local). */
+  const latestCommentByDeal = useMemo(() => {
+    const m = new Map<string, (typeof comments)[number]>();
+    for (const c of comments) {
+      const prev = m.get(c.dealId);
+      if (!prev || new Date(c.createdAt).getTime() > new Date(prev.createdAt).getTime()) m.set(c.dealId, c);
+    }
+    return m;
+  }, [comments]);
 
   /* Visibility scope (UI = server = RLS). A MANAGER/owner who can view the whole
      queue (deals_view_all / deals_approve / manage_sales / manage_reports, or
@@ -163,6 +176,11 @@ export default function DealsPage() {
     const d = searchParams.get("deal");
     if (d) setOpenId(d);
   }, [searchParams]);
+
+  // Opening a deal's review drawer marks its conversation seen (clears the dot).
+  useEffect(() => {
+    if (openId) markSeen(openId);
+  }, [openId, markSeen]);
 
   const openDeal = openId ? dealById(openId) ?? null : null;
   // Keep the open drawer in sync with live deal updates.
@@ -431,7 +449,19 @@ export default function DealsPage() {
                     </td>
                   )}
                   <td className={cn("py-4 align-middle", canDelete ? "pl-3 pr-3" : "pl-5 pr-3")}>
-                    <p className="font-semibold tabular-nums text-zinc-900">{d.dealNo}</p>
+                    <p className="flex items-center gap-1.5 font-semibold tabular-nums text-zinc-900">
+                      {d.dealNo}
+                      {(() => {
+                        const latest = latestCommentByDeal.get(d.id);
+                        return hasUnread(d, latest?.createdAt, latest?.authorId) ? (
+                          <span
+                            aria-label="New message"
+                            title="New message in the deal conversation"
+                            className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500"
+                          />
+                        ) : null;
+                      })()}
+                    </p>
                     {d.leadNo ? (
                       <button
                         type="button"
