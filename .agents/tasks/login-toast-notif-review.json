@@ -1,0 +1,12 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "info",
+      "confidence": "possible",
+      "label": "Walk-in dueTs ?? 0 fallback",
+      "detail": "followUpDueAt(w)?.getTime() ?? 0 would classify a null-due event as backlog, but the loop already requires isFollowUpDue(w, asOf) and hasActiveFollowUp(w) to pass first, so a null due date cannot reach this line. Confirmed benign; no action required."
+    }
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/login-toast-notif-review.md"
+}
