@@ -951,7 +951,7 @@ export default function LeadsListPage() {
   // Per-user "new message" read-marker for the internal Deal conversation — the
   // ONE shared tracker (same hook the Deals queue + View Lead use). Every dot
   // reads from it; opening the conversation calls markSeen(dealId).
-  const { markSeen: markDealSeen, unreadCount: dealUnreadCount } = useDealConversationSeen(currentUser?.id);
+  const { markSeen: markDealSeen, unreadCount: dealUnreadCount, seenVersion: dealSeenVersion } = useDealConversationSeen(currentUser?.id);
   // Quotations — drive the system-derived "Quotation Created / Sent" action and
   // the Lead Table "Send Quotation" flow. Attribution comes from the lead.
   const { currentQuotationForLead } = useQuotations();
@@ -1017,7 +1017,10 @@ export default function LeadsListPage() {
       };
     }
     return m;
-  }, [leads, deals, comments, dealUnreadCount]);
+    // `dealSeenVersion` bumps on every markSeen (shared tracker) so the per-row
+    // unread count recomputes reactively when the conversation is opened from a
+    // Lead Table row — the badge clears without a refresh.
+  }, [leads, deals, comments, dealUnreadCount, dealSeenVersion]);
   // Bulk-action capability gates (granular key OR coarse fallback via CAP).
   const canBulkStatus = allow(can, CAP.lead.stageChange) && !viewAsReadOnly;
   const canBulkDelete = allow(can, CAP.lead.delete) && !viewAsReadOnly;
@@ -1697,11 +1700,14 @@ export default function LeadsListPage() {
           const showDealLineage =
             wf.dealLineage === "approved" && !statusLower.includes("deal");
           return (
-            // Top-anchor the pill so an optional sub-label grows DOWNWARD and
-            // never shifts the pill's Y. The TD is vertically centered, so this
-            // wrapper reserves the pill + one sub-label line of height and keeps
-            // the pill pinned to the top in both states (with/without subtext).
-            <div className="flex min-h-[42px] min-w-0 flex-col items-stretch justify-start">
+            // The wrapper has NO reserved height, so a caption-less cell is just
+            // the pill — the exact intrinsic height of the Action/Result pill
+            // cells, keeping the pill at the identical Y position in both states.
+            // When present, the lineage caption is absolutely positioned below
+            // the pill (`top-full`), so it never changes the cell's height, never
+            // shifts the pill, and never pushes neighbouring columns — all within
+            // the h-[68px] row rhythm.
+            <div className="relative min-w-0">
               <LeadSelectCell
                 value={lead.status || ""}
                 options={statusOptions}
@@ -1712,7 +1718,7 @@ export default function LeadsListPage() {
               />
               {showDealLineage && (
                 <p
-                  className="mt-0.5 w-full min-w-0 truncate px-0.5 text-[10px] font-medium text-muted-foreground"
+                  className="absolute left-0 right-0 top-full mt-0.5 w-full min-w-0 truncate px-0.5 text-[10px] font-medium text-muted-foreground"
                   title={`Deal → ${stageLabel}`}
                 >
                   Deal → {stageLabel}

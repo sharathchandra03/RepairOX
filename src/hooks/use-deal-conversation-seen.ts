@@ -104,6 +104,12 @@ export interface DealConversationSeen {
    *  authored by someone other than the current user. 0 when all read / none.
    *  Pass the deal's own comments (e.g. commentsForDeal(deal.id)). */
   unreadCount: (deal: LeadDeal, comments: Array<{ createdAt: string; authorId?: string | null; dealId?: string }>) => number;
+  /** The module store's reactive version. Bumps on every markSeen. Consumers
+   *  that cache an unread count in a useMemo (e.g. the Lead Table's
+   *  `dealConvoByLead`) can add this to their deps so the count recomputes when
+   *  markSeen fires — the hook's useSyncExternalStore already re-renders the
+   *  consumer, this just makes memoized reads reactive too. */
+  seenVersion: number;
 }
 
 /**
@@ -115,7 +121,7 @@ export function useDealConversationSeen(userId: string | null | undefined): Deal
 
   // Subscribe to the module store so markSeen (from any surface) re-renders
   // this consumer. The snapshot is the version counter — cheap and stable.
-  useSyncExternalStore(subscribe, getVersion, getVersion);
+  const seenVersion = useSyncExternalStore(subscribe, getVersion, getVersion);
 
   const markSeen = useCallback((dealId: string) => {
     if (!dealId) return;
@@ -160,5 +166,5 @@ export function useDealConversationSeen(userId: string | null | undefined): Deal
     [key, userId],
   );
 
-  return { markSeen, hasUnread, unreadCount };
+  return { markSeen, hasUnread, unreadCount, seenVersion };
 }
