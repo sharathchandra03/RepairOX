@@ -217,6 +217,11 @@ export default function AgentPerformancePage() {
   // They still see the shared read-only leaderboard; they just can't switch
   // agents or scope to the All-Agents comparison.
   const canCrossAgent = canAll && !currentUserIsSalesAgent(activeStoreId);
+  // Everyone past the Restricted guard can see the SHARED leaderboard + toggle
+  // to the All-Agents ranked table (including an individual Sales Agent, so
+  // they can see where they rank). This is distinct from canCrossAgent, which
+  // only gates picking/drilling into ANOTHER agent's individual data.
+  const canViewLeaderboard = canAll || canOwn;
 
   // A deep link (?agent=<id>&view=individual) opens the Individual view for a
   // specific agent — used by the drill-down route and external links. Only an
@@ -229,10 +234,12 @@ export default function AgentPerformancePage() {
   // Agent (own-scope) lands directly on their own Individual workspace. A
   // ?view=individual (or an ?agent= deep link) opens Individual immediately.
   const [tab, setTab] = useState<"individual" | "all">(
-    // A user forced to own-scope (no all-perf key, OR an individual Sales Agent
-    // even with a coarse performanceAll key) must never open on the All-Agents
-    // table. An active owner lens (viewAsAgentId) forces the Individual view on
-    // that agent; otherwise owners default to the All-Agents table.
+    // Role-driven DEFAULT only — never a pin. An individual Sales Agent lands
+    // on their own Individual workspace; an owner lands on the All-Agents table
+    // (unless an owner lens / ?view=individual / ?agent= deep link opens
+    // Individual immediately). Individual agents may still freely toggle to the
+    // shared All-Agents table — the toggle below is gated on canViewLeaderboard,
+    // not on canCrossAgent.
     !canCrossAgent
       ? "individual"
       : (viewAsAgentId || initialViewParam === "individual" || initialAgentParam ? "individual" : "all"),
@@ -252,10 +259,10 @@ export default function AgentPerformancePage() {
      Individual view; when they clear it ("All Agents"), it returns to the
      combined leaderboard. Scope-only — never navigates. */
   useEffect(() => {
-    // An individual Sales Agent (or any own-scoped user) is pinned to their own
-    // Individual view — a stray lens can never flip them into All / another
-    // agent.
-    if (!canCrossAgent) { setTab("individual"); return; }
+    // Only the OWNER lens drives the tab here. An individual Sales Agent has no
+    // lens (canViewAsAgent is false in the context), so leave their own toggle
+    // choice alone — they may sit on All Agents or Individual as they please.
+    if (!canCrossAgent) return;
     if (viewAsAgentId) { setScopeAgentId(viewAsAgentId); setTab("individual"); }
     else { setTab("all"); }
   }, [viewAsAgentId, canCrossAgent]);
@@ -326,9 +333,12 @@ export default function AgentPerformancePage() {
 
   if (!canAll && !canOwn) return <Restricted />;
 
-  /* The All Agents / Individual toggle — cross-agent (owner/full-access) only.
-     An individual Sales Agent never sees it, even with a coarse perf key. */
-  const tabToggle = canCrossAgent ? (
+  /* The All Agents / Individual toggle — the SHARED leaderboard control,
+     available to EVERYONE who can view the page (owner AND individual Sales
+     Agent). An individual agent uses it to toggle between their own Individual
+     report and the ranked All-Agents table (read-only, their row highlighted);
+     they still cannot pick/drill into another agent (that is canCrossAgent). */
+  const tabToggle = canViewLeaderboard ? (
     <SegmentedTabs
       size="sm"
       value={tab}
@@ -573,11 +583,14 @@ export default function AgentPerformancePage() {
         rows={rankedRows}
         rowKind="agent"
         firstColLabel="Agent Name"
-        showReport={canAll}
+        showReport={canCrossAgent}
         // Owner "View Details" → open that agent's Individual view in-place,
         // preserving the current period/store/filter context (no navigation,
-        // no impersonation — just a scope switch).
-        onReport={canAll ? (r) => { setScopeAgentId(r.agentId); setTab("individual"); setViewAsAgent(r.agentId); } : undefined}
+        // no impersonation — just a scope switch). Gated on canCrossAgent so an
+        // individual Sales Agent on the leaderboard can NEVER drill into another
+        // agent's data (even with a coarse performanceAll key) — they get a
+        // read-only ranked table with their own row highlighted only.
+        onReport={canCrossAgent ? (r) => { setScopeAgentId(r.agentId); setTab("individual"); setViewAsAgent(r.agentId); } : undefined}
         highlightAgentId={currentUserId ?? undefined}
         emptyText="No Sales Agents match the current filters. Metrics appear as soon as agents own real leads."
       />
