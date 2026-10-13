@@ -107,8 +107,9 @@ export function UserDetailsDrawer({
   onChangeRole: (m: TeamMember) => void;
   /** Open the Change Store drawer for this member (home-store relocation). */
   onChangeStore?: (m: TeamMember) => void;
-  /** Open the Reset Password drawer for this member. */
-  onResetPassword: (m: TeamMember) => void;
+  /** Open the Reset Password drawer for this member. `mode` distinguishes
+   *  resetting an existing login from creating the first password to enable it. */
+  onResetPassword: (m: TeamMember, mode?: "reset" | "enable") => void;
   /** Enable/disable login. */
   onToggleLogin: (id: string, enabled: boolean) => void;
   /** Suspend the account. */
@@ -445,7 +446,7 @@ export function UserDetailsDrawer({
 
             {canManage && (
               <div className="flex flex-wrap gap-2 pt-1">
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onResetPassword(d)}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onResetPassword(d, "reset")}>
                   <KeyRound className="h-3.5 w-3.5" /> Reset password
                 </Button>
                 {d.loginEnabled ? (
@@ -453,7 +454,7 @@ export function UserDetailsDrawer({
                     <Ban className="h-3.5 w-3.5" /> Disable login
                   </Button>
                 ) : (
-                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onResetPassword(d)}>
+                  <Button size="sm" variant="outline" className="gap-1.5" onClick={() => onResetPassword(d, "enable")}>
                     <Power className="h-3.5 w-3.5" /> Enable login…
                   </Button>
                 )}

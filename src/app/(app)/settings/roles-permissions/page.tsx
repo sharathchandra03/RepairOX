@@ -371,6 +371,7 @@ function RolesTab({
   const [editingMember, setEditingMember] = useState<TeamMember | null>(null);
   const [removingMember, setRemovingMember] = useState<TeamMember | null>(null);
   const [resettingMember, setResettingMember] = useState<TeamMember | null>(null);
+  const [resettingMemberMode, setResettingMemberMode] = useState<"reset" | "enable">("reset");
   const [suspendingMember, setSuspendingMember] = useState<TeamMember | null>(null);
   const active = allRoles.find((r) => r.id === activeRoleId) ?? allRoles[0];
   const totalPermissions = ALL_PERMISSIONS.length;
@@ -579,6 +580,7 @@ function RolesTab({
             setEditingMember={setEditingMember}
             setRemovingMember={setRemovingMember}
             setResettingMember={setResettingMember}
+            setResettingMemberMode={setResettingMemberMode}
             setSuspendingMember={setSuspendingMember}
           />
         )}
@@ -641,7 +643,7 @@ function RolesTab({
       </motion.div>
 
       <ChangeRoleDrawer open={!!editingMember} onClose={() => setEditingMember(null)} memberName={editingMember?.name ?? ""} currentRoleId={editingMember?.roleId ?? allRoles[0].id} roles={allRoles} onConfirm={(roleId) => editingMember && handleChangeRole(editingMember.email, roleId)} />
-      <ResetPasswordDrawer open={!!resettingMember} onClose={() => setResettingMember(null)} memberName={resettingMember?.name ?? ""} onConfirm={(password) => { if (resettingMember) resetPassword(resettingMember.id, password); setResettingMember(null); }} />
+      <ResetPasswordDrawer open={!!resettingMember} onClose={() => setResettingMember(null)} memberName={resettingMember?.name ?? ""} mode={resettingMemberMode} email={resettingMember?.email} onConfirm={(password) => { if (resettingMember) resetPassword(resettingMember.id, password); setResettingMember(null); }} />
       <ConfirmDialog open={!!suspendingMember} onClose={() => setSuspendingMember(null)} title="Suspend this staff member?" description={`${suspendingMember?.name ?? "They"} will lose access immediately and won't be able to log in until reactivated.`} confirmLabel="Suspend" onConfirm={() => { if (suspendingMember) setStaffStatus(suspendingMember.id, "suspended"); setSuspendingMember(null); }} />
       <DeleteMemberDialog open={!!removingMember} onClose={() => setRemovingMember(null)} member={removingMember} onConfirm={handleRemoveMember} />
     </div>
@@ -669,7 +671,7 @@ function ScopeCard({ icon: Icon, label, value, hint }: {
 /* ─── Role Members Panel — the member list shown inside the Roles tab ─── */
 function RoleMembersPanel({
   members, active, selfEmail, toggleLogin, setStaffStatus,
-  setEditingMember, setRemovingMember, setResettingMember, setSuspendingMember,
+  setEditingMember, setRemovingMember, setResettingMember, setResettingMemberMode, setSuspendingMember,
 }: {
   members: TeamMember[];
   active: RoleDef;
@@ -679,6 +681,7 @@ function RoleMembersPanel({
   setEditingMember: (m: TeamMember | null) => void;
   setRemovingMember: (m: TeamMember | null) => void;
   setResettingMember: (m: TeamMember | null) => void;
+  setResettingMemberMode: (mode: "reset" | "enable") => void;
   setSuspendingMember: (m: TeamMember | null) => void;
 }) {
   return (
@@ -774,7 +777,7 @@ function RoleMembersPanel({
                         <MenuItem icon={UserCog} onClick={() => { setEditingMember(m); close(); }}>
                           Change role
                         </MenuItem>
-                        <MenuItem icon={KeyRound} onClick={() => { setResettingMember(m); close(); }}>
+                        <MenuItem icon={KeyRound} onClick={() => { setResettingMemberMode("reset"); setResettingMember(m); close(); }}>
                           Reset password
                         </MenuItem>
                         {m.loginEnabled ? (
@@ -782,7 +785,7 @@ function RoleMembersPanel({
                             Disable login
                           </MenuItem>
                         ) : (
-                          <MenuItem icon={Power} onClick={() => { setResettingMember(m); close(); }}>
+                          <MenuItem icon={Power} onClick={() => { setResettingMemberMode("enable"); setResettingMember(m); close(); }}>
                             Enable login…
                           </MenuItem>
                         )}
@@ -1630,6 +1633,7 @@ function UsersTab({
   const [changingStore, setChangingStore] = useState<TeamMember | null>(null);
   const [removing, setRemoving] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
+  const [resettingMode, setResettingMode] = useState<"reset" | "enable">("reset");
   const [suspending, setSuspending] = useState<TeamMember | null>(null);
 
   // Each user's category is DERIVED from their role (never stored). Adding a
@@ -1807,7 +1811,7 @@ function UsersTab({
                                 <MenuItem icon={UserCog} onClick={() => { setEditing(t); close(); }}>
                                   Change role
                                 </MenuItem>
-                                <MenuItem icon={KeyRound} onClick={() => { setResetting(t); close(); }}>
+                                <MenuItem icon={KeyRound} onClick={() => { setResettingMode("reset"); setResetting(t); close(); }}>
                                   Reset password
                                 </MenuItem>
                                 {t.loginEnabled ? (
@@ -1815,7 +1819,7 @@ function UsersTab({
                                     Disable login
                                   </MenuItem>
                                 ) : (
-                                  <MenuItem icon={Power} onClick={() => { setResetting(t); close(); }}>
+                                  <MenuItem icon={Power} onClick={() => { setResettingMode("enable"); setResetting(t); close(); }}>
                                     Enable login…
                                   </MenuItem>
                                 )}
@@ -1862,7 +1866,7 @@ function UsersTab({
         onClose={() => setViewing(null)}
         onChangeRole={(m) => { setViewing(null); setEditing(m); }}
         onChangeStore={(m) => { setViewing(null); setChangingStore(m); }}
-        onResetPassword={(m) => { setViewing(null); setResetting(m); }}
+        onResetPassword={(m, mode) => { setViewing(null); setResettingMode(mode ?? "reset"); setResetting(m); }}
         onToggleLogin={(id, enabled) => toggleLogin(id, enabled)}
         onSuspend={(m) => { setViewing(null); setSuspending(m); }}
         onActivate={(id) => setStaffStatus(id, "active")}
@@ -1891,6 +1895,8 @@ function UsersTab({
         open={!!resetting}
         onClose={() => setResetting(null)}
         memberName={resetting?.name ?? ""}
+        mode={resettingMode}
+        email={resetting?.email}
         onConfirm={(password, opts) => {
           if (resetting) resetPassword(resetting.id, password, opts);
           setResetting(null);

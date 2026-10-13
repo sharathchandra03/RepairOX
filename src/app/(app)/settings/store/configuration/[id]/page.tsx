@@ -88,6 +88,7 @@ function ViewStoreInner() {
   const [changingRole, setChangingRole] = useState<TeamMember | null>(null);
   const [changingStore, setChangingStore] = useState<TeamMember | null>(null);
   const [resetting, setResetting] = useState<TeamMember | null>(null);
+  const [resettingMode, setResettingMode] = useState<"reset" | "enable">("reset");
   const [archiving, setArchiving] = useState(false);
   const [changingMgr, setChangingMgr] = useState(false);
 
@@ -382,7 +383,7 @@ function ViewStoreInner() {
         onClose={() => setViewingMember(null)}
         onChangeRole={(m) => { setViewingMember(null); setChangingRole(m); }}
         onChangeStore={(m) => { setViewingMember(null); setChangingStore(m); }}
-        onResetPassword={(m) => { setViewingMember(null); setResetting(m); }}
+        onResetPassword={(m, mode) => { setViewingMember(null); setResettingMode(mode ?? "reset"); setResetting(m); }}
         onToggleLogin={(id, enabled) => { toggleLogin(id, enabled); setTimeout(load, 400); }}
         onSuspend={(m) => { setStaffStatus(m.id, "suspended"); setViewingMember(null); setTimeout(load, 400); }}
         onActivate={(id) => { setStaffStatus(id, "active"); setTimeout(load, 400); }}
@@ -411,6 +412,8 @@ function ViewStoreInner() {
         open={!!resetting}
         onClose={() => setResetting(null)}
         memberName={resetting?.name ?? ""}
+        mode={resettingMode}
+        email={resetting?.email}
         onConfirm={(password, opts) => { if (resetting) resetPassword(resetting.id, password, opts); setResetting(null); setTimeout(load, 400); }}
       />
 

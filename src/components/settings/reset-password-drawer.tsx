@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { KeyRound, Check, Lock, Eye, EyeOff, RefreshCw, Copy, CheckCheck } from "lucide-react";
+import { KeyRound, Check, Lock, Eye, EyeOff, RefreshCw, Copy, CheckCheck, Mail } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
@@ -32,12 +32,20 @@ export function ResetPasswordDrawer({
   onClose,
   memberName,
   onConfirm,
+  mode = "reset",
+  email,
 }: {
   open: boolean;
   onClose: () => void;
   memberName: string;
   onConfirm: (password: string, opts?: { temporary?: boolean }) => void;
+  /** Intent of this drawer: resetting an existing login vs. creating the first
+   *  password to enable login. Defaults to "reset". */
+  mode?: "reset" | "enable";
+  /** The member's sign-in email — shown read-only in "enable" mode. */
+  email?: string;
 }) {
+  const isEnable = mode === "enable";
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
@@ -89,17 +97,31 @@ export function ResetPasswordDrawer({
       open={open}
       onClose={onClose}
       icon={KeyRound}
-      title="Reset password"
+      title={isEnable ? "Enable login" : "Reset password"}
       subtitle={memberName}
       footer={
         <Button className="w-full gap-1.5" onClick={submit}>
-          <Check className="h-4 w-4" /> Update password
+          <Check className="h-4 w-4" /> {isEnable ? "Enable login" : "Update password"}
         </Button>
       }
     >
       <div className="space-y-5">
+        {isEnable && (
+          <div className="space-y-1.5">
+            <Label htmlFor="reset-email">Email</Label>
+            <Input
+              id="reset-email"
+              type="email"
+              value={email ?? ""}
+              readOnly
+              disabled
+              placeholder="No email on file"
+              iconLeft={<Mail className="h-4 w-4" />}
+            />
+          </div>
+        )}
         <div className="space-y-1.5">
-          <Label htmlFor="reset-pw">New password</Label>
+          <Label htmlFor="reset-pw">{isEnable ? "Create password" : "New password"}</Label>
           <Input
             id="reset-pw"
             type={show ? "text" : "password"}
@@ -115,7 +137,7 @@ export function ResetPasswordDrawer({
           />
         </div>
         <div className="space-y-1.5">
-          <Label htmlFor="reset-confirm">Confirm new password</Label>
+          <Label htmlFor="reset-confirm">{isEnable ? "Confirm password" : "Confirm new password"}</Label>
           <Input
             id="reset-confirm"
             type={show ? "text" : "password"}
@@ -166,7 +188,7 @@ export function ResetPasswordDrawer({
           <span>
             <span className="block text-[13px] font-semibold">Temporary — force change at next login</span>
             <span className="block text-[12px] text-muted-foreground">
-              {memberName} must set their own password the first time they sign in.
+              {memberName} must change this password the first time they sign in.
             </span>
           </span>
         </label>
@@ -178,8 +200,9 @@ export function ResetPasswordDrawer({
         )}
 
         <p className="rounded-xl border border-dashed border-[#B3BFF6] bg-[#EEF1FD]/60 px-3.5 py-2.5 text-[12px] leading-relaxed text-[#3347D6]">
-          {memberName} will need to use this new password the next time they sign in. Login is enabled automatically.
-          The existing password is never shown — it can only be replaced.
+          {isEnable
+            ? `This creates the first password for ${memberName}. Login will be enabled and they can sign in with their email and this password.`
+            : `${memberName} will need to use this new password the next time they sign in. Login is enabled automatically. The existing password is never shown — it can only be replaced.`}
         </p>
       </div>
     </Drawer>
