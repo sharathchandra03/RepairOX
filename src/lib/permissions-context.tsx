@@ -254,7 +254,7 @@ interface PermissionsContextValue {
   }) => Promise<{ ok: boolean; reason?: string }>;
   /** Authenticated fetch to a server route (attaches the bearer token). */
   apiFetch: (path: string, init?: RequestInit) => Promise<{ ok: boolean; status: number; json: any }>;
-  resetPassword: (id: string, newPassword: string, opts?: { temporary?: boolean }) => void;
+  resetPassword: (id: string, newPassword: string, opts?: { temporary?: boolean; email?: string }) => void;
   setStaffStatus: (id: string, status: TeamMember["status"]) => void;
   toggleLogin: (id: string, enabled: boolean, password?: string) => void;
 
@@ -816,9 +816,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     return { ok: true };
   }, [currentUser, apiFetch, refreshTeamFromDb]);
 
-  const resetPassword = useCallback((id: string, newPassword: string, opts?: { temporary?: boolean }) => {
+  const resetPassword = useCallback((id: string, newPassword: string, opts?: { temporary?: boolean; email?: string }) => {
     const now = new Date().toISOString();
     const temporary = Boolean(opts?.temporary);
+    const email = opts?.email?.trim() || undefined;
     setTeam((prev) => prev.map((m) => (m.id === id
       ? {
           ...m,
@@ -826,13 +827,14 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
           loginEnabled: true,
           lastPasswordChangedAt: now,
           passwordResetRequired: temporary,
+          ...(email ? { email } : {}),
           updatedAt: now,
         }
       : m)));
     if (isSupabaseConfigured) {
       apiFetch(`/api/staff/${id}`, {
         method: "PATCH",
-        body: JSON.stringify({ password: newPassword, loginEnabled: true, temporary }),
+        body: JSON.stringify({ password: newPassword, loginEnabled: true, temporary, ...(email ? { email } : {}) }),
       }).then(() => refreshTeamFromDb());
     }
   }, [apiFetch, refreshTeamFromDb]);

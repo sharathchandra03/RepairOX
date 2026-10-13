@@ -8,6 +8,10 @@ import { Input, Label } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { validatePassword, PASSWORD_MIN_LENGTH } from "@/lib/auth";
 
+/** A basic email-shape check — good enough to gate the enable-login confirm.
+ *  (The server normalizes and Supabase Auth is the real validator.) */
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 /** Generate a readable, reasonably strong temporary password. */
 function generateTempPassword(): string {
   const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -38,7 +42,7 @@ export function ResetPasswordDrawer({
   open: boolean;
   onClose: () => void;
   memberName: string;
-  onConfirm: (password: string, opts?: { temporary?: boolean }) => void;
+  onConfirm: (password: string, opts?: { temporary?: boolean; email?: string }) => void;
   /** Intent of this drawer: resetting an existing login vs. creating the first
    *  password to enable login. Defaults to "reset". */
   mode?: "reset" | "enable";
@@ -46,6 +50,7 @@ export function ResetPasswordDrawer({
   email?: string;
 }) {
   const isEnable = mode === "enable";
+  const [emailValue, setEmailValue] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [show, setShow] = useState(false);
@@ -55,6 +60,7 @@ export function ResetPasswordDrawer({
 
   useEffect(() => {
     if (open) {
+      setEmailValue(email ?? "");
       setPassword("");
       setConfirm("");
       setShow(false);
@@ -62,7 +68,7 @@ export function ResetPasswordDrawer({
       setCopied(false);
       setError(null);
     }
-  }, [open]);
+  }, [open, email]);
 
   function fillGenerated() {
     const pw = generateTempPassword();
@@ -83,13 +89,20 @@ export function ResetPasswordDrawer({
     } catch { /* clipboard blocked — the value is still visible to copy manually */ }
   }
 
+  const trimmedEmail = emailValue.trim();
+  const emailValid = EMAIL_RE.test(trimmedEmail);
+
   function submit() {
+    if (isEnable && !emailValid) {
+      setError("Enter a valid email address.");
+      return;
+    }
     const check = validatePassword(password, confirm);
     if (!check.ok) {
       setError(check.message!);
       return;
     }
-    onConfirm(password, { temporary });
+    onConfirm(password, { temporary, ...(isEnable ? { email: trimmedEmail } : {}) });
   }
 
   return (
@@ -100,7 +113,11 @@ export function ResetPasswordDrawer({
       title={isEnable ? "Enable login" : "Reset password"}
       subtitle={memberName}
       footer={
-        <Button className="w-full gap-1.5" onClick={submit}>
+        <Button
+          className="w-full gap-1.5"
+          onClick={submit}
+          disabled={isEnable && (!emailValid || !password || !confirm)}
+        >
           <Check className="h-4 w-4" /> {isEnable ? "Enable login" : "Update password"}
         </Button>
       }
@@ -112,9 +129,8 @@ export function ResetPasswordDrawer({
             <Input
               id="reset-email"
               type="email"
-              value={email ?? ""}
-              readOnly
-              disabled
+              value={emailValue}
+              onChange={(e) => setEmailValue(e.target.value)}
               placeholder="No email on file"
               iconLeft={<Mail className="h-4 w-4" />}
             />

@@ -643,7 +643,7 @@ function RolesTab({
       </motion.div>
 
       <ChangeRoleDrawer open={!!editingMember} onClose={() => setEditingMember(null)} memberName={editingMember?.name ?? ""} currentRoleId={editingMember?.roleId ?? allRoles[0].id} roles={allRoles} onConfirm={(roleId) => editingMember && handleChangeRole(editingMember.email, roleId)} />
-      <ResetPasswordDrawer open={!!resettingMember} onClose={() => setResettingMember(null)} memberName={resettingMember?.name ?? ""} mode={resettingMemberMode} email={resettingMember?.email} onConfirm={(password) => { if (resettingMember) resetPassword(resettingMember.id, password); setResettingMember(null); }} />
+      <ResetPasswordDrawer open={!!resettingMember} onClose={() => setResettingMember(null)} memberName={resettingMember?.name ?? ""} mode={resettingMemberMode} email={resettingMember?.email} onConfirm={(password, opts) => { if (resettingMember) resetPassword(resettingMember.id, password, opts); setResettingMember(null); }} />
       <ConfirmDialog open={!!suspendingMember} onClose={() => setSuspendingMember(null)} title="Suspend this staff member?" description={`${suspendingMember?.name ?? "They"} will lose access immediately and won't be able to log in until reactivated.`} confirmLabel="Suspend" onConfirm={() => { if (suspendingMember) setStaffStatus(suspendingMember.id, "suspended"); setSuspendingMember(null); }} />
       <DeleteMemberDialog open={!!removingMember} onClose={() => setRemovingMember(null)} member={removingMember} onConfirm={handleRemoveMember} />
     </div>
