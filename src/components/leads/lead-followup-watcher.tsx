@@ -74,6 +74,14 @@ export function LeadFollowUpWatcher() {
   const soundPrefsRef = useRef(soundPrefs);
   soundPrefsRef.current = soundPrefs;
 
+  // Session-start baseline for the toast/sound backlog guard. Captured once on
+  // the first announce-effect run (re-baselined when the user id changes — see
+  // below), so the many clock-driven re-runs don't move it. A follow-up whose
+  // due instant is BEFORE this baseline is historical backlog: it still records
+  // the durable bell notification, but must NOT toast/sound on login.
+  const sessionStartRef = useRef<number | null>(null);
+  const sessionUserRef = useRef<string | undefined>(undefined);
+
   // Feed the engine every scheduled follow-up's due instant so it schedules a
   // precise timer to the soonest one. Recomputed whenever the dataset changes.
   const dueInstants = useMemo(() => collectLeadDueInstants(followUps), [followUps]);
@@ -88,6 +96,14 @@ export function LeadFollowUpWatcher() {
     const asOf = now;
     const seen = getAnnounced();
     let changed = false;
+
+    // Establish (or re-establish on user switch) the session-start baseline.
+    // Anything already due before this instant is backlog → bell-only, no toast.
+    if (sessionStartRef.current === null || sessionUserRef.current !== currentUserId) {
+      sessionStartRef.current = Date.now();
+      sessionUserRef.current = currentUserId;
+    }
+    const sessionStart = sessionStartRef.current;
 
     for (const fu of followUps) {
       if (fu.status !== "scheduled") continue;
@@ -104,6 +120,14 @@ export function LeadFollowUpWatcher() {
       if (seen.has(key) || hasNotification(key)) { seen.add(key); continue; }
       seen.add(key);
       changed = true;
+
+      // Backlog = became due BEFORE this session started. Such events still
+      // record the durable bell notification below, but must not toast/sound
+      // (that is the login burst). A follow-up crossing its time live, or an
+      // event routed to this user during the session, has dueTs >= sessionStart
+      // and still toasts.
+      const dueTs = new Date(fu.dueAt).getTime();
+      const isBacklog = dueTs < sessionStart;
 
       const who = lead?.name || lead?.leadNo || "Lead";
       const ref = lead?.leadNo || fu.leadId;
@@ -123,15 +147,17 @@ export function LeadFollowUpWatcher() {
         dedupeKey: key,
       });
 
-      toast.info(title, {
-        description: `${ref} · ${who} — Follow-up #${fu.seq}`,
-        duration: 8000,
-        action: { label: "Open Lead", onClick: () => { window.location.href = href; } },
-      });
+      if (!isBacklog) {
+        toast.info(title, {
+          description: `${ref} · ${who} — Follow-up #${fu.seq}`,
+          duration: 8000,
+          action: { label: "Open Lead", onClick: () => { window.location.href = href; } },
+        });
 
-      // The user's chosen notification sound — the SAME per-user preference the
-      // Walk-In follow-up uses. Respects the enabled flag inside playWalkInSound.
-      playWalkInSound(soundPrefsRef.current);
+        // The user's chosen notification sound — the SAME per-user preference the
+        // Walk-In follow-up uses. Respects the enabled flag inside playWalkInSound.
+        playWalkInSound(soundPrefsRef.current);
+      }
     }
 
     if (changed) persistAnnounced();

@@ -83,6 +83,13 @@ export function WalkInFollowUpWatcher() {
   const soundPrefsRef = useRef(soundPrefs);
   soundPrefsRef.current = soundPrefs;
 
+  // Session-start baseline for the toast/sound backlog guard. Captured once on
+  // the first announce-effect run so the many clock-driven re-runs don't move
+  // it. A follow-up whose due instant is BEFORE this baseline is historical
+  // backlog: it still records the durable bell notification, but must NOT
+  // toast/sound on login (that is the login burst).
+  const sessionStartRef = useRef<number | null>(null);
+
   // Feed the engine every pending follow-up's due instant so it schedules a
   // precise timer to the soonest one. Recomputed whenever the dataset changes.
   const dueInstants = useMemo(() => collectDueInstants(walkIns), [walkIns]);
@@ -96,6 +103,11 @@ export function WalkInFollowUpWatcher() {
     const asOf = new Date(now);
     const seen = getAnnounced();
     let changed = false;
+
+    // Establish the session-start baseline on the first run. Anything already
+    // due before this instant is backlog → bell-only, no toast.
+    if (sessionStartRef.current === null) sessionStartRef.current = Date.now();
+    const sessionStart = sessionStartRef.current;
 
     for (const w of walkIns) {
       // Only active (not converted / lost / completed) follow-ups whose time has
@@ -111,6 +123,13 @@ export function WalkInFollowUpWatcher() {
       if (seen.has(key) || hasNotification(key)) { seen.add(key); continue; }
       seen.add(key);
       changed = true;
+
+      // Backlog = became due BEFORE this session started. Such events still
+      // record the durable bell notification below, but must not toast/sound
+      // (that is the login burst). A follow-up crossing its time live has
+      // dueTs >= sessionStart and still toasts.
+      const dueTs = followUpDueAt(w)?.getTime() ?? 0;
+      const isBacklog = dueTs < sessionStart;
 
       const who = w.customer || walkInDisplayId(w);
       const attempt = w.followUpAttempt ? `${ordinal(w.followUpAttempt)} Follow-Up · ` : "";
@@ -129,18 +148,20 @@ export function WalkInFollowUpWatcher() {
         dedupeKey: key,
       });
 
-      toast.info("Walk-In follow-up due", {
-        description: `${attempt}${desc}`,
-        duration: 8000,
-        action: {
-          label: "Open Walk-In",
-          onClick: () => { window.location.href = `/walk-in?walkIn=${encodeURIComponent(w.id)}`; },
-        },
-      });
+      if (!isBacklog) {
+        toast.info("Walk-In follow-up due", {
+          description: `${attempt}${desc}`,
+          duration: 8000,
+          action: {
+            label: "Open Walk-In",
+            onClick: () => { window.location.href = `/walk-in?walkIn=${encodeURIComponent(w.id)}`; },
+          },
+        });
 
-      // Sound plays ONCE because a NEW follow-up became due — never repeated
-      // just because the notification remains unread.
-      playWalkInSound(soundPrefsRef.current);
+        // Sound plays ONCE because a NEW follow-up became due — never repeated
+        // just because the notification remains unread.
+        playWalkInSound(soundPrefsRef.current);
+      }
     }
 
     if (changed) persistAnnounced();
