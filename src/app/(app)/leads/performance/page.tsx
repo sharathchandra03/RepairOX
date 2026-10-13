@@ -163,20 +163,26 @@ function AgentScopePicker({
           {agents.length === 0 ? (
             <p className="px-3 py-2 text-[12px] text-muted-foreground">No sales agents available</p>
           ) : (
-            agents.map((a) => (
-              <MenuItem key={a.id} onClick={() => { onSelect(a.id); close(); }} className={a.id === selectedId ? "bg-[#EEF1FD]" : ""}>
-                <span className="flex flex-1 items-center justify-between gap-2">
-                  <span className="flex items-center gap-2 min-w-0">
-                    <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#4361EE] text-[9px] font-bold text-white">{initials(a.name)}</span>
-                    <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-medium">{a.name}</span>
-                      <span className="block truncate text-[10px] text-muted-foreground">{a.roleLabel}</span>
+            // Cap the agent list to ~half the viewport with internal scroll so a
+            // long roster never grows the dropdown very tall (matches the topbar
+            // AgentScopeSelector's max-h scroll pattern). rox-rail-scroll = the
+            // thin brand-blue scrollbar utility.
+            <div className="max-h-[min(50vh,320px)] overflow-y-auto rox-rail-scroll">
+              {agents.map((a) => (
+                <MenuItem key={a.id} onClick={() => { onSelect(a.id); close(); }} className={a.id === selectedId ? "bg-[#EEF1FD]" : ""}>
+                  <span className="flex flex-1 items-center justify-between gap-2">
+                    <span className="flex items-center gap-2 min-w-0">
+                      <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[#4361EE] text-[9px] font-bold text-white">{initials(a.name)}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate text-[13px] font-medium">{a.name}</span>
+                        <span className="block truncate text-[10px] text-muted-foreground">{a.roleLabel}</span>
+                      </span>
                     </span>
+                    {a.id === selectedId && <Check className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />}
                   </span>
-                  {a.id === selectedId && <Check className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />}
-                </span>
-              </MenuItem>
-            ))
+                </MenuItem>
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -193,7 +199,7 @@ export default function AgentPerformancePage() {
   // In Single-Store Lead mode there is only ONE lead store, so a store filter is
   // meaningless clutter — hide it. Multi-Store mode keeps the full filter.
   const leadMode = useLeadStoreMode();
-  const { salesAgents, leads, followUps, viewAsAgentId, setViewAsAgent } = useLeads();
+  const { salesAgents, leads, followUps, viewAsAgentId, setViewAsAgent, currentUserIsSalesAgent } = useLeads();
   const { tickets, invoices } = useStore();
 
   // Agent Performance is the ONE surface where everyone — owner AND individual
@@ -204,6 +210,13 @@ export default function AgentPerformancePage() {
   // see where they rank. Gated by the own/all performance keys only.
   const canAll = allow(can, CAP.lead.performanceAll);
   const canOwn = allow(can, CAP.lead.performanceOwn);
+  // A user who is themselves an eligible Sales Agent never gets cross-agent
+  // SCOPE controls on this page (the agent picker + the All/Individual toggle),
+  // even if their role carries a coarse reporting key (e.g. view_sales_reports
+  // from the Leads "view" tier). Mirrors the topbar AgentScopeSelector guard.
+  // They still see the shared read-only leaderboard; they just can't switch
+  // agents or scope to the All-Agents comparison.
+  const canCrossAgent = canAll && !currentUserIsSalesAgent(activeStoreId);
 
   // A deep link (?agent=<id>&view=individual) opens the Individual view for a
   // specific agent — used by the drill-down route and external links. Only an
@@ -216,9 +229,13 @@ export default function AgentPerformancePage() {
   // Agent (own-scope) lands directly on their own Individual workspace. A
   // ?view=individual (or an ?agent= deep link) opens Individual immediately.
   const [tab, setTab] = useState<"individual" | "all">(
-    // An active owner lens (viewAsAgentId) forces the Individual view on that
-    // agent; otherwise owners default to the All-Agents table, agents to self.
-    viewAsAgentId || initialViewParam === "individual" || initialAgentParam ? "individual" : (canAll ? "all" : "individual"),
+    // A user forced to own-scope (no all-perf key, OR an individual Sales Agent
+    // even with a coarse performanceAll key) must never open on the All-Agents
+    // table. An active owner lens (viewAsAgentId) forces the Individual view on
+    // that agent; otherwise owners default to the All-Agents table.
+    !canCrossAgent
+      ? "individual"
+      : (viewAsAgentId || initialViewParam === "individual" || initialAgentParam ? "individual" : "all"),
   );
 
   /* ── ONE shared filter state drives BOTH tabs + EVERY Individual section ── */
@@ -235,10 +252,13 @@ export default function AgentPerformancePage() {
      Individual view; when they clear it ("All Agents"), it returns to the
      combined leaderboard. Scope-only — never navigates. */
   useEffect(() => {
-    if (!canAll) return;
+    // An individual Sales Agent (or any own-scoped user) is pinned to their own
+    // Individual view — a stray lens can never flip them into All / another
+    // agent.
+    if (!canCrossAgent) { setTab("individual"); return; }
     if (viewAsAgentId) { setScopeAgentId(viewAsAgentId); setTab("individual"); }
     else { setTab("all"); }
-  }, [viewAsAgentId, canAll]);
+  }, [viewAsAgentId, canCrossAgent]);
 
   const revenue = useMemo(() => ({ tickets, invoices }), [tickets, invoices]);
 
@@ -267,11 +287,13 @@ export default function AgentPerformancePage() {
        • Owner → the selected agent, defaulting to self when they are an agent,
          else the first eligible agent. */
   const scopedAgent = useMemo<Pick<SalesAgent, "id" | "name" | "avatarUrl" | "roleLabel">>(() => {
-    if (!canAll) return selfAgent;
+    // Forced own-scope (no all-perf key, OR an individual Sales Agent) always
+    // resolves to self — a ?agent=<other> deep link still renders THEIR data.
+    if (!canCrossAgent) return selfAgent;
     const pick = scopeAgentId || selfAgent.id;
     return eligibleAgents.find((a) => a.id === pick)
       ?? (eligibleAgents.find((a) => a.id === selfAgent.id) ?? eligibleAgents[0] ?? selfAgent);
-  }, [canAll, scopeAgentId, selfAgent, eligibleAgents]);
+  }, [canCrossAgent, scopeAgentId, selfAgent, eligibleAgents]);
 
   /* Store + performance-filtered lead set (shared by both tabs). */
   const scopedLeads = useMemo(() => {
@@ -304,8 +326,9 @@ export default function AgentPerformancePage() {
 
   if (!canAll && !canOwn) return <Restricted />;
 
-  /* The All Agents / Individual toggle — owners only. */
-  const tabToggle = canAll ? (
+  /* The All Agents / Individual toggle — cross-agent (owner/full-access) only.
+     An individual Sales Agent never sees it, even with a coarse perf key. */
+  const tabToggle = canCrossAgent ? (
     <SegmentedTabs
       size="sm"
       value={tab}
@@ -467,7 +490,7 @@ export default function AgentPerformancePage() {
           subtitle="Sales performance across authorized stores — derived from real records."
           actions={
             <div className="flex flex-wrap items-center gap-2">
-              {canAll && <AgentScopePicker agents={eligibleAgents} selectedId={scopedAgent.id} onSelect={(id) => { setScopeAgentId(id); setViewAsAgent(id); }} />}
+              {canCrossAgent && <AgentScopePicker agents={eligibleAgents} selectedId={scopedAgent.id} onSelect={(id) => { setScopeAgentId(id); setViewAsAgent(id); }} />}
               {tabToggle}
             </div>
           }

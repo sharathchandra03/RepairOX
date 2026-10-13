@@ -2055,8 +2055,16 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
      consistent and is defence-in-depth, never the security boundary. */
   /** The owner may only "view as" an agent when they already have cross-agent
    *  authority (see-all leads, or the all-agent performance key). Otherwise the
-   *  scope is ignored — a plain Sales Agent can never scope to someone else. */
-  const canViewAsAgent = canSeeAllLeads || allow(can, CAP.lead.performanceAll);
+   *  scope is ignored — a plain Sales Agent can never scope to someone else.
+   *  A user who is themselves an eligible Sales Agent is ALWAYS own-scoped: the
+   *  view-as-agent lens is an owner-only tool and must never let an agent scope
+   *  to another agent, even if their role carries a coarse performanceAll key
+   *  (e.g. view_sales_reports from the Leads "view" matrix tier). Resolve "is a
+   *  sales agent" store-independently (no store id → true if eligible in ANY
+   *  authorized store) so cross-store ambiguity can't reopen the lens. */
+  const canViewAsAgent =
+    !currentUserIsSalesAgent() &&
+    (canSeeAllLeads || allow(can, CAP.lead.performanceAll));
   /** The agent id actually in effect (empty when not authorized / not set). */
   const effectiveViewAsId = canViewAsAgent ? viewAsAgentId : "";
   // Ref mirror so leadMetrics (a stable useCallback) can read the live scope
