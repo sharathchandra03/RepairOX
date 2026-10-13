@@ -14,6 +14,7 @@ import { Input, Label } from "@/components/ui/input";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { allow, CAP } from "@/lib/capabilities";
+import { isValidEmail } from "@/lib/leads-data";
 import type { TeamMember } from "@/lib/mock-data";
 import type { RoleDef } from "@/lib/permissions";
 import { cn } from "@/lib/utils";
@@ -123,10 +124,11 @@ export function UserDetailsDrawer({
   const [loading, setLoading] = useState(false);
   const [detail, setDetail] = useState<UserDetail | null>(null);
 
-  // Inline name edit.
-  const [editingName, setEditingName] = useState(false);
-  const [nameDraft, setNameDraft] = useState("");
-  const [savingName, setSavingName] = useState(false);
+  // Inline identity edit (name / email / phone).
+  const [editingIdentity, setEditingIdentity] = useState(false);
+  const [identityDraft, setIdentityDraft] = useState({ name: "", email: "", phone: "" });
+  const [savingIdentity, setSavingIdentity] = useState(false);
+  const [identityErr, setIdentityErr] = useState<string | null>(null);
 
   // Additional-store access management (multi-store).
   const [addingStore, setAddingStore] = useState(false);
@@ -162,8 +164,8 @@ export function UserDetailsDrawer({
 
   useEffect(() => {
     if (open && member) {
-      setEditingName(false);
-      setNameDraft(member.name);
+      setEditingIdentity(false);
+      setIdentityErr(null);
       load();
     }
   }, [open, member, load]);
@@ -190,15 +192,24 @@ export function UserDetailsDrawer({
     d.status === "active" ? "success" : d.status === "suspended" ? "danger" : "warning";
   const statusLabel = d.status === "active" ? "Active" : d.status === "suspended" ? "Suspended" : "Invited";
 
-  async function saveName() {
-    const next = nameDraft.trim();
-    if (!next || next === d.name) { setEditingName(false); return; }
-    setSavingName(true);
-    updateStaff(d.id, { name: next });
-    setSavingName(false);
-    setEditingName(false);
+  async function saveIdentity() {
+    const name = identityDraft.name.trim();
+    const email = identityDraft.email.trim();
+    const phone = identityDraft.phone.trim();
+    if (!name) { setIdentityErr("Name is required."); return; }
+    if (email && !isValidEmail(email)) { setIdentityErr("Enter a valid email address."); return; }
+    setIdentityErr(null);
+    // No-op if nothing changed.
+    if (name === d.name && email === (d.email ?? "") && phone === (d.phone ?? "")) {
+      setEditingIdentity(false); return;
+    }
+    setSavingIdentity(true);
+    // Empty string clears the field (matches other save paths: route maps "" -> null).
+    updateStaff(d.id, { name, email, phone });
+    setSavingIdentity(false);
+    setEditingIdentity(false);
     // Reflect immediately, then re-sync from the server.
-    setDetail((prev) => (prev ? { ...prev, member: { ...prev.member, name: next } } : prev));
+    setDetail((prev) => (prev ? { ...prev, member: { ...prev.member, name, email, phone } } : prev));
     load();
   }
 
@@ -238,42 +249,71 @@ export function UserDetailsDrawer({
           <div className="flex items-start gap-3 rounded-2xl border border-border bg-card p-4">
             <Avatar name={d.name} size={48} />
             <div className="min-w-0 flex-1">
-              {editingName ? (
-                <div className="flex items-center gap-2">
-                  <Input
-                    value={nameDraft}
-                    onChange={(e) => setNameDraft(e.target.value)}
-                    className="h-8"
-                    autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
-                  />
-                  <Button size="sm" onClick={saveName} loading={savingName}>Save</Button>
-                  <Button size="sm" variant="ghost" onClick={() => setEditingName(false)}>Cancel</Button>
+              {editingIdentity ? (
+                <div className="space-y-2">
+                  <div>
+                    <Label htmlFor="idn-name">Name</Label>
+                    <Input
+                      id="idn-name"
+                      value={identityDraft.name}
+                      autoFocus
+                      onChange={(e) => setIdentityDraft((p) => ({ ...p, name: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveIdentity(); if (e.key === "Escape") { setEditingIdentity(false); setIdentityErr(null); } }}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="idn-email">Email</Label>
+                    <Input
+                      id="idn-email"
+                      type="email"
+                      value={identityDraft.email}
+                      placeholder="name@example.com"
+                      onChange={(e) => setIdentityDraft((p) => ({ ...p, email: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveIdentity(); if (e.key === "Escape") { setEditingIdentity(false); setIdentityErr(null); } }}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="idn-phone">Phone</Label>
+                    <Input
+                      id="idn-phone"
+                      value={identityDraft.phone}
+                      placeholder="Optional"
+                      onChange={(e) => setIdentityDraft((p) => ({ ...p, phone: e.target.value }))}
+                      onKeyDown={(e) => { if (e.key === "Enter") saveIdentity(); if (e.key === "Escape") { setEditingIdentity(false); setIdentityErr(null); } }}
+                    />
+                  </div>
+                  {identityErr && <p className="text-[11.5px] font-medium text-rose-600">{identityErr}</p>}
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <Button size="sm" onClick={saveIdentity} loading={savingIdentity}>Save</Button>
+                    <Button size="sm" variant="ghost" onClick={() => { setEditingIdentity(false); setIdentityErr(null); }}>Cancel</Button>
+                  </div>
                 </div>
               ) : (
-                <div className="flex items-center gap-2">
-                  <p className="truncate text-[15px] font-bold leading-tight">
-                    {d.name}
-                    {isSelf && <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">(you)</span>}
+                <>
+                  <div className="flex items-center gap-2">
+                    <p className="truncate text-[15px] font-bold leading-tight">
+                      {d.name}
+                      {isSelf && <span className="ml-1.5 text-[10px] font-medium text-muted-foreground">(you)</span>}
+                    </p>
+                    {canManage && (
+                      <button
+                        onClick={() => { setIdentityDraft({ name: d.name, email: d.email ?? "", phone: d.phone ?? "" }); setIdentityErr(null); setEditingIdentity(true); }}
+                        title="Edit profile"
+                        className="text-[#4361EE] hover:underline"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                    )}
+                  </div>
+                  <p className="mt-1 flex items-center gap-1.5 truncate text-[12.5px] text-muted-foreground">
+                    <Mail className="h-3.5 w-3.5 shrink-0" /> {d.email || "—"}
                   </p>
-                  {canManage && (
-                    <button
-                      onClick={() => { setNameDraft(d.name); setEditingName(true); }}
-                      title="Edit name"
-                      className="text-[#4361EE] hover:underline"
-                    >
-                      <Pencil className="h-3.5 w-3.5" />
-                    </button>
+                  {d.phone && (
+                    <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12.5px] text-muted-foreground">
+                      <Phone className="h-3.5 w-3.5 shrink-0" /> {d.phone}
+                    </p>
                   )}
-                </div>
-              )}
-              <p className="mt-1 flex items-center gap-1.5 truncate text-[12.5px] text-muted-foreground">
-                <Mail className="h-3.5 w-3.5 shrink-0" /> {d.email || "—"}
-              </p>
-              {d.phone && (
-                <p className="mt-0.5 flex items-center gap-1.5 truncate text-[12.5px] text-muted-foreground">
-                  <Phone className="h-3.5 w-3.5 shrink-0" /> {d.phone}
-                </p>
+                </>
               )}
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <Badge tone="brand">{role?.label ?? d.roleId}</Badge>

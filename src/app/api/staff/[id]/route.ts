@@ -171,6 +171,17 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
     await admin.auth.admin.updateUserById(authUserId, { ban_duration: banned ? BANNED : UNBANNED }).catch(() => {});
   }
 
+  // Keep the auth login email in sync — ONLY when a login already exists AND
+  // the email changed. Never create an auth account here; editing the profile
+  // email must not silently enable login.
+  if (authUserId && body.email !== undefined) {
+    const prevEmail = (row.email as string | null) ?? null;
+    const nextEmail = (update.email as string | null) ?? null;
+    if (nextEmail && nextEmail !== prevEmail) {
+      await admin.auth.admin.updateUserById(authUserId, { email: nextEmail }).catch(() => {});
+    }
+  }
+
   // ── Sync user_stores + write the store-change audit for a relocation ──
   // Best-effort: user_stores is optional (multi-store migration) and audit is a
   // trail — neither blocks the already-committed staff move.
