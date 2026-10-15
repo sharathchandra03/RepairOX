@@ -38,7 +38,7 @@ import {
 import { recordTransaction as recordLedgerTransaction } from "@/lib/daily-ledger-service";
 import {
   inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS,
-  type InventoryItem, type StockMovement,
+  type InventoryItem, type StockMovement, type ItemKind,
 } from "@/lib/inventory-data";
 import { seedCustomers as SEED_CUSTOMERS, type Customer, type CustomerGroup } from "@/lib/customer-data";
 import { pointsFromInvoiceAmount, tierForLifetimeValue, thresholdsFromTiers, evaluateAutomaticGroups, type LoyaltyTier } from "@/lib/customer-service";
@@ -144,9 +144,19 @@ interface StoreActions {
   pinWalkIn: (id: string, pinned: boolean) => Promise<void>;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
   deductPartsForTicket: (ticketId: string) => Promise<void>;
-  addStockMovement: (movement: StockMovement) => Promise<void>;
-  addInventoryItem: (item: InventoryItem) => Promise<void>;
-  updateInventoryItem: (id: string, updates: Partial<InventoryItem>) => Promise<void>;
+  addStockMovement: (movement: StockMovement, opts?: { itemId?: string; unitCost?: number }) => Promise<void>;
+  addInventoryItem: (
+    item: InventoryItem,
+    opts?: {
+      cost?: { costPrice: number; standardLabourCost: number; configured: boolean };
+      opening?: { qty: number; unitCost: number };
+    },
+  ) => Promise<void>;
+  updateInventoryItem: (
+    id: string,
+    updates: Partial<InventoryItem>,
+    opts?: { cost?: { costPrice: number; standardLabourCost: number; configured: boolean } },
+  ) => Promise<void>;
   deleteInventoryItem: (id: string) => Promise<void>;
   addCustomer: (customer: Customer) => Promise<void>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<void>;
@@ -1045,8 +1055,12 @@ function walkInToRow(w: WalkIn): Record<string, unknown> {
 }
 
 function rowToInventoryItem(r: any): InventoryItem {
+  // Item Type source of truth = item_kind, with a legacy fallback so pre-0075
+  // rows (and any read before the backfill runs) still classify (inv-design §1.1).
+  const kind: ItemKind = (r.item_kind as ItemKind) ?? (String(r.item_type) === "Service" ? "service" : "part");
   return {
     id: r.id,
+    kind,
     name: r.name ?? "",
     category: r.category ?? "",
     type: r.item_type ?? "Product",
@@ -1069,15 +1083,32 @@ function rowToInventoryItem(r: any): InventoryItem {
     reservedStock: Number(r.reserved_stock ?? 0),
     soldUnits: Number(r.sold_units ?? 0),
     purchasedUnits: Number(r.purchased_units ?? 0),
+    // ── Redesign additions (inv-design §2.1). Cost fields are populated by a
+    //    SEPARATE inventory_item_costs read (mergeInventoryCosts) that only
+    //    succeeds for a cost-capable user; here they default to not-configured.
+    itemCode: r.item_code ?? "",
+    serviceCode: r.service_code ?? "",
+    barcode: r.barcode ?? "",
+    brandModel: r.brand_model ?? "",
+    description: r.description ?? "",
+    sellingPrice: Number(r.selling_price ?? r.regular_selling_price ?? 0),
+    serviceCharge: Number(r.service_charge ?? 0),
+    trackStock: r.track_stock ?? (kind === "part"),
+    migrationFlag: r.migration_flag ?? undefined,
+    costState: "not_configured",
   };
 }
 
 function inventoryItemToRow(item: InventoryItem): Record<string, unknown> {
-  return {
+  // Resolve the canonical kind (with legacy fallback) and keep the legacy
+  // item_type/mode columns in sync so existing readers keep working (§1.1).
+  const kind: ItemKind = item.kind ?? (item.type === "Service" ? "service" : "part");
+  const row: Record<string, unknown> = {
     id: item.id,
+    item_kind: kind,
     name: item.name,
     category: item.category || null,
-    item_type: item.type ?? "Product",
+    item_type: kind === "service" ? "Service" : "Product",
     mode: item.mode ?? "Both",
     uom: item.uom || null,
     store: item.store || null,
@@ -1097,7 +1128,21 @@ function inventoryItemToRow(item: InventoryItem): Record<string, unknown> {
     reserved_stock: item.reservedStock,
     sold_units: item.soldUnits,
     purchased_units: item.purchasedUnits,
+    // New public columns (NEVER cost_price / standard_labour_cost — those live
+    // on the cost-scoped inventory_item_costs table, §2.1a/§1.1).
+    selling_price: item.sellingPrice ?? item.regularSellingPrice,
+    service_charge: item.serviceCharge ?? 0,
+    track_stock: item.trackStock ?? (kind === "part"),
+    barcode: item.barcode || null,
+    brand_model: item.brandModel || null,
+    description: item.description || null,
   };
+  // item_code / service_code are server-stamped and immutable — written only
+  // when the caller already carries one (never fabricated here).
+  if (item.itemCode) row.item_code = item.itemCode;
+  if (item.serviceCode) row.service_code = item.serviceCode;
+  if (item.migrationFlag !== undefined) row.migration_flag = item.migrationFlag;
+  return row;
 }
 
 function rowToStockMovement(r: any): StockMovement {
@@ -1582,6 +1627,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: atOpts },
         { data: custGroups },
         { data: loyaltyAccts },
+        { data: itemCosts },
       ] = await Promise.all([
         // Transactional data → scoped to the active store (branch_id) when one
         // is selected; the full RLS-scoped set in All-Shops mode.
@@ -1611,9 +1657,31 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         noScope(supabase.from("customer_groups").select("*").is("deleted_at", null).order("display_order", { ascending: true })),
         // loyalty_accounts is org-wide (one row per customer, no branch_id).
         noScope(supabase.from("loyalty_accounts").select("customer_id, points_balance, tier")),
+        // Item costs (CP / Standard Labour Cost) live on a cost-scoped table —
+        // RLS yields rows ONLY to a cost-capable user; a non-cost user gets an
+        // empty set and the merged cost fields stay undefined / not_configured.
+        // The org-level default row carries branch_id NULL, so it is NOT store-
+        // filtered (would hide the default inside a store context).
+        noScope(supabase.from("inventory_item_costs").select("item_id, cost_price, standard_labour_cost, cost_configured")),
       ]);
 
       if (!active) return;
+
+      // Index the cost-scoped rows by item id. Empty for a non-cost user (RLS),
+      // so cost fields stay undefined + costState "not_configured" for them.
+      const costByItem = new Map<string, { cost_price: number; standard_labour_cost: number; cost_configured: boolean }>(
+        (itemCosts ?? []).map((c: any) => [c.item_id, c]),
+      );
+      const mergeInventoryCosts = (item: InventoryItem): InventoryItem => {
+        const c = costByItem.get(item.id);
+        if (!c) return item;
+        return {
+          ...item,
+          costPrice: Number(c.cost_price ?? 0),
+          standardLabourCost: Number(c.standard_labour_cost ?? 0),
+          costState: c.cost_configured ? "configured" : "not_configured",
+        };
+      };
 
       setState((s) => ({
         ...s,
@@ -1623,7 +1691,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         invoiceRefundAllocations: (refundAllocs ?? []).map(rowToRefundAllocation),
         invoiceItemReturns: (itemReturns ?? []).map(rowToItemReturn),
         walkIns: (wis ?? []).map(rowToWalkIn),
-        inventory: (invItems ?? []).map(rowToInventoryItem),
+        inventory: (invItems ?? []).map(rowToInventoryItem).map(mergeInventoryCosts),
         stockMovements: (moves ?? []).map(rowToStockMovement),
         customers: (custs ?? []).map(rowToCustomer),
         customerGroups: (custGroups ?? []).map(rowToCustomerGroup),
@@ -3558,9 +3626,17 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Inventory", action: "Stock Reduced", severity: "warning", entity: "Parts", reference: ticketId, description: `Deducted ${totalQty} part unit${totalQty !== 1 ? "s" : ""} for ticket ${ticketId}.`, meta: { "Parts consumed": String(partsToDeduct.length), Units: String(totalQty) } });
   }, []);
 
-  const addStockMovement = useCallback(async (movement: StockMovement) => {
+  const addStockMovement = useCallback(async (movement: StockMovement, opts?: { itemId?: string; unitCost?: number }) => {
     if (shouldUseDb()) {
-      const { error } = await db.from("stock_movements").insert(withStore(stockMovementToRow(movement)));
+      const row = stockMovementToRow(movement);
+      // Carry the optional cost dimension (0075 additive columns) so an Inward
+      // movement can be tied to its item + unit cost (ledger layer link).
+      if (opts?.itemId !== undefined) row.item_id = opts.itemId;
+      if (opts?.unitCost !== undefined) {
+        row.unit_cost = opts.unitCost;
+        row.total_value = opts.unitCost * movement.items;
+      }
+      const { error } = await db.from("stock_movements").insert(withStore(row));
       if (error) { console.error("[store] addStockMovement failed:", error.message); return; }
     }
     setState((s) => ({ ...s, stockMovements: [movement, ...s.stockMovements] }));
@@ -3568,26 +3644,90 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     logActivity({ module: "Inventory", action: inward ? "Stock Increased" : "Stock Reduced", severity: inward ? "success" : "warning", entity: "Stock Movement", reference: movement.docNumber, description: `${movement.type} movement of ${movement.items} item${movement.items !== 1 ? "s" : ""}: ${movement.fromStore} → ${movement.toStore}.` });
   }, []);
 
-  const addInventoryItem = useCallback(async (item: InventoryItem) => {
+  const addInventoryItem = useCallback(async (
+    item: InventoryItem,
+    opts?: {
+      cost?: { costPrice: number; standardLabourCost: number; configured: boolean };
+      opening?: { qty: number; unitCost: number };
+    },
+  ) => {
+    const kind: ItemKind = item.kind ?? (item.type === "Service" ? "service" : "part");
+    const opening = kind === "part" && opts?.opening && opts.opening.qty > 0 ? opts.opening : undefined;
     if (shouldUseDb()) {
-      const { data, error } = await db.from("inventory_items").insert(withStore(inventoryItemToRow(item))).select("*").single();
+      // Stock never flows through the master row on create — opening (if any)
+      // is posted as an explicit movement + ledger layer below (§4).
+      const insertRow = withStore(inventoryItemToRow({ ...item, kind, currentStock: 0 }));
+      const { data, error } = await db.from("inventory_items").insert(insertRow).select("*").single();
       if (error || !data) { console.error("[store] addInventoryItem failed:", error?.message); return; }
-      const saved = rowToInventoryItem(data);
+      let saved = rowToInventoryItem(data);
+
+      // Cost side-channel → cost-scoped table. Written org-level (branch_id null)
+      // so every cost-capable org member resolves the default (MEDIUM-2). RLS
+      // rejects the write for a non-cost caller, so this is a no-op for them.
+      if (opts?.cost) {
+        const { error: costErr } = await db.from("inventory_item_costs").upsert({
+          item_id: saved.id,
+          branch_id: null,
+          cost_price: opts.cost.costPrice,
+          standard_labour_cost: opts.cost.standardLabourCost,
+          cost_configured: opts.cost.configured,
+          updated_at: new Date().toISOString(),
+        });
+        if (costErr) { console.error("[store] addInventoryItem cost upsert failed:", costErr.message); }
+        else if (opts.cost.configured) {
+          saved = { ...saved, costPrice: opts.cost.costPrice, standardLabourCost: opts.cost.standardLabourCost, costState: "configured" };
+        }
+      }
+
+      // Opening stock → ONE cost-carrying ledger layer + the Inward movement +
+      // set current_stock. Services never reach here (opening guarded above).
+      if (opening) {
+        const { error: layerErr } = await db.from("inventory_stock_layers").insert(withStore({
+          item_id: saved.id,
+          source: "opening",
+          qty_in: opening.qty,
+          unit_cost: opening.unitCost,
+        }));
+        if (layerErr) { console.error("[store] addInventoryItem opening layer failed:", layerErr.message); }
+        const docNumber = `MOV-OPEN-${Date.now()}`;
+        await addStockMovement({
+          docNumber, fromStore: "Opening Balance", toStore: saved.store,
+          items: opening.qty, date: new Date().toLocaleDateString("en-IN"), user: "", type: "Inward", status: "completed",
+        }, { itemId: saved.id, unitCost: opening.unitCost });
+        const { error: stockErr } = await db.from("inventory_items").update({ current_stock: opening.qty }).eq("id", saved.id);
+        if (stockErr) { console.error("[store] addInventoryItem opening stock set failed:", stockErr.message); }
+        saved = { ...saved, currentStock: opening.qty };
+      }
+
       setState((s) => ({ ...s, inventory: [saved, ...s.inventory] }));
       logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: saved.id, description: `Added new inventory item: ${saved.name}.`, meta: { Category: saved.category, Stock: String(saved.currentStock) } });
       return;
     }
-    setState((s) => ({ ...s, inventory: [item, ...s.inventory] }));
-    logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: item.id, description: `Added new inventory item: ${item.name}.`, meta: { Category: item.category, Stock: String(item.currentStock) } });
-  }, []);
+    // Local/demo mode: no DB. Mirror the cost + opening onto the in-memory item.
+    const localItem: InventoryItem = {
+      ...item,
+      kind,
+      currentStock: opening ? opening.qty : 0,
+      ...(opts?.cost?.configured
+        ? { costPrice: opts.cost.costPrice, standardLabourCost: opts.cost.standardLabourCost, costState: "configured" as const }
+        : {}),
+    };
+    setState((s) => ({ ...s, inventory: [localItem, ...s.inventory] }));
+    logActivity({ module: "Inventory", action: "Item Added", severity: "success", entity: "Item", reference: localItem.id, description: `Added new inventory item: ${localItem.name}.`, meta: { Category: localItem.category, Stock: String(localItem.currentStock) } });
+  }, [addStockMovement]);
 
-  const updateInventoryItem = useCallback(async (id: string, updates: Partial<InventoryItem>) => {
+  const updateInventoryItem = useCallback(async (
+    id: string,
+    updates: Partial<InventoryItem>,
+    opts?: { cost?: { costPrice: number; standardLabourCost: number; configured: boolean } },
+  ) => {
     const prev = stateRef.current.inventory.find((i) => i.id === id);
     if (shouldUseDb()) {
       const row: Record<string, unknown> = {};
       if ("name" in updates) row.name = updates.name;
       if ("category" in updates) row.category = updates.category ?? null;
-      if ("type" in updates) row.item_type = updates.type;
+      if ("kind" in updates && updates.kind) { row.item_kind = updates.kind; row.item_type = updates.kind === "service" ? "Service" : "Product"; }
+      else if ("type" in updates) row.item_type = updates.type;
       if ("mode" in updates) row.mode = updates.mode;
       if ("uom" in updates) row.uom = updates.uom ?? null;
       if ("store" in updates) row.store = updates.store ?? null;
@@ -3607,10 +3747,36 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("reservedStock" in updates) row.reserved_stock = updates.reservedStock;
       if ("soldUnits" in updates) row.sold_units = updates.soldUnits;
       if ("purchasedUnits" in updates) row.purchased_units = updates.purchasedUnits;
-      const { error } = await db.from("inventory_items").update(row).eq("id", id);
-      if (error) { console.error("[store] updateInventoryItem failed:", error.message); return; }
+      // New public columns (never cost_price / standard_labour_cost here).
+      if ("sellingPrice" in updates) row.selling_price = updates.sellingPrice;
+      if ("serviceCharge" in updates) row.service_charge = updates.serviceCharge;
+      if ("trackStock" in updates) row.track_stock = updates.trackStock;
+      if ("barcode" in updates) row.barcode = updates.barcode || null;
+      if ("brandModel" in updates) row.brand_model = updates.brandModel || null;
+      if ("description" in updates) row.description = updates.description || null;
+      if ("migrationFlag" in updates) row.migration_flag = updates.migrationFlag ?? null;
+      if (Object.keys(row).length > 0) {
+        const { error } = await db.from("inventory_items").update(row).eq("id", id);
+        if (error) { console.error("[store] updateInventoryItem failed:", error.message); return; }
+      }
+      // Cost side-channel → cost-scoped table (org-level default, branch_id null).
+      // RLS rejects the write for a non-cost caller, so this is a no-op for them.
+      if (opts?.cost) {
+        const { error: costErr } = await db.from("inventory_item_costs").upsert({
+          item_id: id,
+          branch_id: null,
+          cost_price: opts.cost.costPrice,
+          standard_labour_cost: opts.cost.standardLabourCost,
+          cost_configured: opts.cost.configured,
+          updated_at: new Date().toISOString(),
+        });
+        if (costErr) { console.error("[store] updateInventoryItem cost upsert failed:", costErr.message); }
+      }
     }
-    setState((s) => ({ ...s, inventory: s.inventory.map((i) => (i.id === id ? { ...i, ...updates } : i)) }));
+    const localCost = opts?.cost?.configured
+      ? { costPrice: opts.cost.costPrice, standardLabourCost: opts.cost.standardLabourCost, costState: "configured" as const }
+      : {};
+    setState((s) => ({ ...s, inventory: s.inventory.map((i) => (i.id === id ? { ...i, ...updates, ...localCost } : i)) }));
     const changes = buildChanges(prev as Record<string, unknown> | undefined, updates as Record<string, unknown>, [
       { key: "currentStock", label: "Stock" }, { key: "name", label: "Name" }, { key: "defaultPrice", label: "Default Price", format: inr }, { key: "regularSellingPrice", label: "Selling Price", format: inr },
     ]);

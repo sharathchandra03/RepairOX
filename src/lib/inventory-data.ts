@@ -50,12 +50,22 @@ export function classifyStock(current: number, min: number, max: number): StockH
 export type ItemType = "Product" | "Service";
 export type ItemMode = "Buy" | "Sell" | "Both";
 
+/* NEW canonical Item Type source of truth (replaces the user-facing
+   Product/Service + Buy/Sell/Both controls). `type`/`mode` below are RETAINED
+   for backward compatibility and kept in sync on write. See inv-design §1.1. */
+export type ItemKind = "part" | "service";
+
 export type InventoryItem = {
-  id: string;            // SKU / Item ID
+  id: string;            // SKU / Item ID (free-text PK; NOT the PRT-/SRV- code)
+  // NEW Item Type source of truth. Always populated by rowToInventoryItem (with
+  // a legacy item_type fallback); left optional on the interface so the legacy
+  // form builders that still set only `type`/`mode` keep compiling until the
+  // form rework lands in a later feature (NFR-2 — legacy rows/writers load).
+  kind?: ItemKind;
   name: string;
   category: string;
-  type: ItemType;
-  mode: ItemMode;
+  type: ItemType;        // legacy mirror, kept in sync
+  mode: ItemMode;        // legacy, retained + defaulted "Both", no longer user-facing
   uom: string;
   store: string;
   active: boolean;
@@ -74,6 +84,23 @@ export type InventoryItem = {
   reservedStock: number;  // reserved by tickets (not yet consumed)
   soldUnits: number;     // for top-selling
   purchasedUnits: number;// for top-purchased
+
+  // ── Redesign additions (inv-design §2.1). All optional-friendly so legacy
+  //    rows still load (NFR-2). CP / Standard Labour Cost live on the
+  //    cost-scoped inventory_item_costs table, merged in on read.
+  itemCode?: string;             // permanent server-generated PRT-000001 (parts)
+  serviceCode?: string;          // permanent server-generated SRV-000001 (services)
+  barcode?: string;              // optional scanning id
+  brandModel?: string;           // optional "Brand / compatible device or model"
+  description?: string;
+  costPrice?: number;            // CP — internal default cost/unit (parts); from inventory_item_costs
+  sellingPrice?: number;         // SP — customer default price/unit (parts)
+  serviceCharge?: number;        // customer-facing default SP (services)
+  standardLabourCost?: number;   // estimated internal cost (services); from inventory_item_costs
+  costState?: "configured" | "not_configured"; // derived on read
+  trackStock?: boolean;          // parts only; false ⇒ sellable non-stock good
+  billingBasis?: string;         // service unit / billing basis (reuses uom channel)
+  migrationFlag?: string;        // backfill flag: unrecognised_item_type | service_with_stock
 };
 
 export const STORES = ["All Stores", "Main Store", "Service Counter", "Warehouse A", "Branch — Andheri"];
