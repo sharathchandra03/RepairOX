@@ -1,0 +1,20 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "NIT",
+      "location": "§5.2",
+      "problem": "lineRefundableValue used in the per-line remaining formula is only defined implicitly through the §5.4 allocation; it is not restated in one place next to §5.2.",
+      "fix": "Add a one-line definition `lineRefundableValue(L) = round(lineNetAfterDisc(L)) + lineTax(L)` beside §5.2 so the per-line remaining and the §5.4 allocation visibly share one formula. Readability only; the math is already unambiguous."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "location": "§4.1 / §4.5",
+      "problem": "invoice_refunds.branch_id is `on delete set null` but RLS requires `auth_branch_visible(branch_id)`; behavior of `auth_branch_visible(null)` after a branch deletion is unstated.",
+      "fix": "State that `auth_branch_visible` treats null as org-wide-visible (matching the lead_deals pattern this design mirrors) or that invoice-branch deletion is not expected for finalized invoices. Mirrors existing table behavior; not a blocker."
+    }
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/.worktrees/invoice-refunds/app/.agents/tasks/invoice-refunds-design-review.md"
+}
