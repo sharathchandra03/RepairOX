@@ -3,6 +3,7 @@
 import {
   HelpCircle, MoreHorizontal, ChevronDown, Menu,
   ShoppingBag, Check, LayoutGrid, LogOut, MessageCircle, UserCog,
+  Clock, Coffee, Play, BarChart3,
 } from "lucide-react";
 import { NotificationBell } from "@/components/layout/notification-bell";
 import { Avatar } from "@/components/ui/avatar";
@@ -20,6 +21,14 @@ import {
 import { usePermissions } from "@/lib/permissions-context";
 import { Can } from "@/components/common/can";
 import { CHAT_UNREAD_TOTAL } from "@/components/common/internal-chat";
+import { useWorkSession, type WorkStatus } from "@/lib/work-session-context";
+
+const WORK_STATUS_META: Record<WorkStatus, { label: string; dot: string; text: string }> = {
+  working: { label: "Working", dot: "bg-emerald-500", text: "text-emerald-700" },
+  on_break: { label: "On Break", dot: "bg-amber-500", text: "text-amber-700" },
+  interrupted: { label: "Needs Review", dot: "bg-rose-500", text: "text-rose-700" },
+  logged_out: { label: "Not Working", dot: "bg-zinc-400", text: "text-zinc-600" },
+};
 
 export function Topbar({
   onMenu,
@@ -37,10 +46,23 @@ export function Topbar({
   const router = useRouter();
   const meta = WORKSPACE_MAP[activeWorkspace];
   const { allowedWorkspaces: allowed, role, isPreviewing, currentUser, logout } = usePermissions();
+  const { status: workStatus, startBreak, endBreak, startWork, endWork } = useWorkSession();
   const displayName = currentUser?.name ?? "User";
   const displayEmail = currentUser?.email ?? "";
+  const workMeta = WORK_STATUS_META[workStatus];
 
-  function handleLogout() {
+  async function handleLogout() {
+    // Close the work session (and any open break) BEFORE auth logout, but never
+    // block logout on it — a hanging/failing close is recovered later as an
+    // interrupted session.
+    try {
+      await Promise.race([
+        endWork("logout"),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    } catch {
+      /* swallow — logout must always proceed */
+    }
     logout();
     router.push("/login");
   }
@@ -220,6 +242,36 @@ export function Topbar({
                   All modules
                 </MenuItem>
               )}
+
+              {/* Work Status + context actions. Separate from Online presence
+                  (the green roster dot) — this is the user's WORK status,
+                  derived from their open work session. */}
+              <div className="my-1 h-px bg-border" />
+              <MenuLabel>
+                <span className="flex items-center gap-1.5">
+                  <span className={cn("h-1.5 w-1.5 rounded-full", workMeta.dot)} />
+                  <span className={workMeta.text}>Work status: {workMeta.label}</span>
+                </span>
+              </MenuLabel>
+              {workStatus === "working" && (
+                <MenuItem icon={Coffee} onClick={() => { void startBreak(); close(); }}>
+                  Start Break
+                </MenuItem>
+              )}
+              {workStatus === "on_break" && (
+                <MenuItem icon={Play} onClick={() => { void endBreak(); close(); }}>
+                  Resume Work
+                </MenuItem>
+              )}
+              {(workStatus === "logged_out" || workStatus === "interrupted") && (
+                <MenuItem icon={Clock} onClick={() => { void startWork(); close(); }}>
+                  Start Work
+                </MenuItem>
+              )}
+              <MenuItem icon={BarChart3} onClick={() => { router.push("/account/productivity"); close(); }}>
+                Productivity
+              </MenuItem>
+
               <div className="my-1 h-px bg-border" />
               <MenuItem icon={LogOut} danger onClick={() => { handleLogout(); close(); }}>
                 Log out

@@ -824,6 +824,11 @@ export const navItems: NavItem[] = [
   // pages. The page itself role-gates: own-scope agents see only their own tab,
   // owners (performanceAll) get the all-agents leaderboard with drill-down.
   { href: "/leads/performance", label: "Agent Performance", icon: "BarChart3", permission: ["leads_performance_view_own", "leads_performance_view_all", "leads_view", "manage_sales"] },
+  // Agent Productivity — the owner "Sales Agent Productivity" work-session
+  // report (analysis only; the selected agent is a subject, never impersonation)
+  // with the HR/payroll Excel+CSV export. Gated by the owner/team Attendance
+  // keys (hidden from own-only Sales Agents, who use /account/productivity).
+  { href: "/leads/productivity", label: "Agent Productivity", icon: "Clock", permission: ["work_sessions_view_team", "work_sessions_view_all", "manage_attendance", "view_sales_reports", "manage_reports"] },
   { href: "/leads/reports",    label: "Reports",      icon: "BarChart3", permission: ["manage_reports", "view_sales_reports", "view_financial_reports"] },
   { href: "/leads/campaigns", label: "Campaigns",    icon: "Boxes", permission: "manage_sales" },
   { href: "/leads/settings",   label: "Settings",     icon: "Settings", permission: "manage_settings" },
@@ -1919,7 +1924,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
-    { label: "PERFORMANCE",    items: ["/leads/performance", "/leads/intelligence", "/leads/intelligence/agents"] },
+    { label: "PERFORMANCE",    items: ["/leads/performance", "/leads/intelligence", "/leads/intelligence/agents", "/leads/productivity"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },
     { label: "GENERAL",        items: ["/leads/reports", "/leads/settings"] },

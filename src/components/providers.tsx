@@ -7,6 +7,7 @@ import { StoreProvider } from "@/lib/store";
 import { StoreProvider as ActiveStoreProvider } from "@/lib/store-context";
 import { StoreSettingsProvider } from "@/lib/store-settings";
 import { LeadsProvider } from "@/lib/leads-context";
+import { WorkSessionProvider } from "@/lib/work-session-context";
 import { DealsProvider } from "@/lib/lead-deals-context";
 import { QuotationsProvider } from "@/lib/quotations-context";
 import { FieldProvider } from "@/lib/field-context";
@@ -28,17 +29,22 @@ export function Providers({ children }: { children: ReactNode }) {
         <ActiveStoreProvider>
         <StoreProvider>
           <StoreSettingsProvider>
-            <CatalogProvider>
-              <AccountingProvider>
-                <LeadsProvider>
-                  <DealsProvider>
-                    <QuotationsProvider>
-                      <FieldProvider>{children}</FieldProvider>
-                    </QuotationsProvider>
-                  </DealsProvider>
-                </LeadsProvider>
-              </AccountingProvider>
-            </CatalogProvider>
+            {/* Work Session & Productivity. Sits inside StoreSettings (reads the
+                org timezone) and only needs identity + permissions, so it sits
+                high, outside the lead/field data providers it doesn't depend on. */}
+            <WorkSessionProvider>
+              <CatalogProvider>
+                <AccountingProvider>
+                  <LeadsProvider>
+                    <DealsProvider>
+                      <QuotationsProvider>
+                        <FieldProvider>{children}</FieldProvider>
+                      </QuotationsProvider>
+                    </DealsProvider>
+                  </LeadsProvider>
+                </AccountingProvider>
+              </CatalogProvider>
+            </WorkSessionProvider>
           </StoreSettingsProvider>
         </StoreProvider>
         </ActiveStoreProvider>

@@ -384,6 +384,24 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       work: ["account_password_change", "account_pin_manage", "account_sessions_manage"],
     },
   },
+  {
+    // Work Session & Productivity (Attendance) is its OWN module so the four
+    // keys are individually grantable with distinct audiences: own-productivity
+    // (every agent, View) vs team/all-agent review (owners, Manage) vs
+    // corrections (superuser, Full). The `work` tier is OMITTED entirely —
+    // own-tracking (auto-start / break / logout) needs no extra key; it is
+    // granted at `view` via work_sessions_view_own (precedent: the sales_agent
+    // and account modules likewise declare only a subset of tiers).
+    id: "work_session",
+    label: "Attendance & Productivity",
+    blurb: "Work-time tracking — own productivity (View) vs team/all-agent review (Manage) and corrections (Full).",
+    icon: "Clock",
+    levels: {
+      view: ["work_sessions_view_own"],
+      manage: ["work_sessions_view_team", "work_sessions_view_all"],
+      full: ["work_sessions_correct"],
+    },
+  },
 ];
 
 export const MODULE_BY_ID: Record<string, ModuleDef> = Object.fromEntries(
@@ -458,6 +476,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       field: "manage", inventory: "manage", catalog: "manage", customers: "manage", loyalty: "manage",
       employees: "manage", accounts: "manage", reports: "manage", stores: "full",
       employees_admin: "manage", settings: "full", account: "work", deals: "full",
+      work_session: "full",
     },
   },
   {
@@ -471,6 +490,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       field: "manage", inventory: "manage", catalog: "work", customers: "manage", loyalty: "manage",
       employees: "view", accounts: "work", reports: "manage", stores: "view",
       employees_admin: "view", settings: "view", account: "work", deals: "manage",
+      work_session: "manage",
     },
   },
   {
@@ -483,7 +503,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "work", invoices: "work", walkin: "work", leads: "none",
       field: "view", inventory: "view", catalog: "view", customers: "work", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
   },
   {
@@ -496,7 +516,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "work", invoices: "none", walkin: "none", leads: "none",
       field: "none", inventory: "view", catalog: "view", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "none", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
   },
   {
@@ -509,7 +529,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "manage", invoices: "view", walkin: "none", leads: "none",
       field: "view", inventory: "work", catalog: "view", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
   },
   {
@@ -522,7 +542,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "none", invoices: "work", walkin: "work", leads: "work",
       field: "none", inventory: "none", catalog: "view", customers: "work", loyalty: "work",
       employees: "none", accounts: "none", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work", deals: "work",
+      employees_admin: "none", settings: "none", account: "work", deals: "work", work_session: "view",
     },
   },
   {
@@ -535,7 +555,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "none", invoices: "none", walkin: "none", leads: "none",
       field: "none", inventory: "manage", catalog: "manage", customers: "none",
       employees: "none", accounts: "none", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
   },
   {
@@ -548,7 +568,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "view", invoices: "none", walkin: "none", leads: "none",
       field: "manage", inventory: "none", catalog: "none", customers: "view", loyalty: "view",
       employees: "none", accounts: "none", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
   },
   {
@@ -561,7 +581,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "view", invoices: "manage", walkin: "none", leads: "none",
       field: "none", inventory: "none", catalog: "none", customers: "view", loyalty: "view",
       employees: "none", accounts: "manage", reports: "view", stores: "none",
-      employees_admin: "none", settings: "none", account: "work",
+      employees_admin: "none", settings: "none", account: "work", work_session: "view",
     },
   },
   {
@@ -574,7 +594,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       dashboard: "view", tickets: "view", invoices: "view", walkin: "view", leads: "view",
       field: "view", inventory: "view", catalog: "view", customers: "view", loyalty: "view",
       employees: "view", accounts: "view", reports: "view", stores: "none",
-      employees_admin: "none", settings: "view", account: "work",
+      employees_admin: "none", settings: "view", account: "work", work_session: "view",
     },
   },
 ];

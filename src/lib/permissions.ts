@@ -469,7 +469,12 @@ export type PermissionKey =
   | "settings_ticket_assignees_manage"
   | "manage_webhooks"
   /* Roles admin */
-  | "roles_preview";               // preview / impersonate a role
+  | "roles_preview"                // preview / impersonate a role
+  /* Work Session & Productivity (Attendance) */
+  | "work_sessions_view_own"       // see & operate the signed-in user's own work sessions / My Productivity
+  | "work_sessions_view_team"      // owner/manager — see work records for agents in the caller's store scope
+  | "work_sessions_view_all"       // owner — see every eligible Sales Agent's records + run the owner report/export
+  | "work_sessions_correct";       // review & correct a completed/interrupted session (append-only)
 
 export interface PermissionDef {
   key: PermissionKey;
@@ -1020,6 +1025,17 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "settings_ticket_assignees_manage", label: "Manage Ticket Assignees (By / To)" },
       { key: "manage_webhooks", label: "Manage Webhooks" },
       { key: "roles_preview", label: "Preview / Impersonate a Role" },
+    ],
+  },
+  {
+    id: "work_sessions",
+    label: "Attendance & Productivity",
+    description: "Work-session time tracking — own productivity vs team/all-agent review.",
+    permissions: [
+      { key: "work_sessions_view_own", label: "View Own Productivity" },
+      { key: "work_sessions_view_team", label: "View Team Productivity" },
+      { key: "work_sessions_view_all", label: "View All Sales Agent Productivity" },
+      { key: "work_sessions_correct", label: "Review / Correct Interrupted Sessions" },
     ],
   },
 ];

@@ -19,6 +19,7 @@ import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visib
 import { resetDemoData } from "@/lib/demo-mode";
 import { useSessionTracker } from "@/lib/use-session-tracker";
 import { useSalesPresenceTracker } from "@/lib/use-sales-presence";
+import { useWorkSessionAutoStart } from "@/lib/work-session-context";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -107,6 +108,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // and they are active; untracks after 5 min idle so the shared Sales Agents
   // Online roster reflects who is actively working right now.
   useSalesPresenceTracker({ id: currentUser?.id, name: currentUser?.name });
+
+  // Work Session auto-start + liveness heartbeat (Attendance & Productivity).
+  // Idempotent (in-tab single-flight → server open-session SELECT → DB unique
+  // index resume); closes nothing — logout handles the close. Strictly separate
+  // from presence above (Online ≠ Working).
+  useWorkSessionAutoStart();
 
   // Route guard — once the session is restored, bounce anyone who isn't
   // signed in back to the login screen. Access is centrally controlled.

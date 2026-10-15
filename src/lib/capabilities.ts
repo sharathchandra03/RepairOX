@@ -334,6 +334,25 @@ export const CAP = {
     edit: ["edit_expense", "manage_payments"],
     delete: ["delete_expense", "manage_payments"],
   },
+  /* Work Session & Productivity (Attendance). Three concepts stay separate:
+     Online Presence (existing), Work Status (derived from the open session),
+     Work Session (persisted records). Granular key(s) first, coarse
+     `manage_attendance`/reports fallbacks after; `full_access`/`*` implied by
+     can(). The `viewTeam`/`viewAll` fallback arrays MUST stay in lockstep with
+     the RLS `auth_has_any([...])` owner-key array in `auth_work_sessions_see`
+     (migration 0075) — drop/add `view_sales_reports`/`manage_reports` from both
+     together. */
+  workSession: {
+    // See & operate one's OWN productivity. Any owner/team key implies it, plus
+    // the coarse HR fallback so an attendance manager sees their own too.
+    viewOwn: ["work_sessions_view_own", "work_sessions_view_team", "work_sessions_view_all", "manage_attendance"],
+    // Team (store-scoped) owner report.
+    viewTeam: ["work_sessions_view_team", "work_sessions_view_all", "manage_attendance", "view_sales_reports", "manage_reports"],
+    // All eligible Sales Agents (authorized stores) — owner report + export.
+    viewAll: ["work_sessions_view_all", "manage_attendance", "view_sales_reports", "manage_reports"],
+    // Review / correct a completed or interrupted session (append-only).
+    correct: ["work_sessions_correct", "manage_attendance"],
+  },
 } satisfies Record<string, Record<string, PermissionKey[]>>;
 
 /** True when the caller's `can()` grants ANY of the keys for an action.

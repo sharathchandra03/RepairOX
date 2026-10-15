@@ -18,12 +18,21 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, X } from "lucide-react";
+import { Users, X, Coffee, Play, Clock, BarChart3 } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { useSession } from "@/lib/use-session";
 import { useSalesPresenceRoster, type PresenceMeta } from "@/lib/use-sales-presence";
+import { useWorkSession, type WorkStatus } from "@/lib/work-session-context";
+
+const WORK_STATUS_META: Record<WorkStatus, { label: string; dot: string; text: string }> = {
+  working: { label: "Working", dot: "bg-emerald-500", text: "text-emerald-700" },
+  on_break: { label: "On Break", dot: "bg-amber-500", text: "text-amber-700" },
+  interrupted: { label: "Needs Review", dot: "bg-rose-500", text: "text-rose-700" },
+  logged_out: { label: "Not Working", dot: "bg-zinc-400", text: "text-zinc-600" },
+};
 
 function activeSince(meta?: PresenceMeta): string {
   if (!meta?.onlineAt) return "";
@@ -40,6 +49,8 @@ export function SalesAgentsOnline() {
   const { salesAgents } = useLeads();
   const { id: myId } = useSession();
   const { onlineIds, metaById } = useSalesPresenceRoster();
+  const router = useRouter();
+  const { status: workStatus, startWork, startBreak, endBreak } = useWorkSession();
 
   const [open, setOpen] = useState(false);
   const btnRef = useRef<HTMLButtonElement | null>(null);
@@ -117,6 +128,51 @@ export function SalesAgentsOnline() {
             >
               <X className="h-4 w-4" />
             </button>
+          </div>
+
+          {/* Current user's WORK STATUS + context actions. Distinct from the
+              presence (online) picture below — Online ≠ Working. */}
+          <div className="border-b border-border bg-muted/30 px-4 py-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="flex items-center gap-1.5 text-[11px] font-semibold">
+                <span className={cn("h-1.5 w-1.5 rounded-full", WORK_STATUS_META[workStatus].dot)} />
+                <span className={WORK_STATUS_META[workStatus].text}>
+                  Your work status: {WORK_STATUS_META[workStatus].label}
+                </span>
+              </span>
+              <button
+                onClick={() => { router.push("/account/productivity"); setOpen(false); }}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] font-medium text-[#4361EE] transition hover:bg-[#4361EE]/10"
+              >
+                <BarChart3 className="h-3.5 w-3.5" /> Productivity
+              </button>
+            </div>
+            <div className="mt-2 flex items-center gap-2">
+              {workStatus === "working" && (
+                <button
+                  onClick={() => void startBreak()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted"
+                >
+                  <Coffee className="h-3.5 w-3.5" /> Start Break
+                </button>
+              )}
+              {workStatus === "on_break" && (
+                <button
+                  onClick={() => void endBreak()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted"
+                >
+                  <Play className="h-3.5 w-3.5" /> Resume Work
+                </button>
+              )}
+              {(workStatus === "logged_out" || workStatus === "interrupted") && (
+                <button
+                  onClick={() => void startWork()}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted"
+                >
+                  <Clock className="h-3.5 w-3.5" /> Start Work
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="h-[360px] overflow-y-auto p-2">
