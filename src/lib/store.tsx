@@ -2747,31 +2747,33 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    */
   const persistInvoiceLineCosts = useCallback(async (invoice: Invoice) => {
     if (!shouldUseDb()) return;
-    const rows: Record<string, unknown>[] = [];
-    const pushLine = (line: { id: string; qty?: number; kind?: string; cost?: number; costState?: string }) => {
-      // Only snapshot lines that actually carry a resolved cost provenance; a
-      // line with neither cost nor costState is a legacy/unconfigured line and
-      // needs no cost row (it reads as "not configured").
-      if (line.cost === undefined && line.costState === undefined) return;
-      rows.push({
-        invoice_id: invoice.id,
-        line_id: line.id,
-        branch_id: null,
-        kind: line.kind ?? "part",
-        qty: line.qty ?? 0,
-        cost: line.cost ?? null,
-        cost_state: line.costState ?? "not_configured",
-        updated_at: new Date().toISOString(),
+    // SERVER-OWNED finalization (review findings #5, #6, #8). The per-line cost
+    // snapshot and any direct-sale stock consumption are NO LONGER written from
+    // the browser — the client cannot (and must not) write invoice_line_costs
+    // (it has no end-user RLS write policy) nor derive cost it may not read.
+    // Instead we POST to /api/invoice/[id]/finalize-costing, which under the
+    // service role resolves each line's cost from the authoritative records
+    // REGARDLESS of this user's cost-read grants (so a non-cost creator still
+    // gets a correct snapshot), upserts the immutable snapshot, and idempotently
+    // consumes direct-invoice part stock (single Outward per fulfilment line).
+    try {
+      const { data: sess } = await db.auth.getSession();
+      const token = sess?.session?.access_token;
+      if (!token) return;
+      const res = await fetch(`/api/invoice/${encodeURIComponent(invoice.id)}/finalize-costing`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
       });
-    };
-    for (const it of invoice.items ?? []) pushLine(it as any);
-    for (const d of invoice.devices ?? []) for (const p of d.parts ?? []) pushLine(p as any);
-    if (rows.length === 0) return;
-    const { error } = await db.from("invoice_line_costs").upsert(rows, { onConflict: "invoice_id,line_id" });
-    // A non-cost caller is rejected by RLS — that is expected and not an error
-    // we surface (the cost snapshot is simply not recorded by that user).
-    if (error && !/row-level security|permission denied/i.test(error.message)) {
-      console.error("[store] persistInvoiceLineCosts failed:", error.message);
+      if (!res.ok) {
+        // Non-fatal: the invoice itself is already saved. A failure here means
+        // the cost snapshot / consumption did not record; log for diagnosis but
+        // never block the user's save.
+        let msg = `${res.status}`;
+        try { msg = (await res.json())?.error ?? msg; } catch { /* ignore */ }
+        console.error("[store] finalize-costing failed:", msg);
+      }
+    } catch (e: any) {
+      console.error("[store] finalize-costing request error:", e?.message ?? e);
     }
   }, [shouldUseDb, db]);
 
@@ -3791,13 +3793,32 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const addStockMovement = useCallback(async (movement: StockMovement, opts?: { itemId?: string; unitCost?: number }) => {
     if (shouldUseDb()) {
+      // Purchase / Stock-In (FR-13 / review finding #9): an INWARD movement that
+      // carries an item + a receipt unit cost is a COST-CARRYING receipt. It is
+      // posted through the atomic post_stock_receipt RPC, which writes the
+      // cost-gated inventory_stock_layers layer (source='purchase', qty_remaining
+      // = qty), the Inward quantity movement, and raises the master balance in
+      // ONE transaction — so Purchase/Stock-In is valued like opening stock, not
+      // just opening. The cost dimension never touches the broadly-readable
+      // movement row (SYS-1). Non-Inward movements (Transfer/Outward/Adjustment)
+      // and Inward movements without a cost keep the plain movement insert.
+      if (movement.type === "Inward" && opts?.itemId && opts.unitCost !== undefined) {
+        const { error: rErr } = await db.rpc("post_stock_receipt", {
+          p_item_id: opts.itemId,
+          p_qty: movement.items,
+          p_unit_cost: opts.unitCost,
+          p_source: "purchase",
+        });
+        if (rErr) { console.error("[store] addStockMovement receipt failed:", rErr.message); return; }
+        setState((s) => ({ ...s, stockMovements: [movement, ...s.stockMovements] }));
+        logActivity({ module: "Inventory", action: "Stock Increased", severity: "success", entity: "Stock Movement", reference: movement.docNumber, description: `Inward (purchase) movement of ${movement.items} item${movement.items !== 1 ? "s" : ""}: ${movement.fromStore} → ${movement.toStore}.` });
+        return;
+      }
       const row = stockMovementToRow(movement);
-      // Tie the movement to its item for traceability. The COST dimension
-      // (unit_cost/total_value) is DELIBERATELY NOT written here (SYS-1): the
-      // stock_movements SELECT policy admits non-cost roles (manage_repair_jobs),
-      // so cost lives ONLY on the cost-gated inventory_stock_layers, never on the
-      // broadly-readable movement row. `opts.unitCost` is still accepted for the
-      // caller's ledger-layer write but is not persisted onto the movement.
+      // Tie the movement to its item for traceability. The COST dimension is
+      // NEVER written on the broadly-readable movement row (SYS-1 / finding #2):
+      // the stock_movements SELECT policy admits non-cost roles, so cost lives
+      // ONLY on the cost-gated inventory_stock_layers ledger.
       if (opts?.itemId !== undefined) row.item_id = opts.itemId;
       const { error } = await db.from("stock_movements").insert(withStore(row));
       if (error) { console.error("[store] addStockMovement failed:", error.message); return; }

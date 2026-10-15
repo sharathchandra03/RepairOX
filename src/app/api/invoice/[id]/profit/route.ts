@@ -98,18 +98,45 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   if (!row) return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
 
-  // Branch visibility: a caller may read this invoice's profit only when it is
-  // in their branch scope (a null branch is org-wide / visible), unless they can
-  // cross branches (manage_branches / owner). Mirrors auth_branch_visible.
-  const canCrossBranch = isSuper || permissions.has("manage_branches");
+  // Branch visibility (review finding #3) — reproduce the EXACT auth_branch_visible
+  // contract the invoice RLS would apply, since the service-role client bypasses
+  // RLS. The real contract (migrations 0034/0039) is:
+  //   • a NULL invoice branch is org-wide → visible to any org member;
+  //   • otherwise the branch must be in the caller's authorized store set
+  //     (auth_store_ids = home staff.branch_id + active user_stores grants);
+  //   • a caller who can cross branches sees every branch in the org, and
+  //     cross-branch is gated on multi_store_access (NOT manage_branches, which
+  //     is store administration, and NOT a hard-coded role id). full_access is
+  //     action-wide but store-scoped per 0039, so it does NOT by itself grant
+  //     cross-store — only platform/master owner (true admin) + multi_store_access.
+  // auth_can_cross_branch() ≡ multi_store_access; is_admin() ≡ the built-in
+  // admin role set (platform_owner / master_shop_owner / developer / admin). '*'
+  // / full_access are action-wide but store-scoped (0039) and do NOT, on their
+  // own, cross branches — so they are deliberately NOT in this test.
+  const IS_ADMIN_ROLES = ["platform_owner", "master_shop_owner", "developer", "admin"];
+  const canCrossBranch = IS_ADMIN_ROLES.includes(roleId) || permissions.has("multi_store_access");
+
   if (!canCrossBranch && row.branch_id != null) {
+    // auth_store_ids() for a non-cross-branch caller = home staff.branch_id +
+    // active user_stores grants (keyed by staff_id). Resolve the caller's staff
+    // id first, then both its home branch and its active grants.
     const { data: staffRow } = await admin
       .from("staff")
-      .select("branch_id")
+      .select("id, branch_id")
       .eq("auth_user_id", user.id)
       .maybeSingle();
-    const callerBranch = staffRow?.branch_id ?? null;
-    if (callerBranch == null || callerBranch !== row.branch_id) {
+    const authorizedBranches = new Set<string>();
+    if (staffRow?.branch_id) authorizedBranches.add(staffRow.branch_id as string);
+    if (staffRow?.id) {
+      const { data: grants } = await admin
+        .from("user_stores")
+        .select("branch_id")
+        .eq("staff_id", staffRow.id)
+        .eq("status", "active");
+      for (const g of (grants ?? []) as any[]) if (g.branch_id) authorizedBranches.add(g.branch_id as string);
+    }
+
+    if (!authorizedBranches.has(row.branch_id as string)) {
       return NextResponse.json({ ok: false, error: "You don't have permission to view this invoice's profitability." }, { status: 403 });
     }
   }

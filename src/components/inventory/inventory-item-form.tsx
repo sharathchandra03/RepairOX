@@ -247,11 +247,13 @@ export function inventoryUpdateFromForm(
 ): { patch: Partial<InventoryItem>; cost?: InventoryCostInput } {
   const isService = v.kind === "service";
   const sp = isService ? Number(v.serviceCharge || 0) : Number(v.sellingPrice || 0);
+  // item_kind (and its legacy `type` mirror) is a PERMANENT identity and is
+  // DELIBERATELY NOT in the update patch (review finding #10): the DB rejects a
+  // kind change and the UI locks the control on edit, so an ordinary edit never
+  // attempts to re-write the item's kind/type.
   const patch: Partial<InventoryItem> = {
-    kind: v.kind,
     name: v.name.trim(),
     category: v.category,
-    type: isService ? "Service" : "Product",
     mode: "Both",
     uom: v.uom,
     active: true,
@@ -326,11 +328,18 @@ export function InventoryItemFields({
    *  no opening balance can be established here. The invoice-side Add Inventory
    *  modal sets this — invoice flows never establish stock (FR-8/AC-9). */
   hideOpeningStock = false,
+  /** When true the Item Type control is read-only (edit mode). item_kind is a
+   *  PERMANENT identity: the per-org PRT-/SRV- code is kind-specific and never
+   *  re-stamped on update, so a kind flip would strand the code's identity. The
+   *  DB enforces this too (inventory_items_lock_code rejects a kind change —
+   *  review finding #10); locking the control here keeps the UI honest. */
+  lockItemType = false,
 }: {
   values: InventoryFormValues;
   onChange: (patch: Partial<InventoryFormValues>) => void;
   canEdit?: boolean;
   hideOpeningStock?: boolean;
+  lockItemType?: boolean;
 }) {
   const { can } = usePermissions();
   const canViewCost = allow(can, CAP.sensitive.viewCost);
@@ -359,17 +368,30 @@ export function InventoryItemFields({
 
   return (
     <div className="space-y-4">
-      {/* ── Item Type — the ONE control (replaces Product/Service + Buy/Sell/Both) ── */}
+      {/* ── Item Type — the ONE control (replaces Product/Service + Buy/Sell/Both) ──
+          Immutable once the item exists (lockItemType): the permanent PRT-/SRV-
+          code is kind-specific, so Item Type can only be chosen at creation. */}
       <Field label="Item Type">
-        <SegmentedTabs
-          className="w-full [&>button]:flex-1"
-          options={[
-            { label: "Part / Product", value: "part" },
-            { label: "Repair Service / Labour", value: "service" },
-          ]}
-          value={values.kind}
-          onChange={(v) => set({ kind: v as InventoryFormValues["kind"] })}
-        />
+        {lockItemType ? (
+          <div className="flex items-center gap-2">
+            <span className="inline-flex h-9 items-center rounded-lg border border-input bg-muted/40 px-3 text-sm font-medium text-foreground">
+              {isService ? "Repair Service / Labour" : "Part / Product"}
+            </span>
+            <span className="text-[11px] text-muted-foreground">
+              Item Type is permanent and can&apos;t be changed after creation.
+            </span>
+          </div>
+        ) : (
+          <SegmentedTabs
+            className="w-full [&>button]:flex-1"
+            options={[
+              { label: "Part / Product", value: "part" },
+              { label: "Repair Service / Labour", value: "service" },
+            ]}
+            value={values.kind}
+            onChange={(v) => set({ kind: v as InventoryFormValues["kind"] })}
+          />
+        )}
       </Field>
 
       {/* ── Identity ── */}

@@ -119,7 +119,7 @@ export default function AddItemPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_330px]">
         {/* ── Form column — the shared canonical field set ── */}
         <div className="space-y-5">
-          <InventoryItemFields values={values} onChange={set} canEdit={canUse} />
+          <InventoryItemFields values={values} onChange={set} canEdit={canUse} lockItemType={isEdit} />
         </div>
 
         {/* ── Live preview rail ── */}

@@ -164,9 +164,17 @@ create trigger inventory_items_stamp_code_trg
   for each row execute function public.inventory_items_stamp_code();
 
 -- BEFORE UPDATE immutability guard: once stamped, item_code / service_code can
--- NEVER change (FR-24 / AC-4 / SYS-7). Any attempt to mutate a non-null code to
--- a different value is reverted to the stored value, so an authorized update can
--- never rename an assigned code.
+-- NEVER change (FR-24 / AC-4 / SYS-7), and item_kind is a PERMANENT identity
+-- (SYS-10 / review finding #10). The permanent code is kind-specific (PRT- for a
+-- part, SRV- for a service) and the stamp trigger is INSERT-only, so allowing a
+-- later kind flip would leave a part carrying a PRT- code as a "service" (and
+-- vice-versa), violating the one-kind/one-code invariant. We therefore:
+--   • revert any attempt to mutate a non-null item_code / service_code, and
+--   • HARD-REJECT any attempt to change item_kind once an item exists.
+-- There is no silent coercion of kind: a reclassification would need an audited
+-- transition that re-allocates and validates the opposite-kind code, which this
+-- phase does not build — so the invariant is enforced by rejection, not a
+-- partial in-place edit that could strand identity.
 create or replace function public.inventory_items_lock_code()
 returns trigger
 language plpgsql
@@ -178,6 +186,18 @@ begin
   if old.service_code is not null and new.service_code is distinct from old.service_code then
     new.service_code := old.service_code;
   end if;
+
+  -- item_kind is immutable once set. A null→value transition on a legacy row
+  -- that was never classified is allowed (the backfill/seed path); a value→
+  -- different-value change is rejected so the permanent code can never become
+  -- the wrong kind. The legacy item_type mirror is likewise pinned to the kind.
+  if old.item_kind is not null and new.item_kind is distinct from old.item_kind then
+    raise exception
+      'inventory_items: item_kind is immutable once assigned (% → % denied for item %)',
+      old.item_kind, new.item_kind, old.id
+      using errcode = '42501';
+  end if;
+
   return new;
 end;
 $$;
@@ -340,13 +360,23 @@ create index if not exists invoice_line_costs_invoice_idx on public.invoice_line
 
 
 -- ############################################################################
--- SECTION 6 — stock_movements additive cost columns (optional link)     §9.6
---   All nullable, so legacy movements stay valid.
+-- SECTION 6 — stock_movements additive link (NO cost columns)           §9.6
+--   `stock_movements` is BROADLY readable (its SELECT policy admits operational
+--   roles such as manage_repair_jobs that hold NO cost capability). Cost MUST
+--   therefore never be representable on a movement row — RLS cannot mask a
+--   column, so a cost column here would hand raw cost to every reader admitted
+--   by the broad row policy (review finding #2 / FR-27 / AC-21). The cost
+--   dimension lives EXCLUSIVELY on the cost-gated inventory_stock_layers ledger.
+--
+--   We keep only the non-sensitive `item_id` link (so a movement can be tied to
+--   its item) and we DROP the previously-added unit_cost / total_value columns
+--   if an earlier revision of this migration created them, so re-applying this
+--   file converges to the strict shape with no cost column on the broad table.
 -- ############################################################################
 
-alter table public.stock_movements add column if not exists item_id     text;
-alter table public.stock_movements add column if not exists unit_cost   numeric;
-alter table public.stock_movements add column if not exists total_value numeric;
+alter table public.stock_movements add column if not exists item_id text;
+alter table public.stock_movements drop column if exists unit_cost;
+alter table public.stock_movements drop column if exists total_value;
 
 
 -- ############################################################################
@@ -481,20 +511,29 @@ begin
   end if;
 
   -- Authorize: the caller must be an org member able to add stock (same key set
-  -- as the inventory_stock_layers write policy). A non-authorized caller is
-  -- rejected before anything is written.
+  -- as the inventory_stock_layers write policy) AND be in scope for the item's
+  -- store. Because this function is SECURITY DEFINER it BYPASSES table RLS, so
+  -- the store predicate the inventory_stock_layers policy would normally apply
+  -- (auth_branch_visible) MUST be re-checked here (review finding #7 / SYS-9):
+  -- otherwise a branch-scoped worker who knows another store's item id could
+  -- post opening stock into that store. A non-authorized or out-of-scope caller
+  -- is rejected BEFORE anything is written (fail-closed). Service-role / trigger
+  -- context (no end-user JWT) is trusted and skips the end-user checks.
   if public.auth_org_id() is not null then
     if not public.auth_member_of_org(v_org)
-       or not public.auth_has_any(array['manage_inventory','manage_purchases','adjust_stock']) then
-      raise exception 'post_opening_stock: not authorized' using errcode = '42501';
+       or not public.auth_has_any(array['manage_inventory','manage_purchases','adjust_stock'])
+       or not public.auth_branch_visible(v_branch) then
+      raise exception 'post_opening_stock: not authorized for this store' using errcode = '42501';
     end if;
   end if;
 
   v_doc := 'MOV-OPEN-' || replace(gen_random_uuid()::text, '-', '');
 
-  -- (1) cost-carrying ledger layer (scope stamped by the layer guard trigger)
-  insert into public.inventory_stock_layers (organization_id, branch_id, item_id, source, qty_in, unit_cost, movement_doc_number)
-  values (v_org, v_branch, p_item_id, 'opening', p_qty, coalesce(p_unit_cost, 0), v_doc);
+  -- (1) cost-carrying ledger layer (scope stamped by the layer guard trigger).
+  --     qty_remaining starts equal to qty_in; sales deplete it oldest-first so
+  --     the weighted-average valuation always reflects REMAINING stock (§8).
+  insert into public.inventory_stock_layers (organization_id, branch_id, item_id, source, qty_in, qty_remaining, unit_cost, movement_doc_number)
+  values (v_org, v_branch, p_item_id, 'opening', p_qty, p_qty, coalesce(p_unit_cost, 0), v_doc);
 
   -- (2) the Inward quantity movement (quantity still flows through the existing
   --     stock-movement engine). unit_cost/total_value are DELIBERATELY NOT
@@ -513,29 +552,16 @@ grant execute on function public.post_opening_stock(text, numeric, numeric) to a
 
 -- ############################################################################
 -- SECTION 6d — Branch-scoped weighted-average cost read (LEDGER-DISCONNECT)
---   The valuation engine must READ the real stock-layer cost, not fall back to
---   org CP for every line. This cost-gated reader returns the branch-scoped
---   weighted-average unit cost for an item (Σ qty_in·unit_cost / Σ qty_in) over
---   the layers visible to the caller, or NULL when there are no layers (caller
---   then falls back to org CP). It is SECURITY INVOKER so RLS on
---   inventory_stock_layers still applies — a non-cost caller gets NULL, never a
---   cost. Used server-side (service role) by the profit route and on the
---   cost-authorized client save to snapshot line.cost.
+--   The valuation engine READs the real stock-layer cost (not org CP for every
+--   line). It is SECURITY INVOKER so RLS on inventory_stock_layers still applies
+--   — a non-cost caller gets NULL and the caller falls back to org CP. The
+--   DEFINITIVE, DEPLETION-AWARE version of inventory_weighted_avg_cost (averaging
+--   over qty_REMAINING, so a sold-out cheap layer no longer blends the valuation)
+--   is defined in SECTION 8 (review finding #9); it `create or replace`s the
+--   function after qty_remaining exists. There is intentionally no naive
+--   definition here, so the migration ends with exactly one, depletion-aware
+--   implementation. See SECTION 8.
 -- ############################################################################
-
-create or replace function public.inventory_weighted_avg_cost(p_item_id text)
-returns numeric
-language sql
-stable
-security invoker
-set search_path = public
-as $$
-  select case when sum(qty_in) > 0 then sum(qty_in * unit_cost) / sum(qty_in) else null end
-  from public.inventory_stock_layers
-  where item_id = p_item_id;
-$$;
-
-grant execute on function public.inventory_weighted_avg_cost(text) to authenticated;
 
 
 -- ############################################################################
@@ -642,9 +668,23 @@ create policy inventory_stock_layers_delete on public.inventory_stock_layers
 -- ── invoice_line_costs (SYS-1) ───────────────────────────────────────────────
 --   Read requires a COST key (view_profit_margin DELIBERATELY excluded, same as
 --   the other cost tables) so a non-cost invoice reader never pulls raw cost.
---   Write requires an edit-cost key (the snapshot is stamped by a cost-authorized
---   save). The parent-scope guard below stamps org/branch from the parent invoice
---   so a child row can never be bound to another org's invoice (SYS-8 shape).
+--
+--   WRITES ARE A PRIVILEGED SERVER-OWNED FINALIZATION OPERATION (review findings
+--   #5 + #6). The snapshot is historical truth the profit endpoint trusts, so it
+--   is NOT writable by any end user:
+--     • No end-user INSERT/UPDATE/DELETE policy exists → an authenticated caller
+--       (even a cost editor) can never create, rewrite, or delete a snapshot row
+--       directly through PostgREST. This makes finalized snapshots immutable from
+--       the client and removes the "read-only cost viewer rewrites history" hole.
+--     • The ONLY writer is the server finalization route, which runs under the
+--       service role and therefore BYPASSES RLS. It derives cost from the
+--       authorized item/layer records server-side and stamps org+branch from the
+--       parent invoice via the scope guard above — so a normal (non-cost) invoice
+--       creator still gets a correct, complete snapshot, because persistence no
+--       longer depends on the creator's read grants (finding #6).
+--   The parent-scope guard above stamps org/branch from the parent invoice and
+--   rejects any mismatch, so a service-role write can never bind a snapshot to
+--   the wrong org/branch either.
 alter table public.invoice_line_costs enable row level security;
 
 create or replace function public.invoice_line_costs_scope_guard()
@@ -663,14 +703,25 @@ begin
     raise exception 'invoice_line_costs: parent invoice % not found', new.invoice_id
       using errcode = '23503';
   end if;
+  -- Org is ALWAYS stamped authoritatively from the parent invoice; a non-null
+  -- client value that disagrees is a hard error (never silently accepted).
   if new.organization_id is null then
     new.organization_id := v_inv_org;
   elsif new.organization_id is distinct from v_inv_org then
     raise exception 'invoice_line_costs: organization_id % does not match parent invoice org %',
       new.organization_id, v_inv_org using errcode = '42501';
   end if;
+  -- Branch is ALWAYS the parent invoice's branch. Previously a non-null child
+  -- branch different from the invoice's was accepted, letting a cost holder in
+  -- branch B bind a branch-B snapshot to a branch-A invoice and alter its
+  -- profitability without invoice access (review finding #5). We now REJECT any
+  -- non-null branch that differs from the parent and otherwise stamp the
+  -- parent's branch — the snapshot can never carry a branch the invoice doesn't.
   if new.branch_id is null then
     new.branch_id := v_inv_branch;
+  elsif new.branch_id is distinct from v_inv_branch then
+    raise exception 'invoice_line_costs: branch_id % does not match parent invoice branch %',
+      new.branch_id, v_inv_branch using errcode = '42501';
   end if;
   return new;
 end;
@@ -690,38 +741,296 @@ create policy invoice_line_costs_select on public.invoice_line_costs
     and public.auth_has_any(array['inventory_view_cost','inventory_edit_cost','manage_inventory','manage_purchases'])
   );
 
+-- NO end-user INSERT / UPDATE / DELETE policies (review findings #5 + #6).
+-- Any previously-created end-user write policies are dropped here so a replay
+-- converges to the strict, server-owned-write-only shape. The snapshot is
+-- written exclusively by the service-role finalization route (which bypasses
+-- RLS), making it immutable from the client and independent of the invoice
+-- creator's cost-read grants.
 drop policy if exists invoice_line_costs_insert on public.invoice_line_costs;
-create policy invoice_line_costs_insert on public.invoice_line_costs
-  for insert to authenticated
-  with check (
-    public.auth_member_of_org(organization_id)
-    and public.auth_branch_visible(branch_id)
-    and public.auth_has_any(array['inventory_view_cost','inventory_edit_cost','manage_inventory','manage_purchases'])
-  );
-
 drop policy if exists invoice_line_costs_update on public.invoice_line_costs;
-create policy invoice_line_costs_update on public.invoice_line_costs
-  for update to authenticated
-  using (
-    public.auth_member_of_org(organization_id)
-    and public.auth_branch_visible(branch_id)
-    and public.auth_has_any(array['inventory_view_cost','inventory_edit_cost','manage_inventory','manage_purchases'])
-  )
-  with check (
-    public.auth_member_of_org(organization_id)
-    and public.auth_branch_visible(branch_id)
-    and public.auth_has_any(array['inventory_view_cost','inventory_edit_cost','manage_inventory','manage_purchases'])
-  );
-
 drop policy if exists invoice_line_costs_delete on public.invoice_line_costs;
-create policy invoice_line_costs_delete on public.invoice_line_costs
-  for delete to authenticated
-  using (
-    public.auth_member_of_org(organization_id)
-    and public.auth_branch_visible(branch_id)
-    and public.auth_has_any(array['inventory_view_cost','inventory_edit_cost','manage_inventory','manage_purchases'])
-  );
+
 
 -- ############################################################################
--- END 0075
+-- SECTION 8 — Depletion-aware receipt valuation (FR-13 / FR-16 / finding #9)
+--   The weighted-average valuation must reflect the cost of REMAINING stock,
+--   not blend every receipt ever recorded. Previously only post_opening_stock
+--   wrote a layer and the reader averaged ALL layers (so after old cheap stock
+--   is sold out it still reported a blended cost). We now:
+--     • track qty_remaining per layer (seeded to qty_in for existing rows),
+--     • add an atomic branch-scoped Purchase/Stock-In receipt RPC that posts a
+--       cost-carrying layer + the Inward quantity movement + the master balance
+--       in ONE transaction (FR-13 — Purchase/Stock-In now valued, not just
+--       opening stock),
+--     • compute the weighted average over qty_REMAINING so consumption depletes
+--       old layers first (FIFO depletion feeding a current weighted average),
+--     • deplete remaining quantity (oldest-first) when a sale consumes stock.
+-- ############################################################################
+
+alter table public.inventory_stock_layers
+  add column if not exists qty_remaining numeric;
+
+-- Seed remaining = qty_in for any layer that predates this column (idempotent:
+-- only fills the NULLs this migration introduced, never overwrites a value a
+-- consumption already decremented).
+update public.inventory_stock_layers
+   set qty_remaining = qty_in
+ where qty_remaining is null;
+
+alter table public.inventory_stock_layers
+  alter column qty_remaining set default 0;
+
+-- Current weighted-average over REMAINING quantity (depletion-aware). Falls back
+-- to NULL when no stock remains so the caller uses the org-level default CP.
+-- SECURITY INVOKER so cost RLS still applies — a non-cost caller gets NULL.
+create or replace function public.inventory_weighted_avg_cost(p_item_id text)
+returns numeric
+language sql
+stable
+security invoker
+set search_path = public
+as $$
+  select case
+           when sum(coalesce(qty_remaining, qty_in)) > 0
+             then sum(coalesce(qty_remaining, qty_in) * unit_cost)
+                  / sum(coalesce(qty_remaining, qty_in))
+           else null
+         end
+  from public.inventory_stock_layers
+  where item_id = p_item_id;
+$$;
+
+grant execute on function public.inventory_weighted_avg_cost(text) to authenticated;
+
+-- Atomic Purchase / Stock-In receipt (FR-13). Posts a cost-carrying layer, the
+-- Inward quantity movement, and raises the master balance in ONE transaction,
+-- store-scope-checked exactly like post_opening_stock (finding #7 shape).
+create or replace function public.post_stock_receipt(
+  p_item_id   text,
+  p_qty       numeric,
+  p_unit_cost numeric,
+  p_source    text default 'purchase'
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org    uuid;
+  v_branch uuid;
+  v_store  text;
+  v_doc    text;
+begin
+  if p_qty is null or p_qty <= 0 then
+    raise exception 'post_stock_receipt: received quantity must be > 0' using errcode = '22023';
+  end if;
+
+  select organization_id, branch_id, store into v_org, v_branch, v_store
+  from public.inventory_items where id = p_item_id;
+  if v_org is null then
+    raise exception 'post_stock_receipt: item % not found', p_item_id using errcode = '23503';
+  end if;
+
+  if public.auth_org_id() is not null then
+    if not public.auth_member_of_org(v_org)
+       or not public.auth_has_any(array['manage_inventory','manage_purchases','adjust_stock'])
+       or not public.auth_branch_visible(v_branch) then
+      raise exception 'post_stock_receipt: not authorized for this store' using errcode = '42501';
+    end if;
+  end if;
+
+  v_doc := 'MOV-RCV-' || replace(gen_random_uuid()::text, '-', '');
+
+  insert into public.inventory_stock_layers
+    (organization_id, branch_id, item_id, source, qty_in, qty_remaining, unit_cost, movement_doc_number)
+  values
+    (v_org, v_branch, p_item_id, coalesce(p_source, 'purchase'), p_qty, p_qty, coalesce(p_unit_cost, 0), v_doc);
+
+  insert into public.stock_movements
+    (doc_number, organization_id, branch_id, from_store, to_store, items, movement_date, movement_user, movement_type, status, item_id)
+  values
+    (v_doc, v_org, v_branch, 'Purchase / Stock In', v_store, p_qty, to_char(now(), 'DD/MM/YYYY'), '', 'Inward', 'completed', p_item_id);
+
+  update public.inventory_items
+     set current_stock = coalesce(current_stock, 0) + p_qty, updated_at = now()
+   where id = p_item_id;
+end;
+$$;
+
+grant execute on function public.post_stock_receipt(text, numeric, numeric, text) to authenticated;
+
+
+-- ############################################################################
+-- SECTION 9 — Idempotent sales stock-consumption boundary (FR-12 / finding #8)
+--   A single server-owned consumption operation that deducts a direct-invoice
+--   part's stock EXACTLY ONCE, recognizes already-consumed linked-ticket parts,
+--   depletes the oldest cost layers first, and is protected by a unique
+--   fulfillment/line idempotency key so a retry / concurrent finalize is a
+--   no-op. This is the "single Outward movement per unit of fulfilment" FR-12
+--   requires — the ticket path (deductPartsForTicket) remains the authority for
+--   ticket-originated fulfilment; this handles the DIRECT-invoice sale.
+-- ############################################################################
+
+-- Idempotency ledger: one row per (invoice line) that has been consumed. The
+-- PK is the fulfilment key, so a second attempt to consume the same line
+-- violates the PK and is skipped — the unique key is the idempotency guarantee.
+create table if not exists public.stock_consumption_log (
+  fulfillment_key text primary key,            -- e.g. 'invoice:<invoice_id>:line:<line_id>'
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+  branch_id       uuid references public.branches(id) on delete set null,
+  invoice_id      text,
+  line_id         text,
+  item_id         text,
+  qty             numeric not null default 0,
+  consumed_at     timestamptz not null default now(),
+  consumed_by     uuid references public.staff(id) on delete set null
+);
+
+alter table public.stock_consumption_log enable row level security;
+-- Read is cost/inventory scoped (it reveals which lines consumed stock); writes
+-- happen ONLY through the service-role consumption RPC (no end-user write
+-- policy), so the idempotency ledger can never be forged or cleared by a client.
+drop policy if exists stock_consumption_log_select on public.stock_consumption_log;
+create policy stock_consumption_log_select on public.stock_consumption_log
+  for select to authenticated
+  using (
+    public.auth_member_of_org(organization_id)
+    and public.auth_branch_visible(branch_id)
+    and public.auth_has_any(array['manage_inventory','manage_purchases','adjust_stock','manage_invoices'])
+  );
+
+-- Deplete oldest remaining cost layers for an item by a quantity (FIFO
+-- depletion). Returns nothing; silently stops when layers run out (the master
+-- current_stock is the authoritative balance; layers only track cost).
+create or replace function public.inventory_deplete_layers(p_item_id text, p_qty numeric)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_remaining numeric := p_qty;
+  v_layer     record;
+  v_take      numeric;
+begin
+  if p_qty is null or p_qty <= 0 then return; end if;
+  for v_layer in
+    select id, coalesce(qty_remaining, qty_in) as rem
+    from public.inventory_stock_layers
+    where item_id = p_item_id and coalesce(qty_remaining, qty_in) > 0
+    order by received_at asc, created_at asc
+  loop
+    exit when v_remaining <= 0;
+    v_take := least(v_layer.rem, v_remaining);
+    update public.inventory_stock_layers
+       set qty_remaining = coalesce(qty_remaining, qty_in) - v_take
+     where id = v_layer.id;
+    v_remaining := v_remaining - v_take;
+  end loop;
+end;
+$$;
+
+-- Consume ONE direct-invoice part line exactly once. Idempotent via the
+-- fulfilment-key PK on stock_consumption_log: a retry / concurrent call hits the
+-- unique PK and returns false (already consumed) without a second deduction.
+-- Writes the Outward movement, depletes cost layers, and lowers the master
+-- balance — all in this single transaction (fail-closed).
+create or replace function public.consume_invoice_line_stock(
+  p_invoice_id text,
+  p_line_id    text,
+  p_item_id    text,
+  p_qty        numeric
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org    uuid;
+  v_branch uuid;
+  v_store  text;
+  v_key    text := 'invoice:' || p_invoice_id || ':line:' || p_line_id;
+  v_doc    text;
+begin
+  if p_qty is null or p_qty <= 0 then return false; end if;
+
+  select organization_id, branch_id, store into v_org, v_branch, v_store
+  from public.inventory_items where id = p_item_id;
+  if v_org is null then
+    raise exception 'consume_invoice_line_stock: item % not found', p_item_id using errcode = '23503';
+  end if;
+
+  -- Idempotency claim FIRST: if this fulfilment key already exists, the line was
+  -- already consumed (by a prior finalize, a retry, or the linked ticket path
+  -- that logged it) — do nothing. The PK conflict makes concurrent finalizes
+  -- safe (only one wins the insert).
+  begin
+    insert into public.stock_consumption_log
+      (fulfillment_key, organization_id, branch_id, invoice_id, line_id, item_id, qty)
+    values
+      (v_key, v_org, v_branch, p_invoice_id, p_line_id, p_item_id, p_qty);
+  exception when unique_violation then
+    return false;  -- already consumed → no second deduction
+  end;
+
+  v_doc := 'MOV-SALE-' || replace(gen_random_uuid()::text, '-', '');
+
+  -- Outward quantity movement (single movement per fulfilment line).
+  insert into public.stock_movements
+    (doc_number, organization_id, branch_id, from_store, to_store, items, movement_date, movement_user, movement_type, status, item_id)
+  values
+    (v_doc, v_org, v_branch, v_store, 'Sold / Invoiced', p_qty, to_char(now(), 'DD/MM/YYYY'), '', 'Outward', 'completed', p_item_id);
+
+  -- Deplete oldest cost layers so the weighted-average reflects remaining stock.
+  perform public.inventory_deplete_layers(p_item_id, p_qty);
+
+  -- Lower the master balance (never below zero).
+  update public.inventory_items
+     set current_stock = greatest(coalesce(current_stock, 0) - p_qty, 0), updated_at = now()
+   where id = p_item_id;
+
+  return true;
+end;
+$$;
+
+grant execute on function public.consume_invoice_line_stock(text, text, text, numeric) to authenticated;
+
+-- Record that a linked-ticket part was already consumed by the ticket path, so
+-- a later invoice finalize for the same fulfilment recognizes it and never
+-- double-deducts (FR-12). Idempotent: a duplicate key is a no-op.
+create or replace function public.mark_ticket_line_consumed(
+  p_invoice_id text,
+  p_line_id    text,
+  p_item_id    text,
+  p_qty        numeric
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_org    uuid;
+  v_branch uuid;
+  v_key    text := 'invoice:' || p_invoice_id || ':line:' || p_line_id;
+begin
+  select organization_id, branch_id into v_org, v_branch
+  from public.inventory_items where id = p_item_id;
+  if v_org is null then return; end if;
+  insert into public.stock_consumption_log
+    (fulfillment_key, organization_id, branch_id, invoice_id, line_id, item_id, qty)
+  values
+    (v_key, v_org, v_branch, p_invoice_id, p_line_id, p_item_id, coalesce(p_qty, 0))
+  on conflict (fulfillment_key) do nothing;
+end;
+$$;
+
+grant execute on function public.mark_ticket_line_consumed(text, text, text, numeric) to authenticated;
+
+
+-- ############################################################################
+-- END 0077
 -- ############################################################################
