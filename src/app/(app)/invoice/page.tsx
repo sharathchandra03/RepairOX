@@ -9,7 +9,7 @@ import {
   Trash2, Copy, Printer, Mail, MessageCircle, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
   PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, ChevronDown, X,
-  Pin, PinOff, Filter, FileSpreadsheet, RotateCcw,
+  Pin, PinOff, Filter, FileSpreadsheet, RotateCcw, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -62,10 +62,10 @@ type InvColumnDef = {
 const INV_ALL_COLUMNS: InvColumnDef[] = [
   { id: "id", label: "ID", width: "w-[120px]" },
   { id: "ticket", label: "Ticket", align: "center", width: "w-[96px]" },
-  { id: "customer", label: "Customer", width: "w-[20%]" },
+  { id: "customer", label: "Customer", width: "w-[25%]" },
   { id: "date", label: "Created", width: "w-[112px]" },
   { id: "status", label: "Status", width: "w-[130px]" },
-  { id: "refundStatus", label: "Refund", width: "w-[150px]" },
+  { id: "refundStatus", label: "Refund", width: "w-[116px]" },
   { id: "category", label: "Category", width: "w-[116px]" },
   { id: "paid", label: "Paid", align: "right", width: "w-[88px]" },
   { id: "tax", label: "Tax", align: "right", width: "w-[76px]" },
@@ -198,6 +198,7 @@ export default function InvoicePage() {
   const canBulkChangeStatus = allow(can, CAP.invoice.changeStatus);
   const canBulkDelete = allow(can, CAP.invoice.delete);
   const canRefundInitiate = allow(can, CAP.invoice.refundInitiate);
+  const canEditInvoice = allow(can, CAP.invoice.edit);
   const multiStore = isAllShops && stores.length > 1;
   const { settings } = useStoreSettings();
   const invoiceStatusColors = settings.invoiceStatusColors;
@@ -1031,7 +1032,7 @@ export default function InvoicePage() {
                         const invRefunds = refundsByInvoice.get(inv.id) ?? [];
                         const invRefundStatus = deriveRefundStatus(inv, invRefunds);
                         const invRefundEligible = refundEligibility(inv, invRefunds).eligible;
-                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined, invRefundStatus, invRefundEligible, canRefundInitiate, () => setRefundTarget(inv));
+                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined, invRefundStatus, invRefundEligible, canRefundInitiate, () => setRefundTarget(inv), canEditInvoice, (next: InvoiceStatus) => { if (next === inv.status) return; void updateInvoice(inv.id, { status: next }); });
                       })()}
                     </td>
                   ))}
@@ -1281,6 +1282,8 @@ function renderInvCell(
   refundEligible?: boolean,
   canRefundInitiate?: boolean,
   onRefund?: () => void,
+  canChangeStatus?: boolean,
+  onChangeStatus?: (next: InvoiceStatus) => void,
 ) {
   const statusHex = statusColors?.[inv.status];
   const proforma = isProforma(inv);
@@ -1351,7 +1354,8 @@ function renderInvCell(
           </span>
         );
       }
-      return statusHex ? (
+      // Read-only pill markup (view-tier user, or when editing not permitted).
+      const statusPill = statusHex ? (
         <span
           className="ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap"
           style={invoiceStatusPillStyle(statusHex)}
@@ -1363,16 +1367,100 @@ function renderInvCell(
           <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
         </span>
       );
+      // View-vs-edit: a user without edit rights sees the static pill only.
+      if (!canChangeStatus) return statusPill;
+      // Editable: the pill becomes a clickable lifecycle dropdown offering ALL
+      // financial statuses, with the current one marked. It changes ONLY the
+      // financial status (inv.status) — never the derived refund state.
+      const statuses = Object.keys(INVOICE_STATUS_LABEL) as InvoiceStatus[];
+      return (
+        <div className="ml-[7px]" onClick={(e) => e.stopPropagation()}>
+          <Dropdown
+            align="left"
+            width="w-44"
+            trigger={({ toggle }) => (
+              <button
+                type="button"
+                onClick={(e) => { e.stopPropagation(); toggle(); }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+                  !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[inv.status]}`,
+                )}
+                style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
+                title={`Change status (currently ${INVOICE_STATUS_LABEL[inv.status]})`}
+              >
+                <span className="h-1.5 w-1.5 rounded-full bg-current" style={statusHex ? { backgroundColor: statusHex } : undefined} />
+                {INVOICE_STATUS_LABEL[inv.status]}
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </button>
+            )}
+          >
+            {(close) => (
+              <>
+                {statuses.map((key) => {
+                  const current = key === inv.status;
+                  // Use only the tone's text colour for the dot (bg-current),
+                  // not the full pill tone (which carries a bg/ring).
+                  const dotTone = INVOICE_STATUS_TONE[key].split(" ").find((c) => c.startsWith("text-")) ?? "text-foreground";
+                  return (
+                    <MenuItem
+                      key={key}
+                      className={current ? "bg-[#EEF1FD]" : undefined}
+                      onClick={() => { onChangeStatus?.(key); close(); }}
+                    >
+                      <span className="flex items-center gap-2">
+                        <span className={cn("inline-flex h-1.5 w-1.5 rounded-full bg-current", dotTone)} />
+                        <span className={cn("flex-1", current && "font-semibold")}>{INVOICE_STATUS_LABEL[key]}</span>
+                        {current && <Check className="h-3.5 w-3.5 text-[#4361EE]" />}
+                      </span>
+                    </MenuItem>
+                  );
+                })}
+              </>
+            )}
+          </Dropdown>
+        </div>
+      );
     }
     case "refundStatus": {
       // DERIVED refund status (never a stored field) — a full-width pill per the
       // pill standard. Proformas / unrefundable rows read as "No Refund".
       const rs = refundStatusValue ?? "no_refund";
+      // The whole cell is a refund entry point when the invoice is eligible AND
+      // the user may initiate refunds — it opens the mounted RefundFlow at its
+      // first ask step. Refund status itself stays DERIVED / never user-edited.
+      const clickable = !!refundEligible && !!canRefundInitiate;
       if (rs === "no_refund") {
+        if (clickable) {
+          return (
+            <button
+              type="button"
+              onClick={(e) => { e.stopPropagation(); onRefund?.(); }}
+              title="Start refund"
+              className="rounded text-[13px] font-medium text-[#4361EE] hover:underline cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
+            >
+              Refund
+            </button>
+          );
+        }
         return <span className="text-[13px] text-muted-foreground leading-snug">—</span>;
       }
+      const pillClasses = `inline-flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[rs]}`;
+      if (clickable) {
+        return (
+          <button
+            type="button"
+            onClick={(e) => { e.stopPropagation(); onRefund?.(); }}
+            title={`${REFUND_STATUS_LABEL[rs]} — click to process a refund`}
+            className={cn(pillClasses, "transition hover:brightness-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40")}
+          >
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+            <span className="min-w-0 flex-1 truncate text-left">{REFUND_STATUS_LABEL[rs]}</span>
+          </button>
+        );
+      }
       return (
-        <span className={`inline-flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[rs]}`} title={REFUND_STATUS_LABEL[rs]}>
+        <span className={pillClasses} title={REFUND_STATUS_LABEL[rs]}>
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
           <span className="min-w-0 flex-1 truncate">{REFUND_STATUS_LABEL[rs]}</span>
         </span>
