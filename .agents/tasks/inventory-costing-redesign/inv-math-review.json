@@ -1,0 +1,31 @@
+{
+  "approved": true,
+  "findings": [
+    {
+      "id": "MATH-LOW-1",
+      "severity": "low",
+      "confidence": "confirmed",
+      "title": "Client preview weighted-average is lifetime-blend, server WAC is depletion-aware",
+      "detail": "The store hydrates inventory_stock_layers as {item_id, qty_in, unit_cost} (store.tsx ~1797), so the in-memory resolvePartUnitCost averages over qty_in (lifetime), while the authoritative inventory_weighted_avg_cost (migration 0077) averages over qty_remaining (depletion-aware). The two can disagree once a cheaper layer has partly/fully sold. Non-blocking: the client value is stripped from the invoice JSON on save and overwritten by the server depletion-aware snapshot (invoice_line_costs), and the breakdown panel renders only on the saved detail page from the merged snapshot — so the lifetime value is never persisted and never feeds realized profit. Optional fix: hydrate qty_remaining (fallback qty_in) so the preview matches the authoritative value.",
+      "blocking": false
+    },
+    {
+      "id": "MATH-INFO-1",
+      "severity": "info",
+      "confidence": "confirmed",
+      "title": "In-session post-save display uses the transient client cost until reload",
+      "detail": "addInvoice restores saved.items = current.items (store.tsx ~2892), so immediately after save the panel shows the lifetime-blend client cost until a reload merges the depletion-aware server snapshot. Same root cause as MATH-LOW-1; cosmetic, self-corrects on reload.",
+      "blocking": false
+    },
+    {
+      "id": "MATH-INFO-2",
+      "severity": "info",
+      "confidence": "confirmed",
+      "title": "Service cost provenance label differs between client and server paths",
+      "detail": "Client addServiceLine stamps costState 'resolved' for a configured labour cost; server finalize-costing stamps 'cp'. The engine treats both as configured, so GP/margin are identical — only the provenance label differs. No math impact.",
+      "blocking": false
+    }
+  ],
+  "summary": "The costing/profitability MATH is correct across all seven focus areas. Weighted-average resolution (authoritative server function is depletion-aware over qty_remaining with correct FIFO depletion; CP fallback and 'not configured' handled correctly, configured-\u20b90 kept distinct, false 100% margin suppressed). Preliminary/parts & service GP and the combined-GP identity (partsGP + serviceGP == combinedGP + otherDirectCost) hold by construction with the corrected sign. grossRevenue reconciles to invoice.subtotal (partsTotal incl. service lines + repairCost); eligibleNetRevenue == max(0, subtotal \u2212 discount) via pro-rata split in all cases; GST excluded; finalized-only eligibility mapped correctly. Service lines create no stock movement. Historical profitability is frozen via an immutable server snapshot and does not drift when a catalogue CP/SP later changes. Verification evidence present in the latest commit (tsc PASS, inventory:costing:test 20/20 PASS, build PASS); not re-run per protocol. One non-blocking LOW inconsistency: the client preview WAC is a lifetime blend vs the authoritative depletion-aware server WAC, but the divergent value is transient and never persisted.",
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/inventory-costing-redesign/inv-math-review.md"
+}

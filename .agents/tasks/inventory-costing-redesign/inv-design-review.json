@@ -1,0 +1,16 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "NIT",
+      "id": "NIT-5",
+      "description": "The new server route getInvoiceProfitAggregate(invoiceId) (introduced in §6/§7.1 to serve GP/margin to a profit-only viewer without exposing raw cost) has its requirePermission guard pinned but no explicit response shape, and it is not listed in the AC->design map or a file-level plan. Implementable unambiguously (the §3.5 engine defines the aggregates and §10 tests the 'no per-unit cost field' rule), so non-blocking. Fix: add a one-line response-shape note, e.g. { partsGP, serviceGP, combinedGP, grossMargin: number | null, partsNet, serviceNet }, and list the route as a deliberate new API surface."
+    },
+    {
+      "severity": "NIT",
+      "id": "NIT-6",
+      "description": "§3.3 resolvePartUnitCost CP-fallback branch tests item.costState === 'configured' && item.costPrice >= 0. Per §2.1a a non-cost caller has costPrice undefined and costState not 'configured', so the branch correctly falls through to not_configured — consistent. The only NIT is that this coupling is implicit; a one-line note in §3.3 that item.costState/item.costPrice are populated solely from the cost-capable read (so a non-cost caller never reaches the CP branch) would make the boundary self-evident at the resolver. Non-blocking."
+    }
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/inventory-costing-redesign/inv-design-review.md"
+}

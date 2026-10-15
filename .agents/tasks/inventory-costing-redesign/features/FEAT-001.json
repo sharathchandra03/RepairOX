@@ -1,0 +1,35 @@
+{
+  "id": "FEAT-001",
+  "type": "feat",
+  "description": "Data foundation: additive/idempotent migration 0075 (inventory_items new columns incl. item_kind/migration_flag, per-org code counter + stamp trigger for PRT-/SRV-, cost-scoped inventory_item_costs, inventory_stock_layers, stock_movements cost columns, RLS, ordered backfill) plus the TypeScript data layer that consumes it (ItemKind + new InventoryItem fields, rowToInventoryItem/inventoryItemToRow mapping, and cost/opening side-channels on addInventoryItem/updateInventoryItem + the cost read on inventory load). Everything else builds on this. Independent of FEAT-002..005 only in that it must land first.",
+  "status": "pending",
+  "steps": [
+    "Create supabase/migrations/0075_inventory_costing_redesign.sql, additive + idempotent (add column if not exists / create table if not exists / drop..if exists+recreate / every backfill IS NULL or =0 guarded). (a) inventory_items additive columns: item_kind, item_code, service_code, barcode, brand_model, description (guarded), selling_price numeric default 0, service_charge numeric default 0, track_stock boolean default true, migration_flag text. Do NOT add cost_price/standard_labour_cost here. Retain item_type/mode/default_price/regular_buying_price/all tiers (design §9.1).",
+    "(b) inventory_code_sequences table + next_inventory_code(p_org_id,p_kind) SECURITY DEFINER function (per-org counter seeded above existing codes), reusing the next_lead_id(p_org_id) precedent in 0002_leads.sql lines 136-186 — NOT a global nextval. inventory_items_stamp_code_trg BEFORE INSERT stamps PRT-000001/SRV-000001 when blank. Unique partial indexes on (organization_id,item_code) and (organization_id,service_code) where not null. grant execute to authenticated (design §9.2 / HIGH-3).",
+    "(c) Backfill in order (design §9.3): classify item_kind from item_type (Service->service else part); flag migration_flag='unrecognised_item_type' for item_type not in (Product,Service) and 'service_with_stock' for a service row carrying non-zero current/min/max stock (stray stock preserved, never zeroed); seed codes via next_inventory_code keyed on item_kind; seed selling_price/service_charge from regular_selling_price ONLY (never cost).",
+    "(d) inventory_item_costs table (design §9.4): PK item_id only, organization_id default auth_org_id(), branch_id default null (org-level default row), cost_price, standard_labour_cost, cost_configured boolean default false, updated_at/by.",
+    "(e) inventory_stock_layers table (design §9.5): id uuid, organization_id, branch_id default auth_branch_id(), item_id, source text default 'purchase' (opening|purchase), qty_in, unit_cost, movement_doc_number, received_at, created_by/at; indexes on (item_id) and (branch_id).",
+    "(f) stock_movements additive nullable columns item_id text, unit_cost numeric, total_value numeric (design §9.6).",
+    "(g) RLS (design §9.7): enable RLS on both new tables. inventory_item_costs SELECT = auth_member_of_org(organization_id) and auth_branch_visible(branch_id) and auth_has_any(array['inventory_view_cost','inventory_edit_cost','manage_inventory','manage_purchases']) — view_profit_margin DELIBERATELY EXCLUDED (MEDIUM-1 option a); write = + auth_has_any(array['inventory_edit_cost','manage_inventory','manage_purchases']). inventory_stock_layers SELECT = same cost-only read set + branch scope; write = auth_has_any(array['manage_inventory','manage_purchases','adjust_stock']). Confirm helper signatures in 0001/0002 before referencing. No new permission KEYS.",
+    "In src/lib/inventory-data.ts: add `export type ItemKind = \"part\" | \"service\";` and add to InventoryItem the fields kind, itemCode, serviceCode, barcode, brandModel, costPrice?, sellingPrice?, serviceCharge?, standardLabourCost?, costState?('configured'|'not_configured'), trackStock, billingBasis?, migrationFlag? (keep legacy type/mode) (design §2.1).",
+    "In src/lib/store.tsx: rowToInventoryItem resolves kind with legacy fallback (r.item_kind ?? (item_type==='Service'?'service':'part')), maps new columns, defaults costState='not_configured'. inventoryItemToRow writes item_kind, keeps item_type/mode in sync, writes selling_price/service_charge/track_stock/barcode/brand_model/migration_flag but NOT cost_price/standard_labour_cost (design §2.1/§1.1). Legacy rows still load (NFR-2).",
+    "In src/lib/store.tsx extend addInventoryItem(item, opts?:{cost?,opening?}) and updateInventoryItem(id,updates,opts?:{cost?}) (design §2.4/§4): after inserting the master row, upsert inventory_item_costs with branch_id:null (org-level, MEDIUM-2) + cost_configured when opts.cost present & caller cost-authorized; when opts.opening present (part, qty>0) post ONE inventory_stock_layers row (source 'opening') + the Inward stock_movements row (reuse addStockMovement carrying item_id/unit_cost/total_value) + set current_stock=opening.qty; services never write a layer. Update the context member types (lines ~115-116) and provider value (~3534+).",
+    "In src/lib/store.tsx extend the inventory load (~line 1381) to also read inventory_item_costs (RLS yields rows only to cost-capable users) and merge costPrice/standardLabourCost/costState onto each item; a non-cost user gets no rows => fields undefined + not_configured."
+  ],
+  "acceptance_criteria": [
+    "0075 is additive + idempotent and re-runnable: every statement if-not-exists / IS NULL / =0 guarded (AC-23).",
+    "inventory_items gains item_kind/item_code/service_code/migration_flag etc. but NO cost_price/standard_labour_cost column (HIGH-1).",
+    "Per-org counter yields PRT-000001/SRV-000001 independently per org via next_inventory_code (not a global sequence) (HIGH-3).",
+    "Backfill classifies legacy item_type, flags unrecognised_item_type and service_with_stock rows without discarding stray stock, and never overwrites item_type/mode/prices/stock (AC-22, AC-23).",
+    "inventory_item_costs/inventory_stock_layers RLS SELECT excludes view_profit_margin (MEDIUM-1); inventory_item_costs rows written branch_id NULL so auth_branch_visible(NULL) is true for every cost-capable org member (MEDIUM-2).",
+    "rowToInventoryItem/inventoryItemToRow round-trip the new fields; legacy rows load without error (NFR-2); inventoryItemToRow emits no cost column.",
+    "addInventoryItem/updateInventoryItem accept cost/opening side-channels; opening writes a cost-carrying ledger layer + Inward movement, not a bare qty; cost upsert always branch_id:null."
+  ],
+  "verification": [
+    "Re-read 0075 and confirm every statement is guarded (re-runnable), RLS read set excludes view_profit_margin, no cost_price column on inventory_items, backfill overwrites nothing historical.",
+    "npx tsc --noEmit  (from the worktree root) — green.",
+    "grep: inventoryItemToRow does not emit a cost_price/standard_labour_cost key; the cost upsert sets branch_id:null; the opening path writes an inventory_stock_layers row."
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

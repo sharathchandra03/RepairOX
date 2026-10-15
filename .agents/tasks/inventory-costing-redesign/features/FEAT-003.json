@@ -1,0 +1,32 @@
+{
+  "id": "FEAT-003",
+  "type": "feat",
+  "description": "Add/Edit Inventory form redesign: single Item Type control (Part/Product vs Repair Service/Labour) replacing Product/Service + Buy/Sell/Both; CP/SP + Advanced Pricing for parts; Service Charge/Standard Labour Cost + no-stock for services; read-only auto Item/Service code; buildInventoryItem returns {item,cost?,opening?} and inventoryUpdateFromForm returns {patch,cost?}; no synthetic price derivation; AddInventoryModal hides opening fields + forwards cost; Add Item page fully re-pointed to the shared form (remove synthetic pricing + raw stock write); InventorySearchBox kind filter + item.kind presentation. Depends on FEAT-001 (data layer) and FEAT-002 (resolvePartUnitCost used by the invoice side later, not here) — needs FEAT-001.",
+  "status": "pending",
+  "steps": [
+    "src/components/inventory/inventory-item-form.tsx: rewrite InventoryFormValues to the design §2.2 shape (kind, itemCode, serviceCode, barcode, brandModel, costPrice, sellingPrice, advanced tiers, serviceCharge, standardLabourCost, trackStock, currentStock(=opening qty on create), openingUnitCost, minStock, maxStock, store, hidden mode); remove type/defaultPrice keys. Update emptyInventoryForm (kind:'part', tax:'18', uom:'Piece', trackStock:true, mode:'Both', money/stock '') and inventoryFormFromItem (map kind/codes/cost fields/sku/barcode; opening fields NOT re-editable on edit — currentStock read-only, no openingUnitCost).",
+    "Change buildInventoryItem(v, opts?:{store?}) to RETURN {item,cost?,opening?} (keep opts.store -> item.store, NIT-1): emit cost iff CP/labour field non-blank via STRING-TRIM (v.costPrice.trim() !== '' so '0'=>configured ₹0, ''=>no cost); emit opening iff v.trackStock && Number(v.currentStock)>0; id from v.sku or widened SKU-${Date.now()}-${rand4} fallback (NEVER PRT-<ts>); item stock 0; sellingPrice->regularSellingPrice/defaultPrice; regularBuyingPrice NOT derived (0 on new rows); advanced tiers stored verbatim — REMOVE all SP*multiplier/defaultPrice*0.7 derivations (NIT-2).",
+    "Change inventoryUpdateFromForm(v) to return {patch,cost?} (omit codes/stock/opening; include migration_flag:null when the edit resolves a flag — §1.2 lifecycle). Update validateInventoryForm per §2.5 (negative CP/SP/charge/labour rejected; opening qty without unit cost rejected; 0 valid).",
+    "Rewrite InventoryItemFields rendering: single Item Type SegmentedTabs (Part/Product=part, Repair Service/Labour=service) replacing the two legacy tabs; isService drives Part sections (Identity w/ read-only Item Code chip + SKU + Barcode + Name* + Description + Category* + Brand/model + UoM; CP+SP + Advanced Pricing disclosure w/ MRP/wholesale/dealer/distributor; Inventory Tracking Track Stock + Opening Qty/Unit Cost + Store + Min + Max; Tax HSN/GST/UoM) vs Service sections (Identity w/ read-only Service Code + Name* + Description + Service Category + device cat/brand/model + Unit/billing basis; Service Charge + Standard Labour Cost labelled 'standard/estimated'; Tax — NO stock controls). Gate CP / Standard Labour Cost inputs with CAP.sensitive.viewCost (view) / CAP.sensitive.editCost (edit) honouring canEdit / <fieldset disabled>.",
+    "src/components/inventory/add-inventory-modal.tsx: handleSave -> const {item,cost}=buildInventoryItem(values); await addInventoryItem(item,{cost}); onCreated?.(item). Modal HIDES opening fields (openingUnitCost/currentStock) so opening is always undefined (FR-8/AC-9) but still forwards cost. Preserve the double-submit guard + onCreated auto-select.",
+    "src/app/(app)/inventory/add-item/page.tsx: full rework (design §4/MEDIUM-2). Replace the bespoke Item Basics/Pricing & Tax/Stock Levels sections and its own Product/Service + Buy/Sell/Both tabs with the shared <InventoryItemFields> driven by InventoryFormValues. Route create through buildInventoryItem -> addInventoryItem(item,{cost,opening}) and edit through inventoryUpdateFromForm -> updateInventoryItem(id,patch,{cost}). REMOVE the inline defaultPrice*0.7 derivation block and REMOVE the raw currentStock write (opening flows ONLY through opening={qty,unitCost} -> ledger layer). This is the ONLY opening-stock entry surface.",
+    "src/components/inventory/inventory-search-box.tsx: add optional kind?:'part'|'service' prop filtering results to item.kind===kind; switch the out-of-stock test (line ~146) to item.kind==='part' && available<=0 and the label (line ~172) to item.kind==='service' (presentation keys off kind, not legacy type) (NIT-4)."
+  ],
+  "acceptance_criteria": [
+    "Single Item Type control with Part/Product and Repair Service/Labour; NO Buy/Sell/Both and NO Product/Service control anywhere (AC-1).",
+    "Part form renders Identity (read-only Item Code) + CP/SP + Advanced Pricing + Inventory Tracking + Tax (AC-2); Service form renders Identity (read-only Service Code) + Service Charge/Standard Labour Cost + Tax with NO stock controls (AC-3).",
+    "buildInventoryItem returns {item,cost?,opening?}; '0' CP emits configured ₹0, '' emits no cost; no SP*multiplier/defaultPrice*0.7 derivation remains (NIT-2); id never PRT-<ts>.",
+    "inventoryUpdateFromForm returns {patch,cost?}, omits immutable codes/stock, nulls migration_flag on resolving edit.",
+    "AddInventoryModal hides opening fields and forwards cost; onCreated auto-select preserved (AC-9).",
+    "add-item page uses the shared form, writes no synthetic cost, writes no raw currentStock (opening via ledger only); it is the only opening-stock entry point.",
+    "InventorySearchBox honours kind filter and keys presentation off item.kind.",
+    "CP/Standard Labour Cost inputs gated by CAP.sensitive.viewCost/editCost + canEdit."
+  ],
+  "verification": [
+    "npx tsc --noEmit — green.",
+    "grep: no Buy/Sell/Both or Product/Service SegmentedTabs remain; no *0.7/*1.2/*0.9/*0.85/*0.65 derivation remains; add-item page has no raw currentStock: literal write; search box has no item.type presentation check.",
+    "npm run build — passes (integration milestone covering the form + add-item rework)."
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

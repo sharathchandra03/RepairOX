@@ -1,0 +1,16 @@
+{
+  "verdict": "APPROVED",
+  "findings": [
+    {
+      "severity": "non-blocking",
+      "title": "Self-route timestamps use the Node server clock rather than SQL now()",
+      "detail": "The self API routes stamp new Date().toISOString() (the Node server clock) instead of SQL now(). This is still server-authoritative — the client never supplies the time — so NFR §46 is satisfied and no change is required. If strict now() parity is desired later, drive the writes from a default now() column or an RPC."
+    },
+    {
+      "severity": "non-blocking",
+      "title": "Service-role guard bypass is by design; ownership enforced in route code",
+      "detail": "requireUser/requirePermission return the service-role admin client, so auth.uid() is null in Postgres and the guard's service-role bypass branch skips the ownership/open-state checks for API writes. Ownership is enforced in the route handlers (.eq('staff_id', staff.id) + conditional .is('ended_at', null) updates), exactly as the design documents and as the existing self routes do; the DB guards still protect any user-token write. No action needed."
+    }
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/attendance-review.md"
+}

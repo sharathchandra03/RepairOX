@@ -1,0 +1,15 @@
+{
+  "approved": false,
+  "findings": [
+    "Route capability drift (confirmed): the profit route omits view_invoice/view_profitability, while finalization omits create_invoice/edit_invoice and admits unrelated coarse keys; use the canonical CAP key sets server-side.",
+    "Client-callable privileged stock functions (confirmed): authenticated/PUBLIC callers can invoke security-definer consumption/depletion with arbitrary ids; revoke client execution or enforce the complete caller and parent relationship inside each function.",
+    "Finalization store and item-scope bypass (confirmed): the service-role route checks invoice organization but not caller branch visibility or invoice-to-item organization/store consistency; validate both before reading cost or mutating stock.",
+    "Premature and stale stock consumption (confirmed): draft/proforma saves and line edits invoke consumption, while line-id-only idempotency cannot reconcile quantity, SKU, or deletion changes; consume only on paid non-proforma finalization with immutable or audited correction semantics.",
+    "Partial finalization reported as success (confirmed): per-line RPCs run separately and their errors are ignored, permitting partial stock movement with a successful route response; make the operation transactional or fail closed with durable retry state.",
+    "Ticket guard is not tied to ticket fulfillment (confirmed): every line on a ticket invoice is marked consumed without proving a matching used ticket part, and ticket deduction never depletes cost layers; unify both paths around a durable fulfillment record and consume invoice-only lines normally.",
+    "Destructive canonical migration (confirmed): DROP COLUMN IF EXISTS unit_cost/total_value violates the additive/no-history-overwrite contract; remove the drops from the final migration and handle experimental schemas separately.",
+    "Unenforced item-kind domain (confirmed): invalid post-migration kinds receive part codes and remain unflagged; add an idempotent part-or-service constraint plus server-side service/stock invariants.",
+    "Unexecuted and stale boundary verification (confirmed): the DB verifier was not run and its system-role cases miss direct authenticated RPC access, while the pure ticket model no longer matches production; run hardened route/RPC scenarios against a disposable migrated database."
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/inventory-costing-redesign/inv-system-review.md"
+}

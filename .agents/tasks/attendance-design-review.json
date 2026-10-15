@@ -1,0 +1,22 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": 1,
+      "severity": "MEDIUM",
+      "title": "Owner report/export route bypasses RLS (service-role client) but the replacement scope filter is underspecified",
+      "where": "§4.2 POST /api/work-session/report; §9 (export reads the same route)",
+      "problem": "requireUser returns a service-role admin client (verified in account-security.ts: createAdminClient), so any query the owner report route runs through it bypasses the work_sessions/work_session_breaks RLS policies entirely. The design promises the route is 're-constrained to the caller's authorized scope ... never wider than RLS' but never specifies the concrete filter that reproduces auth_work_sessions_see (org = caller org AND (self OR (branch-visible-incl-null AND team/all/reports key))). staff_store_ids(uuid) is revoke-all from authenticated (migration 0049) so the route cannot RPC it as the user; cross-branch (multi_store_access) and null-branch org-wide visibility must also be reproduced. This is the one place UI=server=RLS is not backstopped by RLS.",
+      "fix": "Preferred: have the report route use a user-token-bound Supabase client (RLS active) and SELECT the rows so RLS does the scoping, adding only agent/date/store filters. If the service-role client must be used, write out the exact scope SQL in the design (organization_id = caller org AND (staff_id = caller OR (branch-visible-incl-null AND holds team/all/reports key)), agent set intersected with lead_sales_agents()), state that it duplicates auth_work_sessions_see, and add it to the §11 steering lockstep note."
+    },
+    {
+      "id": 2,
+      "severity": "NIT",
+      "title": "Touch-route realtime suppression stated as chosen-default with an acceptable-churn fallback — pin it as mandatory",
+      "where": "§4.2 touch route decision; §8 realtime decision",
+      "problem": "The design says the realtime handler ignores last_seen_at/updated_at-only changes as the 'chosen default' but adds that if the column-diff is not implemented, the 60s refetch cadence is 'acceptable churn'. Leaving it optional invites a guaranteed per-user open-session refetch every 60s and possible live-indicator flicker, which is fully avoidable since §4.2 already specifies the suppression.",
+      "fix": "Reword so heartbeat-only suppression is REQUIRED: the realtime handler MUST compare old->new and, when only last_seen_at/updated_at changed, patch locally without a refetch. Drop the 'acceptable churn' escape clause."
+    }
+  ],
+  "reviewDoc": "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/attendance-design-review.md"
+}

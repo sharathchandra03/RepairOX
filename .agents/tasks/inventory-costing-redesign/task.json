@@ -1,0 +1,7 @@
+{
+  "task_id": "inventory-costing-redesign",
+  "task_description": "Redesign the Add Inventory form and inventory/costing model: replace Product/Service + Buy/Sell/Both with a single Item Type (Part/Product vs Repair Service/Labour), introduce explicit Cost Price/Selling Price (and Service Charge/Standard Labour Cost), add a cost-scoped table + weighted-average stock-cost ledger (CP fallback, 'Cost not configured'), wire distinct Add Part / Add Service invoice paths with a double-deduction guard, compute parts/service/combined gross profit + margin behind CAP.sensitive gates, keep internal costing off customer prints, and surface flagged legacy rows. Additive/idempotent migration 0075. Follows the APPROVED Revision-4 design.",
+  "status": "pending",
+  "feature_order": ["FEAT-001", "FEAT-002", "FEAT-003", "FEAT-004", "FEAT-005"],
+  "blocked_reason": null
+}

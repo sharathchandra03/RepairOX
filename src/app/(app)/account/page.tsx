@@ -17,9 +17,9 @@
    `my-account` + `view-detail-pages` steering standards.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useState } from "react";
-import { useSearchParams } from "next/navigation";
-import { User, ShieldCheck, CreditCard } from "lucide-react";
+import { useState, useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { User, ShieldCheck, CreditCard, ArrowLeft } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { DetailHero } from "@/components/common/detail-page";
 import { usePermissions } from "@/lib/permissions-context";
@@ -34,8 +34,19 @@ type TabId = "profile" | "sessions" | "billing";
 
 export default function MyAccountPage() {
   const { currentUser, getRoleById, can } = usePermissions();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const canBilling = allow(can, CAP.account.billing);
+
+  // Prefer real browser history so the user returns exactly where they were;
+  // fall back to the dashboard when the page was opened directly.
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/dashboard");
+    }
+  }, [router]);
 
   // Default tab, honouring an optional ?tab= deep link (used by the legacy
   // Settings → Account redirects so Active Sessions / Billing land in place).
@@ -60,6 +71,16 @@ export default function MyAccountPage() {
     <div className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6 lg:px-8">
       {/* ── Hero: breadcrumb + identity + inline tab bar (shared DetailHero) ── */}
       <DetailHero>
+        <button
+          type="button"
+          onClick={handleBack}
+          className="group mb-3 inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.5)] ring-1 ring-inset ring-white/10 transition-all duration-200 hover:bg-[#3A56D4] hover:shadow-[0_6px_16px_-4px_rgba(67,97,238,0.6)] active:scale-[0.97]"
+          aria-label="Go back"
+          title="Go back"
+        >
+          <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          Back
+        </button>
         <nav className="text-[11px] font-medium text-[#4361EE]/70" aria-label="Breadcrumb">
           <span>Account</span>
           <span className="px-1.5 text-[#4361EE]/30">/</span>

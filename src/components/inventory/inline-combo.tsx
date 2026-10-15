@@ -36,8 +36,8 @@ export function InlineCombo({
           type="button"
           onClick={toggle}
           className={cn(
-            "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition",
-            open ? "border-brand-400 ring-2 ring-brand-200/50" : "border-border hover:bg-muted/40"
+            "flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition",
+            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-input hover:border-[#4361EE]/40"
           )}
         >
           <span className={cn("truncate", !value && "text-muted-foreground")}>{value || placeholder}</span>

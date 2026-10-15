@@ -1,0 +1,28 @@
+{
+  "id": "FEAT-002",
+  "type": "feat",
+  "description": "Pure costing/profitability engine src/lib/inventory-costing.ts + its unit tests. Weighted-average unit-cost resolution (ledger first, CP fallback, else 'not_configured'), parts/service/combined gross profit and margin over eligible net revenue (invoice-level discount pro-rata split, repairCost folded into service revenue, GST excluded, finalized-only via isFinalizedInvoice). Depends on FEAT-001 for the ItemKind/InventoryItem fields it consumes. Self-contained and fully unit-tested.",
+  "status": "pending",
+  "steps": [
+    "Create src/lib/inventory-costing.ts (design §3.3, §3.5, §3.6, §3.7): resolvePartUnitCost(itemId, layers, item) returning {kind:'resolved',unitCost,source:'ledger'|'cp'} | {kind:'not_configured'} — weighted average over branch-scoped layers of that item first (sum(qty_in*unit_cost)/sum(qty_in)), then org CP fallback when item.costState==='configured', else not_configured.",
+    "Add the profitability function (design §3.5): compute partsRevenue (sum line.total where kind==='part'), serviceRevenue (sum line.total where kind==='service' PLUS each device repairCost folded in as a repair/labour charge with cost not_configured — HIGH-2), grossRevenue = parts+service (== invoice.subtotal). Split the SINGLE invoice-level discount pro-rata by bucket revenue share (ignore per-line discount — MEDIUM-1 invariant); bucket discounts 0 when grossRevenue==0. eligibleNetRevenue = partsNet+serviceNet. partsCost/labourCost from line.cost*qty (not_configured tracked). partsGP=partsNet-partsCost, serviceGP=serviceNet-labourCost, combinedGP=eligibleNetRevenue-partsCost-labourCost-otherDirectCost, grossMargin = eligibleNetRevenue>0 ? combinedGP/eligibleNetRevenue*100 : null.",
+    "Add toRevenueInvoiceLike(inv) mapping to {id,total,status,documentType: inv.documentType ?? 'invoice'} BEFORE calling isFinalizedInvoice from src/lib/leads-data.ts (NIT-1); realized aggregates filter on isFinalizedInvoice.",
+    "Represent not_configured lines so the breakdown renders 'Cost not configured' (never ₹0); keep configured-₹0 distinct from not_configured.",
+    "Create src/lib/inventory-costing.test.ts (design §10) using the node test runner (import { test } from 'node:test'; import assert from 'node:assert'), mirroring src/lib/lead-intelligence.test.ts conventions."
+  ],
+  "acceptance_criteria": [
+    "Weighted-average cost over multiple layers; CP fallback when no layers; not_configured when neither (AC-15, AC-16).",
+    "Zero-denominator margin returns null (renders '—'), bucket discounts 0 (AC-14).",
+    "repairCost folded into service revenue so eligibleNetRevenue == max(0, subtotal - invoice.discount) and partsGP + serviceGP == combinedGP - otherDirectCost (HIGH-2).",
+    "A non-zero per-line discount does NOT change the result — engine reconciles only against invoice-level discount (MEDIUM-1 invariant).",
+    "GST excluded from revenue (AC-13); only finalized eligible invoices contribute (AC-17).",
+    "CP=1800/SP=2500 => ₹700/unit preliminary margin (AC-5); ServiceCharge=500/StdLabour=200 => ₹300 service GP (AC-6).",
+    "configured-₹0 yields valid ₹0 cost; not_configured yields 'Cost not configured' not ₹0/100%."
+  ],
+  "verification": [
+    "npx tsx --test src/lib/inventory-costing.test.ts — all tests pass.",
+    "npx tsc --noEmit — green."
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

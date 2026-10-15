@@ -1,0 +1,90 @@
+{
+  "verdict": "CHANGES_REQUESTED",
+  "findings": [
+    {
+      "id": "SYS-1",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Route capability drift",
+      "detail": "The profit route omits view_invoice/view_profitability, while finalization omits create_invoice/edit_invoice and admits unrelated coarse keys (manage_sales/use_pos). This falsely denies granular roles and grants privileged costing/stock effects to unrelated coarse roles. Use the canonical CAP key sets (CAP.invoice.view, CAP.sensitive.viewProfit, CAP.invoice.create/edit) server-side, then apply record/store scope separately.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-2",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Client-callable privileged stock functions",
+      "detail": "consume_invoice_line_stock and mark_ticket_line_consumed are SECURITY DEFINER granted to authenticated, and inventory_deplete_layers retains default PUBLIC execute. None verifies invoice permission, caller org/branch, invoice existence, line membership, or the invoice->item relationship, so arbitrary ids can lower another store's stock, deplete cost layers, create an Outward movement, or pre-claim a fulfillment key. Revoke client execution (grant only service_role, keep the depletion helper internal) or enforce the complete caller and parent relationship inside each function.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-3",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Finalization store and item-scope bypass",
+      "detail": "The service-role finalization route loads an invoice by id and organization only and never evaluates auth_branch_visible(branch_id); it then trusts JSON sku as an inventory key with no org/branch predicate, deriving scope from the item rather than the invoice. A branch-A invoice can reference a branch-B or foreign-org item, letting the service role read its cost and mutate its stock. Validate caller access to the invoice and resolve every line to an item in the same organization/permitted store before reading cost or mutating stock, using authoritative item item_kind/track_stock rather than caller-controlled line kind.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-4",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Premature and stale stock consumption",
+      "detail": "addInvoice invokes finalize-costing after every insert (including draft/proforma) and updateInvoice invokes it on any line change regardless of status, so direct-invoice stock moves and a snapshot is captured before a finalized eligible sale. The line-id-only idempotency key (invoice:<id>:line:<id>) cannot reconcile quantity, SKU, or deletion changes, and snapshot upserts recompute current WAC/CP on edits of finalized invoices. Consume only on the paid non-proforma finalization transition, then make finalized quantities/snapshots immutable or correct them via an audited reversal.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-5",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Partial finalization reported as success",
+      "detail": "Per-line RPCs run in separate transactions and their errors are ignored, permitting partial stock movement with a successful route response. Make the finalization operation transactional or fail closed with durable retry state.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-6",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Ticket guard is not tied to ticket fulfillment",
+      "detail": "Any non-null ticket_id makes every part line call mark_ticket_line_consumed without proving the line came from a used ticket part with an Outward movement, so a catalogue part added while reviewing a ticket invoice is marked but never deducted. deductPartsForTicket also updates master stock/movements without depleting inventory_stock_layers, so future WAC still includes sold stock. Unify both paths around a durable fulfillment record (shared identity, movement, stock decrement, layer depletion); invoice finalization should recognize only matching durable ticket-part records and consume invoice-only lines normally.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-7",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Destructive canonical migration",
+      "detail": "Migration 0077 executes DROP COLUMN IF EXISTS unit_cost/total_value on stock_movements, violating the additive/no-history-overwrite contract and potentially destroying data from an earlier revision. Because current main never had those columns, remove the drops from the canonical migration and handle experimental schemas separately.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-8",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Unenforced item-kind domain",
+      "detail": "item_kind lacks a check constraint and the stamp trigger treats every non-service value as a part, so a crafted invalid kind receives a PRT- code and remains unflagged. Add an idempotent part|service constraint after backfill and enforce service/track_stock invariants server-side.",
+      "blocking": true,
+      "source": "inv-system-review"
+    },
+    {
+      "id": "SYS-9",
+      "severity": "high",
+      "confidence": "confirmed",
+      "title": "Unexecuted and stale boundary verification",
+      "detail": "The DB verifier was not run (no SUPABASE_DB_URL), so there is no execution evidence for migration replay or the security-definer boundaries; its consumption cases run as the system role and miss authenticated direct RPC access, and the pure ticket test models finalization as a no-op despite production now consuming/marking lines. After hardening, run against a disposable migrated DB with route cases for wrong-store callers, foreign SKUs, drafts/proformas, line quantity/SKU edits, invoice-only lines on ticket invoices, ticket-layer depletion, and partial failures.",
+      "blocking": true,
+      "source": "inv-system-review"
+    }
+  ],
+  "reviewDoc": [
+    "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/inventory-costing-redesign/inv-math-review.md",
+    "/Users/apple/Desktop/Reapirox dummy2/app/.agents/tasks/inventory-costing-redesign/inv-system-review.md"
+  ]
+}

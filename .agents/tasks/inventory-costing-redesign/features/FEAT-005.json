@@ -1,0 +1,29 @@
+{
+  "id": "FEAT-005",
+  "type": "feat",
+  "description": "Profitability + safety surfaces: internal Profitability Breakdown panel (two viewer tiers — cost-capable in-memory; profit-only via a cost-free getInvoiceProfitAggregate server route guarded by requirePermission), the double-deduction guard assertion (invoice finalize deducts nothing; deductPartsForTicket stays the single consumption point), the legacy 'Needs review' filter chip + pill (migration_flag, no cost leak), and the mandatory print-safety test (PrintLineItem/buildInvoiceInfo carry no cost/kind/costState/labour/profit). Depends on FEAT-001..004.",
+  "status": "pending",
+  "steps": [
+    "Create src/components/invoice/profitability-breakdown.tsx (design §7.1): rendered on invoice detail/review, wrapped in <Can permission={CAP.sensitive.viewProfit}>. Shows Parts Revenue, Service Revenue (with a Repair/Labour charge sub-line carrying each device repairCost), Parts Cost, Labour Cost, Other Direct Costs, Gross Profit, Gross Margin from the FEAT-002 engine. Cost-capable viewer (CAP.sensitive.viewCost) sees cost columns + GP/margin computed in-memory; profit-only viewer sees cost columns MASKED (locked ••••, never ₹0) and GP/margin from the aggregate route. Margin '—' when net revenue 0; not_configured lines show 'Cost not configured'. Use the shared detail/section primitives.",
+    "Create the cost-free aggregate server route getInvoiceProfitAggregate(invoiceId) under src/app/api/ (follow the requirePermission pattern in src/app/api/owner/summary/route.ts). Guard: requirePermission(req, ['view_profit_margin','view_financial_reports','inventory_view_cost','manage_inventory','manage_purchases']). It computes GP/margin server-side (where it legitimately reads the cost tables) and returns ONLY derived aggregates (parts/service/combined GP, margin, per-bucket revenue) — never per-unit CP/labour (design §7.1, MEDIUM-1).",
+    "Confirm the double-deduction guard (design §5.4): grep src/app/(app)/invoice/ for addStockMovement/current_stock/deductParts — there must be NONE, so invoice finalize deducts no stock and deductPartsForTicket remains the single consumption point. Add no new deduction path.",
+    "src/app/(app)/inventory/page.tsx (design §1.2): add an opt-in 'Needs review' filter chip (migrationFlag != null) and a small amber 'Needs review' pill (shared pill primitive) with the machine reason in its tooltip, gated to allow(can, CAP.inventory.edit). Pill/tooltip render ONLY the machine-reason string (unrecognised_item_type / service_with_stock -> short human label) and NEVER any CP/labour/unit_cost value (NIT-5).",
+    "Add the mandatory print-safety test (design §7.2/§10) asserting buildInvoiceInfo output and every PrintLineItem contain NO cost/kind/costState/labour/profit property (in src/lib/inventory-costing.test.ts or a dedicated src/lib/print-safety.test.ts). Do NOT modify PrintLineItem/buildInvoiceInfo/buildTicketInfo/QuotationA4 to add cost."
+  ],
+  "acceptance_criteria": [
+    "Profitability Breakdown shows Parts/Service Revenue (incl. repairCost sub-line), Parts/Labour Cost, Gross Profit, Gross Margin per FEAT-002 over eligible net revenue (after discount, GST excluded) (AC-13).",
+    "Gross margin shows '—' (not 0/NaN) when eligible net revenue is 0 (AC-14); a part with no ledger cost and no CP shows 'Cost not configured' not ₹0/100% (AC-15).",
+    "A user WITHOUT CAP.sensitive.viewCost cannot see CP/Standard Labour Cost (masked, not ₹0); a user WITHOUT CAP.sensitive.viewProfit cannot see the breakdown — enforced in UI AND server/RLS (profit-only viewer gets GP/margin from the cost-free aggregate route, never raw CP) (AC-21).",
+    "Invoice finalize deducts no stock; a ticket-linked invoice does not re-deduct already-consumed parts (AC-12).",
+    "Legacy 'Needs review' chip + pill surface migration_flag with the machine reason only — no cost field in the payload (AC-22, NIT-5).",
+    "The printed customer invoice/ticket/quotation shows NO cost/labour/profit (AC-18); PrintLineItem/buildInvoiceInfo unchanged."
+  ],
+  "verification": [
+    "npx tsx --test src/lib/inventory-costing.test.ts (and the print-safety test) — pass.",
+    "npx tsc --noEmit — green.",
+    "npm run build — passes (final integration milestone).",
+    "grep: the invoice create/finalize flow has no stock-deduction call; the Needs-review pill payload references only migrationFlag; the aggregate route returns no per-unit cost field."
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

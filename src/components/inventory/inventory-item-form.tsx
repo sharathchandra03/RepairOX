@@ -291,12 +291,15 @@ export function inventoryUpdateFromForm(
 
 function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
+    <div className="flex flex-col space-y-1.5">
+      {/* Header reserves a consistent min height and stacks label → hint so a
+         long label/hint (e.g. "Standard Labour Cost") never wraps against a
+         short one, keeping side-by-side inputs vertically aligned. */}
+      <div className="flex min-h-[34px] flex-col justify-start gap-0.5">
         <Label>{label}{required && <span className="ml-0.5 text-rose-500">*</span>}</Label>
-        {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
+        {hint && <span className="text-[11px] leading-tight text-muted-foreground">{hint}</span>}
       </div>
-      {children}
+      <div className="mt-auto">{children}</div>
     </div>
   );
 }
@@ -305,7 +308,7 @@ function Field({ label, required, hint, children }: { label: string; required?: 
 function CodeChip({ label, code }: { label: string; code: string }) {
   return (
     <Field label={label} hint={code ? "Permanent · auto-generated" : "Auto-generated on save"}>
-      <div className="flex h-[38px] items-center gap-2 rounded-xl border border-input bg-muted/40 px-3 font-mono text-[13px] text-muted-foreground">
+      <div className="flex h-[34px] items-center gap-2 rounded-xl border border-input bg-muted/40 px-3 font-mono text-[13px] text-muted-foreground">
         <Lock className="h-3.5 w-3.5 shrink-0" />
         <span className="truncate">{code || "— assigned on save —"}</span>
       </div>
@@ -578,6 +581,7 @@ export function InventoryItemFields({
             <Select
               value={values.tax}
               onChange={(e) => set({ tax: e.target.value })}
+              className="h-[34px] px-3 text-[13px]"
               options={["0", "5", "12", "18", "28"].map((t) => ({ value: t, label: `${t}%` }))}
             />
           </Field>

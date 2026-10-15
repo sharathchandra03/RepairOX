@@ -15,6 +15,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Clock, Users, FileSpreadsheet, FileText, RefreshCw, ChevronDown } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 import { DetailHero, SummaryCard } from "@/components/common/detail-page";
 import { Reveal } from "@/components/common/reveal";
 import {
@@ -76,7 +77,7 @@ export default function AgentProductivityPage() {
   const canExport = allow(can, CAP.workSession.viewAll);
 
   const [nowMs] = useState(() => Date.now()); // ONE nowMs per report render
-  const [agentFilter, setAgentFilter] = useState<string>("all"); // "all" | staffId
+  const [agentFilter, setAgentFilter] = useState<string[]>([]); // [] = All Sales Agents; else specific staffIds
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
   const [fromISO, setFromISO] = useState<string>(() => startOfMonthISO(Date.now()));
   const [toISO, setToISO] = useState<string>(() => new Date(Date.now() + MS_DAY).toISOString());
@@ -97,7 +98,7 @@ export default function AgentProductivityPage() {
         const res = await apiFetch("/api/work-session/report", {
           method: "POST",
           body: JSON.stringify({
-            agentIds: agentFilter === "all" ? [] : [agentFilter],
+            agentIds: agentFilter, // [] = all authorized agents; else specific staffIds
             storeIds: storeFilter,
             from: fromISO,
             to: toISO,
@@ -128,9 +129,9 @@ export default function AgentProductivityPage() {
     [allSessions, storeFilter],
   );
 
-  // The agent list the report is actually about (All or the one selected).
+  // The agent list the report is actually about (All, or the selected subset).
   const scopedAgents = useMemo(
-    () => (agentFilter === "all" ? agents : agents.filter((a) => a.staffId === agentFilter)),
+    () => (agentFilter.length === 0 ? agents : agents.filter((a) => agentFilter.includes(a.staffId))),
     [agents, agentFilter],
   );
 
@@ -282,18 +283,7 @@ export default function AgentProductivityPage() {
             <span className="inline-flex items-center gap-1.5 text-[12px] font-medium text-muted-foreground">
               <Users className="h-4 w-4" /> Agent
             </span>
-            <select
-              value={agentFilter}
-              onChange={(e) => setAgentFilter(e.target.value)}
-              className="h-[34px] rounded-xl border border-[#4361EE]/30 bg-card px-3 text-[13px] font-medium text-foreground outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
-            >
-              <option value="all">All Sales Agents</option>
-              {agents.map((a) => (
-                <option key={a.staffId} value={a.staffId}>
-                  {a.name}
-                </option>
-              ))}
-            </select>
+            <AgentMultiSelect agents={agents} value={agentFilter} onChange={setAgentFilter} />
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
@@ -305,16 +295,18 @@ export default function AgentProductivityPage() {
 
       {/* Daily comparison table */}
       <RoxTableCard>
+        {/* All columns share an equal proportional width so spacing is uniform
+            across the row (Store shown only in multi-store views). */}
         <colgroup>
-          {multiStore && <col style={{ width: 160 }} />}
-          <col style={{ width: 200 }} />
-          <col style={{ width: 130 }} />
-          <col style={{ width: 120 }} />
-          <col style={{ width: 120 }} />
-          <col style={{ width: 120 }} />
-          <col style={{ width: 100 }} />
-          <col style={{ width: 100 }} />
-          <col style={{ width: 120 }} />
+          {multiStore && <col className="w-[11.11%]" />}
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
+          <col className="w-[11.11%]" />
         </colgroup>
         <RoxTableHead top={theadTop}>
           <RoxHeadRow>
@@ -427,5 +419,120 @@ export default function AgentProductivityPage() {
         </Reveal>
       )}
     </div>
+  );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   AgentMultiSelect — checkbox multi-select for the agent filter.
+
+   Mirrors StoreMultiSelect's look + behaviour exactly (shared Dropdown +
+   Checkbox, brand-blue styling, portalled panel). Value is string[] of staff
+   ids; an EMPTY array means "All Sales Agents" (the full authorized set).
+   Ticking every agent normalises back to All.
+   ────────────────────────────────────────────────────────────────────────── */
+function AgentMultiSelect({
+  agents,
+  value,
+  onChange,
+}: {
+  agents: ReportAgent[];
+  value: string[];
+  onChange: (ids: string[]) => void;
+}) {
+  const allSelected = value.length === 0;
+  const total = agents.length;
+
+  const summary = (() => {
+    if (allSelected || value.length === total) return "All Sales Agents";
+    if (value.length === 1) {
+      const a = agents.find((x) => x.staffId === value[0]);
+      return a?.name ?? "1 Agent";
+    }
+    const first = agents.find((x) => x.staffId === value[0]);
+    if (first && first.name.length <= 12) return `${first.name} + ${value.length - 1} more`;
+    return `${value.length} Agents`;
+  })();
+
+  const toggleAgent = (id: string) => {
+    const set = new Set(allSelected ? [] : value);
+    if (set.has(id)) set.delete(id);
+    else set.add(id);
+    const next = Array.from(set);
+    if (next.length === 0 || next.length === total) onChange([]);
+    else onChange(next);
+  };
+
+  const selectAll = () => onChange([]);
+
+  return (
+    <Dropdown
+      align="left"
+      width="w-60"
+      className="block shrink-0 min-w-[190px]"
+      trigger={({ open, toggle }) => (
+        <button
+          type="button"
+          onClick={toggle}
+          className={cn(
+            "flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition-all duration-150",
+            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-input hover:border-[#4361EE]/40",
+          )}
+        >
+          <span className="flex min-w-0 items-center gap-2 truncate text-left">
+            <Users className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+            <span className={cn("truncate", allSelected && "text-muted-foreground")}>{summary}</span>
+          </span>
+          <ChevronDown
+            className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")}
+          />
+        </button>
+      )}
+    >
+      {() => (
+        <div className="flex flex-col">
+          {total === 0 ? (
+            <p className="px-2.5 py-6 text-center text-[12px] text-muted-foreground">
+              No sales agents available.
+            </p>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={selectAll}
+                className={cn(
+                  "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+                  allSelected ? "bg-[#EEF1FD] font-medium text-[#4361EE]" : "hover:bg-[#EEF1FD]/60",
+                )}
+              >
+                <Checkbox checked={allSelected} onChange={selectAll} aria-label="All Sales Agents" />
+                <span className="truncate">All Sales Agents</span>
+              </button>
+
+              <div className="my-1 h-px bg-border" />
+
+              <div className="max-h-[240px] overflow-y-auto overscroll-contain">
+                {agents.map((a) => {
+                  const checked = !allSelected && value.includes(a.staffId);
+                  return (
+                    <button
+                      key={a.staffId}
+                      type="button"
+                      onClick={() => toggleAgent(a.staffId)}
+                      className={cn(
+                        "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-[13px] transition-colors",
+                        checked ? "bg-[#EEF1FD]/70 font-medium text-foreground" : "hover:bg-[#EEF1FD]/60",
+                      )}
+                    >
+                      <Checkbox checked={checked} onChange={() => toggleAgent(a.staffId)} aria-label={a.name} />
+                      <span className="truncate">{a.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Dropdown>
   );
 }

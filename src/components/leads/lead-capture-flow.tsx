@@ -46,13 +46,14 @@ import type { Customer } from "@/lib/customer-data";
 import { normalizeCustomerPhone, normalizeCustomerEmail } from "@/lib/customer-data";
 import { IssueSelector } from "@/components/common/issue-selector";
 import { LocationPicker } from "@/components/leads/location-picker";
+import { leadNatureGlyph } from "@/components/leads/lead-pills";
 import { cn } from "@/lib/utils";
 
 /* ─── Configurable select (searchable, options from Settings) ─────────── */
 
 function ConfigurableSelect({
   field, value, onChange, placeholder, extra = [], invalid, options, labelFor,
-  allowCustom = false,
+  glyphFor, allowCustom = false,
 }: {
   /** Lead-options field; omit when passing an explicit `options` list. */
   field?: LeadFieldKey;
@@ -67,6 +68,10 @@ function ConfigurableSelect({
   options?: string[];
   /** Map an option value to a display label (e.g. store id → store name). */
   labelFor?: (value: string) => string;
+  /** Optional leading emoji glyph for a value (e.g. Lead Nature 🔥/🌤️/❄️),
+   *  shown in the trigger and the option rows. Presentation only — the stored
+   *  value stays the plain configurable label. */
+  glyphFor?: (value: string) => string;
   /** When true the control becomes a typeable combobox: the agent can type a
    *  free value (saved as-is) AND pick from existing options. Used by Region so
    *  a lead outside the configured list can still be captured + filtered. */
@@ -190,7 +195,10 @@ function ConfigurableSelect({
             open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : invalid ? "border-rose-300" : "border-input hover:border-[#4361EE]/40",
           )}
         >
-          <span className={cn("truncate text-left", !value && "text-muted-foreground")}>{value ? label(value) : (placeholder || "Select…")}</span>
+          <span className={cn("flex min-w-0 items-center gap-1.5 text-left", !value && "text-muted-foreground")}>
+            {value && glyphFor && <span className="shrink-0 leading-none">{glyphFor(value)}</span>}
+            <span className="truncate">{value ? label(value) : (placeholder || "Select…")}</span>
+          </span>
           <span className="flex shrink-0 items-center gap-1">
             {value && (
               <span
@@ -261,6 +269,7 @@ function ConfigurableSelect({
                   )}
                 >
                   <Check className={cn("h-3.5 w-3.5 text-[#4361EE]", v === value ? "opacity-100" : "opacity-0")} />
+                  {glyphFor && <span className="shrink-0 leading-none">{glyphFor(v)}</span>}
                   <span className="truncate">{label(v)}</span>
                 </button>
               ))}
@@ -1170,7 +1179,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     </div>
                   )}
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label={ft("leadNature")}><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" /></Field>
+                    <Field label={ft("leadNature")}><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" glyphFor={leadNatureGlyph} /></Field>
                     <Field label={ft("priority")}><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Normal / High / Urgent" /></Field>
                   </div>
                   <div className="grid grid-cols-2 gap-3">

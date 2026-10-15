@@ -1,0 +1,23 @@
+{
+  "id": "FEAT-004",
+  "type": "feat",
+  "description": "Invoice integration: extend InvoiceLineItem with kind/cost/costState (internal, never printed), formalize distinct Add Part and Add Service paths in the invoice Products step (both reusing InventorySearchBox with a kind filter; Add Part resolves valuation cost via resolvePartUnitCost; Add Service loads Standard Labour Cost internally with no inventory-quantity effect), and stamp Ticket->Invoice prefill lines with kind + resolved cost without duplicating or treating the Estimate as a billable line. Depends on FEAT-001 (data), FEAT-002 (resolvePartUnitCost), FEAT-003 (InventorySearchBox kind prop).",
+  "status": "pending",
+  "steps": [
+    "src/lib/mock-data.ts: extend InvoiceLineItem with OPTIONAL kind?:'part'|'service', cost?:number, costState?:'resolved'|'cp'|'not_configured' (legacy lines without them still render/total — NFR-2) (design §5.1).",
+    "src/app/(app)/invoice/create/page.tsx StepProducts (design §5.2): Add Part path reuses InventorySearchBox kind='part' -> select -> qty -> load sellingPrice onto line.price -> resolve valuation cost internally onto line.cost/line.costState via resolvePartUnitCost (not shown to customer); preserve stock-availability display/validation; addInventoryLine stamps kind:'part'. Add Service path (DISTINCT) uses InventorySearchBox kind='service' -> load serviceCharge onto line.price -> stamp line.cost=standardLabourCost or not_configured, kind:'service', NO inventory-quantity effect. Keep the existing free-text 'Add Row' (addService) as a manual non-catalogue charge (kind:'service', no cost). Totals math (subtotal=partsTotal+repairCost, estimate excluded) UNCHANGED; cost/kind never affect billed totals.",
+    "src/lib/mock-data.ts ticketDeviceToInvoiceDevice + the fromTicket effect in invoice/create/page.tsx (design §5.3): stamp each prefilled part line kind:'part' + a resolved cost; prefill ticket-recorded services as kind:'service' lines; keep estimate->estimateValue (reference only, never billable), repairCost behaviour, and SGST/CGST/discount unchanged. No duplication of parts/services."
+  ],
+  "acceptance_criteria": [
+    "Products step offers two distinct paths: Add Part (search Inventory Master -> select -> qty -> loads SP -> resolves valuation cost internally, stock-availability preserved) and Add Service (search Service Catalogue -> loads Service Charge -> resolves Standard Labour Cost internally, NO inventory-quantity effect) (AC-10).",
+    "InvoiceLineItem gains optional kind/cost/costState; legacy lines still render and total (NFR-2).",
+    "Ticket->Invoice prefill carries parts and services without duplication, does NOT add the Estimate Value as a billable line, and preserves discount/GST totals (AC-11).",
+    "cost/kind never affect billed totals (FR-19)."
+  ],
+  "verification": [
+    "npx tsc --noEmit — green.",
+    "grep/read: two distinct paths exist (Add Part vs Add Service vs the pre-existing Add Inventory master-create); estimateValue is not added to the billed subtotal; prefill does not duplicate lines."
+  ],
+  "blocked_reason": null,
+  "findings": ""
+}

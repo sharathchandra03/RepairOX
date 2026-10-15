@@ -12,8 +12,9 @@
    absence/leave judgment.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useEffect, useMemo, useState } from "react";
-import { Clock, Coffee, Timer, CalendarDays, ListChecks, BarChart3, Hourglass } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { ArrowLeft, Clock, Coffee, Timer, CalendarDays, ListChecks, BarChart3, Hourglass } from "lucide-react";
 import { DetailHero, DetailSection, SummaryCard } from "@/components/common/detail-page";
 import { Reveal } from "@/components/common/reveal";
 import { SegmentedTabs } from "@/components/ui/tabs";
@@ -87,7 +88,18 @@ function rangeFor(mode: RangeMode, anchorMs: number, tz: string, customFrom: str
 
 export default function MyProductivityPage() {
   const { can } = usePermissions();
+  const router = useRouter();
   const { name } = useSession();
+
+  // Prefer real browser history so the user returns exactly where they were;
+  // fall back to My Account when the page was opened directly.
+  const handleBack = useCallback(() => {
+    if (typeof window !== "undefined" && window.history.length > 1) {
+      router.back();
+    } else {
+      router.push("/account");
+    }
+  }, [router]);
   const { settings } = useStoreSettings();
   const tz = settings.timeZone || "Asia/Kolkata";
   const { status, openSession, rangeSessions } = useWorkSession();
@@ -180,6 +192,16 @@ export default function MyProductivityPage() {
   if (!canView) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 text-center">
+        <button
+          type="button"
+          onClick={handleBack}
+          className="group mb-6 inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.5)] ring-1 ring-inset ring-white/10 transition-all duration-200 hover:bg-[#3A56D4] hover:shadow-[0_6px_16px_-4px_rgba(67,97,238,0.6)] active:scale-[0.97]"
+          aria-label="Go back"
+          title="Go back"
+        >
+          <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          Back
+        </button>
         <h1 className="text-lg font-bold text-foreground">My Productivity</h1>
         <p className="mt-2 text-sm text-muted-foreground">
           You don't have permission to view productivity data.
@@ -194,6 +216,16 @@ export default function MyProductivityPage() {
     <div className="mx-auto max-w-6xl space-y-6 px-4 py-6 sm:px-6">
       {/* Hero */}
       <DetailHero>
+        <button
+          type="button"
+          onClick={handleBack}
+          className="group mb-3 inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.5)] ring-1 ring-inset ring-white/10 transition-all duration-200 hover:bg-[#3A56D4] hover:shadow-[0_6px_16px_-4px_rgba(67,97,238,0.6)] active:scale-[0.97]"
+          aria-label="Go back"
+          title="Go back"
+        >
+          <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          Back
+        </button>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">
