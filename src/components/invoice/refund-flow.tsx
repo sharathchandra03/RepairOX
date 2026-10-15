@@ -17,6 +17,7 @@ import { useMemo, useState, useCallback } from "react";
 import { RotateCcw, AlertTriangle } from "lucide-react";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Input, Select, Textarea } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { formatINR } from "@/lib/utils";
 import { useStore, type ProcessRefundInput } from "@/lib/store";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -252,17 +253,38 @@ export function RefundFlow({
       readOnlyNote="View-only: you don't have permission to initiate refunds."
       footer={footer}
     >
-      {/* Step rail */}
+      {/* Step rail — clickable, with forward-skip gating (Issue 2 + 3a). */}
       {!blocked && (
         <div className="mb-5 flex items-center gap-1.5 text-[11px] font-medium">
-          {stepTitles.map((t, i) => (
-            <span
-              key={t}
-              className={`rounded-full px-2.5 py-1 ${step === i + 1 ? "bg-[#4361EE] text-white" : step > i + 1 ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200" : "bg-muted text-muted-foreground"}`}
-            >
-              {i + 1}. {t}
-            </span>
-          ))}
+          {stepTitles.map((t, i) => {
+            const target = i + 1;
+            const isCurrent = step === target;
+            const isCompleted = step > target;
+            // Already-visited/current steps are freely clickable; the immediate
+            // next step is reachable only when the current step validates;
+            // anything further ahead stays disabled.
+            const reachable = target <= step || (target === step + 1 && canGoNext);
+            return (
+              <button
+                key={t}
+                type="button"
+                disabled={!reachable}
+                aria-current={isCurrent ? "step" : undefined}
+                onClick={() => reachable && setStep(target)}
+                className={`rounded-full px-2.5 py-1 text-[11px] font-medium leading-5 ring-1 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE] focus-visible:ring-offset-1 ${
+                  isCurrent
+                    ? "bg-[#4361EE] text-white ring-[#4361EE]"
+                    : isCompleted
+                    ? "bg-emerald-50 text-emerald-700 ring-emerald-200 hover:bg-emerald-100"
+                    : reachable
+                    ? "bg-muted text-muted-foreground ring-transparent hover:bg-muted/70"
+                    : "cursor-not-allowed bg-muted text-muted-foreground ring-transparent opacity-50"
+                }`}
+              >
+                {target}. {t}
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -318,26 +340,23 @@ export function RefundFlow({
               {tree.map((d) => {
                 const deviceLineIds = d.lines.map((l) => l.lineId);
                 const allSel = deviceLineIds.length > 0 && deviceLineIds.every((id) => selectedLineIds.has(id));
+                const toggleAllDeviceLines = () =>
+                  setSelectedLineIds((prev) => {
+                    const next = new Set(prev);
+                    if (allSel) deviceLineIds.forEach((id) => next.delete(id));
+                    else deviceLineIds.forEach((id) => next.add(id));
+                    return next;
+                  });
                 return (
                   <div key={d.deviceId} className="rounded-xl border border-border p-3">
-                    <div className="mb-2 flex items-center justify-between">
-                      <p className="text-[13px] font-semibold">{d.brand} {d.model}</p>
-                      {scopeMode === "devices" && (
-                        <label className="flex items-center gap-2 text-[12px]">
-                          <input
-                            type="checkbox"
-                            checked={allSel}
-                            onChange={() => {
-                              setSelectedLineIds((prev) => {
-                                const next = new Set(prev);
-                                if (allSel) deviceLineIds.forEach((id) => next.delete(id));
-                                else deviceLineIds.forEach((id) => next.add(id));
-                                return next;
-                              });
-                            }}
-                          />
-                          Refund device
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      {scopeMode === "devices" ? (
+                        <label className="flex min-w-0 items-center gap-2">
+                          <Checkbox checked={allSel} onChange={toggleAllDeviceLines} aria-label={`Refund ${d.brand} ${d.model}`} />
+                          <span className="truncate text-[13px] font-semibold">{d.brand} {d.model}</span>
                         </label>
+                      ) : (
+                        <p className="truncate text-[13px] font-semibold">{d.brand} {d.model}</p>
                       )}
                     </div>
                     <div className="space-y-1.5">
@@ -347,11 +366,11 @@ export function RefundFlow({
                           <div key={l.lineId} className="flex items-center justify-between gap-2 rounded-lg bg-muted/30 px-3 py-1.5 text-[12px]">
                             <label className="flex min-w-0 items-center gap-2">
                               {scopeMode === "lines" && (
-                                <input
-                                  type="checkbox"
+                                <Checkbox
                                   checked={selectedLineIds.has(l.lineId)}
                                   onChange={() => toggleLine(l.lineId)}
                                   disabled={remQty <= 0 && l.lineComponent === "line"}
+                                  aria-label={`Refund line ${l.name}`}
                                 />
                               )}
                               <span className="truncate">{l.name}</span>
@@ -420,6 +439,7 @@ export function RefundFlow({
               value={reasonCode}
               onChange={(e) => setReasonCode(e.target.value)}
               options={settings.refundConfig.reasons.map((r) => ({ label: r, value: r }))}
+              className="h-9"
             />
           </Field>
           <Field label="Comment (optional)">
@@ -431,6 +451,7 @@ export function RefundFlow({
                 value={method}
                 onChange={(e) => setMethod(e.target.value)}
                 options={settings.invoicePaymentModes.map((m) => ({ label: paymentLabel(m), value: m }))}
+                className="h-9"
               />
             </Field>
             <Field label="Reference / Txn ID (optional)">
@@ -438,7 +459,7 @@ export function RefundFlow({
             </Field>
           </div>
           <label className="flex items-center gap-2 text-[13px]">
-            <input type="checkbox" checked={gateway} onChange={(e) => setGateway(e.target.checked)} />
+            <Checkbox checked={gateway} onChange={setGateway} aria-label="Gateway refund" />
             Gateway refund (settle later — records as Pending until confirmed)
           </label>
           <Field label="Customer note (optional)">
@@ -477,7 +498,7 @@ export function RefundFlow({
                   <label className="flex items-center justify-between gap-2">
                     <span className="truncate text-[13px] font-medium">{l.name}</span>
                     <span className="flex items-center gap-2 text-[12px]">
-                      <input type="checkbox" checked={draft.returned} onChange={(e) => setDraft({ returned: e.target.checked })} />
+                      <Checkbox checked={draft.returned} onChange={(returned) => setDraft({ returned })} aria-label={`Mark ${l.name} returned`} />
                       Item returned
                     </span>
                   </label>
@@ -491,6 +512,7 @@ export function RefundFlow({
                           value={draft.condition}
                           onChange={(e) => setDraft({ condition: e.target.value as ReturnCondition })}
                           options={(Object.keys(RETURN_CONDITION_LABEL) as ReturnCondition[]).map((c) => ({ label: RETURN_CONDITION_LABEL[c], value: c }))}
+                          className="h-9"
                         />
                       </Field>
                       <Field label="Disposition">
@@ -498,6 +520,7 @@ export function RefundFlow({
                           value={draft.disposition}
                           onChange={(e) => setDraft({ disposition: e.target.value as ReturnDisposition })}
                           options={(Object.keys(RETURN_DISPOSITION_LABEL) as ReturnDisposition[]).map((d) => ({ label: RETURN_DISPOSITION_LABEL[d], value: d }))}
+                          className="h-9"
                         />
                       </Field>
                     </div>
