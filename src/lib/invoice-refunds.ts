@@ -422,8 +422,8 @@ export function refundStatus(invoice: Invoice, refunds: InvoiceRefund[]): Refund
   );
   const anyFailedOrReversed = refunds.some((r) => r.status === "failed" || r.status === "reversed");
 
-  if (succeeded.length === 0 && anyPendingOrProcessing) return "refund_pending";
   if (succeeded.length === 0 && anyFailedOrReversed) return "refund_failed_reversed";
+  if (succeeded.length === 0 && anyPendingOrProcessing) return "refund_pending";
   if (prior <= 0) return "no_refund";
 
   const base = refundableBase(invoice);
