@@ -70,6 +70,9 @@ export async function POST(req: Request) {
   // Log the append-only correction event with the mandatory reason + snapshot.
   await admin.from("work_session_events").insert({
     organization_id: current.organization_id,
+    // Denormalized from the parent session so the correction event is
+    // store-scoped for RLS, matching the trigger-stamped events.
+    branch_id: current.branch_id,
     session_id: sessionId,
     staff_id: current.staff_id,
     kind: "correction",

@@ -63,6 +63,11 @@ create table if not exists public.work_session_events (
   organization_id uuid not null default public.auth_org_id() references public.organizations(id) on delete cascade,
   session_id      uuid references public.work_sessions(id) on delete set null,
   staff_id        uuid not null references public.staff(id) on delete restrict,
+  -- Denormalized from the parent session for store-scoped RLS without a join,
+  -- exactly like work_session_breaks.branch_id. Stamped by the event-writing
+  -- triggers from the parent work_sessions row, never from the client. A null
+  -- branch (org-wide staff) is org-wide to key holders via auth_branch_visible.
+  branch_id       uuid references public.branches(id) on delete set null,
   kind            text not null
                     check (kind in ('session_start', 'break_start', 'break_end',
                                     'session_end', 'auto_close', 'correction')),
@@ -73,6 +78,11 @@ create table if not exists public.work_session_events (
   details         jsonb,
   created_at      timestamptz not null default now()
 );
+
+-- Idempotency guard: ensure branch_id exists on an already-created events
+-- table (additive; never drops or weakens anything).
+alter table public.work_session_events
+  add column if not exists branch_id uuid references public.branches(id) on delete set null;
 
 -- ── SECTION 2 — Indexes (state-machine guarantees + reporting) ───────────────
 
@@ -240,12 +250,12 @@ returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
-    insert into public.work_session_events (organization_id, session_id, staff_id, kind, actor_staff_id, at)
-      values (new.organization_id, new.id, new.staff_id, 'session_start',
+    insert into public.work_session_events (organization_id, branch_id, session_id, staff_id, kind, actor_staff_id, at)
+      values (new.organization_id, new.branch_id, new.id, new.staff_id, 'session_start',
               coalesce(public.auth_staff_id(), new.staff_id), new.started_at);
   elsif tg_op = 'UPDATE' and old.ended_at is null and new.ended_at is not null then
-    insert into public.work_session_events (organization_id, session_id, staff_id, kind, actor_staff_id, at)
-      values (new.organization_id, new.id, new.staff_id,
+    insert into public.work_session_events (organization_id, branch_id, session_id, staff_id, kind, actor_staff_id, at)
+      values (new.organization_id, new.branch_id, new.id, new.staff_id,
               case when new.end_reason = 'auto_close' or new.status = 'interrupted'
                    then 'auto_close' else 'session_end' end,
               coalesce(public.auth_staff_id(), new.staff_id), new.ended_at);
@@ -264,12 +274,12 @@ returns trigger
 language plpgsql security definer set search_path = public as $$
 begin
   if tg_op = 'INSERT' then
-    insert into public.work_session_events (organization_id, session_id, staff_id, kind, actor_staff_id, at)
-      values (new.organization_id, new.session_id, new.staff_id, 'break_start',
+    insert into public.work_session_events (organization_id, branch_id, session_id, staff_id, kind, actor_staff_id, at)
+      values (new.organization_id, new.branch_id, new.session_id, new.staff_id, 'break_start',
               coalesce(public.auth_staff_id(), new.staff_id), new.started_at);
   elsif tg_op = 'UPDATE' and old.ended_at is null and new.ended_at is not null then
-    insert into public.work_session_events (organization_id, session_id, staff_id, kind, actor_staff_id, at)
-      values (new.organization_id, new.session_id, new.staff_id, 'break_end',
+    insert into public.work_session_events (organization_id, branch_id, session_id, staff_id, kind, actor_staff_id, at)
+      values (new.organization_id, new.branch_id, new.session_id, new.staff_id, 'break_end',
               coalesce(public.auth_staff_id(), new.staff_id), new.ended_at);
   end if;
   return null;
