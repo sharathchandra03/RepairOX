@@ -85,6 +85,7 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Numbering", href: "/settings/invoice/numbering" },
       { label: "Tax", href: "/settings/invoice/tax" },
       { label: "Payment", href: "/settings/invoice/payment" },
+      { label: "Refunds", href: "/settings/invoice/refunds" },
     ],
   },
   {

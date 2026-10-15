@@ -1078,6 +1078,153 @@ export type InvoiceLineItem = {
   total: number;
 };
 
+/* ─── Invoice Refunds / Device Returns ───────────────────────────────────
+   A monetary REFUND and a physical ITEM RETURN are SEPARATE, linkable facts
+   attached to a FINALIZED invoice. The invoice is never mutated; the refund
+   STATUS is DERIVED from these records (see invoice-refunds.ts). camelCase
+   mirror of the migration 0075 columns. */
+
+export type RefundLifecycle = "pending" | "processing" | "succeeded" | "failed" | "reversed";
+export type RefundScope = "invoice" | "devices" | "lines";
+export type RefundKind = "full_scope" | "partial";
+
+export type InvoiceRefund = {
+  id: string;
+  branchId?: string | null;
+  refundNo?: string;
+  invoiceId: string;
+  invoiceReference?: string;
+  customerId?: string;
+  customerName?: string;
+  ticketId?: string;
+  scope: RefundScope;
+  refundKind: RefundKind;
+  /** Pre-tax refunded value. */
+  refundNet: number;
+  /** Tax component refunded (budget split of invoice.tax). */
+  refundTax: number;
+  /** Discount reversed (reference). */
+  refundDiscount: number;
+  /** Gross cash returned (authoritative) = refundNet + refundTax. */
+  refundAmount: number;
+  reasonCode: string;
+  reasonComment?: string;
+  method: string;
+  reference?: string;
+  customerNote?: string;
+  internalRemark?: string;
+  status: RefundLifecycle;
+  initiatedBy?: string;
+  initiatedByName?: string;
+  initiatedAt?: string;
+  approvedBy?: string;
+  approvedByName?: string;
+  approvedAt?: string;
+  processedBy?: string;
+  processedByName?: string;
+  processedAt?: string;
+  reversedBy?: string;
+  reversedAt?: string;
+  reversalReason?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+export type RefundLineComponent = "line" | "repair_cost" | "device_tax" | "discount_adj";
+
+export type InvoiceRefundAllocation = {
+  id: string;
+  refundId: string;
+  invoiceId: string;
+  deviceId?: string;
+  ticketDeviceId?: string;
+  lineId?: string;
+  lineComponent: RefundLineComponent;
+  sku?: string;
+  qty: number;
+  allocNet: number;
+  allocTax: number;
+  allocAmount: number;
+  createdAt?: string;
+};
+
+export type ReturnCondition = "uninspected" | "good" | "damaged" | "defective" | "other";
+export type ReturnDisposition = "restock" | "inspection_required" | "damaged_non_saleable" | "do_not_restock";
+export type ReturnDispositionStatus = "pending" | "completed";
+
+export type InvoiceItemReturn = {
+  id: string;
+  branchId?: string | null;
+  returnNo?: string;
+  invoiceId: string;
+  deviceId?: string;
+  lineId?: string;
+  sku?: string;
+  itemName?: string;
+  /** Link to the money refund when related (null for return-first). */
+  refundId?: string;
+  returned: boolean;
+  returnQty: number;
+  condition: ReturnCondition;
+  disposition: ReturnDisposition;
+  dispositionStatus: ReturnDispositionStatus;
+  /** The Customer Return stock_movements.doc_number, once restocked. */
+  stockMovementRef?: string;
+  /** Cost/valuation at return time — NEVER the selling/refund price. */
+  unitCost?: number;
+  receivingStore?: string;
+  inspectionNotes?: string;
+  receivedBy?: string;
+  receivedByName?: string;
+  receivedAt?: string;
+  restockedBy?: string;
+  restockedAt?: string;
+  createdAt?: string;
+  updatedAt?: string;
+};
+
+/** Derived refund status (NEVER a stored editable label). Computed at read time
+ *  from the invoice's persisted refund records (see invoice-refunds.ts). */
+export type RefundStatus =
+  | "no_refund"
+  | "refund_pending"
+  | "partially_refunded"
+  | "fully_refunded"
+  | "refund_failed_reversed";
+
+export const REFUND_STATUS_LABEL: Record<RefundStatus, string> = {
+  no_refund: "No Refund",
+  refund_pending: "Refund Pending",
+  partially_refunded: "Partially Refunded",
+  fully_refunded: "Fully Refunded",
+  refund_failed_reversed: "Refund Failed / Reversed",
+};
+
+/** Restrained RepairOX pill tones (pill standard). No Refund neutral, Pending
+ *  amber, Partially sky/blue, Fully emerald, Failed/Reversed rose. */
+export const REFUND_STATUS_TONE: Record<RefundStatus, string> = {
+  no_refund: "bg-zinc-100 text-zinc-600 ring-zinc-200",
+  refund_pending: "bg-warning/10 text-amber-700 ring-warning/30",
+  partially_refunded: "bg-sky-50 text-sky-700 ring-sky-200",
+  fully_refunded: "bg-emerald-50 text-emerald-800 ring-emerald-300",
+  refund_failed_reversed: "bg-rose-50 text-rose-700 ring-rose-200",
+};
+
+export const RETURN_CONDITION_LABEL: Record<ReturnCondition, string> = {
+  uninspected: "Uninspected",
+  good: "Good",
+  damaged: "Damaged",
+  defective: "Defective",
+  other: "Other",
+};
+
+export const RETURN_DISPOSITION_LABEL: Record<ReturnDisposition, string> = {
+  restock: "Restock",
+  inspection_required: "Inspection Required",
+  damaged_non_saleable: "Damaged / Non-Saleable",
+  do_not_restock: "Do Not Restock",
+};
+
 export type InvoiceType = "retail" | "business";
 
 export const INVOICE_TYPE_LABEL: Record<InvoiceType, string> = {

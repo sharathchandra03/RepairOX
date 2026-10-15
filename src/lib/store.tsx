@@ -26,7 +26,16 @@ import {
   type TeamMember, type Invoice, type WalkIn,
   deriveTicketStatus, getTicketDevices, getInvoicedTicketDeviceIds,
   isProforma, getInvoiceDevices,
+  type InvoiceRefund, type InvoiceRefundAllocation, type InvoiceItemReturn,
 } from "@/lib/mock-data";
+import {
+  eligibility as refundEligibility,
+  remainingRefundable,
+  refundsForInvoice,
+  INVOICE_REFUNDS_PAISA,
+  type Allocation,
+} from "@/lib/invoice-refunds";
+import { recordTransaction as recordLedgerTransaction } from "@/lib/daily-ledger-service";
 import {
   inventoryItems as SEED_INVENTORY, stockMovements as SEED_MOVEMENTS,
   type InventoryItem, type StockMovement,
@@ -60,6 +69,13 @@ export type RevenueMonth = { m: string; v: number };
 interface StoreState {
   tickets: Ticket[];
   invoices: Invoice[];
+  /** DB-backed refund ledger (the financial-reversal authority). The invoice is
+   *  never mutated; refund status is DERIVED from these rows (invoice-refunds.ts). */
+  invoiceRefunds: InvoiceRefund[];
+  /** Per-device / per-line refund breakdown (authoritative per-line refunded). */
+  invoiceRefundAllocations: InvoiceRefundAllocation[];
+  /** Physical item returns — independent of the money refund, linkable. */
+  invoiceItemReturns: InvoiceItemReturn[];
   walkIns: WalkIn[];
   orders: OrderStatus[];
   revenue: RevenueMonth[];
@@ -105,6 +121,23 @@ interface StoreActions {
    *  invoice id. Returns the (new or existing) final Invoice id, or "" on
    *  failure/permission denial. */
   convertProformaToInvoice: (proformaId: string) => Promise<string>;
+  /* ── Refunds & Returns (DB-backed; the finalized invoice is NEVER mutated) ── */
+  /** Create a refund against a finalized invoice (money event + allocations).
+   *  Returns the refund_no (or "" on failure/denial). Manual method → succeeded
+   *  immediately; gateway method → pending until settleRefund. The DB guard is
+   *  the authoritative over-refund + eligibility + SoD check. */
+  processRefund: (input: ProcessRefundInput) => Promise<string>;
+  /** Settle a gateway refund: pending/processing → succeeded|failed. Only
+   *  succeeded affects balances/loyalty/reports. */
+  settleRefund: (refundId: string, update: { status: "succeeded" | "failed"; reference?: string }) => Promise<void>;
+  /** Compensating reversal (never a delete): status → reversed, re-reverses
+   *  loyalty once, retains the physical-return link, never auto-touches stock. */
+  reverseRefund: (refundId: string, reason: string) => Promise<void>;
+  /** Record a physical item return (return-first allowed). Does NOT touch stock. */
+  recordItemReturn: (input: RecordItemReturnInput) => Promise<string>;
+  /** Execute the disposition-gated restock via the atomic DB function (the
+   *  net-new current_stock increment, valued at cost — never selling price). */
+  restockItemReturn: (returnId: string) => Promise<void>;
   addWalkIn: (walkIn: WalkIn) => Promise<void>;
   updateWalkIn: (id: string, updates: Partial<WalkIn>) => Promise<void>;
   deleteWalkIn: (id: string) => Promise<void>;
@@ -148,6 +181,46 @@ interface StoreActions {
 }
 
 type Store = StoreState & StoreActions;
+
+/** Input for processRefund — the UI computes scope + allocation via the pure
+ *  invoice-refunds.ts engine and passes the result; the store writes it + the
+ *  DB guard revalidates. */
+export interface ProcessRefundInput {
+  invoiceId: string;
+  scope: "invoice" | "devices" | "lines";
+  refundKind: "full_scope" | "partial";
+  /** gross cash = refundNet + refundTax (authoritative) */
+  refundAmount: number;
+  refundNet: number;
+  refundTax: number;
+  refundDiscount?: number;
+  reasonCode: string;
+  reasonComment?: string;
+  method: string;
+  reference?: string;
+  customerNote?: string;
+  internalRemark?: string;
+  /** manual → immediate succeeded; gateway → pending (default manual). */
+  gateway?: boolean;
+  /** the per-line/device allocation lines (from allocateScope / distributePartial). */
+  allocation: Allocation;
+}
+
+export interface RecordItemReturnInput {
+  invoiceId: string;
+  deviceId?: string;
+  lineId?: string;
+  sku?: string;
+  itemName?: string;
+  refundId?: string;
+  returnQty: number;
+  condition: InvoiceItemReturn["condition"];
+  disposition: InvoiceItemReturn["disposition"];
+  unitCost?: number;
+  receivingStore?: string;
+  inspectionNotes?: string;
+  branchId?: string | null;
+}
 
 /* ─── Row <-> App Model Mappers ──────────────────────────────────────── */
 
@@ -396,6 +469,158 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
       // Reverse warranty lineage (see rowToInvoice).
       warrantyClaimIds: inv.warrantyClaimIds ?? null,
     },
+  };
+}
+
+/* ─── Refund / Return mappers (DB row ↔ camelCase app model) ─────────── */
+
+function rowToInvoiceRefund(r: any): InvoiceRefund {
+  return {
+    id: r.id,
+    branchId: r.branch_id ?? null,
+    refundNo: r.refund_no ?? undefined,
+    invoiceId: r.invoice_id,
+    invoiceReference: r.invoice_reference ?? undefined,
+    customerId: r.customer_id ?? undefined,
+    customerName: r.customer_name ?? undefined,
+    ticketId: r.ticket_id ?? undefined,
+    scope: (r.scope ?? "invoice") as InvoiceRefund["scope"],
+    refundKind: (r.refund_kind ?? "partial") as InvoiceRefund["refundKind"],
+    refundNet: Number(r.refund_net ?? 0),
+    refundTax: Number(r.refund_tax ?? 0),
+    refundDiscount: Number(r.refund_discount ?? 0),
+    refundAmount: Number(r.refund_amount ?? 0),
+    reasonCode: r.reason_code ?? "",
+    reasonComment: r.reason_comment ?? undefined,
+    method: r.method ?? "cash",
+    reference: r.reference ?? undefined,
+    customerNote: r.customer_note ?? undefined,
+    internalRemark: r.internal_remark ?? undefined,
+    status: (r.status ?? "succeeded") as InvoiceRefund["status"],
+    initiatedBy: r.initiated_by ?? undefined,
+    initiatedByName: r.initiated_by_name ?? undefined,
+    initiatedAt: r.initiated_at ?? undefined,
+    approvedBy: r.approved_by ?? undefined,
+    approvedByName: r.approved_by_name ?? undefined,
+    approvedAt: r.approved_at ?? undefined,
+    processedBy: r.processed_by ?? undefined,
+    processedByName: r.processed_by_name ?? undefined,
+    processedAt: r.processed_at ?? undefined,
+    reversedBy: r.reversed_by ?? undefined,
+    reversedAt: r.reversed_at ?? undefined,
+    reversalReason: r.reversal_reason ?? undefined,
+    createdAt: r.created_at ?? undefined,
+    updatedAt: r.updated_at ?? undefined,
+  };
+}
+
+function invoiceRefundToRow(x: InvoiceRefund): Record<string, unknown> {
+  return {
+    id: x.id,
+    branch_id: x.branchId ?? null,
+    invoice_id: x.invoiceId,
+    invoice_reference: x.invoiceReference ?? null,
+    customer_id: x.customerId ?? null,
+    customer_name: x.customerName ?? null,
+    ticket_id: x.ticketId ?? null,
+    scope: x.scope,
+    refund_kind: x.refundKind,
+    refund_net: x.refundNet ?? 0,
+    refund_tax: x.refundTax ?? 0,
+    refund_discount: x.refundDiscount ?? 0,
+    refund_amount: x.refundAmount ?? 0,
+    reason_code: x.reasonCode,
+    reason_comment: x.reasonComment ?? null,
+    method: x.method,
+    reference: x.reference ?? null,
+    customer_note: x.customerNote ?? null,
+    internal_remark: x.internalRemark ?? null,
+    status: x.status,
+  };
+}
+
+function rowToRefundAllocation(r: any): InvoiceRefundAllocation {
+  return {
+    id: r.id,
+    refundId: r.refund_id,
+    invoiceId: r.invoice_id,
+    deviceId: r.device_id ?? undefined,
+    ticketDeviceId: r.ticket_device_id ?? undefined,
+    lineId: r.line_id ?? undefined,
+    lineComponent: (r.line_component ?? "line") as InvoiceRefundAllocation["lineComponent"],
+    sku: r.sku ?? undefined,
+    qty: Number(r.qty ?? 0),
+    allocNet: Number(r.alloc_net ?? 0),
+    allocTax: Number(r.alloc_tax ?? 0),
+    allocAmount: Number(r.alloc_amount ?? 0),
+    createdAt: r.created_at ?? undefined,
+  };
+}
+
+function refundAllocationToRow(a: InvoiceRefundAllocation): Record<string, unknown> {
+  return {
+    refund_id: a.refundId,
+    invoice_id: a.invoiceId,
+    device_id: a.deviceId ?? null,
+    ticket_device_id: a.ticketDeviceId ?? null,
+    line_id: a.lineId ?? null,
+    line_component: a.lineComponent,
+    sku: a.sku ?? null,
+    qty: a.qty ?? 0,
+    alloc_net: a.allocNet ?? 0,
+    alloc_tax: a.allocTax ?? 0,
+    alloc_amount: a.allocAmount ?? 0,
+  };
+}
+
+function rowToItemReturn(r: any): InvoiceItemReturn {
+  return {
+    id: r.id,
+    branchId: r.branch_id ?? null,
+    returnNo: r.return_no ?? undefined,
+    invoiceId: r.invoice_id,
+    deviceId: r.device_id ?? undefined,
+    lineId: r.line_id ?? undefined,
+    sku: r.sku ?? undefined,
+    itemName: r.item_name ?? undefined,
+    refundId: r.refund_id ?? undefined,
+    returned: r.returned ?? true,
+    returnQty: Number(r.return_qty ?? 0),
+    condition: (r.condition ?? "uninspected") as InvoiceItemReturn["condition"],
+    disposition: (r.disposition ?? "inspection_required") as InvoiceItemReturn["disposition"],
+    dispositionStatus: (r.disposition_status ?? "pending") as InvoiceItemReturn["dispositionStatus"],
+    stockMovementRef: r.stock_movement_ref ?? undefined,
+    unitCost: r.unit_cost != null ? Number(r.unit_cost) : undefined,
+    receivingStore: r.receiving_store ?? undefined,
+    inspectionNotes: r.inspection_notes ?? undefined,
+    receivedBy: r.received_by ?? undefined,
+    receivedByName: r.received_by_name ?? undefined,
+    receivedAt: r.received_at ?? undefined,
+    restockedBy: r.restocked_by ?? undefined,
+    restockedAt: r.restocked_at ?? undefined,
+    createdAt: r.created_at ?? undefined,
+    updatedAt: r.updated_at ?? undefined,
+  };
+}
+
+function itemReturnToRow(x: InvoiceItemReturn): Record<string, unknown> {
+  return {
+    id: x.id,
+    branch_id: x.branchId ?? null,
+    invoice_id: x.invoiceId,
+    device_id: x.deviceId ?? null,
+    line_id: x.lineId ?? null,
+    sku: x.sku ?? null,
+    item_name: x.itemName ?? null,
+    refund_id: x.refundId ?? null,
+    returned: x.returned,
+    return_qty: x.returnQty ?? 0,
+    condition: x.condition,
+    disposition: x.disposition,
+    disposition_status: x.dispositionStatus,
+    unit_cost: x.unitCost ?? null,
+    receiving_store: x.receivingStore ?? null,
+    inspection_notes: x.inspectionNotes ?? null,
   };
 }
 
@@ -1103,6 +1328,9 @@ function loadFromStorage(storageKey?: string): StoreState | null {
     return {
       ...saved,
       invoices: (saved.invoices ?? SEED_INVOICES).map((inv: any) => ({ ...inv, invoiceType: inv.invoiceType ?? "retail" })),
+      invoiceRefunds: saved.invoiceRefunds ?? [],
+      invoiceRefundAllocations: saved.invoiceRefundAllocations ?? [],
+      invoiceItemReturns: saved.invoiceItemReturns ?? [],
       walkIns: saved.walkIns ?? SEED_WALKINS,
       inventory: (saved.inventory ?? SEED_INVENTORY).map((i: any) => ({ ...i, reservedStock: i.reservedStock ?? 0 })),
       stockMovements: saved.stockMovements ?? SEED_MOVEMENTS,
@@ -1188,7 +1416,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => { activePrefixesRef.current = activePrefixes; }, [activePrefixes]);
 
   const [state, setState] = useState<StoreState>({
-    tickets: [], invoices: [], walkIns: [], orders: [], revenue: [],
+    tickets: [], invoices: [], invoiceRefunds: [], invoiceRefundAllocations: [], invoiceItemReturns: [],
+    walkIns: [], orders: [], revenue: [],
     team: [], inventory: [], stockMovements: [], customers: [], customerGroups: [],
     loyaltyByCustomer: {},
     companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [],
@@ -1293,7 +1522,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Demo mode: always start fresh — wipe any stale demo data and seed clean.
     if (isDemoMode) {
       const fresh: StoreState = {
-        tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
+        tickets: SEED_TICKETS, invoices: SEED_INVOICES,
+        invoiceRefunds: [], invoiceRefundAllocations: [], invoiceItemReturns: [],
+        walkIns: SEED_WALKINS,
         orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
         inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
         customers: SEED_CUSTOMERS, customerGroups: [], loyaltyByCustomer: {}, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
@@ -1314,7 +1545,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         setState(saved);
       } else {
         setState({
-          tickets: SEED_TICKETS, invoices: SEED_INVOICES, walkIns: SEED_WALKINS,
+          tickets: SEED_TICKETS, invoices: SEED_INVOICES,
+          invoiceRefunds: [], invoiceRefundAllocations: [], invoiceItemReturns: [],
+          walkIns: SEED_WALKINS,
           orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
           inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
           customers: SEED_CUSTOMERS, customerGroups: [], loyaltyByCustomer: {}, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
@@ -1335,6 +1568,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       const [
         { data: tix, error: tixErr },
         { data: invs, error: invErr },
+        { data: refunds },
+        { data: refundAllocs },
+        { data: itemReturns },
         { data: wis },
         { data: invItems },
         { data: moves },
@@ -1351,6 +1587,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // is selected; the full RLS-scoped set in All-Shops mode.
         scopeToStore(supabase.from("tickets").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
         scopeToStore(supabase.from("invoices").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
+        // Refunds / allocations / item returns — the DB refund ledger. Scoped to
+        // the active store by branch_id (allocations follow via the refund_id);
+        // tolerate the error so the app still loads before the migration is run.
+        scopeToStore(supabase.from("invoice_refunds").select("*").order("created_at", { ascending: false })),
+        noScope(supabase.from("invoice_refund_allocations").select("*").order("created_at", { ascending: false })),
+        scopeToStore(supabase.from("invoice_item_returns").select("*").order("created_at", { ascending: false })),
         scopeToStore(supabase.from("walk_ins").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
         scopeToStore(supabase.from("inventory_items").select("*").is("deleted_at", null).order("created_at", { ascending: false })),
         scopeToStore(supabase.from("stock_movements").select("*").order("created_at", { ascending: false })),
@@ -1377,6 +1619,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         ...s,
         tickets: (tix ?? []).map(rowToTicket),
         invoices: (invs ?? []).map(rowToInvoice),
+        invoiceRefunds: (refunds ?? []).map(rowToInvoiceRefund),
+        invoiceRefundAllocations: (refundAllocs ?? []).map(rowToRefundAllocation),
+        invoiceItemReturns: (itemReturns ?? []).map(rowToItemReturn),
         walkIns: (wis ?? []).map(rowToWalkIn),
         inventory: (invItems ?? []).map(rowToInventoryItem),
         stockMovements: (moves ?? []).map(rowToStockMovement),
@@ -1510,6 +1755,30 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             const next = [...prev.invoices]; next[idx] = inv;
             return { ...prev, invoices: next };
           }
+          case "invoice_refunds": {
+            if (isDelete) return { ...prev, invoiceRefunds: prev.invoiceRefunds.filter((r) => r.id !== row.id) };
+            const rf = rowToInvoiceRefund(row);
+            const idx = prev.invoiceRefunds.findIndex((r) => r.id === row.id);
+            if (idx === -1) return { ...prev, invoiceRefunds: [rf, ...prev.invoiceRefunds] };
+            const next = [...prev.invoiceRefunds]; next[idx] = rf;
+            return { ...prev, invoiceRefunds: next };
+          }
+          case "invoice_refund_allocations": {
+            if (isDelete) return { ...prev, invoiceRefundAllocations: prev.invoiceRefundAllocations.filter((a) => a.id !== row.id) };
+            const al = rowToRefundAllocation(row);
+            const idx = prev.invoiceRefundAllocations.findIndex((a) => a.id === row.id);
+            if (idx === -1) return { ...prev, invoiceRefundAllocations: [al, ...prev.invoiceRefundAllocations] };
+            const next = [...prev.invoiceRefundAllocations]; next[idx] = al;
+            return { ...prev, invoiceRefundAllocations: next };
+          }
+          case "invoice_item_returns": {
+            if (isDelete) return { ...prev, invoiceItemReturns: prev.invoiceItemReturns.filter((r) => r.id !== row.id) };
+            const ir = rowToItemReturn(row);
+            const idx = prev.invoiceItemReturns.findIndex((r) => r.id === row.id);
+            if (idx === -1) return { ...prev, invoiceItemReturns: [ir, ...prev.invoiceItemReturns] };
+            const next = [...prev.invoiceItemReturns]; next[idx] = ir;
+            return { ...prev, invoiceItemReturns: next };
+          }
           case "walk_ins": {
             if (isDelete) return { ...prev, walkIns: prev.walkIns.filter((w) => w.id !== row.id) };
             const wi = rowToWalkIn(row);
@@ -1613,7 +1882,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       });
     };
 
-    const tables = ["tickets", "invoices", "walk_ins", "inventory_items", "stock_movements", "customers", "customer_groups", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options", "loyalty_accounts"];
+    const tables = ["tickets", "invoices", "invoice_refunds", "invoice_refund_allocations", "invoice_item_returns", "walk_ins", "inventory_items", "stock_movements", "customers", "customer_groups", "companies", "brands", "device_models", "assigned_by_options", "assigned_to_options", "loyalty_accounts"];
 
     const channel = client.channel("store-realtime");
     for (const table of tables) {
@@ -2702,6 +2971,460 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [addInvoice, updateInvoice, updateTicket]);
 
+  /* ── Refunds & Returns (DB-first; the finalized invoice is NEVER mutated) ──
+     The DB `invoice_refunds` ledger is the financial-reversal authority; the
+     two demo ledgers (daily-ledger + accounting journal) are PROJECTIONS only.
+     The DB guard (`invoice_refunds_guard`) is the authoritative over-refund +
+     eligibility + segregation-of-duties check — the client re-reads live
+     invoices for the common-case concurrency check only. */
+
+  // Loyalty-reversal single-flight (keyed by refund uuid), avoiding a redundant
+  // DB round-trip before the refund-scoped unique index settles.
+  const reversingLoyaltyRef = useRef<Set<string>>(new Set());
+
+  /** Reverse earned loyalty for a succeeded refund, ONCE. Mirrors
+   *  awardLoyaltyForPaidInvoice's inverse: one `adjustment` row keyed on the
+   *  refund uuid (`source_type='refund'`), negative points, decrement balance.
+   *  `direction` = -1 for a refund (points removed), +1 to restore on reversal. */
+  const reverseLoyaltyForRefund = useCallback(
+    async (refundId: string, customerId: string | undefined, refundAmount: number, direction: 1 | -1) => {
+      if (!customerId || refundAmount <= 0) return;
+      const key = `${refundId}:${direction}`;
+      if (reversingLoyaltyRef.current.has(key)) return;
+      reversingLoyaltyRef.current.add(key);
+      try {
+        let pointsPerRupee = 100;
+        if (shouldUseDb()) {
+          try {
+            const { data: rows } = await db.from("organization_settings").select("loyalty_config").limit(1);
+            const raw = rows?.[0]?.loyalty_config as unknown;
+            const cfg = raw ? (typeof raw === "string" ? JSON.parse(raw) : raw) : null;
+            if (cfg && typeof cfg === "object" && typeof (cfg as any).pointsPerRupee === "number" && (cfg as any).pointsPerRupee > 0) {
+              pointsPerRupee = (cfg as any).pointsPerRupee;
+            }
+          } catch { /* keep default ₹100 = 1 point */ }
+        }
+        const magnitude = pointsFromInvoiceAmount(refundAmount, pointsPerRupee);
+        if (magnitude <= 0) return;
+        // direction -1 → remove points (refund); +1 → restore (reversal).
+        const delta = direction * magnitude;
+        const thresholds = await readLoyaltyThresholds();
+
+        if (shouldUseDb()) {
+          const { data: account } = await db
+            .from("loyalty_accounts")
+            .select("points_balance")
+            .eq("customer_id", customerId)
+            .maybeSingle();
+          const currentBalance = account?.points_balance ?? 0;
+          const newBalance = Math.max(0, currentBalance + delta);
+          const newTier = tierForLifetimeValue(newBalance, thresholds);
+          // One reversal per refund uuid: the refund-scoped partial unique index
+          // (loyalty_transactions_one_refund_reversal) makes a double-submit a
+          // no-op (23505 ignored). The reversal row uses source_type='refund',
+          // source_id = refund uuid.
+          const { error: txError } = await db.from("loyalty_transactions").insert({
+            id: `LTX-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).slice(2, 9)}`,
+            customer_id: customerId,
+            type: "adjustment",
+            points_change: delta,
+            points_balance: newBalance,
+            source_type: "refund",
+            source_id: direction === -1 ? refundId : `${refundId}:restore`,
+            description:
+              direction === -1
+                ? `Reversed ${magnitude} pts for refund ${refundId}`
+                : `Restored ${magnitude} pts (refund ${refundId} reversed)`,
+          });
+          if (txError && txError.code !== "23505") {
+            console.error("[store] loyalty refund-reversal failed:", txError.message);
+            return;
+          }
+          if (!txError) {
+            await db.from("loyalty_accounts").upsert({
+              customer_id: customerId,
+              points_balance: newBalance,
+              tier: newTier,
+              last_transaction_at: new Date().toISOString(),
+            });
+          }
+        }
+        // Patch loyaltyByCustomer immediately (also covers local/demo mode).
+        setState((s) => {
+          const prevLoy = s.loyaltyByCustomer[customerId] ?? { points: 0, tier: "bronze" as LoyaltyTier };
+          const newLoyPoints = Math.max(0, prevLoy.points + delta);
+          return {
+            ...s,
+            loyaltyByCustomer: {
+              ...s.loyaltyByCustomer,
+              [customerId]: { points: newLoyPoints, tier: tierForLifetimeValue(newLoyPoints, thresholds) },
+            },
+          };
+        });
+      } finally {
+        reversingLoyaltyRef.current.delete(key);
+      }
+    },
+    [shouldUseDb, db, readLoyaltyThresholds],
+  );
+
+  /** Project a succeeded/reversed refund into the demo daily-ledger (a Refund
+   *  outflow / inflow correction). Idempotent per refund_no via the seen-set —
+   *  the DB `invoice_refunds` row is the authority, never this projection. */
+  const ledgerRefundRef = useRef<Set<string>>(new Set());
+  const projectRefundToDailyLedger = useCallback(
+    (refundNo: string, amount: number, method: string, direction: "outflow" | "inflow", createdBy: string) => {
+      const key = `${refundNo}:${direction}`;
+      if (ledgerRefundRef.current.has(key)) return;
+      ledgerRefundRef.current.add(key);
+      try {
+        const cashOrBank: "Cash" | "Bank" = method.toLowerCase() === "cash" ? "Cash" : "Bank";
+        recordLedgerTransaction({
+          date: new Date().toISOString().slice(0, 10),
+          module: "Refund",
+          referenceId: refundNo,
+          description: `Refund ${refundNo} (${direction === "outflow" ? "paid" : "reversed"})`,
+          category: "Refund",
+          paymentMode: (cashOrBank === "Cash" ? "Cash" : "Bank"),
+          cashOrBank,
+          direction,
+          amount,
+          employee: createdBy,
+          createdBy,
+        });
+      } catch (e) {
+        // The ledger is a demo projection; never let it break the refund.
+        console.warn("[store] daily-ledger refund projection skipped:", e);
+      }
+    },
+    [],
+  );
+
+  const processRefund = useCallback(
+    async (input: ProcessRefundInput): Promise<string> => {
+      const invoice = stateRef.current.invoices.find((i) => i.id === input.invoiceId);
+      if (!invoice) {
+        toast.error("Invoice not found");
+        return "";
+      }
+      // Common-case concurrency guard (the DB guard is authoritative).
+      const existing = refundsForInvoice(stateRef.current.invoiceRefunds, invoice.id);
+      const elig = refundEligibility(invoice, existing);
+      if (!elig.eligible) {
+        toast.error("Refund not allowed", {
+          description: "This invoice is not eligible for a monetary refund.",
+        });
+        return "";
+      }
+      const remaining = remainingRefundable(invoice, existing);
+      if (input.refundAmount <= 0 || input.refundAmount > remaining + INVOICE_REFUNDS_PAISA) {
+        toast.error("Refund exceeds balance", {
+          description: `The maximum refundable amount is ₹${remaining.toLocaleString("en-IN")}.`,
+        });
+        return "";
+      }
+
+      const status: InvoiceRefund["status"] = input.gateway ? "pending" : "succeeded";
+      const localId = `rf_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const refund: InvoiceRefund = {
+        id: localId,
+        branchId: invoice.branchId ?? null,
+        invoiceId: invoice.id,
+        invoiceReference: invoice.reference || invoice.id,
+        customerId: invoice.customerId,
+        customerName: invoice.customer,
+        ticketId: invoice.ticketId ?? invoice.sourceTicketId,
+        scope: input.scope,
+        refundKind: input.refundKind,
+        refundNet: input.refundNet,
+        refundTax: input.refundTax,
+        refundDiscount: input.refundDiscount ?? 0,
+        refundAmount: input.refundAmount,
+        reasonCode: input.reasonCode,
+        reasonComment: input.reasonComment,
+        method: input.method,
+        reference: input.reference,
+        customerNote: input.customerNote,
+        internalRemark: input.internalRemark,
+        status,
+      };
+
+      if (shouldUseDb()) {
+        const res = await db
+          .from("invoice_refunds")
+          .insert(withStore(invoiceRefundToRow(refund)))
+          .select("*")
+          .single();
+        if (res.error || !res.data) {
+          const msg = res.error?.message ?? "unknown";
+          toast.error("Refund not saved", {
+            description: /refund_exceeds_balance/.test(msg)
+              ? "The refund exceeds the invoice's remaining refundable balance."
+              : /refund_not_eligible/.test(msg)
+                ? "This invoice is not eligible for a monetary refund."
+                : /refund_.*forbidden/.test(msg)
+                  ? "You are not allowed to perform this refund action."
+                  : `DB error: ${msg}`,
+          });
+          return "";
+        }
+        const saved = rowToInvoiceRefund(res.data);
+        // Allocations (authoritative per-line refunded breakdown).
+        const allocRows = input.allocation.lines.map((l) =>
+          refundAllocationToRow({
+            id: "",
+            refundId: saved.id,
+            invoiceId: invoice.id,
+            deviceId: l.deviceId,
+            ticketDeviceId: l.ticketDeviceId,
+            lineId: l.lineId,
+            lineComponent: l.lineComponent,
+            sku: l.sku,
+            qty: l.qty,
+            allocNet: l.allocNet,
+            allocTax: l.allocTax,
+            allocAmount: l.allocAmount,
+          }),
+        );
+        if (allocRows.length > 0) {
+          const alloc = await db
+            .from("invoice_refund_allocations")
+            .insert(allocRows.map((r) => ({ ...r, organization_id: (res.data as any).organization_id })))
+            .select("*");
+          if (!alloc.error && alloc.data) {
+            const mapped = alloc.data.map(rowToRefundAllocation);
+            setState((s) => ({ ...s, invoiceRefundAllocations: [...mapped, ...s.invoiceRefundAllocations] }));
+          }
+        }
+        setState((s) => ({ ...s, invoiceRefunds: [saved, ...s.invoiceRefunds] }));
+        stateRef.current = { ...stateRef.current, invoiceRefunds: [saved, ...stateRef.current.invoiceRefunds] };
+        logActivity({ module: "Invoice", action: "Refund Processed", severity: "warning", entity: "Refund", reference: saved.refundNo || saved.id, description: `Refund of ${inr(saved.refundAmount)} on invoice ${invoice.reference || invoice.id} (${saved.reasonCode}).`, meta: { Status: saved.status, Method: saved.method } });
+        // Succeeded (manual) → reverse loyalty + project the daily-ledger outflow.
+        if (saved.status === "succeeded") {
+          await reverseLoyaltyForRefund(saved.id, saved.customerId, saved.refundAmount, -1);
+          projectRefundToDailyLedger(saved.refundNo || saved.id, saved.refundAmount, saved.method, "outflow", saved.processedByName || saved.initiatedByName || "system");
+        }
+        return saved.refundNo || saved.id;
+      }
+
+      // local/demo mode
+      const refundNo = `CN-${String(stateRef.current.invoiceRefunds.length + 1).padStart(4, "0")}`;
+      const localRefund: InvoiceRefund = { ...refund, refundNo, initiatedAt: new Date().toISOString() };
+      const localAllocs: InvoiceRefundAllocation[] = input.allocation.lines.map((l, i) => ({
+        id: `${localId}_a${i}`,
+        refundId: localId,
+        invoiceId: invoice.id,
+        deviceId: l.deviceId,
+        ticketDeviceId: l.ticketDeviceId,
+        lineId: l.lineId,
+        lineComponent: l.lineComponent,
+        sku: l.sku,
+        qty: l.qty,
+        allocNet: l.allocNet,
+        allocTax: l.allocTax,
+        allocAmount: l.allocAmount,
+      }));
+      setState((s) => ({
+        ...s,
+        invoiceRefunds: [localRefund, ...s.invoiceRefunds],
+        invoiceRefundAllocations: [...localAllocs, ...s.invoiceRefundAllocations],
+      }));
+      stateRef.current = { ...stateRef.current, invoiceRefunds: [localRefund, ...stateRef.current.invoiceRefunds] };
+      logActivity({ module: "Invoice", action: "Refund Processed", severity: "warning", entity: "Refund", reference: refundNo, description: `Refund of ${inr(localRefund.refundAmount)} on invoice ${invoice.reference || invoice.id} (${localRefund.reasonCode}).`, meta: { Status: localRefund.status, Method: localRefund.method } });
+      if (localRefund.status === "succeeded") {
+        await reverseLoyaltyForRefund(localId, localRefund.customerId, localRefund.refundAmount, -1);
+        projectRefundToDailyLedger(refundNo, localRefund.refundAmount, localRefund.method, "outflow", "system");
+      }
+      return refundNo;
+    },
+    [shouldUseDb, db, withStore, reverseLoyaltyForRefund, projectRefundToDailyLedger],
+  );
+
+  const settleRefund = useCallback(
+    async (refundId: string, update: { status: "succeeded" | "failed"; reference?: string }) => {
+      const refund = stateRef.current.invoiceRefunds.find((r) => r.id === refundId);
+      if (!refund) return;
+      if (shouldUseDb()) {
+        const { data, error } = await db
+          .from("invoice_refunds")
+          .update({ status: update.status, reference: update.reference ?? refund.reference ?? null })
+          .eq("id", refundId)
+          .select("*")
+          .single();
+        if (error || !data) {
+          toast.error("Refund not settled", { description: error?.message ?? "unknown" });
+          return;
+        }
+        const saved = rowToInvoiceRefund(data);
+        setState((s) => ({ ...s, invoiceRefunds: s.invoiceRefunds.map((r) => (r.id === refundId ? saved : r)) }));
+        stateRef.current = { ...stateRef.current, invoiceRefunds: stateRef.current.invoiceRefunds.map((r) => (r.id === refundId ? saved : r)) };
+        if (saved.status === "succeeded") {
+          await reverseLoyaltyForRefund(saved.id, saved.customerId, saved.refundAmount, -1);
+          projectRefundToDailyLedger(saved.refundNo || saved.id, saved.refundAmount, saved.method, "outflow", saved.processedByName || saved.initiatedByName || "system");
+        }
+        logActivity({ module: "Invoice", action: "Refund Settled", severity: saved.status === "succeeded" ? "warning" : "info", entity: "Refund", reference: saved.refundNo || saved.id, description: `Refund ${saved.refundNo || saved.id} settled: ${saved.status}.`, meta: { Status: saved.status } });
+        return;
+      }
+      const next: InvoiceRefund = { ...refund, status: update.status, reference: update.reference ?? refund.reference };
+      setState((s) => ({ ...s, invoiceRefunds: s.invoiceRefunds.map((r) => (r.id === refundId ? next : r)) }));
+      stateRef.current = { ...stateRef.current, invoiceRefunds: stateRef.current.invoiceRefunds.map((r) => (r.id === refundId ? next : r)) };
+      if (next.status === "succeeded") {
+        await reverseLoyaltyForRefund(next.id, next.customerId, next.refundAmount, -1);
+        projectRefundToDailyLedger(next.refundNo || next.id, next.refundAmount, next.method, "outflow", "system");
+      }
+    },
+    [shouldUseDb, db, reverseLoyaltyForRefund, projectRefundToDailyLedger],
+  );
+
+  const reverseRefund = useCallback(
+    async (refundId: string, reason: string) => {
+      const refund = stateRef.current.invoiceRefunds.find((r) => r.id === refundId);
+      if (!refund) return;
+      const wasSucceeded = refund.status === "succeeded";
+      if (shouldUseDb()) {
+        const { data, error } = await db
+          .from("invoice_refunds")
+          .update({ status: "reversed", reversal_reason: reason })
+          .eq("id", refundId)
+          .select("*")
+          .single();
+        if (error || !data) {
+          toast.error("Refund not reversed", {
+            description: /forbidden/.test(error?.message ?? "") ? "You are not allowed to reverse refunds." : (error?.message ?? "unknown"),
+          });
+          return;
+        }
+        const saved = rowToInvoiceRefund(data);
+        setState((s) => ({ ...s, invoiceRefunds: s.invoiceRefunds.map((r) => (r.id === refundId ? saved : r)) }));
+        stateRef.current = { ...stateRef.current, invoiceRefunds: stateRef.current.invoiceRefunds.map((r) => (r.id === refundId ? saved : r)) };
+        // Re-reverse loyalty once (restore points) + inverse ledger correction.
+        // The physical return link is RETAINED; stock is NOT auto-touched.
+        if (wasSucceeded) {
+          await reverseLoyaltyForRefund(saved.id, saved.customerId, saved.refundAmount, 1);
+          projectRefundToDailyLedger(saved.refundNo || saved.id, saved.refundAmount, saved.method, "inflow", saved.reversedBy || saved.initiatedByName || "system");
+        }
+        logActivity({ module: "Invoice", action: "Refund Reversed", severity: "critical", entity: "Refund", reference: saved.refundNo || saved.id, description: `Refund ${saved.refundNo || saved.id} reversed: ${reason}.`, meta: { Amount: inr(saved.refundAmount) } });
+        return;
+      }
+      const next: InvoiceRefund = { ...refund, status: "reversed", reversalReason: reason, reversedAt: new Date().toISOString() };
+      setState((s) => ({ ...s, invoiceRefunds: s.invoiceRefunds.map((r) => (r.id === refundId ? next : r)) }));
+      stateRef.current = { ...stateRef.current, invoiceRefunds: stateRef.current.invoiceRefunds.map((r) => (r.id === refundId ? next : r)) };
+      if (wasSucceeded) {
+        await reverseLoyaltyForRefund(next.id, next.customerId, next.refundAmount, 1);
+        projectRefundToDailyLedger(next.refundNo || next.id, next.refundAmount, next.method, "inflow", "system");
+      }
+    },
+    [shouldUseDb, db, reverseLoyaltyForRefund, projectRefundToDailyLedger],
+  );
+
+  const recordItemReturn = useCallback(
+    async (input: RecordItemReturnInput): Promise<string> => {
+      const localId = `ret_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+      const ret: InvoiceItemReturn = {
+        id: localId,
+        branchId: input.branchId ?? activeStoreIdRef.current ?? null,
+        invoiceId: input.invoiceId,
+        deviceId: input.deviceId,
+        lineId: input.lineId,
+        sku: input.sku,
+        itemName: input.itemName,
+        refundId: input.refundId,
+        returned: true,
+        returnQty: input.returnQty,
+        condition: input.condition,
+        disposition: input.disposition,
+        dispositionStatus: "pending",
+        unitCost: input.unitCost,
+        receivingStore: input.receivingStore,
+        inspectionNotes: input.inspectionNotes,
+      };
+      if (shouldUseDb()) {
+        const res = await db
+          .from("invoice_item_returns")
+          .insert(withStore(itemReturnToRow(ret)))
+          .select("*")
+          .single();
+        if (res.error || !res.data) {
+          toast.error("Return not recorded", {
+            description: /return_exceeds_qty/.test(res.error?.message ?? "")
+              ? "The returned quantity exceeds the invoiced quantity minus prior returns."
+              : /forbidden/.test(res.error?.message ?? "")
+                ? "You are not allowed to record customer returns."
+                : (res.error?.message ?? "unknown"),
+          });
+          return "";
+        }
+        const saved = rowToItemReturn(res.data);
+        setState((s) => ({ ...s, invoiceItemReturns: [saved, ...s.invoiceItemReturns] }));
+        stateRef.current = { ...stateRef.current, invoiceItemReturns: [saved, ...stateRef.current.invoiceItemReturns] };
+        logActivity({ module: "Inventory", action: "Customer Return Received", severity: "info", entity: "Item Return", reference: saved.returnNo || saved.id, description: `Received return of ${saved.returnQty} × ${saved.itemName || saved.sku || "item"} (${saved.disposition}).` });
+        return saved.returnNo || saved.id;
+      }
+      const returnNo = `RET-${String(stateRef.current.invoiceItemReturns.length + 1).padStart(4, "0")}`;
+      const local: InvoiceItemReturn = { ...ret, returnNo, receivedAt: new Date().toISOString() };
+      setState((s) => ({ ...s, invoiceItemReturns: [local, ...s.invoiceItemReturns] }));
+      stateRef.current = { ...stateRef.current, invoiceItemReturns: [local, ...stateRef.current.invoiceItemReturns] };
+      logActivity({ module: "Inventory", action: "Customer Return Received", severity: "info", entity: "Item Return", reference: returnNo, description: `Received return of ${local.returnQty} × ${local.itemName || local.sku || "item"} (${local.disposition}).` });
+      return returnNo;
+    },
+    [shouldUseDb, db, withStore],
+  );
+
+  const restockItemReturn = useCallback(
+    async (returnId: string) => {
+      const ret = stateRef.current.invoiceItemReturns.find((r) => r.id === returnId);
+      if (!ret) return;
+      if (ret.disposition !== "restock") {
+        toast.error("Not restockable", { description: "Only a restock-disposition return can increase saleable stock." });
+        return;
+      }
+      if (ret.dispositionStatus === "completed") {
+        toast.error("Already restocked", { description: "This return has already been restocked." });
+        return;
+      }
+      if (shouldUseDb()) {
+        // Atomic DB function: Return movement + current_stock bump + completion.
+        const { error } = await db.rpc("restock_item_return", { p_return_id: returnId });
+        if (error) {
+          toast.error("Restock failed", {
+            description: /forbidden/.test(error.message)
+              ? "You are not allowed to restock returned items."
+              : error.message,
+          });
+          return;
+        }
+        // Refresh the return + inventory item from the DB (realtime also echoes).
+        const { data: refreshed } = await db.from("invoice_item_returns").select("*").eq("id", returnId).single();
+        if (refreshed) {
+          const saved = rowToItemReturn(refreshed);
+          setState((s) => ({ ...s, invoiceItemReturns: s.invoiceItemReturns.map((r) => (r.id === returnId ? saved : r)) }));
+          if (saved.sku) {
+            const { data: item } = await db.from("inventory_items").select("*").eq("id", saved.sku).single();
+            if (item) {
+              const mapped = rowToInventoryItem(item);
+              setState((s) => ({ ...s, inventory: s.inventory.map((i) => (i.id === mapped.id ? mapped : i)) }));
+            }
+          }
+        }
+        logActivity({ module: "Inventory", action: "Stock Increased", severity: "success", entity: "Item Return", reference: ret.returnNo || ret.id, description: `Restocked ${ret.returnQty} × ${ret.itemName || ret.sku || "item"} (Customer Return, at cost).` });
+        return;
+      }
+      // local/demo: emulate the atomic restock.
+      const docNo = `RET-${String(stateRef.current.invoiceItemReturns.length + 1).padStart(4, "0")}`;
+      setState((s) => ({
+        ...s,
+        invoiceItemReturns: s.invoiceItemReturns.map((r) =>
+          r.id === returnId ? { ...r, dispositionStatus: "completed" as const, stockMovementRef: docNo, restockedAt: new Date().toISOString() } : r,
+        ),
+        inventory: ret.sku
+          ? s.inventory.map((i) => (i.id === ret.sku ? { ...i, currentStock: (i.currentStock ?? 0) + ret.returnQty } : i))
+          : s.inventory,
+      }));
+      logActivity({ module: "Inventory", action: "Stock Increased", severity: "success", entity: "Item Return", reference: ret.returnNo || ret.id, description: `Restocked ${ret.returnQty} × ${ret.itemName || ret.sku || "item"} (Customer Return, at cost).` });
+    },
+    [shouldUseDb, db],
+  );
+
   /* ── Walk-In actions (DB-first) ── */
   const addWalkIn = useCallback(async (walkIn: WalkIn) => {
     if (shouldUseDb()) {
@@ -3526,6 +4249,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     updateInvoice,
     deleteInvoice,
     convertProformaToInvoice,
+    processRefund,
+    settleRefund,
+    reverseRefund,
+    recordItemReturn,
+    restockItemReturn,
     addWalkIn,
     updateWalkIn,
     deleteWalkIn,

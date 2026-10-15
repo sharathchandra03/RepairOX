@@ -213,6 +213,21 @@ export type StoreSettings = {
      *  points `threshold` (point structure). Ordered lowest → highest. */
     tiers: { key: "bronze" | "silver" | "gold" | "platinum"; label: string; threshold: number }[];
   };
+
+  /* ── Refund configuration (Settings → Store → Financial) ──
+   * Structured refund rules. The free-text `refundPolicy` above is KEPT (it
+   * still prints on documents); this adds the operational config consumed by
+   * the refund flow. Payment methods reuse `invoicePaymentModes` (no 2nd list). */
+  refundConfig: {
+    /** Selectable refund reasons (editable with CAP.settings.financial). */
+    reasons: string[];
+    /** When true, a refund must be approved by a non-initiator before it settles. */
+    requireApproval: boolean;
+    /** When true, partial-amount refunds are allowed (not only full-scope). */
+    allowPartial: boolean;
+    /** Default disposition proposed for a returned item. */
+    restockDefault: "restock" | "inspection_required" | "damaged_non_saleable" | "do_not_restock";
+  };
 };
 
 export const DEFAULT_STORE_SETTINGS: StoreSettings = {
@@ -375,6 +390,21 @@ CLAIM PROCEDURE:
       { key: "platinum", label: "Platinum", threshold: 10000 },
     ],
   },
+
+  refundConfig: {
+    reasons: [
+      "Customer requested",
+      "Part defective",
+      "Wrong part supplied",
+      "Repair unsuccessful",
+      "Duplicate charge",
+      "Service not delivered",
+      "Other",
+    ],
+    requireApproval: false,
+    allowPartial: true,
+    restockDefault: "inspection_required",
+  },
 };
 
 /* ─── DB ↔ Client field mapping ──────────────────────────────────────── */
@@ -454,6 +484,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     })(),
     defaultLeadStoreId: (row.default_lead_store_id as string) ?? DEFAULT_STORE_SETTINGS.defaultLeadStoreId,
     loyaltyConfig: parseJsonColumn(row.loyalty_config, DEFAULT_STORE_SETTINGS.loyaltyConfig),
+    refundConfig: parseJsonColumn(row.refund_config, DEFAULT_STORE_SETTINGS.refundConfig),
   };
 }
 
@@ -549,6 +580,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     leadStoreMode: "lead_store_mode",
     defaultLeadStoreId: "default_lead_store_id",
     loyaltyConfig: "loyalty_config",
+    refundConfig: "refund_config",
   };
   const payload: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(updates)) {

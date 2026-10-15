@@ -92,20 +92,26 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     blurb: "Invoices, payments, refunds and printing.",
     icon: "FileText",
     levels: {
-      view: ["view_invoice", "view_payment_history"],
+      view: ["view_invoice", "view_payment_history", "refunds_view"],
       work: [
         "create_invoice", "create_partial_invoice", "edit_invoice", "print_invoice",
         "share_invoice", "update_payment", "apply_invoice_discount", "duplicate_invoice",
+        // Open the refund flow + create a refund draft (initiate ≠ process ≠ approve).
+        "refunds_initiate",
       ],
       manage: [
         "delete_invoice", "cancel_invoice", "change_invoice_status", "mark_overdue",
         "export_invoices", "manage_invoices", "manage_payments", "manage_warranties",
         // See all invoices, override price/discount limits, edit locked, revenue.
         "invoices_view_all", "edit_price_after_creation", "view_revenue_totals",
+        // Mark a refund succeeded / settle a manual or gateway refund.
+        "refunds_process",
       ],
       full: [
         "manage_refunds", "void_payment", "reconcile_payment",
         "discount_over_limit",
+        // Approve (when required) + reverse a refund (compensating).
+        "refunds_approve",
       ],
     },
   },
@@ -213,11 +219,15 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         // Cost/buying price visibility is opt-in: a normal stock-worker sees
         // stock but NOT purchase cost unless granted.
         "inventory_view_cost",
+        // Receive a physical customer return (receipt, no stock change yet).
+        "returns_accept",
       ],
       manage: [
         "delete_item", "approve_inventory", "inventory_reject", "manage_inventory",
         "manage_purchases", "purchases_approve", "purchases_receive", "manage_vendors",
         "transfer_inventory", "inventory_transfer_receive", "inventory_edit_cost",
+        // Execute the disposition-gated restock (increments saleable stock).
+        "returns_restock",
       ],
     },
   },
@@ -298,7 +308,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
         "view_reports", "view_ticket_reports", "view_sales_reports", "view_inventory_reports",
         "view_audit_logs",
         // Money-sensitive figures are opt-in even within reports access.
-        "view_profit_margin", "view_revenue_totals",
+        "view_profit_margin", "view_profitability", "view_revenue_totals",
       ],
       work: ["reports_builder_use", "reports_comparison_use", "reports_saved_manage", "manage_saved_filters"],
       manage: ["export_reports", "reports_print", "manage_reports", "reports_scheduled_manage", "import_data", "audit_export"],

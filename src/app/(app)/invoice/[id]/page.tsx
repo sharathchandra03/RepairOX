@@ -24,15 +24,19 @@ import { formatINR, cn } from "@/lib/utils";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL, invoiceStatusPillStyle,
+  REFUND_STATUS_LABEL, REFUND_STATUS_TONE,
   type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
   formatDeviceColour, isProforma, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE,
 } from "@/lib/mock-data";
+import { refundStatus as deriveRefundStatus, eligibility as refundEligibility, priorRefunded as priorRefundedAmount } from "@/lib/invoice-refunds";
+import { RefundFlow } from "@/components/invoice/refund-flow";
+import { RefundsReturnsSection } from "@/components/invoice/refunds-returns-section";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 import { DetailSection as SharedDetailSection, DetailHero, type Accent } from "@/components/common/detail-page";
-import { GitBranch } from "lucide-react";
+import { GitBranch, RotateCcw } from "lucide-react";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
 
@@ -120,7 +124,7 @@ function getElapsedLabel(createdAt: string): string {
 export default function InvoiceDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const { invoices, tickets, deleteInvoice, updateInvoice } = useStore();
+  const { invoices, invoiceRefunds, tickets, deleteInvoice, updateInvoice } = useStore();
   const { can } = usePermissions();
   // Per-action invoice capability gates (granular OR backward-compatible coarse).
   const canEditInvoice = allow(can, CAP.invoice.edit);
@@ -128,11 +132,27 @@ export default function InvoiceDetailPage() {
   const canDuplicateInvoice = allow(can, CAP.invoice.duplicate);
   const canUpdatePayment = allow(can, CAP.invoice.updatePayment);
   const canPrintInvoice = allow(can, CAP.invoice.print);
+  const canRefundInitiate = allow(can, CAP.invoice.refundInitiate);
+  const [refundOpen, setRefundOpen] = useState(false);
   const { settings } = useStoreSettings();
   const invoiceId = params.id as string;
 
   const invoice = useMemo(() => invoices.find((i) => i.id === invoiceId), [invoices, invoiceId]);
   const statusHex = invoice ? settings.invoiceStatusColors[invoice.status] : undefined;
+  // Derived refund state (never a stored field) — from the invoice's refund rows.
+  const invoiceRefundRows = useMemo(
+    () => (invoice ? invoiceRefunds.filter((r) => r.invoiceId === invoice.id) : []),
+    [invoice, invoiceRefunds],
+  );
+  const refundStatusValue = useMemo(
+    () => (invoice ? deriveRefundStatus(invoice, invoiceRefundRows) : "no_refund"),
+    [invoice, invoiceRefundRows],
+  );
+  const refundedAmount = useMemo(() => priorRefundedAmount(invoiceRefundRows), [invoiceRefundRows]);
+  const refundEligibleHere = useMemo(
+    () => (invoice ? refundEligibility(invoice, invoiceRefundRows).eligible : false),
+    [invoice, invoiceRefundRows],
+  );
   const linkedTicket = useMemo(() => tickets.find((t) => t.id === invoice?.ticketId), [tickets, invoice]);
   const activity = useMemo(() => (invoice ? generateActivity(invoice, linkedTicket?.ticketNo ?? invoice.ticketId) : []), [invoice, linkedTicket]);
   const proforma = invoice ? isProforma(invoice) : false;
@@ -331,6 +351,14 @@ export default function InvoiceDetailPage() {
                       <span className="h-1.5 w-1.5 rounded-full" style={statusHex ? { backgroundColor: statusHex } : undefined} />
                       {INVOICE_STATUS_LABEL[invoice.status]}
                     </span>
+                    {/* Derived REFUND status — visually + semantically distinct
+                        from the financial status (shown only when a refund exists). */}
+                    {refundStatusValue !== "no_refund" && (
+                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[refundStatusValue]}`}>
+                        <RotateCcw className="h-3 w-3" />
+                        {REFUND_STATUS_LABEL[refundStatusValue]}
+                      </span>
+                    )}
                     <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
                       {invoice.serviceCategory === "accessories"
                         ? "Accessories Invoice"
@@ -421,6 +449,14 @@ export default function InvoiceDetailPage() {
             <SummaryCard label="Due Date" value={fmtDateShort(invoice.dueDate)} icon={Calendar} />
           )}
           <SummaryCard label="Created" value={fmtDateShort(invoice.createdAt)} icon={Tag} />
+          {/* Refund-aware money cards — shown only once a refund exists so the
+              hero stays clean for the common no-refund case. */}
+          {!proforma && refundedAmount > 0 && (
+            <>
+              <SummaryCard label="Refunded" value={formatINR(refundedAmount)} icon={RotateCcw} />
+              <SummaryCard label="Net Received" value={formatINR(Math.max(0, (invoice.paidAmount ?? 0) - refundedAmount))} icon={CheckCircle2} />
+            </>
+          )}
         </div>
       </DetailHero>
 
@@ -776,6 +812,10 @@ export default function InvoiceDetailPage() {
               )}
             </DetailSection>
           )}
+
+          {/* Refunds & Returns — the DB refund ledger + physical returns for
+              this invoice (empty state is a compact dashed card). */}
+          {!proforma && <RefundsReturnsSection invoice={invoice} />}
         </div>
 
         {/* Right Column — pinned rail. Its internal scroll is DRIVEN by the
@@ -803,6 +843,21 @@ export default function InvoiceDetailPage() {
                 <div>
                   <p className="text-sm font-semibold">Edit Invoice</p>
                   <p className="text-[11px] text-muted-foreground">Modify full invoice details</p>
+                </div>
+              </button>
+              )}
+              {/* Process Refund — only an eligible invoice + the initiate key. */}
+              {refundEligibleHere && canRefundInitiate && (
+              <button
+                onClick={() => setRefundOpen(true)}
+                className="flex w-full items-center gap-3 rounded-xl border border-border px-4 py-3 text-left transition hover:border-[#B3BFF6]/50 hover:bg-[#EEF1FD]/40"
+              >
+                <span className="grid h-9 w-9 place-items-center rounded-lg bg-amber-100 text-amber-700">
+                  <RotateCcw className="h-4 w-4" />
+                </span>
+                <div>
+                  <p className="text-sm font-semibold">Process Refund</p>
+                  <p className="text-[11px] text-muted-foreground">Refund money &amp; record returns</p>
                 </div>
               </button>
               )}
@@ -1123,6 +1178,9 @@ export default function InvoiceDetailPage() {
         cancelLabel="Cancel"
         danger
       />
+
+      {/* Refund workflow (opened from Quick Actions). */}
+      <RefundFlow invoice={refundOpen ? invoice : null} open={refundOpen} onClose={() => setRefundOpen(false)} />
     </div>
   );
 }

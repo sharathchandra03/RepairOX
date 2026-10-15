@@ -91,6 +91,10 @@ export const CAP = {
     edit: ["edit_item", "manage_inventory"],
     // Delete an Inventory Master record.
     delete: ["delete_item", "manage_inventory"],
+    // Receive a physical customer return (no stock change yet).
+    returnAccept: ["returns_accept", "adjust_stock", "manage_inventory"],
+    // Execute the disposition-gated restock (increments saleable stock).
+    returnRestock: ["returns_restock", "approve_inventory", "manage_inventory"],
   },
   /* Money-sensitive VISIBILITY gates (gap audit v3). Owners hold these via
      full_access; grant explicitly to let a role SEE these figures. */
@@ -99,7 +103,8 @@ export const CAP = {
     // already sees cost). Otherwise a plain inventory viewer does NOT.
     viewCost: ["inventory_view_cost", "manage_inventory", "manage_purchases"],
     editCost: ["inventory_edit_cost", "manage_inventory"],
-    viewProfit: ["view_profit_margin", "view_financial_reports"],
+    // CP / labour / net-margin profitability figures (granular-first).
+    viewProfit: ["view_profitability", "view_profit_margin", "view_financial_reports"],
     viewRevenue: ["view_revenue_totals", "view_financial_reports"],
   },
   /* Own-vs-all record scope. When a user LACKS the *_view_all key they should
@@ -228,6 +233,12 @@ export const CAP = {
     share: ["share_invoice", "send_communications", "manage_invoices"],
     export: ["export_invoices", "export_reports", "manage_invoices"],
     convertFromTicket: ["convert_from_ticket", "create_invoice", "manage_invoices"],
+    /* Refunds & Returns (granular-first + coarse manage_refunds fallback).
+       Segregation of duties: initiate ≠ process ≠ approve. */
+    refundView: ["refunds_view", "manage_refunds", "manage_invoices"],
+    refundInitiate: ["refunds_initiate", "manage_refunds"],
+    refundProcess: ["refunds_process", "manage_refunds"],
+    refundApprove: ["refunds_approve", "manage_refunds"],
   },
   walkin: {
     view: ["walkin_view", "use_pos", "manage_repair_jobs"],

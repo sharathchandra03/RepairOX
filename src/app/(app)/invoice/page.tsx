@@ -9,7 +9,7 @@ import {
   Trash2, Copy, Printer, Mail, MessageCircle, FileDown, TrendingUp, Receipt,
   IndianRupee, AlertCircle, Clock, FileText, CreditCard, BarChart3,
   PieChart, Settings2, GripVertical, RefreshCw, ChevronUp, ChevronDown, X,
-  Pin, PinOff, Filter, FileSpreadsheet,
+  Pin, PinOff, Filter, FileSpreadsheet, RotateCcw,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -30,7 +30,9 @@ import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { SegmentedTabs } from "@/components/ui/tabs";
-import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, type Invoice, type InvoiceStatus, type InvoiceType, type Ticket } from "@/lib/mock-data";
+import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, REFUND_STATUS_LABEL, REFUND_STATUS_TONE, type Invoice, type InvoiceStatus, type InvoiceType, type Ticket, type RefundStatus } from "@/lib/mock-data";
+import { refundStatus as deriveRefundStatus, eligibility as refundEligibility } from "@/lib/invoice-refunds";
+import { RefundFlow } from "@/components/invoice/refund-flow";
 import { ProformaNeedsTicketDialog } from "@/components/invoice/proforma-needs-ticket-dialog";
 import { exportInvoicesExcel, exportInvoicesCSV } from "@/lib/list-export";
 import { usePermissions } from "@/lib/permissions-context";
@@ -45,7 +47,7 @@ import { readDateFilterParams } from "@/lib/date-filter";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
-type InvColumnId = "store" | "id" | "ticket" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
+type InvColumnId = "store" | "id" | "ticket" | "customer" | "date" | "status" | "refundStatus" | "category" | "paid" | "tax" | "total" | "actions";
 
 type InvColumnDef = {
   id: InvColumnId;
@@ -63,6 +65,7 @@ const INV_ALL_COLUMNS: InvColumnDef[] = [
   { id: "customer", label: "Customer", width: "w-[20%]" },
   { id: "date", label: "Created", width: "w-[112px]" },
   { id: "status", label: "Status", width: "w-[130px]" },
+  { id: "refundStatus", label: "Refund", width: "w-[150px]" },
   { id: "category", label: "Category", width: "w-[116px]" },
   { id: "paid", label: "Paid", align: "right", width: "w-[88px]" },
   { id: "tax", label: "Tax", align: "right", width: "w-[76px]" },
@@ -90,6 +93,16 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | "all" }[] = [
   { label: "Partial", value: "partial" },
   { label: "Overdue", value: "overdue" },
   { label: "Cancelled", value: "cancelled" },
+];
+
+/* Derived refund-status filter segments (never a stored field). */
+const REFUND_STATUS_FILTERS: { label: string; value: string }[] = [
+  { label: "All Refunds", value: "all" },
+  { label: "No Refund", value: "no_refund" },
+  { label: "Pending", value: "refund_pending" },
+  { label: "Partial", value: "partially_refunded" },
+  { label: "Fully", value: "fully_refunded" },
+  { label: "Failed / Reversed", value: "refund_failed_reversed" },
 ];
 
 const DATE_RANGES = [
@@ -158,7 +171,19 @@ function isInDateRange(createdAt: string, range: DateRange, customFrom?: string,
 
 export default function InvoicePage() {
   const router = useRouter();
-  const { invoices, tickets, deleteInvoice, addInvoice, updateInvoice, pinInvoice } = useStore();
+  const { invoices, invoiceRefunds, tickets, deleteInvoice, addInvoice, updateInvoice, pinInvoice } = useStore();
+  // Per-invoice refund records (for the derived Refund Status column + eligibility).
+  const refundsByInvoice = useMemo(() => {
+    const m = new Map<string, typeof invoiceRefunds>();
+    for (const r of invoiceRefunds) {
+      const arr = m.get(r.invoiceId);
+      if (arr) arr.push(r);
+      else m.set(r.invoiceId, [r]);
+    }
+    return m;
+  }, [invoiceRefunds]);
+  // The invoice whose refund flow is open (null = closed).
+  const [refundTarget, setRefundTarget] = useState<Invoice | null>(null);
   // Active-store context — drives the context-aware Store column (§3h). In
   // multi-store / All-Shops mode each row shows which store owns the invoice.
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -172,6 +197,7 @@ export default function InvoicePage() {
   // Per-action invoice capability gates (granular OR backward-compatible coarse).
   const canBulkChangeStatus = allow(can, CAP.invoice.changeStatus);
   const canBulkDelete = allow(can, CAP.invoice.delete);
+  const canRefundInitiate = allow(can, CAP.invoice.refundInitiate);
   const multiStore = isAllShops && stores.length > 1;
   const { settings } = useStoreSettings();
   const invoiceStatusColors = settings.invoiceStatusColors;
@@ -245,6 +271,8 @@ export default function InvoicePage() {
   const [dashboardExpanded, setDashboardExpanded] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<string>("all");
+  // Derived refund-status filter (all | no_refund | refund_pending | ...).
+  const [refundStatusFilter, setRefundStatusFilter] = useState<string>("all");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
   const [documentTypeFilter, setDocumentTypeFilter] = useState<string>("all");
@@ -425,24 +453,29 @@ export default function InvoicePage() {
       const okProformaStatus =
         proformaStatusFilter === "all" ||
         (isProforma(inv) && (inv.proformaStatus ?? (inv.convertedInvoiceId ? "converted" : "open")) === proformaStatusFilter);
+      // Derived refund status — computed from the invoice's refund records
+      // (never a stored field) via the pure engine.
+      const okRefundStatus =
+        refundStatusFilter === "all" ||
+        deriveRefundStatus(inv, refundsByInvoice.get(inv.id) ?? []) === refundStatusFilter;
       const okDate = isInDateRange(inv.createdAt, dateRange, customFrom, customTo);
       const linkedTicketNo = inv.ticketId ? (ticketNoById.get(inv.ticketId) ?? inv.ticketId) : "";
       const haystack = `${inv.id} ${linkedTicketNo} ${inv.customer} ${inv.company || ""} ${inv.phone}`.toLowerCase();
       const okQ = !q || haystack.includes(q.toLowerCase());
       // Unified panel search matches across Invoice ID + Customer (+ company).
       const okPanelSearch = !panelSearch || `${inv.id} ${inv.customer} ${inv.company || ""}`.toLowerCase().includes(panelSearch.toLowerCase());
-      return okStore && okStatus && okType && okCategory && okDocumentType && okProformaStatus && okDate && okQ && okPanelSearch;
+      return okStore && okStatus && okRefundStatus && okType && okCategory && okDocumentType && okProformaStatus && okDate && okQ && okPanelSearch;
     });
     // Pinned invoices float to the top; order within each group is preserved.
     const pinned = filtered.filter((inv) => inv.pinnedAt);
     const normal = filtered.filter((inv) => !inv.pinnedAt);
     return [...pinned, ...normal];
-  }, [invoices, storeFilter, statusFilter, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
+  }, [invoices, storeFilter, statusFilter, refundStatusFilter, refundsByInvoice, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId, ticketNoById]);
 
   // Reset to page 1 whenever the filtered result set changes.
   useEffect(() => {
     setPage(1);
-  }, [statusFilter, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
+  }, [statusFilter, refundStatusFilter, typeFilter, categoryFilter, documentTypeFilter, proformaStatusFilter, dateRange, customFrom, customTo, q, panelSearch, searchFilterId]);
 
   /* ─── Sticky frozen workspace (filters + table header) ───────────────────
      Same formula as the Tickets page: the date pills + status pills live in
@@ -809,6 +842,17 @@ export default function InvoicePage() {
         </div>
       </div>
 
+      {/* Derived Refund-status filter (connected SegmentedTabs). */}
+      <div className="flex w-full max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          value={refundStatusFilter}
+          onChange={setRefundStatusFilter}
+          options={REFUND_STATUS_FILTERS}
+          size="sm"
+          className="[&>button]:px-3"
+        />
+      </div>
+
       {/* Custom Date Range — reuses the shared Date Range picker (same as Tickets) */}
       <DateRangePicker
         open={dateRange === "custom"}
@@ -984,7 +1028,10 @@ export default function InvoicePage() {
                         // Resolve the TICKET column target: the real linked
                         // Ticket when one exists, else the source Estimate.
                         const ref = ticketRefById(inv);
-                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined);
+                        const invRefunds = refundsByInvoice.get(inv.id) ?? [];
+                        const invRefundStatus = deriveRefundStatus(inv, invRefunds);
+                        const invRefundEligible = refundEligibility(inv, invRefunds).eligible;
+                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined, invRefundStatus, invRefundEligible, canRefundInitiate, () => setRefundTarget(inv));
                       })()}
                     </td>
                   ))}
@@ -1055,6 +1102,9 @@ export default function InvoicePage() {
         progress={bulkProgress}
         onRetryFailed={retryFailed}
       />
+
+      {/* Refund workflow (opened from the row overflow menu). */}
+      <RefundFlow invoice={refundTarget} open={!!refundTarget} onClose={() => setRefundTarget(null)} />
     </div>
   );
 }
@@ -1227,6 +1277,10 @@ function renderInvCell(
   store?: StoreBranch | null,
   onConvertProforma?: () => void,
   onOpenConvertedInvoice?: () => void,
+  refundStatusValue?: RefundStatus,
+  refundEligible?: boolean,
+  canRefundInitiate?: boolean,
+  onRefund?: () => void,
 ) {
   const statusHex = statusColors?.[inv.status];
   const proforma = isProforma(inv);
@@ -1310,6 +1364,20 @@ function renderInvCell(
         </span>
       );
     }
+    case "refundStatus": {
+      // DERIVED refund status (never a stored field) — a full-width pill per the
+      // pill standard. Proformas / unrefundable rows read as "No Refund".
+      const rs = refundStatusValue ?? "no_refund";
+      if (rs === "no_refund") {
+        return <span className="text-[13px] text-muted-foreground leading-snug">—</span>;
+      }
+      return (
+        <span className={`inline-flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[rs]}`} title={REFUND_STATUS_LABEL[rs]}>
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
+          <span className="min-w-0 flex-1 truncate">{REFUND_STATUS_LABEL[rs]}</span>
+        </span>
+      );
+    }
     case "category": return (
       <span className={`ml-[7px] inline-flex items-center rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${
         (inv.serviceCategory || "service") === "accessories"
@@ -1363,6 +1431,14 @@ function renderInvCell(
             <MenuItem icon={FileDown} onClick={() => { onDownloadPdf(); close(); }}>Download PDF</MenuItem>
             <MenuItem icon={MessageCircle} onClick={() => { openWhatsApp(inv.phone, `Hi ${inv.customer}, here is your ${proforma ? "proforma" : "invoice"} ${inv.id} — ${formatINR(inv.total)}.`); close(); }}>WhatsApp {proforma ? "Proforma" : "Invoice"}</MenuItem>
             <MenuItem icon={Mail} onClick={close}>Email {proforma ? "Proforma" : "Invoice"}</MenuItem>
+            {/* Process Refund — only for an eligible invoice and a user who may
+                initiate refunds (never on proforma/draft/unpaid/fully-refunded). */}
+            {refundEligible && canRefundInitiate && (
+              <>
+                <div className="my-1 border-t border-border" />
+                <MenuItem icon={RotateCcw} onClick={() => { onRefund?.(); close(); }}>Process Refund</MenuItem>
+              </>
+            )}
             <div className="my-1 border-t border-border" />
             <MenuItem icon={Trash2} danger onClick={() => { onDelete(); close(); }}>Delete</MenuItem>
           </>)}

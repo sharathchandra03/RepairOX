@@ -146,6 +146,12 @@ export type PermissionKey =
   | "manage_payments"
   | "manage_refunds"
   | "manage_warranties"
+  /* Refunds (granular; coarse fallback manage_refunds). Segregation of duties:
+     initiate ≠ process ≠ approve. */
+  | "refunds_view"
+  | "refunds_initiate"
+  | "refunds_process"
+  | "refunds_approve"
   /* Inventory */
   | "view_inventory"
   | "create_item"
@@ -154,6 +160,9 @@ export type PermissionKey =
   | "adjust_stock"
   | "stock_movement"
   | "approve_inventory"
+  /* Customer returns (physical item return receipt + disposition-gated restock) */
+  | "returns_accept"
+  | "returns_restock"
   | "manage_barcode"
   | "manage_categories"
   | "manage_brands"
@@ -445,6 +454,7 @@ export type PermissionKey =
   | "inventory_view_cost"          // see buying / purchase / wholesale cost
   | "inventory_edit_cost"          // edit buying / cost price
   | "view_profit_margin"           // see profit & margin figures anywhere
+  | "view_profitability"           // see CP/labour/profit/net-margin figures (money-sensitive opt-in)
   | "view_revenue_totals"          // see revenue totals / KPI money figures
   /* Record scope (own vs all) */
   | "tickets_view_all"             // see all tickets, not only own/assigned
@@ -584,6 +594,10 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "manage_invoices", label: "Manage Invoices" },
       { key: "manage_payments", label: "Manage Payments" },
       { key: "manage_refunds", label: "Manage Refunds" },
+      { key: "refunds_view", label: "View Refunds" },
+      { key: "refunds_initiate", label: "Initiate Refund" },
+      { key: "refunds_process", label: "Process / Settle Refund" },
+      { key: "refunds_approve", label: "Approve / Reverse Refund" },
       { key: "manage_warranties", label: "Manage Warranties" },
     ],
   },
@@ -599,6 +613,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "adjust_stock", label: "Adjust Stock" },
       { key: "stock_movement", label: "Stock Movement" },
       { key: "approve_inventory", label: "Approve Inventory" },
+      { key: "returns_accept", label: "Accept Customer Return" },
+      { key: "returns_restock", label: "Restock Returned Item" },
       { key: "manage_barcode", label: "Manage Barcode" },
       { key: "manage_categories", label: "Manage Categories" },
       { key: "manage_brands", label: "Manage Brands" },
@@ -985,6 +1001,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "inventory_view_cost", label: "View Cost / Purchase Price" },
       { key: "inventory_edit_cost", label: "Edit Cost / Buying Price" },
       { key: "view_profit_margin", label: "View Profit / Margin" },
+      { key: "view_profitability", label: "View Profitability (CP / Labour / Net Margin)" },
       { key: "view_revenue_totals", label: "View Revenue Totals" },
     ],
   },
