@@ -1076,6 +1076,18 @@ export type InvoiceLineItem = {
   taxClass?: string;
   discount: number;
   total: number;
+  /** Item Type discriminator for the costing engine. Optional — legacy lines
+   *  without it still render and total (treated as a part). It NEVER affects
+   *  billed totals (subtotal = parts + repairCost); it only drives the internal
+   *  profitability breakdown (inv-design §5.1 / FR-19 / NFR-2). */
+  kind?: "part" | "service";
+  /** Resolved per-unit valuation cost snapshot — INTERNAL ONLY. Never added to
+   *  PrintLineItem / buildInvoiceInfo, never shown to the customer, never part
+   *  of any billed total. Absent ⇒ "Cost not configured" (never ₹0). */
+  cost?: number;
+  /** Provenance of `cost` for the breakdown: resolved from the stock ledger,
+   *  from the org-level CP fallback, or not configured. */
+  costState?: "resolved" | "cp" | "not_configured";
 };
 
 /* ─── Invoice Refunds / Device Returns ───────────────────────────────────
@@ -1331,6 +1343,11 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
   // Parts & Services carries ONLY real ticket parts. The ticket estimate is a
   // commercial reference value and is mapped to `estimateValue` below — it must
   // NEVER be injected as a synthetic "Repair Service" line item.
+  // Ticket parts are always billed as part lines. `kind: "part"` is stamped so
+  // the profitability engine classifies them correctly; the resolved valuation
+  // `cost`/`costState` is filled in by the invoice create page's fromTicket
+  // effect, which has the Inventory Master to resolve against (inv-design §5.3).
+  // Stamping kind/cost here NEVER affects billed totals (FR-19).
   const parts: InvoiceLineItem[] = dev.parts.map((p, i) => ({
     id: `li-${dev.id}-${i}`,
     sku: p.sku,
@@ -1340,6 +1357,7 @@ export function ticketDeviceToInvoiceDevice(dev: DeviceRecord): InvoiceDeviceRec
     price: p.unitPrice,
     discount: 0,
     total: p.total,
+    kind: "part",
   }));
 
   const subtotal = parts.reduce((s, p) => s + p.total, 0);

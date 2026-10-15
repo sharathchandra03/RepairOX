@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
-  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2, PackageSearch,
+  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2, PackageSearch, Wrench,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
@@ -26,6 +26,7 @@ import { DeviceBrandModelSelector } from "@/components/common/device-brand-model
 import type { InventoryItem } from "@/lib/inventory-data";
 import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
 import { AddInventoryModal } from "@/components/inventory/add-inventory-modal";
+import { resolvePartUnitCost } from "@/lib/inventory-costing";
 import { Can } from "@/components/common/can";
 import { searchCustomers, type Customer } from "@/lib/customer-data";
 import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
@@ -190,6 +191,21 @@ function genLineId(): string {
   return `li-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
+/**
+ * Resolve a part line's INTERNAL valuation cost from an Inventory Master item
+ * for the profitability engine (inv-design §5.2). This is never shown to the
+ * customer and never affects billed totals (FR-19). The invoice client holds no
+ * in-memory stock-ledger layers, so we pass none and rely on the org-level CP
+ * fallback inside `resolvePartUnitCost` (ledger → CP → not configured); a
+ * cost-authorized read already populated `item.costPrice` / `item.costState`.
+ * Maps the resolver's `source` to the `InvoiceLineItem.costState` snapshot.
+ */
+function resolveLinePartCost(item: InventoryItem): { cost?: number; costState: "resolved" | "cp" | "not_configured" } {
+  const resolved = resolvePartUnitCost(item.id, [], item);
+  if (resolved.kind === "not_configured") return { cost: undefined, costState: "not_configured" };
+  return { cost: resolved.unitCost, costState: resolved.source === "ledger" ? "resolved" : "cp" };
+}
+
 /** Friendly labels for known payment modes; custom modes are title-cased. */
 const PAYMENT_MODE_LABEL: Record<string, string> = {
   cash: "Cash",
@@ -222,7 +238,7 @@ function InvoiceWizard() {
   const { can } = usePermissions();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
-  const { invoices, tickets, addInvoice, updateInvoice, customers, addCustomer } = useStore();
+  const { invoices, tickets, addInvoice, updateInvoice, customers, addCustomer, inventory } = useStore();
   const { contacts, leads, updateContact, updateLead, recordConversionEvent, autoLinkByIdentity } = useLeads();
   const { settings, hydrated: settingsHydrated } = useStoreSettings();
   const isEdit = !!editId;
@@ -288,16 +304,30 @@ function InvoiceWizard() {
         try {
           const parsed = JSON.parse(devicesRaw);
           formDevices = parsed.map((dev: any, idx: number) => {
-            const parts: InvoiceLineItem[] = (dev.parts || []).map((p: any, pi: number) => ({
-              id: `li-${Date.now()}-${idx}-${pi}`,
-              name: p.name,
-              sku: p.sku || "",
-              description: "",
-              qty: p.qty || 1,
-              price: p.unitPrice || p.price || 0,
-              discount: 0,
-              total: p.total || ((p.qty || 1) * (p.unitPrice || p.price || 0)),
-            }));
+            const parts: InvoiceLineItem[] = (dev.parts || []).map((p: any, pi: number) => {
+              const sku = p.sku || "";
+              // Stamp each prefilled line as a part and resolve its INTERNAL
+              // valuation cost from the matching Inventory Master item (so
+              // profitability works on pushed invoices). The resolved cost /
+              // kind never affect billed totals (inv-design §5.3 / FR-19).
+              const master = sku ? inventory.find((it) => it.id === sku) : undefined;
+              const { cost, costState } = master && master.kind !== "service"
+                ? resolveLinePartCost(master)
+                : { cost: undefined, costState: "not_configured" as const };
+              return {
+                id: `li-${Date.now()}-${idx}-${pi}`,
+                name: p.name,
+                sku,
+                description: "",
+                qty: p.qty || 1,
+                price: p.unitPrice || p.price || 0,
+                discount: 0,
+                total: p.total || ((p.qty || 1) * (p.unitPrice || p.price || 0)),
+                kind: "part" as const,
+                cost,
+                costState,
+              };
+            });
 
             // The ticket estimate is a COMMERCIAL REFERENCE VALUE — it maps to
             // the device's Estimate Value field below, NOT to a Parts & Services
@@ -1532,6 +1562,7 @@ function LineItemNameInput({
 
 function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; showErrors?: boolean }) {
   const { can } = usePermissions();
+  const { inventory } = useStore();
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
 
@@ -1550,9 +1581,13 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
   // the Add Inventory modal (create a NEW Inventory Master record) are two
   // DISTINCT workflows, tracked separately.
   const [showInventorySearch, setShowInventorySearch] = useState(false);
+  // Add Service — a DISTINCT catalogue path over kind="service" master items,
+  // separate from both the part search above and the free-text "Add Row".
+  const [showServiceSearch, setShowServiceSearch] = useState(false);
   const [showAddInventory, setShowAddInventory] = useState(false);
   const [addInventorySeed, setAddInventorySeed] = useState("");
   const searchWrapRef = useRef<HTMLDivElement>(null);
+  const serviceSearchWrapRef = useRef<HTMLDivElement>(null);
 
   // Close the inventory search popover on outside click / Escape.
   useEffect(() => {
@@ -1570,6 +1605,20 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [showInventorySearch]);
+
+  // Close the service-catalogue search popover on outside click.
+  useEffect(() => {
+    if (!showServiceSearch) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if ((target as HTMLElement)?.closest?.('[data-inventory-search-panel="true"]')) return;
+      if (serviceSearchWrapRef.current && !serviceSearchWrapRef.current.contains(target)) {
+        setShowServiceSearch(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showServiceSearch]);
 
   const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
 
@@ -1655,11 +1704,39 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
         if (i !== activeIdx) return d;
         return {
           ...d,
-          parts: d.parts.map((p) =>
-            p.id === partId
-              ? { ...p, name: item.name, sku: item.id, price: item.regularSellingPrice, description: item.category, total: p.qty * item.regularSellingPrice }
-              : p
-          ),
+          parts: d.parts.map((p) => {
+            if (p.id !== partId) return p;
+            // The inline Item autocomplete binds an existing master item to this
+            // row. Resolve kind + internal valuation cost the same way Add Part /
+            // Add Service do, so profitability classifies the line correctly.
+            if (item.kind === "service") {
+              const price = typeof item.serviceCharge === "number" ? item.serviceCharge : item.regularSellingPrice;
+              const configured = item.costState === "configured" && typeof item.standardLabourCost === "number";
+              return {
+                ...p,
+                name: item.name,
+                sku: item.id,
+                price,
+                description: item.category,
+                total: p.qty * price,
+                kind: "service" as const,
+                cost: configured ? (item.standardLabourCost as number) : undefined,
+                costState: configured ? ("resolved" as const) : ("not_configured" as const),
+              };
+            }
+            const { cost, costState } = resolveLinePartCost(item);
+            return {
+              ...p,
+              name: item.name,
+              sku: item.id,
+              price: item.regularSellingPrice,
+              description: item.category,
+              total: p.qty * item.regularSellingPrice,
+              kind: "part" as const,
+              cost,
+              costState,
+            };
+          }),
         };
       }),
     }));
@@ -1670,6 +1747,10 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
   // its quantity instead of adding a duplicate row — the master record is never
   // touched, only the invoice line.
   const addInventoryLine = (item: InventoryItem) => {
+    // Loads the master's current Selling Price onto the line and resolves the
+    // INTERNAL valuation cost (kind="part") — the cost is never shown to the
+    // customer and never affects billed totals (inv-design §5.2 / FR-19).
+    const { cost, costState } = resolveLinePartCost(item);
     updateForm((f) => ({
       ...f,
       devices: f.devices.map((d, i) => {
@@ -1689,21 +1770,67 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
           ...d,
           parts: [
             ...d.parts,
-            { id: genLineId(), name: item.name, sku: item.id, qty: 1, price: item.regularSellingPrice, discount: 0, total: item.regularSellingPrice, description: item.category },
+            { id: genLineId(), name: item.name, sku: item.id, qty: 1, price: item.regularSellingPrice, discount: 0, total: item.regularSellingPrice, description: item.category, kind: "part", cost, costState },
           ],
         };
       }),
     }));
   };
 
-  // Add a NON-inventory line item (a manual service / charge). This is a
-  // billed invoice line with no Inventory Master record — the existing invoice
-  // line-item architecture already supports free-text items with a price.
+  // Add Service (DISTINCT catalogue path) — add an EXISTING Repair Service /
+  // Labour master item (kind="service") as a billed line. Loads the master's
+  // Service Charge onto the line price and stamps the INTERNAL Standard Labour
+  // Cost (or "not configured"). A service NEVER touches inventory quantity /
+  // stock availability (inv-design §5.2 / FR-18). Billed totals are unchanged.
+  const addServiceLine = (item: InventoryItem) => {
+    const price = typeof item.serviceCharge === "number" ? item.serviceCharge : item.regularSellingPrice;
+    const configured = item.costState === "configured" && typeof item.standardLabourCost === "number";
+    updateForm((f) => ({
+      ...f,
+      devices: f.devices.map((d, i) => {
+        if (i !== activeIdx) return d;
+        const existing = d.parts.find((p) => p.sku && p.sku === item.id);
+        if (existing) {
+          return {
+            ...d,
+            parts: d.parts.map((p) =>
+              p.id === existing.id
+                ? { ...p, qty: p.qty + 1, total: (p.qty + 1) * p.price }
+                : p
+            ),
+          };
+        }
+        return {
+          ...d,
+          parts: [
+            ...d.parts,
+            {
+              id: genLineId(),
+              name: item.name,
+              sku: item.id,
+              qty: 1,
+              price,
+              discount: 0,
+              total: price,
+              description: item.category,
+              kind: "service",
+              cost: configured ? (item.standardLabourCost as number) : undefined,
+              costState: configured ? "resolved" : "not_configured",
+            },
+          ],
+        };
+      }),
+    }));
+  };
+
+  // Add a NON-inventory, manual service / charge row (the free-text "Add Row").
+  // A billed service line with no Inventory Master record and no internal cost —
+  // the existing line-item architecture already supports free-text charges.
   const addService = () => {
     updateForm((f) => ({
       ...f,
       devices: f.devices.map((d, i) => i === activeIdx
-        ? { ...d, parts: [...d.parts, { id: genLineId(), name: "", qty: 1, price: 0, discount: 0, total: 0 }] }
+        ? { ...d, parts: [...d.parts, { id: genLineId(), name: "", qty: 1, price: 0, discount: 0, total: 0, kind: "service" }] }
         : d
       ),
     }));
@@ -1892,14 +2019,20 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
           <div className="border-t border-border pt-4 mt-3" />
 
           {/* INVENTORY COST — the primary working area of the Products step.
-              Two DISTINCT workflows live here:
-                • Search Inventory → select an existing Inventory Master item →
-                  it becomes an invoice LINE ITEM (addInventoryLine).
-                • Add Inventory   → opens the canonical Inventory Master create
+              FOUR DISTINCT actions live here (inv-design §5.2):
+                • Add Part    → live search over kind="part" master items →
+                  select → qty → loads Selling Price onto the line and resolves
+                  the INTERNAL valuation cost (addInventoryLine).
+                • Add Service → DISTINCT live search over kind="service" master
+                  items → loads Service Charge + internal Standard Labour Cost;
+                  NO inventory-quantity effect (addServiceLine).
+                • Add Row     → a manual, non-catalogue service charge, a
+                  free-text billed line with no master record (addService).
+                • Add Inventory → opens the canonical Inventory Master create
                   form (AddInventoryModal) → creates a REAL master record; the
-                  new item is then findable in Search and can be added as a line.
-              Add Service adds a non-inventory manual charge. Master creation is
-              NEVER the same action as adding a line item. */}
+                  new item is then findable in search and can be added as a line.
+              Master creation is NEVER the same action as adding a line item;
+              internal cost/kind never affect billed totals (FR-19). */}
           <div className="overflow-hidden rounded-2xl border-2 border-zinc-300 bg-gradient-to-b from-[#4361EE]/[0.05] to-transparent shadow-sm">
             {/* Section header — clean, professional ERP inventory workspace. */}
             <div className="flex flex-col gap-2.5 rounded-t-2xl border-b-2 border-zinc-300 bg-[#EEF1FD]/70 px-4 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:px-5">
@@ -1917,8 +2050,13 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => setShowInventorySearch((v) => !v)} className={showInventorySearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
-                  <Search className="h-3.5 w-3.5" /> Search Inventory
+                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => { setShowInventorySearch((v) => !v); setShowServiceSearch(false); }} className={showInventorySearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
+                  <Search className="h-3.5 w-3.5" /> Add Part
+                </Button>
+                {/* Add Service — DISTINCT catalogue search over kind="service"
+                    master items (never the part search, never master-create). */}
+                <Button size="sm" variant={showServiceSearch ? "secondary" : "outline"} onClick={() => { setShowServiceSearch((v) => !v); setShowInventorySearch(false); }} className={showServiceSearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
+                  <Wrench className="h-3.5 w-3.5" /> Add Service
                 </Button>
                 <Button size="sm" variant="outline" onClick={addService} className="border-[#4361EE]/30 hover:border-[#4361EE]/50">
                   <Plus className="h-3.5 w-3.5" /> Add Row
@@ -1939,6 +2077,8 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
               {showInventorySearch && (
                 <div className="relative z-30 mb-4" ref={searchWrapRef}>
                   <InventorySearchBox
+                    kind="part"
+                    placeholder="Search parts by name, SKU, category, or HSN…"
                     onSelect={(item) => { addInventoryLine(item); /* keep open for rapid multi-add */ }}
                     onClose={() => setShowInventorySearch(false)}
                     onAddInventory={(term) => {
@@ -1950,6 +2090,20 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                         setShowAddInventory(true);
                       }
                     }}
+                  />
+                </div>
+              )}
+
+              {/* Add Service — DISTINCT live search over kind="service" master
+                  items (Service Catalogue). Loads the Service Charge onto the
+                  line; no inventory-quantity effect (inv-design §5.2). */}
+              {showServiceSearch && (
+                <div className="relative z-30 mb-4" ref={serviceSearchWrapRef}>
+                  <InventorySearchBox
+                    kind="service"
+                    placeholder="Search repair services / labour by name, code, or category…"
+                    onSelect={(item) => { addServiceLine(item); /* keep open for rapid multi-add */ }}
+                    onClose={() => setShowServiceSearch(false)}
                   />
                 </div>
               )}
