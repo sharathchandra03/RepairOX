@@ -32,6 +32,7 @@ import {
   temperatureTone, temperatureAccent, temperatureStepIndex, temperatureDirection,
   type LeadTemperatureEvent, type TemperatureLevel,
 } from "@/lib/lead-temperature";
+import { AnimatedTemperatureGlyph } from "@/components/leads/animated-temperature-glyph";
 import type { Lead } from "@/lib/leads-data";
 
 function fmt(iso: string): string {
@@ -240,7 +241,7 @@ export function LeadTemperatureSection({
       <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <span className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[13px] font-semibold ring-1 ring-inset", temperatureTone(level))}>
-            <span>{temperatureGlyph(level)}</span>
+            <AnimatedTemperatureGlyph glyph={temperatureGlyph(level)} changeKey={current} className="shrink-0 leading-none" />
             {current || "Not set"}
           </span>
           <span className="text-[11px] uppercase tracking-wider text-muted-foreground">Buying intent</span>

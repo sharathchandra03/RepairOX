@@ -62,6 +62,7 @@ import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
 import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph, qualificationTone, qualificationDot } from "@/components/leads/lead-pills";
+import { AnimatedTemperatureGlyph } from "@/components/leads/animated-temperature-glyph";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -402,9 +403,14 @@ function LeadSelectCell({
   onChangeWithReason?: (value: string, reason: string) => void;
 }) {
   // Leading glyph for a value — the custom glyph if provided, else the dot.
-  const leadGlyph = (v: string, dot: string) =>
+  // Leading glyph for a value — the custom glyph if provided, else the dot.
+  // `animated` opts the PILL glyph into the one-shot change animation; option
+  // rows and other callers stay static (default false).
+  const leadGlyph = (v: string, dot: string, animated = false) =>
     glyphFor
-      ? <span className="shrink-0 text-[12px] leading-none">{glyphFor(v)}</span>
+      ? animated
+        ? <AnimatedTemperatureGlyph glyph={glyphFor(v)} changeKey={v} />
+        : <span className="shrink-0 text-[12px] leading-none">{glyphFor(v)}</span>
       : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
@@ -490,7 +496,7 @@ function LeadSelectCell({
           title={value}
           className={cn("flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", toneClass)}
         >
-          {leadGlyph(value, dotColor)}
+          {leadGlyph(value, dotColor, true)}
           <span className="min-w-0 flex-1 truncate">{value}</span>
         </span>
       : <span className="flex h-7 w-full items-center px-2.5 text-[11px] text-zinc-400">{placeholder}</span>;
@@ -509,7 +515,7 @@ function LeadSelectCell({
         )}
         style={value ? { backgroundColor: `${dotColor}15`, color: dotColor, boxShadow: `inset 0 0 0 1px ${dotColor}30` } : undefined}
       >
-        {value ? leadGlyph(value, dotColor) : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#a1a1aa" }} />}
+        {value ? leadGlyph(value, dotColor, true) : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#a1a1aa" }} />}
         <span className="min-w-0 flex-1 truncate">{value || placeholder}</span>
         <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
       </button>

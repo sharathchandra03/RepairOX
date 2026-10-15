@@ -21,6 +21,7 @@ import { Pencil, Phone } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { temperatureLevel, temperatureTone, temperatureGlyph } from "@/lib/lead-temperature";
+import { AnimatedTemperatureGlyph } from "@/components/leads/animated-temperature-glyph";
 import type { Lead } from "@/lib/leads-data";
 
 export function LeadStickyContext({
@@ -68,7 +69,7 @@ export function LeadStickyContext({
                 <span className="truncate text-[14px] font-bold tracking-tight text-foreground">{lead.name || "Unnamed lead"}</span>
               </div>
               <span className={cn("hidden shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset sm:inline-flex", temperatureTone(tLevel))}>
-                <span>{temperatureGlyph(tLevel)}</span> {lead.leadNature || "No temperature"}
+                <AnimatedTemperatureGlyph glyph={temperatureGlyph(tLevel)} changeKey={lead.leadNature || ""} className="shrink-0 leading-none" /> {lead.leadNature || "No temperature"}
               </span>
               <span className="hidden min-w-0 shrink items-center gap-1.5 text-[12px] text-muted-foreground md:inline-flex">
                 <span className="truncate">{lead.assignedToName || lead.agent || "Unassigned"}</span>

@@ -86,6 +86,7 @@ import { LeadFollowUpHistory } from "@/components/leads/lead-followup-history";
 import { LeadTemperatureSection } from "@/components/leads/lead-temperature-section";
 import { LeadQuickActions } from "@/components/leads/lead-quick-actions";
 import { LeadStickyContext } from "@/components/leads/lead-sticky-context";
+import { AnimatedTemperatureGlyph } from "@/components/leads/animated-temperature-glyph";
 import type { Lead } from "@/lib/leads-data";
 
 /* A device's captured issues rendered as compact pills (same language as the
@@ -407,7 +408,7 @@ export default function ViewLeadPage() {
                   {/* Pills: Temperature · Status · Sales Agent · Store — all distinct. */}
                   <div className="mt-2.5 flex flex-wrap items-center gap-2">
                     <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", temperatureTone(tLevel))}>
-                      <span>{temperatureGlyph(tLevel)}</span> {lead.leadNature || "No temperature"}
+                      <AnimatedTemperatureGlyph glyph={temperatureGlyph(tLevel)} changeKey={lead.leadNature || ""} className="shrink-0 leading-none" /> {lead.leadNature || "No temperature"}
                     </span>
                     {lead.status && <span className={cn("inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", statusTone(lead.status))}>{lead.status}</span>}
                     <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-zinc-700">
