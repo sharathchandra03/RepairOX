@@ -131,8 +131,9 @@ test("repairCost folds into service revenue; reconciliation identities hold (HIG
   // eligibleNetRevenue == max(0, subtotal - invoice.discount)
   assert.equal(p.eligibleNetRevenue, Math.max(0, subtotal - invoiceDiscount));
 
-  // partsGP + serviceGP == combinedGP + otherDirectCost (otherDirectCost == 0 here)
-  assert.ok(Math.abs(p.partsGP + p.serviceGP - (p.combinedGP - p.otherDirectCost)) < 1e-9);
+  // partsGP + serviceGP == combinedGP + otherDirectCost (the correct identity;
+  // the sign was previously inverted and only inert because otherDirectCost == 0).
+  assert.ok(Math.abs(p.partsGP + p.serviceGP - (p.combinedGP + p.otherDirectCost)) < 1e-9);
 
   // repairCost is unconfigured => the bucket is partial, never ₹0 margin inflation.
   assert.equal(p.costPartial, true);
@@ -280,6 +281,10 @@ test("configured-₹0 line yields valid ₹0 cost; not_configured yields 'Cost n
   assert.equal(pn.breakdown[0].notConfigured, true);
   assert.equal(pn.breakdown[0].cost, null); // renders "Cost not configured", never ₹0
   assert.equal(pn.breakdown[0].unitCost, null);
+  // A FULLY-not-configured invoice must NOT report a 100% margin (math-review
+  // nit): the margin is suppressed to null so the panel shows "—"/"Partial",
+  // never a misleading "100.0%" that is really "cost unknown".
+  assert.equal(pn.grossMargin, null);
 });
 
 /* ──────────────────────────────────────────────────────────────────────────

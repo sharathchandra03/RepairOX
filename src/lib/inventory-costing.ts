@@ -171,8 +171,10 @@ export interface InvoiceProfitability {
  * and `partsGP + serviceGP == combinedGP + otherDirectCost` hold by construction.
  * The invoice-level discount is split pro-rata by each bucket's share of gross
  * revenue; per-line discounts are ignored (the single-discount-source invariant,
- * MEDIUM-1). When `grossRevenue == 0` both bucket discounts are 0 and
- * `grossMargin` is `null` (AC-14).
+ * MEDIUM-1). `grossMargin` is `null` (rendered "—"/"Partial") when
+ * `eligibleNetRevenue == 0` (AC-14) OR when the invoice is FULLY not-configured
+ * (≥1 cost-bearing line, none configured) — so a "cost unknown" invoice never
+ * reports a misleading 100% margin (AC-15 / math-review nit).
  */
 export function computeInvoiceProfitability(inv: CostingInvoiceLike): InvoiceProfitability {
   const lines = inv.lines ?? [];
@@ -205,13 +207,21 @@ export function computeInvoiceProfitability(inv: CostingInvoiceLike): InvoicePro
   let partsCost = 0;
   let labourCost = 0;
   let costPartial = false;
+  // Track whether ANY cost-bearing line/charge exists and whether ANY of them is
+  // configured. When at least one cost line exists but NONE is configured, the
+  // margin would compute to 100% purely because cost is unknown — a misleading
+  // "100.0%". We suppress the numeric margin to null in that fully-unconfigured
+  // case so the panel renders "—"/"Partial", never a false 100% (math-review nit).
+  let costLineCount = 0;
+  let configuredCostLineCount = 0;
   const breakdown: ProfitBreakdownLine[] = [];
 
   for (const l of partLines) {
     const configured = lineCostConfigured(l);
     const unitCost = configured ? (l.cost as number) : null;
     const extended = configured ? (l.cost as number) * l.qty : null;
-    if (configured) partsCost += extended as number;
+    costLineCount += 1;
+    if (configured) { partsCost += extended as number; configuredCostLineCount += 1; }
     else costPartial = true;
     breakdown.push({
       kind: "part",
@@ -227,7 +237,8 @@ export function computeInvoiceProfitability(inv: CostingInvoiceLike): InvoicePro
     const configured = lineCostConfigured(l);
     const unitCost = configured ? (l.cost as number) : null;
     const extended = configured ? (l.cost as number) * l.qty : null;
-    if (configured) labourCost += extended as number;
+    costLineCount += 1;
+    if (configured) { labourCost += extended as number; configuredCostLineCount += 1; }
     else costPartial = true;
     breakdown.push({
       kind: "service",
@@ -245,6 +256,7 @@ export function computeInvoiceProfitability(inv: CostingInvoiceLike): InvoicePro
     const repair = d.repairCost ?? 0;
     if (repair === 0) continue;
     costPartial = true;
+    costLineCount += 1; // a repair charge is a cost-bearing line that is always unconfigured
     breakdown.push({
       kind: "service",
       qty: 1,
@@ -260,7 +272,14 @@ export function computeInvoiceProfitability(inv: CostingInvoiceLike): InvoicePro
   const partsGP = partsNet - partsCost;
   const serviceGP = serviceNet - labourCost;
   const combinedGP = eligibleNetRevenue - partsCost - labourCost - otherDirectCost;
-  const grossMargin = eligibleNetRevenue > 0 ? (combinedGP / eligibleNetRevenue) * 100 : null;
+  // A fully-not-configured invoice (≥1 cost-bearing line, none configured) would
+  // otherwise report grossMargin 100% purely because cost is unknown. Suppress it
+  // to null so the panel shows "—"/"Partial", never a false 100% (math-review nit).
+  const fullyNotConfigured = costLineCount > 0 && configuredCostLineCount === 0;
+  const grossMargin =
+    eligibleNetRevenue > 0 && !fullyNotConfigured
+      ? (combinedGP / eligibleNetRevenue) * 100
+      : null;
 
   return {
     partsRevenue,
