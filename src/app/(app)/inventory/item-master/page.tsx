@@ -15,13 +15,14 @@ import { DataTable, type Column } from "@/components/inventory/data-table";
 import { ItemHealthBadge } from "@/components/inventory/widgets";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
+import { CAP, allow } from "@/lib/capabilities";
 import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import {
   itemHealth, STORES, type InventoryItem,
 } from "@/lib/inventory-data";
 
-type StatusFilter = "all" | "low" | "excess" | "negative" | "inactive";
+type StatusFilter = "all" | "low" | "excess" | "negative" | "inactive" | "needs_review";
 const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: "all", label: "All" },
   { value: "low", label: "Low Stock" },
@@ -30,9 +31,22 @@ const STATUS_TABS: { value: StatusFilter; label: string }[] = [
   { value: "inactive", label: "Inactive Items" },
 ];
 
+/* Human labels for the backfill `migration_flag` machine reasons (inv-design
+   §1.2). Rendered on the "Needs review" pill + its tooltip — the ONLY thing
+   surfaced here is the reason string; NEVER a CP / labour / unit_cost value
+   (NIT-5 hard no-cost guarantee). */
+const MIGRATION_FLAG_LABEL: Record<string, string> = {
+  unrecognised_item_type: "Unrecognised legacy item type",
+  service_with_stock: "Service carrying stray stock values",
+};
+function migrationFlagLabel(flag: string): string {
+  return MIGRATION_FLAG_LABEL[flag] ?? "Needs review";
+}
+
 function matchesStatus(it: InventoryItem, status: StatusFilter) {
   if (status === "all") return true;
   if (status === "inactive") return !it.active;
+  if (status === "needs_review") return !!it.migrationFlag;
   const h = itemHealth(it);
   if (status === "low") return h === "low" || h === "reorder";
   if (status === "excess") return h === "excess" || h === "high";
@@ -47,17 +61,30 @@ function ItemMasterInner() {
   const params = useSearchParams();
   const { can } = usePermissions();
   const { inventory: inventoryItems, deleteInventoryItem } = useStore();
+  // Legacy "Needs review" (migration_flag) is an inventory-manage concern — the
+  // opt-in filter chip + the row pill only show to inventory editors.
+  const canEditInventory = allow(can, CAP.inventory.edit);
   const [mode, setMode] = useState<"all" | "Product" | "Service">("all");
   const [store, setStore] = useState(STORES[0]);
   const [status, setStatus] = useState<StatusFilter>("all");
   const [query, setQuery] = useState("");
   const [refreshing, setRefreshing] = useState(false);
 
+  // The opt-in "Needs review" chip (migration_flag != null) appears only for
+  // inventory editors (inv-design §1.2) and only when at least one flagged item
+  // exists — never a dead/empty chip.
+  const hasFlaggedItems = useMemo(() => inventoryItems.some((it) => !!it.migrationFlag), [inventoryItems]);
+  const visibleTabs = useMemo(() => {
+    const tabs = [...STATUS_TABS];
+    if (canEditInventory && hasFlaggedItems) tabs.push({ value: "needs_review", label: "Needs review" });
+    return tabs;
+  }, [canEditInventory, hasFlaggedItems]);
+
   // drill-down from dashboard: /inventory/item-master?status=low
   useEffect(() => {
     const s = params.get("status") as StatusFilter | null;
-    if (s && STATUS_TABS.some((t) => t.value === s)) setStatus(s);
-  }, [params]);
+    if (s && visibleTabs.some((t) => t.value === s)) setStatus(s);
+  }, [params, visibleTabs]);
 
   const rows = useMemo(() => {
     return inventoryItems.filter((it) => {
@@ -91,7 +118,17 @@ function ItemMasterInner() {
             <Package className="h-4 w-4" />
           </span>
           <div className="min-w-0">
-            <p className="truncate font-semibold leading-tight">{r.name}</p>
+            <div className="flex items-center gap-1.5">
+              <p className="truncate font-semibold leading-tight">{r.name}</p>
+              {canEditInventory && r.migrationFlag && (
+                <span
+                  title={migrationFlagLabel(r.migrationFlag)}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
+                >
+                  Needs review
+                </span>
+              )}
+            </div>
             <p className="font-mono text-[11px] text-muted-foreground">{r.id}</p>
           </div>
         </div>
@@ -202,7 +239,7 @@ function ItemMasterInner() {
       {/* Status segmented tabs */}
       <div className="-mx-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <div className="inline-flex items-center gap-1 rounded-full border border-border bg-muted p-1">
-          {STATUS_TABS.map((t) => (
+          {visibleTabs.map((t) => (
             <button
               key={t.value}
               onClick={() => setStatus(t.value)}

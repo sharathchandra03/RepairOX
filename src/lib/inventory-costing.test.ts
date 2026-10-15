@@ -8,6 +8,8 @@ import {
   type CostingInvoiceLike,
   type StockLayerLike,
 } from "./inventory-costing";
+import { buildInvoiceInfo } from "@/lib/print-utils";
+import type { Invoice } from "@/lib/mock-data";
 
 /* ──────────────────────────────────────────────────────────────────────────
  * resolvePartUnitCost — weighted average / CP fallback / not_configured
@@ -333,4 +335,97 @@ test("legacy lines without kind/cost are treated as unconfigured parts", () => {
   assert.equal(p.costPartial, true);
   assert.equal(p.breakdown[0].kind, "part");
   assert.equal(p.breakdown[0].notConfigured, true);
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * MANDATORY print-safety guarantee (inv-design §7.2 / §10, AC-18)
+ *
+ * The internal `cost` / `kind` / `costState` snapshot on an invoice line, the
+ * device repair/labour cost, and any profit figure must NEVER reach a customer
+ * document. `buildInvoiceInfo` maps only safe fields — this test proves no
+ * cost/kind/costState/labour/profit property survives into its output (or any
+ * nested PrintLineItem / device), so a future edit cannot silently leak cost.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+const FORBIDDEN_PRINT_KEYS = ["cost", "kind", "coststate", "labour", "labor", "profit", "margin", "costprice", "standardlabourcost", "unit_cost", "unitcost"];
+
+/** Recursively assert no object key in `value` matches a forbidden internal-cost
+ *  key (case-insensitive). */
+function assertNoCostKeys(value: unknown, path = "root"): void {
+  if (Array.isArray(value)) {
+    value.forEach((v, i) => assertNoCostKeys(v, `${path}[${i}]`));
+    return;
+  }
+  if (value && typeof value === "object") {
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      assert.ok(
+        !FORBIDDEN_PRINT_KEYS.includes(k.toLowerCase()),
+        `print output leaked an internal-cost property "${k}" at ${path}`,
+      );
+      assertNoCostKeys(v, `${path}.${k}`);
+    }
+  }
+}
+
+test("buildInvoiceInfo + every PrintLineItem carry NO cost/kind/costState/labour/profit (AC-18)", () => {
+  // An invoice whose lines deliberately carry the INTERNAL cost snapshot — both
+  // on the flat `items` and inside a multi-device record with a repairCost.
+  const invoice = {
+    id: "INV-PRINT-SAFE",
+    invoiceType: "retail",
+    customer: "Test Customer",
+    phone: "9000000000",
+    status: "paid",
+    createdAt: new Date().toISOString(),
+    dueDate: new Date().toISOString(),
+    paidAmount: 2500,
+    items: [
+      // Each line carries the forbidden internal props — they must be stripped.
+      { id: "li-1", sku: "PRT-1", name: "Screen", qty: 1, price: 2500, discount: 0, total: 2500, kind: "part", cost: 1800, costState: "cp" },
+    ],
+    subtotal: 3300,
+    discount: 0,
+    tax: 0,
+    total: 3300,
+    devices: [
+      {
+        id: "IDEV-1",
+        brand: "Acme",
+        model: "X1",
+        imei: "123",
+        imeiType: "imei",
+        issue: "Broken screen",
+        description: "",
+        jobType: "service",
+        priority: "normal",
+        warranty: "",
+        technician: "Tech",
+        repairCost: 800,
+        parts: [
+          { id: "li-2", sku: "PRT-2", name: "Battery", qty: 1, price: 500, discount: 0, total: 500, kind: "part", cost: 200, costState: "resolved" },
+        ],
+        notes: "",
+        subtotal: 500,
+      },
+    ],
+  } as unknown as Invoice;
+
+  const info = buildInvoiceInfo(invoice, "T-001");
+  // The mapped print info — and every nested PrintLineItem / device — must be
+  // free of any internal cost/kind/costState/labour/profit property.
+  assertNoCostKeys(info);
+
+  // Spot-check: the line-level props the invoice line DID carry are gone.
+  for (const it of info.items) {
+    assert.equal((it as Record<string, unknown>).cost, undefined);
+    assert.equal((it as Record<string, unknown>).kind, undefined);
+    assert.equal((it as Record<string, unknown>).costState, undefined);
+  }
+  for (const d of info.devices ?? []) {
+    for (const p of d.parts) {
+      assert.equal((p as Record<string, unknown>).cost, undefined);
+      assert.equal((p as Record<string, unknown>).kind, undefined);
+      assert.equal((p as Record<string, unknown>).costState, undefined);
+    }
+  }
 });

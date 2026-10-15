@@ -38,6 +38,7 @@ import { DocumentLineage, type LineageNode } from "@/components/common/document-
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 import { DetailSection as SharedDetailSection, DetailHero, type Accent } from "@/components/common/detail-page";
+import { ProfitabilityBreakdown } from "@/components/invoice/profitability-breakdown";
 import { GitBranch, RotateCcw } from "lucide-react";
 
 /* ─── Helpers ────────────────────────────────────────────────────────── */
@@ -811,6 +812,11 @@ export default function InvoiceDetailPage() {
               <p className="mt-4 text-center text-xs font-semibold text-muted-foreground tracking-wide border-t border-border/70 pt-3">{invoice.footer}</p>
             )}
           </DetailSection>
+
+          {/* Internal Profitability Breakdown — gated to CAP.sensitive.viewProfit
+              (the panel self-gates via <Can>). Never printed; cost columns are
+              further gated to CAP.sensitive.viewCost (masked otherwise). */}
+          <ProfitabilityBreakdown invoice={invoice} />
 
           {/* Related Ticket */}
           {invoice.ticketId && (
