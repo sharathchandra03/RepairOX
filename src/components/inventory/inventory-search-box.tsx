@@ -32,6 +32,7 @@ export function InventorySearchBox({
   onSelect,
   onClose,
   onAddInventory,
+  kind,
   autoFocus = true,
   clearOnSelect = true,
   placeholder = "Search inventory by name, SKU, category, or HSN…",
@@ -41,6 +42,9 @@ export function InventorySearchBox({
   /** When provided, an "+ Add Inventory" action shows in the empty state.
    *  The caller must gate this on CAP.inventory.create. */
   onAddInventory?: (searchTerm: string) => void;
+  /** When set, restrict results to this Item Type (part or service). Lets the
+   *  invoice Add Part / Add Service paths search their own kind only. */
+  kind?: "part" | "service";
   autoFocus?: boolean;
   /** When true (default) picking a result clears the query so the dropdown
    *  collapses and the box is ready for the next search — the "search → pick →
@@ -95,6 +99,7 @@ export function InventorySearchBox({
     return inventory
       .filter((item) => {
         if (!item.active) return false;
+        if (kind && item.kind !== kind) return false;
         return (
           item.name.toLowerCase().includes(query) ||
           item.id.toLowerCase().includes(query) ||
@@ -103,7 +108,7 @@ export function InventorySearchBox({
         );
       })
       .slice(0, 12);
-  }, [inventory, query]);
+  }, [inventory, query, kind]);
 
   const hasQuery = query.length >= 1;
   const noResults = hasQuery && results.length === 0;
@@ -143,7 +148,7 @@ export function InventorySearchBox({
               <div className="max-h-[300px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
                 {results.map((item) => {
                   const available = item.currentStock - (item.reservedStock || 0);
-                  const out = item.type === "Product" && available <= 0;
+                  const out = item.kind === "part" && available <= 0;
                   return (
                     <button
                       key={item.id}
@@ -169,7 +174,7 @@ export function InventorySearchBox({
                       <div className="shrink-0 text-right">
                         <p className="text-sm font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
                         <span className={cn("text-[10px] font-medium", out ? "text-rose-500" : "text-muted-foreground")}>
-                          {item.type === "Service" ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
+                          {item.kind === "service" ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
                         </span>
                       </div>
                     </button>

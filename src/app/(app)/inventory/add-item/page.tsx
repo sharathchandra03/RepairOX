@@ -4,24 +4,23 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
-import {
-  ArrowLeft, Save, Plus, Wand2, Package, Trash2, Info, Tag, IndianRupee,
-  Boxes, ListPlus, CheckCircle2, Layers3,
-} from "lucide-react";
+import { ArrowLeft, Save, Plus, Package, Wrench, Tag, CheckCircle2 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Input, Label, Select } from "@/components/ui/input";
-import { SegmentedTabs } from "@/components/ui/tabs";
-import { SectionCard, HealthBadge } from "@/components/inventory/widgets";
-import { InlineCombo } from "@/components/inventory/inline-combo";
 import { NoPermission } from "@/components/common/no-permission";
 import { usePermissions } from "@/lib/permissions-context";
-import { CATEGORIES, UOMS, classifyStock } from "@/lib/inventory-data";
 import { useStore } from "@/lib/store";
-import { cn, formatINR } from "@/lib/utils";
-
-type CustomField = { id: number; label: string; value: string };
+import { formatINR } from "@/lib/utils";
+import {
+  InventoryItemFields,
+  emptyInventoryForm,
+  inventoryFormFromItem,
+  validateInventoryForm,
+  buildInventoryItem,
+  inventoryUpdateFromForm,
+  type InventoryFormValues,
+} from "@/components/inventory/inventory-item-form";
 
 export default function AddItemPage() {
   const { can } = usePermissions();
@@ -31,149 +30,57 @@ export default function AddItemPage() {
   const editItem = editId ? inventory.find((i) => i.id === editId) : null;
   const isEdit = !!editItem;
 
-  const [name, setName] = useState("");
-  const [sku, setSku] = useState("");
-  const [type, setType] = useState("Product");
-  const [mode, setMode] = useState("Both");
-  const [categories, setCategories] = useState(CATEGORIES);
-  const [category, setCategory] = useState("");
-  const [uoms, setUoms] = useState(UOMS);
-  const [uom, setUom] = useState("Piece");
-  const [defaultPrice, setDefaultPrice] = useState("");
-  const [hsn, setHsn] = useState("");
-  const [tax, setTax] = useState("18");
-  const [currentStock, setCurrentStock] = useState("");
-  const [minStock, setMinStock] = useState("");
-  const [maxStock, setMaxStock] = useState("");
-  const [customFields, setCustomFields] = useState<CustomField[]>([]);
-  const [fieldSeq, setFieldSeq] = useState(1);
+  const [values, setValues] = useState<InventoryFormValues>(() => emptyInventoryForm());
   const [toast, setToast] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
 
-  // Populate form fields when editing an existing item
+  // Populate form values when editing an existing item (opening fields are not
+  // re-editable on edit — see inventoryFormFromItem).
   useEffect(() => {
     if (editItem && !hydrated) {
-      setName(editItem.name);
-      setSku(editItem.id);
-      setType(editItem.type);
-      setMode(editItem.mode);
-      setCategory(editItem.category);
-      setUom(editItem.uom || "Piece");
-      setDefaultPrice(String(editItem.defaultPrice || ""));
-      setHsn(editItem.hsnCode === "—" ? "" : editItem.hsnCode);
-      setTax(String(editItem.tax || "18"));
-      setCurrentStock(String(editItem.currentStock || ""));
-      setMinStock(String(editItem.minStock || ""));
-      setMaxStock(String(editItem.maxStock || ""));
+      setValues(inventoryFormFromItem(editItem));
       setHydrated(true);
     }
   }, [editItem, hydrated]);
 
-  const isService = type === "Service";
+  const set = (patch: Partial<InventoryFormValues>) => setValues((v) => ({ ...v, ...patch }));
+  const isService = values.kind === "service";
 
-  const health = useMemo(() => {
-    const c = Number(currentStock || 0);
-    const mn = Number(minStock || 0);
-    const mx = Number(maxStock || 0);
-    if (isService || (!minStock && !maxStock)) return null;
-    return classifyStock(c, mn, mx || mn + 1);
-  }, [currentStock, minStock, maxStock, isService]);
-
-  function generateSku() {
-    const base = (name || "ITM").slice(0, 3).toUpperCase().replace(/[^A-Z]/g, "X");
-    const n = (Date.now() % 10000).toString().padStart(4, "0");
-    setSku(`${base}-${n}`);
-  }
-
-  function addField() {
-    setCustomFields((f) => [...f, { id: fieldSeq, label: "", value: "" }]);
-    setFieldSeq((s) => s + 1);
+  function flashToast(msg: string) {
+    setToast(msg);
+    setTimeout(() => setToast(null), 2600);
   }
 
   function save(addNew: boolean) {
-    if (!name.trim()) {
-      setToast("Item name is required");
-      setTimeout(() => setToast(null), 2600);
-      return;
-    }
-    if (!category) {
-      setToast("Please select a category");
-      setTimeout(() => setToast(null), 2600);
-      return;
-    }
-
-    const itemSku = sku || `SKU-${Date.now().toString().slice(-6)}`;
+    const err = validateInventoryForm(values);
+    if (err) { flashToast(err); return; }
 
     if (isEdit && editId) {
-      // Update existing item
-      updateInventoryItem(editId, {
-        name: name.trim(),
-        category,
-        type: type as "Product" | "Service",
-        mode: mode as "Buy" | "Sell" | "Both",
-        uom,
-        active: true,
-        currentStock: Number(currentStock || 0),
-        defaultPrice: Number(defaultPrice || 0),
-        regularBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.7),
-        wholesaleBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.65),
-        regularSellingPrice: Number(defaultPrice || 0),
-        mrp: Math.round(Number(defaultPrice || 0) * 1.2),
-        dealerPrice: Math.round(Number(defaultPrice || 0) * 0.9),
-        distributorPrice: Math.round(Number(defaultPrice || 0) * 0.85),
-        hsnCode: hsn || "—",
-        tax: Number(tax || 18),
-        minStock: Number(minStock || 0),
-        maxStock: Number(maxStock || 0),
-      });
-      setToast("Item updated successfully");
-      setTimeout(() => setToast(null), 2600);
+      const { patch, cost } = inventoryUpdateFromForm(values);
+      updateInventoryItem(editId, patch, { cost });
+      flashToast("Item updated successfully");
       return;
     }
 
-    const newItem = {
-      id: itemSku,
-      name: name.trim(),
-      category,
-      type: type as "Product" | "Service",
-      mode: mode as "Buy" | "Sell" | "Both",
-      uom,
-      store: "Main Store",
-      active: true,
-      currentStock: Number(currentStock || 0),
-      defaultPrice: Number(defaultPrice || 0),
-      regularBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.7),
-      wholesaleBuyingPrice: Math.round(Number(defaultPrice || 0) * 0.65),
-      regularSellingPrice: Number(defaultPrice || 0),
-      mrp: Math.round(Number(defaultPrice || 0) * 1.2),
-      dealerPrice: Math.round(Number(defaultPrice || 0) * 0.9),
-      distributorPrice: Math.round(Number(defaultPrice || 0) * 0.85),
-      hsnCode: hsn || "—",
-      tax: Number(tax || 18),
-      minStock: Number(minStock || 0),
-      maxStock: Number(maxStock || 0),
-      reservedStock: 0,
-      soldUnits: 0,
-      purchasedUnits: 0,
-    };
+    // Create: opening stock flows ONLY through `opening = {qty, unitCost}` →
+    // ledger layer (this is the sole opening-stock entry surface). No synthetic
+    // cost, no raw currentStock write.
+    const { item, cost, opening } = buildInventoryItem(values);
+    addInventoryItem(item, { cost, opening });
 
-    addInventoryItem(newItem);
-
-    setToast(addNew ? "Item saved — ready for the next one" : "Item saved successfully");
-    setTimeout(() => setToast(null), 2600);
+    flashToast(addNew ? "Item saved — ready for the next one" : "Item saved successfully");
     if (addNew) {
-      setName(""); setSku(""); setCategory(""); setDefaultPrice(""); setHsn("");
-      setCurrentStock(""); setMinStock(""); setMaxStock(""); setCustomFields([]);
+      setValues(emptyInventoryForm());
       if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }
 
   // Creating a NEW item needs create/manage_inventory; EDITING an existing item
-  // needs edit_item/manage_inventory. Previously the edit branch skipped the
-  // gate entirely, so a view-only user could edit items by URL — fixed here.
+  // needs edit_item/manage_inventory.
   const canCreateItem = can("create") || can("create_item") || can("manage_inventory");
   const canEditItem = can("edit") || can("edit_item") || can("manage_inventory");
-  if ((isEdit && !canEditItem) || (!isEdit && !canCreateItem)) {
+  const canUse = isEdit ? canEditItem : canCreateItem;
+  if (!canUse) {
     return (
       <NoPermission
         title={isEdit ? "You can't edit this item" : "You don't have permission to create items"}
@@ -182,12 +89,14 @@ export default function AddItemPage() {
     );
   }
 
+  const previewPrice = isService ? values.serviceCharge : values.sellingPrice;
+
   return (
     <div className="space-y-5">
       <PageHeader
         eyebrow="Inventory Management"
         title={isEdit ? "Edit Item" : "Add Item"}
-        subtitle={isEdit ? `Editing ${editItem?.name || editId}` : "Create a new product or service with full pricing and stock controls."}
+        subtitle={isEdit ? `Editing ${editItem?.name || editId}` : "Create a part/product or repair service with pricing, cost and stock controls."}
         actions={
           <>
             <Link href="/inventory/item-master">
@@ -195,9 +104,11 @@ export default function AddItemPage() {
                 <ArrowLeft className="h-3.5 w-3.5" /> Item Master
               </Button>
             </Link>
-            <Button variant="secondary" size="sm" className="gap-1.5 rounded-full" onClick={() => save(true)}>
-              <Plus className="h-3.5 w-3.5" /> Save &amp; Add New
-            </Button>
+            {!isEdit && (
+              <Button variant="secondary" size="sm" className="gap-1.5 rounded-full" onClick={() => save(true)}>
+                <Plus className="h-3.5 w-3.5" /> Save &amp; Add New
+              </Button>
+            )}
             <Button size="sm" className="gap-1.5 rounded-full" onClick={() => save(false)}>
               <Save className="h-3.5 w-3.5" /> Save
             </Button>
@@ -206,155 +117,9 @@ export default function AddItemPage() {
       />
 
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_330px]">
-        {/* ── Form column ── */}
+        {/* ── Form column — the shared canonical field set ── */}
         <div className="space-y-5">
-          <SectionCard icon={Package} title="Item Basics" description="Identity and classification" bodyClassName="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Item Name" required>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. iPhone 15 Pro OLED Assembly" />
-              </Field>
-              <Field label="Item ID / SKU" hint="Leave blank to auto-generate">
-                <div className="flex gap-2">
-                  <Input value={sku} onChange={(e) => setSku(e.target.value)} placeholder="SKU-0001" className="font-mono" />
-                  <Button type="button" variant="soft" size="md" className="shrink-0 rounded-xl px-3" onClick={generateSku}>
-                    <Wand2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </Field>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Product / Service">
-                <SegmentedTabs
-                  className="w-full [&>button]:flex-1"
-                  options={[{ label: "Product", value: "Product" }, { label: "Service", value: "Service" }]}
-                  value={type}
-                  onChange={setType}
-                />
-              </Field>
-              <Field label="Buy / Sell / Both">
-                <SegmentedTabs
-                  className="w-full [&>button]:flex-1"
-                  options={[{ label: "Buy", value: "Buy" }, { label: "Sell", value: "Sell" }, { label: "Both", value: "Both" }]}
-                  value={mode}
-                  onChange={setMode}
-                />
-              </Field>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Item Category" required>
-                <InlineCombo
-                  value={category}
-                  onChange={setCategory}
-                  options={categories}
-                  onCreate={(n) => setCategories((c) => [n, ...c])}
-                  placeholder="Select or create category"
-                  createLabel="Create category"
-                />
-              </Field>
-              <Field label="Unit of Measurement">
-                <InlineCombo
-                  value={uom}
-                  onChange={setUom}
-                  options={uoms}
-                  onCreate={(n) => setUoms((u) => [n, ...u])}
-                  placeholder="Select or create unit"
-                  createLabel="Create unit"
-                />
-              </Field>
-            </div>
-          </SectionCard>
-
-          <SectionCard icon={IndianRupee} title="Pricing & Tax" description="Default price and tax treatment" bodyClassName="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <Field label="Default Price" required>
-                <Input type="number" inputMode="decimal" value={defaultPrice} onChange={(e) => setDefaultPrice(e.target.value)} placeholder="0" iconLeft={<span className="text-[13px]">₹</span>} />
-              </Field>
-              <Field label="HSN Code">
-                <Input value={hsn} onChange={(e) => setHsn(e.target.value)} placeholder="8517xx" className="font-mono" />
-              </Field>
-              <Field label="Tax (GST)">
-                <Select
-                  value={tax}
-                  onChange={(e) => setTax(e.target.value)}
-                  options={["0", "5", "12", "18", "28"].map((t) => ({ value: t, label: `${t}%` }))}
-                />
-              </Field>
-            </div>
-          </SectionCard>
-
-          {!isService && (
-            <SectionCard icon={Boxes} title="Stock Levels" description="Opening stock and reorder thresholds" bodyClassName="space-y-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-                <Field label="Current Stock">
-                  <Input type="number" inputMode="numeric" value={currentStock} onChange={(e) => setCurrentStock(e.target.value)} placeholder="0" />
-                </Field>
-                <Field label="Minimum Stock Level">
-                  <Input type="number" inputMode="numeric" value={minStock} onChange={(e) => setMinStock(e.target.value)} placeholder="0" />
-                </Field>
-                <Field label="Maximum Stock Level">
-                  <Input type="number" inputMode="numeric" value={maxStock} onChange={(e) => setMaxStock(e.target.value)} placeholder="0" />
-                </Field>
-              </div>
-              {health && (
-                <div className="flex items-center gap-2 rounded-xl border border-border bg-muted/40 px-3.5 py-2.5">
-                  <Info className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-[13px] text-muted-foreground">Projected stock status:</span>
-                  <HealthBadge health={health} />
-                </div>
-              )}
-            </SectionCard>
-          )}
-
-          <SectionCard
-            icon={Layers3}
-            title="Custom Fields"
-            description="Add bespoke attributes for this item"
-            action={
-              <Button type="button" variant="soft" size="sm" className="gap-1.5 rounded-full" onClick={addField}>
-                <ListPlus className="h-3.5 w-3.5" /> Add Field
-              </Button>
-            }
-            bodyClassName="space-y-3"
-          >
-            <AnimatePresence initial={false}>
-              {customFields.length === 0 ? (
-                <motion.p
-                  key="empty"
-                  initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-                  className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-[13px] text-muted-foreground"
-                >
-                  No custom fields yet. Use <span className="font-medium text-foreground">Add Field</span> to capture extra attributes like warranty, supplier, or grade.
-                </motion.p>
-              ) : (
-                customFields.map((f) => (
-                  <motion.div
-                    key={f.id}
-                    initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, height: 0 }}
-                    className="grid grid-cols-1 gap-2 sm:grid-cols-[1fr_1.4fr_auto]"
-                  >
-                    <Input
-                      placeholder="Field name (e.g. Warranty)"
-                      value={f.label}
-                      onChange={(e) => setCustomFields((arr) => arr.map((x) => (x.id === f.id ? { ...x, label: e.target.value } : x)))}
-                    />
-                    <Input
-                      placeholder="Value"
-                      value={f.value}
-                      onChange={(e) => setCustomFields((arr) => arr.map((x) => (x.id === f.id ? { ...x, value: e.target.value } : x)))}
-                    />
-                    {can("delete") && (
-                      <Button
-                        type="button" variant="outline" size="icon" className="shrink-0 rounded-xl"
-                        onClick={() => setCustomFields((arr) => arr.filter((x) => x.id !== f.id))}
-                      >
-                        <Trash2 className="h-4 w-4 text-rose-500" />
-                      </Button>
-                    )}
-                  </motion.div>
-                ))
-              )}
-            </AnimatePresence>
-          </SectionCard>
+          <InventoryItemFields values={values} onChange={set} canEdit={canUse} />
         </div>
 
         {/* ── Live preview rail ── */}
@@ -366,46 +131,34 @@ export default function AddItemPage() {
             <div className="p-5">
               <div className="flex items-center gap-3">
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
-                  <Package className="h-5 w-5" />
+                  {isService ? <Wrench className="h-5 w-5" /> : <Package className="h-5 w-5" />}
                 </span>
                 <div className="min-w-0">
-                  <p className="truncate font-display text-[15px] font-bold">{name || "New item"}</p>
-                  <p className="font-mono text-[11px] text-muted-foreground">{sku || "SKU — auto"}</p>
+                  <p className="truncate font-display text-[15px] font-bold">{values.name || "New item"}</p>
+                  <p className="font-mono text-[11px] text-muted-foreground">
+                    {(isService ? values.serviceCode : values.itemCode) || "Code — auto on save"}
+                  </p>
                 </div>
               </div>
 
               <div className="mt-4 flex flex-wrap gap-1.5">
-                <Badge tone={isService ? "violet" : "info"}>{type}</Badge>
-                <Badge tone="neutral">{mode}</Badge>
-                {category && <Badge tone="brand"><Tag className="h-3 w-3" />{category}</Badge>}
+                <Badge tone={isService ? "violet" : "info"}>{isService ? "Repair Service / Labour" : "Part / Product"}</Badge>
+                {values.category && <Badge tone="brand"><Tag className="h-3 w-3" />{values.category}</Badge>}
               </div>
 
               <dl className="mt-4 space-y-2.5 text-[13px]">
-                <PreviewRow label="Default price" value={defaultPrice ? formatINR(Number(defaultPrice)) : "—"} />
-                <PreviewRow label="Tax" value={`${tax}%`} />
-                <PreviewRow label="UOM" value={uom} />
-                {!isService && <PreviewRow label="Current stock" value={currentStock || "0"} />}
-                {!isService && health && (
-                  <div className="flex items-center justify-between">
-                    <dt className="text-muted-foreground">Status</dt>
-                    <dd><HealthBadge health={health} /></dd>
-                  </div>
-                )}
-                {customFields.filter((f) => f.label).length > 0 && (
-                  <div className="border-t border-border pt-2.5">
-                    {customFields.filter((f) => f.label).map((f) => (
-                      <PreviewRow key={f.id} label={f.label} value={f.value || "—"} />
-                    ))}
-                  </div>
-                )}
+                <PreviewRow label={isService ? "Service charge" : "Selling price"} value={previewPrice ? formatINR(Number(previewPrice)) : "—"} />
+                <PreviewRow label="Tax" value={`${values.tax}%`} />
+                <PreviewRow label={isService ? "Billing basis" : "UOM"} value={values.uom} />
+                {!isService && values.trackStock && <PreviewRow label="Opening qty" value={values.currentStock || "0"} />}
               </dl>
             </div>
           </div>
 
           <div className="mt-4 flex items-start gap-2.5 rounded-2xl border border-[#B3BFF6]/60 bg-[#EEF1FD]/60 p-4">
-            <Wand2 className="mt-0.5 h-4 w-4 shrink-0 text-[#4361EE]" />
+            <Package className="mt-0.5 h-4 w-4 shrink-0 text-[#4361EE]" />
             <p className="text-[12px] leading-relaxed text-muted-foreground">
-              Tip: Set realistic min/max levels to unlock low-stock alerts and reorder recommendations on the dashboard.
+              Tip: Cost Price stays internal and never prints on the customer document. Set realistic min/max levels to unlock low-stock alerts and reorder recommendations.
             </p>
           </div>
         </div>
@@ -425,18 +178,6 @@ export default function AddItemPage() {
           </motion.div>
         )}
       </AnimatePresence>
-    </div>
-  );
-}
-
-function Field({ label, required, hint, children }: { label: string; required?: boolean; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center justify-between">
-        <Label>{label}{required && <span className="ml-0.5 text-rose-500">*</span>}</Label>
-        {hint && <span className="text-[11px] text-muted-foreground">{hint}</span>}
-      </div>
-      {children}
     </div>
   );
 }

@@ -72,8 +72,11 @@ export function AddInventoryModal({
     if (err) { toast.error(err); return; }
     setSaving(true);
     try {
-      const item = buildInventoryItem(values);
-      await addInventoryItem(item);
+      // The modal hides opening-stock inputs, so `opening` is always undefined
+      // (invoice flows never establish stock — FR-8/AC-9). A cost-authorized
+      // creator still forwards `cost`.
+      const { item, cost } = buildInventoryItem(values);
+      await addInventoryItem(item, { cost });
       toast.success(`${item.name} added to Inventory Master`);
       onCreated?.(item);
       onClose();
@@ -104,7 +107,7 @@ export function AddInventoryModal({
         </>
       }
     >
-      <InventoryItemFields values={values} onChange={patch} />
+      <InventoryItemFields values={values} onChange={patch} canEdit={canCreate} hideOpeningStock />
     </RoxCenteredForm>
   );
 }
