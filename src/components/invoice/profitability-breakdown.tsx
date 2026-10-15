@@ -67,15 +67,17 @@ function toCostingInvoice(invoice: Invoice): CostingInvoiceLike {
   };
 }
 
-/* ─── Server aggregate (cost-free) shape ───────────────────────────────────
-   The payload returned by GET /api/invoice/[id]/profit — derived aggregates
-   ONLY, never a per-unit cost. */
+/* ─── Server aggregate shape ────────────────────────────────────────────────
+   The payload returned by GET /api/invoice/[id]/profit. For a PROFIT-ONLY caller
+   the server returns ONLY combinedGP + grossMargin + costPartial (SYS-1): the
+   per-bucket revenue / bucket GP are WITHHELD so they can't be used to derive a
+   per-unit cost. The bucket fields are therefore optional here. */
 interface ProfitAggregate {
-  partsRevenue: number;
-  serviceRevenue: number;
-  eligibleNetRevenue: number;
-  partsGP: number;
-  serviceGP: number;
+  partsRevenue?: number;
+  serviceRevenue?: number;
+  eligibleNetRevenue?: number;
+  partsGP?: number;
+  serviceGP?: number;
   combinedGP: number;
   grossMargin: number | null;
   costPartial: boolean;
@@ -121,7 +123,10 @@ export function ProfitabilityBreakdown({ invoice }: { invoice: Invoice }) {
     };
   }, [canViewCost, invoice.id, apiFetch]);
 
-  // The headline numbers come from whichever authorized source applies.
+  // The headline numbers come from whichever authorized source applies. A
+  // cost-capable viewer computes everything in-memory; a profit-only viewer
+  // receives ONLY combinedGP + margin + costPartial from the server (bucket
+  // figures withheld — SYS-1).
   const headline: ProfitAggregate | null = canViewCost
     ? {
         partsRevenue: inMemory.partsRevenue,
@@ -146,70 +151,74 @@ export function ProfitabilityBreakdown({ invoice }: { invoice: Invoice }) {
           </div>
         )}
 
-        {/* Revenue — never gated (it is the customer-facing billed amount) */}
-        <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-          <Metric label="Parts Revenue" value={headline ? formatINR(headline.partsRevenue) : "—"} />
-          <Metric label="Service Revenue" value={headline ? formatINR(headline.serviceRevenue) : "—"} />
-        </div>
+        {/* Per-bucket revenue, the per-line breakdown and the raw cost columns
+            are shown ONLY to a cost-capable viewer. For a profit-only viewer
+            they are WITHHELD entirely (not masked tiles) so no bucket-level
+            figure is on screen to combine with the server GP into a per-unit
+            cost (SYS-1). A profit-only viewer sees only Gross Profit + Margin. */}
+        {canViewCost ? (
+          <>
+            <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
+              <Metric label="Parts Revenue" value={formatINR(inMemory.partsRevenue)} />
+              <Metric label="Service Revenue" value={formatINR(inMemory.serviceRevenue)} />
+            </div>
 
-        {/* Per-line breakdown with repair/labour sub-lines. Only the cost COLUMN
-            is cost-sensitive; the revenue column is always shown. */}
-        <div className="mt-4 overflow-hidden rounded-xl border border-border">
-          <table className="w-full text-left text-[13px]">
-            <thead className="bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2">Line</th>
-                <th className="px-3 py-2 text-right">Qty</th>
-                <th className="px-3 py-2 text-right">Revenue</th>
-                <th className="px-3 py-2 text-right">Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {inMemory.breakdown.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-3 py-3 text-center text-muted-foreground">
-                    No billable lines.
-                  </td>
-                </tr>
-              ) : (
-                inMemory.breakdown.map((l, idx) => (
-                  <tr key={idx} className="border-t border-border">
-                    <td className="px-3 py-2">
-                      <span
-                        className={cn(
-                          "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset",
-                          l.kind === "service"
-                            ? "bg-violet-50 text-violet-700 ring-violet-200"
-                            : "bg-sky-50 text-sky-700 ring-sky-200",
-                        )}
-                      >
-                        {l.kind === "service" ? "Service / Labour" : "Part"}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2 text-right tabular-nums">{l.qty}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">{formatINR(l.revenue)}</td>
-                    <td className="px-3 py-2 text-right tabular-nums">
-                      <CostCell notConfigured={l.notConfigured} cost={l.cost} canViewCost={canViewCost} />
-                    </td>
+            {/* Per-line breakdown with repair/labour sub-lines. */}
+            <div className="mt-4 overflow-hidden rounded-xl border border-border">
+              <table className="w-full text-left text-[13px]">
+                <thead className="bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <tr>
+                    <th className="px-3 py-2">Line</th>
+                    <th className="px-3 py-2 text-right">Qty</th>
+                    <th className="px-3 py-2 text-right">Revenue</th>
+                    <th className="px-3 py-2 text-right">Cost</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {inMemory.breakdown.length === 0 ? (
+                    <tr>
+                      <td colSpan={4} className="px-3 py-3 text-center text-muted-foreground">
+                        No billable lines.
+                      </td>
+                    </tr>
+                  ) : (
+                    inMemory.breakdown.map((l, idx) => (
+                      <tr key={idx} className="border-t border-border">
+                        <td className="px-3 py-2">
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset",
+                              l.kind === "service"
+                                ? "bg-violet-50 text-violet-700 ring-violet-200"
+                                : "bg-sky-50 text-sky-700 ring-sky-200",
+                            )}
+                          >
+                            {l.kind === "service" ? "Service / Labour" : "Part"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-right tabular-nums">{l.qty}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">{formatINR(l.revenue)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <CostCell notConfigured={l.notConfigured} cost={l.cost} canViewCost={canViewCost} />
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </>
+        ) : (
+          <p className="text-[11px] text-muted-foreground">
+            Gross Profit and Gross Margin only. Per-line and per-bucket cost
+            figures require the cost-view permission.
+          </p>
+        )}
 
-        {/* Cost / GP / Margin summary */}
+        {/* Cost / GP / Margin summary. Parts/Labour cost rows are cost-only. */}
         <div className="mt-4 grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
-          <Metric
-            label="Parts Cost"
-            value={canViewCost ? formatINR(inMemory.partsCost) : null}
-            masked={!canViewCost}
-          />
-          <Metric
-            label="Labour Cost"
-            value={canViewCost ? formatINR(inMemory.labourCost) : null}
-            masked={!canViewCost}
-          />
+          {canViewCost && <Metric label="Parts Cost" value={formatINR(inMemory.partsCost)} />}
+          {canViewCost && <Metric label="Labour Cost" value={formatINR(inMemory.labourCost)} />}
           {canViewCost && inMemory.otherDirectCost > 0 && (
             <Metric label="Other Direct Costs" value={formatINR(inMemory.otherDirectCost)} />
           )}

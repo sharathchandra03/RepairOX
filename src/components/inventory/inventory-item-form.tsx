@@ -239,8 +239,9 @@ export function buildInventoryItem(
 
 /** The item-update patch (for edit) + optional cost side-channel (§2.4).
  *  Omits immutable item/service codes, stock and opening; never returns an
- *  opening layer. Nulls migration_flag when the edit resolves a flagged row
- *  (§1.2 lifecycle). */
+ *  opening layer. SYS-6 — an ordinary edit NEVER touches migration_flag and
+ *  NEVER zeroes a flagged service's preserved stray min/max; the flag is cleared
+ *  only through the dedicated reconcileMigrationFlag path. */
 export function inventoryUpdateFromForm(
   v: InventoryFormValues,
 ): { patch: Partial<InventoryItem>; cost?: InventoryCostInput } {
@@ -264,17 +265,24 @@ export function inventoryUpdateFromForm(
     distributorPrice: isService ? 0 : Number(v.distributorPrice || 0),
     hsnCode: v.hsn || "—",
     tax: Number(v.tax || 18),
-    minStock: isService ? 0 : Number(v.minStock || 0),
-    maxStock: isService ? 0 : Number(v.maxStock || 0),
     barcode: v.barcode.trim() || undefined,
     brandModel: v.brandModel.trim() || undefined,
     description: v.description.trim() || undefined,
     trackStock: isService ? false : v.trackStock,
-    // Re-saving a flagged item through the form resolves the contradiction
-    // (a service re-save carries no stock; a valid Item Type is now chosen),
-    // so clear the review flag (§1.2 lifecycle).
-    migrationFlag: null as unknown as string | undefined,
+    // SYS-6 — an ordinary edit NEVER clears the migration_flag and NEVER zeroes a
+    // flagged service's preserved stray min/max evidence. The service form has no
+    // stock controls, so for a part we still persist the entered min/max; for a
+    // service we OMIT min/max from the patch so any preserved stray value (the
+    // "service_with_stock" evidence) survives untouched. Clearing the flag — and
+    // actually reconciling the stray current_stock — is a dedicated, verified,
+    // audited action (reconcileMigrationFlag), not a side effect of a normal save.
   };
+  // Only a part persists min/max from the form; a service leaves the stored
+  // (possibly stray, flagged) values intact for reconciliation.
+  if (!isService) {
+    patch.minStock = Number(v.minStock || 0);
+    patch.maxStock = Number(v.maxStock || 0);
+  }
   const cost = buildCost(v);
   return { patch, cost };
 }

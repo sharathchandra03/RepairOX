@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { DataTable, type Column } from "@/components/inventory/data-table";
 import { ItemHealthBadge } from "@/components/inventory/widgets";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Can } from "@/components/common/can";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
@@ -60,7 +61,11 @@ function ItemMasterInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { can } = usePermissions();
-  const { inventory: inventoryItems, deleteInventoryItem } = useStore();
+  const { inventory: inventoryItems, deleteInventoryItem, reconcileMigrationFlag } = useStore();
+  // SYS-6 — the pending "Needs review" item awaiting a deliberate, confirmed
+  // reconciliation (clearing the legacy migration_flag). An ordinary edit never
+  // clears the flag; this dedicated action does.
+  const [reviewItem, setReviewItem] = useState<InventoryItem | null>(null);
   // Legacy "Needs review" (migration_flag) is an inventory-manage concern — the
   // opt-in filter chip + the row pill only show to inventory editors.
   const canEditInventory = allow(can, CAP.inventory.edit);
@@ -121,12 +126,21 @@ function ItemMasterInner() {
             <div className="flex items-center gap-1.5">
               <p className="truncate font-semibold leading-tight">{r.name}</p>
               {canEditInventory && r.migrationFlag && (
-                <span
-                  title={migrationFlagLabel(r.migrationFlag)}
-                  className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
-                >
-                  Needs review
-                </span>
+                <>
+                  <span
+                    title={migrationFlagLabel(r.migrationFlag)}
+                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
+                  >
+                    Needs review
+                  </span>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setReviewItem(r); }}
+                    className="shrink-0 text-[10px] font-medium text-[#4361EE] hover:underline"
+                  >
+                    Mark reviewed
+                  </button>
+                </>
               )}
             </div>
             <p className="font-mono text-[11px] text-muted-foreground">{r.id}</p>
@@ -298,6 +312,24 @@ function ItemMasterInner() {
         minTableWidth={1100}
         emptyTitle="No items found"
         emptyDescription="Try adjusting filters or search, or add a new item to the catalogue."
+      />
+
+      {/* SYS-6 — deliberate, confirmed reconciliation of a legacy review flag.
+          For a service_with_stock row this also clears the stray stock that
+          caused the flag, so the marker is never cleared while the
+          contradiction stands. */}
+      <ConfirmDialog
+        open={!!reviewItem}
+        onClose={() => setReviewItem(null)}
+        onConfirm={() => { if (reviewItem) reconcileMigrationFlag(reviewItem.id); setReviewItem(null); }}
+        danger={false}
+        title="Mark this item reviewed?"
+        description={
+          reviewItem?.migrationFlag === "service_with_stock"
+            ? "This clears the review flag and resets the stray stock (quantity, min, max) that a service should not carry. This cannot be undone."
+            : "This clears the legacy review flag now that the item type is valid."
+        }
+        confirmLabel="Mark reviewed"
       />
     </div>
   );

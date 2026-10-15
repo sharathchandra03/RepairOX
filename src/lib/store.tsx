@@ -23,7 +23,7 @@ import {
   tickets as SEED_TICKETS, ordersStatus as SEED_ORDERS, revenueMonthly as SEED_REVENUE,
   TEAM_SEED, invoices as SEED_INVOICES, walkIns as SEED_WALKINS,
   STATUS_LABEL, type Ticket, type TicketStatus, type TicketPart,
-  type TeamMember, type Invoice, type WalkIn,
+  type TeamMember, type Invoice, type WalkIn, type InvoiceLineItem,
   deriveTicketStatus, getTicketDevices, getInvoicedTicketDeviceIds,
   isProforma, getInvoiceDevices,
   type InvoiceRefund, type InvoiceRefundAllocation, type InvoiceItemReturn,
@@ -49,6 +49,7 @@ import {
   type Brand, type DeviceModel,
 } from "@/lib/brand-model-data";
 import { loadDeviceCategories, DEFAULT_CATEGORIES } from "@/lib/device-categories";
+import { type StockLayerLike } from "@/lib/inventory-costing";
 
 /** Default device-category ids — used as a fallback bucket set for the
  *  synchronous localStorage legacy-brand migration. */
@@ -82,6 +83,11 @@ interface StoreState {
   team: TeamMember[];
   inventory: InventoryItem[];
   stockMovements: StockMovement[];
+  /** Cost-carrying stock ledger layers (inventory_stock_layers), used by the
+   *  weighted-average valuation (LEDGER-DISCONNECT). Cost-scoped: RLS yields
+   *  rows ONLY to a cost-capable user, so this is EMPTY for a non-cost user
+   *  (valuation then falls back to the org-level CP). Branch-scoped by RLS. */
+  inventoryStockLayers: StockLayerLike[];
   customers: Customer[];
   customerGroups: CustomerGroup[];
   /** Denormalized loyalty snapshot per customer (points balance + tier), keyed
@@ -157,6 +163,10 @@ interface StoreActions {
     updates: Partial<InventoryItem>,
     opts?: { cost?: { costPrice: number; standardLabourCost: number; configured: boolean } },
   ) => Promise<void>;
+  /** SYS-6 — dedicated, audited reconciliation that resolves a legacy
+   *  migration_flag contradiction and clears the flag. Not a side effect of a
+   *  normal edit. */
+  reconcileMigrationFlag: (id: string) => Promise<void>;
   deleteInventoryItem: (id: string) => Promise<void>;
   addCustomer: (customer: Customer) => Promise<void>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<void>;
@@ -430,6 +440,56 @@ function rowToInvoice(r: any): Invoice {
   };
 }
 
+/**
+ * SYS-1 — the broadly-readable invoices JSON (items / devices.records) must NOT
+ * carry the internal `cost` / `costState` snapshot, because the invoices SELECT
+ * policy admits roles without any cost key. These strippers remove the two
+ * sensitive props from every line before persistence; `kind` (part/service,
+ * non-sensitive) is retained so the costing engine can still bucket. The
+ * resolved cost snapshot is persisted separately to the cost-scoped
+ * `invoice_line_costs` table (see persistInvoiceLineCosts). Historical
+ * immutability is unchanged — only WHERE the snapshot lives moved.
+ */
+function stripLineCost<T extends { cost?: number; costState?: unknown }>(line: T): Omit<T, "cost" | "costState"> {
+  const { cost: _cost, costState: _costState, ...rest } = line;
+  void _cost; void _costState;
+  return rest;
+}
+
+function stripDeviceCosts(devices: any[]): any[] {
+  return (devices ?? []).map((d) => ({
+    ...d,
+    parts: Array.isArray(d?.parts) ? d.parts.map((p: any) => stripLineCost(p)) : d?.parts,
+  }));
+}
+
+/**
+ * SYS-1 — carry the in-memory cost snapshot from an existing invoice onto a
+ * freshly-mapped one (whose JSON no longer carries cost), matching lines by id.
+ * Used on a realtime echo so a cost-capable viewer keeps the cost figures that
+ * were merged at load/save without a DB round-trip.
+ */
+function carryInvoiceLineCosts(fromInv: Invoice, toInv: Invoice): Invoice {
+  const costById = new Map<string, { cost?: number; costState?: InvoiceLineItem["costState"] }>();
+  const collect = (lines?: InvoiceLineItem[]) => {
+    for (const l of lines ?? []) {
+      if (l.cost !== undefined || l.costState !== undefined) costById.set(l.id, { cost: l.cost, costState: l.costState });
+    }
+  };
+  collect(fromInv.items);
+  for (const d of fromInv.devices ?? []) collect(d.parts);
+  if (costById.size === 0) return toInv;
+  const apply = (l: InvoiceLineItem): InvoiceLineItem => {
+    const hit = costById.get(l.id);
+    return hit ? { ...l, cost: hit.cost, costState: hit.costState } : l;
+  };
+  return {
+    ...toInv,
+    items: (toInv.items ?? []).map(apply),
+    devices: (toInv.devices ?? []).map((d) => ({ ...d, parts: (d.parts ?? []).map(apply) })),
+  };
+}
+
 function invoiceToRow(inv: Invoice): Record<string, unknown> {
   return {
     id: inv.id,
@@ -455,9 +515,10 @@ function invoiceToRow(inv: Invoice): Record<string, unknown> {
     employee: inv.employee || null,
     ticket_id: inv.ticketId || null,
     pinned_at: inv.pinnedAt ?? null,
-    items: inv.items ?? [],
+    // Cost snapshot stripped from the broadly-readable JSON (SYS-1).
+    items: (inv.items ?? []).map((it) => stripLineCost(it)),
     devices: {
-      records: inv.devices ?? [],
+      records: stripDeviceCosts(inv.devices ?? []),
       repairStatus: inv.repairStatus ?? null,
       paymentMode: inv.paymentMode || null,
       serviceCategory: inv.serviceCategory || "service",
@@ -1379,6 +1440,7 @@ function loadFromStorage(storageKey?: string): StoreState | null {
       walkIns: saved.walkIns ?? SEED_WALKINS,
       inventory: (saved.inventory ?? SEED_INVENTORY).map((i: any) => ({ ...i, reservedStock: i.reservedStock ?? 0 })),
       stockMovements: saved.stockMovements ?? SEED_MOVEMENTS,
+      inventoryStockLayers: saved.inventoryStockLayers ?? [],
       customers: saved.customers ?? SEED_CUSTOMERS,
       customerGroups: saved.customerGroups ?? [],
       companies: saved.companies ?? SEED_COMPANIES,
@@ -1463,7 +1525,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<StoreState>({
     tickets: [], invoices: [], invoiceRefunds: [], invoiceRefundAllocations: [], invoiceItemReturns: [],
     walkIns: [], orders: [], revenue: [],
-    team: [], inventory: [], stockMovements: [], customers: [], customerGroups: [],
+    team: [], inventory: [], stockMovements: [], inventoryStockLayers: [], customers: [], customerGroups: [],
     loyaltyByCustomer: {},
     companies: [], brands: [], deviceModels: [], assignedByOptions: [], assignedToOptions: [],
     issueLibrary: [],
@@ -1571,7 +1633,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         invoiceRefunds: [], invoiceRefundAllocations: [], invoiceItemReturns: [],
         walkIns: SEED_WALKINS,
         orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
-        inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
+        inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS, inventoryStockLayers: [],
         customers: SEED_CUSTOMERS, customerGroups: [], loyaltyByCustomer: {}, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
         companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
         assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
@@ -1594,7 +1656,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           invoiceRefunds: [], invoiceRefundAllocations: [], invoiceItemReturns: [],
           walkIns: SEED_WALKINS,
           orders: SEED_ORDERS, revenue: SEED_REVENUE, team: TEAM_SEED,
-          inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS,
+          inventory: SEED_INVENTORY, stockMovements: SEED_MOVEMENTS, inventoryStockLayers: [],
           customers: SEED_CUSTOMERS, customerGroups: [], loyaltyByCustomer: {}, brands: SEED_BRANDS, deviceModels: SEED_MODELS,
           companies: SEED_COMPANIES, assignedByOptions: SEED_ASSIGNED_BY_OPTIONS,
           assignedToOptions: SEED_ASSIGNED_TO_OPTIONS,
@@ -1628,6 +1690,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         { data: custGroups },
         { data: loyaltyAccts },
         { data: itemCosts },
+        { data: lineCosts },
+        { data: stockLayers },
       ] = await Promise.all([
         // Transactional data → scoped to the active store (branch_id) when one
         // is selected; the full RLS-scoped set in All-Shops mode.
@@ -1663,6 +1727,19 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         // The org-level default row carries branch_id NULL, so it is NOT store-
         // filtered (would hide the default inside a store context).
         noScope(supabase.from("inventory_item_costs").select("item_id, cost_price, standard_labour_cost, cost_configured")),
+        // Invoice line-cost snapshot (SYS-1) — cost-scoped, RLS yields rows ONLY
+        // to a cost-capable user. One bulk read (no N+1); merged back onto each
+        // invoice's lines below. A non-cost user gets an empty set, so invoice
+        // lines stay cost-free (the Profitability panel masks cost + uses the
+        // cost-free server aggregate for GP/margin). Not store-filtered (the
+        // snapshot's own org/branch RLS already scopes it).
+        noScope(supabase.from("invoice_line_costs").select("invoice_id, line_id, cost, cost_state")),
+        // Cost-carrying stock ledger layers (LEDGER-DISCONNECT) — cost-scoped,
+        // RLS yields rows ONLY to a cost-capable user AND only for visible
+        // branches. The weighted-average valuation reads these FIRST (falling
+        // back to org CP). Empty for a non-cost user. Store-scoped so an
+        // All-Shops valuation sees every visible branch's layers.
+        scopeToStore(supabase.from("inventory_stock_layers").select("item_id, qty_in, unit_cost")),
       ]);
 
       if (!active) return;
@@ -1683,16 +1760,43 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         };
       };
 
+      // Index the invoice line-cost snapshot by invoice → line (SYS-1). Empty
+      // for a non-cost user (RLS). Merged back onto each invoice's lines so a
+      // cost-capable viewer's Profitability panel runs in-memory as before.
+      const lineCostByInvoice = new Map<string, Map<string, { cost: number | null; cost_state: string | null }>>();
+      for (const r of (lineCosts ?? []) as any[]) {
+        let m = lineCostByInvoice.get(r.invoice_id);
+        if (!m) { m = new Map(); lineCostByInvoice.set(r.invoice_id, m); }
+        m.set(r.line_id, { cost: r.cost, cost_state: r.cost_state });
+      }
+      const mergeInvoiceCosts = (inv: Invoice): Invoice => {
+        const m = lineCostByInvoice.get(inv.id);
+        if (!m) return inv;
+        const applyLine = <T extends { id: string }>(line: T): T => {
+          const hit = m.get(line.id);
+          if (!hit) return line;
+          return { ...line, cost: hit.cost ?? undefined, costState: (hit.cost_state ?? undefined) as any };
+        };
+        return {
+          ...inv,
+          items: (inv.items ?? []).map(applyLine),
+          devices: (inv.devices ?? []).map((d) => ({ ...d, parts: (d.parts ?? []).map(applyLine) })),
+        };
+      };
+
       setState((s) => ({
         ...s,
         tickets: (tix ?? []).map(rowToTicket),
-        invoices: (invs ?? []).map(rowToInvoice),
+        invoices: (invs ?? []).map(rowToInvoice).map(mergeInvoiceCosts),
         invoiceRefunds: (refunds ?? []).map(rowToInvoiceRefund),
         invoiceRefundAllocations: (refundAllocs ?? []).map(rowToRefundAllocation),
         invoiceItemReturns: (itemReturns ?? []).map(rowToItemReturn),
         walkIns: (wis ?? []).map(rowToWalkIn),
         inventory: (invItems ?? []).map(rowToInventoryItem).map(mergeInventoryCosts),
         stockMovements: (moves ?? []).map(rowToStockMovement),
+        inventoryStockLayers: ((stockLayers ?? []) as any[]).map((l) => ({
+          item_id: l.item_id, qty_in: Number(l.qty_in ?? 0), unit_cost: Number(l.unit_cost ?? 0),
+        })),
         customers: (custs ?? []).map(rowToCustomer),
         customerGroups: (custGroups ?? []).map(rowToCustomerGroup),
         loyaltyByCustomer: Object.fromEntries(
@@ -1817,8 +1921,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
           }
           case "invoices": {
             if (isDelete) return { ...prev, invoices: prev.invoices.filter((i) => i.id !== row.id) };
-            const inv = rowToInvoice(row);
+            let inv = rowToInvoice(row);
             const idx = prev.invoices.findIndex((i) => i.id === row.id);
+            // SYS-1 — the invoices JSON no longer carries line cost. Carry the
+            // cost snapshot already merged in memory (from load / save) across a
+            // realtime echo so a cost-capable viewer's Profitability panel keeps
+            // its figures without a round-trip. (A full reload re-reads the
+            // cost-scoped table authoritatively.)
+            if (idx !== -1) inv = carryInvoiceLineCosts(prev.invoices[idx], inv);
             if (idx === -1) return { ...prev, invoices: [inv, ...prev.invoices] };
             const next = [...prev.invoices]; next[idx] = inv;
             return { ...prev, invoices: next };
@@ -2627,6 +2737,44 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  /**
+   * SYS-1 — persist the per-line resolved cost snapshot to the cost-scoped
+   * `invoice_line_costs` table (RLS = cost keys only). This REPLACES storing
+   * `cost`/`costState` inline in the broadly-readable invoices JSON. A non-cost
+   * caller's upserts are simply rejected by RLS (no-op), so only a cost-authorized
+   * save records the snapshot; the snapshot is historical/immutable (we upsert on
+   * create and leave it untouched on ordinary edits that don't re-stamp cost).
+   */
+  const persistInvoiceLineCosts = useCallback(async (invoice: Invoice) => {
+    if (!shouldUseDb()) return;
+    const rows: Record<string, unknown>[] = [];
+    const pushLine = (line: { id: string; qty?: number; kind?: string; cost?: number; costState?: string }) => {
+      // Only snapshot lines that actually carry a resolved cost provenance; a
+      // line with neither cost nor costState is a legacy/unconfigured line and
+      // needs no cost row (it reads as "not configured").
+      if (line.cost === undefined && line.costState === undefined) return;
+      rows.push({
+        invoice_id: invoice.id,
+        line_id: line.id,
+        branch_id: null,
+        kind: line.kind ?? "part",
+        qty: line.qty ?? 0,
+        cost: line.cost ?? null,
+        cost_state: line.costState ?? "not_configured",
+        updated_at: new Date().toISOString(),
+      });
+    };
+    for (const it of invoice.items ?? []) pushLine(it as any);
+    for (const d of invoice.devices ?? []) for (const p of d.parts ?? []) pushLine(p as any);
+    if (rows.length === 0) return;
+    const { error } = await db.from("invoice_line_costs").upsert(rows, { onConflict: "invoice_id,line_id" });
+    // A non-cost caller is rejected by RLS — that is expected and not an error
+    // we surface (the cost snapshot is simply not recorded by that user).
+    if (error && !/row-level security|permission denied/i.test(error.message)) {
+      console.error("[store] persistInvoiceLineCosts failed:", error.message);
+    }
+  }, [shouldUseDb, db]);
+
   /* ── Invoice actions (DB-first) ── */
   const addInvoice = useCallback(async (invoiceInput: Invoice): Promise<string> => {
     // Normalize the ticket link so a ticket NUMBER (or stale reference) can never
@@ -2733,6 +2881,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // Preserve serviceCategory/paymentMode locally even if DB lacks the columns.
       saved.serviceCategory = current.serviceCategory;
       saved.paymentMode = current.paymentMode;
+      // SYS-1 — the invoices JSON no longer carries line cost, so (a) persist the
+      // resolved cost snapshot to the cost-scoped table and (b) re-merge it onto
+      // the in-memory record (from the ORIGINAL input `current`, which still
+      // carries cost) so this session's cost-capable user keeps the figures.
+      await persistInvoiceLineCosts(current);
+      saved.items = current.items;
+      saved.devices = current.devices;
       setState((s) => ({ ...s, invoices: [saved, ...s.invoices] }));
       // See note above: refresh stateRef synchronously so the immediately
       // following syncTicketStatusFromInvoice + hasInvoice guards see this
@@ -2779,7 +2934,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await awardLoyaltyForPaidInvoice(invoice.id, invoice.customerId, invoice.reference || invoice.id, invoice.total);
     }
     return invoice.id;
-  }, [syncTicketStatusFromInvoice, resolveTicketId, awardLoyaltyForPaidInvoice, updateTicket]);
+  }, [syncTicketStatusFromInvoice, resolveTicketId, awardLoyaltyForPaidInvoice, updateTicket, persistInvoiceLineCosts]);
 
   const updateInvoice = useCallback(async (id: string, updates: Partial<Invoice>) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
@@ -2841,8 +2996,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("total" in updates) row.total = updates.total ?? 0;
       if ("notes" in updates) row.notes = updates.notes ?? null;
       if ("terms" in updates) row.terms = updates.terms ?? null;
-      if ("items" in updates) row.items = updates.items ?? [];
-      if ("devices" in updates) row.devices = updates.devices ?? [];
+      // Cost snapshot stripped from the broadly-readable JSON (SYS-1). The
+      // devices branch below re-serializes via invoiceToRow (also stripped) when
+      // lineage/meta changes; this handles the plain items/devices update.
+      if ("items" in updates) row.items = (updates.items ?? []).map((it) => stripLineCost(it));
+      if ("devices" in updates) row.devices = stripDeviceCosts(updates.devices ?? []);
       if ("dueDate" in updates) row.due_date = updates.dueDate ?? null;
       if ("employee" in updates) row.employee = updates.employee ?? null;
       if ("invoiceType" in updates) row.invoice_type = updates.invoiceType ?? "retail";
@@ -2877,6 +3035,11 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (error) {
         console.error("[store] updateInvoice failed:", error.code, error.message);
         toast.error("Changes not saved", { description: `DB error [${error.code ?? "?"}]: ${error.message ?? "unknown"}` });
+      } else if (("items" in updates || "devices" in updates) && prev) {
+        // SYS-1 — when the line set changed, re-snapshot the cost to the
+        // cost-scoped table from the (un-stripped) incoming lines. RLS no-ops
+        // this for a non-cost caller, so only a cost-authorized edit records it.
+        await persistInvoiceLineCosts({ ...prev, ...updates } as Invoice);
       }
     }
     setState((s) => ({ ...s, invoices: s.invoices.map((inv) => (inv.id === id ? { ...inv, ...updates } : inv)) }));
@@ -2923,7 +3086,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     if (("paidAmount" in updates && (updates.paidAmount ?? 0) > (prev?.paidAmount ?? 0)) || updates.status === "paid") { action = "Payment Added"; severity = "success"; }
     else if (updates.status === "cancelled") { action = "Cancelled"; severity = "critical"; }
     logActivity({ module: "Invoice", action, severity, entity: "Invoice", reference: prev?.reference || id, description: `Updated invoice ${prev?.reference || id} (${prev?.customer ?? ""}).`, changes });
-  }, [resolveTicketId, awardLoyaltyForPaidInvoice]);
+  }, [resolveTicketId, awardLoyaltyForPaidInvoice, persistInvoiceLineCosts]);
 
   const deleteInvoice = useCallback(async (id: string) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
@@ -3629,13 +3792,13 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const addStockMovement = useCallback(async (movement: StockMovement, opts?: { itemId?: string; unitCost?: number }) => {
     if (shouldUseDb()) {
       const row = stockMovementToRow(movement);
-      // Carry the optional cost dimension (0075 additive columns) so an Inward
-      // movement can be tied to its item + unit cost (ledger layer link).
+      // Tie the movement to its item for traceability. The COST dimension
+      // (unit_cost/total_value) is DELIBERATELY NOT written here (SYS-1): the
+      // stock_movements SELECT policy admits non-cost roles (manage_repair_jobs),
+      // so cost lives ONLY on the cost-gated inventory_stock_layers, never on the
+      // broadly-readable movement row. `opts.unitCost` is still accepted for the
+      // caller's ledger-layer write but is not persisted onto the movement.
       if (opts?.itemId !== undefined) row.item_id = opts.itemId;
-      if (opts?.unitCost !== undefined) {
-        row.unit_cost = opts.unitCost;
-        row.total_value = opts.unitCost * movement.items;
-      }
       const { error } = await db.from("stock_movements").insert(withStore(row));
       if (error) { console.error("[store] addStockMovement failed:", error.message); return; }
     }
@@ -3679,24 +3842,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // Opening stock → ONE cost-carrying ledger layer + the Inward movement +
-      // set current_stock. Services never reach here (opening guarded above).
+      // Opening stock → ONE atomic, fail-closed RPC (SYS-9) that creates the
+      // cost-carrying ledger layer, the Inward movement AND sets current_stock
+      // as a single transaction, so master quantity / layer / movement can never
+      // diverge. Services never reach here (opening guarded above). On failure
+      // we leave current_stock at 0 (the item exists but carries no opening) and
+      // surface the error rather than half-committing.
       if (opening) {
-        const { error: layerErr } = await db.from("inventory_stock_layers").insert(withStore({
-          item_id: saved.id,
-          source: "opening",
-          qty_in: opening.qty,
-          unit_cost: opening.unitCost,
-        }));
-        if (layerErr) { console.error("[store] addInventoryItem opening layer failed:", layerErr.message); }
-        const docNumber = `MOV-OPEN-${Date.now()}`;
-        await addStockMovement({
-          docNumber, fromStore: "Opening Balance", toStore: saved.store,
-          items: opening.qty, date: new Date().toLocaleDateString("en-IN"), user: "", type: "Inward", status: "completed",
-        }, { itemId: saved.id, unitCost: opening.unitCost });
-        const { error: stockErr } = await db.from("inventory_items").update({ current_stock: opening.qty }).eq("id", saved.id);
-        if (stockErr) { console.error("[store] addInventoryItem opening stock set failed:", stockErr.message); }
-        saved = { ...saved, currentStock: opening.qty };
+        const { error: openErr } = await db.rpc("post_opening_stock", {
+          p_item_id: saved.id,
+          p_qty: opening.qty,
+          p_unit_cost: opening.unitCost,
+        });
+        if (openErr) {
+          console.error("[store] addInventoryItem opening stock (atomic) failed:", openErr.message);
+        } else {
+          saved = { ...saved, currentStock: opening.qty };
+        }
       }
 
       setState((s) => ({ ...s, inventory: [saved, ...s.inventory] }));
@@ -3783,6 +3945,46 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     let action = "Item Edited"; let severity: ActivitySeverity = "info";
     if ("currentStock" in updates && prev && updates.currentStock !== prev.currentStock) { const inc = (updates.currentStock ?? 0) > prev.currentStock; action = inc ? "Stock Increased" : "Stock Reduced"; severity = inc ? "success" : "warning"; }
     logActivity({ module: "Inventory", action, severity, entity: "Item", reference: id, description: `Updated inventory item ${prev?.name || id}.`, changes });
+  }, []);
+
+  /**
+   * SYS-6 — the DEDICATED, verified, audited path that clears a legacy
+   * `migration_flag`. An ordinary edit never clears the flag; this action does,
+   * and ONLY after actually resolving the contradiction:
+   *   • service_with_stock → zero the stray current_stock / min / max that
+   *     contradicted "a service has no stock", THEN clear the flag.
+   *   • unrecognised_item_type → the row now carries a valid item_kind, so
+   *     clearing the flag is the reconciliation.
+   * The resolution + flag clear are written together and audited, so the review
+   * marker is never cleared while its contradiction still stands.
+   */
+  const reconcileMigrationFlag = useCallback(async (id: string) => {
+    const prev = stateRef.current.inventory.find((i) => i.id === id);
+    if (!prev || !prev.migrationFlag) return;
+    const wasServiceWithStock = prev.migrationFlag === "service_with_stock";
+    const patch: Record<string, unknown> = { migration_flag: null };
+    if (wasServiceWithStock) {
+      patch.current_stock = 0;
+      patch.min_stock = 0;
+      patch.max_stock = 0;
+    }
+    if (shouldUseDb()) {
+      const { error } = await db.from("inventory_items").update(patch).eq("id", id);
+      if (error) { console.error("[store] reconcileMigrationFlag failed:", error.message); toast.error("Could not mark reviewed", { description: error.message }); return; }
+    }
+    setState((s) => ({
+      ...s,
+      inventory: s.inventory.map((i) =>
+        i.id === id
+          ? { ...i, migrationFlag: undefined, ...(wasServiceWithStock ? { currentStock: 0, minStock: 0, maxStock: 0 } : {}) }
+          : i,
+      ),
+    }));
+    logActivity({
+      module: "Inventory", action: "Migration Reviewed", severity: "info", entity: "Item", reference: id,
+      description: `Resolved legacy review flag "${prev.migrationFlag}" on ${prev.name || id}.`,
+      meta: wasServiceWithStock ? { "Stray stock cleared": String(prev.currentStock) } : undefined,
+    });
   }, []);
 
   const deleteInventoryItem = useCallback(async (id: string) => {
@@ -4429,6 +4631,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addStockMovement,
     addInventoryItem,
     updateInventoryItem,
+    reconcileMigrationFlag,
     deleteInventoryItem,
     addCustomer,
     updateCustomer,

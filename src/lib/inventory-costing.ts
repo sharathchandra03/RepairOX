@@ -168,7 +168,7 @@ export interface InvoiceProfitability {
  *
  * `repairCost` folds into service revenue as an unconfigured-cost repair/labour
  * charge (HIGH-2), so `eligibleNetRevenue == max(0, subtotal − invoice.discount)`
- * and `partsGP + serviceGP == combinedGP − otherDirectCost` hold by construction.
+ * and `partsGP + serviceGP == combinedGP + otherDirectCost` hold by construction.
  * The invoice-level discount is split pro-rata by each bucket's share of gross
  * revenue; per-line discounts are ignored (the single-discount-source invariant,
  * MEDIUM-1). When `grossRevenue == 0` both bucket discounts are 0 and

@@ -26,7 +26,7 @@ import { DeviceBrandModelSelector } from "@/components/common/device-brand-model
 import type { InventoryItem } from "@/lib/inventory-data";
 import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
 import { AddInventoryModal } from "@/components/inventory/add-inventory-modal";
-import { resolvePartUnitCost } from "@/lib/inventory-costing";
+import { resolvePartUnitCost, type StockLayerLike } from "@/lib/inventory-costing";
 import { Can } from "@/components/common/can";
 import { searchCustomers, type Customer } from "@/lib/customer-data";
 import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
@@ -193,15 +193,22 @@ function genLineId(): string {
 
 /**
  * Resolve a part line's INTERNAL valuation cost from an Inventory Master item
- * for the profitability engine (inv-design §5.2). This is never shown to the
- * customer and never affects billed totals (FR-19). The invoice client holds no
- * in-memory stock-ledger layers, so we pass none and rely on the org-level CP
- * fallback inside `resolvePartUnitCost` (ledger → CP → not configured); a
- * cost-authorized read already populated `item.costPrice` / `item.costState`.
- * Maps the resolver's `source` to the `InvoiceLineItem.costState` snapshot.
+ * for the profitability engine (inv-design §5.2 / §3.3). This is never shown to
+ * the customer and never affects billed totals (FR-19).
+ *
+ * LEDGER-DISCONNECT fix: the branch-scoped stock-ledger layers (loaded into the
+ * store from inventory_stock_layers for a cost-capable user) are passed through,
+ * so `resolvePartUnitCost` resolves the WEIGHTED AVERAGE of real received stock
+ * FIRST, falling back to the org-level CP, then "not configured". A non-cost
+ * user's store holds no layers (RLS), so they fall back to CP exactly as before.
+ * Maps the resolver's `source` to the `InvoiceLineItem.costState` snapshot
+ * (`ledger → "resolved"`, `cp → "cp"`).
  */
-function resolveLinePartCost(item: InventoryItem): { cost?: number; costState: "resolved" | "cp" | "not_configured" } {
-  const resolved = resolvePartUnitCost(item.id, [], item);
+function resolveLinePartCost(
+  item: InventoryItem,
+  layers: readonly StockLayerLike[],
+): { cost?: number; costState: "resolved" | "cp" | "not_configured" } {
+  const resolved = resolvePartUnitCost(item.id, layers, item);
   if (resolved.kind === "not_configured") return { cost: undefined, costState: "not_configured" };
   return { cost: resolved.unitCost, costState: resolved.source === "ledger" ? "resolved" : "cp" };
 }
@@ -238,7 +245,7 @@ function InvoiceWizard() {
   const { can } = usePermissions();
   const searchParams = useSearchParams();
   const editId = searchParams.get("edit");
-  const { invoices, tickets, addInvoice, updateInvoice, customers, addCustomer, inventory } = useStore();
+  const { invoices, tickets, addInvoice, updateInvoice, customers, addCustomer, inventory, inventoryStockLayers } = useStore();
   const { contacts, leads, updateContact, updateLead, recordConversionEvent, autoLinkByIdentity } = useLeads();
   const { settings, hydrated: settingsHydrated } = useStoreSettings();
   const isEdit = !!editId;
@@ -312,7 +319,7 @@ function InvoiceWizard() {
               // kind never affect billed totals (inv-design §5.3 / FR-19).
               const master = sku ? inventory.find((it) => it.id === sku) : undefined;
               const { cost, costState } = master && master.kind !== "service"
-                ? resolveLinePartCost(master)
+                ? resolveLinePartCost(master, inventoryStockLayers)
                 : { cost: undefined, costState: "not_configured" as const };
               return {
                 id: `li-${Date.now()}-${idx}-${pi}`,
@@ -1562,7 +1569,7 @@ function LineItemNameInput({
 
 function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; showErrors?: boolean }) {
   const { can } = usePermissions();
-  const { inventory } = useStore();
+  const { inventory, inventoryStockLayers } = useStore();
   const activeIdx = form.activeDeviceIndex;
   const activeDevice = form.devices[activeIdx] || form.devices[0];
 
@@ -1724,7 +1731,7 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                 costState: configured ? ("resolved" as const) : ("not_configured" as const),
               };
             }
-            const { cost, costState } = resolveLinePartCost(item);
+            const { cost, costState } = resolveLinePartCost(item, inventoryStockLayers);
             return {
               ...p,
               name: item.name,
@@ -1750,7 +1757,7 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
     // Loads the master's current Selling Price onto the line and resolves the
     // INTERNAL valuation cost (kind="part") — the cost is never shown to the
     // customer and never affects billed totals (inv-design §5.2 / FR-19).
-    const { cost, costState } = resolveLinePartCost(item);
+    const { cost, costState } = resolveLinePartCost(item, inventoryStockLayers);
     updateForm((f) => ({
       ...f,
       devices: f.devices.map((d, i) => {

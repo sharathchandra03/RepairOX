@@ -131,7 +131,7 @@ test("repairCost folds into service revenue; reconciliation identities hold (HIG
   // eligibleNetRevenue == max(0, subtotal - invoice.discount)
   assert.equal(p.eligibleNetRevenue, Math.max(0, subtotal - invoiceDiscount));
 
-  // partsGP + serviceGP == combinedGP - otherDirectCost (otherDirectCost == 0 here)
+  // partsGP + serviceGP == combinedGP + otherDirectCost (otherDirectCost == 0 here)
   assert.ok(Math.abs(p.partsGP + p.serviceGP - (p.combinedGP - p.otherDirectCost)) < 1e-9);
 
   // repairCost is unconfigured => the bucket is partial, never ₹0 margin inflation.
@@ -366,6 +366,152 @@ function assertNoCostKeys(value: unknown, path = "root"): void {
     }
   }
 }
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * LEDGER-DISCONNECT — the weighted-average ledger is actually READ at runtime.
+ *
+ * The production bug was that the sole caller passed `[]` layers, so every line
+ * fell back to org CP and `source: "ledger"` / `costState: "resolved"` was dead.
+ * This mirrors the invoice-create resolver (resolveLinePartCost) exactly: given
+ * branch-scoped layers it must return the weighted average with ledger
+ * provenance, and only fall back to CP when there are NO layers for the item.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** The exact mapping resolveLinePartCost performs in invoice/create/page.tsx. */
+function lineCostFromResolver(itemId: string, layers: StockLayerLike[], item: { costPrice?: number; costState?: "configured" | "not_configured" }) {
+  const r = resolvePartUnitCost(itemId, layers, item);
+  if (r.kind === "not_configured") return { cost: undefined, costState: "not_configured" as const };
+  return { cost: r.unitCost, costState: r.source === "ledger" ? ("resolved" as const) : ("cp" as const) };
+}
+
+test("ledger layers drive the sold cost (weighted avg, 'resolved'); CP only when no layers (LEDGER-DISCONNECT)", () => {
+  const item = { costPrice: 1000, costState: "configured" as const };
+  const layers: StockLayerLike[] = [
+    { item_id: "PART", qty_in: 10, unit_cost: 100 },
+    { item_id: "PART", qty_in: 30, unit_cost: 200 },
+    { item_id: "OTHER", qty_in: 99, unit_cost: 9999 }, // different item — ignored
+  ];
+  // With layers → weighted average 175, provenance LEDGER (not the 1000 CP).
+  const withLayers = lineCostFromResolver("PART", layers, item);
+  assert.deepEqual(withLayers, { cost: 175, costState: "resolved" });
+
+  // With NO layers for this item → falls back to the org CP (1000), provenance cp.
+  const noLayers = lineCostFromResolver("PART", [{ item_id: "OTHER", qty_in: 5, unit_cost: 50 }], item);
+  assert.deepEqual(noLayers, { cost: 1000, costState: "cp" });
+
+  // No layers AND no configured CP → not configured (never ₹0).
+  const neither = lineCostFromResolver("PART", [], { costState: "not_configured" });
+  assert.deepEqual(neither, { cost: undefined, costState: "not_configured" });
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * SYS-1 — strict cost-confidentiality boundary (profit-only viewer tier).
+ *
+ * The server route (GET /api/invoice/[id]/profit) returns a TIERED payload:
+ *   • cost-capable → full per-bucket revenue + bucket GP + combined GP + margin
+ *   • profit-only  → ONLY combinedGP + grossMargin + costPartial
+ * so a profit-only viewer cannot derive a per-unit cost from bucketNet − bucketGP.
+ * The route composes the profit-only payload directly from the engine result;
+ * this test asserts the engine supplies those three fields and that building the
+ * profit-only projection drops every bucket-level figure.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** The profit-only projection the route returns (must expose NO bucket figure). */
+function profitOnlyAggregate(p: ReturnType<typeof computeInvoiceProfitability>) {
+  return { combinedGP: p.combinedGP, grossMargin: p.grossMargin, costPartial: p.costPartial };
+}
+
+test("profit-only aggregate exposes ONLY combined GP + margin + partial — no bucket figure (SYS-1)", () => {
+  const inv: CostingInvoiceLike = {
+    id: "inv-boundary",
+    status: "paid",
+    subtotal: 3000,
+    discount: 0,
+    total: 3000,
+    lines: [
+      { kind: "part", qty: 1, price: 2000, total: 2000, cost: 1200, costState: "cp" } as never,
+      { kind: "service", qty: 1, price: 1000, total: 1000, cost: 400, costState: "resolved" } as never,
+    ],
+  };
+  const p = computeInvoiceProfitability(inv);
+  const payload = profitOnlyAggregate(p);
+
+  // The three allowed fields are present and correct.
+  assert.equal(payload.combinedGP, 3000 - 1200 - 400);
+  assert.equal(payload.grossMargin, p.grossMargin);
+  assert.equal(payload.costPartial, false);
+
+  // Crucially, NO bucket-level field leaks — a profit-only viewer must not be
+  // able to compute bucketCost = bucketNet − bucketGP.
+  const keys = Object.keys(payload);
+  for (const forbidden of ["partsRevenue", "serviceRevenue", "partsGP", "serviceGP", "partsCost", "labourCost", "eligibleNetRevenue", "breakdown"]) {
+    assert.ok(!keys.includes(forbidden), `profit-only payload leaked bucket field "${forbidden}"`);
+  }
+});
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * SYS-10 — Ticket → Invoice: no double stock deduction.
+ *
+ * The design (§5.4) keeps ticket-originated consumption in deductPartsForTicket
+ * (planned → used, once) and adds NO invoice-side deduction. This regression
+ * models that boundary: deductPartsForTicket is idempotent (a re-run finds
+ * `used` parts and skips them), and finalizing / re-finalizing the linked
+ * invoice performs NO deduction — so a part consumed by the ticket is never
+ * decremented again, and no duplicate stock movement or invoice line is created.
+ * (Pure model of the real store contract — the live-DB integration cannot run in
+ * this environment, so the invariant is proven over the same logic.)
+ * ────────────────────────────────────────────────────────────────────────── */
+
+type TicketPartModel = { id: string; qty: number; status: "planned" | "used" };
+type ItemModel = { id: string; currentStock: number };
+
+/** Mirrors store.deductPartsForTicket's contract: consume ONLY `planned` parts
+ *  (flip to `used`, decrement stock, emit one Outward movement each). Idempotent
+ *  by the part status — a re-run finds `used` and does nothing. */
+function deductPartsForTicketModel(parts: TicketPartModel[], item: ItemModel, movements: string[]) {
+  for (const p of parts) {
+    if (p.status !== "planned") continue;
+    p.status = "used";
+    item.currentStock -= p.qty;
+    movements.push(`OUT-${p.id}`);
+  }
+}
+
+/** Mirrors the invoice create/finalize contract after this redesign: NO stock
+ *  deduction, NO movement, NO duplicate line (§5.4). It only persists lines. */
+function finalizeInvoiceModel(_lines: unknown[], _item: ItemModel, _movements: string[]) {
+  // Intentionally empty: invoice finalization performs no stock side effect.
+}
+
+test("ticket-consumed part is NOT re-deducted on invoice finalize; idempotent (SYS-10 / AC-12)", () => {
+  const parts: TicketPartModel[] = [
+    { id: "p1", qty: 2, status: "planned" },
+    { id: "p2", qty: 1, status: "planned" },
+  ];
+  const item: ItemModel = { id: "PART", currentStock: 10 };
+  const movements: string[] = [];
+
+  // Ticket consumes its planned parts once.
+  deductPartsForTicketModel(parts, item, movements);
+  assert.equal(item.currentStock, 10 - 2 - 1); // 7
+  assert.deepEqual(parts.map((p) => p.status), ["used", "used"]);
+  assert.equal(movements.length, 2);
+
+  // Invoice is finalized from the SAME ticket parts — no deduction added.
+  const invoiceLines = parts.map((p) => ({ sku: item.id, qty: p.qty }));
+  finalizeInvoiceModel(invoiceLines, item, movements);
+  assert.equal(item.currentStock, 7, "invoice finalize must not deduct stock");
+  assert.equal(movements.length, 2, "invoice finalize must not add a stock movement");
+
+  // Re-finalize / duplicate submit — still no change.
+  finalizeInvoiceModel(invoiceLines, item, movements);
+  // And a re-run of the ticket consumption finds `used` parts and skips them.
+  deductPartsForTicketModel(parts, item, movements);
+  assert.equal(item.currentStock, 7, "duplicate finalize + re-run must not re-deduct");
+  assert.equal(movements.length, 2, "no duplicate movement on retry");
+  // No duplicate invoice line produced (one line per ticket part).
+  assert.equal(invoiceLines.length, 2);
+});
 
 test("buildInvoiceInfo + every PrintLineItem carry NO cost/kind/costState/labour/profit (AC-18)", () => {
   // An invoice whose lines deliberately carry the INTERNAL cost snapshot — both

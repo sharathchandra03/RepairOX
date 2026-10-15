@@ -20,6 +20,7 @@
     "leads:verify": "node scripts/sales-agent-verify.mjs",
     "leads:intelligence:test": "tsx --test src/lib/lead-intelligence.test.ts",
     "attendance:test": "tsx --test src/lib/work-session.test.ts",
+    "inventory:costing:test": "tsx --test src/lib/inventory-costing.test.ts",
     "ms:migrate": "node scripts/apply-multi-store.mjs"
   },
   "dependencies": {

@@ -12,31 +12,40 @@ export const dynamic = "force-dynamic";
 /* ──────────────────────────────────────────────────────────────────────────
    GET /api/invoice/[id]/profit
 
-   Cost-FREE invoice profitability aggregate (FEAT-005 / inv-design §7.1,
-   MEDIUM-1 option (a)).
+   Invoice profitability aggregate (FEAT-005 / inv-design §7.1, with the
+   STRICT-boundary override of §7.1 approved in the review loop — SYS-1/SYS-3).
 
-   Why a server route:
-     A PROFIT-ONLY viewer (holds `view_profit_margin` but NOT any cost key) must
-     be able to see Gross Profit / Gross Margin WITHOUT their client ever
-     receiving a raw per-unit cost. Per inv-design §2.1a their client gets NO
-     cost rows from RLS, so they cannot compute GP/margin in-memory. This route
-     computes the aggregates SERVER-SIDE (where the service-role client
-     legitimately reads the invoice's own cost snapshot) and returns ONLY the
-     derived aggregate numbers — never a per-unit CP / labour figure.
+   AUTHORIZATION (conjunctive — SYS-3):
+     The caller MUST hold an INVOICE-VIEW key AND (a PROFIT-VIEW key OR a COST
+     key). Invoice-view alone, or a cost/profit key WITHOUT invoice-view, is
+     rejected — so a cost-only caller can never read an invoice's profit without
+     also being entitled to see that invoice, and the normal invoice RLS
+     org/branch predicate is reproduced here (service-role bypasses RLS).
 
-   Guard: the broad "may see profitability OR cost" set, so a cost-capable user
-   can also hit it, matching inv-design §7.1. The payload is identical either
-   way — aggregates only, so a role with only `view_profit_margin` can never
-   obtain a raw cost from any surface (AC-21: a server-side boundary, not a
-   hidden button). Everything is constrained to the caller's own organization.
+   WHAT EACH TIER RECEIVES (SYS-1 derivation side-channel closed):
+     • Cost-capable caller (holds a cost key) → the FULL aggregate: per-bucket
+       revenue + bucket GP + combined GP + margin. They are already entitled to
+       the raw cost, so bucket figures reveal nothing new.
+     • Profit-only caller (holds view_profit_margin / view_financial_reports but
+       NO cost key) → ONLY combinedGP + grossMargin + costPartial. Per-bucket
+       revenue and bucket GP are WITHHELD, because a profit-only viewer who also
+       sees the invoice subtotal/discount could otherwise derive bucketCost =
+       bucketNet − bucketGP (exact for a single-line bucket). Withholding the
+       bucket figures closes that arithmetic side-channel (AC-21: a real
+       server-side boundary, not a hidden button).
+
+   COST SOURCE (SYS-1 relocation):
+     The resolved per-line cost snapshot no longer lives in the broadly-readable
+     invoices JSON. It is read here from the cost-scoped `invoice_line_costs`
+     table via the service-role client. `kind`/`qty`/`total` still come from the
+     invoice's own device/line JSON (non-sensitive).
    ────────────────────────────────────────────────────────────────────────── */
 
 interface InvoiceLineRow {
+  id?: string;
   kind?: "part" | "service";
   qty?: number;
   total?: number;
-  cost?: number;
-  costState?: "resolved" | "cp" | "not_configured";
 }
 
 interface InvoiceDeviceRow {
@@ -44,31 +53,44 @@ interface InvoiceDeviceRow {
   repairCost?: number;
 }
 
+const INVOICE_VIEW_KEYS = ["manage_invoices", "manage_payments", "view_financial_reports", "manage_sales"];
+const PROFIT_KEYS = ["view_profit_margin", "view_financial_reports"];
+const COST_KEYS = ["inventory_view_cost", "inventory_edit_cost", "manage_inventory", "manage_purchases"];
+
 export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  // Allow any viewer who may see profitability OR cost (inv-design §7.1 /
-  // FEAT-005). Resolved live from role_permissions — hiding the UI is backed by
-  // real server enforcement.
-  const guard = await requirePermission(req, [
-    "view_profit_margin",
-    "view_financial_reports",
-    "inventory_view_cost",
-    "manage_inventory",
-    "manage_purchases",
-  ]);
+  // Single auth call over the UNION of every key that could matter, then derive
+  // the granular tier below. (requirePermission already admits admin / '*' /
+  // full_access.)
+  const guard = await requirePermission(req, [...INVOICE_VIEW_KEYS, ...PROFIT_KEYS, ...COST_KEYS]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
-  const { admin, user } = guard;
+  const { admin, user, roleId, permissions } = guard;
+
+  // Universal authority (owner roles / '*' / full_access) satisfies every tier.
+  const isSuper =
+    permissions.has("*") || permissions.has("full_access") || roleId === "platform_owner" || roleId === "master_shop_owner" || roleId === "developer" || roleId === "admin";
+  const hasAny = (keys: string[]) => isSuper || keys.some((k) => permissions.has(k));
+
+  const canViewInvoice = hasAny(INVOICE_VIEW_KEYS);
+  const hasProfit = hasAny(PROFIT_KEYS);
+  const hasCost = hasAny(COST_KEYS);
+
+  // Conjunctive requirement (SYS-3): invoice-view AND (profit OR cost).
+  if (!canViewInvoice || !(hasProfit || hasCost)) {
+    return NextResponse.json({ ok: false, error: "You don't have permission to view this invoice's profitability." }, { status: 403 });
+  }
 
   const { id } = await ctx.params;
   if (!id) return NextResponse.json({ ok: false, error: "Missing invoice id." }, { status: 400 });
 
-  // Constrain to the caller's own organization — a user can never pull another
-  // organization's invoice by tampering with the id.
   const orgId = await orgIdForAuthUser(admin, user.id);
   if (!orgId) return NextResponse.json({ ok: false, error: "No organization." }, { status: 400 });
 
+  // Reproduce the invoice RLS org + store predicate (SYS-3). The service-role
+  // client bypasses RLS, so we constrain org here AND re-check branch
+  // visibility against the caller's authorized branches below.
   const { data: row, error } = await admin
     .from("invoices")
-    .select("id, status, subtotal, discount, total, items, devices")
+    .select("id, status, subtotal, discount, total, items, devices, branch_id")
     .eq("id", id)
     .eq("organization_id", orgId)
     .is("deleted_at", null)
@@ -76,11 +98,34 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   if (!row) return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
 
-  // Reconstruct the costing-engine input from the stored invoice. The invoice's
-  // own `cost`/`costState` line snapshot (stamped at line-creation by a
-  // cost-authorized user — FEAT-004) is the historical cost source, consistent
-  // with the in-memory path. `devices` is a JSONB envelope { records, meta } or
-  // a legacy array; the flat `items` is the legacy single-device fallback.
+  // Branch visibility: a caller may read this invoice's profit only when it is
+  // in their branch scope (a null branch is org-wide / visible), unless they can
+  // cross branches (manage_branches / owner). Mirrors auth_branch_visible.
+  const canCrossBranch = isSuper || permissions.has("manage_branches");
+  if (!canCrossBranch && row.branch_id != null) {
+    const { data: staffRow } = await admin
+      .from("staff")
+      .select("branch_id")
+      .eq("auth_user_id", user.id)
+      .maybeSingle();
+    const callerBranch = staffRow?.branch_id ?? null;
+    if (callerBranch == null || callerBranch !== row.branch_id) {
+      return NextResponse.json({ ok: false, error: "You don't have permission to view this invoice's profitability." }, { status: 403 });
+    }
+  }
+
+  // Cost snapshot — read from the cost-scoped table (SYS-1), NOT the invoice
+  // JSON. One read, keyed by line id.
+  const { data: costRows } = await admin
+    .from("invoice_line_costs")
+    .select("line_id, cost, cost_state")
+    .eq("invoice_id", id)
+    .eq("organization_id", orgId);
+  const costByLine = new Map<string, { cost: number | null; cost_state: string | null }>();
+  for (const c of (costRows ?? []) as any[]) costByLine.set(c.line_id, { cost: c.cost, cost_state: c.cost_state });
+
+  // Reconstruct the costing-engine input: kind/qty/total from the invoice JSON
+  // (non-sensitive), cost/costState from the cost-scoped snapshot.
   const rawDevices = row.devices ?? {};
   const isLegacyArray = Array.isArray(rawDevices);
   const meta = isLegacyArray ? {} : (rawDevices as Record<string, unknown>);
@@ -90,31 +135,24 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
   const lines: CostingLineLike[] = [];
   const devices: { repairCost?: number }[] = [];
+  const toLine = (p: InvoiceLineRow): CostingLineLike => {
+    const snap = p.id ? costByLine.get(p.id) : undefined;
+    return {
+      kind: p.kind,
+      qty: Number(p.qty ?? 0),
+      total: Number(p.total ?? 0),
+      cost: snap?.cost ?? undefined,
+      costState: (snap?.cost_state ?? undefined) as any,
+    };
+  };
   if (deviceRecords.length > 0) {
     for (const d of deviceRecords) {
-      for (const p of d.parts ?? []) {
-        lines.push({
-          kind: p.kind,
-          qty: Number(p.qty ?? 0),
-          total: Number(p.total ?? 0),
-          cost: p.cost,
-          costState: p.costState,
-        });
-      }
+      for (const p of d.parts ?? []) lines.push(toLine(p));
       devices.push({ repairCost: Number(d.repairCost ?? 0) });
     }
   } else {
-    // Legacy flat invoice — wrap `items` as part lines (no device repairCost).
     const items = (row.items ?? []) as InvoiceLineRow[];
-    for (const p of items) {
-      lines.push({
-        kind: p.kind,
-        qty: Number(p.qty ?? 0),
-        total: Number(p.total ?? 0),
-        cost: p.cost,
-        costState: p.costState,
-      });
-    }
+    for (const p of items) lines.push(toLine(p));
   }
 
   const docType = (meta as any)?.documentType as "invoice" | "proforma" | null | undefined;
@@ -131,18 +169,31 @@ export async function GET(req: Request, ctx: { params: Promise<{ id: string }> }
 
   const p = computeInvoiceProfitability(inv);
 
-  // Return ONLY derived aggregates — never a per-unit CP / labour cost. (The
-  // raw `partsCost`/`labourCost`/`breakdown[].cost` are deliberately omitted so
-  // a profit-only viewer can never reconstruct a per-unit cost from this
-  // payload — inv-design §7.1 / AC-21.)
+  // TIERED PAYLOAD (SYS-1): a cost-capable caller gets the full bucket
+  // breakdown; a profit-only caller gets ONLY combined GP + margin + the
+  // partial flag, so no bucket-level figure (and therefore no derivable
+  // per-unit cost) ever reaches a non-cost viewer.
+  if (hasCost) {
+    return NextResponse.json({
+      ok: true,
+      tier: "cost",
+      aggregate: {
+        partsRevenue: p.partsRevenue,
+        serviceRevenue: p.serviceRevenue,
+        eligibleNetRevenue: p.eligibleNetRevenue,
+        partsGP: p.partsGP,
+        serviceGP: p.serviceGP,
+        combinedGP: p.combinedGP,
+        grossMargin: p.grossMargin,
+        costPartial: p.costPartial,
+      },
+    });
+  }
+
   return NextResponse.json({
     ok: true,
+    tier: "profit",
     aggregate: {
-      partsRevenue: p.partsRevenue,
-      serviceRevenue: p.serviceRevenue,
-      eligibleNetRevenue: p.eligibleNetRevenue,
-      partsGP: p.partsGP,
-      serviceGP: p.serviceGP,
       combinedGP: p.combinedGP,
       grossMargin: p.grossMargin,
       costPartial: p.costPartial,
