@@ -200,7 +200,7 @@ export default function AgentPerformancePage() {
   // meaningless clutter — hide it. Multi-Store mode keeps the full filter.
   const leadMode = useLeadStoreMode();
   const { salesAgents, leads, followUps, viewAsAgentId, setViewAsAgent, currentUserIsSalesAgent } = useLeads();
-  const { tickets, invoices } = useStore();
+  const { tickets, invoices, invoiceRefunds } = useStore();
 
   // Agent Performance is the ONE surface where everyone — owner AND individual
   // Sales Agent — gets the same experience: the "All Agents" ranked comparison
@@ -267,7 +267,9 @@ export default function AgentPerformancePage() {
     else { setTab("all"); }
   }, [viewAsAgentId, canCrossAgent]);
 
-  const revenue = useMemo(() => ({ tickets, invoices }), [tickets, invoices]);
+  // Net Revenue Won subtracts only finalized-parent succeeded refunds (gross
+  // revenueWon stays unchanged — see agent-performance.ts).
+  const revenue = useMemo(() => ({ tickets, invoices, refunds: invoiceRefunds }), [tickets, invoices, invoiceRefunds]);
 
   /* Eligible agents in the active store scope (org-wide in All Shops).
      Match against the CURRENTLY-SELECTED store (activeStoreId), not stores[0]

@@ -237,13 +237,14 @@ export function allocateScope(
       l.allocTax = round2((invoiceTax * l.allocNet) / totalSelectedNet);
       assigned += l.allocTax;
     }
-    // Residual paisa → the largest-net line, so a full scope's Σ === invoice.tax
-    // exactly. For a partial scope this keeps Σ ≤ invoice.tax.
-    const fullScopeNet = invoiceNet(invoice);
+    // The budget base must be the WHOLE invoice's net-after-discount (the same
+    // measure as totalSelectedNet), NOT the pre-discount gross net — otherwise a
+    // full selection never matches and under-allocates tax (291.6 vs 324).
+    const fullScopeNetAfterDisc = round2(invoiceNet(invoice) * (1 - factor));
     const scopeTaxBudget =
-      fullScopeNet > 0 ? round2((invoiceTax * totalSelectedNet) / fullScopeNet) : 0;
-    // Full-invoice selection → budget is the entire invoice.tax.
-    const isFullInvoice = Math.abs(totalSelectedNet - fullScopeNet) < PAISA;
+      fullScopeNetAfterDisc > 0 ? round2((invoiceTax * totalSelectedNet) / fullScopeNetAfterDisc) : 0;
+    // Full-invoice selection → budget is the entire invoice.tax exactly.
+    const isFullInvoice = Math.abs(totalSelectedNet - fullScopeNetAfterDisc) < PAISA;
     const budget = isFullInvoice ? invoiceTax : Math.min(scopeTaxBudget, invoiceTax);
     const residual = round2(budget - assigned);
     if (Math.abs(residual) >= PAISA && partial.length > 0) {

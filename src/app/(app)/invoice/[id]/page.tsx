@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -31,6 +31,8 @@ import {
 import { refundStatus as deriveRefundStatus, eligibility as refundEligibility, priorRefunded as priorRefundedAmount } from "@/lib/invoice-refunds";
 import { RefundFlow } from "@/components/invoice/refund-flow";
 import { RefundsReturnsSection } from "@/components/invoice/refunds-returns-section";
+import { useLedger } from "@/lib/accounting-service";
+import { emitRefundSucceeded, emitRefundReversed } from "@/lib/refund-accounting-emitter";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { DocumentLineage, type LineageNode } from "@/components/common/document-lineage";
 import { PinnedRail } from "@/components/common/pinned-rail";
@@ -153,6 +155,26 @@ export default function InvoiceDetailPage() {
     () => (invoice ? refundEligibility(invoice, invoiceRefundRows).eligible : false),
     [invoice, invoiceRefundRows],
   );
+
+  // Accounting-journal projection — fire ONCE per newly-observed succeeded /
+  // reversed refund (keyed by refund uuid in a seen-set), NOT inside the store
+  // action and NOT on every realtime echo. The DB invoice_refunds row is the
+  // authority; this journal is a demo projection, idempotent per refund_no.
+  const ledger = useLedger();
+  const journaledSucceeded = useRef<Set<string>>(new Set());
+  const journaledReversed = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    for (const r of invoiceRefundRows) {
+      if (r.status === "succeeded" && !journaledSucceeded.current.has(r.id)) {
+        journaledSucceeded.current.add(r.id);
+        emitRefundSucceeded(r, ledger, r.processedByName || r.initiatedByName || "system");
+      }
+      if (r.status === "reversed" && !journaledReversed.current.has(r.id)) {
+        journaledReversed.current.add(r.id);
+        emitRefundReversed(r, ledger, r.reversedBy || r.initiatedByName || "system");
+      }
+    }
+  }, [invoiceRefundRows, ledger]);
   const linkedTicket = useMemo(() => tickets.find((t) => t.id === invoice?.ticketId), [tickets, invoice]);
   const activity = useMemo(() => (invoice ? generateActivity(invoice, linkedTicket?.ticketNo ?? invoice.ticketId) : []), [invoice, linkedTicket]);
   const proforma = invoice ? isProforma(invoice) : false;

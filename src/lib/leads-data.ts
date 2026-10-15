@@ -1267,6 +1267,49 @@ export function revenueWonForLead(
   return total;
 }
 
+/** Minimal refund shape for net reconciliation (succeeded refunds only). */
+export interface RevenueRefundLike {
+  invoiceId: string;
+  refundAmount: number;
+  status: string; // only "succeeded" is realized
+}
+
+/**
+ * Net-of-refund revenue attributable to a lead: Revenue Won MINUS only the
+ * succeeded refunds whose parent invoice is FINALIZED (same `status==='paid'`
+ * universe as the gross) and reachable from this lead's finalized invoices.
+ * A refund on a non-finalized (partial) invoice is NEVER subtracted here (it
+ * was never in gross Revenue Won). Never goes below 0. Design §10/§12.
+ */
+export function revenueWonNetForLead(
+  lead: Lead,
+  tickets: RevenueTicketLike[],
+  invoices: RevenueInvoiceLike[],
+  refunds: RevenueRefundLike[],
+): number {
+  const gross = revenueWonForLead(lead, tickets, invoices);
+  if (gross <= 0) return 0;
+  // The finalized invoice ids counted in this lead's gross revenue.
+  const finalized = invoices.filter(isFinalizedInvoice);
+  const finalizedIds = new Set<string>();
+  if (lead.linkedTicketId) {
+    const ticket = tickets.find((t) => t.id === lead.linkedTicketId || t.ticketNo === lead.linkedTicketId);
+    if (ticket) {
+      for (const inv of finalized) {
+        if (inv.ticketId && (inv.ticketId === ticket.id || inv.ticketId === ticket.ticketNo)) finalizedIds.add(inv.id);
+      }
+    }
+  }
+  if (lead.linkedInvoiceId) {
+    const direct = finalized.find((inv) => inv.id === lead.linkedInvoiceId);
+    if (direct) finalizedIds.add(direct.id);
+  }
+  const attributableRefunds = refunds
+    .filter((r) => r.status === "succeeded" && finalizedIds.has(r.invoiceId))
+    .reduce((s, r) => s + Number(r.refundAmount || 0), 0);
+  return Math.max(0, gross - attributableRefunds);
+}
+
 /* ═══════════════════════════════════════════════════════════════════════
    CUSTOMER SALES ATTRIBUTION (derived, read-only)
    A single Customer may be worked by MANY Sales Agents across MANY leads

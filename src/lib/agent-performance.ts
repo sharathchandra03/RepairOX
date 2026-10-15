@@ -33,8 +33,10 @@ import {
   isLostStatus,
   leadExpectedValue,
   revenueWonForLead,
+  revenueWonNetForLead,
   type RevenueInvoiceLike,
   type RevenueTicketLike,
+  type RevenueRefundLike,
 } from "@/lib/leads-data";
 import type { SalesAgent } from "@/lib/sales-agents";
 
@@ -47,6 +49,8 @@ import type { SalesAgent } from "@/lib/sales-agents";
 export interface RevenueSources {
   tickets: RevenueTicketLike[];
   invoices: RevenueInvoiceLike[];
+  /** Succeeded refunds for net-of-refund Revenue Won (optional; gross unchanged). */
+  refunds?: RevenueRefundLike[];
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -158,7 +162,8 @@ export interface AgentPerformance {
   /* Money */
   pipelineValue: number;   // Σ expected value of OPEN leads (NOT revenue)
   projection: number;      // probability-weighted open pipeline (see STAGE_PROBABILITY)
-  revenueWon: number;      // Σ FINALIZED invoice totals attributable to this agent
+  revenueWon: number;      // Σ FINALIZED invoice totals attributable to this agent (GROSS, unchanged)
+  revenueWonNet: number;   // revenueWon − refunds on finalized-parent invoices (NET; same universe)
   avgLeadValue: number;    // pipelineValue+revenueWon proxy → Σ expected value / leads
   ticketsWon: number;      // leads that produced a real linked ticket
 
@@ -282,6 +287,7 @@ export function computeAgentPerformance(
   let contacted = 0;
   let projection = 0;
   let expectedValueSum = 0;
+  let revNetSum = 0;
   let convDaysSum = 0;
   let convDaysCount = 0;
   let invoiceCount = 0;
@@ -303,6 +309,10 @@ export function computeAgentPerformance(
     const lost = isLostStatus(l.status, l.finalResult);
     const qualified = isQualifiedLead(l);
     const rev = revenueWonForLead(l, revenue.tickets, revenue.invoices);
+    const revNet = revenue.refunds
+      ? revenueWonNetForLead(l, revenue.tickets, revenue.invoices, revenue.refunds)
+      : rev;
+    revNetSum += revNet;
     const ev = leadExpectedValue(l);
     expectedValueSum += ev;
 
@@ -385,6 +395,9 @@ export function computeAgentPerformance(
     pipelineValue: base.pipelineValue,
     projection,
     revenueWon: base.revenueWon,
+    // Net = gross − finalized-parent refunds (same universe). Falls back to
+    // gross when no refund data is supplied. Never below gross's correct value.
+    revenueWonNet: revenue.refunds ? Math.max(0, Math.min(base.revenueWon, revNetSum)) : base.revenueWon,
     avgLeadValue: agentLeads.length > 0 ? expectedValueSum / agentLeads.length : 0,
     ticketsWon: base.ticketsWon,
 

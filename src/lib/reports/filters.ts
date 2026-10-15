@@ -149,6 +149,12 @@ export function applyFilters(
 
   const ledgerEntries = d.ledgerEntries.filter((e) => inRange(e.date, range));
 
+  // Refunds in range by their processed/created date (independent of the parent
+  // invoice's date — a refund can land in a later period than the sale).
+  const invoiceRefunds = d.invoiceRefunds.filter((r) =>
+    inRange((r.processedAt || r.createdAt || "").slice(0, 10), range),
+  );
+
   const customers = d.customers.filter((c) => eqi(c.city, undefined));
 
   const team = f.branch ? d.team.filter((t) => eqi(t.branch, f.branch)) : d.team;
@@ -157,6 +163,7 @@ export function applyFilters(
     ...d,
     tickets,
     invoices,
+    invoiceRefunds,
     walkIns,
     expenses,
     ledgerTx,

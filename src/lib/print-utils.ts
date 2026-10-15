@@ -1,5 +1,5 @@
 import type { StoreSettings, CustomPrintTemplate } from "@/lib/store-settings";
-import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord } from "@/lib/mock-data";
+import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord, InvoiceRefund, InvoiceRefundAllocation } from "@/lib/mock-data";
 import { getTicketDevices, getInvoiceDevices, formatDeviceColour, getRecordType } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import { qcItemLabel } from "@/lib/qc-config";
@@ -7,7 +7,7 @@ import { qcItemLabel } from "@/lib/qc-config";
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
 export type PrintFormat = "a4" | "thermal" | "label";
-export type PrintDocumentType = "ticket" | "invoice" | "quotation" | "diagnostic";
+export type PrintDocumentType = "ticket" | "invoice" | "quotation" | "diagnostic" | "credit_note";
 
 /* ─── Print Data Shapes ──────────────────────────────────────────────── */
 
@@ -139,6 +139,10 @@ export type PrintInvoiceInfo = {
   serviceCategory?: string;
   /** Multi-device: individual device sections for print */
   devices?: PrintInvoiceDeviceInfo[];
+  /** NON-DESTRUCTIVE refund annotation (e.g. "PARTIALLY REFUNDED ₹X on DATE
+   *  (CN-00NN)" / "FULLY REFUNDED"). The invoice content/totals are NEVER
+   *  rewritten — this is a stamped footer/watermark line only. */
+  refundAnnotation?: string;
 };
 
 export type PrintInvoiceDeviceInfo = {
@@ -184,12 +188,37 @@ export type PrintQuotationInfo = {
   message: string[];
 };
 
+/* ─── Credit Note print info ────────────────────────────────────────────────
+   A customer-facing CREDIT NOTE for a refund. Shares the invoice/quotation A4
+   design family. It shows the refunded devices/lines/qty/net/tax, the refund
+   method + reference + reason, and the ORIGINAL invoice reference. It NEVER
+   shows cost price / labour / profit (customer-facing). */
+export type PrintCreditNoteInfo = {
+  creditNoteId: string;     // CN-#### (or the refund uuid when no number yet)
+  refundDate: string;
+  originalInvoiceId: string;
+  originalInvoiceRef: string;
+  customerName: string;
+  reason: string;
+  method: string;
+  reference: string;
+  scope: string;            // "invoice" | "devices" | "lines" (display)
+  status: string;           // lifecycle label
+  /** Refunded lines (name/qty/net/tax/amount — NO cost / labour / profit). */
+  items: PrintLineItem[];
+  refundNet: number;
+  refundTax: number;
+  refundAmount: number;
+  customerNote: string;
+};
+
 export type PrintDocumentData = {
   store: PrintStoreInfo;
   customer: PrintCustomerInfo;
   ticket?: PrintTicketInfo;
   invoice?: PrintInvoiceInfo;
   quotation?: PrintQuotationInfo;
+  creditNote?: PrintCreditNoteInfo;
   /** Diagnostic-report mode: when present, the shared Ticket A4 renders a
    *  diagnostic variant — a highlighted "QC FAILED" banner + a highlighted
    *  "Device Condition" box carrying this comment — and OMITS Terms &
@@ -443,6 +472,10 @@ export function buildInvoicePrintData(
   settings: StoreSettings,
   invoice: Invoice,
   linkedTicketNo?: string,
+  /** Optional NON-DESTRUCTIVE refund annotation stamped on the original invoice
+   *  ("PARTIALLY REFUNDED ₹X on DATE (CN-00NN)" / "FULLY REFUNDED"). The invoice
+   *  totals/content are never rewritten. */
+  refundAnnotation?: string,
 ): PrintDocumentData {
   const now = new Date();
   // Determine print title. A PROFORMA always prints as "Proforma Invoice"
@@ -458,10 +491,12 @@ export function buildInvoicePrintData(
   } else {
     title = "Retail Invoice";
   }
+  const invoiceInfo = buildInvoiceInfo(invoice, linkedTicketNo);
+  if (refundAnnotation) invoiceInfo.refundAnnotation = refundAnnotation;
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromInvoice(invoice),
-    invoice: buildInvoiceInfo(invoice, linkedTicketNo),
+    invoice: invoiceInfo,
     printTitle: title,
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
     printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
@@ -555,6 +590,85 @@ export function buildQuotationPrintData(
     warrantyText: "",
     printFooter: settings.printFooter || "",
   };
+}
+
+/* ─── Credit Note document assembly ─────────────────────────────────────────
+   The customer-facing CREDIT NOTE for a refund. Reuses buildStoreInfo /
+   buildCustomerFromInvoice (never hard-codes company/office/phone). It carries
+   ONLY customer-facing figures — refunded lines/qty/net/tax, method, reason,
+   original invoice reference — and NEVER cost price / labour / profit. */
+export function buildCreditNotePrintData(
+  settings: StoreSettings,
+  invoice: Invoice,
+  refund: InvoiceRefund,
+  allocations: InvoiceRefundAllocation[],
+): PrintDocumentData {
+  const now = new Date();
+  const items: PrintLineItem[] = allocations.map((a) => ({
+    name: a.lineComponent === "repair_cost" ? "Repair / Labour" : (lineNameForAlloc(invoice, a) || a.sku || "Item"),
+    qty: a.qty || 1,
+    price: a.allocNet,
+    discount: 0,
+    total: a.allocAmount,
+  }));
+  const scopeLabel = refund.scope === "invoice" ? "Entire Invoice" : refund.scope === "devices" ? "Selected Devices" : "Selected Line Items";
+  const statusLabel = refund.status.charAt(0).toUpperCase() + refund.status.slice(1);
+  return {
+    store: buildStoreInfo(settings),
+    customer: buildCustomerFromInvoice(invoice),
+    creditNote: {
+      creditNoteId: refund.refundNo || refund.id,
+      refundDate: (refund.processedAt || refund.createdAt || now.toISOString()),
+      originalInvoiceId: invoice.id,
+      originalInvoiceRef: invoice.reference || invoice.id,
+      customerName: invoice.customer || refund.customerName || "",
+      reason: refund.reasonCode || "",
+      method: refund.method || "",
+      reference: refund.reference || "",
+      scope: scopeLabel,
+      status: statusLabel,
+      items,
+      refundNet: refund.refundNet,
+      refundTax: refund.refundTax,
+      refundAmount: refund.refundAmount,
+      customerNote: refund.customerNote || "",
+    },
+    printTitle: "Credit Note",
+    printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
+    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    termsAndConditions: "",
+    warrantyText: "",
+    printFooter: invoice.footer || settings.invoiceFooter || "",
+  };
+}
+
+/** Resolve a human line name for an allocation from the invoice's device/line
+ *  structure (best-effort; falls back to the alloc sku). */
+function lineNameForAlloc(invoice: Invoice, a: InvoiceRefundAllocation): string {
+  for (const d of getInvoiceDevices(invoice)) {
+    for (const p of d.parts || []) {
+      if (p.id === a.lineId) return p.name;
+    }
+  }
+  return "";
+}
+
+/** Build a non-destructive refund annotation string for the ORIGINAL invoice
+ *  print (never rewrites invoice totals). Returns "" when there is no realized
+ *  refund. */
+export function buildRefundAnnotation(
+  refunds: InvoiceRefund[],
+  refundedAmount: number,
+  fullyRefunded: boolean,
+): string {
+  const succeeded = refunds.filter((r) => r.status === "succeeded");
+  if (succeeded.length === 0 || refundedAmount <= 0) return "";
+  const cns = succeeded.map((r) => r.refundNo).filter(Boolean).join(", ");
+  const date = (succeeded[succeeded.length - 1].processedAt || succeeded[succeeded.length - 1].createdAt || "").slice(0, 10);
+  if (fullyRefunded) {
+    return `FULLY REFUNDED${cns ? ` (${cns})` : ""}`;
+  }
+  return `PARTIALLY REFUNDED ₹${refundedAmount.toLocaleString("en-IN")}${date ? ` on ${date}` : ""}${cns ? ` (${cns})` : ""}`;
 }
 
 /* ─── Master Default + Custom Templates ──────────────────────────────────

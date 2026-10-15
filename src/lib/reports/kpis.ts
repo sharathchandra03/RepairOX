@@ -26,6 +26,16 @@ interface CoreMetrics {
   billed: number;
   collected: number;
   gst: number;
+  /** Σ succeeded refunds (all parents). Real cash returned. */
+  refunds: number;
+  /** billed − refunds whose parent is a finalized invoice (same universe). */
+  netSales: number;
+  /** collected − all succeeded refunds (real cash position). */
+  netCollected: number;
+  /** gst − refund tax on finalized-parent refunds. */
+  netGst: number;
+  /** refunds / collected (%). */
+  refundRate: number;
   collectionRate: number;
   pending: number;
   overdue: number;
@@ -119,7 +129,34 @@ function computeCore(d: ReportDataset, range: DateRange, full: ReportDataset): C
     (it) => (it.minStock || 0) > 0 && (it.currentStock || 0) <= (it.minStock || 0)
   ).length;
 
-  const netRevenue = collected - expenseTotal;
+  /* Refunds (net-of-refund reconciliation — gross figures stay UNCHANGED).
+     Only SUCCEEDED refunds are realized (reversed/failed/pending contribute 0).
+     Two distinct net lines, each on the SAME universe as the thing it nets
+     (design §10):
+       • Net Sales      = billed − refunds whose parent isFinalizedInvoice
+                          (same paid/finalized universe as `billed`).
+       • Net Collected  = collected − ALL succeeded refunds (real cash returned),
+                          incl. partial-invoice refunds.
+     `billed`/`collected`/`gst` remain gross for historical integrity. */
+  const invoiceById = new Map(full.invoices.map((i) => [i.id, i]));
+  const succeededRefunds = d.invoiceRefunds.filter((r) => r.status === "succeeded");
+  const isFinalizedParent = (invoiceId: string): boolean => {
+    const inv = invoiceById.get(invoiceId);
+    return !!inv && (inv.documentType ?? "invoice") !== "proforma" && inv.status === "paid";
+  };
+  const refunds = succeededRefunds.reduce((s, r) => s + (r.refundAmount || 0), 0);
+  const refundsAgainstFinalized = succeededRefunds
+    .filter((r) => isFinalizedParent(r.invoiceId))
+    .reduce((s, r) => s + (r.refundAmount || 0), 0);
+  const refundTaxFinalized = succeededRefunds
+    .filter((r) => isFinalizedParent(r.invoiceId))
+    .reduce((s, r) => s + (r.refundTax || 0), 0);
+  const netSales = Math.max(0, billed - refundsAgainstFinalized);
+  const netCollected = Math.max(0, collected - refunds);
+  const netGst = Math.max(0, gst - refundTaxFinalized);
+  const refundRate = collected > 0 ? (refunds / collected) * 100 : 0;
+
+  const netRevenue = netCollected - expenseTotal;
 
   return {
     ticketCount,
@@ -133,6 +170,11 @@ function computeCore(d: ReportDataset, range: DateRange, full: ReportDataset): C
     billed,
     collected,
     gst,
+    refunds,
+    netSales,
+    netCollected,
+    netGst,
+    refundRate,
     collectionRate: billed ? (collected / billed) * 100 : 0,
     pending,
     overdue,
@@ -140,7 +182,7 @@ function computeCore(d: ReportDataset, range: DateRange, full: ReportDataset): C
     cancelledInvoices,
     expenseTotal,
     netRevenue,
-    grossMargin: collected ? (netRevenue / collected) * 100 : 0,
+    grossMargin: netCollected ? (netRevenue / netCollected) * 100 : 0,
     cashCollection,
     bankCollection,
     newCustomers,
@@ -193,11 +235,16 @@ export function computeKpis(full: ReportDataset, filters: ReportFilters): KpiRes
     /* Revenue */
     K("total_revenue", "Total Revenue (Billed)", cur.billed, pm.billed, "currency", "revenue", "emerald", { drillHref: "/invoice" }),
     K("collected", "Cash Collected", cur.collected, pm.collected, "currency", "revenue", "emerald", { drillHref: "/shop/payments" }),
-    K("net_revenue", "Net Revenue", cur.netRevenue, pm.netRevenue, "currency", "revenue", "sky", { hint: "Collected − expenses" }),
+    K("net_revenue", "Net Revenue", cur.netRevenue, pm.netRevenue, "currency", "revenue", "sky", { hint: "Net collected − expenses" }),
+    K("refunds", "Refunds", cur.refunds, pm.refunds, "currency", "revenue", "rose", { higherIsBetter: false, hint: "Succeeded refunds (cash returned)", drillHref: "/invoice" }),
+    K("net_sales", "Net Sales", cur.netSales, pm.netSales, "currency", "revenue", "emerald", { hint: "Billed − refunds on finalized invoices" }),
+    K("net_collected", "Net Collected", cur.netCollected, pm.netCollected, "currency", "revenue", "emerald", { hint: "Collected − all refunds" }),
+    K("refund_rate", "Refund Rate", cur.refundRate, pm.refundRate, "percent", "revenue", "rose", { higherIsBetter: false, progress: cur.refundRate }),
     K("collection_rate", "Collection Rate", cur.collectionRate, pm.collectionRate, "percent", "revenue", "violet", { progress: cur.collectionRate }),
     K("avg_invoice", "Avg Invoice Value", cur.avgInvoiceValue, pm.avgInvoiceValue, "currency", "revenue", "sky"),
     K("gross_margin", "Gross Margin", cur.grossMargin, pm.grossMargin, "percent", "revenue", "emerald", { progress: Math.max(0, cur.grossMargin) }),
     K("gst", "GST Collected", cur.gst, pm.gst, "currency", "revenue", "amber", { hint: "Tax on invoices" }),
+    K("net_gst", "Net GST", cur.netGst, pm.netGst, "currency", "revenue", "amber", { hint: "GST − refunded tax (finalized)" }),
     K("daily_avg", "Daily Avg Revenue", cur.dailyAvgRevenue, pm.dailyAvgRevenue, "currency", "revenue", "sky"),
     K("monthly_proj", "Monthly Projection", cur.monthlyProjection, pm.monthlyProjection, "currency", "revenue", "violet", { noDelta: true, hint: "Daily avg × 30" }),
     K("yearly_proj", "Yearly Projection", cur.yearlyProjection, pm.yearlyProjection, "currency", "revenue", "violet", { noDelta: true, hint: "Daily avg × 365" }),

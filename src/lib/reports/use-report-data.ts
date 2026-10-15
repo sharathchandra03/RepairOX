@@ -34,6 +34,7 @@ export function useReportData(): ReportDataset {
     () => ({
       tickets: store.tickets,
       invoices: store.invoices,
+      invoiceRefunds: store.invoiceRefunds,
       walkIns: store.walkIns,
       inventory: store.inventory,
       customers: store.customers,
@@ -47,7 +48,7 @@ export function useReportData(): ReportDataset {
       hydrated: store.hydrated,
     }),
     [
-      store.tickets, store.invoices, store.walkIns, store.inventory, store.customers,
+      store.tickets, store.invoices, store.invoiceRefunds, store.walkIns, store.inventory, store.customers,
       store.brands, store.deviceModels, store.hydrated,
       team, expenses, ledger.transactions, accounting.entries, ledgerSummaries, isDemoMode,
     ]

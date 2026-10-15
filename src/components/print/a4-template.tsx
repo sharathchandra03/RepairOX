@@ -1,6 +1,6 @@
 "use client";
 
-import type { PrintDocumentData, PrintDeviceInfo, PrintLineItem, PrintQuotationInfo } from "@/lib/print-utils";
+import type { PrintDocumentData, PrintDeviceInfo, PrintLineItem, PrintQuotationInfo, PrintCreditNoteInfo } from "@/lib/print-utils";
 import { formatPrintCurrency, formatPrintDate, formatPrintTime, formatPrintDateTime } from "@/lib/print-utils";
 import { formatWarranty } from "@/lib/mock-data";
 
@@ -35,6 +35,9 @@ export function A4Template({ data }: { data: PrintDocumentData }) {
   }
   if (data.quotation) {
     return <QuotationA4 data={data} />;
+  }
+  if (data.creditNote) {
+    return <CreditNoteA4 data={data} />;
   }
   return <InvoiceA4 data={data} />;
 }
@@ -945,6 +948,14 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
           </div>
         </header>
 
+        {/* ══ NON-DESTRUCTIVE REFUND ANNOTATION (totals never rewritten) ══ */}
+        {inv.refundAnnotation ? (
+          <div data-pdf-atomic style={{ marginTop: 8, border: `1px solid ${BRAND.rose}`, borderRadius: 6, backgroundColor: "#FEF2F4", padding: "6px 12px", display: "flex", alignItems: "center", gap: 8, ...NO_BREAK }}>
+            <span style={{ width: 7, height: 7, borderRadius: 99, backgroundColor: BRAND.rose, display: "inline-block" }} />
+            <span style={{ fontSize: 10.5, fontWeight: 800, letterSpacing: 0.4, color: BRAND.rose, textTransform: "uppercase" }}>{inv.refundAnnotation}</span>
+          </div>
+        ) : null}
+
         {/* ══ CUSTOMER + INVOICE INFO ══ */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1.35fr", gap: 10, marginTop: 7 }}>
           {/* CUSTOMER DETAILS */}
@@ -1416,6 +1427,151 @@ function QSummaryRow({ label, value, strong, accent }: { label: string; value: s
     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
       <span style={{ fontSize: strong ? 12 : 11, fontWeight: strong ? 800 : 500, color: accent ? BRAND.blue : BRAND.slate }}>{label}</span>
       <span style={{ fontSize: strong ? 13 : 11, fontWeight: strong ? 800 : 600, color: accent ? BRAND.blue : BRAND.navy, textAlign: "right" }}>{value}</span>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CREDIT NOTE — customer-facing refund document (shares the invoice A4 family).
+   Shows refunded lines/qty/net/tax, method, reason + the ORIGINAL invoice ref.
+   NEVER shows cost price / labour / profit (customer-facing).
+   ═══════════════════════════════════════════════════════════════════════ */
+function CreditNoteA4({ data }: { data: PrintDocumentData }) {
+  const { store, customer, printTitle } = data;
+  const cn = data.creditNote as PrintCreditNoteInfo;
+  const rows = (cn.items || []).map((it, i) => ({ idx: i + 1, ...it }));
+  const cnNo = (cn.creditNoteId || "").trim();
+
+  const th = (align: "left" | "center" | "right"): React.CSSProperties => ({
+    textAlign: align, padding: "8px 14px", fontSize: 9.5, fontWeight: 800,
+    letterSpacing: 0.5, textTransform: "uppercase", color: BRAND.white,
+  });
+  const td = (align: "left" | "center" | "right"): React.CSSProperties => ({
+    textAlign: align, padding: "9px 14px", fontSize: 11, lineHeight: 1.35,
+    color: BRAND.ink, borderTop: `1px solid ${BRAND.borderSoft}`,
+    whiteSpace: align === "left" ? "normal" : "nowrap",
+  });
+
+  return (
+    <div
+      className="a4-page"
+      style={{
+        width: "210mm", minHeight: "297mm", margin: "0 auto", backgroundColor: BRAND.white,
+        color: BRAND.navy, fontFamily: "system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif",
+        fontSize: 11, lineHeight: 1.5, boxShadow: "0 1px 4px rgba(0,0,0,0.12)",
+        position: "relative", display: "flex", flexDirection: "column",
+      }}
+    >
+      <div className="ticket-print-body" style={{ padding: "10mm 16mm 4mm", flex: 1 }}>
+        {/* ══ HEADER ══ */}
+        <header data-pdf-atomic style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, paddingBottom: 12, borderBottom: `2px solid ${BRAND.blue}` }}>
+          <div style={{ display: "flex", gap: 16, alignItems: "flex-start", maxWidth: "56%" }}>
+            {store.logo ? <img src={store.logo} alt="Logo" style={{ height: 60, width: 60, objectFit: "contain" }} /> : null}
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 800, color: BRAND.blue, lineHeight: 1.15 }}>{store.storeName}</div>
+              {store.alternateName ? <div style={{ fontSize: 10, color: BRAND.slateLight, fontWeight: 600, marginTop: 1 }}>{store.alternateName}</div> : null}
+              <div style={{ marginTop: 9, fontSize: 10, color: BRAND.slate, display: "flex", flexDirection: "column", gap: 3 }}>
+                {store.fullAddress ? <span>{store.fullAddress}</span> : null}
+                {store.phone ? <span>{store.phone}{store.mobile && store.mobile !== store.phone ? ` · ${store.mobile}` : ""}</span> : null}
+                {store.email ? <span>{store.email}</span> : null}
+              </div>
+            </div>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", flexShrink: 0 }}>
+            <div style={{ fontSize: 26, fontWeight: 800, letterSpacing: 1, color: BRAND.navy, textTransform: "uppercase", lineHeight: 1 }}>{printTitle}</div>
+            {cnNo ? <div style={{ marginTop: 6, fontSize: 16, fontWeight: 800, color: BRAND.rose, letterSpacing: 0.4, lineHeight: 1 }}>#{cnNo}</div> : null}
+            <div style={{ marginTop: 8, fontSize: 9.5, color: BRAND.slate }}>{formatPrintDate(cn.refundDate)} · {formatPrintTime(cn.refundDate)}</div>
+            <div style={{ marginTop: 6, display: "inline-block", padding: "2px 9px", borderRadius: 5, fontSize: 8.5, fontWeight: 800, letterSpacing: 0.6, textTransform: "uppercase", backgroundColor: BRAND.band, color: BRAND.blue, border: `1px solid ${BRAND.border}` }}>
+              {cn.status}
+            </div>
+          </div>
+        </header>
+
+        {/* ══ CUSTOMER + REFUND INFO ══ */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1.3fr", gap: 14, marginTop: 14 }}>
+          <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
+            <QSectionHead title="Refund To" />
+            <div style={{ padding: "11px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+              <QField label="Name" value={cn.customerName || customer.name} />
+              {customer.phone ? <QField label="Phone" value={customer.phone} /> : null}
+              {customer.email ? <QField label="Email" value={customer.email} /> : null}
+            </div>
+          </div>
+          <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
+            <QSectionHead title="Refund Information" />
+            <div style={{ padding: "11px 14px", display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px 18px" }}>
+              <QField label="Original Invoice" value={cn.originalInvoiceRef} />
+              <QField label="Scope" value={cn.scope} />
+              <QField label="Reason" value={cn.reason} />
+              <QField label="Method" value={cn.method} />
+              {cn.reference ? <QField label="Reference" value={cn.reference} /> : null}
+            </div>
+          </div>
+        </div>
+
+        {/* ══ REFUNDED ITEMS (NO cost / labour / profit) ══ */}
+        {rows.length > 0 ? (
+          <div style={{ marginTop: 14, border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", tableLayout: "fixed" }}>
+              <colgroup>
+                <col style={{ width: "6%" }} />
+                <col style={{ width: "52%" }} />
+                <col style={{ width: "10%" }} />
+                <col style={{ width: "16%" }} />
+                <col style={{ width: "16%" }} />
+              </colgroup>
+              <thead>
+                <tr style={{ backgroundColor: BRAND.blue }}>
+                  <th style={th("center")}>#</th>
+                  <th style={th("left")}>Refunded Item</th>
+                  <th style={th("center")}>Qty</th>
+                  <th style={th("right")}>Net</th>
+                  <th style={th("right")}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r, i) => (
+                  <tr key={i} data-pdf-atomic style={{ backgroundColor: i % 2 === 1 ? BRAND.bandSoft : BRAND.white, verticalAlign: "top", ...NO_BREAK }}>
+                    <td style={td("center")}>{r.idx}</td>
+                    <td style={td("left")}><div style={{ fontWeight: 700, color: BRAND.navy, fontSize: 11.5 }}>{r.name}</div></td>
+                    <td style={td("center")}>{r.qty}</td>
+                    <td style={td("right")}>{formatPrintCurrency(r.price)}</td>
+                    <td style={{ ...td("right"), fontWeight: 800, color: BRAND.navy }}>{formatPrintCurrency(r.total)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
+        {/* ══ REFUND TOTAL ══ */}
+        <div data-pdf-atomic style={{ display: "flex", justifyContent: "flex-end", marginTop: 14, ...NO_BREAK }}>
+          <div style={{ width: "46%", border: `1px solid ${BRAND.border}`, borderRadius: 12, overflow: "hidden", display: "flex", flexDirection: "column" }}>
+            <QSectionHead title="Refund Summary" />
+            <div style={{ padding: "12px 14px", display: "flex", flexDirection: "column", gap: 9 }}>
+              <QSummaryRow label="Refund (Net)" value={formatPrintCurrency(cn.refundNet)} />
+              <QSummaryRow label="Refund (Tax)" value={formatPrintCurrency(cn.refundTax)} />
+              <div style={{ borderTop: `1px dashed ${BRAND.border}`, margin: "3px 0" }} />
+              <QSummaryRow label="Total Refunded" value={formatPrintCurrency(cn.refundAmount)} strong accent />
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", backgroundColor: BRAND.rose, padding: "12px 14px" }}>
+              <span style={{ fontSize: 12, fontWeight: 800, color: BRAND.white, letterSpacing: 0.4 }}>Amount Refunded</span>
+              <span style={{ fontSize: 18, fontWeight: 800, color: BRAND.white }}>{formatPrintCurrency(cn.refundAmount)}</span>
+            </div>
+          </div>
+        </div>
+
+        {cn.customerNote ? (
+          <div data-pdf-atomic style={{ marginTop: 14, border: `1px solid ${BRAND.borderSoft}`, borderRadius: 12, padding: "11px 14px", ...NO_BREAK }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 0.4, textTransform: "uppercase", color: BRAND.slateLight, marginBottom: 4 }}>Note</div>
+            <p style={{ fontSize: 10.5, color: BRAND.ink, lineHeight: 1.5, margin: 0 }}>{cn.customerNote}</p>
+          </div>
+        ) : null}
+      </div>
+
+      <footer data-pdf-atomic style={{ backgroundColor: BRAND.blue, color: BRAND.white, textAlign: "center", padding: "11px 16px", fontSize: 11, fontWeight: 700, letterSpacing: 0.5, breakBefore: "avoid", pageBreakBefore: "avoid", ...NO_BREAK }}>
+        {data.printFooter || "Thank you for choosing " + (store.storeName || "us") + "!"}
+      </footer>
     </div>
   );
 }

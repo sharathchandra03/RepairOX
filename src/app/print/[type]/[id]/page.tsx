@@ -11,9 +11,14 @@ import {
   buildInvoicePrintData,
   buildQuotationPrintData,
   buildDiagnosticReportPrintData,
+  buildCreditNotePrintData,
+  buildRefundAnnotation,
   type PrintFormat,
   type PrintDocumentData,
 } from "@/lib/print-utils";
+import { priorRefunded as priorRefundedAmount, refundStatus as deriveRefundStatus } from "@/lib/invoice-refunds";
+import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
 import { buildStoreInfo } from "@/lib/print-utils";
 import { buildQuotationMessage, warrantyLabel, formatIssueList, DEFAULT_QUOTATION_POLICY } from "@/lib/quotation-data";
 import { A4Template } from "@/components/print/a4-template";
@@ -34,16 +39,18 @@ function FormatSelector({
   isTicket,
   isQuotation,
   isDiagnostic,
+  isCreditNote,
 }: {
   format: PrintFormat;
   setFormat: (f: PrintFormat) => void;
   isTicket: boolean;
   isQuotation?: boolean;
   isDiagnostic?: boolean;
+  isCreditNote?: boolean;
 }) {
-  // A quotation and a diagnostic report are A4-only full-page documents.
+  // A quotation, diagnostic report and credit note are A4-only full-page docs.
   // Tickets get all three; invoices get A4 + thermal.
-  const a4Only = isQuotation || isDiagnostic;
+  const a4Only = isQuotation || isDiagnostic || isCreditNote;
   const options = a4Only
     ? FORMAT_OPTIONS.filter((o) => o.id === "a4")
     : isTicket
@@ -101,9 +108,11 @@ function getCommentFromUrl(): string {
 export default function PrintPreviewPage() {
   const params = useParams();
   const router = useRouter();
-  const { tickets, invoices } = useStore();
+  const { tickets, invoices, invoiceRefunds, invoiceRefundAllocations } = useStore();
   const { settings, hydrated } = useStoreSettings();
   const { quotations } = useQuotations();
+  const { can } = usePermissions();
+  const canSeeRefund = allow(can, CAP.invoice.refundView) && allow(can, CAP.invoice.print);
 
   const docType = (params.type as string) || "";
   const docId = decodeURIComponent((params.id as string) || "");
@@ -118,6 +127,7 @@ export default function PrintPreviewPage() {
   const isTicket = docType === "ticket";
   const isQuotation = docType === "quotation";
   const isDiagnostic = docType === "diagnostic";
+  const isCreditNote = docType === "credit_note";
 
   // Wait for client mount to avoid hydration mismatch
   useEffect(() => {
@@ -128,7 +138,18 @@ export default function PrintPreviewPage() {
   // Build print data (only after mount AND settings hydrated)
   const printData: PrintDocumentData | null = useMemo(() => {
     if (!mounted || !hydrated || !docId) return null;
-    if (isDiagnostic) {
+    if (isCreditNote) {
+      // [id] = the invoice_refunds UUID. Resolve the refund, its allocations and
+      // the parent invoice. An unauthorized / missing id renders not-found (the
+      // DB RLS is the real boundary — an unauthorized refund isn't in the list).
+      if (!canSeeRefund) return null;
+      const refund = invoiceRefunds.find((r) => r.id === docId);
+      if (!refund) return null;
+      const parent = invoices.find((i) => i.id === refund.invoiceId);
+      if (!parent) return null;
+      const allocs = invoiceRefundAllocations.filter((a) => a.refundId === refund.id);
+      return buildCreditNotePrintData(settings, parent, refund, allocs);
+    } else if (isDiagnostic) {
       const ticket = tickets.find((t) => t.id === docId);
       if (!ticket) return null;
       return buildDiagnosticReportPrintData(settings, ticket, comment);
@@ -173,9 +194,18 @@ export default function PrintPreviewPage() {
       const invoice = invoices.find((i) => i.id === docId);
       if (!invoice) return null;
       const lt = invoice.ticketId ? tickets.find((t) => t.id === invoice.ticketId) : undefined;
-      return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId);
+      // Non-destructive refund annotation on the original invoice (totals never
+      // rewritten). Only visible to a refund-view user.
+      const invRefunds = invoiceRefunds.filter((r) => r.invoiceId === invoice.id);
+      let annotation = "";
+      if (canSeeRefund && invRefunds.length > 0) {
+        const refunded = priorRefundedAmount(invRefunds);
+        const fully = deriveRefundStatus(invoice, invRefunds) === "fully_refunded";
+        annotation = buildRefundAnnotation(invRefunds, refunded, fully);
+      }
+      return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId, annotation || undefined);
     }
-  }, [mounted, hydrated, isTicket, isQuotation, isDiagnostic, comment, docId, tickets, invoices, quotations, settings]);
+  }, [mounted, hydrated, isTicket, isQuotation, isDiagnostic, isCreditNote, canSeeRefund, comment, docId, tickets, invoices, invoiceRefunds, invoiceRefundAllocations, quotations, settings]);
 
   // Auto-print if query param is set
   useEffect(() => {
@@ -190,10 +220,10 @@ export default function PrintPreviewPage() {
     if (!isTicket && format === "label") {
       setFormat("a4");
     }
-    if ((isQuotation || isDiagnostic) && format !== "a4") {
+    if ((isQuotation || isDiagnostic || isCreditNote) && format !== "a4") {
       setFormat("a4");
     }
-  }, [isTicket, isQuotation, isDiagnostic, format]);
+  }, [isTicket, isQuotation, isDiagnostic, isCreditNote, format]);
 
   // Loading state while mounting
   if (!mounted || !hydrated) {
@@ -252,7 +282,7 @@ export default function PrintPreviewPage() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <FormatSelector format={format} setFormat={setFormat} isTicket={isTicket} isQuotation={isQuotation} isDiagnostic={isDiagnostic} />
+            <FormatSelector format={format} setFormat={setFormat} isTicket={isTicket} isQuotation={isQuotation} isDiagnostic={isDiagnostic} isCreditNote={isCreditNote} />
             <button
               onClick={() => window.print()}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, background: "#4361EE", padding: "8px 16px", fontSize: 14, fontWeight: 500, color: "#fff", border: "none", cursor: "pointer", boxShadow: "0 1px 2px rgba(0,0,0,0.1)" }}

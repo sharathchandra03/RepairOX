@@ -12,7 +12,7 @@
    requires rewriting the engine — it registers itself (see registry.ts).
    ────────────────────────────────────────────────────────────────────────── */
 
-import type { Ticket, Invoice, WalkIn, TeamMember } from "@/lib/mock-data";
+import type { Ticket, Invoice, InvoiceRefund, WalkIn, TeamMember } from "@/lib/mock-data";
 import type { InventoryItem } from "@/lib/inventory-data";
 import type { Customer } from "@/lib/customer-data";
 import type { Brand, DeviceModel } from "@/lib/brand-model-data";
@@ -132,6 +132,9 @@ export interface FilterOptionSet {
 export interface ReportDataset {
   tickets: Ticket[];
   invoices: Invoice[];
+  /** DB refund ledger (succeeded = realized). Net-of-refund KPIs subtract these
+   *  WITHOUT mutating gross billed/collected/total/paidAmount. */
+  invoiceRefunds: InvoiceRefund[];
   walkIns: WalkIn[];
   inventory: InventoryItem[];
   customers: Customer[];
