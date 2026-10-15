@@ -155,7 +155,7 @@ TypeScript + Next.js (App Router) + React, Supabase (Postgres + RLS + Realtime),
 
 ---
 
-## 4. Data model (migration `0075_invoice_refunds.sql`)
+## 4. Data model (migration `0076_invoice_refunds.sql`)
 
 Three new tables, mirroring the `0063_lead_deals.sql` structure (per-org sequence RPC + guard trigger + append-only revisions + RLS that follows the parent record). All are **additive + idempotent**. The invoice table is NOT altered — invoice-level derived figures are computed, and any invoice-side cache (optional) is written into the existing JSONB `devices` envelope, never a schema change.
 
@@ -565,7 +565,7 @@ Add `.kiro/steering/invoice-refunds.md` (repository-defined, same format/tone as
 ## 18. Files to create / modify
 
 **Create**
-- `supabase/migrations/0075_invoice_refunds.sql` — tables, sequences, guards, revisions, RLS, realtime (mirror `0063`); PLUS `restock_item_return()` SECURITY DEFINER function; PLUS the `loyalty_transactions.source_type` CHECK alter + the `loyalty_transactions_one_refund_reversal` partial unique index (§9.5).
+- `supabase/migrations/0076_invoice_refunds.sql` — tables, sequences, guards, revisions, RLS, realtime (mirror `0063`); PLUS `restock_item_return()` SECURITY DEFINER function; PLUS the `loyalty_transactions.source_type` CHECK alter + the `loyalty_transactions_one_refund_reversal` partial unique index (§9.5).
 - `src/lib/invoice-refunds.ts` — pure types + eligibility/allocation(budget-split tax)/status engine.
 - `src/lib/refund-accounting-emitter.ts` — the `AccountingBridge`-based journal projection + module-level `recordTransaction` daily-ledger projection (mirror `expense-accounting-emitter.ts`), fired once per newly-observed `succeeded`/`reversed` refund from a UI effect (§6 Finding-3).
 - `src/components/invoice/refund-flow.tsx` — the `RoxCenteredForm` multi-step workflow.

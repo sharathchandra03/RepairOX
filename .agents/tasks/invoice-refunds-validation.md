@@ -22,8 +22,8 @@ All commands run from the worktree app root
 | 3b | `npm run ms:security` | **SKIP (exit 0)** — "set MS_TEST_EMAIL / MS_TEST_PASSWORD … to run the RLS cross-store test." No non-owner test user configured; the script exits 0 (clean, not a failure). |
 | 3c | `npm run leads:verify` | **24 passed, 7 failed** — the 7 failures are **PRE-EXISTING and UNRELATED** to this feature (see §1.1). |
 | 3d | `npx tsx --test src/lib/invoice-refunds.test.ts` | **PASS 8/8** — the pure refund engine (`tests 8 … pass 8 … fail 0`) |
-| 4 | `node scripts/migrate.mjs status` | `0075_invoice_refunds.sql` listed **PENDING**, 77 applied (DB reachable) |
-| 5 | `node scripts/migrate.mjs up --dry-run` | **OK** — `would apply 0075_invoice_refunds.sql (41935 bytes)`, parses without SQL error |
+| 4 | `node scripts/migrate.mjs status` | `0076_invoice_refunds.sql` listed **PENDING**, 77 applied (DB reachable) |
+| 5 | `node scripts/migrate.mjs up --dry-run` | **OK** — `would apply 0076_invoice_refunds.sql (41935 bytes)`, parses without SQL error |
 | 6 | Live-DB rolled-back `BEGIN; <0075>; ROLLBACK` | **APPLIED-OK** — migration executed with no SQL error; 4/4 refund tables + 6 refund functions created inside the txn, then rolled back (no persistent change). Proves every `auth_*`/`invoices`/`inventory_items`/`stock_movements`/`loyalty_transactions`/`organization_settings` reference resolves. |
 | 7 | Permission coverage reconciliation (permission-matrix steering) | **PASS** — 337 group-def keys, **0 missing** from a `PERMISSION_MODULES` tier; all 7 new refund/return keys present. |
 
@@ -48,7 +48,7 @@ The 7 `leads:verify` failures are:
 
 **Proof they are unrelated to Invoice Refunds:**
 1. This branch's diff vs `origin/main` touches **no** sales-agent role seeding,
-   **no** leads RLS policy, and **no** migration other than `0075_invoice_refunds.sql`
+   **no** leads RLS policy, and **no** migration other than `0076_invoice_refunds.sql`
    (verified: `git diff --name-only origin/main HEAD | grep -iE "sales.agent|lead.*rls|004x|005x|lead_data" → NONE`). The only lead file touched is
    `src/lib/leads-data.ts`, and only to **add** the pure net-of-refund helper
    `revenueWonNetForLead` (no change to `revenueWonForLead`, lead links, owner,
@@ -68,7 +68,7 @@ cleanly skips; `leads:verify` shows the identical pre-existing baseline on `main
 ## 2. The 30 acceptance scenarios — PASS/FAIL + reconciliation evidence
 
 Legend for evidence: engine = `src/lib/invoice-refunds.ts` (+ `invoice-refunds.test.ts`);
-DB = `supabase/migrations/0075_invoice_refunds.sql`; store = `src/lib/store.tsx`;
+DB = `supabase/migrations/0076_invoice_refunds.sql`; store = `src/lib/store.tsx`;
 reports = `src/lib/reports/kpis.ts` + `src/lib/agent-performance.ts` + `src/lib/leads-data.ts`;
 UI = invoice table/view pages + `refund-flow.tsx` + `refunds-returns-section.tsx`;
 print = `print-utils.ts` + `a4-template.tsx` + `print/[type]/[id]/page.tsx`.

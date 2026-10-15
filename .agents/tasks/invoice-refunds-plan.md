@@ -16,7 +16,7 @@ is a symlink to the Next.js app repo). All paths below are absolute within that 
 
 **Migration-number note (resolved during exploration):** the highest migration in this worktree is
 `0074_lead_multi_device.sql`; there is NO `0075_work_sessions.sql` here (that is a repository standard whose
-implementation is not on this branch). So `0075_invoice_refunds.sql` is the correct next number for THIS
+implementation is not on this branch). So `0076_invoice_refunds.sql` is the correct next number for THIS
 worktree. Before creating it, re-confirm with `ls supabase/migrations | sort | tail -3`; if a `0075_*` has
 appeared since, use the next free number and keep the filename `NNNN_invoice_refunds.sql`.
 
@@ -29,7 +29,7 @@ never dimmed.
 
 ---
 
-- [ ] 1. **Migration `0075_invoice_refunds.sql` — the DB foundation (tables, sequences, guards, revisions, RLS, realtime, loyalty guard, restock function).**
+- [ ] 1. **Migration `0076_invoice_refunds.sql` — the DB foundation (tables, sequences, guards, revisions, RLS, realtime, loyalty guard, restock function).**
       Create the migration mirroring `supabase/migrations/0063_lead_deals.sql` structure (per-org sequence RPC + `*_sequences` table with `on conflict do nothing` + `for update`; `SECURITY DEFINER` guard with service-role bypass; append-only revisions; RLS that follows the parent invoice; `alter publication supabase_realtime add table …`). Implement exactly per design §4:
       - **Tables:** `invoice_refunds` (§4.1 — money event; all columns incl. lifecycle `pending|processing|succeeded|failed|reversed`, SoD audit columns, `scope`, `refund_kind`, `refund_net/tax/discount/amount`, `reason_code` NOT NULL), `invoice_refund_allocations` (§4.2 — per device/line + `line_component`, qty, `alloc_net/tax/amount`, denormalized `invoice_id`+`organization_id`), `invoice_item_returns` (§4.3 — physical, independent, `refund_id` nullable, `condition`, `disposition`, `disposition_status`, `unit_cost`, `stock_movement_ref`, receiving `branch_id`), and `invoice_refund_revisions` (append-only, same shape as `lead_deal_revisions`).
       - **Sequences:** `next_refund_id(org)`→`CN-0001`, `next_return_id(org)`/`next_item_return_id`→`RET-0001` (gap-free per org).
@@ -38,7 +38,7 @@ never dimmed.
       - **Loyalty reversal guard (§9.5):** `alter … loyalty_transactions_source_type_check` to add `'refund'` (new set `('invoice','adjustment','admin','refund')`) and `create unique index if not exists loyalty_transactions_one_refund_reversal on loyalty_transactions(source_type, source_id) where type='adjustment' and source_type='refund'`.
       - **RLS (§4.5):** mirror `lead_deals` exactly — SELECT visible iff `auth_member_of_org(organization_id)` AND `auth_branch_visible(branch_id)` AND (`auth_has_any(['refunds_view','manage_refunds','manage_invoices','manage_reports'])` OR parent invoice visible); INSERT/UPDATE require the matching refund capability + branch visibility; allocations/returns/revisions follow via denormalized `invoice_id`/`organization_id`. **NIT-2 fix:** add a comment stating `auth_branch_visible(null)` is treated org-wide-visible (matching `lead_deals`, since `branch_id` is `on delete set null`).
       - Everything additive + idempotent (`create table if not exists`, `drop constraint if exists`, `create index if not exists`).
-      Files: `/Users/apple/Desktop/Reapirox dummy2/.worktrees/invoice-refunds/app/supabase/migrations/0075_invoice_refunds.sql`
+      Files: `/Users/apple/Desktop/Reapirox dummy2/.worktrees/invoice-refunds/app/supabase/migrations/0076_invoice_refunds.sql`
       Verify: `cd .../app && node scripts/migrate.mjs status` lists `0075` as pending (DB reachable) OR `node scripts/migrate.mjs up --dry-run` parses it without SQL error; if no DB is configured, confirm the file parses by eye against `0063_lead_deals.sql` (same clause set). This step adds no TS, so `npx tsc --noEmit` must still pass unchanged.
 
 - [ ] 2. **Types + pure refund engine (`invoice-refunds.ts`) + `mock-data.ts` type/label/tone additions.**

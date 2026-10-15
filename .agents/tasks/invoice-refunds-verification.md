@@ -82,7 +82,7 @@ cannot be executed here. This is an environment constraint, not a code failure.
 The RLS and 5-layer permission wiring were instead verified statically:
 - `npx tsc --noEmit` is clean (the CAP/union/matrix keys all typecheck).
 - `npm run build` is clean.
-- The migration `0075_invoice_refunds.sql` RLS `auth_has_any([...])` arrays were
+- The migration `0076_invoice_refunds.sql` RLS `auth_has_any([...])` arrays were
   cross-checked by hand against the `CAP.*` fallback arrays and the
   `PERMISSION_MODULES` tiers (initiate=work, process=manage, approve=full;
   returns_accept=work, returns_restock=manage; view_profitability=reports view),

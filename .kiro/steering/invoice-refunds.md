@@ -13,7 +13,7 @@ family, and the two demo ledgers.
 
 **Reference implementations (match these):**
 - Migration (tables, sequences, guards, RLS, realtime, restock fn, loyalty
-  guard): `app/supabase/migrations/0075_invoice_refunds.sql`.
+  guard): `app/supabase/migrations/0076_invoice_refunds.sql`.
 - Pure engine (eligibility / allocation / derived status): `app/src/lib/invoice-refunds.ts`.
 - Types + pill tone/label maps: `app/src/lib/mock-data.ts` (`InvoiceRefund`,
   `InvoiceRefundAllocation`, `InvoiceItemReturn`, `RefundStatus`,

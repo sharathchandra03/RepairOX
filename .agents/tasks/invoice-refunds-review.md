@@ -6,7 +6,7 @@ code is fully committed; the only uncommitted files are the task docs
 themselves.
 
 The implementation lands a complete, transactional refund + device-return +
-reconciliation subsystem: a 903-line DB migration (`0075_invoice_refunds.sql`),
+reconciliation subsystem: a 903-line DB migration (`0076_invoice_refunds.sql`),
 a 448-line pure engine (`invoice-refunds.ts` + tests), ~700 lines of DB-first
 store actions, a 5-step `RoxCenteredForm` flow, invoice-table + view-invoice
 entry points, a Credit Note print document, net-of-refund reports, 5-layer
@@ -237,7 +237,7 @@ invoice mutation in the refund path) corroborates the immutability claim.
 <details>
 <summary>File map</summary>
 
-- `supabase/migrations/0075_invoice_refunds.sql` — tables, sequences, guards, restock fn, loyalty guard, RLS, realtime.
+- `supabase/migrations/0076_invoice_refunds.sql` — tables, sequences, guards, restock fn, loyalty guard, RLS, realtime.
 - `src/lib/invoice-refunds.ts` (+ `.test.ts`) — pure eligibility/allocation/status engine.
 - `src/lib/mock-data.ts` — refund/return types, `RefundStatus`, label/tone maps.
 - `src/lib/store.tsx` — DB-first refund/return actions, loyalty reversal, ledger projection.
