@@ -50,6 +50,21 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     { onConflict: "staff_id,branch_id" }
   );
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+
+  // If this store has NO primary manager yet, promote the just-assigned user to
+  // primary manager so the store's "Manager & Access" reflects the assignment
+  // instead of showing "No primary manager assigned" while People With Access
+  // lists the same user. This only fills an EMPTY pointer — an existing manager
+  // is never overwritten (that stays the explicit "Change Manager" action).
+  // The caller can also force it with { makeManager: true }.
+  try {
+    const { data: br } = await admin
+      .from("branches").select("manager_staff_id").eq("id", params.id).maybeSingle();
+    if (br && (!br.manager_staff_id || body?.makeManager === true)) {
+      await admin.from("branches").update({ manager_staff_id: staffId }).eq("id", params.id);
+    }
+  } catch { /* manager_staff_id column optional (pre-0044) — best-effort */ }
+
   return NextResponse.json({ ok: true });
 }
 

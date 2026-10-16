@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Filter, SlidersHorizontal } from "lucide-react";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
+import { Select } from "@/components/ui/input";
 import { ActiveFilterChip, RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { StoreMultiSelect } from "@/components/common/store-multi-select";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
@@ -31,6 +32,7 @@ export function IntelligenceFilters({
   categories,
   brands,
   lockedStoreName,
+  rightLeadSlot,
 }: {
   filters: LeadIntelligenceFilters;
   onChange: (next: LeadIntelligenceFilters) => void;
@@ -38,6 +40,9 @@ export function IntelligenceFilters({
   categories: DeviceCategory[];
   brands: PriceListBrand[];
   lockedStoreName?: string;
+  /** Optional control placed in the right-side utility group, immediately to
+   *  the LEFT of the Store pill (e.g. the owner's agent multi-select). */
+  rightLeadSlot?: ReactNode;
 }) {
   const [showFilters, setShowFilters] = useState(false);
   const set = <K extends keyof LeadIntelligenceFilters>(key: K, value: LeadIntelligenceFilters[K]) => onChange({ ...filters, [key]: value });
@@ -91,6 +96,7 @@ export function IntelligenceFilters({
           />
         </div>
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
+          {rightLeadSlot}
           {lockedStoreName ? (
             <span className="inline-flex h-[34px] min-w-[150px] items-center rounded-xl border border-border bg-card px-3 text-[12px] font-semibold text-foreground">{lockedStoreName}</span>
           ) : <StoreMultiSelect value={filters.storeIds} onChange={(value) => set("storeIds", value)} />}
@@ -141,10 +147,12 @@ function SelectField({ label, value, onChange, options, labels = (v) => v }: { l
   return (
     <label className="space-y-1">
       <span className="block text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
-      <select value={value} onChange={(event) => onChange(event.target.value)} className="h-[36px] w-full rounded-xl border border-input bg-card px-2.5 text-[13px] text-foreground focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15">
-        <option value="">All</option>
-        {options.map((option) => <option key={option} value={option}>{labels(option)}</option>)}
-      </select>
+      <Select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-[36px]"
+        options={[{ value: "", label: "All" }, ...options.map((option) => ({ value: option, label: labels(option) }))]}
+      />
     </label>
   );
 }

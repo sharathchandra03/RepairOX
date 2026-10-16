@@ -33,6 +33,33 @@ const CAN_GRANT_ORG_ADMIN = new Set([
    `manage_users` fallbacks) — NOT a hardcoded admin-role check. This lets an
    administrator delegate user creation WITHOUT granting Manage Roles &
    Permissions. Uses the service-role key to create the auth user. */
+/* GET /api/staff — the org's team ("Users & Assignment"), loaded with the
+   SERVICE ROLE so a just-created member always appears. The browser RLS query
+   (staff_read) only returns rows whose organization_id equals the viewer's own
+   auth_org_id(); when a bootstrap/org-mismatch leaves a new row in a different
+   org, that row is invisible in the client list even though it exists. Loading
+   the list server-side, scoped explicitly to the caller's organization, makes
+   the newly-created user show up reliably. Gated on user-view authority. */
+export async function GET(req: Request) {
+  const guard = await requirePermission(req, [
+    "view_users", "manage_users", "edit_users", "add_user", "manage_roles", "assign_roles",
+  ]);
+  if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
+  const { admin, user } = guard;
+
+  const orgId = await orgIdForAuthUser(admin, user.id);
+  if (!orgId) return NextResponse.json({ ok: true, members: [] });
+
+  const { data, error } = await admin
+    .from("staff")
+    .select("*")
+    .eq("organization_id", orgId)
+    .order("created_at", { ascending: true });
+  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+
+  return NextResponse.json({ ok: true, members: (data ?? []).map((r) => rowToStaff(r)) });
+}
+
 export async function POST(req: Request) {
   const guard = await requirePermission(req, ["add_user", "create_users", "manage_users"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
@@ -93,7 +120,20 @@ export async function POST(req: Request) {
   }
 
   // Create the auth user if login is requested.
+  //
+  // IMPORTANT — orphaned-auth-user recovery: user creation is a non-atomic
+  // two-step (create the Supabase Auth user, then insert the staff row). A
+  // prior attempt that created the auth user but never committed the staff row
+  // (a dropped response, a retried request, or a failure before rollback) leaves
+  // an ORPHANED auth user. Without recovery, the next attempt hits "email
+  // already registered" and the whole flow is wedged — exactly the reported
+  // "it failed, and now it says the user already exists" bug. So when
+  // createUser reports the email is taken, we look up that auth user: if it has
+  // NO staff row, it's an orphan we safely reuse (and `createdAuthUser` stays
+  // false so we don't delete a pre-existing login on a later rollback). If it
+  // DOES already back a staff row, it's a genuine duplicate.
   let authUserId: string | null = null;
+  let createdAuthUser = false; // did WE create it this request? (controls rollback)
   if (hasLogin) {
     const { data: created, error: authErr } = await admin.auth.admin.createUser({
       email,
@@ -106,11 +146,27 @@ export async function POST(req: Request) {
     if (authErr || !created.user) {
       const msg = authErr?.message ?? "";
       if (/registered|exists/i.test(msg)) {
-        return NextResponse.json({ ok: false, reason: "duplicate_email" }, { status: 409 });
+        // Recover an orphaned auth user (created by a failed/retried attempt).
+        const orphan = await findOrphanAuthUser(admin, email);
+        if (orphan) {
+          authUserId = orphan;
+          createdAuthUser = false;
+          // Reset the password + name to what the creator just entered so the
+          // recovered login matches this request.
+          await admin.auth.admin.updateUserById(orphan, {
+            password, email_confirm: true, user_metadata: { name: name.trim() },
+          }).catch(() => {});
+        } else {
+          // A real, in-use login already exists for this email.
+          return NextResponse.json({ ok: false, reason: "duplicate_email" }, { status: 409 });
+        }
+      } else {
+        return NextResponse.json({ ok: false, error: msg || "Could not create login." }, { status: 400 });
       }
-      return NextResponse.json({ ok: false, error: msg || "Could not create login." }, { status: 400 });
+    } else {
+      authUserId = created.user.id;
+      createdAuthUser = true;
     }
-    authUserId = created.user.id;
   }
 
   // Scope the new staff member to the creator's organization + branch. If the
@@ -151,7 +207,7 @@ export async function POST(req: Request) {
   if (branchId && !callerCanDelegateAll(callerRoleId, callerPerms) && !callerPerms.has("multi_store_access")) {
     const authorized = await creatorAuthorizedBranchIds(admin, user.id, orgId);
     if (authorized.size > 0 && !authorized.has(branchId)) {
-      if (authUserId) await admin.auth.admin.deleteUser(authUserId).catch(() => {});
+      if (authUserId && createdAuthUser) await admin.auth.admin.deleteUser(authUserId).catch(() => {});
       return NextResponse.json(
         { ok: false, reason: "forbidden_store", error: "You can only add users to a store you're authorized to manage." },
         { status: 403 }
@@ -188,8 +244,9 @@ export async function POST(req: Request) {
     .single();
 
   if (insErr || !inserted) {
-    // Roll back the auth user so we don't leave an orphaned login.
-    if (authUserId) await admin.auth.admin.deleteUser(authUserId).catch(() => {});
+    // Roll back the auth user so we don't leave an orphaned login — but only if
+    // WE created it this request (never delete a pre-existing/recovered login).
+    if (authUserId && createdAuthUser) await admin.auth.admin.deleteUser(authUserId).catch(() => {});
     if (/duplicate|unique/i.test(insErr?.message ?? "")) {
       return NextResponse.json({ ok: false, reason: "duplicate_email" }, { status: 409 });
     }
@@ -221,6 +278,18 @@ export async function POST(req: Request) {
         { onConflict: "staff_id,branch_id" }
       )
       .then(() => {}, () => {}); // ignore if user_stores isn't present
+
+    // If this user's HOME store has no primary manager yet, make them its
+    // primary manager so the store's "Manager & Access" isn't stuck on "No
+    // primary manager assigned" while the user clearly has home access. Only
+    // fills an EMPTY pointer — never overwrites an existing manager. Best-effort
+    // (the manager_staff_id column is optional pre-0044).
+    await admin
+      .from("branches")
+      .update({ manager_staff_id: inserted.id })
+      .eq("id", branchId)
+      .is("manager_staff_id", null)
+      .then(() => {}, () => {});
   }
 
   // ── Additional store access (multi-store) ──────────────────────────────────
@@ -302,6 +371,30 @@ export async function POST(req: Request) {
     .then(() => {}, () => {}); // best-effort — never fail creation on logging
 
   return NextResponse.json({ ok: true, member: rowToStaff(inserted) });
+}
+
+/** Find an ORPHANED Supabase Auth user for `email` — one that exists in Auth
+ *  but has NO staff row pointing at it. Such a user is left behind by a failed
+ *  or retried creation attempt and is safe to reuse. Returns the auth user id
+ *  when it's a reusable orphan, or null when the email backs a real staff row
+ *  (a genuine duplicate) or no auth user exists. */
+async function findOrphanAuthUser(admin: SupabaseClient, email: string): Promise<string | null> {
+  const target = email.toLowerCase();
+  // Page through auth users to locate the one with this email. Most orgs are
+  // small; a bounded scan is fine and avoids depending on a getUserByEmail API.
+  let authId: string | null = null;
+  for (let page = 1; page <= 20 && !authId; page++) {
+    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 200 });
+    if (error || !data?.users?.length) break;
+    const hit = data.users.find((u) => (u.email ?? "").toLowerCase() === target);
+    if (hit) authId = hit.id;
+    if (data.users.length < 200) break; // last page
+  }
+  if (!authId) return null;
+  // Is it already backing a staff row? Then it's a real duplicate, not an orphan.
+  const { data: staffRow } = await admin
+    .from("staff").select("id").eq("auth_user_id", authId).maybeSingle();
+  return staffRow ? null : authId;
 }
 
 /** The staff.id for the signed-in auth user (creator), for created_by stamping. */

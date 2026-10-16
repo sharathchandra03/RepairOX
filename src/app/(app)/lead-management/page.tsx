@@ -26,8 +26,8 @@ import {
   Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RcTooltip, XAxis, YAxis,
 } from "recharts";
 import {
-  Inbox, Target, TrendingUp, Megaphone, Plus, ChevronRight,
-  CheckCircle2, Clock, AlertTriangle, IndianRupee, Trophy, Route as RouteIcon,
+  Inbox, TrendingUp, Megaphone, Plus, ChevronRight,
+  Clock, IndianRupee, Trophy, Route as RouteIcon,
   Flame, CalendarClock, ArrowUpRight, Smartphone,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
@@ -365,42 +365,54 @@ export default function LeadDashboardPage() {
         initialRange={{ start: fromISODate(customFrom), end: fromISODate(customTo) }}
       />
 
-      {/* ── TOP KPI CARDS (all derived; each clickable to a real filtered view) ── */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 xl:grid-cols-7">
-        <KpiCard
-          label="Total Leads" value={String(perf.leads)} icon={Inbox} tone="indigo"
-          hint={dateLabel} onClick={() => goToLeads()}
-        />
-        <KpiCard
-          label="Qualified" value={String(perf.qualified)} icon={CheckCircle2} tone="sky"
-          hint={`${pct(perf.leads > 0 ? perf.qualified / perf.leads : 0)} of leads`}
-          onClick={() => goToLeads({ status: firstStatusMatching("qualif") })}
-        />
-        <KpiCard
-          label="Pending Follow-ups" value={String(perf.followUps.pending + perf.followUps.dueToday)} icon={Clock} tone="amber"
-          hint={`${perf.followUps.dueToday} due today`}
-          onClick={() => goToLeads({ followUp: "upcoming" })}
-        />
-        <KpiCard
-          label="Overdue Follow-ups" value={String(perf.followUps.overdue)} icon={AlertTriangle} tone="rose"
-          hint={perf.followUps.overdue > 0 ? "Needs attention" : "All clear"}
-          urgent={perf.followUps.overdue > 0}
-          onClick={() => goToLeads({ followUp: "overdue" })}
-        />
-        <KpiCard
-          label="Converted / Won" value={String(perf.converted)} icon={Trophy} tone="emerald"
-          hint={`${pct(perf.conversionRate)} conversion`}
-          onClick={() => goToLeads({ status: firstStatusMatching("won") })}
-        />
-        <KpiCard
-          label="Pipeline Value" value={formatINR(perf.pipelineValue)} icon={Target} tone="violet"
-          hint="Open leads (est.)"
+      {/* ── TOP KPI CARDS — four consolidated groups (each metric clickable to a
+          real filtered view). Grouping is tailored to THIS dashboard's metrics:
+          Leads, Conversion, Revenue and Follow-ups. ── */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        {/* 1 — Leads */}
+        <KpiGroupCard
+          label="Leads" icon={Inbox} tone="indigo"
+          primaryValue={String(perf.leads)} primaryDescription={`Total Leads · ${dateLabel}`}
+          progress={perf.leads > 0 ? perf.qualified / perf.leads : 0}
           onClick={() => goToLeads()}
+          support={[
+            { label: "Qualified", value: String(perf.qualified), onClick: () => goToLeads({ status: firstStatusMatching("qualif") }) },
+            { label: "Qualification Rate", value: perf.leads > 0 ? pct(perf.qualified / perf.leads) : "—" },
+          ]}
         />
-        <KpiCard
-          label="Revenue Won" value={formatINR(perf.revenueWon)} icon={IndianRupee} tone="emerald"
-          hint="Finalized invoices"
+        {/* 2 — Conversion */}
+        <KpiGroupCard
+          label="Conversion" icon={Trophy} tone="violet"
+          primaryValue={String(perf.converted)} primaryDescription="Converted / Won"
+          progress={perf.conversionRate}
           onClick={() => goToLeads({ status: firstStatusMatching("won") })}
+          support={[
+            { label: "Conversion Rate", value: perf.leads > 0 ? pct(perf.conversionRate) : "—" },
+            { label: "Pipeline Value", value: formatINR(perf.pipelineValue), onClick: () => goToLeads() },
+          ]}
+        />
+        {/* 3 — Revenue */}
+        <KpiGroupCard
+          label="Revenue" icon={IndianRupee} tone="emerald"
+          primaryValue={formatINR(perf.revenueWon)} primaryDescription="Revenue Won · finalized invoices"
+          onClick={() => goToLeads({ status: firstStatusMatching("won") })}
+          support={[
+            { label: "Invoices", value: String(perf.invoiceCount) },
+            { label: "Avg / Invoice", value: perf.invoiceCount > 0 ? formatINR(Math.round(perf.revenueWon / perf.invoiceCount)) : "—" },
+          ]}
+        />
+        {/* 4 — Follow-ups */}
+        <KpiGroupCard
+          label="Follow-ups" icon={Clock} tone="amber"
+          primaryValue={String(perf.followUps.pending + perf.followUps.dueToday)} primaryDescription="Pending Follow-ups"
+          progress={(perf.followUps.pending + perf.followUps.dueToday) > 0 ? perf.followUps.overdue / (perf.followUps.pending + perf.followUps.dueToday) : 0}
+          progressAlert={perf.followUps.overdue > 0}
+          urgent={perf.followUps.overdue > 0}
+          onClick={() => goToLeads({ followUp: "upcoming" })}
+          support={[
+            { label: "Due Today", value: String(perf.followUps.dueToday), onClick: () => goToLeads({ followUp: "today" }) },
+            { label: "Overdue", value: String(perf.followUps.overdue), onClick: () => goToLeads({ followUp: "overdue" }), alert: perf.followUps.overdue > 0 },
+          ]}
         />
       </div>
 
@@ -794,51 +806,71 @@ const KPI_TONES: Record<
   violet:  { icon: "bg-violet-50 text-violet-600", hint: "text-violet-700 bg-violet-50 ring-violet-200/50", from: "#8B5CF6", to: "#A78BFA", wash: "from-violet-500/[0.07]" },
 };
 
-function KpiCard({
-  label, value, hint, icon: Icon, tone = "indigo", onClick, urgent = false,
+interface KpiSupport { label: string; value: string; onClick?: () => void; alert?: boolean }
+
+/* Consolidated dashboard KPI card — groups a primary metric with two related
+   supporting figures + a thin progress indicator. Keeps the dashboard's
+   premium look (gradient accent rail, soft wash, colour-matched icon) and a
+   clearly visible border; the whole card and each supporting metric are
+   independently clickable to a real filtered leads view. */
+function KpiGroupCard({
+  label, icon: Icon, tone = "indigo", primaryValue, primaryDescription, support,
+  progress, progressAlert, onClick, urgent = false,
 }: {
   label: string;
-  value: string;
-  hint?: string;
   icon: React.ComponentType<{ className?: string }>;
   tone?: keyof typeof KPI_TONES | string;
+  primaryValue: string;
+  primaryDescription: string;
+  support: [KpiSupport, KpiSupport];
+  progress?: number;
+  progressAlert?: boolean;
   onClick?: () => void;
   urgent?: boolean;
 }) {
   const t = KPI_TONES[tone] ?? KPI_TONES.indigo;
+  const showProgress = typeof progress === "number";
+  const clamped = showProgress ? Math.max(0, Math.min(1, progress)) : 0;
   return (
     <button
       onClick={onClick}
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-2xl border bg-card p-4 pl-[18px] text-left shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1 hover:border-[#4361EE]/40 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
-        urgent ? "border-red-300 bg-red-50/40" : "border-[#B3BFF6]/50",
+        "group relative flex min-h-[150px] flex-col overflow-hidden rounded-2xl border-2 bg-card p-4 pl-[18px] text-left shadow-[0_1px_3px_rgba(0,0,0,0.04),0_4px_12px_-4px_rgba(0,0,0,0.06)] transition-all duration-300 hover:-translate-y-1 hover:shadow-[0_6px_20px_-6px_rgba(67,97,238,0.30),0_12px_32px_-10px_rgba(67,97,238,0.20)]",
+        urgent ? "border-red-300 bg-red-50/40 hover:border-red-400" : "border-zinc-200 hover:border-[#4361EE]/40",
       )}
     >
-      {/* Left accent rail — instantly distinguishes each metric at a glance. */}
-      <span
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-r-full opacity-80 transition-opacity duration-300 group-hover:opacity-100"
-        style={{ background: `linear-gradient(to bottom, ${t.from}, ${t.to})` }}
-      />
-      {/* Soft top wash — tone-tinted, fades to transparent. */}
+      <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3px] rounded-r-full opacity-80 transition-opacity duration-300 group-hover:opacity-100" style={{ background: `linear-gradient(to bottom, ${t.from}, ${t.to})` }} />
       <div aria-hidden className={cn("pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b to-transparent", t.wash)} />
 
       <div className="relative flex items-center justify-between">
-        <span className={cn("grid h-9 w-9 place-items-center rounded-lg", t.icon)}>
-          <Icon className="h-4 w-4" />
-        </span>
-        <ArrowUpRight className="h-4 w-4 text-zinc-300 transition group-hover:text-[#4361EE]" />
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={cn("grid h-8 w-8 place-items-center rounded-lg", t.icon)}><Icon className="h-4 w-4" /></span>
+          <span className="truncate text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+        </div>
+        <ArrowUpRight className="h-4 w-4 shrink-0 text-zinc-300 transition group-hover:text-[#4361EE]" />
       </div>
-      <p className={cn("relative mt-3 text-2xl font-extrabold tabular-nums", urgent ? "text-[#B42318]" : "text-foreground")}>{value}</p>
-      <p className="relative text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
-      {hint && (
-        <p className={cn(
-          "relative mt-1.5 inline-flex w-fit items-center truncate rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
-          urgent ? "text-[#B42318] bg-red-50 ring-red-200/60" : t.hint,
-        )}>
-          {hint}
-        </p>
-      )}
+      <p className={cn("relative mt-2.5 text-[26px] font-extrabold leading-none tabular-nums", urgent ? "text-[#B42318]" : "text-foreground")}>{primaryValue}</p>
+      <p className="relative mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
+
+      <div className="relative mt-auto space-y-1.5 pt-3">
+        {showProgress && (
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
+            <div className="h-full rounded-full transition-all duration-500" style={{ width: `${clamped > 0 ? Math.max(clamped * 100, 2) : 0}%`, background: progressAlert ? "#D96A82" : `linear-gradient(to right, ${t.from}, ${t.to})` }} />
+          </div>
+        )}
+        <div className="space-y-1">
+          {support.map((sup) => (
+            <div key={sup.label} className="flex items-center justify-between gap-2 text-[12px]">
+              <span className="truncate text-muted-foreground">{sup.label}</span>
+              {sup.onClick ? (
+                <span role="button" tabIndex={0} onClick={(e) => { e.stopPropagation(); sup.onClick!(); }} onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); sup.onClick!(); } }} className={cn("shrink-0 rounded px-1 font-bold tabular-nums transition hover:bg-muted hover:underline", sup.alert ? "text-[#B42318]" : "text-foreground")}>{sup.value}</span>
+              ) : (
+                <span className={cn("shrink-0 font-bold tabular-nums", sup.alert ? "text-[#B42318]" : "text-foreground")}>{sup.value}</span>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
     </button>
   );
 }

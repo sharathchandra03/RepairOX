@@ -25,6 +25,7 @@ import {
 import { isSupabaseConfigured, supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
+import { useStoreSettings } from "@/lib/store-settings";
 import { demoKey } from "@/lib/demo-mode";
 import { toast } from "@/components/ui/toaster";
 import { STALE_MS, type WorkSessionRecord } from "@/lib/work-session";
@@ -33,6 +34,23 @@ export type WorkStatus = "working" | "on_break" | "logged_out" | "interrupted";
 
 /** Client heartbeat cadence — mirrors use-session-tracker's HEARTBEAT_MS. */
 const HEARTBEAT_MS = 60_000;
+
+/** Fallback break-reminder threshold (minutes) when the org setting is absent
+ *  or invalid. The live value is admin-configurable in Settings → Lead
+ *  Management → Productivity (`productivityConfig.breakReminderMinutes`); break
+ *  time is NOT productive time, so a forgotten break inflates the break total
+ *  and shrinks net productive time — the reminder keeps the day accurate. */
+const DEFAULT_BREAK_REMINDER_MINUTES = 5;
+
+/** The break reminder only fires when the agent is ACTIVELY using RepairOX
+ *  (real mouse/keyboard/scroll/touch within this window) — the whole signal is
+ *  "you're clearly back at work but still marked on break". If they're truly
+ *  away (no activity), stay silent instead of nagging into an empty room. */
+const BREAK_ACTIVITY_WINDOW_MS = 30_000; // 30 seconds
+
+/** Interaction events that count as "actively working" (mirrors the presence
+ *  tracker's event set — kept local so Work Session never reads presence). */
+const BREAK_ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "scroll", "touchstart", "wheel"] as const;
 
 export interface UseWorkSession {
   hydrated: boolean;
@@ -403,30 +421,123 @@ export function useWorkSession(): UseWorkSession {
    → DB partial unique index resume. Heartbeat touches last_seen_at while a
    session is open, debounced to HEARTBEAT_MS. Does NOT create a session per
    render. ── */
-export function useWorkSessionAutoStart() {
+/**
+ * @param enabled Only auto-start / heartbeat a work session when the signed-in
+ *   user is an eligible Sales Agent. An owner (or any non-Sales-Agent role) is
+ *   NOT tracked — Work Session is employee-time tracking for Sales Agents this
+ *   phase, so the owner never gets a session, status chip, or Start Work. The
+ *   caller resolves eligibility (app-shell is inside LeadsProvider); defaults
+ *   to false so a session is never created before eligibility is known.
+ */
+export function useWorkSessionAutoStart(enabled: boolean = false) {
   const { authReady, currentUser } = usePermissions();
-  const { startWork, touch, openSession, hydrated } = useWorkSession();
+  const { startWork, endBreak, touch, openSession, status, hydrated } = useWorkSession();
+  const { settings } = useStoreSettings();
   const startedRef = useRef(false);
+  // Which open break (by its startedAt) we've already reminded about, so the
+  // reminder fires exactly ONCE per break and re-arms for the next one.
+  const remindedBreakRef = useRef<string | null>(null);
+  // Timestamp of the agent's most recent real interaction with RepairOX. The
+  // break reminder only fires when this is recent (they're actively working),
+  // never when they're idle/away.
+  const lastActivityRef = useRef<number>(Date.now());
 
-  // Auto-start once per auth session.
+  // Admin-configurable break-reminder threshold (minutes). 0 (or invalid) =
+  // never remind. Settings → Lead Management → Productivity.
+  const reminderMinutes = (() => {
+    const m = settings.productivityConfig?.breakReminderMinutes;
+    return typeof m === "number" && m >= 0 ? m : DEFAULT_BREAK_REMINDER_MINUTES;
+  })();
+
+  // Auto-start once per auth session — only for eligible Sales Agents.
   useEffect(() => {
-    if (!authReady || !currentUser?.id || !hydrated) return;
+    if (!enabled || !authReady || !currentUser?.id || !hydrated) return;
     if (startedRef.current) return;
     startedRef.current = true;
     void startWork();
-  }, [authReady, currentUser?.id, hydrated, startWork]);
+  }, [enabled, authReady, currentUser?.id, hydrated, startWork]);
 
   // Reset the single-flight guard if the signed-in user changes (logout/login).
   useEffect(() => {
     startedRef.current = false;
   }, [currentUser?.id]);
 
-  // Heartbeat: keep last_seen_at fresh while a session is open.
+  // Heartbeat: keep last_seen_at fresh while a session is open (Sales Agents only).
   useEffect(() => {
-    if (!authReady || !currentUser?.id) return;
+    if (!enabled || !authReady || !currentUser?.id) return;
     const t = window.setInterval(() => {
       if (openSession) void touch();
     }, HEARTBEAT_MS);
     return () => window.clearInterval(t);
-  }, [authReady, currentUser?.id, openSession, touch]);
+  }, [enabled, authReady, currentUser?.id, openSession, touch]);
+
+  // Track genuine interaction with RepairOX so the break reminder only fires
+  // when the agent is ACTIVELY working. Mirrors the presence tracker's events
+  // but stays local to Work Session (Online ≠ Working — never read presence).
+  useEffect(() => {
+    if (!enabled || !authReady || !currentUser?.id) return;
+    const mark = () => { lastActivityRef.current = Date.now(); };
+    const onVisible = () => { if (document.visibilityState === "visible") mark(); };
+    BREAK_ACTIVITY_EVENTS.forEach((ev) => window.addEventListener(ev, mark, { passive: true }));
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      BREAK_ACTIVITY_EVENTS.forEach((ev) => window.removeEventListener(ev, mark));
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [enabled, authReady, currentUser?.id]);
+
+  // Forgot-to-resume reminder: when the agent has been ON BREAK longer than the
+  // admin-configured threshold AND is ACTIVELY using RepairOX (recent mouse /
+  // keyboard / scroll activity, tab visible), nudge them to resume work so
+  // break time doesn't eat into the day's productive total. It never fires
+  // while they're idle/away — the whole point is "you're clearly working but
+  // still on break". Checks on the heartbeat cadence; fires once per break,
+  // but re-arms if they go idle and come back still on the same break.
+  useEffect(() => {
+    // reminderMinutes <= 0 means the admin disabled the reminder entirely.
+    if (!enabled || !authReady || !currentUser?.id || reminderMinutes <= 0) {
+      remindedBreakRef.current = null;
+      return;
+    }
+    // No open break → clear the guard so the NEXT break can remind afresh.
+    if (status !== "on_break" || !openSession) {
+      remindedBreakRef.current = null;
+      return;
+    }
+    const openBreak = openSession.breaks.find((b) => b.endedAt === null);
+    if (!openBreak) {
+      remindedBreakRef.current = null;
+      return;
+    }
+
+    const thresholdMs = reminderMinutes * 60 * 1000;
+    const check = () => {
+      const now = Date.now();
+      // Only when actively working: real interaction within the activity window
+      // AND the tab is in the foreground. Idle/away → stay silent (and re-arm so
+      // the reminder can fire once they come back, still on the same break).
+      const active =
+        now - lastActivityRef.current <= BREAK_ACTIVITY_WINDOW_MS &&
+        (typeof document === "undefined" || document.visibilityState === "visible");
+      if (!active) {
+        if (remindedBreakRef.current === openBreak.startedAt) remindedBreakRef.current = null;
+        return;
+      }
+      // Already reminded about THIS break (while active)? (keyed by its start)
+      if (remindedBreakRef.current === openBreak.startedAt) return;
+      const breakMs = now - new Date(openBreak.startedAt).getTime();
+      if (breakMs < thresholdMs) return;
+      remindedBreakRef.current = openBreak.startedAt;
+      const unit = reminderMinutes === 1 ? "minute" : "minutes";
+      toast.info("Still on break?", {
+        description: `You've been on break for over ${reminderMinutes} ${unit} and you're active. Resume work so your productivity is counted correctly.`,
+        duration: 10_000,
+        action: { label: "Resume Work", onClick: () => void endBreak() },
+      });
+    };
+
+    check(); // fire immediately if already past the threshold AND active
+    const t = window.setInterval(check, HEARTBEAT_MS);
+    return () => window.clearInterval(t);
+  }, [enabled, authReady, currentUser?.id, reminderMinutes, status, openSession, endBreak]);
 }

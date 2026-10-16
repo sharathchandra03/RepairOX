@@ -3,9 +3,10 @@
 /* ──────────────────────────────────────────────────────────────────────────
    RepairOX — Individual Sales Agent Performance (reusable sections).
 
-   The analytical surfaces BELOW the page header + filters of the Individual
-   Agent Performance view:
-     • PerfKpiRow        — the six headline KPI cards (trend pill + sparkline).
+   The analytical surfaces of the Agent Performance views:
+     • KpiSummaryRow     — the FOUR consolidated KPI cards (Revenue / Lead /
+                           Conversion / Follow-up), shared by BOTH the All-Agents
+                           aggregate and the Individual agent views.
      • ConversionSummary — Qualified→Converted, Revenue/Converted, Pending F/U.
      • LeadConversionFunnel — Total → Qualified → Converted → Revenue Won bars.
      • LeadRouteMix      — donut of CONVERTED operations by service route +
@@ -18,13 +19,13 @@
    (#4361EE / #EEF1FD / emerald / amber / overdue-rose).
    ────────────────────────────────────────────────────────────────────────── */
 
-import { ArrowUpRight, ArrowDownRight } from "lucide-react";
-import { cn, formatINR } from "@/lib/utils";
-import { Sparkline, DonutSplit } from "@/components/reports/mini-charts";
+import type { LucideIcon } from "lucide-react";
+import { IndianRupee, Users, Target, CalendarClock } from "lucide-react";
+import { cn, formatINR, formatNumber } from "@/lib/utils";
+import { DonutSplit } from "@/components/reports/mini-charts";
 import {
   conversionSummary, funnelStages, funnelRevenueOutcome, convertedRouteMix, topSourceByVolume,
-  perfSparkline, perfLatestVsPrevious, perfDelta,
-  type AgentPerformance, type PeriodPerformance, type PerfSeriesMetric,
+  type AgentPerformance, type KpiSummary,
 } from "@/lib/agent-performance";
 
 function pct(v: number): string {
@@ -52,6 +53,237 @@ export function PerfSection({
 }
 
 /* ════════════════════════════════════════════════════════════════════════
+   CONSOLIDATED KPI CARD — the four premium dashboard cards.
+
+   ONE reusable component (<KpiPerformanceCard>) renders Revenue / Lead /
+   Conversion / Follow-up identically in BOTH views. Each card carries a
+   semantic accent (strip + icon chip + value colour), a prominent primary
+   metric + description, two supporting metrics, and a subtle progress
+   indicator for the card's related percentage. Values are pre-derived (from
+   kpiSummaryForAgent / kpiSummaryFromTotals) — the card NEVER calculates a
+   business figure itself. Loading + empty are handled; colour never floods
+   the white card body. Click-through is optional per supporting metric.
+   ════════════════════════════════════════════════════════════════════════ */
+
+type KpiAccent = "emerald" | "blue" | "indigo" | "amber";
+
+/* Restrained semantic palette — strip + chip + value + progress-fill only. */
+const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string }> = {
+  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/50" },
+  blue:    { bar: "bg-[#4361EE]",   chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/40" },
+  indigo:  { bar: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-600", value: "text-indigo-700", fill: "bg-indigo-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(99,102,241,0.4)] hover:border-indigo-400/50" },
+  amber:   { bar: "bg-amber-500",   chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/50" },
+};
+
+interface KpiSupport {
+  label: string;
+  value: string;
+  onClick?: () => void;
+  /** Tint the value for a genuine alert (e.g. real overdue actions). */
+  alert?: boolean;
+}
+
+interface KpiCardProps {
+  label: string;
+  icon: LucideIcon;
+  accent: KpiAccent;
+  primaryValue: string;
+  primaryDescription: string;
+  support: [KpiSupport, KpiSupport];
+  /** 0..1 for the progress indicator; when provided it renders a thin bar. */
+  progress?: number;
+  /** Override the progress fill colour for a genuine-alert state. */
+  progressAlert?: boolean;
+  /** A11y + explanatory tooltip on the whole card. */
+  title?: string;
+  onClick?: () => void;
+  loading?: boolean;
+}
+
+function SupportMetric({ s }: { s: KpiSupport }) {
+  const cls = cn("tabular-nums font-bold", s.alert ? "text-[#B42318]" : "text-foreground");
+  return (
+    <div className="flex items-center justify-between gap-2 text-[12px]">
+      <span className="truncate text-muted-foreground">{s.label}</span>
+      {s.onClick ? (
+        <button
+          onClick={(e) => { e.stopPropagation(); s.onClick!(); }}
+          className={cn(cls, "shrink-0 rounded px-1 transition hover:bg-muted hover:underline focus:outline-none focus:ring-2 focus:ring-[#4361EE]/30")}
+        >
+          {s.value}
+        </button>
+      ) : (
+        <span className={cn(cls, "shrink-0")}>{s.value}</span>
+      )}
+    </div>
+  );
+}
+
+export function KpiPerformanceCard({
+  label, icon: Icon, accent, primaryValue, primaryDescription, support,
+  progress, progressAlert, title, onClick, loading,
+}: KpiCardProps) {
+  const a = KPI_ACCENT[accent];
+
+  if (loading) {
+    return (
+      <div className="relative flex h-full min-h-[136px] flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/40 bg-card p-4 pl-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)]">
+        <span className={cn("absolute inset-y-0 left-0 w-1 opacity-40", a.bar)} aria-hidden />
+        <div className="h-7 w-7 animate-pulse rounded-lg bg-muted" />
+        <div className="mt-2.5 h-7 w-28 animate-pulse rounded bg-muted" />
+        <div className="mt-1.5 h-3 w-24 animate-pulse rounded bg-muted" />
+        <div className="mt-auto space-y-1.5 pt-3">
+          <div className="h-3 w-full animate-pulse rounded bg-muted" />
+          <div className="h-3 w-5/6 animate-pulse rounded bg-muted" />
+        </div>
+      </div>
+    );
+  }
+
+  const Tag = onClick ? "button" : "div";
+  const showProgress = typeof progress === "number";
+  const clamped = showProgress ? Math.max(0, Math.min(1, progress!)) : 0;
+
+  return (
+    <Tag
+      {...(onClick ? { onClick, type: "button" as const } : {})}
+      title={title}
+      className={cn(
+        "group relative flex h-full min-h-[136px] flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-4 pl-5 text-left shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition duration-200 hover:-translate-y-0.5",
+        a.glow,
+        onClick && "cursor-pointer focus:outline-none focus:ring-2 focus:ring-[#4361EE]/30",
+      )}
+    >
+      {/* Semantic left accent strip */}
+      <span className={cn("absolute inset-y-0 left-0 w-1", a.bar)} aria-hidden />
+
+      {/* Category icon + uppercase label */}
+      <div className="flex items-center gap-2">
+        <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", a.chip)}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+        <span className="truncate text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
+      </div>
+
+      {/* Prominent primary metric + short description */}
+      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums transition-colors", a.value)}>
+        {primaryValue}
+      </p>
+      <p className="mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
+
+      {/* Supporting metrics + progress, pinned to the bottom for equal-height cards */}
+      <div className="mt-auto space-y-1.5 pt-3">
+        {showProgress && (
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
+            <div
+              className={cn("h-full rounded-full transition-all duration-500", progressAlert ? "bg-[#D96A82]" : a.fill)}
+              style={{ width: `${clamped > 0 ? Math.max(clamped * 100, 2) : 0}%` }}
+            />
+          </div>
+        )}
+        <div className="space-y-1">
+          <SupportMetric s={support[0]} />
+          <SupportMetric s={support[1]} />
+        </div>
+      </div>
+    </Tag>
+  );
+}
+
+/* ── The four consolidated cards, driven by ONE KpiSummary ───────────────── */
+export interface KpiCardDrilldowns {
+  onRevenue?: () => void;
+  onInvoices?: () => void;
+  onTotalLeads?: () => void;
+  onQualified?: () => void;
+  onConverted?: () => void;
+  onNotConverted?: () => void;
+  onFollowUps?: () => void;
+  onOverdue?: () => void;
+}
+
+export function KpiSummaryRow({
+  summary, loading, drilldowns,
+}: {
+  summary: KpiSummary;
+  loading?: boolean;
+  drilldowns?: KpiCardDrilldowns;
+}) {
+  const d = drilldowns ?? {};
+  return (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {/* 1 — Revenue Performance */}
+      <KpiPerformanceCard
+        label="Revenue Performance"
+        icon={IndianRupee}
+        accent="emerald"
+        primaryValue={formatINR(summary.netRevenue)}
+        primaryDescription="Net Revenue Won"
+        title="Net Revenue Won = finalized (paid) invoices linked via Lead → Ticket → Invoice, minus completed refunds."
+        onClick={d.onRevenue}
+        loading={loading}
+        support={[
+          { label: "Invoices", value: formatNumber(summary.invoiceCount), onClick: d.onInvoices },
+          { label: "Avg / Invoice", value: summary.invoiceCount > 0 ? formatINR(Math.round(summary.avgRevenuePerInvoice)) : "—" },
+        ]}
+      />
+
+      {/* 2 — Lead Performance */}
+      <KpiPerformanceCard
+        label="Lead Performance"
+        icon={Users}
+        accent="blue"
+        primaryValue={formatNumber(summary.totalLeads)}
+        primaryDescription="Total Leads"
+        title="Total Leads = distinct leads created in the selected period and store scope. Qualified = leads meeting the canonical qualification rule."
+        onClick={d.onTotalLeads}
+        loading={loading}
+        progress={summary.qualificationRate}
+        support={[
+          { label: "Qualified Leads", value: formatNumber(summary.qualifiedLeads), onClick: d.onQualified },
+          { label: "Qualification Rate", value: summary.totalLeads > 0 ? pct(summary.qualificationRate) : "—" },
+        ]}
+      />
+
+      {/* 3 — Conversion Performance */}
+      <KpiPerformanceCard
+        label="Conversion Performance"
+        icon={Target}
+        accent="indigo"
+        primaryValue={formatNumber(summary.convertedLeads)}
+        primaryDescription="Converted Leads"
+        title="Converted = distinct leads that reached the canonical won/converted outcome. Conversion Rate = converted ÷ total leads."
+        onClick={d.onConverted}
+        loading={loading}
+        progress={summary.conversionRate}
+        support={[
+          { label: "Conversion Rate", value: summary.totalLeads > 0 ? pct(summary.conversionRate) : "—" },
+          { label: "Not Converted", value: formatNumber(summary.notConverted), onClick: d.onNotConverted },
+        ]}
+      />
+
+      {/* 4 — Follow-up Performance */}
+      <KpiPerformanceCard
+        label="Follow-up Performance"
+        icon={CalendarClock}
+        accent="amber"
+        primaryValue={formatNumber(summary.totalFollowUps)}
+        primaryDescription="Total Follow-ups"
+        title="Total Follow-ups = distinct follow-up records (scheduled + completed). Overdue = open and past due (datetime-precise)."
+        onClick={d.onFollowUps}
+        loading={loading}
+        progress={summary.overdueRate}
+        progressAlert={summary.overdueFollowUps > 0}
+        support={[
+          { label: "Overdue Follow-ups", value: formatNumber(summary.overdueFollowUps), onClick: d.onOverdue, alert: summary.overdueFollowUps > 0 },
+          { label: "Overdue Rate", value: summary.totalFollowUps > 0 ? pct(summary.overdueRate) : "—" },
+        ]}
+      />
+    </div>
+  );
+}
+
+/* ════════════════════════════════════════════════════════════════════════
    KPI CARD — compact card with icon chip, trend pill and a real sparkline.
    Matches the reference row (six balanced cards). The trend pill + sparkline
    only render when a VALID comparison / ≥2 months of real data exist.
@@ -72,75 +304,6 @@ const TONE: Record<Tone, { chip: string; icon: string; spark: string; bar: strin
   rose:    { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
   overdue: { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
 };
-
-export interface KpiSpec {
-  label: string;
-  value: string;             // formatted display value
-  sub?: string;              // supporting line (e.g. "75% of total", "From 21 invoices")
-  tone: Tone;
-  icon: React.ComponentType<{ className?: string }>;
-  metric: PerfSeriesMetric;  // which real series drives trend + sparkline
-  higherIsBetter?: boolean;  // false for overdue-type metrics
-  onClick?: () => void;      // optional drilldown
-}
-
-function KpiCard({ spec, months }: { spec: KpiSpec; months: PeriodPerformance[] }) {
-  const t = TONE[spec.tone];
-  const Icon = spec.icon;
-  const series = perfSparkline(months, spec.metric);
-  const { current, previous } = perfLatestVsPrevious(months, spec.metric);
-  const delta = perfDelta(current, previous, spec.higherIsBetter ?? true);
-
-  return (
-    <div
-      onClick={spec.onClick}
-      className={cn(
-        "group relative flex flex-col overflow-hidden rounded-2xl border border-[#B3BFF6]/50 bg-card p-4 pl-5 shadow-[0_1px_3px_rgba(0,0,0,0.04)] transition hover:-translate-y-0.5",
-        t.glow,
-        spec.onClick && "cursor-pointer",
-      )}
-      style={{ containerType: "inline-size" }}
-    >
-      {/* Semantic left accent bar */}
-      <span className={cn("absolute inset-y-0 left-0 w-1", t.bar)} aria-hidden />
-      <div className="flex items-center justify-between gap-2">
-        <span className="flex items-center gap-2 min-w-0">
-          <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", t.chip)}>
-            <Icon className="h-3.5 w-3.5" />
-          </span>
-          <span className="truncate text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{spec.label}</span>
-        </span>
-        {delta && (
-          <span className={cn("inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset", delta.up ? t.pillUp : t.pillDown)}>
-            {delta.up ? <ArrowUpRight className="h-2.5 w-2.5" /> : <ArrowDownRight className="h-2.5 w-2.5" />}
-            {Math.abs(delta.pct)}%
-          </span>
-        )}
-      </div>
-
-      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", t.value)}>
-        {spec.value}
-      </p>
-
-      <div className="mt-1 flex items-end justify-between gap-2">
-        <p className="text-[11px] text-muted-foreground">{spec.sub ?? "\u00A0"}</p>
-        {series.length >= 2 && (
-          <div className="h-7 w-20 shrink-0">
-            <Sparkline data={series} color={t.spark} height={28} />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export function PerfKpiRow({ specs, months }: { specs: KpiSpec[]; months: PeriodPerformance[] }) {
-  return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-      {specs.map((s) => <KpiCard key={s.label} spec={s} months={months} />)}
-    </div>
-  );
-}
 
 /* ════════════════════════════════════════════════════════════════════════
    CONVERSION SUMMARY — three insight cards filling the panel vertically.

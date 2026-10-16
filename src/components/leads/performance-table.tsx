@@ -111,7 +111,7 @@ const STICKY_ACTION_SHADOW = "shadow-[-8px_0_8px_-6px_rgba(15,23,42,0.12)]";
 
 /* The table's intrinsic min width — shared by all three tables so their
    columns line up exactly inside the single horizontal-scroll wrapper. */
-const TABLE_MIN_W = "min-w-[1200px]";
+const TABLE_MIN_W = "min-w-[1238px]";
 const TABLE_BASE = "w-full table-fixed border-separate border-spacing-0 text-[13px]";
 
 /* ── Semantic accent colors for group header bottom borders ──────────── */
@@ -185,6 +185,97 @@ function BarMetric({
   );
 }
 
+/* ── Follow Ups cell ───────────────────────────────────────────────────────
+   One self-contained, visually-structured Follow-Ups column. Three distinct,
+   individual follow-up facts (all DERIVED upstream from lead_followup_history —
+   never fabricated), each with its OWN treatment so the cell reads as a tiny
+   dashboard rather than three identical stacked rows:
+
+     1. OVERDUE  — the urgency HERO. When > 0 it's a red chip (dot + count +
+        "overdue") that pops. When 0 it's a calm green "On track" state so a
+        healthy agent never looks alarming (0 is valid data, never dimmed).
+     2. TOTAL · CLOSED — a compact two-stat row under a hairline divider: the
+        count over a tiny label, split by a thin separator so they read as two
+        aligned stats, not a run-on line.
+     3. CLOSED BAR — a labelled completion bar ("CLOSED  P%") with the amber
+        fill (closed / total), so the graph's meaning is explicit.
+
+   `onSummary` switches to the footer's high-contrast dark-on-light treatment
+   on the blue-gray summary surface. */
+function FollowUpCell({
+  overdue, total, closed, closedRatio, onSummary = false,
+}: {
+  overdue: number;
+  total: number;
+  closed: number;
+  closedRatio: number; // 0..1
+  onSummary?: boolean;
+}) {
+  const w = Math.max(0, Math.min(1, closedRatio));
+  const hasOverdue = overdue > 0;
+  const hasData = total > 0;
+
+  const labelMuted = onSummary ? "text-[#475178]" : "text-muted-foreground";
+  const valTone = onSummary ? "text-[#1E293B]" : "text-foreground";
+  const divider = onSummary ? "bg-[#A9B6E8]" : "bg-zinc-200";
+  const track = onSummary ? "bg-white/70" : "bg-zinc-200/80";
+
+  /* Overdue chip — red urgency when present, calm green "on track" otherwise. */
+  const chipTone = hasOverdue
+    ? "bg-red-50 text-red-700 ring-red-200/70"
+    : hasData
+      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70"
+      : (onSummary ? "bg-white/60 text-[#475178] ring-white/70" : "bg-zinc-50 text-zinc-500 ring-zinc-200/70");
+
+  return (
+    <span className="flex flex-col items-center gap-1.5 leading-tight">
+      {/* 1 ─ Overdue hero chip */}
+      <span className={cn(
+        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset",
+        chipTone,
+      )}>
+        {hasOverdue ? (
+          <>
+            <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
+            <span className="text-[12px] font-extrabold tabular-nums">{overdue}</span>
+            <span className="text-[9px] font-semibold uppercase tracking-wide">overdue</span>
+          </>
+        ) : hasData ? (
+          <span className="text-[9px] font-bold uppercase tracking-wide">On track</span>
+        ) : (
+          <span className="text-[9px] font-semibold uppercase tracking-wide">No F/U</span>
+        )}
+      </span>
+
+      {/* 2 ─ Total · Closed aligned stat row */}
+      <span className="flex items-stretch gap-2">
+        <span className="flex flex-col items-center">
+          <span className={cn("text-[13px] font-bold tabular-nums", valTone)}>{total}</span>
+          <span className={cn("text-[8.5px] font-medium uppercase tracking-wide", labelMuted)}>total</span>
+        </span>
+        <span className={cn("w-px self-stretch", divider)} />
+        <span className="flex flex-col items-center">
+          <span className={cn("text-[13px] font-bold tabular-nums", valTone)}>{closed}</span>
+          <span className={cn("text-[8.5px] font-medium uppercase tracking-wide", labelMuted)}>closed</span>
+        </span>
+      </span>
+
+      {/* 3 ─ Labelled completion bar */}
+      <span className="flex w-16 flex-col items-stretch gap-0.5">
+        <span className="flex items-center justify-between">
+          <span className={cn("text-[8px] font-semibold uppercase tracking-wide", labelMuted)}>Closed</span>
+          <span className={cn("text-[9px] font-bold tabular-nums", hasData ? valTone : labelMuted)}>
+            {hasData ? pct(closedRatio) : "—"}
+          </span>
+        </span>
+        <span className={cn("h-[5px] w-full overflow-hidden rounded-full", track)}>
+          <span className="block h-full rounded-full bg-amber-500 transition-all" style={{ width: `${w * 100}%` }} />
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function TierBadge({ rate }: { rate: number }) {
   const tier = conversionTier(rate);
   if (!tier) return null;
@@ -221,9 +312,9 @@ function PerfCols({ isAgent }: { isAgent: boolean }) {
       <col style={{ width: isAgent ? "150px" : "140px" }} />
       <col style={{ width: "70px" }} /><col style={{ width: "92px" }} />{/* Total Leads / Qualified Leads */}
       <col style={{ width: "82px" }} /><col style={{ width: "82px" }} />{/* Walk-In Assigned / Walk-In Visited */}
-      <col style={{ width: "62px" }} /><col style={{ width: "62px" }} />{/* Pickup / On-Site */}
+      <col style={{ width: "62px" }} /><col style={{ width: "66px" }} />{/* Pickup / On-Site */}
       <col style={{ width: "108px" }} /><col style={{ width: "92px" }} />{/* Revenue / Projection */}
-      <col style={{ width: "66px" }} /><col style={{ width: "78px" }} />{/* Ticket Won / Pending F/U */}
+      <col style={{ width: "66px" }} /><col style={{ width: "112px" }} />{/* Ticket Won / Follow Ups */}
       <col style={{ width: "100px" }} />{/* Conversion */}
       <col style={{ width: "120px" }} />{/* Action */}
     </colgroup>
@@ -345,7 +436,7 @@ export function PerformanceTable({
                 <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.pickup)}>
                   Pickup
                 </th>
-                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.onSite)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV, "whitespace-nowrap")} style={accentBorder(ACCENT.onSite)}>
                   On-Site
                 </th>
                 <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.revenue)}>
@@ -358,7 +449,7 @@ export function PerformanceTable({
                   Ticket Won
                 </th>
                 <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.followUp)}>
-                  Pending F/U
+                  Follow Ups
                 </th>
                 <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.conversion)}>
                   Conversion
@@ -495,12 +586,14 @@ export function PerformanceTable({
                         />
                       </td>
 
-                      {/* ═══ Pending Follow-up ═══ */}
+                      {/* ═══ Follow Ups — Overdue (top) · Total (below) ·
+                             Closed/completed progress bar ═══ */}
                       <td className={cn(CELL, BODY_GRP_DIV)}>
-                        <Metric
-                          primary={r.pendingFollowUp}
-                          secondary={r.overdueFollowUp > 0 ? `${r.overdueFollowUp} overdue` : undefined}
-                          accent={r.overdueFollowUp > 0 ? "red" : undefined}
+                        <FollowUpCell
+                          overdue={r.followUps.overdue}
+                          total={r.followUps.total}
+                          closed={r.followUps.completed}
+                          closedRatio={r.followUps.completionRate}
                         />
                       </td>
 
@@ -585,7 +678,13 @@ export function PerformanceTable({
                     <span className="text-[14px] font-extrabold tabular-nums">{totals.ticketsWonAgentDriven}</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
-                    <span className="text-[14px] font-extrabold tabular-nums">{totals.pendingFollowUp}</span>
+                    <FollowUpCell
+                      overdue={totals.followUpsOverdue}
+                      total={totals.followUpsTotal}
+                      closed={totals.followUpsCompleted}
+                      closedRatio={totals.followUpsTotal > 0 ? totals.followUpsCompleted / totals.followUpsTotal : 0}
+                      onSummary
+                    />
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <BarMetric primary={pct(totals.conversionRate)} ratio={totals.conversionRate} tone="bg-[#3B54CF]" valueClass="text-[#1E293B]" trackClass="bg-white/70" />

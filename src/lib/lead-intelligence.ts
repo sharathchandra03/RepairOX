@@ -266,6 +266,12 @@ export interface TrendComparison {
 export interface LeadIntelligenceResult {
   period: IntelligencePeriod;
   minSample: number;
+  /** The instant outcomes were observed through (for cohort labelling). */
+  asOf: number;
+  /** The agent's full permitted/assigned lead set BEFORE period + dimension
+   *  filters — used to populate filter dropdowns and to tell an empty cohort
+   *  (wrong period) apart from an agent with no leads at all. */
+  scopeLeads: Lead[];
   cohort: Lead[];
   summary: IntelligenceSummary;
   summaryEvidence: {
@@ -296,17 +302,57 @@ export interface LeadIntelligenceResult {
   trend: TrendComparison;
 }
 
+/**
+ * How the personal cohort is resolved for `agentUserId`:
+ *   • "permitted" (My Lead Intelligence) — every lead the agent legitimately
+ *     works: owned (assignedTo) OR created (createdBy) OR their follow-up
+ *     (followUpAgentId / an open follow-up they own). This matches the Lead
+ *     Table / RLS "own" scope so the page can never show an empty cohort while
+ *     the agent still has visible leads to learn from.
+ *   • "assigned" (owner analysing a specific agent) — strictly leads OWNED by
+ *     the agent (assignedTo), so cross-agent aggregation stays clean and sales
+ *     credit is unambiguous.
+ */
+export type IntelligenceScopeMode = "permitted" | "assigned";
+
 export interface CalculateLeadIntelligenceInput {
   leads: Lead[];
   followUps: LeadFollowUp[];
   revenue: IntelligenceRevenueSources;
   filters: LeadIntelligenceFilters;
   agentUserId: string;
+  /** TEAM mode (owner): when provided, the cohort is every lead OWNED by any of
+   *  these agent ids (deduped) — used for the team-wide roll-up so totals come
+   *  from underlying records, never summed per-agent rounded cards. Overrides
+   *  `agentUserId`/`scope` for cohort resolution. */
+  teamAgentUserIds?: string[];
+  /** Cohort resolution — defaults to "assigned" (back-compat with the owner
+   *  per-agent view and existing tests). The My page passes "permitted". */
+  scope?: IntelligenceScopeMode;
   /** Follow-up ownership may differ from Lead ownership. Defaults to agentUserId. */
   followUpUserId?: string;
   labels?: IntelligenceLabels;
   minSample?: number;
   asOf?: number;
+}
+
+/** Resolve the owner cohort for an agent. See {@link IntelligenceScopeMode}. */
+export function resolveAgentCohort(
+  leads: Lead[],
+  followUps: LeadFollowUp[],
+  agentUserId: string,
+  scope: IntelligenceScopeMode,
+): Lead[] {
+  if (scope === "assigned") return leads.filter((l) => l.assignedTo === agentUserId);
+  const followUpLeadIds = new Set(
+    followUps.filter((f) => f.followUpUserId === agentUserId && f.status !== "cancelled").map((f) => f.leadId),
+  );
+  return leads.filter((l) =>
+    l.assignedTo === agentUserId
+    || l.createdBy === agentUserId
+    || l.followUpAgentId === agentUserId
+    || followUpLeadIds.has(l.id),
+  );
 }
 
 function startOfDay(t: number): number {
@@ -854,12 +900,22 @@ function currency(v: number): string { return `₹${Math.round(v).toLocaleString
 export function calculateLeadIntelligence(input: CalculateLeadIntelligenceInput): LeadIntelligenceResult {
   const asOf = input.asOf ?? Date.now();
   const minSample = Math.max(3, input.minSample ?? LEAD_INTELLIGENCE_MIN_SAMPLE);
-  const followUpUserId = input.followUpUserId ?? input.agentUserId;
+  // In TEAM mode, follow-ups belong to many agents — count every follow-up on a
+  // cohort lead ("" = no owner filter). Otherwise follow-up ownership defaults
+  // to the analysed agent.
+  const followUpUserId = input.teamAgentUserIds ? (input.followUpUserId ?? "") : (input.followUpUserId ?? input.agentUserId);
   const labels = input.labels ?? {};
   const period = resolveIntelligencePeriod(input.filters.dateRange, input.filters.customFrom, input.filters.customTo, asOf);
   // Ownership is canonical staff.id. Caller supplies an already-authorized set;
-  // this additional predicate prevents accidental cross-agent aggregation.
-  const owned = input.leads.filter((l) => l.assignedTo === input.agentUserId);
+  // this predicate resolves the agent's cohort (permitted vs assigned) and
+  // prevents accidental cross-agent aggregation. Default "assigned". TEAM mode
+  // takes the union of every authorized agent's owned leads (deduped).
+  const owned = input.teamAgentUserIds
+    ? (() => {
+        const ids = new Set(input.teamAgentUserIds);
+        return input.leads.filter((l) => ids.has(l.assignedTo));
+      })()
+    : resolveAgentCohort(input.leads, input.followUps, input.agentUserId, input.scope ?? "assigned");
   const cohort = applyLeadIntelligenceFilters(owned, input.filters, period);
   const summary = summaryFor(cohort, input.followUps, input.revenue, followUpUserId, asOf);
   const cohortIds = new Set(cohort.map((lead) => lead.id));
@@ -921,7 +977,7 @@ export function calculateLeadIntelligence(input: CalculateLeadIntelligenceInput)
   if (cohort.length > 0 && summary.finalizedInvoices === 0) dataQualityWarnings.push("No finalized linked invoices were found for this cohort; Revenue Won is ₹0.");
 
   const baseWithoutInsights: Omit<LeadIntelligenceResult, "focusInsights" | "trend"> = {
-    period, minSample, cohort, summary, summaryEvidence, funnel, leakage, segments, supportedDimensions,
+    period, minSample, asOf, scopeLeads: owned, cohort, summary, summaryEvidence, funnel, leakage, segments, supportedDimensions,
     strongestPatterns, weakestPatterns, strongestProfile, followUp, aging, lossReasons,
     valueSegments, timing, contactSpeed, stalls, dataQualityWarnings,
   };

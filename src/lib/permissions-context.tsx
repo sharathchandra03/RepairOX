@@ -307,13 +307,43 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   const [demoRoleIds, setDemoRoleIdsState] = useState<string[]>(getDemoRoleIds);
   const [demoResetCounter, setDemoResetCounter] = useState(0);
 
+  /* ── Authed API helper (browser → server routes) ── */
+  const apiFetch = useCallback(async (path: string, init: RequestInit = {}) => {
+    let token: string | undefined;
+    if (supabase) token = (await supabase.auth.getSession()).data.session?.access_token;
+    const res = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...(init.headers ?? {}),
+      },
+    });
+    let json: any = null;
+    try { json = await res.json(); } catch { /* no body */ }
+    return { ok: res.ok, status: res.status, json };
+  }, []);
+
   /* ── Supabase read helpers ── */
   const refreshTeamFromDb = useCallback(async () => {
     if (!supabase) return;
+    // Prefer the SERVICE-ROLE server route: it returns every member of the
+    // caller's organization, so a just-created user always shows up here. The
+    // direct browser query is bound by the staff_read RLS policy
+    // (organization_id = auth_org_id()), which can hide a newly-created row when
+    // an org-bootstrap mismatch lands it in a different org. We fall back to the
+    // RLS query only if the server route is unavailable.
+    try {
+      const res = await apiFetch("/api/staff");
+      if (res.ok && res.json?.ok && Array.isArray(res.json.members)) {
+        setTeam(res.json.members as TeamMember[]);
+        return;
+      }
+    } catch { /* fall through to the direct query */ }
     const { data, error } = await supabase.from("staff").select("*").order("created_at", { ascending: true });
     if (error || !data) return;
     setTeam(data.map((r) => rowToStaff(r as StaffRow)));
-  }, []);
+  }, [apiFetch]);
 
   const loadAccessFromDb = useCallback(async () => {
     if (!supabase) return;
@@ -358,23 +388,6 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       }
       setFeatureVisibilityState(fvMap);
     }
-  }, []);
-
-  /* ── Authed API helper (browser → server routes) ── */
-  const apiFetch = useCallback(async (path: string, init: RequestInit = {}) => {
-    let token: string | undefined;
-    if (supabase) token = (await supabase.auth.getSession()).data.session?.access_token;
-    const res = await fetch(path, {
-      ...init,
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        ...(init.headers ?? {}),
-      },
-    });
-    let json: any = null;
-    try { json = await res.json(); } catch { /* no body */ }
-    return { ok: res.ok, status: res.status, json };
   }, []);
 
   /* ── Hydration ── */

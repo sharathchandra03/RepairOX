@@ -18,7 +18,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Users, X, Coffee, Play, Clock, BarChart3 } from "lucide-react";
+import { Users, X, Coffee, Play, Clock, BarChart3, LogOut } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -26,6 +26,8 @@ import { useLeads } from "@/lib/leads-context";
 import { useSession } from "@/lib/use-session";
 import { useSalesPresenceRoster, type PresenceMeta } from "@/lib/use-sales-presence";
 import { useWorkSession, type WorkStatus } from "@/lib/work-session-context";
+import { usePermissions } from "@/lib/permissions-context";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 
 const WORK_STATUS_META: Record<WorkStatus, { label: string; dot: string; text: string }> = {
   working: { label: "Working", dot: "bg-emerald-500", text: "text-emerald-700" },
@@ -46,13 +48,37 @@ function activeSince(meta?: PresenceMeta): string {
 }
 
 export function SalesAgentsOnline() {
-  const { salesAgents } = useLeads();
+  const { salesAgents, currentUserIsSalesAgent, salesAgentsReady } = useLeads();
+  // Work Session is Sales-Agent-only — the owner sees the agent roster but no
+  // personal work-status chip / Start Work (Online ≠ Working; owner ≠ agent).
+  const showWorkStatus = salesAgentsReady && currentUserIsSalesAgent();
   const { id: myId } = useSession();
   const { onlineIds, metaById } = useSalesPresenceRoster();
   const router = useRouter();
-  const { status: workStatus, startWork, startBreak, endBreak } = useWorkSession();
+  const { status: workStatus, startWork, startBreak, endBreak, endWork } = useWorkSession();
+  const { logout } = usePermissions();
 
   const [open, setOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+
+  // Close the work session (and any open break) BEFORE auth logout — this is
+  // what makes each day's productivity computable (the engine midnight-splits
+  // the CLOSED session). Never block logout on it: a hanging/failing close is
+  // recovered later as an interrupted session. Mirrors topbar handleLogout.
+  async function handleLogout() {
+    setConfirmLogout(false);
+    setOpen(false);
+    try {
+      await Promise.race([
+        endWork("logout"),
+        new Promise((resolve) => setTimeout(resolve, 2500)),
+      ]);
+    } catch {
+      /* swallow — logout must always proceed */
+    }
+    logout();
+    router.push("/login");
+  }
   const btnRef = useRef<HTMLButtonElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const [rect, setRect] = useState<DOMRect | null>(null);
@@ -131,7 +157,9 @@ export function SalesAgentsOnline() {
           </div>
 
           {/* Current user's WORK STATUS + context actions. Distinct from the
-              presence (online) picture below — Online ≠ Working. */}
+              presence (online) picture below — Online ≠ Working. Sales Agents
+              only — hidden for the owner / any non-Sales-Agent. */}
+          {showWorkStatus && (
           <div className="border-b border-border bg-muted/30 px-4 py-3">
             <div className="flex items-center justify-between gap-2">
               <span className="flex items-center gap-1.5 text-[11px] font-semibold">
@@ -151,7 +179,7 @@ export function SalesAgentsOnline() {
               {workStatus === "working" && (
                 <button
                   onClick={() => void startBreak()}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-700 transition hover:bg-amber-100"
                 >
                   <Coffee className="h-3.5 w-3.5" /> Start Break
                 </button>
@@ -159,7 +187,7 @@ export function SalesAgentsOnline() {
               {workStatus === "on_break" && (
                 <button
                   onClick={() => void endBreak()}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
                 >
                   <Play className="h-3.5 w-3.5" /> Resume Work
                 </button>
@@ -167,13 +195,23 @@ export function SalesAgentsOnline() {
               {(workStatus === "logged_out" || workStatus === "interrupted") && (
                 <button
                   onClick={() => void startWork()}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground transition hover:bg-muted"
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-[#4361EE]/30 bg-[#4361EE]/10 px-2.5 py-1 text-[11px] font-semibold text-[#4361EE] transition hover:bg-[#4361EE]/20"
                 >
                   <Clock className="h-3.5 w-3.5" /> Start Work
                 </button>
               )}
+
+              {/* Logout — red, asks for confirmation (closes the work session
+                  first so each day's productivity is calculated). */}
+              <button
+                onClick={() => setConfirmLogout(true)}
+                className="ml-auto inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1 text-[11px] font-semibold text-rose-600 transition hover:bg-rose-100"
+              >
+                <LogOut className="h-3.5 w-3.5" /> Logout
+              </button>
             </div>
           </div>
+          )}
 
           <div className="h-[360px] overflow-y-auto p-2">
             {total === 0 && (
@@ -235,6 +273,16 @@ export function SalesAgentsOnline() {
         </span>
       </button>
       {panel}
+      <ConfirmDialog
+        open={confirmLogout}
+        onClose={() => setConfirmLogout(false)}
+        onConfirm={() => void handleLogout()}
+        title="Log out of RepairOX?"
+        description="Your work session will be closed and today's productivity recorded before you're signed out."
+        confirmLabel="Log out"
+        cancelLabel="Cancel"
+        danger
+      />
     </>
   );
 }

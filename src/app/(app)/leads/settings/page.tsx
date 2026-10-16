@@ -15,7 +15,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import Link from "next/link";
-import { ListChecks, ChevronRight, Store, Sparkles } from "lucide-react";
+import { ListChecks, ChevronRight, Store, Sparkles, Gauge } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { usePermissions } from "@/lib/permissions-context";
 
@@ -36,6 +36,14 @@ const AREAS: SettingsArea[] = [
     description: "Manage the dropdown values sales agents pick from when capturing a lead — Source, Device, Status, Priority and more. Reorder, rename, archive.",
     icon: ListChecks,
     href: "/leads/settings/form-edit",
+    available: true,
+  },
+  {
+    id: "productivity",
+    label: "Productivity",
+    description: "Tune the Sales-Agent work-session reminders — set how long an agent may stay on break before RepairOX reminds them to resume work so productivity stays accurate.",
+    icon: Gauge,
+    href: "/leads/settings/productivity",
     available: true,
   },
 ];

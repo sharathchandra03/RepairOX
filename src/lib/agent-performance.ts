@@ -588,6 +588,10 @@ export interface PerfTotals {
   pickupCompleted: number;
   onSiteCompleted: number;
   revenueWon: number;
+  /** Net Revenue Won (gross − succeeded refunds on finalized-parent invoices),
+   *  summed from the rows' earned net revenue. Equals revenueWonAgentDriven
+   *  when no refund data was supplied to the engine. */
+  revenueWonNet: number;
   invoiceCount: number;
   projection: number;
   ticketsWon: number;
@@ -601,6 +605,14 @@ export interface PerfTotals {
   ticketsWonSelfInitiated: number;
   revenueWonAgentDriven: number;
   revenueWonSelfInitiated: number;
+  /* ── Follow-up engine aggregates (distinct follow-up RECORDS, not leads) ──
+     Each follow-up's lead has exactly ONE owner, so summing per-agent rows
+     never double-counts a shared record. `followUpOverdueRate` is re-derived
+     from the summed totals (a true weighted rate — never an average of rates). */
+  followUpsTotal: number;
+  followUpsOverdue: number;
+  followUpsCompleted: number;
+  followUpOverdueRate: number; // overdue / total (0..1)
 }
 
 /** Sum any set of performance rows (agent rows or month rows) into totals that
@@ -608,16 +620,17 @@ export interface PerfTotals {
  *  summed converted/leads so it stays a true weighted rate. */
 export function sumPerfRows(rows: Pick<AgentPerformance,
   | "leads" | "qualified" | "converted" | "routeAssigned" | "walkIn" | "pickup" | "onSite"
-  | "pickupCompleted" | "onSiteCompleted" | "revenueWon" | "invoiceCount" | "projection"
+  | "pickupCompleted" | "onSiteCompleted" | "revenueWon" | "revenueWonNet" | "invoiceCount" | "projection"
   | "ticketsWon" | "pendingFollowUp" | "overdueFollowUp"
   | "convertedAgentDriven" | "convertedSelfInitiated" | "ticketsWonAgentDriven"
-  | "ticketsWonSelfInitiated" | "revenueWonAgentDriven" | "revenueWonSelfInitiated">[]): PerfTotals {
+  | "ticketsWonSelfInitiated" | "revenueWonAgentDriven" | "revenueWonSelfInitiated" | "followUps">[]): PerfTotals {
   const t: PerfTotals = {
     leads: 0, qualified: 0, converted: 0, routeAssigned: 0, walkIn: 0, pickup: 0, onSite: 0,
-    pickupCompleted: 0, onSiteCompleted: 0, revenueWon: 0, invoiceCount: 0, projection: 0,
+    pickupCompleted: 0, onSiteCompleted: 0, revenueWon: 0, revenueWonNet: 0, invoiceCount: 0, projection: 0,
     ticketsWon: 0, pendingFollowUp: 0, overdueFollowUp: 0, conversionRate: 0,
     convertedAgentDriven: 0, convertedSelfInitiated: 0, ticketsWonAgentDriven: 0,
     ticketsWonSelfInitiated: 0, revenueWonAgentDriven: 0, revenueWonSelfInitiated: 0,
+    followUpsTotal: 0, followUpsOverdue: 0, followUpsCompleted: 0, followUpOverdueRate: 0,
   };
   for (const r of rows) {
     t.leads += r.leads;
@@ -630,6 +643,7 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
     t.pickupCompleted += r.pickupCompleted;
     t.onSiteCompleted += r.onSiteCompleted;
     t.revenueWon += r.revenueWon;
+    t.revenueWonNet += r.revenueWonNet;
     t.invoiceCount += r.invoiceCount;
     t.projection += r.projection;
     t.ticketsWon += r.ticketsWon;
@@ -641,9 +655,110 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
     t.ticketsWonSelfInitiated += r.ticketsWonSelfInitiated;
     t.revenueWonAgentDriven += r.revenueWonAgentDriven;
     t.revenueWonSelfInitiated += r.revenueWonSelfInitiated;
+    t.followUpsTotal += r.followUps.total;
+    t.followUpsOverdue += r.followUps.overdue;
+    t.followUpsCompleted += r.followUps.completed;
   }
+  // Weighted rates re-derived from summed counts (never an average of rates).
   t.conversionRate = t.leads > 0 ? t.converted / t.leads : 0;
+  t.followUpOverdueRate = t.followUpsTotal > 0 ? t.followUpsOverdue / t.followUpsTotal : 0;
   return t;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CONSOLIDATED KPI SUMMARY  (the four dashboard cards — ONE source of truth)
+   ═══════════════════════════════════════════════════════════════════════
+
+   The Agent Performance dashboard shows exactly four KPI cards:
+     1. Revenue Performance    — Net Revenue Won · invoices · avg per invoice
+     2. Lead Performance       — Total Leads · qualified · qualification rate
+     3. Conversion Performance — Converted · conversion rate · not converted
+     4. Follow-up Performance  — Total follow-ups · overdue · overdue rate
+
+   Both views (All Agents aggregate + Individual agent) derive the SAME shape
+   from the SAME definitions via `kpiSummary(...)`, so they can never disagree.
+   Every value is zero-safe (a zero denominator yields 0, never NaN/Infinity),
+   and every rate is computed from the underlying COUNTS (never an average of
+   per-agent rates — see the spec's weighted-aggregation rule).
+
+   Credit model: Converted / Revenue use the AGENT-DRIVEN (earned) figures —
+   the established business rule everywhere else on this page — so a
+   self-initiated walk-in only back-linked to an old lead never inflates an
+   agent's earned performance. `convertedForRate` and `leads` share ONE cohort
+   so Conversion Rate + Not Converted reconcile with Lead Performance. */
+export interface KpiSummary {
+  /* Revenue Performance */
+  netRevenue: number;        // ₹ — net of succeeded refunds (gross when none)
+  invoiceCount: number;      // eligible finalized invoices attributed
+  avgRevenuePerInvoice: number; // netRevenue / invoiceCount (0 when no invoices)
+
+  /* Lead Performance */
+  totalLeads: number;
+  qualifiedLeads: number;
+  qualificationRate: number; // qualified / total (0..1)
+
+  /* Conversion Performance */
+  convertedLeads: number;    // agent-driven converted (earned)
+  conversionRate: number;    // converted / total (0..1)
+  notConverted: number;      // total − converted (never negative)
+
+  /* Follow-up Performance */
+  totalFollowUps: number;    // distinct follow-up records (scheduled + completed, no cancelled)
+  overdueFollowUps: number;  // open + past due (datetime-precise, timezone-aware)
+  overdueRate: number;       // overdue / total (0..1)
+}
+
+function kpiCommon(args: {
+  netRevenue: number; invoiceCount: number;
+  totalLeads: number; qualifiedLeads: number;
+  convertedLeads: number;
+  totalFollowUps: number; overdueFollowUps: number;
+}): KpiSummary {
+  const { netRevenue, invoiceCount, totalLeads, qualifiedLeads, convertedLeads, totalFollowUps, overdueFollowUps } = args;
+  return {
+    netRevenue,
+    invoiceCount,
+    avgRevenuePerInvoice: invoiceCount > 0 ? netRevenue / invoiceCount : 0,
+
+    totalLeads,
+    qualifiedLeads,
+    qualificationRate: totalLeads > 0 ? qualifiedLeads / totalLeads : 0,
+
+    convertedLeads,
+    conversionRate: totalLeads > 0 ? convertedLeads / totalLeads : 0,
+    notConverted: Math.max(0, totalLeads - convertedLeads),
+
+    totalFollowUps,
+    overdueFollowUps,
+    overdueRate: totalFollowUps > 0 ? overdueFollowUps / totalFollowUps : 0,
+  };
+}
+
+/** Four-card KPI summary for ONE agent (Individual view). */
+export function kpiSummaryForAgent(p: AgentPerformance): KpiSummary {
+  return kpiCommon({
+    netRevenue: p.revenueWonNet,
+    invoiceCount: p.invoiceCount,
+    totalLeads: p.leads,
+    qualifiedLeads: p.qualified,
+    convertedLeads: p.convertedAgentDriven,
+    totalFollowUps: p.followUps.total,
+    overdueFollowUps: p.followUps.overdue,
+  });
+}
+
+/** Four-card KPI summary for the AGGREGATED rows (All Agents view). Rates come
+ *  from the summed counts in PerfTotals — true weighted rates, never averaged. */
+export function kpiSummaryFromTotals(t: PerfTotals): KpiSummary {
+  return kpiCommon({
+    netRevenue: t.revenueWonNet,
+    invoiceCount: t.invoiceCount,
+    totalLeads: t.leads,
+    qualifiedLeads: t.qualified,
+    convertedLeads: t.convertedAgentDriven,
+    totalFollowUps: t.followUpsTotal,
+    overdueFollowUps: t.followUpsOverdue,
+  });
 }
 
 /* ═══════════════════════════════════════════════════════════════════════

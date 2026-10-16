@@ -59,7 +59,7 @@ export const ACCENT: Record<Accent, { bar: string; chip: string }> = {
 /* The section card. `delay` staggers the reveal; `id` enables deep-link
    anchors (scroll-mt-28 clears the sticky topbar). */
 export function DetailSection({
-  icon: Icon, title, action, children, id, accent = "blue", delay = 0, className,
+  icon: Icon, title, action, children, id, accent = "blue", delay = 0, className, fill = false,
 }: {
   icon: LucideIcon;
   title: string;
@@ -69,10 +69,14 @@ export function DetailSection({
   accent?: Accent;
   delay?: number;
   className?: string;
+  /** When true the section fills its parent's height (h-full) and lays its body
+   *  out as a flex column — use it inside an equal-height grid row so two
+   *  sections match length and the body can flex/scroll internally. */
+  fill?: boolean;
 }) {
   const a = ACCENT[accent];
   return (
-    <Reveal delay={delay}>
+    <Reveal delay={delay} className={cn(fill && "h-full")}>
       <section
         id={id}
         className={cn(
@@ -80,19 +84,20 @@ export function DetailSection({
           // Soft 3D shadow + a lift on hover (the premium feel).
           "shadow-[0_1px_2px_rgba(20,30,80,0.04),0_10px_30px_-18px_rgba(20,30,80,0.22)]",
           "transition-shadow hover:shadow-[0_2px_4px_rgba(20,30,80,0.05),0_18px_44px_-22px_rgba(20,30,80,0.3)]",
+          fill && "flex h-full flex-col",
           className,
         )}
       >
         {/* Left accent strip — the section's colour identity. */}
         <span aria-hidden className={cn("absolute inset-y-0 left-0 w-1", a.bar)} />
-        <div className="mb-5 flex items-center justify-between gap-2.5 border-b border-border/70 pb-4">
+        <div className={cn("flex items-center justify-between gap-2.5 border-b border-border/70 pb-4", fill ? "mb-4" : "mb-5")}>
           <div className="flex items-center gap-2.5">
             <span className={cn("grid h-8 w-8 place-items-center rounded-lg", a.chip)}><Icon className="h-4 w-4" /></span>
             <h2 className="text-sm font-bold uppercase tracking-wider text-foreground">{title}</h2>
           </div>
           {action}
         </div>
-        {children}
+        {fill ? <div className="flex min-h-0 flex-1 flex-col">{children}</div> : children}
       </section>
     </Reveal>
   );

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { calculateLeadIntelligence, EMPTY_INTELLIGENCE_FILTERS } from "./lead-intelligence";
+import { calculateLeadIntelligence, EMPTY_INTELLIGENCE_FILTERS, resolveAgentCohort } from "./lead-intelligence";
 import { buildAgentIntelligenceHref, buildLeadEvidenceHref, parseIntelligenceFilters, resolveLeadEvidenceIds } from "./lead-intelligence-url";
 import type { Lead, LeadFollowUp } from "./leads-data";
 
@@ -263,4 +263,42 @@ test("aging rejects conversion timestamps before lead creation", () => {
   const result = calculateLeadIntelligence({ leads: [invalid], followUps: [], revenue: { tickets: [], invoices: [] }, agentUserId: "agent-a", filters: EMPTY_INTELLIGENCE_FILTERS, asOf: AS_OF });
   assert.equal(result.aging.reduce((sum, bucket) => sum + bucket.leads, 0), 0);
   assert.equal(result.dataQualityWarnings.some((warning) => warning.includes("before creation")), true);
+});
+
+test("permitted scope includes created / follow-up leads the agent doesn't own, assigned scope does not", () => {
+  // Owned by agent-b, but CREATED by agent-a → permitted (My) scope includes it.
+  const created = lead("created-by-a", { assignedTo: "agent-b", assignedToName: "Agent B", createdBy: "agent-a" });
+  // Owned by agent-b, but agent-a is the follow-up agent → permitted includes it.
+  const followUpOwned = lead("fu-by-a", { assignedTo: "agent-b", assignedToName: "Agent B", createdBy: "owner", followUpAgentId: "agent-a" });
+  const other = lead("pure-b", { assignedTo: "agent-b", assignedToName: "Agent B", createdBy: "owner", followUpAgentId: "agent-b" });
+  const leads = [created, followUpOwned, other];
+
+  const permitted = resolveAgentCohort(leads, [], "agent-a", "permitted").map((l) => l.id).sort();
+  assert.deepEqual(permitted, ["created-by-a", "fu-by-a"]);
+  const assigned = resolveAgentCohort(leads, [], "agent-a", "assigned").map((l) => l.id);
+  assert.deepEqual(assigned, []);
+
+  // The engine honours the scope flag end to end.
+  const permittedResult = calculateLeadIntelligence({ leads, followUps: [], revenue: { tickets: [], invoices: [] }, agentUserId: "agent-a", scope: "permitted", filters: EMPTY_INTELLIGENCE_FILTERS, asOf: AS_OF });
+  assert.equal(permittedResult.summary.totalLeads, 2);
+  const assignedResult = calculateLeadIntelligence({ leads, followUps: [], revenue: { tickets: [], invoices: [] }, agentUserId: "agent-a", scope: "assigned", filters: EMPTY_INTELLIGENCE_FILTERS, asOf: AS_OF });
+  assert.equal(assignedResult.summary.totalLeads, 0);
+  // scopeLeads exposes the pre-filter owned set so an empty cohort is distinguishable.
+  assert.equal(permittedResult.scopeLeads.length, 2);
+});
+
+test("team roll-up aggregates the union of owned leads and never double-counts a shared invoice", () => {
+  const s = scenario();
+  // The team pass over both agents equals agent-a's assigned cohort + agent-b's
+  // single lead — computed from underlying records, not summed cards.
+  const team = calculateLeadIntelligence({
+    ...s, agentUserId: "", teamAgentUserIds: ["agent-a", "agent-b"],
+    filters: { ...EMPTY_INTELLIGENCE_FILTERS, dateRange: "thisMonth" }, asOf: AS_OF,
+  });
+  // agent-a's assigned cohort is 26 (existing test) + agent-b's 1 = 27.
+  assert.equal(team.summary.totalLeads, 27);
+  assert.equal(team.cohort.some((l) => l.id === "agent-b"), true);
+  // Revenue is de-duped across the team (6 finalized invoices, ₹60k).
+  assert.equal(team.summary.revenueWon, 60_000);
+  assert.equal(team.summary.finalizedInvoices, 6);
 });

@@ -818,7 +818,11 @@ export const navItems: NavItem[] = [
   // Lead Dashboard. Own and cross-agent scopes reuse the existing performance
   // permissions; store scope remains independently enforced by context + RLS.
   { href: "/leads/intelligence", label: "Lead Intelligence", icon: "Lightbulb", permission: ["leads_performance_view_own", "leads_view", "manage_sales"] },
-  { href: "/leads/intelligence/agents", label: "Agent Intelligence", icon: "Trophy", permission: ["leads_performance_view_all", "leads_view_all", "view_sales_reports", "manage_reports"] },
+  // Sales Book — ONE permission-aware operational workspace. Own-scope so every
+  // Sales Agent sees it (their own book); owners (performanceAll) get the same
+  // page auto-switched to the Agent Roster + agent picker across the team. The
+  // old /leads/intelligence/agents owner page now redirects here.
+  { href: "/leads/sales-book", label: "Sales Book", icon: "BookOpen", permission: ["leads_performance_view_own", "leads_performance_view_all", "leads_view", "manage_sales"] },
   // Agent Performance — the tabular performance dashboard (ALL AGENTS leaderboard
   // + INDIVIDUAL month-by-month), distinct from the diagnostic Intelligence
   // pages. The page itself role-gates: own-scope agents see only their own tab,
@@ -2089,7 +2093,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
   leads: [
     { label: "PIPELINE",       items: ["/lead-management", "/leads/list", "/leads/price-list", "/leads/kanban", "/leads/contacts", "/leads/companies"] },
     { label: "DEALS",          items: ["/leads/deals", "/leads/quotations"] },
-    { label: "PERFORMANCE",    items: ["/leads/performance", "/leads/intelligence", "/leads/intelligence/agents", "/leads/productivity"] },
+    { label: "PERFORMANCE",    items: ["/leads/sales-book", "/leads/performance", "/leads/intelligence", "/leads/productivity"] },
     { label: "COMMUNICATE",    items: ["/leads/inbox", "/leads/tasks", "/leads/meetings", "/leads/activities", "/leads/calls", "/leads/email", "/leads/whatsapp"] },
     { label: "VIEWS",          items: ["/leads/smart-lists", "/leads/map-view", "/leads/unattributed", "/leads/campaigns"] },
     { label: "GENERAL",        items: ["/leads/reports", "/leads/settings"] },

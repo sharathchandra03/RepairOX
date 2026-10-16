@@ -22,6 +22,7 @@ import { usePermissions } from "@/lib/permissions-context";
 import { Can } from "@/components/common/can";
 import { CHAT_UNREAD_TOTAL } from "@/components/common/internal-chat";
 import { useWorkSession, type WorkStatus } from "@/lib/work-session-context";
+import { useLeads } from "@/lib/leads-context";
 
 const WORK_STATUS_META: Record<WorkStatus, { label: string; dot: string; text: string }> = {
   working: { label: "Working", dot: "bg-emerald-500", text: "text-emerald-700" },
@@ -47,6 +48,11 @@ export function Topbar({
   const meta = WORKSPACE_MAP[activeWorkspace];
   const { allowedWorkspaces: allowed, role, isPreviewing, currentUser, logout } = usePermissions();
   const { status: workStatus, startBreak, endBreak, startWork, endWork } = useWorkSession();
+  // Work Session is Sales-Agent-only this phase — the owner never sees the Work
+  // Status / Start Work controls (Online ≠ Working; owner ≠ agent). endWork on
+  // logout stays unconditional (idempotent no-op for a user with no session).
+  const { currentUserIsSalesAgent, salesAgentsReady } = useLeads();
+  const showWorkStatus = salesAgentsReady && currentUserIsSalesAgent();
   const displayName = currentUser?.name ?? "User";
   const displayEmail = currentUser?.email ?? "";
   const workMeta = WORK_STATUS_META[workStatus];
@@ -245,32 +251,37 @@ export function Topbar({
 
               {/* Work Status + context actions. Separate from Online presence
                   (the green roster dot) — this is the user's WORK status,
-                  derived from their open work session. */}
-              <div className="my-1 h-px bg-border" />
-              <MenuLabel>
-                <span className="flex items-center gap-1.5">
-                  <span className={cn("h-1.5 w-1.5 rounded-full", workMeta.dot)} />
-                  <span className={workMeta.text}>Work status: {workMeta.label}</span>
-                </span>
-              </MenuLabel>
-              {workStatus === "working" && (
-                <MenuItem icon={Coffee} onClick={() => { void startBreak(); close(); }}>
-                  Start Break
-                </MenuItem>
+                  derived from their open work session. Sales Agents only —
+                  hidden for the owner / any non-Sales-Agent. */}
+              {showWorkStatus && (
+                <>
+                  <div className="my-1 h-px bg-border" />
+                  <MenuLabel>
+                    <span className="flex items-center gap-1.5">
+                      <span className={cn("h-1.5 w-1.5 rounded-full", workMeta.dot)} />
+                      <span className={workMeta.text}>Work status: {workMeta.label}</span>
+                    </span>
+                  </MenuLabel>
+                  {workStatus === "working" && (
+                    <MenuItem icon={Coffee} onClick={() => { void startBreak(); close(); }}>
+                      Start Break
+                    </MenuItem>
+                  )}
+                  {workStatus === "on_break" && (
+                    <MenuItem icon={Play} onClick={() => { void endBreak(); close(); }}>
+                      Resume Work
+                    </MenuItem>
+                  )}
+                  {(workStatus === "logged_out" || workStatus === "interrupted") && (
+                    <MenuItem icon={Clock} onClick={() => { void startWork(); close(); }}>
+                      Start Work
+                    </MenuItem>
+                  )}
+                  <MenuItem icon={BarChart3} onClick={() => { router.push("/account/productivity"); close(); }}>
+                    Productivity
+                  </MenuItem>
+                </>
               )}
-              {workStatus === "on_break" && (
-                <MenuItem icon={Play} onClick={() => { void endBreak(); close(); }}>
-                  Resume Work
-                </MenuItem>
-              )}
-              {(workStatus === "logged_out" || workStatus === "interrupted") && (
-                <MenuItem icon={Clock} onClick={() => { void startWork(); close(); }}>
-                  Start Work
-                </MenuItem>
-              )}
-              <MenuItem icon={BarChart3} onClick={() => { router.push("/account/productivity"); close(); }}>
-                Productivity
-              </MenuItem>
 
               <div className="my-1 h-px bg-border" />
               <MenuItem icon={LogOut} danger onClick={() => { handleLogout(); close(); }}>

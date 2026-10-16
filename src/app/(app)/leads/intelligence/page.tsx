@@ -27,5 +27,8 @@ export default function MyLeadIntelligencePage() {
     avatarUrl: session.avatarUrl,
     roleLabel: "Sales Agent",
   };
-  return <LeadIntelligenceView agent={agent} initialFilters={filters} />;
+  // Personal view analyses the agent's PERMITTED leads (owned / created /
+  // follow-up) — the same scope the Lead Table/RLS give them — so the page is
+  // not falsely empty when the agent works leads they don't strictly own.
+  return <LeadIntelligenceView agent={agent} initialFilters={filters} scope="permitted" />;
 }

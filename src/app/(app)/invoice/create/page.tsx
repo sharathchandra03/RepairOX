@@ -1418,7 +1418,12 @@ function LineItemNameInput({
   // search look broken. Portalling escapes that clipping/stacking context,
   // the same approach the shared InventorySearchBox uses.
   const anchorRef = useRef<HTMLDivElement>(null);
-  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  // Flip the dropdown ABOVE the input when there's not enough room below, and
+  // cap its height to the available space, so it never runs off the screen.
+  const [rect, setRect] = useState<
+    | { left: number; top: number; width: number; placement: "below" | "above"; maxHeight: number }
+    | null
+  >(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
@@ -1426,7 +1431,21 @@ function LineItemNameInput({
     const el = anchorRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setRect({ left: r.left, top: r.bottom, width: r.width });
+    const GAP = 6;
+    const MARGIN = 12;
+    const spaceBelow = window.innerHeight - r.bottom - GAP - MARGIN;
+    const spaceAbove = r.top - GAP - MARGIN;
+    const preferAbove = spaceBelow < 200 && spaceAbove > spaceBelow;
+    const placement: "below" | "above" = preferAbove ? "above" : "below";
+    const avail = placement === "above" ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(140, Math.min(320, avail));
+    setRect({
+      left: r.left,
+      top: placement === "above" ? r.top - GAP : r.bottom + GAP,
+      width: r.width,
+      placement,
+      maxHeight,
+    });
   };
 
   useEffect(() => {
@@ -1485,13 +1504,24 @@ function LineItemNameInput({
           <div
             data-lineitem-search-panel="true"
             className="fixed z-[60]"
-            style={{ left: rect.left, top: rect.top + 4, width: rect.width }}
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              transform: rect.placement === "above" ? "translateY(-100%)" : undefined,
+            }}
           >
             {showList && (
-              <div className="max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+              <div
+                className="overflow-y-auto rounded-xl border border-border bg-card shadow-xl"
+                style={{ maxHeight: rect.maxHeight }}
+              >
                 {results.map((item) => {
+                  // Prefer the canonical `kind`; fall back to the legacy `type`
+                  // for any un-migrated row so services are still recognised.
+                  const isService = item.kind ? item.kind === "service" : item.type === "Service";
                   const available = item.currentStock - (item.reservedStock || 0);
-                  const out = item.type === "Product" && available <= 0;
+                  const out = !isService && available <= 0;
                   return (
                     <button
                       key={item.id}
@@ -1499,15 +1529,34 @@ function LineItemNameInput({
                       onMouseDown={(e) => { e.preventDefault(); onPick(item); setOpen(false); }}
                       className="flex w-full items-center gap-3 border-b border-border px-3 py-2 text-left transition last:border-0 hover:bg-indigo-50/50"
                     >
-                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Package className="h-3.5 w-3.5" /></span>
+                      {/* Part = blue Package · Repair Service / Labour = amber Wrench */}
+                      <span
+                        className={cn(
+                          "grid h-7 w-7 shrink-0 place-items-center rounded-lg",
+                          isService ? "bg-amber-100 text-amber-600" : "bg-[#EEF1FD] text-[#4361EE]",
+                        )}
+                        title={isService ? "Repair Service / Labour" : "Part / Product"}
+                      >
+                        {isService ? <Wrench className="h-3.5 w-3.5" /> : <Package className="h-3.5 w-3.5" />}
+                      </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-[13px] font-medium">{item.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate text-[13px] font-medium">{item.name}</p>
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                              isService ? "bg-amber-100 text-amber-700" : "bg-[#EEF1FD] text-[#4361EE]",
+                            )}
+                          >
+                            {isService ? "Service" : "Part"}
+                          </span>
+                        </div>
                         <p className="truncate text-[10px] text-muted-foreground">{item.id} · {item.category}</p>
                       </div>
                       <div className="shrink-0 text-right">
                         <p className="text-[13px] font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
                         <span className={cn("text-[10px]", out ? "text-rose-500" : "text-muted-foreground")}>
-                          {item.type === "Service" ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
+                          {isService ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
                         </span>
                       </div>
                     </button>
@@ -1588,13 +1637,9 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
   // the Add Inventory modal (create a NEW Inventory Master record) are two
   // DISTINCT workflows, tracked separately.
   const [showInventorySearch, setShowInventorySearch] = useState(false);
-  // Add Service — a DISTINCT catalogue path over kind="service" master items,
-  // separate from both the part search above and the free-text "Add Row".
-  const [showServiceSearch, setShowServiceSearch] = useState(false);
   const [showAddInventory, setShowAddInventory] = useState(false);
   const [addInventorySeed, setAddInventorySeed] = useState("");
   const searchWrapRef = useRef<HTMLDivElement>(null);
-  const serviceSearchWrapRef = useRef<HTMLDivElement>(null);
 
   // Close the inventory search popover on outside click / Escape.
   useEffect(() => {
@@ -1612,20 +1657,6 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
     document.addEventListener("mousedown", onDown);
     return () => document.removeEventListener("mousedown", onDown);
   }, [showInventorySearch]);
-
-  // Close the service-catalogue search popover on outside click.
-  useEffect(() => {
-    if (!showServiceSearch) return;
-    const onDown = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if ((target as HTMLElement)?.closest?.('[data-inventory-search-panel="true"]')) return;
-      if (serviceSearchWrapRef.current && !serviceSearchWrapRef.current.contains(target)) {
-        setShowServiceSearch(false);
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [showServiceSearch]);
 
   const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
 
@@ -2057,13 +2088,12 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => { setShowInventorySearch((v) => !v); setShowServiceSearch(false); }} className={showInventorySearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
-                  <Search className="h-3.5 w-3.5" /> Add Part
-                </Button>
-                {/* Add Service — DISTINCT catalogue search over kind="service"
-                    master items (never the part search, never master-create). */}
-                <Button size="sm" variant={showServiceSearch ? "secondary" : "outline"} onClick={() => { setShowServiceSearch((v) => !v); setShowInventorySearch(false); }} className={showServiceSearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
-                  <Wrench className="h-3.5 w-3.5" /> Add Service
+                {/* ONE unified catalogue search over BOTH parts AND services.
+                    Results are differentiated by icon/tag; on select the item's
+                    `kind` routes it to the part vs service line builder, so the
+                    costing stays correct without separate buttons. */}
+                <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => { setShowInventorySearch((v) => !v); }} className={showInventorySearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
+                  <Search className="h-3.5 w-3.5" /> Add Item
                 </Button>
                 <Button size="sm" variant="outline" onClick={addService} className="border-[#4361EE]/30 hover:border-[#4361EE]/50">
                   <Plus className="h-3.5 w-3.5" /> Add Row
@@ -2080,13 +2110,20 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
             </div>
 
             <div className="px-4 py-3 sm:px-5">
-              {/* Live inventory search — anchored popover, type-to-search. */}
+              {/* ONE unified live search over BOTH parts and services (no kind
+                  filter). The result rows carry a Part/Service icon + tag; on
+                  select we route by item.kind to the correct line builder —
+                  a service loads its Service Charge + internal labour cost and
+                  never touches stock, a part loads SP + resolves valuation cost. */}
               {showInventorySearch && (
                 <div className="relative z-30 mb-4" ref={searchWrapRef}>
                   <InventorySearchBox
-                    kind="part"
-                    placeholder="Search parts by name, SKU, category, or HSN…"
-                    onSelect={(item) => { addInventoryLine(item); /* keep open for rapid multi-add */ }}
+                    placeholder="Search parts & services by name, SKU, category, or HSN…"
+                    onSelect={(item) => {
+                      if (item.kind === "service") addServiceLine(item);
+                      else addInventoryLine(item);
+                      /* keep open for rapid multi-add */
+                    }}
                     onClose={() => setShowInventorySearch(false)}
                     onAddInventory={(term) => {
                       // Empty-state "+ Add Inventory" — gated too: only open the
@@ -2097,20 +2134,6 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                         setShowAddInventory(true);
                       }
                     }}
-                  />
-                </div>
-              )}
-
-              {/* Add Service — DISTINCT live search over kind="service" master
-                  items (Service Catalogue). Loads the Service Charge onto the
-                  line; no inventory-quantity effect (inv-design §5.2). */}
-              {showServiceSearch && (
-                <div className="relative z-30 mb-4" ref={serviceSearchWrapRef}>
-                  <InventorySearchBox
-                    kind="service"
-                    placeholder="Search repair services / labour by name, code, or category…"
-                    onSelect={(item) => { addServiceLine(item); /* keep open for rapid multi-add */ }}
-                    onClose={() => setShowServiceSearch(false)}
                   />
                 </div>
               )}

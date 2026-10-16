@@ -20,6 +20,7 @@ import { resetDemoData } from "@/lib/demo-mode";
 import { useSessionTracker } from "@/lib/use-session-tracker";
 import { useSalesPresenceTracker } from "@/lib/use-sales-presence";
 import { useWorkSessionAutoStart } from "@/lib/work-session-context";
+import { useLeads } from "@/lib/leads-context";
 
 /** Resolve which workspace a given pathname belongs to, based on navGroups. */
 function workspaceForPath(pathname: string): WorkspaceId | null {
@@ -95,6 +96,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const { allowedWorkspaces: allowed, currentUser, authReady, getVisibilityByHref, isDemoMode } = usePermissions();
+  // Work Session is Sales-Agent-only this phase. Resolve the signed-in user's
+  // eligibility (excludes the owner / full_access) once the directory loads.
+  const { currentUserIsSalesAgent, salesAgentsReady } = useLeads();
+  const isSalesAgent = salesAgentsReady && currentUserIsSalesAgent();
   const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceId>(allowed[0]?.id ?? "shop");
   const pathname = usePathname();
   const router = useRouter();
@@ -112,8 +117,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Work Session auto-start + liveness heartbeat (Attendance & Productivity).
   // Idempotent (in-tab single-flight → server open-session SELECT → DB unique
   // index resume); closes nothing — logout handles the close. Strictly separate
-  // from presence above (Online ≠ Working).
-  useWorkSessionAutoStart();
+  // from presence above (Online ≠ Working). ONLY eligible Sales Agents are
+  // tracked this phase — the owner (a non-Sales-Agent) never gets a session.
+  useWorkSessionAutoStart(isSalesAgent);
 
   // Route guard — once the session is restored, bounce anyone who isn't
   // signed in back to the login screen. Access is centrally controlled.

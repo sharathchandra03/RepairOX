@@ -190,14 +190,32 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
   });
   members.sort((a, b) => a.name.localeCompare(b.name));
 
-  // Manager name.
+  // Manager name. The explicit branches.manager_staff_id pointer is the source
+  // of truth. For an older store where it was never set, we DERIVE a fallback
+  // primary manager from the people with access (first a member on a
+  // store-administration role, else the first home member, else the first
+  // member) so this detail view agrees with the store LIST's manager column
+  // instead of showing "No primary manager assigned" while People With Access
+  // clearly lists someone. The fallback is read-only (we don't mutate here).
   let manager: { id: string; name: string; email: string } | null = null;
-  if (store.manager_staff_id) {
-    const m = members.find((x) => x.id === store.manager_staff_id);
+  let managerStaffId: string | null = store.manager_staff_id ?? null;
+  if (managerStaffId) {
+    const m = members.find((x) => x.id === managerStaffId);
     if (m) manager = { id: m.id, name: m.name, email: m.email };
     else {
-      const { data: mr } = await admin.from("staff").select("id, name, email").eq("id", store.manager_staff_id).maybeSingle();
+      const { data: mr } = await admin.from("staff").select("id, name, email").eq("id", managerStaffId).maybeSingle();
       if (mr) manager = { id: mr.id, name: mr.name as string, email: (mr.email as string) ?? "" };
+    }
+  }
+  if (!manager && members.length > 0) {
+    const fallback =
+      members.find((m) => m.status === "active" && managerRoleIds.has(m.roleId)) ??
+      members.find((m) => m.status === "active" && m.isHome) ??
+      members.find((m) => m.status === "active") ??
+      members[0];
+    if (fallback) {
+      manager = { id: fallback.id, name: fallback.name, email: fallback.email };
+      managerStaffId = fallback.id;
     }
   }
 
@@ -231,7 +249,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       id: store.id, name: store.name, code: store.code, address: store.address,
       isActive: store.is_active, environment: store.environment ?? "live",
       createdAt: store.created_at, updatedAt: store.updated_at,
-      managerStaffId: store.manager_staff_id ?? null,
+      managerStaffId,
     },
     manager,
     members,

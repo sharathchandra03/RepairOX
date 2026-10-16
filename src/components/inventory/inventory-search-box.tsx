@@ -23,7 +23,7 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Search, Package, X, Plus, PackageSearch } from "lucide-react";
+import { Search, Package, Wrench, X, Plus, PackageSearch } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { cn, formatINR } from "@/lib/utils";
 import type { InventoryItem } from "@/lib/inventory-data";
@@ -75,15 +75,40 @@ export function InventorySearchBox({
   // results from being clipped by an ancestor with overflow-hidden (e.g. the
   // rounded Inventory section card on the invoice/ticket forms).
   const anchorRef = useRef<HTMLDivElement>(null);
-  const [rect, setRect] = useState<{ left: number; top: number; width: number } | null>(null);
+  // `placement` + `maxHeight` make the panel flip ABOVE the input when there
+  // isn't enough room below (so it never runs off the bottom of the screen),
+  // and cap its height to the space actually available in that direction.
+  const [rect, setRect] = useState<
+    | { left: number; top: number; width: number; placement: "below" | "above"; maxHeight: number }
+    | null
+  >(null);
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  const GAP = 6;        // gap between the input and the panel
+  const MARGIN = 12;    // keep the panel this far from the viewport edge
 
   const measure = () => {
     const el = anchorRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    setRect({ left: r.left, top: r.bottom, width: r.width });
+    const spaceBelow = window.innerHeight - r.bottom - GAP - MARGIN;
+    const spaceAbove = r.top - GAP - MARGIN;
+    // Prefer below; flip above only when below is too cramped AND above has more
+    // room. Cap at a comfortable 360px so a tall list still scrolls internally.
+    const preferAbove = spaceBelow < 220 && spaceAbove > spaceBelow;
+    const placement: "below" | "above" = preferAbove ? "above" : "below";
+    const avail = placement === "above" ? spaceAbove : spaceBelow;
+    const maxHeight = Math.max(140, Math.min(360, avail));
+    setRect({
+      left: r.left,
+      // For "above" we anchor the panel's BOTTOM to the input top via a CSS
+      // transform (translateY(-100%)); `top` stays the input edge either way.
+      top: placement === "above" ? r.top - GAP : r.bottom + GAP,
+      width: r.width,
+      placement,
+      maxHeight,
+    });
   };
 
   // Debounce the query so we don't recompute on every keystroke — the ERP feel
@@ -142,13 +167,23 @@ export function InventorySearchBox({
           <div
             data-inventory-search-panel="true"
             className="fixed z-[10050]"
-            style={{ left: rect.left, top: rect.top + 6, width: rect.width }}
+            style={{
+              left: rect.left,
+              top: rect.top,
+              width: rect.width,
+              // When flipped above, anchor the panel's bottom to the input top.
+              transform: rect.placement === "above" ? "translateY(-100%)" : undefined,
+            }}
           >
             {results.length > 0 && (
-              <div className="max-h-[300px] overflow-y-auto rounded-xl border border-border bg-card shadow-xl">
+              <div
+                className="overflow-y-auto rounded-xl border border-border bg-card shadow-xl"
+                style={{ maxHeight: rect.maxHeight }}
+              >
                 {results.map((item) => {
+                  const isService = item.kind === "service";
                   const available = item.currentStock - (item.reservedStock || 0);
-                  const out = item.kind === "part" && available <= 0;
+                  const out = !isService && available <= 0;
                   return (
                     <button
                       key={item.id}
@@ -161,11 +196,31 @@ export function InventorySearchBox({
                       }}
                       className="flex w-full items-center gap-3 border-b border-border px-3 py-2.5 text-left transition last:border-0 hover:bg-indigo-50/50"
                     >
-                      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-                        <Package className="h-3.5 w-3.5" />
+                      {/* Kind-differentiating icon: Part = blue Package,
+                          Repair Service / Labour = amber Wrench. */}
+                      <span
+                        className={cn(
+                          "grid h-8 w-8 shrink-0 place-items-center rounded-lg",
+                          isService ? "bg-amber-100 text-amber-600" : "bg-[#EEF1FD] text-[#4361EE]",
+                        )}
+                        title={isService ? "Repair Service / Labour" : "Part / Product"}
+                      >
+                        {isService ? <Wrench className="h-3.5 w-3.5" /> : <Package className="h-3.5 w-3.5" />}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{item.name}</p>
+                        <div className="flex items-center gap-1.5">
+                          <p className="truncate text-sm font-medium">{item.name}</p>
+                          {/* Explicit kind tag so Part vs Service is unmistakable
+                              even in the combined Item autocomplete. */}
+                          <span
+                            className={cn(
+                              "shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide",
+                              isService ? "bg-amber-100 text-amber-700" : "bg-[#EEF1FD] text-[#4361EE]",
+                            )}
+                          >
+                            {isService ? "Service" : "Part"}
+                          </span>
+                        </div>
                         <p className="truncate text-[10px] text-muted-foreground">
                           {item.id} · {item.category}
                           {item.hsnCode && item.hsnCode !== "—" ? ` · HSN ${item.hsnCode}` : ""}
@@ -174,7 +229,7 @@ export function InventorySearchBox({
                       <div className="shrink-0 text-right">
                         <p className="text-sm font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
                         <span className={cn("text-[10px] font-medium", out ? "text-rose-500" : "text-muted-foreground")}>
-                          {item.kind === "service" ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
+                          {isService ? "Service" : out ? "Out of stock" : `Stock: ${available}`}
                         </span>
                       </div>
                     </button>

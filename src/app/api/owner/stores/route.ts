@@ -102,10 +102,21 @@ export async function POST(req: Request) {
     .maybeSingle();
   if (existing) return NextResponse.json({ ok: false, reason: "duplicate_name" }, { status: 409 });
 
+  // Optional primary manager, supplied at creation. Validated to be a real
+  // staff member in the SAME organization before we stamp it. (Nullable — a
+  // store may be created without a manager and one set later.)
+  let managerStaffId: string | null = null;
+  const mgrIdRaw = body?.managerStaffId;
+  if (mgrIdRaw) {
+    const { data: mgr } = await admin
+      .from("staff").select("id, organization_id").eq("id", String(mgrIdRaw)).maybeSingle();
+    if (mgr && mgr.organization_id === orgId) managerStaffId = mgr.id as string;
+  }
+
   const { data: created, error } = await admin
     .from("branches")
-    .insert({ organization_id: orgId, name, code, address, is_active: true, environment })
-    .select("id, name, code, address, is_active, environment, created_at")
+    .insert({ organization_id: orgId, name, code, address, is_active: true, environment, manager_staff_id: managerStaffId })
+    .select("id, name, code, address, is_active, environment, created_at, manager_staff_id")
     .single();
   if (error || !created) {
     return NextResponse.json({ ok: false, error: error?.message ?? "Create failed." }, { status: 400 });
@@ -133,5 +144,6 @@ export async function POST(req: Request) {
     id: created.id, name: created.name, code: created.code, address: created.address,
     isActive: created.is_active, environment: created.environment ?? "live",
     createdAt: created.created_at, staffCount: 0, ticketCount: 0,
+    managerStaffId: created.manager_staff_id ?? null,
   } });
 }

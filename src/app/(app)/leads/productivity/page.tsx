@@ -31,6 +31,7 @@ import { Pagination } from "@/components/ui/pagination";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
+import { SegmentedTabs } from "@/components/ui/tabs";
 import { DateTimeField } from "@/components/ui/date-time-picker";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
@@ -45,15 +46,59 @@ import {
   summarize,
   dailyBuckets,
   localDateKey,
+  localDateStartMs,
   formatHm,
   toDecimalHours,
 } from "@/lib/work-session";
 import {
   type ReportAgent,
+  buildAgentSummaries,
   buildAttendanceExportRows,
 } from "@/lib/work-session-report";
 
 const MS_DAY = 24 * 60 * 60 * 1000;
+
+/* Period presets that drive the calendar range. "all" keeps whatever custom
+   range the user set with the date pickers; today/week/month/year snap the
+   from/to to the corresponding local window. */
+type PeriodKey = "all" | "today" | "week" | "month" | "year";
+
+const PERIOD_OPTIONS: { label: string; value: PeriodKey }[] = [
+  { label: "All", value: "all" },
+  { label: "Today", value: "today" },
+  { label: "Week", value: "week" },
+  { label: "Month", value: "month" },
+  { label: "Year", value: "year" },
+];
+
+/** Compute the [from, to) ISO range (half-open, `to` exclusive end-of-day) for
+ *  a period preset, in the org tz. "all" returns null — keep the custom range. */
+function periodRange(period: PeriodKey, nowMs: number, tz: string): { from: string; to: string } | null {
+  if (period === "all") return null;
+  const todayKey = localDateKey(nowMs, tz);
+  const todayStart = localDateStartMs(todayKey, tz);
+  // `to` is exclusive: start of tomorrow (local).
+  const to = new Date(localDateStartMs(localDateKey(todayStart + MS_DAY + MS_DAY / 2, tz), tz)).toISOString();
+
+  if (period === "today") {
+    return { from: new Date(todayStart).toISOString(), to };
+  }
+  if (period === "week") {
+    // Monday-based local week start, matching the engine's week buckets.
+    const [y, m, d] = todayKey.split("-").map(Number);
+    const dow = new Date(Date.UTC(y, m - 1, d)).getUTCDay(); // 0=Sun..6=Sat
+    const mondayOffset = (dow + 6) % 7;
+    const mondayKey = localDateKey(todayStart - mondayOffset * MS_DAY + MS_DAY / 2, tz);
+    return { from: new Date(localDateStartMs(mondayKey, tz)).toISOString(), to };
+  }
+  if (period === "month") {
+    const monthStartKey = `${todayKey.slice(0, 7)}-01`;
+    return { from: new Date(localDateStartMs(monthStartKey, tz)).toISOString(), to };
+  }
+  // year
+  const yearStartKey = `${todayKey.slice(0, 4)}-01-01`;
+  return { from: new Date(localDateStartMs(yearStartKey, tz)).toISOString(), to };
+}
 
 interface ReportResponse {
   ok: boolean;
@@ -79,8 +124,30 @@ export default function AgentProductivityPage() {
   const [nowMs] = useState(() => Date.now()); // ONE nowMs per report render
   const [agentFilter, setAgentFilter] = useState<string[]>([]); // [] = All Sales Agents; else specific staffIds
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
+  const [period, setPeriod] = useState<PeriodKey>("month");
   const [fromISO, setFromISO] = useState<string>(() => startOfMonthISO(Date.now()));
   const [toISO, setToISO] = useState<string>(() => new Date(Date.now() + MS_DAY).toISOString());
+
+  // Apply a period preset (All keeps the user's custom calendar range).
+  const applyPeriod = (p: PeriodKey) => {
+    setPeriod(p);
+    const range = periodRange(p, nowMs, tz);
+    if (range) {
+      setFromISO(range.from);
+      setToISO(range.to);
+    }
+  };
+
+  // When the user edits the calendar directly, drop back to the "All" preset
+  // so the strip never implies a window that no longer matches the range.
+  const onFromChange = (v: string) => {
+    setPeriod("all");
+    setFromISO(v);
+  };
+  const onToChange = (v: string) => {
+    setPeriod("all");
+    setToISO(v);
+  };
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<ReportResponse | null>(null);
   const [detailAgent, setDetailAgent] = useState<string | null>(null);
@@ -139,41 +206,21 @@ export default function AgentProductivityPage() {
   const summary = useMemo(() => summarize(sessions, nowMs, STALE_MS, tz), [sessions, nowMs, tz]);
   const avgNetPerWorkday = summary.workdays > 0 ? summary.totalNetMs / summary.workdays : 0;
 
-  // Daily comparison rows: one row per agent per local day in range.
-  const dailyRows = useMemo(() => {
-    const rows: {
-      key: string;
-      agent: ReportAgent;
-      date: string;
-      elapsedMs: number;
-      breakMs: number;
-      netMs: number;
-      sessionCount: number;
-      interruptedCount: number;
-    }[] = [];
-    for (const agent of scopedAgents) {
-      const agentSessions = sessions.filter((s) => s.staffId === agent.staffId);
-      const days = dailyBuckets(agentSessions, tz, nowMs, STALE_MS);
-      for (const d of days) {
-        rows.push({
-          key: `${agent.staffId}::${d.date}`,
-          agent,
-          date: d.date,
-          elapsedMs: d.elapsedMs,
-          breakMs: d.breakMs,
-          netMs: d.netMs,
-          sessionCount: d.sessionCount,
-          interruptedCount: d.interruptedCount,
-        });
-      }
-    }
-    return rows.sort((a, b) => b.date.localeCompare(a.date) || a.agent.name.localeCompare(b.agent.name));
-  }, [scopedAgents, sessions, tz, nowMs]);
+  // ONE row per agent, aggregated over the WHOLE selected period (the same
+  // engine pass the summary cards + export use). No day-by-day repetition — a
+  // single Ullas row for the range, whether the range is one day or a year.
+  // The per-day story lives behind "View Details".
+  const agentRows = useMemo(() => {
+    return buildAgentSummaries(scopedAgents, sessions, nowMs, STALE_MS, tz)
+      // Keep only agents who actually worked in the selected period.
+      .filter((r) => r.sessionCount > 0)
+      .sort((a, b) => b.totalNetMs - a.totalNetMs || a.agent.name.localeCompare(b.agent.name));
+  }, [scopedAgents, sessions, nowMs, tz]);
 
   useEffect(() => setPage(1), [agentFilter, storeFilter, fromISO, toISO]);
 
-  const totalPages = Math.max(1, Math.ceil(dailyRows.length / pageSize));
-  const paged = dailyRows.slice((page - 1) * pageSize, page * pageSize);
+  const totalPages = Math.max(1, Math.ceil(agentRows.length / pageSize));
+  const paged = agentRows.slice((page - 1) * pageSize, page * pageSize);
 
   const multiStore = stores.length > 1;
   const storeById = useMemo(() => {
@@ -276,6 +323,15 @@ export default function AgentProductivityPage() {
         </div>
       </DetailHero>
 
+      {/* Period strip — All / Today / Week / Month / Year. Clicking a preset
+          snaps the calendar range and recomputes every metric for that window.
+          "All" keeps whatever custom range the calendar pickers hold. */}
+      <Reveal>
+        <div className="flex max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs size="sm" options={PERIOD_OPTIONS} value={period} onChange={(v) => applyPeriod(v as PeriodKey)} />
+        </div>
+      </Reveal>
+
       {/* Filters — agent selector (left) + store + date range (right) */}
       <Reveal>
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -287,8 +343,8 @@ export default function AgentProductivityPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
-            <DateTimeField value={fromISO} onChange={setFromISO} placeholder="From" className="w-[190px]" />
-            <DateTimeField value={toISO} onChange={setToISO} placeholder="To" className="w-[190px]" />
+            <DateTimeField value={fromISO} onChange={onFromChange} placeholder="From" className="w-[190px]" />
+            <DateTimeField value={toISO} onChange={onToChange} placeholder="To" className="w-[190px]" />
           </div>
         </div>
       </Reveal>
@@ -312,7 +368,7 @@ export default function AgentProductivityPage() {
           <RoxHeadRow>
             {multiStore && <th className="px-3 py-4 text-[#4361EE]">Store</th>}
             <th className="px-3 py-4 text-[#4361EE]">Agent</th>
-            <th className="px-3 py-4 text-[#4361EE]">Date</th>
+            <th className="px-3 py-4 text-right text-[#4361EE]">Workdays</th>
             <th className="px-3 py-4 text-right text-[#4361EE]">Session</th>
             <th className="px-3 py-4 text-right text-[#4361EE]">Break</th>
             <th className="px-3 py-4 text-right text-[#4361EE]">Net</th>
@@ -330,17 +386,17 @@ export default function AgentProductivityPage() {
             </tr>
           ) : (
             paged.map((r) => (
-              <RoxTableRow key={r.key}>
+              <RoxTableRow key={r.agent.staffId}>
                 {multiStore && (
                   <RoxTableCell className="px-3 py-4">
                     <StoreContextCell store={r.agent.branchId ? storeById.get(r.agent.branchId) ?? null : null} />
                   </RoxTableCell>
                 )}
                 <RoxTableCell className="px-3 py-4 font-semibold text-foreground">{r.agent.name}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-muted-foreground">{r.date}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{formatHm(r.elapsedMs)}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{formatHm(r.breakMs)}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right font-semibold text-emerald-600 tabular-nums">{formatHm(r.netMs)}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{r.workdays}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{formatHm(r.totalElapsedMs)}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{formatHm(r.totalBreakMs)}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right font-semibold text-emerald-600 tabular-nums">{formatHm(r.totalNetMs)}</RoxTableCell>
                 <RoxTableCell className="px-3 py-4 text-right tabular-nums">{r.sessionCount}</RoxTableCell>
                 <RoxTableCell className={cn("px-3 py-4 text-right tabular-nums", r.interruptedCount && "font-semibold text-rose-600")}>
                   {r.interruptedCount}
@@ -358,7 +414,7 @@ export default function AgentProductivityPage() {
           )}
         </tbody>
         <RoxTableFooter>
-          <span className="text-[11px] text-muted-foreground">{dailyRows.length} rows</span>
+          <span className="text-[11px] text-muted-foreground">{agentRows.length} agents</span>
         </RoxTableFooter>
       </RoxTableCard>
 
@@ -366,10 +422,10 @@ export default function AgentProductivityPage() {
         page={page}
         totalPages={totalPages}
         onPageChange={setPage}
-        totalItems={dailyRows.length}
+        totalItems={agentRows.length}
         pageSize={pageSize}
         onPageSizeChange={setPageSize}
-        itemLabel="row"
+        itemLabel="agent"
       />
 
       {/* Per-agent detail (within the owner's own session — no identity change). */}

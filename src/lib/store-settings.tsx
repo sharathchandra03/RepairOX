@@ -200,6 +200,18 @@ export type StoreSettings = {
    *  configured yet — a configuration error that blocks lead creation). */
   defaultLeadStoreId: string;
 
+  /* ── Work Session / Productivity configuration (Settings → Lead
+   *    Management → Productivity) ──
+   * Org-level config for the Sales-Agent Work Session reminders. Presentation
+   * only — it never changes any persisted duration or the pure engine's math;
+   * it only tunes WHEN the client nudges an agent. */
+  productivityConfig: {
+    /** Minutes an agent may stay ON BREAK before being reminded to resume
+     *  work (break time is excluded from net productive time, so a forgotten
+     *  break distorts the day's productivity). 0 = never remind. */
+    breakReminderMinutes: number;
+  };
+
   /* ── Loyalty program configuration (Settings → Customers → Loyalty) ── */
   loyaltyConfig: {
     /** Master on/off switch. When false, awardLoyaltyForPaidInvoice in
@@ -380,6 +392,11 @@ CLAIM PROCEDURE:
   leadStoreMode: "single",
   defaultLeadStoreId: "",
 
+  // Remind an agent to resume work after 5 minutes on break by default.
+  productivityConfig: {
+    breakReminderMinutes: 5,
+  },
+
   loyaltyConfig: {
     enabled: true,
     pointsPerRupee: 100,
@@ -483,6 +500,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
       return m === "multi" ? "multi" : "single";
     })(),
     defaultLeadStoreId: (row.default_lead_store_id as string) ?? DEFAULT_STORE_SETTINGS.defaultLeadStoreId,
+    productivityConfig: parseJsonColumn(row.productivity_config, DEFAULT_STORE_SETTINGS.productivityConfig),
     loyaltyConfig: parseJsonColumn(row.loyalty_config, DEFAULT_STORE_SETTINGS.loyaltyConfig),
     refundConfig: parseJsonColumn(row.refund_config, DEFAULT_STORE_SETTINGS.refundConfig),
   };
@@ -579,6 +597,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     invoiceWarrantyText: "invoice_warranty_text",
     leadStoreMode: "lead_store_mode",
     defaultLeadStoreId: "default_lead_store_id",
+    productivityConfig: "productivity_config",
     loyaltyConfig: "loyalty_config",
     refundConfig: "refund_config",
   };
