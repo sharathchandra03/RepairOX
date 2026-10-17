@@ -1139,6 +1139,7 @@ function rowToInventoryItem(r: any): InventoryItem {
     distributorPrice: Number(r.distributor_price ?? 0),
     hsnCode: r.hsn_code ?? "",
     tax: Number(r.tax ?? 0),
+    costTax: r.cost_tax != null ? Number(r.cost_tax) : undefined,
     minStock: Number(r.min_stock ?? 0),
     maxStock: Number(r.max_stock ?? 0),
     reservedStock: Number(r.reserved_stock ?? 0),
@@ -1185,6 +1186,7 @@ function inventoryItemToRow(item: InventoryItem): Record<string, unknown> {
     distributor_price: item.distributorPrice,
     hsn_code: item.hsnCode || null,
     tax: item.tax,
+    cost_tax: item.costTax ?? null,
     min_stock: item.minStock,
     max_stock: item.maxStock,
     reserved_stock: item.reservedStock,
@@ -3958,6 +3960,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("distributorPrice" in updates) row.distributor_price = updates.distributorPrice;
       if ("hsnCode" in updates) row.hsn_code = updates.hsnCode ?? null;
       if ("tax" in updates) row.tax = updates.tax;
+      if ("costTax" in updates) row.cost_tax = updates.costTax ?? null;
       if ("minStock" in updates) row.min_stock = updates.minStock;
       if ("maxStock" in updates) row.max_stock = updates.maxStock;
       if ("reservedStock" in updates) row.reserved_stock = updates.reservedStock;

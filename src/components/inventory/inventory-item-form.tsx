@@ -36,7 +36,7 @@
 
 import { useMemo, useState } from "react";
 import { Wand2, Package, IndianRupee, Boxes, Info, Wrench, Lock, ChevronDown, Truck } from "lucide-react";
-import { Input, Label, Select } from "@/components/ui/input";
+import { Input, Label, Select, type FieldAccent } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { SectionCard, HealthBadge } from "@/components/inventory/widgets";
@@ -79,7 +79,8 @@ export type InventoryFormValues = {
   standardLabourCost: string;          // → inventory_item_costs (§2.1a)
   // tax
   hsn: string;
-  tax: string;
+  tax: string;                         // GST % on the selling price (SP)
+  costTax: string;                     // GST % on the cost price (CP)
   // stock — part (CREATE ONLY for opening — §2.4)
   trackStock: boolean;
   currentStock: string;                // = Opening Quantity on CREATE only
@@ -99,7 +100,7 @@ export function emptyInventoryForm(): InventoryFormValues {
     uom: "Piece",
     costPrice: "", sellingPrice: "", mrp: "", wholesaleBuyingPrice: "", dealerPrice: "", distributorPrice: "",
     serviceCharge: "", standardLabourCost: "",
-    hsn: "", tax: "0",
+    hsn: "", tax: "0", costTax: "0",
     trackStock: true, currentStock: "", openingUnitCost: "", minStock: "", maxStock: "", store: "",
     mode: "Both",
   };
@@ -131,6 +132,7 @@ export function inventoryFormFromItem(item: InventoryItem): InventoryFormValues 
     standardLabourCost: numOrBlank(item.standardLabourCost),
     hsn: item.hsnCode === "—" ? "" : (item.hsnCode ?? ""),
     tax: String(item.tax || "18"),
+    costTax: item.costTax != null ? String(item.costTax) : String(item.tax || "0"),
     // On edit the opening fields are NOT re-editable (stock changes only via
     // Purchase/Stock In). currentStock is shown read-only; no openingUnitCost.
     trackStock: item.trackStock ?? (kind === "part"),
@@ -252,6 +254,7 @@ export function buildInventoryItem(
     distributorPrice: isService ? 0 : Number(v.distributorPrice || 0),
     hsnCode: v.hsn || "—",
     tax: Number(v.tax || 18),
+    costTax: Number(v.costTax || 0),
     minStock: isService ? 0 : Number(v.minStock || 0),
     maxStock: isService ? 0 : Number(v.maxStock || 0),
     reservedStock: 0,
@@ -304,6 +307,7 @@ export function inventoryUpdateFromForm(
     distributorPrice: isService ? 0 : Number(v.distributorPrice || 0),
     hsnCode: v.hsn || "—",
     tax: Number(v.tax || 18),
+    costTax: Number(v.costTax || 0),
     barcode: v.barcode.trim() || undefined,
     brandModel: v.brandModel.trim() || undefined,
     vendor: v.vendor.trim() || undefined,
@@ -327,6 +331,11 @@ export function inventoryUpdateFromForm(
   return { patch, cost };
 }
 
+const ACCENT_LABEL: Record<FieldAccent, string> = {
+  emerald: "text-emerald-700",
+  blue: "text-[#4361EE]",
+};
+
 function Field({
   label,
   required,
@@ -334,6 +343,7 @@ function Field({
   children,
   invalid,
   fieldKey,
+  accent,
 }: {
   label: string;
   required?: boolean;
@@ -344,25 +354,89 @@ function Field({
   invalid?: boolean;
   /** Stable key used as the scroll/focus target on a failed save. */
   fieldKey?: string;
+  /** Semantic colour accent for the label (e.g. Cost vs Selling). */
+  accent?: FieldAccent;
 }) {
   return (
-    <div className="flex flex-col space-y-1.5" data-field={fieldKey}>
-      {/* Header reserves a consistent min height and stacks label → hint so a
-         long label/hint never wraps against a short one, keeping side-by-side
-         inputs vertically aligned. */}
-      <div className="flex min-h-[34px] flex-col justify-start gap-0.5">
-        <Label className={invalid ? "text-rose-600" : undefined}>
+    // Natural height: label (+ optional hint/required line) directly above the
+    // pill with a small consistent gap. Row-level alignment is handled by the
+    // grid (items-end) so a hinted field and a non-hinted field in the same row
+    // keep their pills on the same baseline.
+    <div className="flex flex-col gap-1.5" data-field={fieldKey}>
+      <div className="flex flex-col gap-0.5">
+        <Label className={cn("leading-tight", invalid ? "text-rose-600" : accent && ACCENT_LABEL[accent])}>
           {label}
           {required && <span className="ml-0.5 text-rose-500">*</span>}
         </Label>
         {invalid ? (
           <span className="text-[11px] leading-tight font-medium text-rose-600">This field is required</span>
         ) : (
-          hint && <span className="text-[11px] leading-tight text-muted-foreground">{hint}</span>
+          hint && <span className="truncate text-[11px] leading-tight text-muted-foreground">{hint}</span>
         )}
       </div>
-      <div className="mt-auto">{children}</div>
+      <div>{children}</div>
     </div>
+  );
+}
+
+/** A GST-rate control: preset dropdown (0/8/12/24) or a free "Custom %" input.
+ *  Reused for both the CP GST and the SP GST so they look + behave identically. */
+function GstField({
+  label,
+  value,
+  onChange,
+  custom,
+  setCustom,
+  disabled,
+  accent,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  custom: boolean;
+  setCustom: (b: boolean) => void;
+  disabled?: boolean;
+  accent?: FieldAccent;
+}) {
+  return (
+    <Field label={label} accent={accent}>
+      {custom ? (
+        <div className="flex gap-2">
+          <Input
+            type="number"
+            inputMode="decimal"
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Custom %"
+            disabled={disabled}
+            accent={accent}
+            iconRight={<span className="text-[12px] text-muted-foreground">%</span>}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="md"
+            className="h-[34px] shrink-0 rounded-xl px-3 text-[12px]"
+            disabled={disabled}
+            onClick={() => { setCustom(false); onChange("0"); }}
+          >
+            Presets
+          </Button>
+        </div>
+      ) : (
+        <Select
+          value={GST_PRESETS.includes(value) ? value : "custom"}
+          onChange={(e) => {
+            if (e.target.value === "custom") { setCustom(true); return; }
+            onChange(e.target.value);
+          }}
+          className="h-[34px] px-3 text-[13px]"
+          disabled={disabled}
+          accent={accent}
+          options={GST_OPTIONS.map((t) => ({ value: t, label: t === "custom" ? "Custom…" : `${t}%` }))}
+        />
+      )}
+    </Field>
   );
 }
 
@@ -421,19 +495,20 @@ export function InventoryItemFields({
   const [categories, setCategories] = useState<string[]>(CATEGORIES);
   const [uoms, setUoms] = useState<string[]>(UOMS);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  // "custom" GST mode when the stored tax isn't one of the presets.
+  // "custom" GST mode when the stored rate isn't one of the presets.
   const [customGst, setCustomGst] = useState(() => !GST_PRESETS.includes(values.tax));
+  const [customCostGst, setCustomCostGst] = useState(() => !GST_PRESETS.includes(values.costTax));
   const isService = values.kind === "service";
   const bad = (k: InventoryFieldKey) => invalidFields?.has(k) ?? false;
 
   const set = (patch: Partial<InventoryFormValues>) => onChange(patch);
 
-  // Combined price + GST breakdown. The same GST rate applies to BOTH the cost
-  // (CP / Standard Labour Cost) and the selling price (SP / Service Charge), so
+  // Combined price + GST breakdown. CP and SP each have their OWN GST rate, so
   // each gets its own GST amount + gross figure.
   const gstRate = Number(values.tax || 0);
+  const costGstRate = Number(values.costTax || 0);
   const costBase = Number((isService ? values.standardLabourCost : values.costPrice) || 0);
-  const costGst = Math.max(0, costBase) * (gstRate / 100);
+  const costGst = Math.max(0, costBase) * (costGstRate / 100);
   const costGross = costBase + costGst;
   const baseAmount = Number((isService ? values.serviceCharge : values.sellingPrice) || 0);
   const gstAmount = Math.max(0, baseAmount) * (gstRate / 100);
@@ -491,7 +566,7 @@ export function InventoryItemFields({
         description="Name, classification and reference codes"
         bodyClassName="space-y-4"
       >
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:items-end">
           {isService ? (
             <CodeChip label="Service Code" code={values.serviceCode} />
           ) : (
@@ -568,101 +643,98 @@ export function InventoryItemFields({
           amount = final price) → SP / GST / Total summary. Identical structure
           for both Part and Repair Service (the labels differ). */}
       <SectionCard icon={IndianRupee} title={isService ? "Service Pricing" : "Pricing"} description="Price and GST combined" bodyClassName="space-y-4">
-        {/* CP — internal cost pill (full width) */}
-        {canViewCost && (
-          <Field
-            label={isService ? "Cost (Standard Labour Cost)" : "Cost Price (CP)"}
-            hint={isService ? "Standard / estimated — not actual job cost" : "Internal default cost / unit"}
-          >
-            <Input
-              type="number"
-              inputMode="decimal"
-              value={isService ? values.standardLabourCost : values.costPrice}
-              onChange={(e) => set(isService ? { standardLabourCost: e.target.value } : { costPrice: e.target.value })}
-              placeholder="Cost not configured"
-              disabled={!canEditCost}
-              iconLeft={<span className="text-[13px]">₹</span>}
-            />
-          </Field>
-        )}
-
-        {/* Selling amount + GST rate */}
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field label={isService ? "Service Charge (SP)" : "Selling Price (SP)"} hint="Base price, before GST">
+        {/* CP (emerald) on the left, SP (blue) on the right. Laid out as two
+            aligned ROWS — prices on top, GST below — so the price pills align
+            with each other and the GST pills align with each other regardless
+            of how many lines each label takes (sm:items-end bottom-aligns). */}
+        {/* Row 1 — prices */}
+        <div className={cn("grid grid-cols-1 gap-4 sm:items-end", canViewCost && "sm:grid-cols-2")}>
+          {canViewCost && (
+            <Field
+              label={isService ? "Cost (Standard Labour Cost)" : "Cost Price (CP)"}
+              hint={isService ? "Standard / estimated — not actual job cost" : "Internal default cost / unit"}
+              accent="emerald"
+            >
+              <Input
+                type="number"
+                inputMode="decimal"
+                value={isService ? values.standardLabourCost : values.costPrice}
+                onChange={(e) => set(isService ? { standardLabourCost: e.target.value } : { costPrice: e.target.value })}
+                placeholder="Cost not configured"
+                disabled={!canEditCost}
+                accent="emerald"
+                iconLeft={<span className="text-[13px]">₹</span>}
+              />
+            </Field>
+          )}
+          <Field label={isService ? "Service Charge (SP)" : "Selling Price (SP)"} hint="Base price, before GST" accent="blue">
             <Input
               type="number"
               inputMode="decimal"
               value={isService ? values.serviceCharge : values.sellingPrice}
               onChange={(e) => set(isService ? { serviceCharge: e.target.value } : { sellingPrice: e.target.value })}
               placeholder="0"
+              accent="blue"
               iconLeft={<span className="text-[13px]">₹</span>}
             />
           </Field>
-          <Field label="GST">
-            {customGst ? (
-              <div className="flex gap-2">
-                <Input
-                  type="number"
-                  inputMode="decimal"
-                  value={values.tax}
-                  onChange={(e) => set({ tax: e.target.value })}
-                  placeholder="Custom %"
-                  iconRight={<span className="text-[12px] text-muted-foreground">%</span>}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="md"
-                  className="h-[34px] shrink-0 rounded-xl px-3 text-[12px]"
-                  onClick={() => { setCustomGst(false); set({ tax: "0" }); }}
-                >
-                  Presets
-                </Button>
-              </div>
-            ) : (
-              <Select
-                value={GST_PRESETS.includes(values.tax) ? values.tax : "custom"}
-                onChange={(e) => {
-                  if (e.target.value === "custom") { setCustomGst(true); return; }
-                  set({ tax: e.target.value });
-                }}
-                className="h-[34px] px-3 text-[13px]"
-                options={GST_OPTIONS.map((t) => ({ value: t, label: t === "custom" ? "Custom…" : `${t}%` }))}
-              />
-            )}
-          </Field>
+        </div>
+
+        {/* Row 2 — per-side GST */}
+        <div className={cn("grid grid-cols-1 gap-4 sm:items-end", canViewCost && "sm:grid-cols-2")}>
+          {canViewCost && (
+            <GstField
+              label="GST on cost"
+              value={values.costTax}
+              onChange={(v) => set({ costTax: v })}
+              custom={customCostGst}
+              setCustom={setCustomCostGst}
+              disabled={!canEditCost}
+              accent="emerald"
+            />
+          )}
+          <GstField
+            label="GST on selling"
+            value={values.tax}
+            onChange={(v) => set({ tax: v })}
+            custom={customGst}
+            setCustom={setCustomGst}
+            accent="blue"
+          />
         </div>
 
         {/* Price summary — GST applies to BOTH cost and selling price. Two
             parallel columns (Cost vs Selling, each: base → +GST → gross) so
             there's no duplicated chip row; the selling gross is the headline. */}
         <div className="overflow-hidden rounded-xl border border-border">
-          <div className="flex items-center justify-between bg-muted/40 px-3.5 py-2">
+          <div className="bg-muted/40 px-3.5 py-2">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Price summary</p>
-            <span className="rounded-md bg-card px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground ring-1 ring-inset ring-border">
-              GST {gstRate || 0}%
-            </span>
           </div>
           <div className={cn("grid divide-border", canViewCost ? "grid-cols-2 divide-x" : "grid-cols-1")}>
             {canViewCost && (
               <PriceColumn
-                label={isService ? "Cost (Labour)" : "Cost (CP)"}
+                heading={isService ? "Cost (Labour)" : "Cost (CP)"}
+                priceLabel="CP"
                 base={costBase}
+                gstRate={costGstRate}
                 gst={costGst}
                 gross={costGross}
+                tone="emerald"
               />
             )}
             <PriceColumn
-              label={isService ? "Selling (Charge)" : "Selling (SP)"}
+              heading={isService ? "Selling (Charge)" : "Selling (SP)"}
+              priceLabel="SP"
               base={baseAmount}
+              gstRate={gstRate}
               gst={gstAmount}
               gross={finalPrice}
-              accent
+              tone="blue"
             />
           </div>
           {canViewCost && (
             <div className="flex items-center justify-between border-t border-border bg-muted/20 px-3.5 py-2 text-[12px]">
-              <span className="font-medium text-muted-foreground">Margin (pre-GST)</span>
+              <span className="font-medium text-muted-foreground">Margin</span>
               <span className={cn("font-semibold tnum", margin < 0 ? "text-rose-600" : "text-emerald-600")}>
                 {formatINR(margin)}
                 {marginPct !== null && <span className="ml-1 font-normal">({marginPct.toFixed(0)}%)</span>}
@@ -763,42 +835,83 @@ export function InventoryItemFields({
   );
 }
 
-/** One column of the price summary: base amount → +GST → gross headline.
- *  The selling column is accented (brand) as the primary figure. */
+/** One column of the price summary as three line-separated rows:
+ *  CP/SP (base) → GST → Total. The selling column is accented (brand). */
+const TONE_TEXT: Record<FieldAccent, string> = {
+  emerald: "text-emerald-700",
+  blue: "text-[#4361EE]",
+};
+const TONE_BG: Record<FieldAccent, string> = {
+  emerald: "bg-emerald-50/40",
+  blue: "bg-[#EEF1FD]/40",
+};
+
 function PriceColumn({
-  label,
+  heading,
+  priceLabel,
   base,
+  gstRate,
   gst,
   gross,
-  accent,
+  tone,
 }: {
-  label: string;
+  /** Column heading (e.g. "Cost (CP)" / "Selling (SP)"). */
+  heading: string;
+  /** Row label for the base price — "CP" or "SP". */
+  priceLabel: string;
   base: number;
+  gstRate: number;
   gst: number;
   gross: number;
-  accent?: boolean;
+  /** Semantic colour for the heading + Total (Cost vs Selling). */
+  tone: FieldAccent;
 }) {
   return (
-    <div className={cn("p-3.5", accent && "bg-[#EEF1FD]/40")}>
-      <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{label}</p>
-      <p
+    <div className={TONE_BG[tone]}>
+      <p className={cn("border-b border-border px-3.5 pb-1.5 pt-2.5 text-[11px] font-semibold uppercase tracking-wider", TONE_TEXT[tone])}>
+        {heading}
+      </p>
+      <div className="divide-y divide-border">
+        <SummaryLine label={priceLabel} value={formatINR(base)} />
+        <SummaryLine label={`GST (${gstRate || 0}%)`} value={formatINR(gst)} />
+        <SummaryLine label="Total" value={formatINR(gross)} total toneText={TONE_TEXT[tone]} />
+      </div>
+    </div>
+  );
+}
+
+/** A single label / value row inside a price-summary column. */
+function SummaryLine({
+  label,
+  value,
+  total,
+  toneText,
+}: {
+  label: string;
+  value: string;
+  total?: boolean;
+  toneText?: string;
+}) {
+  return (
+    <div className="flex items-center justify-between px-3.5 py-2">
+      <span
         className={cn(
-          "font-display mt-1 truncate text-[20px] font-extrabold leading-none tnum",
-          accent ? "text-[#4361EE]" : "text-foreground",
+          "text-[12px]",
+          total ? "font-semibold text-foreground" : "text-muted-foreground",
         )}
       >
-        {formatINR(gross)}
-      </p>
-      <div className="mt-2 space-y-0.5 text-[12px]">
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">Base</span>
-          <span className="tnum text-foreground">{formatINR(base)}</span>
-        </div>
-        <div className="flex items-center justify-between">
-          <span className="text-muted-foreground">+ GST</span>
-          <span className="tnum text-foreground">{formatINR(gst)}</span>
-        </div>
-      </div>
+        {label}
+      </span>
+      <span
+        className={cn(
+          "tnum",
+          total
+            ? cn("font-display text-[15px] font-extrabold", toneText ?? "text-foreground")
+            : "text-[13px] font-medium text-foreground",
+        )}
+      >
+        {value}
+      </span>
     </div>
   );
 }

@@ -1,12 +1,17 @@
--- 0080 — INVENTORY ITEM VENDOR (supplier reference)
+-- 0080 — INVENTORY ITEM VENDOR + COST GST
 --
--- Additive + idempotent. Adds a single nullable `vendor` text column to
--- inventory_items so a Part / Product OR a Repair Service can record its
--- supplier / vendor from the Item Identity section of the inventory form.
+-- Additive + idempotent. Adds two nullable columns to inventory_items:
+--   • vendor    — supplier / vendor label, set from the Item Identity section
+--                 (free-text for now; a future Vendors module may promote it to
+--                 an FK without changing the form surface).
+--   • cost_tax  — GST rate on the Cost Price (CP), independent of the selling
+--                 GST (`tax`), set from the Pricing section.
 --
--- This is a free-text display label for now (same lightweight shape as
--- brand_model / barcode); a future Vendors-module migration may promote it to
--- an FK without changing the form surface. No backfill, no rewrite of any
--- existing row, no destructive change.
+-- No backfill, no rewrite of any existing row, no destructive change.
 
 alter table public.inventory_items add column if not exists vendor text;
+
+-- GST rate applied to the COST price (CP). The existing `tax` column is the GST
+-- on the selling price (SP); this lets CP and SP carry independent GST rates.
+-- Nullable: when absent, the app falls back to `tax` for display.
+alter table public.inventory_items add column if not exists cost_tax numeric;

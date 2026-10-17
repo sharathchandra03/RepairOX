@@ -3,15 +3,26 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
 
+/** Optional semantic border accent for a field (idle + hover + focus border).
+ *  Used e.g. to colour-distinguish Cost vs Selling inputs. */
+export type FieldAccent = "emerald" | "blue";
+
+const ACCENT_INPUT: Record<FieldAccent, string> = {
+  emerald: "border-emerald-400/70 hover:border-emerald-500 focus:border-emerald-500 focus:ring-emerald-500/15",
+  blue: "border-[#4361EE]/60 hover:border-[#4361EE] focus:border-[#4361EE] focus:ring-[#4361EE]/15",
+};
+
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
   /** Highlight the field with a rose border (failed required validation). */
   invalid?: boolean;
+  /** Semantic colour accent for the border (overrides the default). */
+  accent?: FieldAccent;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, iconLeft, iconRight, invalid, type, ...props }, ref) => {
+  ({ className, iconLeft, iconRight, invalid, accent, type, ...props }, ref) => {
     const internalRef = React.useRef<HTMLInputElement>(null);
     const combinedRef = (node: HTMLInputElement | null) => {
       (internalRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
@@ -33,6 +44,8 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             "flex h-[34px] w-full rounded-xl border border-input bg-card px-3 py-1.5 text-[13px] placeholder:text-muted-foreground transition-all duration-150",
             "hover:border-[#4361EE]/40",
             "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none",
+            // Semantic accent border (idle + hover + focus) when requested.
+            accent && !invalid && cn("focus:ring-2 focus:outline-none", ACCENT_INPUT[accent]),
             invalid &&
               "border-rose-400 hover:border-rose-400 focus:border-rose-500 focus:ring-rose-500/15",
             // Strip the native number stepper arrows from numeric inputs.
@@ -80,6 +93,11 @@ export const Label = React.forwardRef<HTMLLabelElement, React.LabelHTMLAttribute
 );
 Label.displayName = "Label";
 
+const ACCENT_SELECT: Record<FieldAccent, { idle: string; open: string }> = {
+  emerald: { idle: "border-emerald-400/70 hover:border-emerald-500", open: "border-emerald-500 ring-2 ring-emerald-500/15" },
+  blue: { idle: "border-[#4361EE]/60 hover:border-[#4361EE]", open: "border-[#4361EE] ring-2 ring-[#4361EE]/15" },
+};
+
 interface SelectProps {
   value?: string;
   defaultValue?: string;
@@ -89,8 +107,10 @@ interface SelectProps {
   placeholder?: string;
   id?: string;
   disabled?: boolean;
+  /** Semantic colour accent for the border (overrides the default). */
+  accent?: FieldAccent;
 }
-export function Select({ value, defaultValue, onChange, options, className, placeholder, disabled }: SelectProps) {
+export function Select({ value, defaultValue, onChange, options, className, placeholder, disabled, accent }: SelectProps) {
   const [open, setOpen] = React.useState(false);
   const [mounted, setMounted] = React.useState(false);
   const [internalValue, setInternalValue] = React.useState(defaultValue || "");
@@ -155,9 +175,9 @@ export function Select({ value, defaultValue, onChange, options, className, plac
         onClick={() => !disabled && setOpen(!open)}
         className={cn(
           "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
-          open
-            ? "border-[#4361EE] ring-2 ring-[#4361EE]/15"
-            : "border-input hover:border-[#4361EE]/40",
+          accent
+            ? (open ? ACCENT_SELECT[accent].open : ACCENT_SELECT[accent].idle)
+            : (open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-input hover:border-[#4361EE]/40"),
           disabled && "cursor-not-allowed opacity-50 hover:border-input",
           className
         )}

@@ -78,7 +78,8 @@ export type InventoryItem = {
   dealerPrice: number;
   distributorPrice: number;
   hsnCode: string;
-  tax: number;           // GST %
+  tax: number;           // GST % on the selling price (SP)
+  costTax?: number;      // GST % on the cost price (CP); defaults to `tax` when absent
   minStock: number;
   maxStock: number;
   reservedStock: number;  // reserved by tickets (not yet consumed)
