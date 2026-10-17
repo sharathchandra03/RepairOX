@@ -1153,7 +1153,7 @@ export default function TicketsPage() {
                       // Nudge ONLY the Status heading text left, without affecting
                       // the cell width or the body cells beneath it. All-Shops
                       // shifts a bit further (16px) to sit over its pills.
-                      <span className={cn("inline-block", multiStore ? "-translate-x-[16px]" : "-translate-x-[11px]")}>{col.label}</span>
+                      <span className={cn("inline-block", multiStore ? "-translate-x-[31px]" : "-translate-x-[26px]")}>{col.label}</span>
                     ) : col.id === "customer" && multiStore ? (
                       // All-Shops only: nudge the Customer heading text 35px right
                       // (heading only — cell width + body cells untouched).
@@ -1583,9 +1583,14 @@ function renderCell(
       );
     case "customer":
       return (
-        <div className="flex items-center gap-3 min-w-0">
+        // Avatar + name tile is centered within the Customer column (both the
+        // normal and the collapsed-sidebar view). When the sidebar is collapsed
+        // the name/details block is nudged 10px to the right so it stays clear
+        // of the wider avatar gap — scoped via the shell's data-sidebar-collapsed
+        // marker so the normal view is untouched.
+        <div className="flex items-center justify-center gap-3 min-w-0">
           <Avatar name={t.customer} size={30} ticketType={getTicketType(t) ?? "na"} />
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0 flex-1 [[data-sidebar-collapsed=true]_&]:translate-x-[10px]">
             <p className="text-sm font-medium leading-tight truncate">{t.customer}</p>
             <p className="text-[11px] font-medium text-[#5B6FC0] truncate">{t.phone}</p>
             {t.company && <p className="text-[11px] text-muted-foreground truncate">{t.company}</p>}

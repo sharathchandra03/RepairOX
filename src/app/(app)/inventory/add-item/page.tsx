@@ -17,9 +17,12 @@ import {
   emptyInventoryForm,
   inventoryFormFromItem,
   validateInventoryForm,
+  invalidInventoryFields,
+  focusFirstInvalidField,
   buildInventoryItem,
   inventoryUpdateFromForm,
   type InventoryFormValues,
+  type InventoryFieldKey,
 } from "@/components/inventory/inventory-item-form";
 
 export default function AddItemPage() {
@@ -33,6 +36,7 @@ export default function AddItemPage() {
   const [values, setValues] = useState<InventoryFormValues>(() => emptyInventoryForm());
   const [toast, setToast] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const [invalid, setInvalid] = useState<Set<InventoryFieldKey>>(() => new Set());
 
   // Populate form values when editing an existing item (opening fields are not
   // re-editable on edit — see inventoryFormFromItem).
@@ -43,7 +47,17 @@ export default function AddItemPage() {
     }
   }, [editItem, hydrated]);
 
-  const set = (patch: Partial<InventoryFormValues>) => setValues((v) => ({ ...v, ...patch }));
+  const set = (patch: Partial<InventoryFormValues>) => {
+    setValues((v) => ({ ...v, ...patch }));
+    if (invalid.size) {
+      setInvalid((prev) => {
+        if (!Object.keys(patch).some((k) => prev.has(k as InventoryFieldKey))) return prev;
+        const next = new Set(prev);
+        Object.keys(patch).forEach((k) => next.delete(k as InventoryFieldKey));
+        return next;
+      });
+    }
+  };
   const isService = values.kind === "service";
 
   function flashToast(msg: string) {
@@ -52,6 +66,13 @@ export default function AddItemPage() {
   }
 
   function save(addNew: boolean) {
+    const bad = invalidInventoryFields(values);
+    if (bad.size > 0) {
+      setInvalid(bad);
+      focusFirstInvalidField(bad);
+      flashToast("Please fill the required fields highlighted in red.");
+      return;
+    }
     const err = validateInventoryForm(values);
     if (err) { flashToast(err); return; }
 
@@ -71,6 +92,7 @@ export default function AddItemPage() {
     flashToast(addNew ? "Item saved — ready for the next one" : "Item saved successfully");
     if (addNew) {
       setValues(emptyInventoryForm());
+      setInvalid(new Set());
       if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" });
     }
   }
@@ -119,7 +141,7 @@ export default function AddItemPage() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1fr_330px]">
         {/* ── Form column — the shared canonical field set ── */}
         <div className="space-y-5">
-          <InventoryItemFields values={values} onChange={set} canEdit={canUse} lockItemType={isEdit} />
+          <InventoryItemFields values={values} onChange={set} canEdit={canUse} lockItemType={isEdit} invalidFields={invalid} />
         </div>
 
         {/* ── Live preview rail ── */}

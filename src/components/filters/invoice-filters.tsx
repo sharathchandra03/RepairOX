@@ -62,6 +62,7 @@ export function InvoiceFilters({
   category,
   documentType,
   proformaStatus,
+  refundStatus,
   onChange,
   onReset,
   onClose,
@@ -75,7 +76,9 @@ export function InvoiceFilters({
   category: string;
   documentType: string;
   proformaStatus: string;
-  onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string; documentType: string; proformaStatus: string }>) => void;
+  /** Derived refund-status filter (all | no_refund | refund_pending | ...). */
+  refundStatus: string;
+  onChange: (patch: Partial<{ search: string; invoiceStatus: string; invoiceType: string; category: string; documentType: string; proformaStatus: string; refundStatus: string }>) => void;
   onReset: () => void;
   /** Closes the Advanced Filters panel. Applied filter state persists — closing
    *  only hides the panel, it does not clear the current selections. */
@@ -194,6 +197,25 @@ export function InvoiceFilters({
               { label: "All Proforma Statuses", value: "all" },
               { label: "Proforma", value: "open" },
               { label: "Converted to Invoice", value: "converted" },
+            ]}
+          />
+        </div>
+
+        {/* Refund Status — DERIVED from the invoice's refund records (never a
+            stored field). Lets the user find refunded / pending / failed
+            invoices. Combines with every other filter; works live. */}
+        <div className="space-y-1.5">
+          <FieldLabel label="Refund Status" filterId="refundStatus" isPinned={isPinned} onTogglePin={onTogglePin} />
+          <Select
+            value={refundStatus}
+            onChange={(e: any) => onChange({ refundStatus: e.target.value })}
+            options={[
+              { label: "All Refunds", value: "all" },
+              { label: "No Refund", value: "no_refund" },
+              { label: "Pending", value: "refund_pending" },
+              { label: "Partial", value: "partially_refunded" },
+              { label: "Fully", value: "fully_refunded" },
+              { label: "Failed / Reversed", value: "refund_failed_reversed" },
             ]}
           />
         </div>

@@ -1151,6 +1151,7 @@ function rowToInventoryItem(r: any): InventoryItem {
     serviceCode: r.service_code ?? "",
     barcode: r.barcode ?? "",
     brandModel: r.brand_model ?? "",
+    vendor: r.vendor ?? "",
     description: r.description ?? "",
     sellingPrice: Number(r.selling_price ?? r.regular_selling_price ?? 0),
     serviceCharge: Number(r.service_charge ?? 0),
@@ -1196,6 +1197,7 @@ function inventoryItemToRow(item: InventoryItem): Record<string, unknown> {
     track_stock: item.trackStock ?? (kind === "part"),
     barcode: item.barcode || null,
     brand_model: item.brandModel || null,
+    vendor: item.vendor || null,
     description: item.description || null,
   };
   // item_code / service_code are server-stamped and immutable — written only
@@ -3383,9 +3385,26 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
 
       if (shouldUseDb()) {
+        // The DB `invoice_refunds.id` is a uuid with a gen_random_uuid()
+        // default. Our client-side `rf_…` id is NOT a valid uuid, so we MUST
+        // omit it and let Postgres mint the real id (sending it fails with
+        // "invalid input syntax for type uuid" and the refund never saves).
+        const { id: _omitClientId, ...refundRow } = invoiceRefundToRow(refund);
+        // organization_id is NOT NULL on invoice_refunds. The before-insert
+        // guard feeds it straight into next_refund_id(new.organization_id), so a
+        // NULL org fails with "refund_sequences organization_id null". Resolve it
+        // from the invoice's own org (mirrors lead-deals / quotations) so the
+        // insert works even on a DB where the column default isn't applied yet.
+        const { data: invOrgRow } = await db
+          .from("invoices")
+          .select("organization_id")
+          .eq("id", invoice.id)
+          .maybeSingle();
+        const refundOrgId = (invOrgRow as { organization_id?: string } | null)?.organization_id ?? null;
+        if (refundOrgId) refundRow.organization_id = refundOrgId;
         const res = await db
           .from("invoice_refunds")
-          .insert(withStore(invoiceRefundToRow(refund)))
+          .insert(withStore(refundRow))
           .select("*")
           .single();
         if (res.error || !res.data) {
@@ -3572,9 +3591,23 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         inspectionNotes: input.inspectionNotes,
       };
       if (shouldUseDb()) {
+        // `invoice_item_returns.id` is a uuid (gen_random_uuid default); our
+        // client `ret_…` id is not a valid uuid, so omit it and let the DB mint
+        // the real id (otherwise the insert fails on an invalid-uuid error).
+        const { id: _omitClientId, ...returnRow } = itemReturnToRow(ret);
+        // organization_id is NOT NULL and is fed into next_item_return_id by the
+        // guard — resolve it from the invoice's org so the insert works even on a
+        // DB where the column default isn't applied yet (see next_refund_id).
+        const { data: retOrgRow } = await db
+          .from("invoices")
+          .select("organization_id")
+          .eq("id", input.invoiceId)
+          .maybeSingle();
+        const returnOrgId = (retOrgRow as { organization_id?: string } | null)?.organization_id ?? null;
+        if (returnOrgId) returnRow.organization_id = returnOrgId;
         const res = await db
           .from("invoice_item_returns")
-          .insert(withStore(itemReturnToRow(ret)))
+          .insert(withStore(returnRow))
           .select("*")
           .single();
         if (res.error || !res.data) {
@@ -3936,6 +3969,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("trackStock" in updates) row.track_stock = updates.trackStock;
       if ("barcode" in updates) row.barcode = updates.barcode || null;
       if ("brandModel" in updates) row.brand_model = updates.brandModel || null;
+      if ("vendor" in updates) row.vendor = updates.vendor || null;
       if ("description" in updates) row.description = updates.description || null;
       if ("migrationFlag" in updates) row.migration_flag = updates.migrationFlag ?? null;
       if (Object.keys(row).length > 0) {

@@ -31,8 +31,11 @@ import {
   InventoryItemFields,
   emptyInventoryForm,
   validateInventoryForm,
+  invalidInventoryFields,
+  focusFirstInvalidField,
   buildInventoryItem,
   type InventoryFormValues,
+  type InventoryFieldKey,
 } from "@/components/inventory/inventory-item-form";
 
 export function AddInventoryModal({
@@ -55,19 +58,38 @@ export function AddInventoryModal({
 
   const [values, setValues] = useState<InventoryFormValues>(() => ({ ...emptyInventoryForm(), name: initialName ?? "" }));
   const [saving, setSaving] = useState(false);
+  const [invalid, setInvalid] = useState<Set<InventoryFieldKey>>(() => new Set());
 
   // Re-seed the form whenever the modal (re)opens so a fresh search term
   // prefills the name and stale input never leaks between opens.
   const [lastOpen, setLastOpen] = useState(open);
   if (open !== lastOpen) {
     setLastOpen(open);
-    if (open) setValues({ ...emptyInventoryForm(), name: initialName ?? "" });
+    if (open) { setValues({ ...emptyInventoryForm(), name: initialName ?? "" }); setInvalid(new Set()); }
   }
 
-  const patch = (p: Partial<InventoryFormValues>) => setValues((v) => ({ ...v, ...p }));
+  const patch = (p: Partial<InventoryFormValues>) => {
+    setValues((v) => ({ ...v, ...p }));
+    // Clear a field's error as soon as the user edits it again.
+    if (invalid.size) {
+      setInvalid((prev) => {
+        if (!Object.keys(p).some((k) => prev.has(k as InventoryFieldKey))) return prev;
+        const next = new Set(prev);
+        Object.keys(p).forEach((k) => next.delete(k as InventoryFieldKey));
+        return next;
+      });
+    }
+  };
 
   async function handleSave() {
     if (saving) return; // guard against double submit
+    const bad = invalidInventoryFields(values);
+    if (bad.size > 0) {
+      setInvalid(bad);
+      focusFirstInvalidField(bad);
+      toast.error("Please fill the required fields highlighted in red.");
+      return;
+    }
     const err = validateInventoryForm(values);
     if (err) { toast.error(err); return; }
     setSaving(true);
@@ -107,7 +129,7 @@ export function AddInventoryModal({
         </>
       }
     >
-      <InventoryItemFields values={values} onChange={patch} canEdit={canCreate} hideOpeningStock />
+      <InventoryItemFields values={values} onChange={patch} canEdit={canCreate} hideOpeningStock invalidFields={invalid} />
     </RoxCenteredForm>
   );
 }

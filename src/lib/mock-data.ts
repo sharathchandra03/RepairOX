@@ -1226,6 +1226,24 @@ export const REFUND_STATUS_TONE: Record<RefundStatus, string> = {
   refund_failed_reversed: "bg-rose-50 text-rose-700 ring-rose-200",
 };
 
+/** A refund that has actually returned money — the invoice's effective state
+ *  reads as "refunded" (partial or full). These REPLACE the financial status
+ *  pill with a RED refunded pill everywhere (table, View Invoice, print). */
+export function isRefundedStatus(rs: RefundStatus | undefined | null): boolean {
+  return rs === "partially_refunded" || rs === "fully_refunded";
+}
+
+/** The ONE red tone used wherever a refunded invoice shows its status as a
+ *  "Partially/Fully Refunded" pill — red no matter what (per product rule).
+ *  Tailwind variant (table / View Invoice) + an inline-style variant (print,
+ *  where Tailwind classes aren't available). */
+export const REFUND_PILL_RED_TONE = "bg-rose-50 text-rose-700 ring-rose-300";
+export const REFUND_PILL_RED_STYLE = {
+  backgroundColor: "#FEF2F2", // rose-50
+  color: "#B42318",           // rose-700 / RepairOX danger red
+  border: "1px solid #FDA29B", // rose-300
+};
+
 export const RETURN_CONDITION_LABEL: Record<ReturnCondition, string> = {
   uninspected: "Uninspected",
   good: "Good",

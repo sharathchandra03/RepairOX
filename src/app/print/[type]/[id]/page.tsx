@@ -103,6 +103,15 @@ function getCommentFromUrl(): string {
   return params.get("comment") ?? "";
 }
 
+/** Diagnostic Report: read the (non-persisted) diagnostic-only Terms &
+ *  Conditions text from the URL query string. Empty when absent → the builder
+ *  falls back to the default diagnostic T&C. */
+function getTermsFromUrl(): string {
+  if (typeof window === "undefined") return "";
+  const params = new URLSearchParams(window.location.search);
+  return params.get("terms") ?? "";
+}
+
 /* ─── Page Component ─────────────────────────────────────────────────── */
 
 export default function PrintPreviewPage() {
@@ -123,6 +132,8 @@ export default function PrintPreviewPage() {
   // persisted). Read it into state on mount so the memo can depend on it
   // without touching `window` during SSR.
   const [comment, setComment] = useState("");
+  // The diagnostic-only Terms & Conditions also live only in the URL.
+  const [terms, setTerms] = useState("");
 
   const isTicket = docType === "ticket";
   const isQuotation = docType === "quotation";
@@ -133,6 +144,7 @@ export default function PrintPreviewPage() {
   useEffect(() => {
     setMounted(true);
     setComment(getCommentFromUrl());
+    setTerms(getTermsFromUrl());
   }, []);
 
   // Build print data (only after mount AND settings hydrated)
@@ -152,7 +164,7 @@ export default function PrintPreviewPage() {
     } else if (isDiagnostic) {
       const ticket = tickets.find((t) => t.id === docId);
       if (!ticket) return null;
-      return buildDiagnosticReportPrintData(settings, ticket, comment);
+      return buildDiagnosticReportPrintData(settings, ticket, comment, terms);
     } else if (isTicket) {
       const ticket = tickets.find((t) => t.id === docId);
       if (!ticket) return null;
@@ -198,14 +210,16 @@ export default function PrintPreviewPage() {
       // rewritten). Only visible to a refund-view user.
       const invRefunds = invoiceRefunds.filter((r) => r.invoiceId === invoice.id);
       let annotation = "";
+      let refundStatusForPrint: ReturnType<typeof deriveRefundStatus> | undefined;
       if (canSeeRefund && invRefunds.length > 0) {
         const refunded = priorRefundedAmount(invRefunds);
-        const fully = deriveRefundStatus(invoice, invRefunds) === "fully_refunded";
-        annotation = buildRefundAnnotation(invRefunds, refunded, fully);
+        const rs = deriveRefundStatus(invoice, invRefunds);
+        refundStatusForPrint = rs;
+        annotation = buildRefundAnnotation(invRefunds, refunded, rs === "fully_refunded");
       }
-      return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId, annotation || undefined);
+      return buildInvoicePrintData(settings, invoice, lt?.ticketNo ?? invoice.ticketId, annotation || undefined, refundStatusForPrint);
     }
-  }, [mounted, hydrated, isTicket, isQuotation, isDiagnostic, isCreditNote, canSeeRefund, comment, docId, tickets, invoices, invoiceRefunds, invoiceRefundAllocations, quotations, settings]);
+  }, [mounted, hydrated, isTicket, isQuotation, isDiagnostic, isCreditNote, canSeeRefund, comment, terms, docId, tickets, invoices, invoiceRefunds, invoiceRefundAllocations, quotations, settings]);
 
   // Auto-print if query param is set
   useEffect(() => {

@@ -530,10 +530,25 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
           </div>
         ) : null}
 
-        {/* ══ SUPPORTING INFO + SUMMARY (side-by-side) ══
+        {/* ══ DIAGNOSTIC: TERMS & CONDITIONS (in place of price details) ══
+             A diagnostic report carries NO price/amount details. In place of the
+             Service Summary + Price Breakdown block, it renders a diagnostic-only
+             Terms & Conditions box carrying the text typed/defaulted on the entry
+             page. */}
+        {diagnostic ? (
+          diagnostic.terms?.trim() ? (
+            <div data-pdf-atomic style={{ marginTop: 9, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
+              <SectionHead title="Terms & Conditions" />
+              <div style={{ padding: "5px 12px" }}>
+                <TwoColList text={diagnostic.terms} />
+              </div>
+            </div>
+          ) : null
+        ) : (
+        /* ══ SUPPORTING INFO + SUMMARY (side-by-side) ══
              All device info lives in the Item/Service table above; the space to
              the LEFT of the Price Breakdown is used for a compact recap so it is
-             not wasted. */}
+             not wasted. */
         <div data-pdf-atomic style={{ display: "grid", gridTemplateColumns: "1.25fr 1fr", gap: 10, marginTop: 9, alignItems: "stretch", ...NO_BREAK }}>
           {/* LEFT: compact supporting info — stretches to match Price Breakdown height */}
           <div style={{ border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", display: "flex", flexDirection: "column" }}>
@@ -619,8 +634,10 @@ function TicketServiceReport({ data }: { data: PrintDocumentData }) {
             </div>
           </div>
         </div>
+        )}
 
-        {/* ══ TERMS & CONDITIONS ══ (omitted in diagnostic mode) */}
+        {/* ══ TERMS & CONDITIONS ══ (omitted in diagnostic mode — the diagnostic
+             report renders its OWN Terms box above, in place of the price block) */}
         {!diagnostic && data.termsAndConditions ? (
           <div data-pdf-atomic style={{ marginTop: 8, border: `1px solid ${BRAND.border}`, borderRadius: 8, overflow: "hidden", ...NO_BREAK }}>
             <SectionHead title="Terms & Conditions" />
@@ -804,7 +821,17 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
   const isBusiness = inv.invoiceType === "business";
   const createdDate = formatPrintDate(inv.createdAt);
   const createdTime = formatPrintTime(inv.createdAt);
-  const statusInfo = INVOICE_STATUS_STYLE[inv.status] || INVOICE_STATUS_STYLE.due;
+  // When money has actually been returned, the STATUS pill becomes a RED
+  // "Partially/Fully Refunded" pill — everywhere the status is printed (header
+  // pill + the "Status" field). DERIVED from refund records; the invoice's
+  // financial status/totals are never rewritten (the red refund annotation band
+  // below still prints too).
+  const refunded = inv.refundStatus === "partially_refunded" || inv.refundStatus === "fully_refunded";
+  const refundStatusInfo = {
+    label: inv.refundStatus === "fully_refunded" ? "Fully Refunded" : "Partially Refunded",
+    bg: "#FEF2F2", color: "#B42318", border: "#FDA29B",
+  };
+  const statusInfo = refunded ? refundStatusInfo : (INVOICE_STATUS_STYLE[inv.status] || INVOICE_STATUS_STYLE.due);
   // A Proforma is a NON-financial commercial document — its print MUST NOT show
   // any financial status label (Paid/Sent/Overdue/Draft) that would imply it is
   // a payable/paid invoice (spec §17). We suppress every status pill/field and

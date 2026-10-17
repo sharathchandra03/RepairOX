@@ -24,7 +24,7 @@ import { formatINR, cn } from "@/lib/utils";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import {
   INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_TYPE_LABEL, invoiceStatusPillStyle,
-  REFUND_STATUS_LABEL, REFUND_STATUS_TONE,
+  REFUND_STATUS_LABEL, REFUND_STATUS_TONE, REFUND_PILL_RED_TONE, isRefundedStatus,
   type Invoice, type InvoiceStatus, type TicketStatus, getInvoiceDevices,
   formatDeviceColour, isProforma, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE,
 } from "@/lib/mock-data";
@@ -367,20 +367,33 @@ export default function InvoiceDetailPage() {
                   </>
                 ) : (
                   <>
-                    <span
-                      className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
-                      style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
-                    >
-                      <span className="h-1.5 w-1.5 rounded-full" style={statusHex ? { backgroundColor: statusHex } : undefined} />
-                      {INVOICE_STATUS_LABEL[invoice.status]}
-                    </span>
-                    {/* Derived REFUND status — visually + semantically distinct
-                        from the financial status (shown only when a refund exists). */}
-                    {refundStatusValue !== "no_refund" && (
-                      <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[refundStatusValue]}`}>
-                        <RotateCcw className="h-3 w-3" />
+                    {/* When money has actually been returned, the STATUS pill
+                        ITSELF becomes a RED "Partially/Fully Refunded" pill
+                        (never a separate pill). DERIVED from refund records; the
+                        invoice's financial status is never mutated. */}
+                    {isRefundedStatus(refundStatusValue) ? (
+                      <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ring-1 ring-inset ${REFUND_PILL_RED_TONE}`}>
+                        <span className="h-1.5 w-1.5 rounded-full bg-current" />
                         {REFUND_STATUS_LABEL[refundStatusValue]}
                       </span>
+                    ) : (
+                      <>
+                        <span
+                          className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium", !statusHex && `ring-1 ring-inset ${INVOICE_STATUS_TONE[invoice.status]}`)}
+                          style={statusHex ? invoiceStatusPillStyle(statusHex) : undefined}
+                        >
+                          <span className="h-1.5 w-1.5 rounded-full" style={statusHex ? { backgroundColor: statusHex } : undefined} />
+                          {INVOICE_STATUS_LABEL[invoice.status]}
+                        </span>
+                        {/* A non-money refund signal (pending / failed / reversed)
+                            still shows as its own distinct pill. */}
+                        {refundStatusValue !== "no_refund" && (
+                          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[refundStatusValue]}`}>
+                            <RotateCcw className="h-3 w-3" />
+                            {REFUND_STATUS_LABEL[refundStatusValue]}
+                          </span>
+                        )}
+                      </>
                     )}
                     <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground ring-1 ring-inset ring-border">
                       {invoice.serviceCategory === "accessories"
@@ -563,7 +576,14 @@ export default function InvoiceDetailPage() {
               <DetailField label="Due Date" value={fmtDate(invoice.dueDate)} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Status</p>
-                {proforma ? (
+                {isRefundedStatus(refundStatusValue) ? (
+                  // Refunded → the Status is LOCKED and reads as a compact RED
+                  // refunded pill (derived, read-only — can't be changed).
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset cursor-default ${REFUND_PILL_RED_TONE}`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    {REFUND_STATUS_LABEL[refundStatusValue]}
+                  </span>
+                ) : proforma ? (
                   // Proforma is non-financial — read-only lifecycle pill only.
                   <span className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset", PROFORMA_STATUS_TONE[proformaStatus])}>
                     {PROFORMA_STATUS_LABEL[proformaStatus]}
@@ -760,6 +780,13 @@ export default function InvoiceDetailPage() {
               <DetailField label="Balance Due" value={formatINR(Math.max(balanceDue, 0))} highlight={balanceDue > 0} />
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Payment Status</p>
+                {isRefundedStatus(refundStatusValue) ? (
+                  // Refunded → status is LOCKED (compact read-only red pill).
+                  <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset cursor-default ${REFUND_PILL_RED_TONE}`}>
+                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
+                    {REFUND_STATUS_LABEL[refundStatusValue]}
+                  </span>
+                ) : (
                 <select
                   value={invoice.status}
                   onChange={(e) => updateInvoice(invoice.id, { status: e.target.value as InvoiceStatus })}
@@ -773,6 +800,7 @@ export default function InvoiceDetailPage() {
                   <option value="overdue">Overdue</option>
                   <option value="cancelled">Cancelled</option>
                 </select>
+                )}
               </div>
             </div>
           </DetailSection>

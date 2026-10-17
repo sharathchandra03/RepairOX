@@ -62,7 +62,7 @@ export async function GET(req: Request) {
 
   // Pull the compact fields we need per table, scoped to this org. We select
   // only the columns required for the metrics to keep payloads small.
-  const [tix, invs, wis, inv] = await Promise.all([
+  const [tix, invs, wis, inv, refunds] = await Promise.all([
     admin.from("tickets")
       // `devices` carries the recordType meta envelope — needed to EXCLUDE
       // Warranty records from the consolidated ticket COUNT (they are ₹0
@@ -80,6 +80,13 @@ export async function GET(req: Request) {
     admin.from("inventory_items")
       .select("branch_id, current_stock, regular_selling_price, default_price, deleted_at")
       .eq("organization_id", orgId).is("deleted_at", null),
+    // Realized (succeeded) refunds — a monetary reversal. Consolidated Total
+    // Sales / Payment Received are reported NET of these. The invoice is never
+    // mutated; we subtract the refund amount per branch. Tolerate a missing
+    // table (migration not yet applied) so the summary still loads.
+    admin.from("invoice_refunds")
+      .select("branch_id, refund_amount, status, created_at")
+      .eq("organization_id", orgId).eq("status", "succeeded"),
   ]);
 
   // Initialise a per-store accumulator.
@@ -129,6 +136,19 @@ export async function GET(req: Request) {
       a.totalSales += total;
       a.paymentReceived += paid;
       a.outstanding += Math.max(0, total - paid);
+    });
+  }
+  // Realized refunds reduce Total Sales + Payment Received (money that was
+  // returned). Outstanding is left on the GROSS invoice balance — a refund is
+  // a reversal of money collected, not a change to what the customer still
+  // owes. Refund rows carry the invoice's branch_id (origin store).
+  for (const r of (refunds?.data ?? []) as Row[]) {
+    if (!inRange(r.created_at, from, to)) continue;
+    const amt = Number(r.refund_amount ?? 0);
+    if (amt <= 0) continue;
+    bump(r.branch_id, (a) => {
+      a.totalSales = Math.max(0, a.totalSales - amt);
+      a.paymentReceived = Math.max(0, a.paymentReceived - amt);
     });
   }
   // Inventory stock value is a snapshot (not date-filtered).

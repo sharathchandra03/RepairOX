@@ -1458,3 +1458,17 @@ html, body {
     --rox-table-row-h-tickets: 60px;
   }
 }
+
+/* Hide the native number-input spin buttons (the up/down stepper arrows) on
+   any input that opts in via .no-spinner. The shared <Input> applies this to
+   every type="number" field so numeric pills (price / GST / stock) stay clean
+   and consistent across the app. */
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+.no-spinner[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

@@ -25,6 +25,7 @@ import { Can } from "@/components/common/can";
 import { useState, useMemo, useRef, useCallback } from "react";
 import { STATUS_LABEL, getTicketType, TICKET_TYPE_LABEL, isProforma, isWarranty, type TicketStatus, type TicketPriority } from "@/lib/mock-data";
 import { useStore } from "@/lib/store";
+import { priorRefunded, refundsForInvoice } from "@/lib/invoice-refunds";
 import { useStoreSettings } from "@/lib/store-settings";
 import { InlineStatusDropdown } from "@/components/tickets/inline-status-dropdown";
 import { InlinePriorityDropdown } from "@/components/tickets/inline-priority-dropdown";
@@ -128,7 +129,12 @@ export default function Dashboard() {
     return { start: null, end: null };
   });
   const [showDatePicker, setShowDatePicker] = useState(false);
-  const { tickets, invoices, inventory, updateTicket, deductPartsForTicket } = useStore();
+  const { tickets, invoices, invoiceRefunds, inventory, updateTicket, deductPartsForTicket } = useStore();
+  // Realized (succeeded) refund total for ONE invoice — Revenue is NET of it.
+  const refundOf = useCallback(
+    (invId: string) => priorRefunded(refundsForInvoice(invoiceRefunds, invId)),
+    [invoiceRefunds],
+  );
   const { settings } = useStoreSettings();
   const router = useRouter();
   // Critical Tasks card — local filters (Filter button). These narrow the
@@ -485,12 +491,13 @@ export default function Dashboard() {
 
   // Revenue from invoices within the selected range
   const revenueMetrics = useMemo(() => {
-    const totalRevenue = filteredInvoices.reduce((s, i) => s + i.total, 0);
+    // Net revenue = Σ invoice total − realized (succeeded) refunds.
+    const totalRevenue = filteredInvoices.reduce((s, i) => s + Math.max(0, i.total - refundOf(i.id)), 0);
     const avgRevenue = Math.round(totalRevenue / rangeDays);
     const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
     const projection = avgRevenue * daysInMonth;
     return { totalRevenue, avgRevenue, projection };
-  }, [filteredInvoices, rangeDays, now]);
+  }, [filteredInvoices, rangeDays, now, refundOf]);
 
   // Monthly revenue — always computed for the full current month regardless of date filter
   // Used for the monthly target progress bar which shouldn't change with date filter
@@ -502,8 +509,9 @@ export default function Dashboard() {
         const created = new Date(i.createdAt).getTime();
         return created >= monthStart && created <= monthEnd;
       })
-      .reduce((s, i) => s + i.total, 0);
-  }, [invoices, now]);
+      // Net of realized refunds (matches the revenue card + reports).
+      .reduce((s, i) => s + Math.max(0, i.total - refundOf(i.id)), 0);
+  }, [invoices, now, refundOf]);
 
   // Stock value from inventory (cost basis — point-in-time, not date-filtered)
   const stockValue = useMemo(() => {

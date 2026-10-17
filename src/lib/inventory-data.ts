@@ -92,6 +92,7 @@ export type InventoryItem = {
   serviceCode?: string;          // permanent server-generated SRV-000001 (services)
   barcode?: string;              // optional scanning id
   brandModel?: string;           // optional "Brand / compatible device or model"
+  vendor?: string;               // optional supplier / vendor (free-text label)
   description?: string;
   costPrice?: number;            // CP — internal default cost/unit (parts); from inventory_item_costs
   sellingPrice?: number;         // SP — customer default price/unit (parts)

@@ -18,7 +18,7 @@
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, FileText, Stethoscope } from "lucide-react";
+import { ArrowLeft, FileText, Stethoscope, ScrollText } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
@@ -26,7 +26,7 @@ import { Button } from "@/components/ui/button";
 import { DetailHero, DetailSection, DetailField } from "@/components/common/detail-page";
 import { getTicketDevices, formatDeviceColour } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
-import { getDiagnosticReportPrintUrl } from "@/lib/print-utils";
+import { getDiagnosticReportPrintUrl, DEFAULT_DIAGNOSTIC_TERMS } from "@/lib/print-utils";
 import { markDiagnosticReportGenerated } from "@/hooks/use-diagnostic-report";
 
 export default function DiagnosticReportPage() {
@@ -42,6 +42,10 @@ export default function DiagnosticReportPage() {
   const devices = useMemo(() => (ticket ? getTicketDevices(ticket) : []), [ticket]);
 
   const [comment, setComment] = useState("");
+  // Diagnostic-only Terms & Conditions — prefilled with the default, fully
+  // editable here; whatever text is submitted prints on the report. Not
+  // persisted server-side (travels only via the print URL).
+  const [terms, setTerms] = useState(DEFAULT_DIAGNOSTIC_TERMS);
 
   // ── Ticket not found ──
   if (!ticket) {
@@ -80,7 +84,7 @@ export default function DiagnosticReportPage() {
     // Record THAT a report was generated (not its content) so View Ticket shows
     // the mention, then open the diagnostic print document carrying the comment.
     markDiagnosticReportGenerated(ticket.id);
-    router.push(getDiagnosticReportPrintUrl(ticket.id, comment));
+    router.push(getDiagnosticReportPrintUrl(ticket.id, comment, terms));
   }
 
   return (
@@ -165,6 +169,23 @@ export default function DiagnosticReportPage() {
             placeholder="e.g. Screen has pressure marks, battery health 78%, water-damage indicator triggered, QC failed on display + camera…"
             className="w-full rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
           />
+        </DetailSection>
+
+        {/* Editable diagnostic-only Terms & Conditions — prefilled with the
+            default; whatever is here prints in the report's T&C box. */}
+        <DetailSection title="Terms & Conditions" icon={ScrollText} accent="neutral">
+          <label htmlFor="diagnostic-terms" className="mb-2 block text-[11px] font-medium text-muted-foreground">
+            Terms &amp; Conditions for this diagnostic report. Edit as needed — this exact text prints on the report (shown in place of any price details).
+          </label>
+          <textarea
+            id="diagnostic-terms"
+            value={terms}
+            onChange={(e) => setTerms(e.target.value)}
+            rows={8}
+            placeholder="Enter the terms & conditions to print on the diagnostic report…"
+            className="w-full rounded-xl border border-input bg-card px-3 py-2.5 text-sm text-foreground outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
+          />
+          <p className="mt-2 text-[11px] text-muted-foreground">One line per term. A diagnostic report carries no price or amount details.</p>
           <div className="mt-4 flex items-center justify-end gap-2">
             <Link href={`/tickets/${ticket.id}`}>
               <Button variant="outline" size="sm" className="rounded-full">Cancel</Button>

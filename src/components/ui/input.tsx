@@ -6,10 +6,12 @@ import { cn } from "@/lib/utils";
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
   iconLeft?: React.ReactNode;
   iconRight?: React.ReactNode;
+  /** Highlight the field with a rose border (failed required validation). */
+  invalid?: boolean;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, iconLeft, iconRight, ...props }, ref) => {
+  ({ className, iconLeft, iconRight, invalid, type, ...props }, ref) => {
     const internalRef = React.useRef<HTMLInputElement>(null);
     const combinedRef = (node: HTMLInputElement | null) => {
       (internalRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
@@ -26,10 +28,15 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         )}
         <input
           ref={combinedRef}
+          type={type}
           className={cn(
             "flex h-[34px] w-full rounded-xl border border-input bg-card px-3 py-1.5 text-[13px] placeholder:text-muted-foreground transition-all duration-150",
             "hover:border-[#4361EE]/40",
             "focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none",
+            invalid &&
+              "border-rose-400 hover:border-rose-400 focus:border-rose-500 focus:ring-rose-500/15",
+            // Strip the native number stepper arrows from numeric inputs.
+            type === "number" && "no-spinner",
             iconLeft && "pl-9",
             iconRight && "pr-9",
             className

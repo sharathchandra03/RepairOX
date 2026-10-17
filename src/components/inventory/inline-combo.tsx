@@ -14,6 +14,7 @@ export function InlineCombo({
   onCreate,
   placeholder = "Select…",
   createLabel = "Create",
+  invalid,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -21,6 +22,8 @@ export function InlineCombo({
   onCreate: (name: string) => void;
   placeholder?: string;
   createLabel?: string;
+  /** Highlight the trigger with a rose border (failed required validation). */
+  invalid?: boolean;
 }) {
   const [q, setQ] = React.useState("");
   const filtered = options.filter((o) => o.toLowerCase().includes(q.trim().toLowerCase()));
@@ -37,7 +40,8 @@ export function InlineCombo({
           onClick={toggle}
           className={cn(
             "flex h-[34px] w-full items-center justify-between gap-2 rounded-xl border bg-card px-3 text-[13px] transition",
-            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-input hover:border-[#4361EE]/40"
+            open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-input hover:border-[#4361EE]/40",
+            invalid && !open && "border-rose-400 hover:border-rose-400"
           )}
         >
           <span className={cn("truncate", !value && "text-muted-foreground")}>{value || placeholder}</span>

@@ -72,6 +72,37 @@ export function remainingRefundable(invoice: Invoice, refunds: InvoiceRefund[]):
   return round2(Math.max(0, refundableBase(invoice) - priorRefunded(refunds)));
 }
 
+/* ───────────────────────── net-of-refunds (reporting) ─────────────────────
+   The ONE place revenue surfaces (invoice KPIs, dashboard, owner summary, …)
+   get a refund-adjusted figure, so they never diverge. Only SUCCEEDED refunds
+   reduce money (a pending/processing/failed/reversed refund has not left the
+   till). The invoice is never mutated — the net is always gross − Σ succeeded.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/** Realized (succeeded) refunded amount for ONE invoice, from a mixed set. */
+export function refundedForInvoice(invoiceId: string, refunds: InvoiceRefund[]): number {
+  return priorRefunded(refundsForInvoice(refunds, invoiceId));
+}
+
+/** Realized (succeeded) refunded TAX for ONE invoice (to net-off tax KPIs). */
+export function refundedTaxForInvoice(invoiceId: string, refunds: InvoiceRefund[]): number {
+  return round2(
+    refundsForInvoice(refunds, invoiceId)
+      .filter((r) => r.status === "succeeded")
+      .reduce((s, r) => s + (r.refundTax || 0), 0),
+  );
+}
+
+/** Net revenue for ONE invoice = invoice total − realized refunds (never < 0). */
+export function netRevenueForInvoice(invoice: Invoice, refunds: InvoiceRefund[]): number {
+  return round2(Math.max(0, (invoice.total ?? 0) - refundedForInvoice(invoice.id, refunds)));
+}
+
+/** Net amount actually collected for ONE invoice = paid − realized refunds. */
+export function netCollectedForInvoice(invoice: Invoice, refunds: InvoiceRefund[]): number {
+  return round2(Math.max(0, (invoice.paidAmount ?? 0) - refundedForInvoice(invoice.id, refunds)));
+}
+
 /* ───────────────────────── scope tree (device/line) ───────────────────── */
 
 export type ScopeLine = {

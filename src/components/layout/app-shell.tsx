@@ -195,7 +195,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       externalScope={workspaceToModule(activeWorkspace)}
       onScopeChange={handleReportScopeChange}
     >
-    <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]">
+    <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]" data-sidebar-collapsed={collapsed ? "true" : "false"}>
       <Sidebar
         collapsed={collapsed}
         setCollapsed={setCollapsed}

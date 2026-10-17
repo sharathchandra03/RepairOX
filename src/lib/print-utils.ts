@@ -1,5 +1,5 @@
 import type { StoreSettings, CustomPrintTemplate } from "@/lib/store-settings";
-import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord, InvoiceRefund, InvoiceRefundAllocation } from "@/lib/mock-data";
+import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecord, InvoiceRefund, InvoiceRefundAllocation, RefundStatus } from "@/lib/mock-data";
 import { getTicketDevices, getInvoiceDevices, formatDeviceColour, getRecordType } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import { qcItemLabel } from "@/lib/qc-config";
@@ -143,6 +143,10 @@ export type PrintInvoiceInfo = {
    *  (CN-00NN)" / "FULLY REFUNDED"). The invoice content/totals are NEVER
    *  rewritten — this is a stamped footer/watermark line only. */
   refundAnnotation?: string;
+  /** DERIVED refund status. When this is a refunded state (partially/fully),
+   *  the print STATUS pill itself renders RED "Partially/Fully Refunded"
+   *  instead of the financial status (per product rule). Never stored. */
+  refundStatus?: RefundStatus;
 };
 
 export type PrintInvoiceDeviceInfo = {
@@ -221,11 +225,13 @@ export type PrintDocumentData = {
   creditNote?: PrintCreditNoteInfo;
   /** Diagnostic-report mode: when present, the shared Ticket A4 renders a
    *  diagnostic variant — a highlighted "QC FAILED" banner + a highlighted
-   *  "Device Condition" box carrying this comment — and OMITS Terms &
-   *  Conditions and Warranty Information. The comment is NOT persisted; it
-   *  travels only via the print URL query param → this field → the rendered
+   *  "Device Condition" box carrying this comment. A diagnostic report carries
+   *  NO price/amount details; in place of the Service Summary + Price Breakdown
+   *  it renders a Terms & Conditions box carrying `terms` (a diagnostic-only
+   *  default T&C, editable on the entry page). Neither value is persisted; both
+   *  travel via the print URL query params → these fields → the rendered
    *  document. */
-  diagnostic?: { comment: string };
+  diagnostic?: { comment: string; terms: string };
   printTitle: string;
   printDate: string;
   printTime: string;
@@ -445,23 +451,41 @@ export function buildTicketPrintData(
    render from one source. Reuses the real ticket's store / customer / device
    data via the same builders as a normal ticket print. */
 
+/** Default Terms & Conditions for a Diagnostic Report ONLY. This is the
+ *  diagnostic-specific T&C — distinct from the ticket/invoice Terms. It is
+ *  pre-filled on the entry page where the QC notes are typed, remains fully
+ *  editable there, and whatever text is submitted is what prints in the
+ *  diagnostic report's Terms & Conditions box. Not persisted server-side. */
+export const DEFAULT_DIAGNOSTIC_TERMS = [
+  "This is a diagnostic report only and does not constitute a repair invoice or a price quotation.",
+  "The device condition and findings above are based on a physical and functional inspection at the time of QC.",
+  "Diagnostic findings are indicative; additional faults may surface once repair work begins.",
+  "No repair work has been carried out and no charges are implied by this report.",
+  "The company is not liable for pre-existing data loss or faults not detectable during inspection.",
+  "This report is valid only for the device and IMEI/serial stated above.",
+].join("\n");
+
 export function buildDiagnosticReportPrintData(
   settings: StoreSettings,
   ticket: Ticket,
   comment: string,
+  terms?: string,
 ): PrintDocumentData {
   const now = new Date();
+  // The diagnostic-only Terms & Conditions: use whatever text was submitted
+  // from the entry page (editable), falling back to the diagnostic default.
+  const diagnosticTerms = terms != null && terms.trim() ? terms : DEFAULT_DIAGNOSTIC_TERMS;
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromTicket(ticket),
     ticket: buildTicketInfo(ticket),
-    diagnostic: { comment },
+    diagnostic: { comment, terms: diagnosticTerms },
     printTitle: "Diagnostic Report",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
     printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
-    // A diagnostic report intentionally carries NO Terms & Conditions and NO
-    // Warranty block — the A4 diagnostic variant suppresses both regardless,
-    // but we keep them blank so no stray text can leak in.
+    // The ticket/invoice Terms & Warranty blocks stay blank — a diagnostic
+    // report carries ONLY its own diagnostic Terms (rendered in place of the
+    // price breakdown), never the service-report Terms or Warranty.
     termsAndConditions: "",
     warrantyText: "",
     printFooter: settings.ticketFooter,
@@ -476,6 +500,9 @@ export function buildInvoicePrintData(
    *  ("PARTIALLY REFUNDED ₹X on DATE (CN-00NN)" / "FULLY REFUNDED"). The invoice
    *  totals/content are never rewritten. */
   refundAnnotation?: string,
+  /** DERIVED refund status — when partially/fully refunded the print status
+   *  pill renders RED "Partially/Fully Refunded" instead of the financial one. */
+  refundStatus?: RefundStatus,
 ): PrintDocumentData {
   const now = new Date();
   // Determine print title. A PROFORMA always prints as "Proforma Invoice"
@@ -493,6 +520,7 @@ export function buildInvoicePrintData(
   }
   const invoiceInfo = buildInvoiceInfo(invoice, linkedTicketNo);
   if (refundAnnotation) invoiceInfo.refundAnnotation = refundAnnotation;
+  if (refundStatus) invoiceInfo.refundStatus = refundStatus;
   return {
     store: buildStoreInfo(settings),
     customer: buildCustomerFromInvoice(invoice),
@@ -801,13 +829,15 @@ export function getQuotationPrintUrl(quotationId: string, format: PrintFormat = 
   return `/print/quotation/${encodeURIComponent(quotationId)}?format=${format}`;
 }
 
-/** Diagnostic Report print URL. The device-condition comment is carried only in
- *  the query string (nothing is persisted). A4 only — a diagnostic report is a
- *  full-page document. */
+/** Diagnostic Report print URL. The device-condition comment AND the
+ *  diagnostic-only Terms & Conditions are carried only in the query string
+ *  (nothing is persisted). A4 only — a diagnostic report is a full-page
+ *  document. */
 export function getDiagnosticReportPrintUrl(
   ticketId: string,
   comment: string,
+  terms: string,
   format: PrintFormat = "a4",
 ): string {
-  return `/print/diagnostic/${encodeURIComponent(ticketId)}?format=${format}&comment=${encodeURIComponent(comment)}`;
+  return `/print/diagnostic/${encodeURIComponent(ticketId)}?format=${format}&comment=${encodeURIComponent(comment)}&terms=${encodeURIComponent(terms)}`;
 }

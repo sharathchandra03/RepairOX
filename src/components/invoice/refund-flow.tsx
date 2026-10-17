@@ -79,6 +79,12 @@ export function RefundFlow({
   const [gateway, setGateway] = useState(false);
   const [returnDrafts, setReturnDrafts] = useState<Record<string, ReturnDraft>>({});
   const [submitting, setSubmitting] = useState(false);
+  // True once a refund in this session has been saved successfully. A full
+  // refund makes the invoice `fully_refunded` (not eligible) the instant the new
+  // row lands in store state — which would flash the amber "cannot be refunded"
+  // box for the frame between that state update and the dialog unmounting. This
+  // keeps the normal view rendered through the close transition.
+  const [justSubmitted, setJustSubmitted] = useState(false);
 
   const existingRefunds = useMemo(
     () => (invoice ? refundsForInvoice(invoiceRefunds, invoice.id) : []),
@@ -135,6 +141,7 @@ export function RefundFlow({
     setGateway(false);
     setReturnDrafts({});
     setSubmitting(false);
+    setJustSubmitted(false);
   }, []);
 
   const close = useCallback(() => {
@@ -175,6 +182,10 @@ export function RefundFlow({
         setSubmitting(false);
         return;
       }
+      // The refund saved — a full refund now makes the invoice ineligible. Mark
+      // it so the eligibility gate below doesn't flash "cannot be refunded"
+      // during the close transition.
+      setJustSubmitted(true);
       // Record each physical item return the user flagged (independent of money).
       for (const l of effectiveAllocation.lines) {
         const draft = returnDrafts[l.lineId];
@@ -202,7 +213,10 @@ export function RefundFlow({
 
   if (!invoice) return null;
 
-  const blocked = !elig?.eligible;
+  // Suppress the blocked/eligibility UI while we're closing after a successful
+  // submit — otherwise a full refund (now fully_refunded) flashes the amber
+  // "cannot be refunded" box for ~1s before the dialog unmounts.
+  const blocked = !justSubmitted && !elig?.eligible;
   const canGoNext =
     step === 1 ? !blocked && scopeLineIds.length > 0 && effectiveAllocation.amount >= 0
     : step === 2 ? (refundKind === "full_scope" ? effectiveAllocation.amount > 0 : !partialTooHigh)

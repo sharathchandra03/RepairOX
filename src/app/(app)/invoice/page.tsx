@@ -30,8 +30,8 @@ import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
 import { SegmentedTabs } from "@/components/ui/tabs";
-import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, REFUND_STATUS_LABEL, REFUND_STATUS_TONE, type Invoice, type InvoiceStatus, type InvoiceType, type Ticket, type RefundStatus } from "@/lib/mock-data";
-import { refundStatus as deriveRefundStatus, eligibility as refundEligibility } from "@/lib/invoice-refunds";
+import { INVOICE_STATUS_LABEL, INVOICE_STATUS_TONE, INVOICE_ID_COLOR, INVOICE_TYPE_LABEL, REFUND_STATUS_LABEL, REFUND_PILL_RED_TONE, isRefundedStatus, getTicketType, getRecordType, invoiceStatusPillStyle, invoiceIdColorStyle, isProforma, getDocumentType, PROFORMA_STATUS_LABEL, PROFORMA_STATUS_TONE, getInvoiceDevices, type Invoice, type InvoiceStatus, type InvoiceType, type RefundStatus, type Ticket } from "@/lib/mock-data";
+import { refundStatus as deriveRefundStatus, eligibility as refundEligibility, priorRefunded, refundsForInvoice } from "@/lib/invoice-refunds";
 import { RefundFlow } from "@/components/invoice/refund-flow";
 import { ProformaNeedsTicketDialog } from "@/components/invoice/proforma-needs-ticket-dialog";
 import { exportInvoicesExcel, exportInvoicesCSV } from "@/lib/list-export";
@@ -47,7 +47,7 @@ import { readDateFilterParams } from "@/lib/date-filter";
 
 /* ─── Invoice Column Definitions ─────────────────────────────────────── */
 
-type InvColumnId = "store" | "id" | "ticket" | "customer" | "date" | "status" | "refundStatus" | "category" | "paid" | "tax" | "total" | "actions";
+type InvColumnId = "store" | "id" | "ticket" | "customer" | "date" | "status" | "category" | "paid" | "tax" | "total" | "actions";
 
 type InvColumnDef = {
   id: InvColumnId;
@@ -64,8 +64,7 @@ const INV_ALL_COLUMNS: InvColumnDef[] = [
   { id: "ticket", label: "Ticket", align: "center", width: "w-[96px]" },
   { id: "customer", label: "Customer", width: "w-[25%]" },
   { id: "date", label: "Created", width: "w-[112px]" },
-  { id: "status", label: "Status", width: "w-[130px]" },
-  { id: "refundStatus", label: "Refund", width: "w-[116px]" },
+  { id: "status", label: "Status", width: "w-[150px]" },
   { id: "category", label: "Category", width: "w-[116px]" },
   { id: "paid", label: "Paid", align: "right", width: "w-[88px]" },
   { id: "tax", label: "Tax", align: "right", width: "w-[76px]" },
@@ -93,16 +92,6 @@ const STATUS_FILTERS: { label: string; value: InvoiceStatus | "all" }[] = [
   { label: "Partial", value: "partial" },
   { label: "Overdue", value: "overdue" },
   { label: "Cancelled", value: "cancelled" },
-];
-
-/* Derived refund-status filter segments (never a stored field). */
-const REFUND_STATUS_FILTERS: { label: string; value: string }[] = [
-  { label: "All Refunds", value: "all" },
-  { label: "No Refund", value: "no_refund" },
-  { label: "Pending", value: "refund_pending" },
-  { label: "Partial", value: "partially_refunded" },
-  { label: "Fully", value: "fully_refunded" },
-  { label: "Failed / Reversed", value: "refund_failed_reversed" },
 ];
 
 const DATE_RANGES = [
@@ -184,6 +173,10 @@ export default function InvoicePage() {
   }, [invoiceRefunds]);
   // The invoice whose refund flow is open (null = closed).
   const [refundTarget, setRefundTarget] = useState<Invoice | null>(null);
+  // The invoice awaiting the "are you sure you want to refund?" confirmation,
+  // triggered by choosing the Refund action at the end of the Status dropdown.
+  // Confirming opens the RefundFlow; Refund status itself stays DERIVED.
+  const [refundConfirmTarget, setRefundConfirmTarget] = useState<Invoice | null>(null);
   // Active-store context — drives the context-aware Store column (§3h). In
   // multi-store / All-Shops mode each row shows which store owns the invoice.
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -293,7 +286,7 @@ export default function InvoicePage() {
   // Individual filter pinning (own storage key so it doesn't collide with other modules).
   const { pinnedIds, unpin, togglePin, isPinned } = usePinnedFilters("repairox-invoice-pinned-filters");
   // True when any filter differs from the defaults (Date=Today, Status=All).
-  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || documentTypeFilter !== "all" || proformaStatusFilter !== "all" || panelSearch !== "";
+  const advancedActive = typeFilter !== "all" || categoryFilter !== "all" || documentTypeFilter !== "all" || proformaStatusFilter !== "all" || refundStatusFilter !== "all" || panelSearch !== "";
 
   // Pinnable filter definitions — shared by the pinned-filter bar. Bound
   // directly to the same setters as the advanced panel, so a pinned filter
@@ -546,18 +539,30 @@ export default function InvoicePage() {
     // the source; only realized normal invoices count (spec §36–§40).
     const financial = list.filter((i) => !isProforma(i));
     const proformaCount = list.length - financial.length;
-    const totalRevenue = financial.reduce((s, i) => s + i.total, 0);
-    const paidAmount = financial.reduce((s, i) => s + i.paidAmount, 0);
+    // Realized (succeeded) refund + refunded-tax per invoice. A refund is a
+    // financial reversal — Revenue / Collected / Tax are reported NET of it.
+    // The invoice itself is never mutated; we subtract the derived refund total.
+    const refundOf = (invId: string) => priorRefunded(refundsForInvoice(invoiceRefunds, invId));
+    const refundTaxOf = (invId: string) =>
+      refundsForInvoice(invoiceRefunds, invId)
+        .filter((r) => r.status === "succeeded")
+        .reduce((s, r) => s + (r.refundTax || 0), 0);
+    const refundedTotal = financial.reduce((s, i) => s + refundOf(i.id), 0);
+    // Net revenue = Σ invoice total − realized refunds (never below 0).
+    const totalRevenue = financial.reduce((s, i) => s + Math.max(0, i.total - refundOf(i.id)), 0);
+    // Net collected = Σ paid − realized refunds (money that actually stayed in).
+    const paidAmount = financial.reduce((s, i) => s + Math.max(0, i.paidAmount - refundOf(i.id)), 0);
     const pending = financial.filter((i) => i.status === "sent" || i.status === "partial").reduce((s, i) => s + (i.total - i.paidAmount), 0);
     const overdue = financial.filter((i) => i.status === "overdue").reduce((s, i) => s + (i.total - i.paidAmount), 0);
     const overdueCount = financial.filter((i) => i.status === "overdue").length;
     const draftCount = financial.filter((i) => i.status === "draft").length;
-    const taxCollected = financial.filter((i) => i.status === "paid").reduce((s, i) => s + i.tax, 0);
+    // Tax on paid invoices, net of refunded tax.
+    const taxCollected = financial.filter((i) => i.status === "paid").reduce((s, i) => s + Math.max(0, i.tax - refundTaxOf(i.id)), 0);
     // "Total Invoices" counts realized invoices only (proformas are surfaced via
     // the Document Type filter, never folded into the financial invoice count).
     const totalInvoices = financial.length;
-    return { totalRevenue, paidAmount, pending, overdue, overdueCount, draftCount, taxCollected, totalInvoices, proformaCount };
-  }, [list]);
+    return { totalRevenue, paidAmount, pending, overdue, overdueCount, draftCount, taxCollected, totalInvoices, proformaCount, refundedTotal };
+  }, [list, invoiceRefunds]);
 
   /* Invoice status view — presentation only, derived from filtered invoice data */
   const invoiceStatusView = useMemo(() => {
@@ -567,13 +572,20 @@ export default function InvoicePage() {
     const countOf = (s: InvoiceStatus) => financial.filter((i) => i.status === s).length;
     const total = financial.length;
     const paidCount = countOf("paid");
+    // Refunded = invoices carrying a DERIVED refund status (partially/fully
+    // refunded) — NOT a financial status. It's shown as a separate, visually
+    // distinct bar and footer stat; it never changes the financial bars or the
+    // Total/Completed/Pending counts (an invoice stays Paid AND Refunded).
+    const refundedCount = financial.filter((i) =>
+      isRefundedStatus(deriveRefundStatus(i, refundsForInvoice(invoiceRefunds, i.id))),
+    ).length;
     const rows = [
       { key: "overdue", label: "Overdue", count: countOf("overdue"), color: "rose" as const },
       { key: "paid", label: "Paid", count: paidCount, color: "emerald" as const },
       { key: "sent", label: "Sent", count: countOf("sent"), color: "sky" as const },
     ];
-    return { rows, total, completed: paidCount, pending: total - paidCount, denom: total || 1 };
-  }, [list]);
+    return { rows, total, completed: paidCount, pending: total - paidCount, refundedCount, denom: total || 1 };
+  }, [list, invoiceRefunds]);
 
   const handleDuplicate = useCallback((inv: Invoice) => {
     // Keep the SAME id as the source so it deliberately collides on insert —
@@ -763,13 +775,45 @@ export default function InvoicePage() {
                         </div>
                       );
                     })}
+
+                    {/* Refunded — a DERIVED status, kept visually distinct from
+                        the financial bars above (dashed separator + rose refund
+                        tone + icon). Shown only when refunds exist; it never
+                        alters the financial breakdown. */}
+                    {invoiceStatusView.refundedCount > 0 && (() => {
+                      const pct = (invoiceStatusView.refundedCount / invoiceStatusView.denom) * 100;
+                      return (
+                        <div className="flex items-center gap-4 border-t border-dashed border-border/70 pt-4">
+                          <div className="w-[68px] shrink-0">
+                            <div className="flex items-center gap-1.5">
+                              <RotateCcw className="h-3 w-3 text-rose-500" />
+                              <span className="text-[13px] font-semibold text-foreground">Refunded</span>
+                            </div>
+                            <p className="mt-0.5 pl-[18px] text-[11px] text-muted-foreground">{invoiceStatusView.refundedCount} invoice{invoiceStatusView.refundedCount !== 1 ? "s" : ""}</p>
+                          </div>
+                          <div className="relative h-2.5 flex-1 overflow-hidden rounded-[4px] bg-muted/70 shadow-[inset_0_1px_2px_rgba(20,30,80,0.07)]">
+                            <motion.div
+                              initial={{ width: 0 }}
+                              animate={{ width: `${pct}%` }}
+                              transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }}
+                              className="h-full rounded-[4px] bg-gradient-to-r from-rose-400 to-rose-500 shadow-[0_1px_3px_-1px_rgba(20,30,80,0.4)]"
+                            />
+                          </div>
+                          <span className="w-12 text-right text-[13px] font-bold tabular-nums text-foreground">{pct.toFixed(1)}%</span>
+                        </div>
+                      );
+                    })()}
                   </div>
 
-                  {/* Statistics footer */}
-                  <div className="mt-6 grid grid-cols-3 overflow-hidden rounded-[10px] border border-border/60 bg-muted/30">
+                  {/* Statistics footer — Refunded is appended only when present,
+                      so a no-refund org keeps the familiar 3-up footer. */}
+                  <div className={cn("mt-6 grid overflow-hidden rounded-[10px] border border-border/60 bg-muted/30", invoiceStatusView.refundedCount > 0 ? "grid-cols-4" : "grid-cols-3")}>
                     <StatFooterItem label="Total" value={invoiceStatusView.total} sub="Invoices" />
                     <StatFooterItem label="Completed" value={invoiceStatusView.completed} sub="Invoices" divider />
                     <StatFooterItem label="Pending" value={invoiceStatusView.pending} sub="Invoices" divider />
+                    {invoiceStatusView.refundedCount > 0 && (
+                      <StatFooterItem label="Refunded" value={invoiceStatusView.refundedCount} sub="Invoices" divider />
+                    )}
                   </div>
                 </div>
 
@@ -843,17 +887,6 @@ export default function InvoicePage() {
         </div>
       </div>
 
-      {/* Derived Refund-status filter (connected SegmentedTabs). */}
-      <div className="flex w-full max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <SegmentedTabs
-          value={refundStatusFilter}
-          onChange={setRefundStatusFilter}
-          options={REFUND_STATUS_FILTERS}
-          size="sm"
-          className="[&>button]:px-3"
-        />
-      </div>
-
       {/* Custom Date Range — reuses the shared Date Range picker (same as Tickets) */}
       <DateRangePicker
         open={dateRange === "custom"}
@@ -882,6 +915,7 @@ export default function InvoicePage() {
               category={categoryFilter}
               documentType={documentTypeFilter}
               proformaStatus={proformaStatusFilter}
+              refundStatus={refundStatusFilter}
               onChange={(patch) => {
                 if (patch.search !== undefined) setPanelSearch(patch.search);
                 if (patch.invoiceStatus !== undefined) setStatusFilter(patch.invoiceStatus);
@@ -889,6 +923,7 @@ export default function InvoicePage() {
                 if (patch.category !== undefined) setCategoryFilter(patch.category);
                 if (patch.documentType !== undefined) setDocumentTypeFilter(patch.documentType);
                 if (patch.proformaStatus !== undefined) setProformaStatusFilter(patch.proformaStatus);
+                if (patch.refundStatus !== undefined) setRefundStatusFilter(patch.refundStatus);
               }}
               onReset={() => {
                 setStatusFilter("all");
@@ -896,6 +931,7 @@ export default function InvoicePage() {
                 setCategoryFilter("all");
                 setDocumentTypeFilter("all");
                 setProformaStatusFilter("all");
+                setRefundStatusFilter("all");
                 setPanelSearch("");
                 setDateRange("today");
                 setCustomFrom("");
@@ -1007,7 +1043,7 @@ export default function InvoicePage() {
                   />
                 </th>
                 {activeInvCols.map((col) => (
-                  <th key={col.id} className={cn("py-3 px-3", col.width, col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.id === "customer" && "pl-[28px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
+                  <th key={col.id} className={cn("py-3 px-3", col.width, col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5", col.id === "customer" && "pl-[40px] [[data-sidebar-collapsed=true]_&]:translate-x-[24px]", (col.id === "status" || col.id === "category") && "pl-[19px]", col.id === "date" && "pl-[5px] [[data-sidebar-collapsed=true]_&]:-translate-x-[22px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>{col.label}</th>
                 ))}
               </tr>
             </thead>
@@ -1024,15 +1060,14 @@ export default function InvoicePage() {
                     />
                   </td>
                   {activeInvCols.map((col) => (
-                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.width, col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5 whitespace-nowrap", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
+                    <td key={col.id} className={cn("py-4 px-3 align-middle", col.width, col.id === "store" && "pl-5", col.id === "id" && "pl-5", col.id === "actions" && "pr-5 whitespace-nowrap", col.id === "date" && "pl-[5px] [[data-sidebar-collapsed=true]_&]:-translate-x-[22px]", col.align === "right" && "text-right", col.align === "center" && "text-center")} onClick={col.id === "actions" ? (e) => e.stopPropagation() : undefined}>
                       {(() => {
                         // Resolve the TICKET column target: the real linked
                         // Ticket when one exists, else the source Estimate.
                         const ref = ticketRefById(inv);
                         const invRefunds = refundsByInvoice.get(inv.id) ?? [];
-                        const invRefundStatus = deriveRefundStatus(inv, invRefunds);
                         const invRefundEligible = refundEligibility(inv, invRefunds).eligible;
-                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined, invRefundStatus, invRefundEligible, canRefundInitiate, () => setRefundTarget(inv), canEditInvoice, (next: InvoiceStatus) => { if (next === inv.status) return; void updateInvoice(inv.id, { status: next }); });
+                        return renderInvCell(col.id, inv, ref.id ? ticketTypeById.get(ref.id) ?? null : null, () => router.push(`/invoice/${inv.id}`), () => router.push(`/invoice/${inv.id}`), () => handleDuplicate(inv), () => setDeleteTarget(inv), () => router.push(`/print/invoice/${inv.id}?format=a4`), () => downloadInvoice(inv), () => pinInvoice(inv.id, !inv.pinnedAt), ref.label, ref.id ? () => router.push(`/tickets/${ref.id}`) : undefined, invoiceStatusColors, getStore(inv.branchId), () => openConvert(inv), inv.convertedInvoiceId ? () => router.push(`/invoice/${inv.convertedInvoiceId}`) : undefined, invRefundEligible, canRefundInitiate, () => setRefundConfirmTarget(inv), canEditInvoice, (next: InvoiceStatus) => { if (next === inv.status) return; void updateInvoice(inv.id, { status: next }); }, deriveRefundStatus(inv, invRefunds));
                       })()}
                     </td>
                   ))}
@@ -1104,7 +1139,25 @@ export default function InvoicePage() {
         onRetryFailed={retryFailed}
       />
 
-      {/* Refund workflow (opened from the row overflow menu). */}
+      {/* "Are you sure you want to refund?" confirmation — raised by choosing
+          the Refund action at the end of the Status dropdown. On confirm we
+          open the RefundFlow to start the refund process. */}
+      <ConfirmDialog
+        open={!!refundConfirmTarget}
+        onClose={() => setRefundConfirmTarget(null)}
+        title="Refund this invoice?"
+        description={refundConfirmTarget ? `Are you sure you want to refund invoice ${refundConfirmTarget.id}? This starts the refund process.` : "Are you sure you want to refund this invoice? This starts the refund process."}
+        confirmLabel="Yes, start refund"
+        cancelLabel="Cancel"
+        danger
+        onConfirm={() => {
+          // Capture the target before onClose clears it, then open the flow.
+          const inv = refundConfirmTarget;
+          if (inv) setRefundTarget(inv);
+        }}
+      />
+
+      {/* Refund workflow (opened after the refund confirmation above). */}
       <RefundFlow invoice={refundTarget} open={!!refundTarget} onClose={() => setRefundTarget(null)} />
     </div>
   );
@@ -1278,12 +1331,12 @@ function renderInvCell(
   store?: StoreBranch | null,
   onConvertProforma?: () => void,
   onOpenConvertedInvoice?: () => void,
-  refundStatusValue?: RefundStatus,
   refundEligible?: boolean,
   canRefundInitiate?: boolean,
   onRefund?: () => void,
   canChangeStatus?: boolean,
   onChangeStatus?: (next: InvoiceStatus) => void,
+  refundStatusValue?: RefundStatus,
 ) {
   const statusHex = statusColors?.[inv.status];
   const proforma = isProforma(inv);
@@ -1330,7 +1383,12 @@ function renderInvCell(
       );
     }
     case "customer": return (
-      <div className="flex items-center gap-3">
+      // The tile is LEFT-aligned (every row's avatar lines up at the same x)
+      // but shifted into the middle of this wide 25% column with a fixed left
+      // indent — so names read "in the middle, left aligned", never ragged
+      // (justify-center would stagger the avatars by name length). The indent
+      // matches the "CUSTOMER" header offset so heading + content line up.
+      <div className="flex items-center gap-3 pl-[40px] [[data-sidebar-collapsed=true]_&]:translate-x-[24px]">
         <Avatar name={inv.customer} size={32} ticketType={ticketType ?? "na"} />
         {/* Cap the name width so long customer names WRAP to a second line
             (then clamp) instead of widening the column and pushing the whole
@@ -1354,25 +1412,58 @@ function renderInvCell(
           </span>
         );
       }
+      // When money has actually been returned, the STATUS PILL ITSELF becomes a
+      // RED "Partially/Fully Refunded" pill (no separate stacked pill) — DERIVED
+      // from the refund records, never a stored financial status. The invoice is
+      // never mutated. `refunded` drives both the read-only pill and the
+      // editable dropdown trigger below so the one pill always tells the truth.
+      const refunded = isRefundedStatus(refundStatusValue);
+      const refundLabel = refunded ? REFUND_STATUS_LABEL[refundStatusValue as RefundStatus] : "";
+      // When refunded, the status is LOCKED — it becomes a compact, read-only
+      // RED refunded pill (no dropdown, no chevron). A refunded invoice's status
+      // can't be changed. Compact sizing (px-2 py-0.5 text-[11px] + a small dot)
+      // keeps it the same scale as a normal status pill.
+      if (refunded) {
+        return (
+          <div className="ml-[7px]">
+            <span
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset whitespace-nowrap cursor-default ${REFUND_PILL_RED_TONE}`}
+              title={refundLabel}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />{refundLabel}
+            </span>
+          </div>
+        );
+      }
       // Read-only pill markup (view-tier user, or when editing not permitted).
+      // Margin lives on the return-site wrapper.
       const statusPill = statusHex ? (
         <span
-          className="ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap"
+          className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium whitespace-nowrap"
           style={invoiceStatusPillStyle(statusHex)}
         >
           <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: statusHex }} />{INVOICE_STATUS_LABEL[inv.status]}
         </span>
       ) : (
-        <span className={`ml-[7px] inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
+        <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[12px] font-medium ring-1 ring-inset whitespace-nowrap ${INVOICE_STATUS_TONE[inv.status]}`}>
           <span className="h-1.5 w-1.5 rounded-full bg-current" />{INVOICE_STATUS_LABEL[inv.status]}
         </span>
       );
-      // View-vs-edit: a user without edit rights sees the static pill only.
-      if (!canChangeStatus) return statusPill;
+      // Whether the Refund action may appear at the END of the Status dropdown.
+      // It is NOT a financial status — it opens the refund flow after a
+      // confirmation. Refund status itself stays DERIVED / never user-edited.
+      const showRefundAction = !!refundEligible && !!canRefundInitiate;
+      // View-vs-edit: a user without edit rights sees the static pill only —
+      // unless they may still initiate a refund, in which case the pill becomes
+      // a dropdown that offers only the Refund action.
+      if (!canChangeStatus && !showRefundAction) {
+        return <div className="ml-[7px]">{statusPill}</div>;
+      }
       // Editable: the pill becomes a clickable lifecycle dropdown offering ALL
-      // financial statuses, with the current one marked. It changes ONLY the
-      // financial status (inv.status) — never the derived refund state.
-      const statuses = Object.keys(INVOICE_STATUS_LABEL) as InvoiceStatus[];
+      // financial statuses, with the current one marked, and a Refund action
+      // appended at the very end. Changing a status changes ONLY the financial
+      // status (inv.status) — never the derived refund state.
+      const statuses = canChangeStatus ? (Object.keys(INVOICE_STATUS_LABEL) as InvoiceStatus[]) : [];
       return (
         <div className="ml-[7px]" onClick={(e) => e.stopPropagation()}>
           <Dropdown
@@ -1416,54 +1507,22 @@ function renderInvCell(
                     </MenuItem>
                   );
                 })}
+                {/* Refund — always the LAST option. Not a financial status: it
+                    asks for confirmation (see onRefund) and then starts the
+                    refund flow. The derived refund state is never set by hand. */}
+                {showRefundAction && (
+                  <MenuItem
+                    icon={RotateCcw}
+                    className="text-[#B42318]"
+                    onClick={() => { onRefund?.(); close(); }}
+                  >
+                    Refund
+                  </MenuItem>
+                )}
               </>
             )}
           </Dropdown>
         </div>
-      );
-    }
-    case "refundStatus": {
-      // DERIVED refund status (never a stored field) — a full-width pill per the
-      // pill standard. Proformas / unrefundable rows read as "No Refund".
-      const rs = refundStatusValue ?? "no_refund";
-      // The whole cell is a refund entry point when the invoice is eligible AND
-      // the user may initiate refunds — it opens the mounted RefundFlow at its
-      // first ask step. Refund status itself stays DERIVED / never user-edited.
-      const clickable = !!refundEligible && !!canRefundInitiate;
-      if (rs === "no_refund") {
-        if (clickable) {
-          return (
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); onRefund?.(); }}
-              title="Start refund"
-              className="rounded text-[13px] font-medium text-[#4361EE] hover:underline cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
-            >
-              Refund
-            </button>
-          );
-        }
-        return <span className="text-[13px] text-muted-foreground leading-snug">—</span>;
-      }
-      const pillClasses = `inline-flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset ${REFUND_STATUS_TONE[rs]}`;
-      if (clickable) {
-        return (
-          <button
-            type="button"
-            onClick={(e) => { e.stopPropagation(); onRefund?.(); }}
-            title={`${REFUND_STATUS_LABEL[rs]} — click to process a refund`}
-            className={cn(pillClasses, "transition hover:brightness-95 cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40")}
-          >
-            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-            <span className="min-w-0 flex-1 truncate text-left">{REFUND_STATUS_LABEL[rs]}</span>
-          </button>
-        );
-      }
-      return (
-        <span className={pillClasses} title={REFUND_STATUS_LABEL[rs]}>
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />
-          <span className="min-w-0 flex-1 truncate">{REFUND_STATUS_LABEL[rs]}</span>
-        </span>
       );
     }
     case "category": return (
@@ -1643,6 +1702,12 @@ function DraggableKpiGrid({ kpis }: { kpis: any }) {
     { id: "drafts", icon: FileText, label: "Drafts", value: String(kpis.draftCount), numericValue: kpis.draftCount, subtext: kpis.draftCount === 0 ? "No draft invoices" : "Awaiting action", tone: "zinc" },
     { id: "tax", icon: TrendingUp, label: "Tax Collected", value: formatINR(kpis.taxCollected), numericValue: kpis.taxCollected, isCurrency: true, subtext: "On paid invoices", tone: "teal" },
     { id: "rate", icon: BarChart3, label: "Collection Rate", value: `${rate}%`, numericValue: rate, isPercent: true, subtext: `${formatINR(kpis.paidAmount)} collected`, tone: "indigo" },
+    // Refunded Amount — Σ realized (succeeded) refunds on finalized invoices,
+    // already net-derived in kpis. The finalized invoice is never mutated; this
+    // is a presentation KPI only. Revenue/Paid/Tax above are already shown NET of
+    // this, so this card simply makes the reversed money visible (not a double
+    // count). Appended last so the existing 8-card layout is unchanged.
+    { id: "refunded", icon: RotateCcw, label: "Refunded Amount", value: formatINR(kpis.refundedTotal), numericValue: kpis.refundedTotal, isCurrency: true, subtext: kpis.refundedTotal > 0 ? "Net of revenue & tax" : "No refunds issued", tone: "rose" },
   ];
 
   const defaultOrder = allCards.map((c) => c.id);
@@ -1652,7 +1717,16 @@ function DraggableKpiGrid({ kpis }: { kpis: any }) {
   });
   const [dragId, setDragId] = useState<string | null>(null);
 
-  const sorted = order.map((id) => allCards.find((c) => c.id === id)).filter(Boolean) as KpiDef[];
+  // Reconcile a persisted order with the current card set: keep the saved order,
+  // drop ids that no longer exist, and APPEND any new cards (e.g. "refunded")
+  // that a previously-saved order doesn't know about — so a new KPI always
+  // appears for existing users without wiping their custom arrangement.
+  const sorted = (() => {
+    const known = new Set(allCards.map((c) => c.id));
+    const kept = order.filter((id) => known.has(id));
+    const appended = allCards.map((c) => c.id).filter((id) => !kept.includes(id));
+    return [...kept, ...appended].map((id) => allCards.find((c) => c.id === id)).filter(Boolean) as KpiDef[];
+  })();
 
   const handleDragOver = (e: React.DragEvent, targetId: string) => {
     e.preventDefault();
@@ -1671,7 +1745,8 @@ function DraggableKpiGrid({ kpis }: { kpis: any }) {
   };
 
   return (
-    <div className="grid grid-cols-2 items-stretch gap-4 lg:grid-cols-4">
+    // 9 KPI cards → a clean 3×3 grid on desktop (no lonely last-row card).
+    <div className="grid grid-cols-2 items-stretch gap-4 lg:grid-cols-3">
       {sorted.map((card) => (
         <div
           key={card.id}
