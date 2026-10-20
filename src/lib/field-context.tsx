@@ -171,7 +171,11 @@ interface FieldContextValue {
   /** Find an active (non-terminal) field job already linked to a lead. */
   activeJobForLead: (leadId: string) => FieldJob | undefined;
 
-  createJob: (draft: FieldJobDraft) => Promise<FieldJob | null>;
+  /** Create a field job. `overrideBranchId` forces the job's owning store
+   *  (branch_id) instead of defaulting to the active store — REQUIRED when
+   *  creating a job FROM a lead, so the job belongs to the LEAD's store even if
+   *  the routing user is currently viewing a different store / All-Shops. */
+  createJob: (draft: FieldJobDraft, overrideBranchId?: string | null) => Promise<FieldJob | null>;
   updateJob: (id: string, updates: Partial<FieldJob>) => Promise<void>;
 
   /** Field Manager takes ownership. */
@@ -310,7 +314,11 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     jobsRef.current.find((j) => j.leadId === leadId && j.status !== "cancelled"), []);
 
   /* ── Create ── */
-  const createJob = useCallback(async (draft: FieldJobDraft): Promise<FieldJob | null> => {
+  const createJob = useCallback(async (draft: FieldJobDraft, overrideBranchId?: string | null): Promise<FieldJob | null> => {
+    // The store that will OWN this job. A lead-routing caller passes the lead's
+    // branch so the job is visible in that store's Field workspace regardless of
+    // the active store; otherwise fall back to the active store.
+    const ownerBranchId = overrideBranchId || activeStoreIdRef.current;
     // Duplicate protection: one active Field Job per lead.
     if (draft.leadId) {
       const existing = jobsRef.current.find((j) => j.leadId === draft.leadId && j.status !== "cancelled");
@@ -327,7 +335,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     // unique(organization_id, branch_id, job_no) index below.
     const fieldPrefix = activePrefixesRef.current.field;
     const initialJobNo = useDb
-      ? await nextFieldJobNoFromDb(activeStoreIdRef.current, fieldPrefix)
+      ? await nextFieldJobNoFromDb(ownerBranchId, fieldPrefix)
       : nextFieldJobNo(jobsRef.current, fieldPrefix);
     const job: FieldJob = {
       id: genFieldJobId(),
@@ -376,7 +384,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       // the DB default (the owner's home branch) apply.
       const buildRow = (j: FieldJob) => {
         const row = jobToRow(j);
-        if (activeStoreIdRef.current) row.branch_id = activeStoreIdRef.current;
+        if (ownerBranchId) row.branch_id = ownerBranchId;
         return row;
       };
 
@@ -399,7 +407,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       let guard = 0;
       while (error && isUniqueViolation(error) && guard < 6) {
         guard += 1;
-        const retryNo = await nextFieldJobNoFromDb(activeStoreIdRef.current, activePrefixesRef.current.field);
+        const retryNo = await nextFieldJobNoFromDb(ownerBranchId, activePrefixesRef.current.field);
         current = { ...current, jobNo: retryNo };
         ({ data, error } = await insertOnce(current));
       }

@@ -32,7 +32,7 @@ import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/sto
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { SegmentedTabs } from "@/components/ui/tabs";
-import { DateTimeField } from "@/components/ui/date-time-picker";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -58,10 +58,10 @@ import {
 
 const MS_DAY = 24 * 60 * 60 * 1000;
 
-/* Period presets that drive the calendar range. "all" keeps whatever custom
-   range the user set with the date pickers; today/week/month/year snap the
-   from/to to the corresponding local window. */
-type PeriodKey = "all" | "today" | "week" | "month" | "year";
+/* Period presets that drive the calendar range. "all" = all time (no date
+   constraint); today/week/month/year snap the from/to to the corresponding
+   local window; "custom" opens the shared calendar range picker. */
+type PeriodKey = "all" | "today" | "week" | "month" | "year" | "custom";
 
 const PERIOD_OPTIONS: { label: string; value: PeriodKey }[] = [
   { label: "All", value: "all" },
@@ -69,12 +69,14 @@ const PERIOD_OPTIONS: { label: string; value: PeriodKey }[] = [
   { label: "Week", value: "week" },
   { label: "Month", value: "month" },
   { label: "Year", value: "year" },
+  { label: "Custom", value: "custom" },
 ];
 
 /** Compute the [from, to) ISO range (half-open, `to` exclusive end-of-day) for
- *  a period preset, in the org tz. "all" returns null — keep the custom range. */
+ *  a period preset, in the org tz. "all" and "custom" return null — "all"
+ *  clears the date constraint; "custom" keeps whatever the calendar holds. */
 function periodRange(period: PeriodKey, nowMs: number, tz: string): { from: string; to: string } | null {
-  if (period === "all") return null;
+  if (period === "all" || period === "custom") return null;
   const todayKey = localDateKey(nowMs, tz);
   const todayStart = localDateStartMs(todayKey, tz);
   // `to` is exclusive: start of tomorrow (local).
@@ -127,26 +129,41 @@ export default function AgentProductivityPage() {
   const [period, setPeriod] = useState<PeriodKey>("month");
   const [fromISO, setFromISO] = useState<string>(() => startOfMonthISO(Date.now()));
   const [toISO, setToISO] = useState<string>(() => new Date(Date.now() + MS_DAY).toISOString());
+  // Custom-range calendar state ("YYYY-MM-DD", local). Only used when the
+  // period preset is "custom"; the shared DateRangePicker opens on selection.
+  const [customFrom, setCustomFrom] = useState<string>("");
+  const [customTo, setCustomTo] = useState<string>("");
 
-  // Apply a period preset (All keeps the user's custom calendar range).
+  // Apply a period preset. today/week/month/year snap the calendar range;
+  // "all" clears the date constraint (all-time); "custom" opens the calendar.
   const applyPeriod = (p: PeriodKey) => {
     setPeriod(p);
     const range = periodRange(p, nowMs, tz);
     if (range) {
       setFromISO(range.from);
       setToISO(range.to);
+    } else if (p === "all") {
+      // All-time: no date constraint (the API treats empty from/to as all).
+      setFromISO("");
+      setToISO("");
+    } else if (p === "custom") {
+      // Seed the API range from any custom range already chosen.
+      setFromISO(customFrom ? `${customFrom}T00:00:00.000Z` : "");
+      setToISO(customTo ? `${customTo}T23:59:59.999Z` : "");
     }
   };
 
-  // When the user edits the calendar directly, drop back to the "All" preset
-  // so the strip never implies a window that no longer matches the range.
-  const onFromChange = (v: string) => {
-    setPeriod("all");
-    setFromISO(v);
+  // Shared calendar edits (local "YYYY-MM-DD"). Editing the range forces the
+  // "custom" preset and recomputes the API from/to.
+  const onCustomFromChange = (v: string) => {
+    setPeriod("custom");
+    setCustomFrom(v);
+    setFromISO(v ? `${v}T00:00:00.000Z` : "");
   };
-  const onToChange = (v: string) => {
-    setPeriod("all");
-    setToISO(v);
+  const onCustomToChange = (v: string) => {
+    setPeriod("custom");
+    setCustomTo(v);
+    setToISO(v ? `${v}T23:59:59.999Z` : "");
   };
   const [loading, setLoading] = useState(false);
   const [resp, setResp] = useState<ReportResponse | null>(null);
@@ -167,8 +184,8 @@ export default function AgentProductivityPage() {
           body: JSON.stringify({
             agentIds: agentFilter, // [] = all authorized agents; else specific staffIds
             storeIds: storeFilter,
-            from: fromISO,
-            to: toISO,
+            from: fromISO || null, // null/empty = all-time (no lower bound)
+            to: toISO || null,
           }),
         });
         if (res.ok && res.json?.ok) {
@@ -228,7 +245,10 @@ export default function AgentProductivityPage() {
     for (const s of stores) m.set(s.id, s);
     return m;
   }, [stores]);
-  const periodLabel = `${localDateKey(new Date(fromISO).getTime(), tz)} → ${localDateKey(new Date(toISO).getTime() - 1, tz)}`;
+  const periodLabel =
+    fromISO || toISO
+      ? `${fromISO ? localDateKey(new Date(fromISO).getTime(), tz) : "Start"} → ${toISO ? localDateKey(new Date(toISO).getTime() - 1, tz) : "Today"}`
+      : "All time";
 
   // Per-agent detail (View Details within the owner's own session).
   const detailRows = useMemo(() => {
@@ -323,16 +343,16 @@ export default function AgentProductivityPage() {
         </div>
       </DetailHero>
 
-      {/* Period strip — All / Today / Week / Month / Year. Clicking a preset
-          snaps the calendar range and recomputes every metric for that window.
-          "All" keeps whatever custom range the calendar pickers hold. */}
+      {/* Period strip — All / Today / Week / Month / Year / Custom. Clicking a
+          preset snaps the range and recomputes every metric for that window.
+          "All" clears the date constraint; "Custom" opens the shared calendar. */}
       <Reveal>
         <div className="flex max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs size="sm" options={PERIOD_OPTIONS} value={period} onChange={(v) => applyPeriod(v as PeriodKey)} />
         </div>
       </Reveal>
 
-      {/* Filters — agent selector (left) + store + date range (right) */}
+      {/* Filters — agent selector (left) + store (right) */}
       <Reveal>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
@@ -343,11 +363,18 @@ export default function AgentProductivityPage() {
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
-            <DateTimeField value={fromISO} onChange={onFromChange} placeholder="From" className="w-[190px]" />
-            <DateTimeField value={toISO} onChange={onToChange} placeholder="To" className="w-[190px]" />
           </div>
         </div>
       </Reveal>
+
+      {/* Shared calendar range — opens when the "Custom" preset is selected. */}
+      <DateRangePicker
+        open={period === "custom"}
+        from={customFrom}
+        to={customTo}
+        onFromChange={onCustomFromChange}
+        onToChange={onCustomToChange}
+      />
 
       {/* Daily comparison table */}
       <RoxTableCard>

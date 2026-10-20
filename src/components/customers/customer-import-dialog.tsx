@@ -32,8 +32,9 @@ export function CustomerImportDialog({
   onClose: () => void;
   /** Live master used for dedup. */
   customers: Customer[];
-  /** Persist a new customer. */
-  addCustomer: (c: Customer) => Promise<void> | void;
+  /** Persist a new customer. Returns the saved record (or null on failure);
+   *  callers that only need fire-and-forget can ignore the result. */
+  addCustomer: (c: Customer) => Promise<Customer | null> | void;
   /** Called after a completed import with a summary. */
   onDone?: (summary: { added: number; skipped: number }) => void;
 }) {

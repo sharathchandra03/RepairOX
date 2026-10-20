@@ -81,7 +81,7 @@ function fmtDate(iso: string): string {
 export default function WalkInPage() {
   const router = useRouter();
   const { walkIns, addWalkIn, updateWalkIn, deleteWalkIn, pinWalkIn, tickets, team, issueLibrary, customers, addCustomer } = useStore();
-  const { contacts, leads, updateContact, linkOperationalRecord } = useLeads();
+  const { contacts, leads, updateContact, linkOperationalRecord, autoLinkByIdentity } = useLeads();
   // Active-store context — drives the context-aware Store column (§3h). Shown
   // only in multi-store / All-Shops mode; hidden inside a single store.
   const { isAllShops, stores, getStore } = useStoreContext();
@@ -460,8 +460,16 @@ export default function WalkInPage() {
           },
           customers,
         );
-        if (result.created) await addCustomer(result.customer);
-        resolvedCustomerId = result.customer.id;
+        if (result.created) {
+          // Only attach the new customer_id when it ACTUALLY persisted to the
+          // DB — otherwise the walk-in's customer_id FK would reference a row
+          // that doesn't exist and the insert would be rejected (the walk-in
+          // "not saving" symptom). An existing customer is always safe to link.
+          const saved = await addCustomer(result.customer);
+          resolvedCustomerId = saved ? saved.id : "";
+        } else {
+          resolvedCustomerId = result.customer.id;
+        }
         // Link the originating CRM contact so it stops showing as an
         // unpromoted prospect (kills the duplicate in the CRM tab).
         if (origin.contactId) void updateContact(origin.contactId, { customerId: result.customer.id });
@@ -502,15 +510,30 @@ export default function WalkInPage() {
         businessValue: 0,
       };
       await addWalkIn(record);
-      // Close the loop back to the Lead so Sales keeps visibility (§4/§5).
+      // ── Reflect the walk-in on the originating Lead (same as Ticket/Invoice) ──
+      // EXPLICIT link first: when the OPEN LEAD banner linked a lead on the form
+      // (data.linkedLeadId), close the two-way loop so Sales keeps visibility.
+      // AUTOMATIC fallback otherwise: a walk-in created for a customer identity
+      // that matches an OPEN lead flips that lead to "Walk-In Created" without a
+      // manual link — exactly how ticket/invoice creation back-attribute by
+      // identity (Customer id → phone → email, never name). This is what makes a
+      // walk-in — including the Marketing Person just assigned — show up on the
+      // Lead Table, while the originating Sales Agent's attribution is preserved.
       if (data.linkedLeadId) {
         await linkOperationalRecord(data.linkedLeadId, "walk_in", record.id, record.walkInNumber);
+      } else {
+        await autoLinkByIdentity(
+          "walk_in",
+          record.id,
+          { customerId: record.customerId || undefined, phone: record.phone, email: record.email },
+          record.walkInNumber,
+        );
       }
       showToast(`Walk-In ${record.walkInNumber} created.`);
     }
     setShowCreate(false);
     setEditTarget(null);
-  }, [walkIns, addWalkIn, updateWalkIn, showToast, customers, addCustomer, can, linkOperationalRecord]);
+  }, [walkIns, addWalkIn, updateWalkIn, showToast, customers, addCustomer, can, linkOperationalRecord, autoLinkByIdentity]);
 
   /* ── Convert Walk-In → Ticket ──
      Does NOT create a ticket directly. It opens the EXISTING ticket creation

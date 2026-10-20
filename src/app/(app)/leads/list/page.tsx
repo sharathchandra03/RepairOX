@@ -853,12 +853,17 @@ function ResultCell({
     return (
       <div className="leading-snug select-none" title="🎉 Congratulations! You closed this deal — revenue is in the bank.">
         <p className={cn("font-bold tabular-nums", leadResultTone(r.kind))}>{r.primary}</p>
-        <div className="mt-0.5 space-y-0.5 border-t border-border/70 pt-0.5">
+        {/* Ticket no | Invoice no — SIDE BY SIDE, CENTERED, each a link, with a
+            "|" separator shown only when both are present. */}
+        <div className="mt-0.5 flex items-center justify-center gap-1.5 border-t border-border/70 pt-0.5">
           {r.ticketNo && (
-            <Link href={ticketHref} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={ticketTitle}>{r.ticketNo}</Link>
+            <Link href={ticketHref} onClick={(e) => e.stopPropagation()} className="min-w-0 truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={ticketTitle}>{r.ticketNo}</Link>
+          )}
+          {r.ticketNo && r.invoiceNo && (
+            <span className="shrink-0 text-[11px] text-muted-foreground" aria-hidden>|</span>
           )}
           {r.invoiceNo && (
-            <Link href={invoiceHref} onClick={(e) => e.stopPropagation()} className="block truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={invoiceTitle}>{r.invoiceNo}</Link>
+            <Link href={invoiceHref} onClick={(e) => e.stopPropagation()} className="min-w-0 truncate text-[11px] font-medium text-[#4361EE] hover:underline tabular-nums" title={invoiceTitle}>{r.invoiceNo}</Link>
           )}
         </div>
       </div>
@@ -1144,13 +1149,26 @@ export default function LeadsListPage() {
           style: { ["--rox-frozen-offset" as any]: `${offset}px` },
         };
       }
-      // RIGHT frozen anchor (single column).
-      if (key === frozen.rightKey) {
-        return { className: "rox-frozen rox-frozen-right rox-frozen-right-edge", style: { ["--rox-frozen-offset" as any]: "0px" } };
+      // RIGHT frozen block — the mandatory anchor PLUS any columns the user
+      // froze to the right. rightKeys is left→right with the anchor LAST, so
+      // the cumulative right offset = sum of widths of the frozen columns AFTER
+      // this one. The leftmost frozen-right column carries the edge shadow.
+      const rightIdx = frozen.rightKeys.indexOf(key);
+      if (rightIdx >= 0) {
+        let offset = 0;
+        for (let i = rightIdx + 1; i < frozen.rightKeys.length; i++) {
+          const c = orderedColumns.find((g) => g.key === frozen.rightKeys[i]);
+          offset += c?.width ?? 0;
+        }
+        const isFirst = rightIdx === 0;
+        return {
+          className: cn("rox-frozen rox-frozen-right", isFirst && "rox-frozen-right-edge"),
+          style: { ["--rox-frozen-offset" as any]: `${offset}px` },
+        };
       }
       return { className: "" };
     },
-    [frozen.leftKeys, frozen.rightKey, orderedColumns, selectColWidth],
+    [frozen.leftKeys, frozen.rightKeys, orderedColumns, selectColWidth],
   );
 
   const [page, setPage] = useState(1);

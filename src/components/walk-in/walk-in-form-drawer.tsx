@@ -33,6 +33,7 @@ import { findOrCreateCustomer } from "@/lib/customer-service";
 import { CustomerBadges, resolveGroups, CustomerLifecycleBadge, customerLifecycle } from "@/components/common/customer-classification";
 import { walkInTypeToCustomerSource } from "@/lib/walk-in-data";
 import { useLeads } from "@/lib/leads-context";
+import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
 import { OpenLeadBanner } from "@/components/leads/open-lead-banner";
 import { CrmContactIdentity } from "@/components/common/crm-contact-identity";
 import type { Contact } from "@/lib/leads-data";
@@ -194,13 +195,43 @@ export function WalkInFormDrawer({
 
   const linkedCustomer = form.customerId ? customers.find((c) => c.id === form.customerId) : undefined;
 
-  /* ── Sales person — reuse the Employee/User master (store.team) ── */
-  const activeStaff = useMemo(() => team.filter((m) => m.status === "active"), [team]);
+  /* ── Marketing Person — eligible Sales Agents + Branch Managers only ──
+     The picker is NOT the whole staff directory. It offers exactly the people
+     who own the customer relationship: eligible Sales Agents (role holds the
+     exact `leads_sales_agent` key — resolved centrally by useLeads so it matches
+     the leads pickers and the DB) PLUS Branch Managers (role grants
+     `manage_branches`). Detection is capability-based, so custom roles that
+     carry either signal are included too — never a hardcoded role name. */
+  const { salesAgents } = useLeads();
+  const { grants } = usePermissions();
+  const eligibleMarketingIds = useMemo(() => {
+    const ids = new Set<string>();
+    // Sales Agents (identity-correct, store-scoped by the leads context).
+    for (const a of salesAgents) ids.add(a.id);
+    // Branch Managers — any active staff whose role grants manage_branches.
+    for (const m of team) {
+      if (m.status !== "active") continue;
+      if (resolveGrantedKeys(grants, m.roleId).has("manage_branches")) ids.add(m.id);
+    }
+    return ids;
+  }, [salesAgents, team, grants]);
+
+  const eligibleStaff = useMemo(
+    () => team.filter((m) => m.status === "active" && eligibleMarketingIds.has(m.id)),
+    [team, eligibleMarketingIds],
+  );
   const salesResults = useMemo(() => {
     const q = salesQuery.trim().toLowerCase();
-    const base = q ? activeStaff.filter((m) => m.name.toLowerCase().includes(q)) : activeStaff;
+    const base = q
+      ? eligibleStaff.filter(
+          (m) =>
+            m.name.toLowerCase().includes(q) ||
+            (m.email || "").toLowerCase().includes(q) ||
+            (m.phone || "").toLowerCase().includes(q),
+        )
+      : eligibleStaff;
     return base.slice(0, 8);
-  }, [activeStaff, salesQuery]);
+  }, [eligibleStaff, salesQuery]);
 
   function pickSalesPerson(m: (typeof team)[number]) {
     set({ salesPersonId: m.id, salesPersonName: m.name });
@@ -563,7 +594,7 @@ export function WalkInFormDrawer({
                 )}
                 {salesOpen && salesResults.length === 0 && (
                   <div className="absolute z-30 mt-1 w-full rounded-xl border border-border bg-card px-3 py-2 text-[11px] text-muted-foreground shadow-lg">
-                    No employees found. Add staff under Employees.
+                    No sales agent or branch manager found. Assign one of those roles under Employees.
                   </div>
                 )}
               </div>

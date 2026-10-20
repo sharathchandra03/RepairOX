@@ -23,7 +23,7 @@ import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { useMemo, useState } from "react";
 import {
-  Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RcTooltip, XAxis, YAxis,
+  Bar, BarChart, Cell, LabelList, Pie, PieChart, ResponsiveContainer, Tooltip as RcTooltip, XAxis, YAxis,
 } from "recharts";
 import {
   Inbox, TrendingUp, Megaphone, Plus, ChevronRight,
@@ -723,18 +723,20 @@ function SourceBarChart({
   onBar: (key: string) => void;
 }) {
   const rows = data.slice(0, 7);
+  const totalLeads = rows.reduce((sum, s) => sum + s.leads, 0);
   const chartData = rows.map((s) => ({
     key: s.key,
     label: s.label,
     leads: s.leads,
+    pct: totalLeads > 0 ? Math.round((s.leads / totalLeads) * 100) : 0,
     detail: `${s.qualified} qualified · ${s.leads > 0 ? Math.round((s.converted / s.leads) * 100) : 0}% won`,
   }));
   const height = Math.max(120, chartData.length * 46);
   return (
     <div style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 16, left: 0, bottom: 4 }} barCategoryGap={12}>
-          <XAxis type="number" hide />
+        <BarChart data={chartData} layout="vertical" margin={{ top: 4, right: 44, left: 0, bottom: 4 }} barCategoryGap={12}>
+          <XAxis type="number" hide domain={[0, "dataMax"]} />
           <YAxis
             type="category"
             dataKey="label"
@@ -760,6 +762,13 @@ function SourceBarChart({
             {chartData.map((_, i) => (
               <Cell key={i} fill="#4361EE" />
             ))}
+            <LabelList
+              dataKey="pct"
+              position="right"
+              offset={10}
+              formatter={(v: number) => `${v}%`}
+              style={{ fontSize: 12, fontWeight: 700, fill: "#4361EE" }}
+            />
           </Bar>
         </BarChart>
       </ResponsiveContainer>

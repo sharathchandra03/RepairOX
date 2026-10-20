@@ -291,11 +291,11 @@ function SummaryGrid({ result, previous, salesMix, evidenceHref }: { result: Lea
    (semantic accent strip + chip, prominent primary metric, two supporting
    metrics, a thin progress indicator) but adds evidence drill-through. */
 type KpiAccent = "blue" | "indigo" | "emerald" | "amber";
-const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string }> = {
-  blue: { bar: "bg-[#4361EE]", chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/50" },
-  indigo: { bar: "bg-[#6D28D9]", chip: "bg-[#EDE9FE] text-[#6D28D9]", value: "text-[#5B21B6]", fill: "bg-[#6D28D9]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(109,40,217,0.4)] hover:border-[#6D28D9]/50" },
-  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/60" },
-  amber: { bar: "bg-amber-500", chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/60" },
+const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string; wash: string }> = {
+  blue: { bar: "bg-[#4361EE]", chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/50", wash: "from-[#4361EE]/[0.07]" },
+  indigo: { bar: "bg-[#6D28D9]", chip: "bg-[#EDE9FE] text-[#6D28D9]", value: "text-[#5B21B6]", fill: "bg-[#6D28D9]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(109,40,217,0.4)] hover:border-[#6D28D9]/50", wash: "from-[#6D28D9]/[0.07]" },
+  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/60", wash: "from-emerald-500/[0.07]" },
+  amber: { bar: "bg-amber-500", chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/60", wash: "from-amber-500/[0.07]" },
 };
 interface KpiSupport { label: string; value: string; href?: string; alert?: boolean }
 function KpiCard({ label, icon: Icon, accent, primaryValue, primaryDescription, support, progress, progressAlert, trend, title, href }: {
@@ -309,16 +309,18 @@ function KpiCard({ label, icon: Icon, accent, primaryValue, primaryDescription, 
   return (
     <Link href={href} title={title} className={cn("group relative flex min-h-[140px] flex-col overflow-hidden rounded-2xl border-2 border-zinc-300 bg-card p-4 pl-5 shadow-card transition duration-200 hover:-translate-y-0.5", a.glow)}>
       <span className={cn("absolute inset-y-0 left-0 w-1", a.bar)} aria-hidden />
-      <div className="flex items-center justify-between gap-2">
+      {/* Soft tone-tinted top wash — the colour-shade matching the Lead Dashboard KPI cards. */}
+      <div aria-hidden className={cn("pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b to-transparent", a.wash)} />
+      <div className="relative flex items-center justify-between gap-2">
         <div className="flex min-w-0 items-center gap-2">
           <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", a.chip)}><Icon className="h-3.5 w-3.5" /></span>
           <span className="truncate text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
         </div>
         {trend != null && Math.abs(trend) >= 0.01 && <span className={cn("shrink-0 text-[10px] font-semibold tabular-nums", trend > 0 ? "text-emerald-600" : "text-rose-600")}>{trend > 0 ? "+" : ""}{Math.round(trend * 100)}%</span>}
       </div>
-      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", a.value)}>{primaryValue}</p>
-      <p className="mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
-      <div className="mt-auto space-y-1.5 pt-3">
+      <p className={cn("relative mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", a.value)}>{primaryValue}</p>
+      <p className="relative mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
+      <div className="relative mt-auto space-y-1.5 pt-3">
         {showProgress && (
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden><div className={cn("h-full rounded-full transition-all duration-500", progressAlert ? "bg-[#D96A82]" : a.fill)} style={{ width: `${clamped > 0 ? Math.max(clamped * 100, 2) : 0}%` }} /></div>
         )}

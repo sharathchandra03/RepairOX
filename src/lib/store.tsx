@@ -168,7 +168,12 @@ interface StoreActions {
    *  normal edit. */
   reconcileMigrationFlag: (id: string) => Promise<void>;
   deleteInventoryItem: (id: string) => Promise<void>;
-  addCustomer: (customer: Customer) => Promise<void>;
+  /** Create a customer. Returns the SAVED record (with its DB-confirmed id) on
+   *  success, or null when the DB write failed — callers that need to set a
+   *  customer_id foreign key (walk-in / ticket / invoice) MUST check this so
+   *  they never stamp a customer_id that doesn't exist in the DB (FK violation
+   *  that would otherwise silently drop the parent record). */
+  addCustomer: (customer: Customer) => Promise<Customer | null>;
   updateCustomer: (id: string, updates: Partial<Customer>) => Promise<void>;
   deleteCustomer: (id: string) => Promise<void>;
   /** Merge a duplicate customer into a primary record (tickets, invoices,
@@ -719,6 +724,23 @@ function isUndefinedColumnError(err: { code?: string; message?: string } | null)
 function extractMissingColumn(err: { message?: string } | null): string | null {
   const m = err?.message ?? "";
   const q = m.match(/'([^']+)'\s+column/i) || m.match(/column\s+"?([a-z_]+)"?/i);
+  return q ? q[1] : null;
+}
+
+/** True when a Supabase error is a foreign-key violation (Postgres 23503) —
+ *  a child row references a parent that doesn't exist (e.g. a walk-in whose
+ *  customer_id points to a customer that never persisted). */
+function isForeignKeyError(err: { code?: string; message?: string } | null): boolean {
+  if (!err) return false;
+  return err.code === "23503" || /foreign key constraint|violates foreign key/i.test(err.message ?? "");
+}
+
+/** Best-effort: pull the offending FK COLUMN from a 23503 message. Postgres
+ *  phrases it as: Key (customer_id)=(CUS-…) is not present in table "customers".
+ *  Returns the column name (e.g. "customer_id") or null. */
+function extractForeignKeyColumn(err: { message?: string } | null): string | null {
+  const m = err?.message ?? "";
+  const q = m.match(/Key \(([a-z_]+)\)=/i) || m.match(/constraint "[a-z_]*_(customer_id|contact_id|ticket_id|branch_id)_/i);
   return q ? q[1] : null;
 }
 
@@ -3298,6 +3320,37 @@ export function StoreProvider({ children }: { children: ReactNode }) {
             },
           };
         });
+
+        // ── Keep customer LIFETIME VALUE consistent with the refund. ──
+        // awardLoyaltyForPaidInvoice ADDS invoiceTotal to lifetime_value when an
+        // invoice is paid; a refund must mirror that: a succeeded refund
+        // (direction -1) DECREMENTS lifetime_value by the refunded amount, and a
+        // refund-reversal (direction +1) adds it back. Without this, a customer's
+        // lifetime value stays inflated after a refund while their points have
+        // already been clawed back — the two numbers disagree (the "loyalty
+        // calculated completely differently" symptom). Floored at 0.
+        {
+          const customer = stateRef.current.customers.find((c) => c.id === customerId);
+          if (customer) {
+            const nextLifetimeValue = Math.max(0, (customer.lifetimeValue ?? 0) + direction * refundAmount);
+            const nowIso = new Date().toISOString();
+            if (shouldUseDb()) {
+              const { error: lvErr } = await db
+                .from("customers")
+                .update({ lifetime_value: nextLifetimeValue })
+                .eq("id", customerId);
+              if (lvErr) console.error("[store] refund lifetime-value update failed:", lvErr.message);
+            }
+            setState((s) => ({
+              ...s,
+              customers: s.customers.map((c) =>
+                c.id === customerId
+                  ? { ...c, lifetimeValue: nextLifetimeValue, updatedAt: nowIso }
+                  : c,
+              ),
+            }));
+          }
+        }
       } finally {
         reversingLoyaltyRef.current.delete(key);
       }
@@ -3696,14 +3749,40 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   /* ── Walk-In actions (DB-first) ── */
   const addWalkIn = useCallback(async (walkIn: WalkIn) => {
     if (shouldUseDb()) {
-      const { data, error } = await db.from("walk_ins").insert(withStore(walkInToRow(walkIn))).select("*").single();
-      if (error || !data) { console.error("[store] addWalkIn failed:", error?.message); return; }
+      let row = withStore(walkInToRow(walkIn));
+      let { data, error } = await db.from("walk_ins").insert(row).select("*").single();
+      // FK self-heal: a customer_id / contact_id that isn't in the DB (e.g. a new
+      // customer whose own insert failed, or a stale in-memory id) triggers a
+      // foreign-key violation (23503) that would otherwise SILENTLY DROP the
+      // walk-in. Clear the offending reference and retry so the walk-in still
+      // saves with its denormalized name/phone intact.
+      let heal = 0;
+      while (error && isForeignKeyError(error) && heal < 2) {
+        heal += 1;
+        const col = extractForeignKeyColumn(error);
+        if (col === "customer_id") row = { ...row, customer_id: null };
+        else if (col === "contact_id") row = { ...row, contact_id: null };
+        else { row = { ...row, customer_id: null, contact_id: null }; }
+        ({ data, error } = await db.from("walk_ins").insert(row).select("*").single());
+      }
+      if (error || !data) {
+        console.error("[store] addWalkIn failed:", error?.code, error?.message);
+        toast.error("Walk-in not saved", {
+          description: `DB error [${error?.code ?? "?"}]: ${error?.message ?? "unknown"}`,
+        });
+        // Last resort: keep locally so the user doesn't lose their work.
+        setState((s) => ({ ...s, walkIns: [walkIn, ...s.walkIns] }));
+        stateRef.current = { ...stateRef.current, walkIns: [walkIn, ...stateRef.current.walkIns] };
+        return;
+      }
       const saved = rowToWalkIn(data);
       setState((s) => ({ ...s, walkIns: [saved, ...s.walkIns] }));
+      stateRef.current = { ...stateRef.current, walkIns: [saved, ...stateRef.current.walkIns] };
       logActivity({ module: "Walk-In", action: "Walk-In Created", severity: "success", entity: "Walk-In", reference: saved.id, description: `Logged a walk-in for ${saved.customer} (${saved.model}).`, meta: { Source: saved.source, Category: saved.category } });
       return;
     }
     setState((s) => ({ ...s, walkIns: [walkIn, ...s.walkIns] }));
+    stateRef.current = { ...stateRef.current, walkIns: [walkIn, ...stateRef.current.walkIns] };
     logActivity({ module: "Walk-In", action: "Walk-In Created", severity: "success", entity: "Walk-In", reference: walkIn.id, description: `Logged a walk-in for ${walkIn.customer} (${walkIn.model}).`, meta: { Source: walkIn.source, Category: walkIn.category } });
   }, []);
 
@@ -4056,7 +4135,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   /* ── Customer actions (DB-first) ── */
-  const addCustomer = useCallback(async (customer: Customer) => {
+  const addCustomer = useCallback(async (customer: Customer): Promise<Customer | null> => {
     if (shouldUseDb()) {
       let row = customerToRow(customer);
       let res = await db.from("customers").insert(row).select("*").single();
@@ -4068,14 +4147,28 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         row = omitKeys(row, col ? [col] : ["source", "group_ids"]);
         res = await db.from("customers").insert(row).select("*").single();
       }
-      if (res.error || !res.data) { console.error("[store] addCustomer failed:", res.error?.message); return; }
+      if (res.error || !res.data) {
+        // DB write failed. Surface it and return null so an FK-dependent caller
+        // (walk-in / ticket / invoice) does NOT stamp a non-existent customer_id.
+        console.error("[store] addCustomer failed:", res.error?.code, res.error?.message);
+        toast.error("Customer not saved", {
+          description: `DB error [${res.error?.code ?? "?"}]: ${res.error?.message ?? "unknown"}`,
+        });
+        return null;
+      }
       const saved = rowToCustomer(res.data);
       setState((s) => ({ ...s, customers: [saved, ...s.customers] }));
+      // Make the new customer visible to stateRef SYNCHRONOUSLY so a caller that
+      // immediately creates a dependent record (walk-in/ticket/invoice carrying
+      // this customer_id) sees it this tick rather than one useEffect later.
+      stateRef.current = { ...stateRef.current, customers: [saved, ...stateRef.current.customers] };
       logActivity({ module: "Customer", action: "Customer Created", severity: "success", entity: "Customer", reference: saved.id, description: `Added new customer ${saved.fullName}.`, meta: { Mobile: saved.mobile, ...(saved.company ? { Company: saved.company } : {}) } });
-      return;
+      return saved;
     }
     setState((s) => ({ ...s, customers: [customer, ...s.customers] }));
+    stateRef.current = { ...stateRef.current, customers: [customer, ...stateRef.current.customers] };
     logActivity({ module: "Customer", action: "Customer Created", severity: "success", entity: "Customer", reference: customer.id, description: `Added new customer ${customer.fullName}.`, meta: { Mobile: customer.mobile, ...(customer.company ? { Company: customer.company } : {}) } });
+    return customer;
   }, []);
 
   const updateCustomer = useCallback(async (id: string, updates: Partial<Customer>) => {

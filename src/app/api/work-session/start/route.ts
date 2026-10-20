@@ -34,10 +34,21 @@ export async function POST(req: Request) {
   const staff = await resolveStaff(admin, guard.user.id);
   if (!staff) return NextResponse.json({ ok: false, error: "No profile for this account." }, { status: 404 });
 
-  // 1. Resume an existing open session.
+  // 1. Resume an existing open session. Refresh last_seen_at = now() so a
+  //    session that had gone stale (interrupted / "Needs Review") immediately
+  //    reads as live again — otherwise deriveStatus would re-flag it
+  //    interrupted on the very next render (the "resume for 1s then stop"
+  //    glitch). Clearing an interrupted status keeps the row consistent.
   const existing = await openSessionFor(admin, staff.id);
   if (existing) {
-    const session = await loadSessionWithBreaks(admin, existing);
+    const { data: refreshed } = await admin
+      .from("work_sessions")
+      .update({ last_seen_at: new Date().toISOString(), status: "open" })
+      .eq("id", existing.id)
+      .is("ended_at", null)
+      .select("*")
+      .maybeSingle();
+    const session = await loadSessionWithBreaks(admin, refreshed ?? existing);
     return NextResponse.json({ ok: true, session, resumed: true });
   }
 
@@ -59,7 +70,14 @@ export async function POST(req: Request) {
     if ((error as any).code === "23505") {
       const now = await openSessionFor(admin, staff.id);
       if (now) {
-        const session = await loadSessionWithBreaks(admin, now);
+        const { data: refreshed } = await admin
+          .from("work_sessions")
+          .update({ last_seen_at: new Date().toISOString(), status: "open" })
+          .eq("id", now.id)
+          .is("ended_at", null)
+          .select("*")
+          .maybeSingle();
+        const session = await loadSessionWithBreaks(admin, refreshed ?? now);
         return NextResponse.json({ ok: true, session, resumed: true });
       }
     }

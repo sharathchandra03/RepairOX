@@ -103,9 +103,9 @@ export function LeadKanbanCard({
           ? "border-[#4361EE] shadow-lg"
           : overdue
             ? "border-red-300"
-            // Light black border so cards stand out against the tinted column
+            // Thin black border so cards stand out against the tinted column
             // (kept for noted cards too — the note tint is on the surface).
-            : "border-zinc-900/25 hover:-translate-y-0.5 hover:border-zinc-900/40 hover:shadow-card",
+            : "border-black/70 hover:-translate-y-0.5 hover:border-black hover:shadow-card",
         // Overdue surface wash sits ON TOP of any note tint.
         overdue && "bg-red-50/60",
       )}

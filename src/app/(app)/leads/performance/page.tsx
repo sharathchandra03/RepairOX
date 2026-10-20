@@ -29,8 +29,9 @@
 
 import { useMemo, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { motion, AnimatePresence } from "framer-motion";
 import {
-  Lock, ChevronDown, Trophy, IndianRupee, CalendarClock,
+  Lock, ChevronDown, ChevronUp, Trophy, IndianRupee, CalendarClock,
   UserCheck, Megaphone, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -41,6 +42,7 @@ import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/sto
 import { cn, initials } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
+import { useWorkspaceCollapsed } from "@/hooks/use-workspace-collapsed";
 import { useStoreContext } from "@/lib/store-context";
 import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { useLeads } from "@/lib/leads-context";
@@ -68,6 +70,34 @@ const DATE_OPTIONS: { label: string; value: PerfDateRange }[] = [
 
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
+}
+
+/* The single Collapse/Expand control for the Agent Performance workspace. It
+   contracts everything ABOVE the filter strip (the page header + the four KPI
+   cards) so the agent table maximises its viewport ("work mode"). It sits on
+   the filter-strip row (top-right), so there is exactly ONE collapse mechanism.
+   Presentation only — it never touches period/store/filter state or data.
+   Keyboard + a11y: a native <button> with an explicit aria-label + tooltip. */
+function WorkspaceCollapseBar({
+  collapsed,
+  onToggle,
+}: {
+  collapsed: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      aria-label={collapsed ? "Show header and expand controls" : "Collapse the header and maximize the agent table"}
+      title={collapsed ? "Show header" : "Collapse header and maximize table"}
+      className="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-[12px] font-semibold text-zinc-700 shadow-sm transition hover:border-[#4361EE]/40 hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/30"
+    >
+      {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
+      {collapsed ? "Show Header" : "Collapse Header"}
+    </button>
+  );
 }
 
 function Restricted() {
@@ -203,6 +233,10 @@ export default function AgentPerformancePage() {
   const [perf, setPerf] = useState<PerfFilters>(EMPTY_PERF_FILTERS);
   const [agentFilter, setAgentFilter] = useState<string>("");   // All-Agents row filter
   const [showFilters, setShowFilters] = useState(false);
+  // Per-user Collapse/Expand of the control area ABOVE the filter strip (page
+  // header + the four KPI cards) so the agent table can fill the viewport.
+  // Presentation only — never touches period/store/filter state.
+  const workspace = useWorkspaceCollapsed("agent_performance", currentUserId);
   // Owner's Individual analytical subject. "" → resolve to self (or first
   // agent). Seeded from the ?agent= deep link when present.
   const [scopeAgentId, setScopeAgentId] = useState<string>(viewAsAgentId || initialAgentParam);
@@ -423,25 +457,46 @@ export default function AgentPerformancePage() {
 
     return (
       <div className="space-y-5">
-        <PageHeader
-          eyebrow="Lead Management"
-          title={`Agent Performance — ${scopedAgent.name}`}
-          subtitle="Sales performance for the selected agent across authorized stores — derived from real records."
-          actions={
-            <div className="flex flex-wrap items-center gap-2">
-              {canCrossAgent && <AgentScopePicker agents={eligibleAgents} selectedId={scopedAgent.id} onSelect={(id) => { setScopeAgentId(id); setViewAsAgent(id); }} />}
-              {tabToggle}
-            </div>
-          }
-        />
+        {/* Collapsible control area (page header + KPI cards). Stays MOUNTED —
+            only its height animates — so collapsing never resets scope/period/
+            filter state. */}
+        <AnimatePresence initial={false}>
+          {!workspace.collapsed && (
+            <motion.div
+              key="perf-header-individual"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+              className="overflow-hidden"
+            >
+              <div className="space-y-5">
+                <PageHeader
+                  eyebrow="Lead Management"
+                  title={`Agent Performance — ${scopedAgent.name}`}
+                  subtitle="Sales performance for the selected agent across authorized stores — derived from real records."
+                  actions={
+                    <div className="flex flex-wrap items-center gap-2">
+                      {canCrossAgent && <AgentScopePicker agents={eligibleAgents} selectedId={scopedAgent.id} onSelect={(id) => { setScopeAgentId(id); setViewAsAgent(id); }} />}
+                      {tabToggle}
+                    </div>
+                  }
+                />
 
-        {/* Four consolidated KPI cards */}
-        <KpiSummaryRow summary={summary} drilldowns={drilldowns} />
+                {/* Four consolidated KPI cards */}
+                <KpiSummaryRow summary={summary} drilldowns={drilldowns} />
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-        {/* Secondary date strip + Store/Filters */}
+        {/* Secondary date strip + Store/Filters + the ONE Collapse control */}
         <div className="flex flex-wrap items-center justify-between gap-3">
           {dateControl}
-          {filterControls}
+          <div className="flex flex-wrap items-center gap-2">
+            {filterControls}
+            <WorkspaceCollapseBar collapsed={workspace.collapsed} onToggle={workspace.toggle} />
+          </div>
         </div>
         {chipsRow}
         {filterPanel}
@@ -454,6 +509,7 @@ export default function AgentPerformancePage() {
           showReport
           reportHref={(r) => leadListHref({ month: (r as { periodKey?: string }).periodKey })}
           emptyText="No leads captured yet. Monthly performance appears as soon as this agent owns real leads."
+          fillViewport={workspace.collapsed}
         />
 
         {/* Conversion Summary · Funnel · Route Mix */}
@@ -482,27 +538,53 @@ export default function AgentPerformancePage() {
   };
   return (
     <div className="space-y-5">
-      <PageHeader
-        eyebrow="Lead Management"
-        title={canAll ? "Agent Performance — All Agents" : "Sales Leaderboard"}
-        subtitle={canAll
-          ? `Sales performance across your authorized stores — derived from real records${agentCount > 0 ? ` (${agentCount} ${agentCount === 1 ? "agent" : "agents"})` : ""}.`
-          : "How the sales team is performing. Your row is highlighted — derived from real records."}
-        actions={tabToggle}
-      />
+      {/* Collapsible control area (page header + KPI cards). Stays MOUNTED —
+          only its height animates — so collapsing never resets filter state. */}
+      <AnimatePresence initial={false}>
+        {!workspace.collapsed && (
+          <motion.div
+            key="perf-header-all"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-5">
+              <PageHeader
+                eyebrow="Lead Management"
+                title={canAll ? "Agent Performance — All Agents" : "Sales Leaderboard"}
+                subtitle={canAll
+                  ? `Sales performance across your authorized stores — derived from real records${agentCount > 0 ? ` (${agentCount} ${agentCount === 1 ? "agent" : "agents"})` : ""}.`
+                  : "How the sales team is performing. Your row is highlighted — derived from real records."}
+                actions={tabToggle}
+              />
 
-      {/* Four consolidated KPI cards — aggregated across all eligible agents */}
-      <KpiSummaryRow summary={boardSummary} drilldowns={boardDrilldowns} />
+              {/* Four consolidated KPI cards — aggregated across all eligible agents */}
+              <KpiSummaryRow summary={boardSummary} drilldowns={boardDrilldowns} />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-      {/* Owner-only filters (a Sales Agent gets a read-only leaderboard). */}
-      {canAll && (
+      {/* Owner filters + the ONE Collapse control. A Sales Agent gets a
+          read-only leaderboard (no filters) but still gets the Collapse
+          control so they can maximize the table too. */}
+      {canAll ? (
         <div className="space-y-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             {dateControl}
-            {filterControls}
+            <div className="flex flex-wrap items-center gap-2">
+              {filterControls}
+              <WorkspaceCollapseBar collapsed={workspace.collapsed} onToggle={workspace.toggle} />
+            </div>
           </div>
           {chipsRow}
           {filterPanel}
+        </div>
+      ) : (
+        <div className="flex justify-end">
+          <WorkspaceCollapseBar collapsed={workspace.collapsed} onToggle={workspace.toggle} />
         </div>
       )}
 
@@ -510,6 +592,7 @@ export default function AgentPerformancePage() {
         rows={rankedRows}
         rowKind="agent"
         firstColLabel="Agent Name"
+        fillViewport={workspace.collapsed}
         showReport={canCrossAgent}
         // Owner "View Details" → open that agent's Individual view in-place,
         // preserving the current period/store/filter context (no navigation,

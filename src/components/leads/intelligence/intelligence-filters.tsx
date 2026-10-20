@@ -17,6 +17,7 @@ import type { Lead } from "@/lib/leads-data";
 import type { DeviceCategory, PriceListBrand } from "@/lib/price-list-data";
 
 const PERIODS: { label: string; value: IntelligenceDateRange }[] = [
+  { label: "All", value: "all" },
   { label: "Today", value: "today" },
   { label: "This Week", value: "thisWeek" },
   { label: "This Month", value: "thisMonth" },

@@ -37,7 +37,7 @@ export function FreezeColumnsMenu({
   const optional = columns.filter(
     (c) => !c.lockedLeft && !c.lockedRight && c.freezable !== false,
   );
-  const frozenCount = state.optionalLeft.length;
+  const frozenCount = state.optionalLeft.length + state.optionalRight.length;
 
   return (
     <Dropdown
@@ -105,10 +105,17 @@ export function FreezeColumnsMenu({
             <>
               <div className="my-1 h-px bg-border" />
               <p className="px-2.5 pb-1 pt-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground/60">
-                Freeze to left
+                Freeze a column
+              </p>
+              <p className="px-2.5 pb-1.5 text-[10.5px] leading-snug text-muted-foreground/70">
+                A left-side column pins to the left (with the columns before it);
+                a right-side column pins to the right (with the columns after it).
               </p>
               {optional.map((c) => {
-                const checked = state.optionalLeft.includes(c.key);
+                const side = state.sideFor(c.key);
+                const checked = side === "left"
+                  ? state.optionalLeft.includes(c.key)
+                  : state.optionalRight.includes(c.key);
                 return (
                   <button
                     key={c.key}
@@ -131,6 +138,14 @@ export function FreezeColumnsMenu({
                       {checked && <Check className="h-3 w-3" strokeWidth={3} />}
                     </span>
                     <span className="flex-1 truncate">{c.label}</span>
+                    <span
+                      className={cn(
+                        "shrink-0 text-[9.5px] font-semibold uppercase tracking-wide",
+                        checked ? "text-[#4361EE]" : "text-muted-foreground/45",
+                      )}
+                    >
+                      {side}
+                    </span>
                   </button>
                 );
               })}

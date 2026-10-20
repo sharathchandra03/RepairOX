@@ -68,11 +68,11 @@ export function PerfSection({
 type KpiAccent = "emerald" | "blue" | "indigo" | "amber";
 
 /* Restrained semantic palette — strip + chip + value + progress-fill only. */
-const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string }> = {
-  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/50" },
-  blue:    { bar: "bg-[#4361EE]",   chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/40" },
-  indigo:  { bar: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-600", value: "text-indigo-700", fill: "bg-indigo-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(99,102,241,0.4)] hover:border-indigo-400/50" },
-  amber:   { bar: "bg-amber-500",   chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/50" },
+const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string; wash: string }> = {
+  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/50", wash: "from-emerald-500/[0.07]" },
+  blue:    { bar: "bg-[#4361EE]",   chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/40", wash: "from-[#4361EE]/[0.07]" },
+  indigo:  { bar: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-600", value: "text-indigo-700", fill: "bg-indigo-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(99,102,241,0.4)] hover:border-indigo-400/50", wash: "from-indigo-500/[0.07]" },
+  amber:   { bar: "bg-amber-500",   chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/50", wash: "from-amber-500/[0.07]" },
 };
 
 interface KpiSupport {
@@ -157,8 +157,11 @@ export function KpiPerformanceCard({
       {/* Semantic left accent strip */}
       <span className={cn("absolute inset-y-0 left-0 w-1", a.bar)} aria-hidden />
 
+      {/* Soft tone-tinted top wash — the colour-shade matching the Lead Dashboard KPI cards. */}
+      <div aria-hidden className={cn("pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b to-transparent", a.wash)} />
+
       {/* Category icon + uppercase label */}
-      <div className="flex items-center gap-2">
+      <div className="relative flex items-center gap-2">
         <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", a.chip)}>
           <Icon className="h-3.5 w-3.5" />
         </span>
@@ -166,13 +169,13 @@ export function KpiPerformanceCard({
       </div>
 
       {/* Prominent primary metric + short description */}
-      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums transition-colors", a.value)}>
+      <p className={cn("relative mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums transition-colors", a.value)}>
         {primaryValue}
       </p>
-      <p className="mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
+      <p className="relative mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
 
       {/* Supporting metrics + progress, pinned to the bottom for equal-height cards */}
-      <div className="mt-auto space-y-1.5 pt-3">
+      <div className="relative mt-auto space-y-1.5 pt-3">
         {showProgress && (
           <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden>
             <div
@@ -296,13 +299,13 @@ type Tone = "blue" | "emerald" | "amber" | "violet" | "rose" | "overdue";
    GLOW, and the trend-pill up/down styles. `bar` + `value` give every card a
    clear semantic colour (not a flat monochrome strip) and keep the Individual
    KPI row visually consistent with the All-Agents summary cards. */
-const TONE: Record<Tone, { chip: string; icon: string; spark: string; bar: string; value: string; glow: string; pillUp: string; pillDown: string }> = {
-  blue:    { chip: "bg-[#EEF1FD] text-[#4361EE]", icon: "#4361EE", spark: "#4361EE", bar: "bg-[#4361EE]", value: "text-[#2A3BA3]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(67,97,238,0.3)] hover:border-[#4361EE]/40", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  emerald: { chip: "bg-emerald-50 text-emerald-600", icon: "#10B981", spark: "#10B981", bar: "bg-emerald-500", value: "text-emerald-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(16,185,129,0.3)] hover:border-emerald-400/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  amber:   { chip: "bg-amber-50 text-amber-600", icon: "#F59E0B", spark: "#F59E0B", bar: "bg-amber-500", value: "text-amber-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(245,158,11,0.3)] hover:border-amber-400/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  violet:  { chip: "bg-violet-50 text-violet-600", icon: "#8B5CF6", spark: "#8B5CF6", bar: "bg-violet-500", value: "text-violet-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(139,92,246,0.3)] hover:border-violet-400/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  rose:    { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
-  overdue: { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+const TONE: Record<Tone, { chip: string; icon: string; spark: string; bar: string; value: string; glow: string; wash: string; pillUp: string; pillDown: string }> = {
+  blue:    { chip: "bg-[#EEF1FD] text-[#4361EE]", icon: "#4361EE", spark: "#4361EE", bar: "bg-[#4361EE]", value: "text-[#2A3BA3]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(67,97,238,0.3)] hover:border-[#4361EE]/40", wash: "from-[#4361EE]/[0.07]", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  emerald: { chip: "bg-emerald-50 text-emerald-600", icon: "#10B981", spark: "#10B981", bar: "bg-emerald-500", value: "text-emerald-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(16,185,129,0.3)] hover:border-emerald-400/50", wash: "from-emerald-500/[0.07]", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  amber:   { chip: "bg-amber-50 text-amber-600", icon: "#F59E0B", spark: "#F59E0B", bar: "bg-amber-500", value: "text-amber-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(245,158,11,0.3)] hover:border-amber-400/50", wash: "from-amber-500/[0.07]", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  violet:  { chip: "bg-violet-50 text-violet-600", icon: "#8B5CF6", spark: "#8B5CF6", bar: "bg-violet-500", value: "text-violet-700", glow: "hover:shadow-[0_8px_24px_-10px_rgba(139,92,246,0.3)] hover:border-violet-400/50", wash: "from-violet-500/[0.07]", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  rose:    { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", wash: "from-rose-500/[0.07]", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
+  overdue: { chip: "bg-[#FBEDF0] text-[#C4506B]", icon: "#D96A82", spark: "#D96A82", bar: "bg-[#D96A82]", value: "text-[#C4506B]", glow: "hover:shadow-[0_8px_24px_-10px_rgba(217,106,130,0.3)] hover:border-[#D96A82]/50", wash: "from-rose-500/[0.07]", pillUp: "text-emerald-700 bg-emerald-50 ring-emerald-200/60", pillDown: "text-[#C4506B] bg-[#FBEDF0] ring-[#E7B8C4]/60" },
 };
 
 /* ════════════════════════════════════════════════════════════════════════
@@ -324,16 +327,18 @@ function InsightCard({
 }) {
   const t = TONE[tone];
   return (
-    <div className="flex flex-col rounded-xl border border-border bg-muted/20 p-3.5">
+    <div className="relative flex flex-col overflow-hidden rounded-xl border border-border bg-card p-3.5">
+      {/* Soft tone-tinted top wash — the colour-shade matching the Lead Dashboard KPI cards. */}
+      <div aria-hidden className={cn("pointer-events-none absolute inset-x-0 top-0 h-20 bg-gradient-to-b to-transparent", t.wash)} />
       {/* Icon chip + label on one line; label wraps to at most 2 lines, reserved height keeps all cards aligned */}
-      <div className="flex items-start gap-2">
+      <div className="relative flex items-start gap-2">
         <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", t.chip)}>
           <Icon className="h-3.5 w-3.5" />
         </span>
         <span className="min-h-[2.1em] text-[10px] font-semibold uppercase leading-tight tracking-wide text-slate-500">{label}</span>
       </div>
-      <p className="mt-2.5 font-display text-[24px] font-extrabold leading-none tabular-nums text-foreground">{value}</p>
-      <div className="mt-1.5">
+      <p className="relative mt-2.5 font-display text-[24px] font-extrabold leading-none tabular-nums text-foreground">{value}</p>
+      <div className="relative mt-1.5">
         {sub && <p className="text-[11px] leading-snug text-muted-foreground">{sub}</p>}
         {overdueSub && <p className="mt-0.5 text-[11px] font-semibold text-[#B42318]">{overdueSub}</p>}
       </div>

@@ -250,6 +250,26 @@ export function resolveLeadTicket(lead: Lead, tickets: Ticket[]): Ticket | null 
   return tickets.find((t) => t.id === lead.linkedTicketId || t.ticketNo === lead.linkedTicketId) ?? null;
 }
 
+/** The internal ticket PRIMARY KEY is `TK-<base36 time>-<rand>` (see
+ *  `genUniqueTicketId` in store.tsx) — it must NEVER be shown to a user. The
+ *  human DISPLAY number is `ticket.ticketNo` (e.g. T-003, KOR-T-0045). */
+const INTERNAL_TICKET_ID_RE = /^TK-[a-z0-9]+-[a-z0-9]+$/i;
+
+/** Compute the human ticket number to DISPLAY for a lead.
+ *   • If the ticket is resolved (same store), use its `ticketNo` (its real
+ *     display number), never the internal `id`.
+ *   • If it's unresolved (e.g. the ticket lives in another store the Lead Table
+ *     didn't load), fall back to the lead's stored link ONLY when that stored
+ *     value is already a human number — never the raw `TK-…` primary key.
+ *  Returns "" when no clean number is available (the caller then shows just
+ *  "Ticket Created" without an ugly code). */
+export function displayTicketNo(lead: Lead, ticket: Ticket | null): string {
+  if (ticket) return ticket.ticketNo || "";
+  const stored = lead.linkedTicketId || "";
+  if (!stored || INTERNAL_TICKET_ID_RE.test(stored)) return "";
+  return stored;
+}
+
 /** Resolve the FINALIZED invoice for a lead, LIVE. Order:
  *   1) the lead's explicit linkedInvoiceId (if that invoice is finalized),
  *   2) a finalized invoice whose ticketId matches the lead's linked ticket.
@@ -392,7 +412,10 @@ export function deriveLeadWorkflow(
     || (lead.fulfilmentRoute || "").toUpperCase() === "STORE_VISIT"
     || !!(walkIn || lead.linkedWalkInId);
 
-  const ticketNo = ticket ? (ticket.ticketNo || ticket.id) : (lead.linkedTicketId || "");
+  // DISPLAY number: the human `ticketNo` (T-003 …) — NEVER the internal
+  // `TK-<…>` primary key. Empty when a cross-store ticket can't be resolved to
+  // a clean number (the cell then shows just "Ticket Created").
+  const ticketNo = displayTicketNo(lead, ticket);
   const ticketId = ticket?.id || lead.linkedTicketId || "";
 
   // ── 1) FINALIZED INVOICE — highest priority (revenue realized). ──
@@ -414,6 +437,7 @@ export function deriveLeadWorkflow(
         invoiceNo, invoiceId: invoice.id,
       },
       `Finalized invoice ${invoiceNo}${ticketNo ? ` (from ticket ${ticketNo})` : ""} — revenue realized${isWalkinPath ? " after the store visit" : ""}.`,
+      // (ticketNo may be empty for a cross-store ticket; the parenthetical is omitted.)
     );
   }
 
@@ -426,8 +450,8 @@ export function deriveLeadWorkflow(
       action,
       { ...NA_RESULT, kind: "ticket", primary: "Ticket Created", ticketNo, ticketId },
       isWalkinPath
-        ? `Customer visited the store — ticket ${ticketNo} created, awaiting a finalized invoice.`
-        : `Ticket ${ticketNo} created — awaiting a finalized invoice.`,
+        ? `Customer visited the store — ticket${ticketNo ? ` ${ticketNo}` : ""} created, awaiting a finalized invoice.`
+        : `Ticket${ticketNo ? ` ${ticketNo}` : ""} created — awaiting a finalized invoice.`,
     );
   }
 

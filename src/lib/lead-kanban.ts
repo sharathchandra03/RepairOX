@@ -44,18 +44,20 @@ export interface KanbanColorToken {
   canvas: string;
   /** A subtle same-hue divider/edge for the themed canvas frame. */
   edge: string;
+  /** A STRONG same-hue border for the column frame (matches the dark header). */
+  frame: string;
 }
 
 export const KANBAN_COLORS: KanbanColorToken[] = [
-  { key: "blue",   label: "Blue",   dot: "bg-sky-500",     chip: "bg-sky-50 text-sky-700 ring-sky-200",         bar: "bg-sky-500",     soft: "bg-sky-100/70",     ring: "ring-sky-400",     canvas: "bg-gradient-to-br from-sky-50 via-white to-sky-100/50",       edge: "border-sky-200/70" },
-  { key: "indigo", label: "Indigo", dot: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-700 ring-indigo-200", bar: "bg-indigo-500",  soft: "bg-indigo-100/70",  ring: "ring-indigo-400",  canvas: "bg-gradient-to-br from-indigo-50 via-white to-violet-100/50",  edge: "border-indigo-200/70" },
-  { key: "purple", label: "Purple", dot: "bg-violet-500",  chip: "bg-violet-50 text-violet-700 ring-violet-200", bar: "bg-violet-500",  soft: "bg-violet-100/70",  ring: "ring-violet-400",  canvas: "bg-gradient-to-br from-violet-50 via-white to-fuchsia-100/50", edge: "border-violet-200/70" },
-  { key: "teal",   label: "Teal",   dot: "bg-teal-500",    chip: "bg-teal-50 text-teal-700 ring-teal-200",       bar: "bg-teal-500",    soft: "bg-teal-100/70",    ring: "ring-teal-400",    canvas: "bg-gradient-to-br from-teal-50 via-white to-cyan-100/50",      edge: "border-teal-200/70" },
-  { key: "green",  label: "Green",  dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", bar: "bg-emerald-500", soft: "bg-emerald-100/70", ring: "ring-emerald-400", canvas: "bg-gradient-to-br from-emerald-50 via-white to-teal-100/50",   edge: "border-emerald-200/70" },
-  { key: "amber",  label: "Amber",  dot: "bg-amber-500",   chip: "bg-amber-50 text-amber-700 ring-amber-200",    bar: "bg-amber-500",   soft: "bg-amber-100/70",   ring: "ring-amber-400",   canvas: "bg-gradient-to-br from-amber-50 via-white to-yellow-100/50",   edge: "border-amber-200/70" },
-  { key: "orange", label: "Orange", dot: "bg-orange-500",  chip: "bg-orange-50 text-orange-700 ring-orange-200", bar: "bg-orange-500",  soft: "bg-orange-100/70",  ring: "ring-orange-400",  canvas: "bg-gradient-to-br from-orange-50 via-white to-amber-100/50",   edge: "border-orange-200/70" },
-  { key: "red",    label: "Red",    dot: "bg-rose-500",    chip: "bg-rose-50 text-rose-700 ring-rose-200",       bar: "bg-rose-500",    soft: "bg-rose-100/70",    ring: "ring-rose-400",    canvas: "bg-gradient-to-br from-rose-50 via-white to-pink-100/50",      edge: "border-rose-200/70" },
-  { key: "gray",   label: "Gray",   dot: "bg-zinc-400",    chip: "bg-zinc-100 text-zinc-600 ring-zinc-200",      bar: "bg-zinc-400",    soft: "bg-zinc-100/80",    ring: "ring-zinc-400",    canvas: "bg-gradient-to-br from-zinc-50 via-white to-slate-100/60",     edge: "border-zinc-200/70" },
+  { key: "blue",   label: "Blue",   dot: "bg-sky-500",     chip: "bg-sky-50 text-sky-700 ring-sky-200",         bar: "bg-sky-500",     soft: "bg-sky-100/70",     ring: "ring-sky-400",     canvas: "bg-gradient-to-br from-sky-50 via-white to-sky-100/50",       edge: "border-sky-200/70",     frame: "border-sky-300" },
+  { key: "indigo", label: "Indigo", dot: "bg-indigo-500",  chip: "bg-indigo-50 text-indigo-700 ring-indigo-200", bar: "bg-indigo-500",  soft: "bg-indigo-100/70",  ring: "ring-indigo-400",  canvas: "bg-gradient-to-br from-indigo-50 via-white to-violet-100/50",  edge: "border-indigo-200/70",  frame: "border-indigo-300" },
+  { key: "purple", label: "Purple", dot: "bg-violet-500",  chip: "bg-violet-50 text-violet-700 ring-violet-200", bar: "bg-violet-500",  soft: "bg-violet-100/70",  ring: "ring-violet-400",  canvas: "bg-gradient-to-br from-violet-50 via-white to-fuchsia-100/50", edge: "border-violet-200/70",  frame: "border-violet-300" },
+  { key: "teal",   label: "Teal",   dot: "bg-teal-500",    chip: "bg-teal-50 text-teal-700 ring-teal-200",       bar: "bg-teal-500",    soft: "bg-teal-100/70",    ring: "ring-teal-400",    canvas: "bg-gradient-to-br from-teal-50 via-white to-cyan-100/50",      edge: "border-teal-200/70",    frame: "border-teal-300" },
+  { key: "green",  label: "Green",  dot: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", bar: "bg-emerald-500", soft: "bg-emerald-100/70", ring: "ring-emerald-400", canvas: "bg-gradient-to-br from-emerald-50 via-white to-teal-100/50",   edge: "border-emerald-200/70", frame: "border-emerald-300" },
+  { key: "amber",  label: "Amber",  dot: "bg-amber-500",   chip: "bg-amber-50 text-amber-700 ring-amber-200",    bar: "bg-amber-500",   soft: "bg-amber-100/70",   ring: "ring-amber-400",   canvas: "bg-gradient-to-br from-amber-50 via-white to-yellow-100/50",   edge: "border-amber-200/70",   frame: "border-amber-300" },
+  { key: "orange", label: "Orange", dot: "bg-orange-500",  chip: "bg-orange-50 text-orange-700 ring-orange-200", bar: "bg-orange-500",  soft: "bg-orange-100/70",  ring: "ring-orange-400",  canvas: "bg-gradient-to-br from-orange-50 via-white to-amber-100/50",   edge: "border-orange-200/70",  frame: "border-orange-300" },
+  { key: "red",    label: "Red",    dot: "bg-rose-500",    chip: "bg-rose-50 text-rose-700 ring-rose-200",       bar: "bg-rose-500",    soft: "bg-rose-100/70",    ring: "ring-rose-400",    canvas: "bg-gradient-to-br from-rose-50 via-white to-pink-100/50",      edge: "border-rose-200/70",    frame: "border-rose-300" },
+  { key: "gray",   label: "Gray",   dot: "bg-zinc-400",    chip: "bg-zinc-100 text-zinc-600 ring-zinc-200",      bar: "bg-zinc-400",    soft: "bg-zinc-100/80",    ring: "ring-zinc-400",    canvas: "bg-gradient-to-br from-zinc-50 via-white to-slate-100/60",     edge: "border-zinc-200/70",    frame: "border-zinc-300" },
 ];
 
 const COLOR_MAP: Record<KanbanColor, KanbanColorToken> = KANBAN_COLORS.reduce(

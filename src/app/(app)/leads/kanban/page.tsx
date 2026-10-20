@@ -657,18 +657,17 @@ function KanbanColumnView({
   return (
     <div
       className={cn(
-        "flex h-full w-[286px] shrink-0 flex-col overflow-hidden rounded-2xl border shadow-sm backdrop-blur-sm transition-colors",
-        isOver ? "border-[#4361EE]/50 bg-white/85" : cn(tone.soft, tone.edge),
+        "flex h-full w-[286px] shrink-0 flex-col overflow-hidden rounded-2xl border-2 shadow-sm backdrop-blur-sm transition-colors",
+        isOver ? "border-[#4361EE]/50 bg-white/85" : cn(tone.soft, tone.frame),
       )}
     >
-      {/* Column accent bar */}
-      <div className={cn("h-1 w-full shrink-0", tone.bar)} />
-      {/* Column header */}
-      <div className="flex items-center justify-between gap-2 px-3 pt-3">
+      {/* Column header — bordered band filled with the column's dark accent
+          (the same color previously used only as the thin top strip). */}
+      <div className={cn("m-2 flex items-center justify-between gap-2 rounded-xl border border-black/10 px-3 py-2 shadow-sm", tone.bar)}>
         <div className="flex min-w-0 items-center gap-2">
-          <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", tone.dot)} />
-          <span className="truncate text-[12px] font-semibold text-zinc-800">{col.name}</span>
-          <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-zinc-200/80 px-1 text-[10px] font-bold text-zinc-600">
+          <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-white/90 ring-1 ring-white/40" />
+          <span className="truncate text-[12px] font-semibold text-white">{col.name}</span>
+          <span className="flex h-5 min-w-5 items-center justify-center rounded-md bg-white/25 px-1 text-[10px] font-bold text-white">
             {col.cardIds.length}
           </span>
         </div>

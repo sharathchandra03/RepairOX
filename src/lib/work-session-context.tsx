@@ -62,6 +62,8 @@ export interface UseWorkSession {
   endBreak: () => Promise<void>;
   endWork: (reason?: "logout") => Promise<void>;
   touch: () => Promise<void>;
+  /** Best-effort final liveness stamp on tab hide / close (keepalive). */
+  flushBeacon: () => void;
   rangeSessions: (fromISO: string, toISO: string) => Promise<WorkSessionRecord[]>;
 }
 
@@ -254,14 +256,28 @@ export function WorkSessionProvider({ children }: { children: ReactNode }) {
     if (useSupabase) {
       const res = await apiFetch("/api/work-session/start", { method: "POST" });
       if (res.ok && res.json?.ok) {
-        setOpenSession((res.json.session as WorkSessionRecord) ?? null);
-        await fetchCurrent();
+        // The /start route stamps a fresh last_seen_at on resume, so the
+        // returned session already reads as "working". Set it directly — no
+        // second blocking GET (that round-trip was the switching lag). Force
+        // the session live locally as a belt-and-braces guard so the chip can
+        // never flash back to "interrupted" on resume.
+        const session = res.json.session as WorkSessionRecord | null;
+        setOpenSession(
+          session
+            ? { ...session, lastSeenAt: new Date().toISOString(), status: "open" }
+            : null,
+        );
       }
       return;
     }
-    // Local: idempotent — resume an existing open session.
+    // Local: idempotent — resume an existing open session (refresh liveness so
+    // a stale/interrupted local session reads as working again).
     const all = readLocal(sid);
-    if (all.some((s) => s.endedAt === null)) {
+    const existingOpen = all.find((s) => s.endedAt === null);
+    if (existingOpen) {
+      existingOpen.lastSeenAt = new Date().toISOString();
+      existingOpen.status = "open";
+      writeLocal(sid, all);
       refreshLocal();
       return;
     }
@@ -278,15 +294,29 @@ export function WorkSessionProvider({ children }: { children: ReactNode }) {
     });
     writeLocal(sid, all);
     refreshLocal();
-  }, [useSupabase, apiFetch, fetchCurrent, refreshLocal]);
+  }, [useSupabase, apiFetch, refreshLocal]);
 
   const startBreak = useCallback(async () => {
     const sid = staffIdRef.current;
     if (!sid) return;
     if (useSupabase) {
+      // Optimistic: flip to on_break immediately so the chip responds without
+      // waiting for the round-trip; reconcile with the authoritative row.
+      const nowISO = new Date().toISOString();
+      const prev = openSession;
+      if (prev && !prev.breaks.some((b) => b.endedAt === null)) {
+        setOpenSession({
+          ...prev,
+          lastSeenAt: nowISO,
+          breaks: [...prev.breaks, { startedAt: nowISO, endedAt: null }],
+        });
+      }
       const res = await apiFetch("/api/work-session/break/start", { method: "POST" });
       if (res.ok && res.json?.ok) setOpenSession((res.json.session as WorkSessionRecord) ?? null);
-      else mapError(res.json?.error);
+      else {
+        setOpenSession(prev); // revert the optimistic change
+        mapError(res.json?.error);
+      }
       return;
     }
     const all = readLocal(sid);
@@ -302,15 +332,29 @@ export function WorkSessionProvider({ children }: { children: ReactNode }) {
     open.breaks.push({ startedAt: new Date().toISOString(), endedAt: null });
     writeLocal(sid, all);
     refreshLocal();
-  }, [useSupabase, apiFetch, mapError, refreshLocal]);
+  }, [useSupabase, apiFetch, mapError, refreshLocal, openSession]);
 
   const endBreak = useCallback(async () => {
     const sid = staffIdRef.current;
     if (!sid) return;
     if (useSupabase) {
+      // Optimistic: close the open break locally so the chip flips back to
+      // working immediately; reconcile with the authoritative row.
+      const nowISO = new Date().toISOString();
+      const prev = openSession;
+      if (prev && prev.breaks.some((b) => b.endedAt === null)) {
+        setOpenSession({
+          ...prev,
+          lastSeenAt: nowISO,
+          breaks: prev.breaks.map((b) => (b.endedAt === null ? { ...b, endedAt: nowISO } : b)),
+        });
+      }
       const res = await apiFetch("/api/work-session/break/end", { method: "POST" });
       if (res.ok && res.json?.ok) setOpenSession((res.json.session as WorkSessionRecord) ?? null);
-      else mapError(res.json?.error);
+      else {
+        setOpenSession(prev); // revert the optimistic change
+        mapError(res.json?.error);
+      }
       return;
     }
     const all = readLocal(sid);
@@ -323,7 +367,7 @@ export function WorkSessionProvider({ children }: { children: ReactNode }) {
     active.endedAt = new Date().toISOString();
     writeLocal(sid, all);
     refreshLocal();
-  }, [useSupabase, apiFetch, mapError, refreshLocal]);
+  }, [useSupabase, apiFetch, mapError, refreshLocal, openSession]);
 
   const endWork = useCallback(
     async (_reason: "logout" = "logout") => {
@@ -367,6 +411,48 @@ export function WorkSessionProvider({ children }: { children: ReactNode }) {
     setOpenSession((prev) => (prev && prev.id === open.id ? { ...prev, lastSeenAt: open.lastSeenAt } : prev));
   }, [useSupabase, apiFetch]);
 
+  /* Best-effort FINAL liveness stamp when the tab is backgrounded or closed
+     (user shuts down / closes the tab without logging out). A normal fetch is
+     cancelled during unload, so this uses `keepalive: true` which survives the
+     page teardown and can still carry the bearer token (unlike sendBeacon,
+     which can't set the Authorization header). Stamping last_seen_at at the
+     TRUE moment the user left means an abandoned session's elapsed/net is
+     capped at that instant (via the pure engine) instead of counting toward
+     `now` until the 30-min stale threshold trips — so the work time reflects
+     reality, never fabricated "working" minutes after they've gone. Fire-and-
+     forget: never awaited, never blocks teardown. */
+  const flushBeacon = useCallback(() => {
+    const sid = staffIdRef.current;
+    if (!sid) return;
+    if (useSupabase) {
+      if (!supabase) return;
+      void (async () => {
+        try {
+          const token = (await supabase.auth.getSession()).data.session?.access_token;
+          // getSession resolves synchronously from the in-memory session during
+          // a normal hide; if the tab is already torn down this just no-ops.
+          void fetch("/api/work-session/touch", {
+            method: "POST",
+            keepalive: true,
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+          }).catch(() => {});
+        } catch {
+          /* unload in progress — nothing more we can do */
+        }
+      })();
+      return;
+    }
+    // Local mode: stamp synchronously (survives teardown — it's just a write).
+    const all = readLocal(sid);
+    const open = all.find((s) => s.endedAt === null);
+    if (!open) return;
+    open.lastSeenAt = new Date().toISOString();
+    writeLocal(sid, all);
+  }, [useSupabase]);
+
   const rangeSessions = useCallback(
     async (fromISO: string, toISO: string): Promise<WorkSessionRecord[]> => {
       const sid = staffIdRef.current;
@@ -402,6 +488,7 @@ export function WorkSessionProvider({ children }: { children: ReactNode }) {
     endBreak,
     endWork,
     touch,
+    flushBeacon,
     rangeSessions,
   };
 
@@ -431,7 +518,7 @@ export function useWorkSession(): UseWorkSession {
  */
 export function useWorkSessionAutoStart(enabled: boolean = false) {
   const { authReady, currentUser } = usePermissions();
-  const { startWork, endBreak, touch, openSession, status, hydrated } = useWorkSession();
+  const { startWork, endBreak, touch, flushBeacon, openSession, status, hydrated } = useWorkSession();
   const { settings } = useStoreSettings();
   const startedRef = useRef(false);
   // Which open break (by its startedAt) we've already reminded about, so the
@@ -470,6 +557,31 @@ export function useWorkSessionAutoStart(enabled: boolean = false) {
     }, HEARTBEAT_MS);
     return () => window.clearInterval(t);
   }, [enabled, authReady, currentUser?.id, openSession, touch]);
+
+  // Final liveness stamp when the user LEAVES without logging out (closes the
+  // tab, shuts down, backgrounds the app). Without this, last_seen_at is only
+  // as fresh as the last 60s heartbeat, so an abandoned session keeps counting
+  // toward `now` as "working" until the 30-min stale threshold trips. Stamping
+  // on hide/close records the TRUE last-active moment, so the pure engine caps
+  // the abandoned session's elapsed/net at that instant — the counted work
+  // time reflects reality. `pagehide` is the reliable close/navigate-away
+  // signal; `visibilitychange→hidden` covers tab switches and mobile
+  // backgrounding (where `pagehide`/`beforeunload` are unreliable).
+  useEffect(() => {
+    if (!enabled || !authReady || !currentUser?.id) return;
+    const onHide = () => {
+      if (openSession) flushBeacon();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden" && openSession) flushBeacon();
+    };
+    window.addEventListener("pagehide", onHide);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", onHide);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [enabled, authReady, currentUser?.id, openSession, flushBeacon]);
 
   // Track genuine interaction with RepairOX so the break reminder only fires
   // when the agent is ACTIVELY working. Mirrors the presence tracker's events

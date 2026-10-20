@@ -3,14 +3,28 @@
 /* ──────────────────────────────────────────────────────────────────────────
    RepairOX — Manage Columns (personal Kanban).
 
-   Rename / add / reorder / recolor / delete columns of the ACTIVE personal
-   board. Deleting a column NEVER deletes leads — the user chooses a fallback
-   column its cards move to (default: the first remaining column). All changes
-   are personal to the signed-in user.
+   Rename / add / REORDER (drag & drop) / recolor / delete columns of the
+   ACTIVE personal board. Deleting a column NEVER deletes leads — its cards
+   reflow to the first remaining column. All changes are personal to the
+   signed-in user and persist (localStorage + DB via useLeadKanban).
+
+   • Reorder is drag-and-drop (@dnd-kit) via a dedicated grip handle — no arrows.
+   • Each name field keeps its own LOCAL draft so the user can freely backspace
+     to empty and type spaces; the value commits on blur/Enter (an empty name
+     falls back to a safe default, never a silent reject mid-edit).
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useState } from "react";
-import { Plus, Trash2, ArrowUp, ArrowDown, Columns3 } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  DndContext, PointerSensor, KeyboardSensor, useSensor, useSensors,
+  closestCenter, type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext, useSortable, verticalListSortingStrategy,
+  sortableKeyboardCoordinates, arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { Plus, Trash2, GripVertical, Columns3 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,106 +52,85 @@ export function ManageColumnsDrawer({
   const [newColor, setNewColor] = useState<KanbanColor>("blue");
   const [deleting, setDeleting] = useState<KanbanColumn | null>(null);
 
-  const move = (idx: number, dir: -1 | 1) => {
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  const handleReorder = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
     const ids = board.columns.map((c) => c.id);
-    const j = idx + dir;
-    if (j < 0 || j >= ids.length) return;
-    [ids[idx], ids[j]] = [ids[j], ids[idx]];
-    kanban.reorderColumns(ids);
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    kanban.reorderColumns(arrayMove(ids, from, to));
   };
 
   const addColumn = () => {
-    if (!newName.trim()) return;
-    kanban.addColumn(newName, newColor);
+    const name = newName.trim();
+    if (!name) return;
+    kanban.addColumn(name, newColor);
     setNewName("");
     setNewColor("blue");
   };
 
   const confirmDelete = () => {
     if (deleting) {
-      // Cards reflow to the first OTHER column (never lost).
       const fallback = board.columns.find((c) => c.id !== deleting.id)?.id ?? null;
       kanban.removeColumn(deleting.id, fallback);
     }
     setDeleting(null);
   };
 
+  const columnIds = board.columns.map((c) => c.id);
+
   return (
     <>
       <Drawer open={open} onClose={onClose} title="Manage Columns" subtitle={board.name} icon={Columns3} width="max-w-md">
-        <div className="space-y-4 p-5">
-          {/* Existing columns */}
-          <div className="space-y-2.5">
-            {board.columns.map((col, idx) => {
-              const tone = kanbanColor(col.color);
-              const count = cardCount(col.id);
-              return (
-                <div key={col.id} className="rounded-xl border border-border bg-card p-3">
-                  <div className="flex items-center gap-2">
-                    <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", tone.dot)} />
-                    <Input
-                      value={col.name}
-                      onChange={(e: any) => kanban.renameColumn(col.id, e.target.value)}
-                      className="h-8 flex-1 text-[13px]"
-                    />
-                    <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500">
-                      {count}
-                    </span>
-                    <div className="flex shrink-0 items-center">
-                      <button
-                        type="button"
-                        title="Move up"
-                        disabled={idx === 0}
-                        onClick={() => move(idx, -1)}
-                        className="grid h-7 w-7 place-items-center rounded text-zinc-400 hover:text-zinc-700 disabled:opacity-30"
-                      >
-                        <ArrowUp className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        title="Move down"
-                        disabled={idx === board.columns.length - 1}
-                        onClick={() => move(idx, 1)}
-                        className="grid h-7 w-7 place-items-center rounded text-zinc-400 hover:text-zinc-700 disabled:opacity-30"
-                      >
-                        <ArrowDown className="h-3.5 w-3.5" />
-                      </button>
-                      <button
-                        type="button"
-                        title={board.columns.length <= 1 ? "A board needs at least one column" : "Delete column"}
-                        disabled={board.columns.length <= 1}
-                        onClick={() => (count > 0 ? setDeleting(col) : kanban.removeColumn(col.id))}
-                        className="grid h-7 w-7 place-items-center rounded text-zinc-400 hover:text-rose-600 disabled:opacity-30"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="mt-2.5 pl-4.5">
-                    <KanbanColorPicker value={col.color} onChange={(c) => kanban.setColumnColor(col.id, c)} size={18} />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
+        <div className="space-y-5 p-5">
+          {/* Hint */}
+          <p className="flex items-center gap-1.5 text-[11.5px] text-muted-foreground">
+            <GripVertical className="h-3.5 w-3.5 text-zinc-400" />
+            Drag the handle to reorder columns. Changes save automatically.
+          </p>
+
+          {/* Existing columns — drag to reorder */}
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleReorder}>
+            <SortableContext items={columnIds} strategy={verticalListSortingStrategy}>
+              <div className="space-y-2.5">
+                {board.columns.map((col) => (
+                  <SortableColumnRow
+                    key={col.id}
+                    col={col}
+                    count={cardCount(col.id)}
+                    canDelete={board.columns.length > 1}
+                    onRename={(name) => kanban.renameColumn(col.id, name)}
+                    onColor={(c) => kanban.setColumnColor(col.id, c)}
+                    onDelete={() => (cardCount(col.id) > 0 ? setDeleting(col) : kanban.removeColumn(col.id))}
+                  />
+                ))}
+              </div>
+            </SortableContext>
+          </DndContext>
 
           {/* Add column */}
-          <div className="rounded-xl border border-dashed border-border bg-muted/20 p-3">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Add Column</p>
+          <div className="rounded-xl border border-dashed border-border bg-muted/20 p-3.5">
+            <p className="mb-2.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Add Column</p>
             <div className="flex items-center gap-2">
               <Input
                 value={newName}
                 onChange={(e: any) => setNewName(e.target.value)}
                 onKeyDown={(e: any) => { if (e.key === "Enter") addColumn(); }}
                 placeholder="Column name…"
-                className="h-8 flex-1 text-[13px]"
+                className="h-9 flex-1 text-[13px]"
               />
               <Button size="sm" className="gap-1.5 rounded-lg" onClick={addColumn} disabled={!newName.trim()}>
                 <Plus className="h-3.5 w-3.5" /> Add
               </Button>
             </div>
-            <div className="mt-2.5">
-              <KanbanColorPicker value={newColor} onChange={setNewColor} size={18} />
+            <div className="mt-3">
+              <KanbanColorPicker value={newColor} onChange={setNewColor} size={20} />
             </div>
           </div>
         </div>
@@ -156,5 +149,107 @@ export function ManageColumnsDrawer({
         confirmLabel="Delete column"
       />
     </>
+  );
+}
+
+/* ─── One sortable, editable column row ──────────────────────────────────── */
+
+function SortableColumnRow({
+  col,
+  count,
+  canDelete,
+  onRename,
+  onColor,
+  onDelete,
+}: {
+  col: KanbanColumn;
+  count: number;
+  canDelete: boolean;
+  onRename: (name: string) => void;
+  onColor: (color: KanbanColor) => void;
+  onDelete: () => void;
+}) {
+  const tone = kanbanColor(col.color);
+  const { setNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: col.id });
+
+  // LOCAL draft so the user can backspace to empty / type spaces freely.
+  const [draft, setDraft] = useState(col.name);
+  // Keep the draft in sync when the canonical value changes from elsewhere
+  // (e.g. reorder re-render) and the field isn't being actively edited.
+  useEffect(() => { setDraft(col.name); }, [col.name]);
+
+  const commit = () => {
+    const name = draft.trim();
+    if (!name) {
+      // Empty → revert to a safe default name (never persist a blank column).
+      setDraft(col.name || "Untitled");
+      if (!col.name) onRename("Untitled");
+      return;
+    }
+    if (name !== col.name) onRename(name);
+    setDraft(name);
+  };
+
+  const style: React.CSSProperties = {
+    transform: CSS.Translate.toString(transform),
+    transition,
+    zIndex: isDragging ? 20 : undefined,
+  };
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={cn(
+        "rounded-xl border bg-card p-3 transition",
+        isDragging ? "border-[#4361EE] shadow-lg" : "border-border",
+      )}
+    >
+      <div className="flex items-center gap-2">
+        {/* Drag handle */}
+        <button
+          type="button"
+          title="Drag to reorder"
+          aria-label="Drag to reorder"
+          className="grid h-8 w-6 shrink-0 cursor-grab touch-none place-items-center rounded text-zinc-300 hover:text-zinc-600 active:cursor-grabbing"
+          {...attributes}
+          {...listeners}
+        >
+          <GripVertical className="h-4 w-4" />
+        </button>
+
+        <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", tone.dot)} />
+
+        <Input
+          value={draft}
+          onChange={(e: any) => setDraft(e.target.value)}
+          onBlur={commit}
+          onKeyDown={(e: any) => {
+            if (e.key === "Enter") { e.currentTarget.blur(); }
+            if (e.key === "Escape") { setDraft(col.name); e.currentTarget.blur(); }
+          }}
+          className="h-9 flex-1 text-[13px]"
+          placeholder="Column name…"
+        />
+
+        <span className="shrink-0 rounded-md bg-zinc-100 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-500">
+          {count}
+        </span>
+
+        <button
+          type="button"
+          title={canDelete ? "Delete column" : "A board needs at least one column"}
+          disabled={!canDelete}
+          onClick={onDelete}
+          className="grid h-8 w-8 shrink-0 place-items-center rounded text-zinc-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-30 disabled:hover:bg-transparent disabled:hover:text-zinc-400"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      <div className="mt-3 pl-8">
+        <KanbanColorPicker value={col.color} onChange={onColor} size={18} />
+      </div>
+    </div>
   );
 }

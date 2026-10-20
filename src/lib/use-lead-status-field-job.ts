@@ -86,23 +86,28 @@ export function useLeadStatusFieldJob() {
 
       // Create the Field Job (lands in the Field "Pickup & Drop" workspace,
       // in the Pending Assignment queue until an agent is set).
-      const job = await createJob({
-        leadId: lead.id,
-        leadNo: lead.leadNo,
-        customerId,
-        customer: lead.name,
-        phone: lead.number,
-        email: lead.email,
-        device: lead.device,
-        issue: lead.issue,
-        leadType: map.leadType, // "pickup" | "onsite"
-        source: lead.source || "",
-        branch: lead.branchId || lead.assignedStore || "",
-        salesPersonId: currentUserId || "",
-        salesPersonName: currentUserName || "",
-        pickupAddress: fullLeadLocation(lead),
-        status: "pending_assignment",
-      });
+      const job = await createJob(
+        {
+          leadId: lead.id,
+          leadNo: lead.leadNo,
+          customerId,
+          customer: lead.name,
+          phone: lead.number,
+          email: lead.email,
+          device: lead.device,
+          issue: lead.issue,
+          leadType: map.leadType, // "pickup" | "onsite"
+          source: lead.source || "",
+          branch: lead.assignedStore || "",
+          salesPersonId: currentUserId || "",
+          salesPersonName: currentUserName || "",
+          pickupAddress: fullLeadLocation(lead),
+          status: "pending_assignment",
+        },
+        // Own the job in the LEAD's store (not the routing user's active store)
+        // so it surfaces in that store's Field "Pickup & Drop" workspace.
+        lead.branchId || null,
+      );
       if (!job) return;
 
       // Record the route + two-way link + conversion trail (preserves the

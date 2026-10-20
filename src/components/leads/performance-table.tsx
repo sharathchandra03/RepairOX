@@ -335,6 +335,13 @@ export function PerformanceTable({
   highlightAgentId,
   firstColLabel,
   emptyText = "No data yet.",
+  /** When true, the table STRETCHES to fill the available viewport height: the
+   *  card grows down to the bottom gap, the body flex-grows to push the Total
+   *  footer to the very bottom, and the body scrolls only when the rows exceed
+   *  that space. Used by the collapsed "work mode" so the footer sits at the
+   *  bottom and the body stretches up into the space the header freed. When
+   *  false the table is content-driven (compact for a few rows). */
+  fillViewport = false,
 }: {
   rows: PerfRow[];
   rowKind: "agent" | "period";
@@ -344,6 +351,7 @@ export function PerformanceTable({
   highlightAgentId?: string;
   firstColLabel: string;
   emptyText?: string;
+  fillViewport?: boolean;
 }) {
   const isAgent = rowKind === "agent";
   const totals = sumPerfRows(rows);
@@ -360,9 +368,13 @@ export function PerformanceTable({
      never grows tall just because many agents exist and the footer is always
      visible. We never exceed the natural content height, so a 2–3 agent list is
      NOT forced into an empty scroll region (no scrollbar when unnecessary). */
+  const cardRef = useRef<HTMLDivElement>(null);
   const scrollBodyRef = useRef<HTMLDivElement>(null);
   const footerRef = useRef<HTMLDivElement>(null);
   const [bodyMaxH, setBodyMaxH] = useState<number | null>(null);
+  // In fill-viewport (collapsed "work mode") the whole card is stretched to the
+  // bottom gap so the footer drops to the bottom and the body flex-grows up.
+  const [cardH, setCardH] = useState<number | null>(null);
   /* Width of the body's vertical scrollbar (0 on overlay-scrollbar systems).
      The header + footer tables live OUTSIDE the scroll region, so when the body
      shows a scrollbar it becomes narrower; we pad the header/footer by this
@@ -382,8 +394,18 @@ export function PerformanceTable({
       // offsetWidth includes the scrollbar; clientWidth does not. The difference
       // is the live scrollbar width (0 when there's no scrollbar / overlay bars).
       setScrollbarW(el.offsetWidth - el.clientWidth);
+      // In fill mode the whole CARD is stretched to the bottom gap so the footer
+      // drops to the bottom of the viewport; the body (flex-1) grows into it.
+      const card = cardRef.current;
+      if (card) {
+        const cardTop = card.getBoundingClientRect().top;
+        setCardH(Math.max(MIN_BODY + footerH, Math.round(window.innerHeight - cardTop - BOTTOM_GAP)));
+      }
     };
     measure();
+    // The collapse height animation runs ~220ms; re-measure just past it so the
+    // card/body settle at the final freed height once the header is gone.
+    const settle = window.setTimeout(measure, 260);
     window.addEventListener("resize", measure);
     // The strip above the table (filters/KPIs) can change height (wrapping,
     // active-filter chips appearing) without a window resize — observe it too.
@@ -391,16 +413,25 @@ export function PerformanceTable({
     const ro = new ResizeObserver(measure);
     ro.observe(document.body);
     if (footerRef.current) ro.observe(footerRef.current);
-    return () => { window.removeEventListener("resize", measure); ro.disconnect(); };
-  }, [rows.length, hasFooter]);
+    return () => { window.clearTimeout(settle); window.removeEventListener("resize", measure); ro.disconnect(); };
+  }, [rows.length, hasFooter, fillViewport]);
 
   return (
-    <div className="overflow-hidden rounded-2xl border-2 border-zinc-300 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.06),0_4px_16px_rgba(67,97,238,0.05)]">
+    <div
+      ref={cardRef}
+      className={cn(
+        "overflow-hidden rounded-2xl border-2 border-zinc-300 bg-white shadow-[0_1px_4px_rgba(0,0,0,0.06),0_4px_16px_rgba(67,97,238,0.05)]",
+        fillViewport && "flex flex-col",
+      )}
+      style={fillViewport && cardH != null ? { height: `${cardH}px` } : undefined}
+    >
       {/* ── Shared horizontal-scroll wrapper ──────────────────────────────
           All three tables (header / body / footer) live inside this ONE wrapper
           so on narrow screens they scroll sideways TOGETHER and stay perfectly
-          column-aligned. The page itself never overflows horizontally. */}
-      <div className="overflow-x-auto rox-rail-scroll">
+          column-aligned. The page itself never overflows horizontally. In fill
+          mode it becomes a flex column so the body can flex-grow and push the
+          footer to the bottom. */}
+      <div className={cn("overflow-x-auto rox-rail-scroll", fillViewport && "flex min-h-0 flex-1 flex-col")}>
 
         {/* ═══ FIXED HEADER TABLE (outside the vertical scroll region) ═══ */}
         <div style={{ paddingRight: scrollbarW }}>
@@ -471,12 +502,21 @@ export function PerformanceTable({
             fits the content — no forced scrollbar for small datasets. */}
         <div
           ref={scrollBodyRef}
-          className="min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300"
-          style={{
-            maxHeight: bodyMaxH != null ? `${bodyMaxH}px` : "calc(100vh - 320px)",
-            overscrollBehavior: "contain",
-            overflowAnchor: "none",
-          }}
+          className={cn(
+            "min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300",
+            // Fill mode: the body grows to absorb all the freed height (pushing
+            // the footer to the bottom) and scrolls only when rows overflow it.
+            fillViewport && "flex-1",
+          )}
+          style={
+            fillViewport
+              ? { overscrollBehavior: "contain", overflowAnchor: "none" }
+              : {
+                  maxHeight: bodyMaxH != null ? `${bodyMaxH}px` : "calc(100vh - 320px)",
+                  overscrollBehavior: "contain",
+                  overflowAnchor: "none",
+                }
+          }
         >
           <table className={cn(TABLE_BASE, TABLE_MIN_W)}>
             <PerfCols isAgent={isAgent} />

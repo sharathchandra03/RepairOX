@@ -259,9 +259,9 @@ export function useLeadKanban(userId: string | null | undefined): UseLeadKanban 
   }, []);
 
   const renameBoard = useCallback((boardId: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    patchBoard(boardId, (b) => ({ ...b, name: trimmed }));
+    // Store the raw value so the user can freely clear/space while typing.
+    // Emptiness is only resolved to a safe default on commit (see UI onBlur).
+    patchBoard(boardId, (b) => ({ ...b, name }));
   }, [patchBoard]);
 
   const setBoardColor = useCallback((boardId: string, color: KanbanColor) => {
@@ -298,9 +298,9 @@ export function useLeadKanban(userId: string | null | undefined): UseLeadKanban 
   }, [patchActive]);
 
   const renameColumn = useCallback((columnId: string, name: string) => {
-    const trimmed = name.trim();
-    if (!trimmed) return;
-    patchActive((b) => ({ ...b, columns: b.columns.map((c) => (c.id === columnId ? { ...c, name: trimmed } : c)) }));
+    // Store the raw value so the user can freely backspace to empty and type
+    // spaces while editing. The empty case is resolved on commit (UI onBlur).
+    patchActive((b) => ({ ...b, columns: b.columns.map((c) => (c.id === columnId ? { ...c, name } : c)) }));
   }, [patchActive]);
 
   const setColumnColor = useCallback((columnId: string, color: KanbanColor) => {

@@ -273,11 +273,11 @@ export function SalesBookWorkspace({
 function pct(v: number): string { return `${Math.round(v * 100)}%`; }
 
 type KpiAccent = "blue" | "indigo" | "emerald" | "amber";
-const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string }> = {
-  blue: { bar: "bg-[#4361EE]", chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/50" },
-  indigo: { bar: "bg-indigo-500", chip: "bg-indigo-50 text-indigo-600", value: "text-indigo-700", fill: "bg-indigo-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(99,102,241,0.4)] hover:border-indigo-400/60" },
-  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/60" },
-  amber: { bar: "bg-amber-500", chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/60" },
+const KPI_ACCENT: Record<KpiAccent, { bar: string; chip: string; value: string; fill: string; glow: string; wash: string }> = {
+  blue: { bar: "bg-[#4361EE]", chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-[#2A3BA3]", fill: "bg-[#4361EE]", glow: "hover:shadow-[0_10px_30px_-14px_rgba(67,97,238,0.4)] hover:border-[#4361EE]/50", wash: "from-[#4361EE]/[0.07]" },
+  indigo: { bar: "bg-indigo-500", chip: "bg-indigo-50 text-indigo-600", value: "text-indigo-700", fill: "bg-indigo-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(99,102,241,0.4)] hover:border-indigo-400/60", wash: "from-indigo-500/[0.07]" },
+  emerald: { bar: "bg-emerald-500", chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-700", fill: "bg-emerald-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(16,185,129,0.4)] hover:border-emerald-400/60", wash: "from-emerald-500/[0.07]" },
+  amber: { bar: "bg-amber-500", chip: "bg-amber-50 text-amber-600", value: "text-amber-700", fill: "bg-amber-500", glow: "hover:shadow-[0_10px_30px_-14px_rgba(245,158,11,0.4)] hover:border-amber-400/60", wash: "from-amber-500/[0.07]" },
 };
 
 /* Consolidated KPI card — one card groups a primary metric with two related
@@ -295,13 +295,15 @@ function Kpi({ label, icon: Icon, accent = "blue", primaryValue, primaryDescript
   return (
     <div className={cn("relative flex min-h-[140px] flex-col overflow-hidden rounded-2xl border-2 bg-card p-4 pl-5 shadow-card transition duration-200 hover:-translate-y-0.5", attention ? "border-red-200 hover:border-red-300" : "border-zinc-200", a.glow)}>
       <span className={cn("absolute inset-y-0 left-0 w-1", attention ? "bg-[#D96A82]" : a.bar)} aria-hidden />
-      <div className="flex items-center gap-2">
+      {/* Soft tone-tinted top wash — the colour-shade matching the Lead Dashboard KPI cards. */}
+      <div aria-hidden className={cn("pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b to-transparent", attention ? "from-rose-500/[0.07]" : a.wash)} />
+      <div className="relative flex items-center gap-2">
         <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", attention ? "bg-red-50 text-rose-600" : a.chip)}><Icon className="h-3.5 w-3.5" /></span>
         <span className="truncate text-[10.5px] font-semibold uppercase tracking-wider text-slate-500">{label}</span>
       </div>
-      <p className={cn("mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", attention ? "text-[#C4506B]" : a.value)}>{primaryValue}</p>
-      <p className="mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
-      <div className="mt-auto space-y-1.5 pt-3">
+      <p className={cn("relative mt-2.5 font-display text-[26px] font-extrabold leading-none tracking-tight tabular-nums", attention ? "text-[#C4506B]" : a.value)}>{primaryValue}</p>
+      <p className="relative mt-1 text-[11px] font-medium text-muted-foreground">{primaryDescription}</p>
+      <div className="relative mt-auto space-y-1.5 pt-3">
         {showProgress && <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted" aria-hidden><div className={cn("h-full rounded-full transition-all duration-500", a.fill)} style={{ width: `${clamped > 0 ? Math.max(clamped * 100, 2) : 0}%` }} /></div>}
         <div className="space-y-1">
           {support.map((sup) => (

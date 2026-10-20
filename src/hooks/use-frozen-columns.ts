@@ -10,10 +10,16 @@
      • one LEFT anchor  (e.g. Lead ID)  — identity, pinned to the left edge
      • one RIGHT anchor (e.g. Last Action) — actions, pinned to the right edge
 
-   In addition, the user may freeze extra columns from the BEGINNING of the
-   table onto the LEFT side (Lead ID | Date | Agent | … | scroll … | Actions).
-   We never freeze an arbitrary middle column between two scrolling regions —
-   the left frozen block is always a contiguous prefix of the columns.
+   In addition, the user may freeze extra columns onto EITHER side:
+     • LEFT  — a contiguous prefix growing from the left anchor
+       (Lead ID | Date | Agent | … | scroll … | Actions)
+     • RIGHT — a contiguous suffix growing in from the right anchor
+       (Lead ID | … | scroll … | Result | Last Action)
+   A column freezes to whichever side it is nearest (first half → left,
+   second half → right), so freezing "Result" pins it to the RIGHT while the
+   columns before it keep scrolling. We never freeze an arbitrary middle column
+   between two scrolling regions — each frozen block is always a contiguous run
+   anchored to its edge.
 
    PERSISTENCE (dual-mode, matches use-column-order.ts / use-lead-kanban.ts):
      • Supabase mode → the `user_table_preferences.frozen_columns` row is the
@@ -51,17 +57,48 @@ export type GridColumn = {
 export type FrozenColumnsState = {
   /** Ordered keys frozen to the LEFT (mandatory left anchor first). */
   leftKeys: string[];
-  /** The single RIGHT anchor key. */
+  /** Ordered keys frozen to the RIGHT, left→right, mandatory right anchor LAST. */
+  rightKeys: string[];
+  /** The single mandatory RIGHT anchor key. */
   rightKey: string | null;
   /** Optional (non-mandatory) left keys the user selected. */
   optionalLeft: string[];
-  /** Toggle an optional column's frozen state (mandatory columns are ignored). */
+  /** Optional (non-mandatory) right keys the user selected. */
+  optionalRight: string[];
+  /** Toggle an optional column's frozen state (mandatory columns are ignored).
+   *  The side is chosen automatically by the column's position. */
   toggle: (key: string) => void;
+  /** Which side a column would freeze to ("left" | "right"), for menu hints. */
+  sideFor: (key: string) => "left" | "right";
   /** Reset to default — only the two mandatory anchors frozen. */
   reset: () => void;
   /** True once the authoritative load has completed (avoids SSR/hydration). */
   hydrated: boolean;
 };
+
+/* ── Storage encoding ───────────────────────────────────────────────────────
+   The persistence layer stores a flat string[] (DB + localStorage). To support
+   BOTH sides without changing the storage schema/API/migration, a right-frozen
+   column is encoded with a "right:" prefix; a plain key is left-frozen (so any
+   legacy left-only preference loads unchanged). */
+const RIGHT_PREFIX = "right:";
+const encodeRight = (key: string) => `${RIGHT_PREFIX}${key}`;
+const isRightToken = (tok: string) => tok.startsWith(RIGHT_PREFIX);
+const decodeToken = (tok: string) => (isRightToken(tok) ? tok.slice(RIGHT_PREFIX.length) : tok);
+
+function splitStored(raw: string[] | null | undefined): { left: string[]; right: string[] } {
+  const left: string[] = [];
+  const right: string[] = [];
+  for (const tok of raw ?? []) {
+    if (isRightToken(tok)) right.push(decodeToken(tok));
+    else left.push(tok);
+  }
+  return { left, right };
+}
+
+function joinStored(left: string[], right: string[]): string[] {
+  return [...left, ...right.map(encodeRight)];
+}
 
 const STORAGE_PREFIX = "repairox-frozen-columns::";
 
@@ -79,8 +116,10 @@ export function useFrozenColumns(
   userId: string | null | undefined,
   columns: GridColumn[],
 ): FrozenColumnsState {
-  // Optional (user-selected) frozen keys — mandatory anchors are implicit.
-  const [optionalLeft, setOptionalLeft] = useState<string[]>([]);
+  // Optional (user-selected) frozen tokens — encoded (plain = left,
+  // "right:" prefixed = right). Mandatory anchors are implicit. Persisted
+  // verbatim as a flat string[] (no storage-schema change).
+  const [stored, setStored] = useState<string[]>([]);
   const [hydrated, setHydrated] = useState(false);
 
   const loadedForKeyRef = useRef<string | null>(null);
@@ -123,7 +162,7 @@ export function useFrozenColumns(
       }
 
       if (cancelled) return;
-      setOptionalLeft(saved ?? []);
+      setStored(saved ?? []);
       loadedForKeyRef.current = `${gridId}::${userId ?? "anon"}`;
       setHydrated(true);
     })();
@@ -141,18 +180,18 @@ export function useFrozenColumns(
     if (loadedForKeyRef.current !== currentKey) return;
 
     // localStorage: immediate.
-    writeLocal(STORAGE_PREFIX, gridId, userId, optionalLeft);
+    writeLocal(STORAGE_PREFIX, gridId, userId, stored);
 
     // Server: debounced.
     if (isSupabaseConfigured) {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-      const snapshot = optionalLeft.length > 0 ? optionalLeft : null;
+      const snapshot = stored.length > 0 ? stored : null;
       saveTimerRef.current = setTimeout(() => {
         void saveServerPref(gridId, "frozenColumns", snapshot);
       }, SAVE_DEBOUNCE);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [optionalLeft, hydrated, gridId, userId]);
+  }, [stored, hydrated, gridId, userId]);
 
   // Flush pending save on unmount.
   useEffect(
@@ -163,39 +202,119 @@ export function useFrozenColumns(
   const lockedLeftKey = useMemo(() => columns.find((c) => c.lockedLeft)?.key ?? null, [columns]);
   const rightKey = useMemo(() => columns.find((c) => c.lockedRight)?.key ?? null, [columns]);
 
-  // Prune saved keys against current column set (stale-column safety).
-  const validOptional = useMemo(() => {
-    const freezableKeys = new Set(
-      columns
-        .filter((c) => !c.lockedLeft && !c.lockedRight && c.freezable !== false)
-        .map((c) => c.key),
-    );
-    return optionalLeft.filter((k) => freezableKeys.has(k));
-  }, [optionalLeft, columns]);
+  // The freezable optional columns, IN VISUAL ORDER (excludes the two anchors
+  // and non-freezable structural columns).
+  const freezableOrder = useMemo(
+    () => columns
+      .filter((c) => !c.lockedLeft && !c.lockedRight && c.freezable !== false)
+      .map((c) => c.key),
+    [columns],
+  );
 
-  // The left frozen block: mandatory left anchor, then optional-frozen columns
-  // IN VISUAL ORDER (contiguous prefix — no scrolling column trapped between
-  // two frozen regions).
+  // Decode the stored tokens into valid left/right key sets (stale-column safe).
+  const { validLeft, validRight } = useMemo(() => {
+    const freezable = new Set(freezableOrder);
+    const { left, right } = splitStored(stored);
+    return {
+      validLeft: left.filter((k) => freezable.has(k)),
+      validRight: right.filter((k) => freezable.has(k)),
+    };
+  }, [stored, freezableOrder]);
+
+  /** Which side a given column freezes to: the half it sits in. First half →
+   *  left, second half (and the exact middle) → right. */
+  const sideFor = useCallback(
+    (key: string): "left" | "right" => {
+      const idx = freezableOrder.indexOf(key);
+      if (idx < 0) return "left";
+      return idx < Math.floor(freezableOrder.length / 2) ? "left" : "right";
+    },
+    [freezableOrder],
+  );
+
+  // LEFT frozen block: mandatory left anchor + a CONTIGUOUS PREFIX of the
+  // freezable columns. Stop at the first gap so a far column can never pin left
+  // with gaps/overlap.
   const leftKeys = useMemo(() => {
-    const optSet = new Set(validOptional);
-    const ordered = columns
-      .filter((c) => optSet.has(c.key))
-      .map((c) => c.key);
+    const set = new Set(validLeft);
+    const ordered: string[] = [];
+    for (const key of freezableOrder) {
+      if (!set.has(key)) break;
+      ordered.push(key);
+    }
     return lockedLeftKey ? [lockedLeftKey, ...ordered] : ordered;
-  }, [columns, validOptional, lockedLeftKey]);
+  }, [freezableOrder, validLeft, lockedLeftKey]);
+
+  // RIGHT frozen block: a CONTIGUOUS SUFFIX of the freezable columns, then the
+  // mandatory right anchor LAST. Built by walking from the right edge inward
+  // and stopping at the first gap.
+  const rightKeys = useMemo(() => {
+    const set = new Set(validRight);
+    const ordered: string[] = [];
+    for (let i = freezableOrder.length - 1; i >= 0; i--) {
+      const key = freezableOrder[i];
+      if (!set.has(key)) break;
+      ordered.unshift(key);
+    }
+    return rightKey ? [...ordered, rightKey] : ordered;
+  }, [freezableOrder, validRight, rightKey]);
 
   const toggle = useCallback(
     (key: string) => {
       const col = columns.find((c) => c.key === key);
       if (!col || col.lockedLeft || col.lockedRight || col.freezable === false) return;
-      setOptionalLeft((prev) =>
-        prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
-      );
+      const targetIdx = freezableOrder.indexOf(key);
+      if (targetIdx < 0) return;
+
+      const side = sideFor(key);
+      setStored((prev) => {
+        const { left, right } = splitStored(prev);
+        const leftSet = new Set(left);
+        const rightSet = new Set(right);
+
+        if (side === "left") {
+          const wasFrozen = leftSet.has(key);
+          let nextLeft: string[];
+          if (wasFrozen) {
+            // Unfreeze this + everything after it (keep the left prefix).
+            nextLeft = freezableOrder.slice(0, targetIdx);
+          } else {
+            // Freeze this + everything before it (contiguous left prefix).
+            nextLeft = freezableOrder.slice(0, targetIdx + 1);
+          }
+          // A column can't be frozen on both sides.
+          const nextRight = right.filter((k) => !nextLeft.includes(k));
+          return joinStored(nextLeft, nextRight);
+        }
+
+        // side === "right"
+        const wasFrozen = rightSet.has(key);
+        let nextRight: string[];
+        if (wasFrozen) {
+          // Unfreeze this + everything before it (keep the right suffix).
+          nextRight = freezableOrder.slice(targetIdx + 1);
+        } else {
+          // Freeze this + everything after it (contiguous right suffix).
+          nextRight = freezableOrder.slice(targetIdx);
+        }
+        const nextLeft = left.filter((k) => !nextRight.includes(k));
+        return joinStored(nextLeft, nextRight);
+      });
     },
-    [columns],
+    [columns, freezableOrder, sideFor],
   );
 
-  const reset = useCallback(() => setOptionalLeft([]), []);
+  const reset = useCallback(() => setStored([]), []);
 
-  return { leftKeys, rightKey, optionalLeft: validOptional, toggle, reset, hydrated };
+  return {
+    leftKeys,
+    rightKeys,
+    rightKey,
+    optionalLeft: validLeft,
+    optionalRight: validRight,
+    toggle,
+    sideFor,
+    reset,
+    hydrated,
+  };
 }

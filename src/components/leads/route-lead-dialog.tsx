@@ -113,20 +113,25 @@ export function RouteLeadDialog({ lead, open, onClose }: {
         } else {
           const manager = managers.find((m) => m.id === fieldManagerId);
           const agent = canAssignNinja ? fieldAgents.find((a) => a.id === ninjaId) : undefined;
-          const job = await createJob({
-            leadId: lead.id, leadNo: lead.leadNo, customerId,
-            customer: lead.name, phone: lead.number, email: lead.email,
-            device: lead.device, issue: lead.issue,
-            // Field-specific operational classification. Source is MAPPED from
-            // the lead (never re-entered); leadType is the trip nature.
-            leadType: jobLeadType,
-            source: lead.source || "",
-            branch: manager?.branch || agent?.branch || store || "",
-            salesPersonId: currentUserId || "", salesPersonName: currentUserName || "",
-            fieldManagerId: manager?.id || "", fieldManagerName: manager?.name || "",
-            pickupAddress, pickupDate, pickupTime,
-            status: "pending_assignment",
-          });
+          const job = await createJob(
+            {
+              leadId: lead.id, leadNo: lead.leadNo, customerId,
+              customer: lead.name, phone: lead.number, email: lead.email,
+              device: lead.device, issue: lead.issue,
+              // Field-specific operational classification. Source is MAPPED from
+              // the lead (never re-entered); leadType is the trip nature.
+              leadType: jobLeadType,
+              source: lead.source || "",
+              branch: manager?.branch || agent?.branch || store || "",
+              salesPersonId: currentUserId || "", salesPersonName: currentUserName || "",
+              fieldManagerId: manager?.id || "", fieldManagerName: manager?.name || "",
+              pickupAddress, pickupDate, pickupTime,
+              status: "pending_assignment",
+            },
+            // Own the job in the LEAD's store so it appears in that store's
+            // Field workspace regardless of the routing user's active store.
+            lead.branchId || null,
+          );
           if (job) {
             await routeLead(lead.id, route);
             await updateLead(lead.id, { customerId, linkedFieldJobId: job.id });
