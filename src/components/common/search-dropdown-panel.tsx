@@ -37,6 +37,10 @@ export const SearchDropdownPanel = forwardRef<HTMLDivElement, {
   listClassName?: string;
   /** Max height of the scrollable list region (CSS length). */
   maxListHeight?: string;
+  /** When true the panel opens UPWARD (anchored to the input's top) instead of
+   *  downward — used when there isn't enough room below (e.g. the field sits
+   *  near the bottom of a modal). */
+  dropUp?: boolean;
 }>(function SearchDropdownPanel({
   onClose,
   label,
@@ -44,12 +48,14 @@ export const SearchDropdownPanel = forwardRef<HTMLDivElement, {
   className,
   listClassName,
   maxListHeight = "15rem",
+  dropUp = false,
 }, ref) {
   return (
     <div
       ref={ref}
       className={cn(
-        "absolute left-0 top-full z-50 mt-1.5 w-full overflow-hidden rounded-xl border border-border bg-card shadow-xl ring-1 ring-black/[0.03]",
+        "absolute left-0 z-50 w-full overflow-hidden rounded-xl border border-border bg-card shadow-xl ring-1 ring-black/[0.03]",
+        dropUp ? "bottom-full mb-1.5" : "top-full mt-1.5",
         className,
       )}
     >

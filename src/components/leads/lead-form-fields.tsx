@@ -530,7 +530,6 @@ export function DeviceCatalogPicker({
 }) {
   const { categories, brands, models, addCategory, addBrand, addModel } = useCatalog();
   const { can } = usePermissions();
-  const [showBrowse, setShowBrowse] = useState(false);
   // Capturing a missing Category / Brand / Model inline writes to the shared
   // Device Catalog, so it's gated on the catalog edit capability (same key the
   // Price List uses). A view-tier user just picks from existing options.
@@ -596,43 +595,15 @@ export function DeviceCatalogPicker({
     </div>
   );
 
-  // Browse-by-category is only an OPTION in search-first mode; always shown
-  // (never collapsed) in the legacy cascade-only mode.
-  const browseOpen = !searchFirst || showBrowse;
-
   return (
     <div className="space-y-2">
       {searchFirst ? (
-        <>
-          {/* ONE search box over every model, no category required. */}
-          <DeviceModelSearch value={value} onChange={onChange} />
-          <button
-            type="button"
-            onClick={() => setShowBrowse((s) => !s)}
-            className="text-[11px] font-medium text-[#4361EE] hover:underline"
-          >
-            {browseOpen ? "Hide category browse" : "Can't find it? Browse by category"}
-          </button>
-          {browseOpen && cascade}
-        </>
+        /* ONE search box over every model — the selected model shows inside the
+           search bar itself, so no extra pill/chip or "browse by category"
+           message is needed. */
+        <DeviceModelSearch value={value} onChange={onChange} />
       ) : (
         cascade
-      )}
-      {value.label && (
-        <div className="pt-1">
-          <span className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] py-1 pl-2.5 pr-1.5 text-[11px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40">
-            <Smartphone className="h-3 w-3 shrink-0" />
-            <span className="truncate">{value.label}</span>
-            <button
-              type="button"
-              aria-label="Remove selected device"
-              onClick={() => onChange({ categoryId: "", brandId: "", modelId: "", label: "" })}
-              className="grid h-4 w-4 shrink-0 place-items-center rounded-full transition hover:bg-[#4361EE]/15"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        </div>
       )}
     </div>
   );

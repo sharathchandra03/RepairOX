@@ -56,6 +56,14 @@ import {
 const FIELD_LABEL_PREFIX = "__label__:";
 const fieldLabelKey = (field: LeadFieldKey) => `${FIELD_LABEL_PREFIX}${field}`;
 
+/* A field SECTION that an admin has deleted/hidden from the Lead Form is
+   persisted the same sentinel way: a row whose `field` column is
+   "__hidden__:<fieldKey>" (value "1"). Hiding removes the whole field section
+   from the form + settings without any schema change; it is reversible by
+   deleting that sentinel row. Existing leads keep their stored values. */
+const FIELD_HIDDEN_PREFIX = "__hidden__:";
+const fieldHiddenKey = (field: LeadFieldKey) => `${FIELD_HIDDEN_PREFIX}${field}`;
+
 /** Normalise a lead's `devices` column into a LeadDevice[]. Tolerates a jsonb
  *  array, a JSON string, or a missing/invalid value (legacy / unmigrated). */
 function parseDevices(raw: unknown): LeadDevice[] {
@@ -576,6 +584,14 @@ interface LeadsContextValue {
    *  (reverts to the built-in label). */
   setFieldTitle: (field: LeadFieldKey, title: string) => Promise<void>;
 
+  /** Field SECTIONS an admin has deleted/hidden from the Lead Form (org-wide,
+   *  reversible, persisted). Existing leads keep their stored values. */
+  hiddenFields: Set<LeadFieldKey>;
+  /** Whether a given field section is hidden from the form. */
+  isFieldHidden: (field: LeadFieldKey) => boolean;
+  /** Hide (delete) or restore a whole field section. */
+  setFieldHidden: (field: LeadFieldKey, hidden: boolean) => Promise<void>;
+
   /* ── CRM Contacts (people, optionally linked to a Customer Master record
      and/or a Company) — see public.contacts, 0031_customer_master_integration.sql.
      Degrades gracefully (empty list, no-op writes) if that migration hasn't
@@ -773,6 +789,12 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const db = supabase!;
   const optionsRef = useRef<LeadOption[]>([]);
   optionsRef.current = options;
+  // While an options write (reorder / add / delete / archive / title) is in
+  // flight, the realtime `lead_options` reload must NOT overwrite our optimistic
+  // local order — the per-row sort_order writes land one-by-one and an
+  // interleaved full-table reload would "snap" the drag back. This lock is held
+  // from the first optimistic setOptions until just after the last DB write.
+  const optionsWriteLockRef = useRef(0);
   const leadsRef = useRef<Lead[]>([]);
   leadsRef.current = leads;
   const contactsRef = useRef<Contact[]>([]);
@@ -995,7 +1017,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       ]);
       if (!active) return;
       if (leadRows) setLeads(applyFulfilmentOverlay(leadRows.map(rowToLead)));
-      if (optRows) setOptions(optRows.map(rowToOption));
+      // Skip applying option rows while a local options write is in flight —
+      // otherwise an interleaved reload overwrites the optimistic order/state
+      // (the drag-reorder "snap back" glitch).
+      if (optRows && optionsWriteLockRef.current === 0) setOptions(optRows.map(rowToOption));
       if (contactRows) setContacts(contactRows.map(rowToContact));
       if (!fuErr && fuRows) setFollowUps(fuRows.map(rowToFollowUp));
       if (!ahErr && ahRows) setAssignmentHistory(ahRows.map(rowToAssignmentEvent));
@@ -2281,16 +2306,30 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
 
   const reorderOptions = useCallback(async (field: LeadFieldKey, orderedIds: string[]) => {
     const orderMap = new Map(orderedIds.map((id, i) => [id, i]));
+    // Hold the realtime write-lock so the incoming postgres_changes reload
+    // can't overwrite this optimistic order mid-write (the snap-back glitch).
+    optionsWriteLockRef.current += 1;
     setOptions((prev) => {
       const next = prev.map((o) => (o.field === field && orderMap.has(o.id) ? { ...o, sortOrder: orderMap.get(o.id)! } : o));
       if (!useDb) writeLS(OPTIONS_KEY, next);
       return next;
     });
     if (useDb) {
-      for (const [id, i] of orderMap.entries()) {
-        const { error } = await db.from("lead_options").update({ sort_order: i }).eq("id", id);
-        if (error) console.error("[leads] reorderOptions failed:", error.message);
+      try {
+        await Promise.all(
+          Array.from(orderMap.entries()).map(([id, i]) =>
+            db.from("lead_options").update({ sort_order: i }).eq("id", id)
+              .then(({ error }) => { if (error) console.error("[leads] reorderOptions failed:", error.message); }),
+          ),
+        );
+      } finally {
+        // Keep the lock a beat longer so the trailing realtime events (which
+        // arrive async after the writes) are ignored; our optimistic state is
+        // already the correct final order.
+        setTimeout(() => { optionsWriteLockRef.current = Math.max(0, optionsWriteLockRef.current - 1); }, 1200);
       }
+    } else {
+      optionsWriteLockRef.current = Math.max(0, optionsWriteLockRef.current - 1);
     }
   }, [useDb, db]);
 
@@ -2370,6 +2409,46 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     setOptions((prev) => { const next = [...prev, opt]; writeLS(OPTIONS_KEY, next); return next; });
   }, [useDb, db]);
 
+  /* ── Hidden field SECTIONS ──
+     The set of field keys an admin has deleted from the Lead Form (persisted as
+     "__hidden__:<field>" sentinel rows). Hiding a section removes the whole
+     field (its dropdown + its form control); existing leads keep their stored
+     values. Reversible by un-hiding. */
+  const hiddenFields = useMemo<Set<LeadFieldKey>>(() => {
+    const set = new Set<LeadFieldKey>();
+    for (const o of options) {
+      if (o.field.startsWith(FIELD_HIDDEN_PREFIX)) {
+        set.add(o.field.slice(FIELD_HIDDEN_PREFIX.length) as LeadFieldKey);
+      }
+    }
+    return set;
+  }, [options]);
+
+  const isFieldHidden = useCallback((field: LeadFieldKey) => hiddenFields.has(field), [hiddenFields]);
+
+  const setFieldHidden = useCallback(async (field: LeadFieldKey, hidden: boolean) => {
+    const key = fieldHiddenKey(field);
+    const existing = optionsRef.current.find((o) => o.field === key);
+    if (hidden) {
+      if (existing) return;
+      if (useDb) {
+        const { data, error } = await db.from("lead_options").insert({ field: key, value: "1", sort_order: 0, active: true, branch_id: null }).select("*").single();
+        if (error || !data) { console.error("[leads] setFieldHidden(hide) failed:", error?.message); toast.error("Section not deleted", { description: "We couldn't delete this section. Check your permissions and try again." }); return; }
+        setOptions((prev) => [...prev, rowToOption(data)]);
+        return;
+      }
+      const opt: LeadOption = { id: uid(), field: key as LeadFieldKey, value: "1", sortOrder: 0, active: true, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      setOptions((prev) => { const next = [...prev, opt]; writeLS(OPTIONS_KEY, next); return next; });
+    } else {
+      if (!existing) return;
+      if (useDb) {
+        const { error } = await db.from("lead_options").delete().eq("id", existing.id);
+        if (error) { console.error("[leads] setFieldHidden(restore) failed:", error.message); toast.error("Section not restored", { description: "We couldn't restore this section. Please try again." }); return; }
+      }
+      setOptions((prev) => { const next = prev.filter((o) => o.id !== existing.id); if (!useDb) writeLS(OPTIONS_KEY, next); return next; });
+    }
+  }, [useDb, db]);
+
   const value = useMemo<LeadsContextValue>(() => ({
     leads: scopedLeads, filteredLeads, options, hydrated, loadErrors, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
@@ -2381,10 +2460,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity,
     leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
-    fieldTitle, setFieldTitle,
+    fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

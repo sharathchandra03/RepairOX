@@ -19,7 +19,7 @@ import {
 } from "@hello-pangea/dnd";
 import {
   ArrowLeft, Plus, X, Check, Pencil, EyeOff, Eye, Trash2, Lock,
-  GripVertical, ListChecks, Users, RotateCcw,
+  GripVertical, ListChecks, Users, RotateCcw, FolderX, RotateCw,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +79,10 @@ export default function FormEditPage() {
               />
             ))}
           </nav>
+          <p className="mt-3 px-1 text-[11px] leading-snug text-muted-foreground">
+            A deleted section is hidden from the Lead Form. Existing leads keep
+            their values — you can restore it anytime.
+          </p>
         </div>
 
         {/* ── Right panel: option editor ── */}
@@ -93,12 +97,13 @@ export default function FormEditPage() {
 /* ── Sidebar field tab ── */
 
 function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boolean; onClick: () => void }) {
-  const { options, fieldTitle } = useLeads();
+  const { options, fieldTitle, isFieldHidden } = useLeads();
   const count = useMemo(
     () => options.filter((o) => o.field === field.key && o.active).length,
     [options, field.key],
   );
   const title = fieldTitle(field.key);
+  const hidden = isFieldHidden(field.key);
   return (
     <button
       type="button"
@@ -108,6 +113,7 @@ function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boo
         active
           ? "border border-[#4361EE]/30 bg-[#EEF1FD]/60 text-[#3A4DBB]"
           : "border border-transparent text-zinc-600 hover:bg-muted/60 hover:text-zinc-800",
+        hidden && !active && "opacity-60",
       )}
     >
       <span className={cn(
@@ -116,13 +122,17 @@ function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boo
       )}>
         {field.usesStaff ? <Users className="h-3.5 w-3.5" /> : <ListChecks className="h-3.5 w-3.5" />}
       </span>
-      <span className="min-w-0 flex-1 truncate">{title}</span>
-      <span className={cn(
-        "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
-        active ? "bg-[#4361EE]/10 text-[#4361EE]" : "bg-muted text-muted-foreground",
-      )}>
-        {count}
-      </span>
+      <span className={cn("min-w-0 flex-1 truncate", hidden && "line-through")}>{title}</span>
+      {hidden ? (
+        <span className="shrink-0 rounded-full bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-600">Deleted</span>
+      ) : (
+        <span className={cn(
+          "rounded-full px-1.5 py-0.5 text-[10px] font-semibold",
+          active ? "bg-[#4361EE]/10 text-[#4361EE]" : "bg-muted text-muted-foreground",
+        )}>
+          {count}
+        </span>
+      )}
     </button>
   );
 }
@@ -130,11 +140,13 @@ function FieldTab({ field, active, onClick }: { field: LeadFieldDef; active: boo
 /* ── Option editor panel (one field at a time) ── */
 
 function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: boolean }) {
-  const { options, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle } = useLeads();
+  const { options, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, isFieldHidden, setFieldHidden } = useLeads();
   const { team } = usePermissions();
   const [adding, setAdding] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState("");
+  const hidden = isFieldHidden(field.key);
+  const [confirmDeleteSection, setConfirmDeleteSection] = useState(false);
 
   // Inline edit of the FIELD TITLE itself (reflects in the table + form).
   const title = fieldTitle(field.key);
@@ -228,7 +240,34 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
         <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
           {rows.filter((r) => r.active).length} active
         </span>
+        {canManage && (
+          hidden ? (
+            <button
+              onClick={() => void setFieldHidden(field.key, false)}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11.5px] font-semibold text-emerald-700 transition hover:bg-emerald-100"
+              title="Restore this section to the Lead Form"
+            >
+              <RotateCw className="h-3.5 w-3.5" /> Restore section
+            </button>
+          ) : (
+            <button
+              onClick={() => setConfirmDeleteSection(true)}
+              className="flex shrink-0 items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11.5px] font-semibold text-rose-600 transition hover:bg-rose-100"
+              title="Delete this whole section from the Lead Form"
+            >
+              <FolderX className="h-3.5 w-3.5" /> Delete section
+            </button>
+          )
+        )}
       </div>
+
+      {/* Deleted-section banner */}
+      {hidden && (
+        <div className="mx-5 mt-4 flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-[12px] text-rose-700">
+          <FolderX className="h-4 w-4 shrink-0" />
+          <p>This section is <strong>deleted</strong> from the Lead Form. Its options stay saved and existing leads keep their values — click <strong>Restore section</strong> to bring it back.</p>
+        </div>
+      )}
 
       {/* Staff notice */}
       {field.usesStaff && (
@@ -356,6 +395,16 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
             : ""
         }
         confirmLabel="Delete"
+        danger
+      />
+
+      <ConfirmDialog
+        open={confirmDeleteSection}
+        onClose={() => setConfirmDeleteSection(false)}
+        onConfirm={() => { void setFieldHidden(field.key, true); setConfirmDeleteSection(false); toast.success("Section deleted", { description: `“${title}” is now hidden from the Lead Form. Restore it anytime.` }); }}
+        title={`Delete the “${title}” section?`}
+        description={`The whole “${title}” field will be removed from the Lead Form. Its options stay saved and existing leads keep their values — you can restore this section later.`}
+        confirmLabel="Delete section"
         danger
       />
     </div>

@@ -53,19 +53,47 @@ export function IssueSelector({
     return () => document.removeEventListener("mousedown", handler);
   }, [open]);
 
-  // When the dropdown opens, bring the option panel into view so the user never
-  // has to scroll manually to see the just-opened list. The panel is absolutely
-  // positioned BELOW the input, so we scroll the panel itself into view (not the
-  // input) — otherwise the input could sit at the bottom edge with its list
-  // hidden off-screen. Runs after the panel paints; `block: "nearest"` scrolls
-  // only the amount needed within the closest scroll container and no-ops when
-  // the panel is already fully visible.
+  // The dropdown ALWAYS opens downward. When the field sits low in the modal,
+  // scroll the modal body so the FIELD moves toward the TOP of the visible
+  // area — freeing the whole height below it for the downward panel. Scrolling
+  // the field up (rather than the panel into view) guarantees room regardless
+  // of the panel's height, and never flips the panel upward.
   useEffect(() => {
     if (!open) return;
-    const id = requestAnimationFrame(() => {
-      (panelRef.current ?? containerRef.current)?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-    });
-    return () => cancelAnimationFrame(id);
+    const run = () => {
+      const panel = panelRef.current;
+      const field = containerRef.current;
+      if (!field) return;
+      // Nearest scrollable ancestor (the modal body).
+      let scroller: HTMLElement | null = field.parentElement;
+      while (scroller) {
+        const style = getComputedStyle(scroller);
+        const oy = style.overflowY;
+        if ((oy === "auto" || oy === "scroll") && scroller.scrollHeight > scroller.clientHeight) break;
+        scroller = scroller.parentElement;
+      }
+      if (!scroller) { (panel ?? field).scrollIntoView({ behavior: "smooth", block: "nearest" }); return; }
+
+      const scRect = scroller.getBoundingClientRect();
+      const fieldRect = field.getBoundingClientRect();
+      const panelH = panel?.offsetHeight ?? 280;
+      const TOP_GAP = 16;   // breathing room above the field after scrolling
+      const BOTTOM_GAP = 12;
+      // Space currently below the field inside the scroller.
+      const spaceBelow = scRect.bottom - fieldRect.bottom;
+      const needed = panelH + BOTTOM_GAP;
+      if (spaceBelow >= needed) return; // already enough room below
+      // Scroll the field up by the shortfall, but no further than putting the
+      // field TOP_GAP below the scroller's top.
+      const maxUp = (fieldRect.top - scRect.top) - TOP_GAP;
+      const delta = Math.min(needed - spaceBelow, Math.max(0, maxUp));
+      if (delta > 0) scroller.scrollBy({ top: delta, behavior: "smooth" });
+    };
+    // Run after the panel paints (so offsetHeight is real), and once more on the
+    // next frame in case height settles after content renders.
+    const id1 = requestAnimationFrame(() => { run(); });
+    const id2 = requestAnimationFrame(() => requestAnimationFrame(run));
+    return () => { cancelAnimationFrame(id1); cancelAnimationFrame(id2); };
   }, [open]);
 
   const filtered = issueLibrary

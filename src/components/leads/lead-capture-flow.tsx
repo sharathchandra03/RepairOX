@@ -34,14 +34,15 @@ import { useLeadStoreMode } from "@/lib/lead-store-mode";
 import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
-  isNotContactedStatus, suggestPartCategory, emptyLeadDevice,
+  isNotContactedStatus, suggestPartCategory, emptyLeadDevice, statusRequiresFollowUp, followUpNounForStatus,
   type Lead, type LeadDraft, type LeadFieldKey, type LeadDevice,
 } from "@/lib/leads-data";
 import { isNotQualified } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
 import { CustomerIdentityLookup } from "@/components/common/customer-identity-lookup";
-import { AddCustomerModal } from "@/components/common/add-customer-modal";
+import { findOrCreateCustomer, formatCustomerName } from "@/lib/customer-service";
+import { toast } from "@/components/ui/toaster";
 import type { Customer } from "@/lib/customer-data";
 import { normalizeCustomerPhone, normalizeCustomerEmail } from "@/lib/customer-data";
 import { IssueSelector } from "@/components/common/issue-selector";
@@ -499,10 +500,10 @@ export function LeadCaptureFlow({
 
 
 function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
-  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft } = useLeads();
+  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft, isFieldHidden } = useLeads();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { team, can, currentUser } = usePermissions();
-  const { customers } = useStore();
+  const { customers, addCustomer } = useStore();
   const { activeStoreId, stores, getStore } = useStoreContext();
   // Lead Management Store Mode governs how the lead's store is chosen:
   //   • SINGLE — forced to the org's Default Lead Store; the picker is hidden.
@@ -600,6 +601,39 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const set = <K extends keyof LeadDraft>(key: K, val: LeadDraft[K]) => setDraft((d) => ({ ...d, [key]: val }));
   const hasPin = draft.locationLat != null && draft.locationLng != null;
 
+  /* ── Default Lead Stage from LIVE options (new leads only) ──
+     We no longer hard-code "New Lead" as the default status (so deleting that
+     option in Settings actually sticks). Instead a brand-new lead gets the
+     org's FIRST active "status" option — matching the configured list. If the
+     list is empty, the stage simply stays blank. Applied once, only when
+     nothing has been picked yet. */
+  const statusDefaultApplied = useRef(false);
+  useEffect(() => {
+    if (isEdit || statusDefaultApplied.current) return;
+    const opts = optionsFor("status").map((o) => o.value).filter(Boolean);
+    if (opts.length === 0) return;
+    statusDefaultApplied.current = true;
+    if (!draft.status) set("status", opts[0]);
+  }, [isEdit, optionsFor, draft.status]);
+
+  /* ── Contact / qualification GATE (progressive data capture) ──
+     • Not-Contacted  → downstream qualification/workflow sections are locked
+       (the lead is still at initial capture).
+     • Not-Qualified  → a MANDATORY reason is required, and downstream sections
+       are locked/closed (the lead never entered the operational workflow).
+     The Not-Qualified reason is stored in `finalRemarks` (an existing canonical
+     field) so it survives to Lead Detail / the Comment column, and is never
+     masked to N/A. Declared before `validation` so the follow-up gate can read
+     it. */
+  const notQualified = isNotQualified(draft.qualification ?? "");
+  const notContacted = isNotContactedStatus(draft.contactStatus ?? "");
+  // Downstream (qualification-dependent) form sections are disabled until the
+  // lead is contacted AND not explicitly disqualified.
+  const downstreamLocked = notContacted || notQualified;
+  // A Not-Qualified lead MUST carry a reason before it can be saved.
+  const needsQualificationReason = notQualified;
+  const qualificationReasonMissing = needsQualificationReason && !(draft.finalRemarks ?? "").trim();
+
   // The owner is REQUIRED whenever one can actually be chosen: the user can pick
   // an owner and the store has Sales Agents, or the user is a Sales Agent
   // themselves. Otherwise the lead may be saved unassigned (a manager assigns
@@ -631,26 +665,27 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         errors.branchId = "Select the store this lead belongs to.";
       }
     }
+    // ── Comments is MANDATORY (the single notes box, in Device & Issue) ──
+    //    Skipped while the downstream is locked (Not-Contacted / Not-Qualified),
+    //    where the Comments field itself is disabled and a Not-Qualified lead
+    //    already carries its mandatory reason in Final Remarks.
+    if (!downstreamLocked && !(draft.comments ?? "").trim()) {
+      errors.comments = "Comments are required.";
+    }
+    // ── Call Back / Follow-Up stage REQUIRES a follow-up date & time ──
+    //    When the Lead Stage is a call-back / follow-up stage, a scheduled
+    //    follow-up instant must be set. (Not gated for a Not-Qualified /
+    //    Not-Contacted lead whose downstream workflow is closed.)
+    if (!downstreamLocked && statusRequiresFollowUp(draft.status ?? "") && !followUpDueAt) {
+      const noun = followUpNounForStatus(draft.status ?? "");
+      errors.followUpDate = `A ${noun.toLowerCase()} date & time is required for a ${noun} stage.`;
+    }
     return { ok: Object.keys(errors).length === 0, errors };
-  }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent, leadMode.ready, leadMode.isSingle, leadMode.isMulti, leadMode.singleStoreMisconfigured, leadMode.singleStoreInactive]);
+  }, [baseValidation, draft.assignedTo, draft.followUpAgentId, draft.branchId, draft.comments, draft.status, followUpDueAt, downstreamLocked, isEdit, editLead?.assignedTo, editLead?.followUpAgentId, salesAgentsReady, isEligibleSalesAgent, leadMode.ready, leadMode.isSingle, leadMode.isMulti, leadMode.singleStoreMisconfigured, leadMode.singleStoreInactive]);
   const showFollowUp = needsFollowUp({ result: draft.result ?? "", status: draft.status ?? "" }) || !!draft.followUpDate;
-
-  /* ── Contact / qualification GATE (progressive data capture) ──
-     • Not-Contacted  → downstream qualification/workflow sections are locked
-       (the lead is still at initial capture).
-     • Not-Qualified  → a MANDATORY reason is required, and downstream sections
-       are locked/closed (the lead never entered the operational workflow).
-     The Not-Qualified reason is stored in `finalRemarks` (an existing canonical
-     field) so it survives to Lead Detail / the Comment column, and is never
-     masked to N/A. */
-  const notQualified = isNotQualified(draft.qualification ?? "");
-  const notContacted = isNotContactedStatus(draft.contactStatus ?? "");
-  // Downstream (qualification-dependent) form sections are disabled until the
-  // lead is contacted AND not explicitly disqualified.
-  const downstreamLocked = notContacted || notQualified;
-  // A Not-Qualified lead MUST carry a reason before it can be saved.
-  const needsQualificationReason = notQualified;
-  const qualificationReasonMissing = needsQualificationReason && !(draft.finalRemarks ?? "").trim();
+  // The follow-up section wording follows the chosen stage: a Call Back stage
+  // reads "Call Back", everything else reads "Follow-Up".
+  const followUpNoun = followUpNounForStatus(draft.status ?? "");
 
   /* ── Non-linear navigation ──
      Any step is reachable directly (click the stepper) or via Prev/Next. No
@@ -795,14 +830,73 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     linkCustomer(c);
   };
 
-  /* ── Inline "Create New Customer" from the Lead Form (spec §8/§80/§81) ──
-     Opens the CANONICAL Add Customer modal (never a mini lead-only form),
-     prefilled with what the salesperson already typed. On create we link the
-     new customer_id straight back onto the draft and keep the current owner. */
-  const [showCreateCustomer, setShowCreateCustomer] = useState(false);
-  const onCustomerCreated = (c: Customer) => {
-    setShowCreateCustomer(false);
-    linkCustomer(c);
+  /* ── Inline "Save as Customer" from the Lead Form (spec §8/§80/§81) ──
+     No second form: the lead's OWN Step-1 fields ARE the customer record. One
+     pill at the top of the Customer step turns the typed identity + location
+     into a canonical Customer Master record, then links it straight back onto
+     the draft (keeping the current Sales Agent untouched — identity only).
+
+     Tracked by MOBILE: findOrCreateCustomer dedups on the normalized phone, so
+     an existing customer with this number is LINKED (never duplicated). The
+     Personal / Business type is chosen inline via `newCustomerType`. */
+  const canCreateCustomer = allow(can, CAP.customer.create);
+  const [newCustomerType, setNewCustomerType] = useState<"personal" | "business">("personal");
+  const [savingCustomer, setSavingCustomer] = useState(false);
+
+  /** Split the single "Name" field into first / last on the FIRST space.
+   *  "Rahul Sharma" → { first: "Rahul", last: "Sharma" }; "Rahul" →
+   *  { first: "Rahul", last: "" }. */
+  const splitName = (full: string): { first: string; last: string } => {
+    const parts = (full || "").trim().split(/\s+/);
+    const first = parts.shift() || "";
+    return { first, last: parts.join(" ") };
+  };
+
+  // The pill is offered only while NO customer is linked, and enabled once the
+  // required identity (Name + valid Number) is present and the user may create.
+  const canSaveAsCustomer =
+    !draft.customerId &&
+    canCreateCustomer &&
+    !validation.errors.name &&
+    !validation.errors.number;
+
+  const saveAsCustomer = async () => {
+    if (!canSaveAsCustomer || savingCustomer) return;
+    setSavingCustomer(true);
+    try {
+      const { first, last } = splitName(draft.name ?? "");
+      // Combine the lead's location unit + address line into one address.
+      const address = [draft.locationUnit, draft.location].map((s) => (s || "").trim()).filter(Boolean).join(", ");
+      const result = findOrCreateCustomer(
+        {
+          firstName: first,
+          lastName: last,
+          mobile: draft.number ?? "",
+          altMobile: draft.alternateNumber || undefined,
+          email: draft.email || undefined,
+          type: newCustomerType,
+          address: address || undefined,
+          city: draft.region || undefined,
+          // Provenance: captured from the Lead Form (Sales origin).
+          captureSource: "lead",
+          source: "sales",
+        },
+        customers,
+      );
+      // Dedup by mobile/email: if the number already belongs to a customer,
+      // link that canonical record instead of creating a duplicate.
+      if (!result.created) {
+        linkCustomer(result.customer);
+        toast.success("Existing customer linked", { description: `${formatCustomerName(result.customer)} already in the Customer Master — no duplicate created.` });
+        return;
+      }
+      const saved = await addCustomer(result.customer);
+      if (!saved) return; // addCustomer surfaces its own DB error toast
+      linkCustomer(saved);
+      toast.success("Customer created", { description: `${formatCustomerName(saved)} was added to the Customer Master.` });
+    } finally {
+      setSavingCustomer(false);
+    }
   };
 
   /* ── Contact-field edit that stays DYNAMIC ──
@@ -844,7 +938,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     if (!validation.ok) {
       // Jump to the step holding the first problem (the stepper stays free-form).
       const e = validation.errors;
-      goToStage(e.name || e.number || e.email ? 1 : e.source || e.assignedTo ? 2 : e.estimate || e.discount ? 3 : 4);
+      goToStage(
+        e.name || e.number || e.email ? 1
+        : e.source || e.assignedTo ? 2
+        : e.estimate || e.discount || e.comments ? 3
+        : 4,
+      );
       return;
     }
     if (!canSaveLead || saving) return;              // permission + double-submit guard
@@ -947,14 +1046,60 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
           <div
             ref={bodyRef}
             onFocus={(e) => { const t = e.target as HTMLElement; if (t.matches("input, textarea, select")) scrollTriggerIntoView(t); }}
-            className="relative flex-1 overflow-y-auto overflow-x-hidden p-5"
+            /* `min-h-0` + `overflow-y-auto` let a TALL step scroll inside the
+               panel's max-height, while a SHORT step (e.g. Step 1) shrink-wraps
+               its content — so there's no empty gap below the last field. */
+            className="relative min-h-0 overflow-y-auto overflow-x-hidden p-5"
           >
             <motion.div key={reviewOpen ? "review" : stage} initial={{ opacity: 0, x: dir >= 0 ? 20 : -20 }} animate={{ opacity: 1, x: 0 }} transition={STEP_TRANSITION}>
 
               {/* ── STEP 1 · Customer ── */}
               {!reviewOpen && stage === 1 && (
                 <div className="space-y-4">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
+                  {/* Header row — the inline "Save as Customer" pill lives
+                      top-right (no separate New Customer sheet). It turns the
+                      lead's own typed fields + location into a canonical
+                      Customer Master record. The Personal/Business selector
+                      sits beside it so the type is chosen in one place. */}
+                  <div className="flex min-h-[28px] items-center justify-between gap-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
+                    {!draft.customerId && canCreateCustomer && (
+                      <div className="flex items-center gap-1.5">
+                        {/* Personal / Business toggle (segmented). */}
+                        <div className="inline-flex items-center rounded-full border border-input bg-muted p-0.5 text-[11px] font-semibold">
+                          {(["personal", "business"] as const).map((t) => (
+                            <button
+                              key={t}
+                              type="button"
+                              onClick={() => setNewCustomerType(t)}
+                              className={cn(
+                                "rounded-full px-2.5 py-1 capitalize transition-colors",
+                                newCustomerType === t ? "bg-[#4361EE] text-white" : "text-muted-foreground hover:text-foreground",
+                              )}
+                            >
+                              {t}
+                            </button>
+                          ))}
+                        </div>
+                        {/* The pill — saves the customer from the lead fields. */}
+                        <button
+                          type="button"
+                          onClick={saveAsCustomer}
+                          disabled={!canSaveAsCustomer || savingCustomer}
+                          title={canSaveAsCustomer ? "Save these details as a customer" : "Enter a name and valid number first"}
+                          className={cn(
+                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-semibold transition",
+                            canSaveAsCustomer && !savingCustomer
+                              ? "border-[#4361EE]/40 bg-white text-[#4361EE] hover:bg-[#EEF1FD]"
+                              : "cursor-not-allowed border-border bg-muted text-muted-foreground",
+                          )}
+                        >
+                          <UserPlus className="h-3.5 w-3.5" />
+                          {savingCustomer ? "Saving…" : "Save as Customer"}
+                        </button>
+                      </div>
+                    )}
+                  </div>
                   {/* Customer lookup + Name share one row at equal (half) width. */}
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Find existing customer">
@@ -979,15 +1124,17 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   </div>
                   {/* Inline Customer Master identity lookup — searches as the
                       salesperson types the phone/email. Shows "Customer Found"
-                      (Use Existing) or "No customer found" (Create New). IDENTITY
-                      ONLY — never surfaces or assigns a historical sales agent. */}
+                      (Use Existing) when the number already belongs to a
+                      customer. Creating a NEW customer is done via the "Save as
+                      Customer" pill above (no separate sheet), so no Create-New
+                      affordance is passed here. IDENTITY ONLY — never surfaces
+                      or assigns a historical sales agent. */}
                   <CustomerIdentityLookup
                     phone={draft.number ?? ""}
                     email={draft.email ?? ""}
                     linkedCustomerId={draft.customerId || ""}
                     onUseExisting={linkCustomer}
                     onClearLink={() => set("customerId", "")}
-                    onCreateNew={() => setShowCreateCustomer(true)}
                   />
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>
@@ -1032,9 +1179,6 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </div>
                     )}
                   </Field>
-                  <Field label={ft("contactStatus")}>
-                    <ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted" />
-                  </Field>
                 </div>
               )}
 
@@ -1046,9 +1190,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     <Field label={ft("source")} required error={touched ? validation.errors.source : undefined}>
                       <ConfigurableSelect field="source" value={draft.source ?? ""} onChange={(v) => set("source", v)} placeholder="How did they reach us?" invalid={touched && !!validation.errors.source} />
                     </Field>
-                    <Field label={ft("modeOfContact")}>
-                      <ConfigurableSelect field="modeOfContact" value={draft.modeOfContact ?? ""} onChange={(v) => set("modeOfContact", v)} placeholder="Call / WhatsApp / Email / …" />
-                    </Field>
+                    {!isFieldHidden("modeOfContact") && (
+                      <Field label={ft("modeOfContact")}>
+                        <ConfigurableSelect field="modeOfContact" value={draft.modeOfContact ?? ""} onChange={(v) => set("modeOfContact", v)} placeholder="Call / WhatsApp / Email / …" />
+                      </Field>
+                    )}
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Agent (owner)" required error={touched ? validation.errors.assignedTo : undefined}>
@@ -1073,10 +1219,19 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         </p>
                       )}
                     </Field>
-                    <Field label={ft("qualification")}>
-                      <ConfigurableSelect field="qualification" value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} placeholder="Qualified Lead / Not Qualified Lead" />
-                    </Field>
+                    {!isFieldHidden("qualification") && (
+                      <Field label={ft("qualification")}>
+                        <ConfigurableSelect field="qualification" value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} placeholder="Qualified Lead / Not Qualified Lead" />
+                      </Field>
+                    )}
                   </div>
+                  {!isFieldHidden("contactStatus") && (
+                    <div className="grid grid-cols-2 gap-3">
+                      <Field label={ft("contactStatus")}>
+                        <ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted" />
+                      </Field>
+                    </div>
+                  )}
                   {/* NOT-QUALIFIED → mandatory reason. Selecting Not Qualified
                       requires a reason before the lead can be saved; the reason
                       is preserved in Final Remarks (readable in Lead Detail +
@@ -1097,9 +1252,6 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </p>
                     </div>
                   )}
-                  <Field label="Comments">
-                    <Textarea value={draft.comments ?? ""} onChange={(e) => set("comments", e.target.value)} placeholder="Notes about this lead…" className="min-h-[70px] text-[13px]" />
-                  </Field>
                 </div>
               )}
 
@@ -1149,6 +1301,18 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       </span>
                     )}
                   </div>
+
+                  {/* Comments — MANDATORY. The single notes box for the lead
+                      lives here with Device & Issue (there is no second box on
+                      the Status step). Highlighted rose when missing on save. */}
+                  <Field label="Comments" required error={touched ? validation.errors.comments : undefined}>
+                    <Textarea
+                      value={draft.comments ?? ""}
+                      onChange={(e) => set("comments", e.target.value)}
+                      placeholder="Notes about this lead…"
+                      className={cn("min-h-[70px] text-[13px]", touched && !!validation.errors.comments && "border-rose-400 focus:border-rose-400 focus:ring-rose-200/40")}
+                    />
+                  </Field>
                 </fieldset>
               )}
 
@@ -1178,12 +1342,20 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         : "Complete contact to unlock status, follow-up and workflow. Set Contact Status to Contacted first."}
                     </div>
                   )}
+                  {(!isFieldHidden("leadNature") || !isFieldHidden("priority")) && (
+                    <div className="grid grid-cols-2 gap-3">
+                      {!isFieldHidden("leadNature") && (
+                        <Field label={ft("leadNature")}><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" glyphFor={leadNatureGlyph} /></Field>
+                      )}
+                      {!isFieldHidden("priority") && (
+                        <Field label={ft("priority")}><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Normal / High / Urgent" /></Field>
+                      )}
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
-                    <Field label={ft("leadNature")}><ConfigurableSelect field="leadNature" value={draft.leadNature ?? ""} onChange={(v) => set("leadNature", v)} placeholder="Hot / Warm / Cold" glyphFor={leadNatureGlyph} /></Field>
-                    <Field label={ft("priority")}><ConfigurableSelect field="priority" value={draft.priority ?? ""} onChange={(v) => set("priority", v)} placeholder="Normal / High / Urgent" /></Field>
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <Field label={ft("status")}><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
+                    {!isFieldHidden("status") && (
+                      <Field label={ft("status")}><ConfigurableSelect field="status" value={draft.status ?? ""} onChange={(v) => set("status", v)} placeholder="Lifecycle stage" /></Field>
+                    )}
                     {/* ── Store · Lead Store Mode aware ──
                         SINGLE mode: a NON-editable context indicator (the store
                         is set in Lead Settings; the agent never picks it).
@@ -1216,19 +1388,19 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   <div className={cn("rounded-2xl border p-4 transition", showFollowUp ? "border-[#B3BFF6] bg-[#EEF1FD]/50" : "border-dashed border-border bg-muted/30")}>
                     <div className="mb-3 flex items-center gap-2">
                       <CalendarClock className={cn("h-4 w-4", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")} />
-                      <p className={cn("text-[12px] font-semibold", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")}>Follow-Up</p>
+                      <p className={cn("text-[12px] font-semibold", showFollowUp ? "text-[#4361EE]" : "text-muted-foreground")}>{followUpNoun}</p>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
-                      <Field label="Follow-Up Date &amp; Time" error={touched ? validation.errors.followUpDate : undefined}>
+                      <Field label={`${followUpNoun} Date & Time`} required={statusRequiresFollowUp(draft.status ?? "")} error={touched ? validation.errors.followUpDate : undefined}>
                         <DateTimeField
                           value={followUpDueAt}
                           onChange={(iso) => { setFollowUpDueAt(iso); set("followUpDate", iso ? iso.slice(0, 10) : ""); }}
-                          title="Follow-Up Date & Time"
+                          title={`${followUpNoun} Date & Time`}
                           placeholder="Pick date & time"
                           invalid={touched && !!validation.errors.followUpDate}
                         />
                       </Field>
-                      <Field label="Follow-Up Agent" error={touched ? validation.errors.followUpAgentId : undefined}>
+                      <Field label={`${followUpNoun} Agent`} error={touched ? validation.errors.followUpAgentId : undefined}>
                         <AgentPicker
                           valueId={draft.followUpAgentId || ""}
                           storeId={draft.branchId || undefined}
@@ -1240,14 +1412,10 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         />
                       </Field>
                     </div>
-                    <Field label="Follow-Up Comments" className="mt-3">
+                    <Field label={`${followUpNoun} Comments`} className="mt-3">
                       <Textarea value={draft.followUpComments ?? ""} onChange={(e) => set("followUpComments", e.target.value)} placeholder="What to do next…" className="min-h-[60px] text-[13px]" />
                     </Field>
                   </div>
-
-                  <Field label="Final Remarks">
-                    <Textarea value={draft.finalRemarks ?? ""} onChange={(e) => set("finalRemarks", e.target.value)} placeholder="Closing notes…" className="min-h-[60px] text-[13px]" />
-                  </Field>
                   </fieldset>
                 </div>
               )}
@@ -1268,13 +1436,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     ["Email", draft.email], ["Region", draft.region],
                     ["Location", [draft.locationUnit, draft.location].filter(Boolean).join(", ")],
                     ["Map pin", hasPin ? `${draft.locationLat!.toFixed(5)}, ${draft.locationLng!.toFixed(5)}` : ""],
-                    ["Contact Status", draft.contactStatus],
                     ["Customer Master", draft.customerId ? "Linked" : "New / unlinked"],
                   ]} />
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
                     ["Source", draft.source], ["Mode of Contact", draft.modeOfContact],
                     ["Agent (owner)", draft.assignedToName], ["Lead Category", draft.qualification],
-                    ["Comments", draft.comments],
+                    ["Contact Status", draft.contactStatus],
                   ]} />
                   {devices.length > 1 ? (
                     <div className="rounded-xl border border-border bg-card p-3">
@@ -1303,6 +1470,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                           <span className="font-bold text-zinc-900 tnum">{money(devicesEstimateTotal)}</span>
                         </div>
                       )}
+                      {!!draft.comments && (
+                        <div className="mt-2.5 border-t border-border pt-2 text-[12px]">
+                          <span className="text-muted-foreground">Comments: </span>
+                          <span className="text-zinc-700">{draft.comments}</span>
+                        </div>
+                      )}
                     </div>
                   ) : (
                     <ReviewGroup title="Device & Issue" onEdit={() => goToStage(3)} rows={[
@@ -1311,13 +1484,14 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       ["Issue", draft.issue],
                       ["Estimate", money(draft.estimate)],
                       ["Discount", draft.discount == null ? "—" : draft.discountType === "percent" ? `${draft.discount}%` : money(draft.discount)],
+                      ["Comments", draft.comments],
                     ]} />
                   )}
                   <ReviewGroup title="Status & Assignment" onEdit={() => goToStage(4)} rows={[
                     ["Lead Nature", draft.leadNature], ["Lead Priority", draft.priority],
                     ["Lead Status", draft.status], ["Store", getStore(draft.branchId)?.name || ""],
-                    ["Follow-Up Date & Time", followUpDueAt ? new Date(followUpDueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""], ["Follow-Up Agent", draft.followUpAgent],
-                    ["Follow-Up Comments", draft.followUpComments], ["Final Remarks", draft.finalRemarks],
+                    [`${followUpNoun} Date & Time`, followUpDueAt ? new Date(followUpDueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }) : ""], [`${followUpNoun} Agent`, draft.followUpAgent],
+                    [`${followUpNoun} Comments`, draft.followUpComments],
                   ]} />
                   <div className="rounded-xl border border-dashed border-border bg-muted/20 p-3 text-[11px] text-muted-foreground">
                     <span className="font-semibold text-zinc-600">System-generated:</span> Lead ID, Date &amp; Time on create · Month ({isEdit ? editLead?.month : derivedMonth}) is derived from the date — never typed.
@@ -1377,26 +1551,6 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         }))}
       />
 
-      {/* Create a NEW Customer Master record from the Lead Form (canonical
-          modal, prefilled with the typed identity). On create we link the new
-          customer_id to the draft; the lead's Sales Agent is unchanged. */}
-      <AddCustomerModal
-        isOpen={showCreateCustomer}
-        onClose={() => setShowCreateCustomer(false)}
-        onCustomerCreated={onCustomerCreated}
-        title="New Customer"
-        description="Create the customer, then continue the lead."
-        defaultData={{
-          firstName: (draft.name ?? "").split(" ")[0] || "",
-          lastName: (draft.name ?? "").split(" ").slice(1).join(" "),
-          mobile: draft.number ?? "",
-          altMobile: draft.alternateNumber ?? "",
-          email: draft.email ?? "",
-          // A customer created from the Lead Form originated in Sales.
-          captureSource: "lead",
-          source: "sales",
-        }}
-      />
     </>
   );
 

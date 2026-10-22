@@ -30,8 +30,8 @@
 
    Visual standard (RepairOX Agent Performance Table v2):
      • Premium 2px outer frame (`border-zinc-300`), rounded-2xl, shadow-card.
-     • SINGLE-TIER flat header (one clean row) on the strong medium-deep
-       RepairOX blue #3B54CF band. Total Leads, Qualified Leads, Walk-In
+     • SINGLE-TIER flat header (one clean row) on the strong RepairOX blue
+       #4261EE band. Total Leads, Qualified Leads, Walk-In
        Assigned and Walk-In Visited are independent first-level columns — no
        nested LEADS / WALK-IN parent group and no second child-header row.
        Long labels wrap to two centred lines (e.g. "Walk-In / Assigned").
@@ -51,11 +51,11 @@
        treatment; Pending F/U uses amber; Overdue uses red indicator.
      • Progress bars for Qualified % and Conversion % — same height, same
        width, same track, brand-filled.
-     • LIGHT summary total footer: a soft blue-gray surface with RepairOX-blue
-       typography and a firm top border — reads as a clean SUMMARY that sits
-       below the body and provides closure, NOT a second dark header. Full
-       contrast on every value (dark-on-light), semantic accents preserved
-       (emerald revenue, blue conversion, red overdue).
+     • Total footer: mirrors the HEADER — the same strong RepairOX blue #4261EE
+       band with high-contrast WHITE typography — so the table is book-ended by
+       matching blue bands. Every value is white-on-blue (fully high-contrast),
+       semantic accents preserved (bright emerald revenue, white conversion bar,
+       red overdue chip).
      • Owner and Individual tables share the SAME visual system so they feel
        like one cohesive performance-table family.
    Every value is derived from real records upstream — no dummy data.
@@ -63,8 +63,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
-import { cn, formatINR, initials } from "@/lib/utils";
+import { ArrowRight, User } from "lucide-react";
+import { cn, formatINR } from "@/lib/utils";
 import {
   medalFor, conversionTier, sumPerfRows,
   type AgentPerformance, type PeriodPerformance,
@@ -86,17 +86,16 @@ const CELL = "px-3 py-3.5 align-middle text-center";
 /* Flat single-tier header. Labels may wrap to two lines (e.g. "Walk-In /
    Assigned") and stay vertically centred via `leading-tight`. */
 const HEAD_PRIMARY = "px-3 py-2.5 text-[10.5px] font-bold uppercase tracking-wider text-center leading-tight";
-/* Group boundary — stronger translucent-white rule that reads cleanly on the
-   #3B54CF primary band. Used at the left edge of each standalone metric area. */
-const HEAD_GRP_DIV = "border-l-2 border-white/25";
-/* SUBTLE in-area divider — a softer white rule used to very gently pair the two
-   Lead columns and the two Walk-In columns without reviving a nested header. */
-const HEAD_SUB_DIV = "border-l border-white/10";
-const BODY_GRP_DIV = "border-l-2 border-[#E0E5F6]/70"; // group boundary in body
-const BODY_SUB_DIV = "border-l border-[#EDF0FA]";       // sub-col in body
-/* Footer dividers — RepairOX-blue rules on the blue-gray summary surface. */
-const FOOT_GRP_DIV = "border-l-2 border-[#A9B6E8]";
-const FOOT_SUB_DIV = "border-l border-[#B9C4EC]";
+/* Header dividers — ONE consistent translucent-white rule so every column
+   separator on the blue band reads identically (no faint vs strong mismatch). */
+const HEAD_GRP_DIV = "border-l border-white/20";
+const HEAD_SUB_DIV = "border-l border-white/20";
+const BODY_GRP_DIV = "border-l border-[#B4BFDD]"; // vertical divider in body — visible but a little lighter
+const BODY_SUB_DIV = "border-l border-[#B4BFDD]"; // same tone so no divider reads lighter/darker than another
+/* Footer dividers — ONE consistent translucent-white rule on the blue summary
+   band, matching the header. */
+const FOOT_GRP_DIV = "border-l border-white/20";
+const FOOT_SUB_DIV = "border-l border-white/20";
 
 /* ── Sticky-right ACTION column ─────────────────────────────────────────────
    The ACTION column (View Details →) is PINNED to the right edge so it is
@@ -128,15 +127,37 @@ const ACCENT = {
   action: "#94A3B8",     // neutral
 } as const;
 
-/* Deterministic avatar tint from the name (brand-adjacent palette, no neon). */
-const AVATAR_TONES = [
-  "bg-[#4361EE]", "bg-emerald-500", "bg-violet-500", "bg-amber-500",
-  "bg-rose-500", "bg-sky-500", "bg-teal-500", "bg-indigo-500",
-];
-function toneFor(seed: string): string {
-  let h = 0;
-  for (let i = 0; i < seed.length; i++) h = (h * 31 + seed.charCodeAt(i)) >>> 0;
-  return AVATAR_TONES[h % AVATAR_TONES.length];
+/* ── Agent avatar chip ──────────────────────────────────────────────────────
+   Shows the agent's UPLOADED profile photo (from their account — the SAME
+   `avatarUrl` the rest of the app uses). When no photo is uploaded we fall back
+   to a neutral PERSON GLYPH (like a phone contact with no picture) on a soft
+   tinted chip — NOT coloured initials — so an empty avatar reads as "no photo
+   yet" rather than a fake identity. A broken image URL degrades to the same
+   person glyph. */
+function AgentAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) {
+  const [broken, setBroken] = useState(false);
+  const showImg = avatarUrl && !broken;
+  return (
+    <span
+      className={cn(
+        "grid h-8 w-8 shrink-0 place-items-center overflow-hidden rounded-full shadow-sm ring-1 ring-black/5",
+        showImg ? "bg-zinc-100" : "bg-[#EEF1FD]",
+      )}
+      aria-label={name}
+    >
+      {showImg ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={avatarUrl}
+          alt={name}
+          className="h-full w-full object-cover"
+          onError={() => setBroken(true)}
+        />
+      ) : (
+        <User className="h-4 w-4 text-[#4361EE]/70" strokeWidth={2.2} />
+      )}
+    </span>
+  );
 }
 
 /* A metric cell: bold primary + an optional small muted secondary line. */
@@ -215,17 +236,22 @@ function FollowUpCell({
   const hasOverdue = overdue > 0;
   const hasData = total > 0;
 
-  const labelMuted = onSummary ? "text-[#475178]" : "text-muted-foreground";
-  const valTone = onSummary ? "text-[#1E293B]" : "text-foreground";
-  const divider = onSummary ? "bg-[#A9B6E8]" : "bg-zinc-200";
-  const track = onSummary ? "bg-white/70" : "bg-zinc-200/80";
+  // The footer now mirrors the header's #3B54CF blue band, so the summary
+  // Follow-Ups cell uses high-contrast WHITE-on-blue tones (not the old
+  // dark-on-light-gray treatment).
+  const labelMuted = onSummary ? "text-white/70" : "text-muted-foreground";
+  const valTone = onSummary ? "text-white" : "text-foreground";
+  const divider = onSummary ? "bg-white/25" : "bg-zinc-200";
+  const track = onSummary ? "bg-white/25" : "bg-zinc-200/80";
 
-  /* Overdue chip — red urgency when present, calm green "on track" otherwise. */
+  /* Overdue chip — red urgency when present, calm green "on track" otherwise.
+     On the blue summary band the "on track" / "no F/U" states use a readable
+     translucent-white chip so they stay legible on blue. */
   const chipTone = hasOverdue
     ? "bg-red-50 text-red-700 ring-red-200/70"
     : hasData
-      ? "bg-emerald-50 text-emerald-700 ring-emerald-200/70"
-      : (onSummary ? "bg-white/60 text-[#475178] ring-white/70" : "bg-zinc-50 text-zinc-500 ring-zinc-200/70");
+      ? (onSummary ? "bg-white/15 text-white ring-white/40" : "bg-emerald-50 text-emerald-700 ring-emerald-200/70")
+      : (onSummary ? "bg-white/15 text-white/90 ring-white/40" : "bg-zinc-50 text-zinc-500 ring-zinc-200/70");
 
   return (
     <span className="flex flex-col items-center gap-1.5 leading-tight">
@@ -290,11 +316,22 @@ function TierBadge({ rate }: { rate: number }) {
   );
 }
 
+/* The `#` column shows the plain numeric rank (e.g. "1.") — no chip/box — and
+   the top-3 MEDAL now sits to the RIGHT of the agent name (see MedalGlyph) so
+   the identity anchor reads "name 🥇". */
 function RankBadge({ rank }: { rank: number }) {
+  return <span className="text-[13px] font-bold tabular-nums text-zinc-500">{rank}.</span>;
+}
+
+/* Top-3 medal shown in its OWN fixed slot immediately after the name block —
+   vertically centred so it stays on ONE line and in a consistent position
+   whether the name is one or two lines. Nothing for rank 4+. The `.rox-medal`
+   class adds a continuous diagonal shine sweep + a gentle breathing glow
+   (honoring prefers-reduced-motion). */
+function MedalGlyph({ rank }: { rank: number }) {
   const medal = medalFor(rank);
-  return medal
-    ? <span className="text-lg leading-none" aria-label={`Rank ${rank}`}>{medal}</span>
-    : <span className="grid h-6 w-6 place-items-center rounded-md bg-zinc-100 text-[11px] font-bold text-zinc-500">{rank}</span>;
+  if (!medal) return null;
+  return <span className="rox-medal shrink-0 text-xl leading-none" aria-label={`Rank ${rank}`} title={`Rank ${rank}`}>{medal}</span>;
 }
 
 /* ── Accent line for grouped header cells ──────────────────────────────── */
@@ -308,8 +345,8 @@ function accentBorder(color: string): React.CSSProperties {
 function PerfCols({ isAgent }: { isAgent: boolean }) {
   return (
     <colgroup>
-      {isAgent && <col style={{ width: "36px" }} />}
-      <col style={{ width: isAgent ? "150px" : "140px" }} />
+      {isAgent && <col style={{ width: "28px" }} />}
+      <col style={{ width: isAgent ? "158px" : "140px" }} />
       <col style={{ width: "70px" }} /><col style={{ width: "92px" }} />{/* Total Leads / Qualified Leads */}
       <col style={{ width: "82px" }} /><col style={{ width: "82px" }} />{/* Walk-In Assigned / Walk-In Visited */}
       <col style={{ width: "62px" }} /><col style={{ width: "66px" }} />{/* Pickup / On-Site */}
@@ -445,7 +482,7 @@ export function PerformanceTable({
                   shares the same strong RepairOX-blue header treatment and the
                   group-strength vertical dividers so the four metrics read as
                   four crisply separated standalone columns. */}
-              <tr className="bg-[#3B54CF] text-white">
+              <tr className="bg-[#4261EE] text-white">
                 {isAgent && (
                   <th className={cn(HEAD_PRIMARY, "text-white/80")} style={accentBorder("transparent")}>#</th>
                 )}
@@ -485,7 +522,7 @@ export function PerformanceTable({
                 <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.conversion)}>
                   Conversion
                 </th>
-                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#3B54CF]")} style={accentBorder(ACCENT.action)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#4261EE]")} style={accentBorder(ACCENT.action)}>
                   Action
                 </th>
               </tr>
@@ -548,12 +585,12 @@ export function PerformanceTable({
                     <tr
                       key={isAgent ? r.agentId : (r as PeriodPerformance).periodKey}
                       className={cn(
-                        "border-t border-zinc-200 transition-colors",
+                        "transition-colors",
                         isMe
                           ? "bg-[#EEF1FD]/60"
                           : idx % 2 === 1
-                            ? "bg-[#F8FAFC] hover:bg-[#EEF1FD]/40"
-                            : "bg-white hover:bg-[#EEF1FD]/40",
+                            ? "bg-[#EDF1F9] hover:bg-[#EEF1FD]/70"
+                            : "bg-white hover:bg-[#EEF1FD]/70",
                         isAgent && isTop3 && "border-l-[3px]",
                         isAgent && isTop3 && rankAccent,
                       )}
@@ -567,28 +604,28 @@ export function PerformanceTable({
                           The name has a title attr so a long name (e.g. "Sharath
                           Chandra…") is fully readable on hover without widening
                           the row. */}
-                      <td className={cn(CELL, "text-left")}>
+                      <td className={cn(CELL, "text-left", isAgent && "pl-1")}>
                         <div className="flex items-center gap-2.5">
                           {isAgent && (
-                            <span className={cn(
-                              "grid h-8 w-8 shrink-0 place-items-center rounded-full text-[11px] font-bold text-white shadow-sm",
-                              toneFor(r.agentId || label),
-                            )}>
-                              {initials(label)}
-                            </span>
+                            <AgentAvatar name={label} avatarUrl={r.avatarUrl} />
                           )}
-                          <span className="flex min-w-0 flex-col leading-tight">
-                            {/* Name wraps to at most TWO lines (line-clamp-2)
-                                rather than truncating to one aggressive "…", so
-                                a longer agent name (e.g. "Sharath Chandra …")
-                                stays readable without widening the column or the
-                                row height. Full name still available on hover. */}
+                          {/* Name/role stack takes the remaining width (flex-1,
+                              min-w-0 so a long name wraps to two lines); the
+                              medal sits in a FIXED right-edge slot after it so
+                              it lands in the SAME horizontal position on every
+                              row regardless of name length / line count. */}
+                          <span className="flex min-w-0 flex-1 flex-col leading-tight">
                             <span className="text-[13px] font-bold leading-snug text-zinc-900 [display:-webkit-box] [-webkit-box-orient:vertical] [-webkit-line-clamp:2] overflow-hidden" title={label}>
                               {label}
                               {isMe && <span className="ml-1.5 rounded-md bg-[#4361EE]/10 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-[#4361EE]">You</span>}
                             </span>
                             {isAgent && <span className="truncate text-[10.5px] text-zinc-400" title={r.roleLabel}>{r.roleLabel}</span>}
                           </span>
+                          {isAgent && (
+                            <span className="grid w-7 shrink-0 place-items-center">
+                              {r.rank >= 1 && r.rank <= 3 && <MedalGlyph rank={r.rank} />}
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -674,27 +711,29 @@ export function PerformanceTable({
         </div>
 
         {/* ═══ FIXED TOTAL FOOTER TABLE (outside the scroll region) ═══
-            A LIGHT summary band — soft blue-gray surface, RepairOX-blue
-            typography, a firm top border lifting it off the body. It reads as a
-            clean SUMMARY (not a second dark header), with full dark-on-light
-            contrast on every value and the semantic accents preserved (emerald
-            revenue, blue conversion). Shares the same colgroup so it stays
+            The summary band mirrors the HEADER — the same strong RepairOX blue
+            #3B54CF surface with high-contrast WHITE typography — so the table is
+            visually book-ended by matching blue bands (header on top, total on
+            the bottom). Every value is white-on-blue (fully high-contrast, never
+            dark-on-dark); Revenue keeps a bright emerald accent that still pops
+            on blue, and the progress-bar tracks/fills use white so they read
+            clearly against the band. Shares the same colgroup so it stays
             column-aligned; padded right by the body's live scrollbar width. */}
         {hasFooter && (
           <div ref={footerRef} style={{ paddingRight: scrollbarW }}>
             <table className={cn(TABLE_BASE, TABLE_MIN_W)}>
               <PerfCols isAgent={isAgent} />
               <tfoot>
-                <tr className="border-t-2 border-[#4361EE]/40 bg-[#CBD5F5] text-[#1E293B]">
+                <tr className="border-t-2 border-white/30 bg-[#4261EE] text-white">
                   {isAgent && <td className={cn(CELL)} />}
                   <td className={cn(CELL, "text-left")}>
-                    <span className="text-[12px] font-extrabold uppercase tracking-wider text-[#3B54CF]">Total</span>
+                    <span className="text-[12px] font-extrabold uppercase tracking-wider text-white">Total</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <span className="text-[14px] font-extrabold tabular-nums">{totals.leads}</span>
                   </td>
                   <td className={cn(CELL, FOOT_SUB_DIV)}>
-                    <BarMetric primary={totals.qualified} ratio={totals.leads > 0 ? totals.qualified / totals.leads : 0} caption={totals.leads > 0 ? pct(totals.qualified / totals.leads) : undefined} tone="bg-emerald-600" valueClass="text-[#1E293B]" captionClass="text-[#475178]" trackClass="bg-white/70" />
+                    <BarMetric primary={totals.qualified} ratio={totals.leads > 0 ? totals.qualified / totals.leads : 0} caption={totals.leads > 0 ? pct(totals.qualified / totals.leads) : undefined} tone="bg-emerald-300" valueClass="text-white" captionClass="text-white/80" trackClass="bg-white/25" />
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <span className="text-[14px] font-extrabold tabular-nums">{totals.routeAssigned}</span>
@@ -709,7 +748,7 @@ export function PerformanceTable({
                     <span className="text-[14px] font-extrabold tabular-nums">{totals.onSite}</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
-                    <span className="text-[14px] font-extrabold tabular-nums text-emerald-700">{formatINR(totals.revenueWonAgentDriven)}</span>
+                    <span className="text-[14px] font-extrabold tabular-nums text-emerald-200">{formatINR(totals.revenueWonAgentDriven)}</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <span className="text-[14px] font-extrabold tabular-nums">{formatINR(totals.projection)}</span>
@@ -727,9 +766,9 @@ export function PerformanceTable({
                     />
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
-                    <BarMetric primary={pct(totals.conversionRate)} ratio={totals.conversionRate} tone="bg-[#3B54CF]" valueClass="text-[#1E293B]" trackClass="bg-white/70" />
+                    <BarMetric primary={pct(totals.conversionRate)} ratio={totals.conversionRate} tone="bg-white" valueClass="text-white" trackClass="bg-white/25" />
                   </td>
-                  <td className={cn(CELL, FOOT_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#CBD5F5]")} />
+                  <td className={cn(CELL, FOOT_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#4261EE]")} />
                 </tr>
               </tfoot>
             </table>

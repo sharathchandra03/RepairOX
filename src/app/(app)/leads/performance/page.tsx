@@ -38,6 +38,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { RoxFilterPanelHeader, ActiveFilterChip } from "@/components/ui/rox-filter";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
 import { cn, initials } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -66,6 +67,7 @@ const DATE_OPTIONS: { label: string; value: PerfDateRange }[] = [
   { label: "7 Days", value: "7days" },
   { label: "This Month", value: "thisMonth" },
   { label: "Last Month", value: "lastMonth" },
+  { label: "Custom", value: "custom" },
 ];
 
 function pct(v: number): string {
@@ -92,7 +94,7 @@ function WorkspaceCollapseBar({
       aria-expanded={!collapsed}
       aria-label={collapsed ? "Show header and expand controls" : "Collapse the header and maximize the agent table"}
       title={collapsed ? "Show header" : "Collapse header and maximize table"}
-      className="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 text-[12px] font-semibold text-zinc-700 shadow-sm transition hover:border-[#4361EE]/40 hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/30"
+      className="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full border border-[#4261EE] bg-[#4261EE] px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-[#3450D8] hover:border-[#3450D8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
     >
       {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
       {collapsed ? "Show Header" : "Collapse Header"}
@@ -345,21 +347,40 @@ export default function AgentPerformancePage() {
     />
   ) : null;
 
-  /* The date control (right of the header) — mirrors the secondary strip. */
+  /* The date control (right of the header) — mirrors the secondary strip. The
+     mandatory "All" (clears the constraint) and "Custom" (opens the shared
+     calendar range picker) segments are both present per the design-system
+     date-strip standard. Picking "Custom" auto-opens the calendar below the
+     strip; the chosen from/to drive perf.customFrom / perf.customTo. */
   const dateControl = (
-    <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-      <SegmentedTabs
-        size="sm"
-        options={DATE_OPTIONS}
-        value={perf.dateRange}
-        onChange={(v) => setPerf((p) => ({ ...p, dateRange: v as PerfDateRange }))}
+    <div className="flex flex-col gap-2">
+      <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <SegmentedTabs
+          size="sm"
+          options={DATE_OPTIONS}
+          value={perf.dateRange}
+          onChange={(v) => setPerf((p) => ({ ...p, dateRange: v as PerfDateRange }))}
+        />
+      </div>
+      <DateRangePicker
+        open={perf.dateRange === "custom"}
+        from={perf.customFrom ?? ""}
+        to={perf.customTo ?? ""}
+        onFromChange={(v) => setPerf((p) => ({ ...p, customFrom: v }))}
+        onToChange={(v) => setPerf((p) => ({ ...p, customTo: v }))}
       />
     </div>
   );
 
   /* Active filter chips (shared). */
   const activeChips: { label?: string; value: string; onClear: () => void }[] = [];
-  if (perf.dateRange !== "all") activeChips.push({ label: "Date", value: DATE_OPTIONS.find((d) => d.value === perf.dateRange)?.label ?? perf.dateRange, onClear: () => setPerf((p) => ({ ...p, dateRange: "all" })) });
+  if (perf.dateRange !== "all") activeChips.push({
+    label: "Date",
+    value: perf.dateRange === "custom"
+      ? (perf.customFrom && perf.customTo ? `${perf.customFrom} → ${perf.customTo}` : "Custom range")
+      : (DATE_OPTIONS.find((d) => d.value === perf.dateRange)?.label ?? perf.dateRange),
+    onClear: () => setPerf((p) => ({ ...p, dateRange: "all", customFrom: "", customTo: "" })),
+  });
   if (storeFilter.length > 0) activeChips.push({ label: "Stores", value: `${storeFilter.length} selected`, onClear: () => setStoreFilter([]) });
   if (tab === "all" && agentFilter) activeChips.push({ label: "Agent", value: eligibleAgents.find((a) => a.id === agentFilter)?.name ?? agentFilter, onClear: () => setAgentFilter("") });
   if (perf.source) activeChips.push({ label: "Source", value: perf.source, onClear: () => setPerf((p) => ({ ...p, source: "" })) });

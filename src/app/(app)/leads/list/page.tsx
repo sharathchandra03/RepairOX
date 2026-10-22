@@ -17,6 +17,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { ActiveFilterChip } from "@/components/ui/rox-filter";
+import { DateTimeDialog } from "@/components/ui/date-time-picker";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { EmptyDash } from "@/components/common/empty-dash";
 import { LeadFilterPanel, type FacetDef } from "@/components/leads/lead-filter-panel";
@@ -50,7 +51,7 @@ import { DealRequestModal } from "@/components/deals/deal-request-modal";
 import { DealConversationPopover } from "@/components/deals/deal-conversation-popover";
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
-  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, type LeadFollowUp,
+  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, type LeadFollowUp,
   isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
 } from "@/lib/leads-data";
@@ -940,7 +941,7 @@ const FOLLOWUP_FILTERS = [
 ] as const;
 
 export default function LeadsListPage() {
-  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, fieldTitle, deleteLead, pinLead, changeLeadStatus, updateLead, salesAgents, openFollowUpsByLead,
+  const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, fieldTitle, deleteLead, pinLead, changeLeadStatus, updateLead, scheduleFollowUp, salesAgents, openFollowUpsByLead,
     viewAsReadOnly } = useLeads();
   // OWNER "view as agent" (Option A — NOT impersonation): when active, the whole
   // Leads workspace is READ-ONLY. Every mutation gate ANDs in `!viewAsReadOnly`.
@@ -1335,6 +1336,14 @@ export default function LeadsListPage() {
   const [dealLead, setDealLead] = useState<Lead | null>(null);
   const canRequestDeal = allow(can, CAP.deal.create);
 
+  /* ── Call Back stage → inline follow-up scheduler ──
+     When a lead's stage is set to a Call Back / Follow-Up value from the table,
+     immediately prompt for the follow-up date & time (right there, no full
+     form). Saving creates a lead_followup_history record via scheduleFollowUp.
+     Gated by CAP.lead.followup. */
+  const [followUpLead, setFollowUpLead] = useState<Lead | null>(null);
+  const canFollowUp = allow(can, CAP.lead.followup);
+
   /* Apply a status change to ONE lead, then auto-create the Field Job when the
      status is a pickup/on-site routing status. Shared by the inline dropdown
      and the bulk action so both behave identically. */
@@ -1346,7 +1355,14 @@ export default function LeadsListPage() {
     if (isDiscountedLeadValue(status) && canRequestDeal && !leadHasOpenDeal(deals, lead.id)) {
       setDealLead({ ...lead, status });
     }
-  }, [changeLeadStatus, autoFieldJobForStatus, canRequestDeal, deals]);
+    // Call Back / Follow-Up stage → prompt for the follow-up date & time right
+    // from the table, every time the stage is chosen (gated by CAP.lead.followup).
+    // If an open follow-up already exists, the picker pre-fills its time so this
+    // acts as a reschedule.
+    else if (statusRequiresFollowUp(status) && canFollowUp) {
+      setFollowUpLead({ ...lead, status });
+    }
+  }, [changeLeadStatus, autoFieldJobForStatus, canRequestDeal, deals, canFollowUp]);
 
   /* Apply a LEAD CATEGORY (qualification) change inline from the table. Writes
      the `qualification` field so the entire qualification gate keeps working.
@@ -2106,7 +2122,14 @@ export default function LeadsListPage() {
               <col key={c.key} style={{ width: c.width }} />
             ))}
           </colgroup>
-          <thead className="rox-table-head sticky top-0 z-[6]">
+          {/* Lead Table header uses a SOLID brand-blue (#4261EE) fill, scoped
+              to this table only (other RepairOX tables keep the shared light
+              #D6DDFB head). White text + white frozen-cell fill keep it readable
+              and the sticky/frozen layering intact. */}
+          <thead
+            className="rox-table-head sticky top-0 z-[6] [&_.rox-frozen]:!bg-[#4261EE] [&_th]:!text-white"
+            style={{ background: "#4261EE", color: "#ffffff", borderBottom: "2px solid rgba(255,255,255,0.35)" }}
+          >
             <tr className="text-[12px] font-bold uppercase tracking-wider">
               {orderedColumns.map((c) => {
                 // HEADER alignment: most headers are CENTERED to sit symmetrically
@@ -2382,6 +2405,26 @@ export default function LeadsListPage() {
         lead={dealLead}
         onDone={() => setDealLead(null)}
       />
+
+      {/* Call Back / Follow-Up stage → inline date & time scheduler. The wording
+          follows the chosen stage (Call Back vs Follow-Up). */}
+      {followUpLead && (() => {
+        const noun = followUpNounForStatus(followUpLead.status || "");
+        return (
+          <DateTimeDialog
+            title={`Schedule ${noun.toLowerCase()} · ${followUpLead.leadNo}`}
+            initialIso={openFollowUpsByLead.get(followUpLead.id)?.dueAt || undefined}
+            onClose={() => setFollowUpLead(null)}
+            onSave={async (iso) => {
+              const lead = followUpLead;
+              setFollowUpLead(null);
+              if (!iso || !lead) return;
+              const fu = await scheduleFollowUp(lead.id, { dueAt: iso });
+              if (fu) toast.success(`${noun} scheduled`, { description: `${lead.leadNo} · ${new Date(iso).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}` });
+            }}
+          />
+        );
+      })()}
 
       {/* Delete confirm */}
       <ConfirmDialog

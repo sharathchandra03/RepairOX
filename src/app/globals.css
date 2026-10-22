@@ -933,6 +933,51 @@ body {
   }
 }
 
+/* ─── Medal shine ──────────────────────────────────────────────────────────
+   A continuous light "sweep" that travels diagonally across a rank medal
+   (🥇🥈🥉) so the top-3 badges feel celebratory. The medal glyph itself sits
+   in `.rox-medal`; a pseudo-element overlays a soft white highlight band that
+   slides across on a loop, clipped to the glyph's box. A gentle breathing glow
+   adds depth. Honors prefers-reduced-motion (static, no sweep). */
+.rox-medal {
+  position: relative;
+  display: inline-block;
+  line-height: 1;
+  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.15));
+  animation: medal-breathe 2.8s ease-in-out infinite;
+}
+.rox-medal::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  border-radius: 999px;
+  background: linear-gradient(
+    115deg,
+    transparent 30%,
+    rgba(255, 255, 255, 0.85) 48%,
+    rgba(255, 255, 255, 0.95) 50%,
+    rgba(255, 255, 255, 0.85) 52%,
+    transparent 70%
+  );
+  background-size: 250% 250%;
+  background-position: 150% 150%;
+  mix-blend-mode: screen;
+  animation: medal-shine 2.4s linear infinite;
+}
+@keyframes medal-shine {
+  0% { background-position: 150% 150%; }
+  60%, 100% { background-position: -50% -50%; }
+}
+@keyframes medal-breathe {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.08); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rox-medal { animation: none; }
+  .rox-medal::after { animation: none; display: none; }
+}
+
 /* Sidebar collapse arrow — subtle continuous forward-and-return nudge */
 @keyframes arrow-nudge-left {
   0%, 100% { transform: translateX(0); }

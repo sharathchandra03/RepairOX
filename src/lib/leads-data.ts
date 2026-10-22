@@ -395,6 +395,31 @@ export function needsFollowUp(lead: Pick<Lead, "result" | "status">): boolean {
   return needle.includes("follow") || needle.includes("rnr") || needle.includes("busy");
 }
 
+/** True when a Lead Stage / Status value is a "Call Back" (or Follow-Up) stage
+ *  that REQUIRES a scheduled follow-up date & time. Substring-tolerant so an
+ *  admin-renamed label ("Call Back", "Callback", "Call-back", "Follow-Up",
+ *  "Call back later") is still detected. Used by the Lead Form (makes the
+ *  follow-up date/time mandatory) and the Lead Table (opens the scheduler when
+ *  the stage is set). */
+export function statusRequiresFollowUp(status: string): boolean {
+  const s = (status || "").toLowerCase().replace(/[-_]/g, " ");
+  return s.includes("call back") || s.includes("callback") || s.includes("follow");
+}
+
+/** True when the stage is specifically a "Call Back" stage (as opposed to a
+ *  generic "Follow-Up"). Used only to pick the user-facing WORDING — a Call
+ *  Back stage says "Call Back", a Follow-Up stage says "Follow-Up". */
+export function isCallBackStatus(status: string): boolean {
+  const s = (status || "").toLowerCase().replace(/[-_]/g, " ");
+  return s.includes("call back") || s.includes("callback");
+}
+
+/** The label to use for the follow-up section/scheduler, given the stage. A
+ *  Call Back stage reads "Call Back"; everything else reads "Follow-Up". */
+export function followUpNounForStatus(status: string): string {
+  return isCallBackStatus(status) ? "Call Back" : "Follow-Up";
+}
+
 /* ─── Lead devices (for the shared Device & Issue details popup) ─────────
    A lead currently captures ONE device (flat catalog-reference fields on the
    Lead). This helper normalises that into an ARRAY so the Device Details popup
@@ -572,7 +597,10 @@ export function emptyLeadDraft(agent = ""): LeadDraft {
     priority: LEAD_SMART_DEFAULTS.priority ?? "",
     comments: "",
     contactStatus: LEAD_SMART_DEFAULTS.contactStatus ?? "",
-    status: LEAD_SMART_DEFAULTS.status ?? "",
+    // Lead Stage is NOT hard-defaulted here — the Lead Form seeds it from the
+    // first LIVE active "status" option so a deleted stage (e.g. "New Lead")
+    // never gets forced back onto a new lead. Falls back to empty.
+    status: "",
     result: "",
     finalRemarks: "",
     followUpDate: "",
