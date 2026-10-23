@@ -99,14 +99,14 @@ export function DataTable({
   return (
     <div className="overflow-auto" style={{ maxHeight }}>
       <table className="w-full text-[12px]">
-        <thead className="sticky top-0 z-10 bg-muted/60 backdrop-blur">
+        <thead className="sticky top-0 z-10 bg-[#EEF1FD] backdrop-blur">
           <tr>
             {columns.map((c, i) => (
               <th
                 key={c.key}
                 onClick={() => toggleSort(i)}
                 className={cn(
-                  "cursor-pointer select-none px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground",
+                  "cursor-pointer select-none px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[#4361EE] hover:text-[#3049C6]",
                   c.numeric || c.format === "currency" || c.format === "number" ? "text-right" : "text-left"
                 )}
               >

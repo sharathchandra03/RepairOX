@@ -96,13 +96,13 @@ export function PartsTab() {
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <table className="w-full text-left text-[13px]">
           <thead>
-            <tr className="border-b border-border bg-muted/30">
-              <th className="py-3 pl-5 px-3 font-semibold text-muted-foreground">Part Name</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">SKU</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Price</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Warranty</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Availability</th>
-              <th className="w-24 py-3 px-3 font-semibold text-muted-foreground">Actions</th>
+            <tr className="border-b border-border bg-[#EEF1FD] text-[#4361EE]">
+              <th className="py-3 pl-5 px-3 font-semibold">Part Name</th>
+              <th className="py-3 px-3 font-semibold">SKU</th>
+              <th className="py-3 px-3 font-semibold">Price</th>
+              <th className="py-3 px-3 font-semibold">Warranty</th>
+              <th className="py-3 px-3 font-semibold">Availability</th>
+              <th className="w-24 py-3 px-3 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>

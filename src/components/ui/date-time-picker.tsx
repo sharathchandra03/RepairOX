@@ -20,7 +20,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, CalendarClock } from "lucide-react";
+import { ChevronLeft, ChevronRight, CalendarClock, CalendarDays, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ─── ISO helpers (local wall-clock) ── */
@@ -146,13 +146,16 @@ export function DateTimeDialog({
             </p>
           </div>
 
-          {/* Body — calendar (left) + time (right), side by side. */}
+          {/* Body — calendar (left) + time (right), separated by a thin divider. */}
           <div className="flex flex-col gap-4 p-4 sm:flex-row">
             {/* Calendar */}
             <div className="select-none sm:flex-1">
               <div className="mb-1.5 flex items-center justify-between">
                 <button type="button" onClick={prevMonth} className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" aria-label="Previous month"><ChevronLeft className="h-4 w-4" /></button>
-                <span className="px-3 py-1 text-[13px] font-bold text-foreground">{MONTHS[month]} {year}</span>
+                <span className="flex items-center justify-center gap-1.5 whitespace-nowrap px-2 py-1 text-[13px] font-bold text-foreground">
+                  <CalendarDays className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
+                  {MONTHS[month]} {year}
+                </span>
                 <button type="button" onClick={nextMonth} className="grid h-7 w-7 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]" aria-label="Next month"><ChevronRight className="h-4 w-4" /></button>
               </div>
 
@@ -187,9 +190,16 @@ export function DateTimeDialog({
               </div>
             </div>
 
+            {/* Thin separation line between the calendar and the time columns
+               (vertical on desktop, horizontal when stacked on mobile). */}
+            <div className="h-px w-full bg-border sm:h-auto sm:w-px" aria-hidden />
+
             {/* Time — Hour / Minute / AM-PM, beside the calendar. */}
             <div className="sm:w-[190px]">
-              <p className="mb-1.5 text-[12px] font-semibold text-foreground">Time</p>
+              <p className="mb-1.5 flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
+                <Clock className="h-3.5 w-3.5 text-[#4361EE]" />
+                Time
+              </p>
               <div className="grid grid-cols-3 gap-2">
                 <div className="rox-rail-scroll h-[210px] overflow-y-auto rounded-lg border border-border bg-muted/20 p-1">
                   {HOURS.map((h) => (

@@ -22,6 +22,7 @@ import { createInvoiceDeviceRecord } from "@/lib/mock-data";
 import { loadDeviceCategories, getCachedCategories } from "@/lib/device-categories";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, identifierDisplayLabel, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
+import { DateTimeField } from "@/components/ui/date-time-picker";
 import { DeviceBrandModelSelector } from "@/components/common/device-brand-model-selector";
 import type { InventoryItem } from "@/lib/inventory-data";
 import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
@@ -99,7 +100,7 @@ type InvoiceFormDevice = {
 
 type InvoiceFormData = {
   customer: { name: string; phone: string; altPhone: string; email: string; company: string; gstNumber: string; customerId?: string };
-  details: { dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories"; documentType: DocumentType; sourceEstimateId?: string; sourceTicketId?: string; sourceProformaId?: string };
+  details: { createdAt: string; dueDate: string; employee: string; ticketId: string; ticketNo: string; ticketLocked: boolean; status: InvoiceStatus; repairStatus: TicketStatus; invoiceType: InvoiceType; serviceCategory: "service" | "accessories"; documentType: DocumentType; sourceEstimateId?: string; sourceTicketId?: string; sourceProformaId?: string };
   /** Flat items — used when no devices are present (legacy mode) */
   items: InvoiceLineItem[];
   /** Multi-device entries */
@@ -141,7 +142,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
 
 const DEFAULT_FORM: InvoiceFormData = {
   customer: { name: "", phone: "", altPhone: "", email: "", company: "", gstNumber: "" },
-  details: { dueDate: "", employee: "", ticketId: "", ticketNo: "", ticketLocked: false, status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service", documentType: "invoice" },
+  details: { createdAt: "", dueDate: "", employee: "", ticketId: "", ticketNo: "", ticketLocked: false, status: "draft", repairStatus: "repaired_collected", invoiceType: "retail", serviceCategory: "service", documentType: "invoice" },
   items: [],
   devices: [createFormDevice()],
   activeDeviceIndex: 0,
@@ -504,6 +505,9 @@ function InvoiceWizard() {
         invoiceType: d.invoiceType ?? prev.details.invoiceType,
         serviceCategory: d.serviceCategory ?? prev.details.serviceCategory,
         status: (d.status as InvoiceStatus) ?? prev.details.status,
+        // Creation Date defaults to NOW; the user may back-date it within the
+        // configured window (see the Creation Date control + save guard).
+        createdAt: prev.details.createdAt || new Date().toISOString(),
         dueDate: prev.details.dueDate || due,
       },
       pricing: {
@@ -573,6 +577,27 @@ function InvoiceWizard() {
     return { subtotal, partsTotal, repairCost, estimateTotal, discount, sgst, cgst, sgstRate, cgstRate, gstRate, tax, total };
   }, [form.devices, form.items, form.pricing]);
 
+  // Creation-date back-dating guard (defence-in-depth for the save handlers).
+  // Mirrors the inline message in StepDetails: a NEW invoice's creation date
+  // must be within [today − backdateLimit, end of today]. Edits never change
+  // the original creation timestamp, so they are exempt.
+  const createdDateError = useMemo<string | null>(() => {
+    if (isEdit) return null;
+    const iso = form.details.createdAt;
+    if (!iso) return null; // falls back to now() at build time
+    const ms = new Date(iso).getTime();
+    if (isNaN(ms)) return null;
+    const limit = Math.max(0, settings.invoiceDefaults.backdateLimitDays ?? 30);
+    const min = new Date(); min.setHours(0, 0, 0, 0); min.setDate(min.getDate() - limit);
+    const max = new Date(); max.setHours(23, 59, 59, 999);
+    if (ms > max.getTime()) return "The invoice Creation Date can't be in the future.";
+    if (ms < min.getTime()) {
+      const minLabel = min.toLocaleDateString("en-IN", { dateStyle: "medium" });
+      return `The invoice Creation Date is past the allowed period (not older than ${minLabel}). Adjust it, or change the back-dating limit in Invoice Settings.`;
+    }
+    return null;
+  }, [isEdit, form.details.createdAt, settings.invoiceDefaults.backdateLimitDays]);
+
   // Build a full Invoice record from the current form. An optional status
   // override lets callers (e.g. Save Draft) force a specific status without
   // touching the rest of the invoice-building logic.
@@ -636,7 +661,12 @@ function InvoiceWizard() {
       email: form.customer.email || undefined,
       company: form.customer.company || undefined,
       status: finalStatus,
-      createdAt: isEdit ? (invoices.find((i) => i.id === editId)?.createdAt || new Date().toISOString()) : new Date().toISOString(),
+      // Creation Date — on edit the original timestamp is preserved untouched;
+      // on create we use the (optionally back-dated) value chosen on the form,
+      // falling back to now when unset (push/standalone paths).
+      createdAt: isEdit
+        ? (invoices.find((i) => i.id === editId)?.createdAt || new Date().toISOString())
+        : (form.details.createdAt || new Date().toISOString()),
       dueDate: form.details.dueDate || new Date(Date.now() + 7 * 86_400_000).toISOString(),
       paidAmount: isProformaDoc
         ? 0
@@ -772,6 +802,10 @@ function InvoiceWizard() {
   // Submit (finalize / save)
   const handleSubmit = useCallback(async () => {
     const resolvedId = await resolveCustomerForSave();
+    if (createdDateError) {
+      toast.error(createdDateError);
+      return;
+    }
     const invoice = buildInvoice(undefined, resolvedId);
 
     setDirty(false);
@@ -807,7 +841,7 @@ function InvoiceWizard() {
       setCreatedInvoiceId(savedId);
       setShowSuccessAnimation(true);
     }
-  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId, resolveCustomerForSave, linkFinalizedInvoiceToLead]);
+  }, [buildInvoice, editId, isEdit, addInvoice, updateInvoice, router, fromProformaId, resolveCustomerForSave, linkFinalizedInvoiceToLead, createdDateError]);
 
   // Save Draft — persist current form to the DB with status "draft" without
   // finalizing the invoice or leaving the flow. Re-uses the same invoice store
@@ -815,6 +849,10 @@ function InvoiceWizard() {
   const [savingDraft, setSavingDraft] = useState(false);
   const handleSaveDraft = useCallback(async () => {
     if (savingDraft) return;
+    if (createdDateError) {
+      toast.error(createdDateError);
+      return;
+    }
     setSavingDraft(true);
     try {
       const invoice = buildInvoice("draft");
@@ -841,7 +879,7 @@ function InvoiceWizard() {
     } finally {
       setSavingDraft(false);
     }
-  }, [savingDraft, buildInvoice, isEdit, editId, draftId, addInvoice, updateInvoice]);
+  }, [savingDraft, buildInvoice, isEdit, editId, draftId, addInvoice, updateInvoice, createdDateError]);
 
   // Step navigation. On the Products step (3) with multiple devices, "Next"
   // walks through the devices one at a time (fill device 1 → Next → device 2 …)
@@ -1012,7 +1050,7 @@ function InvoiceWizard() {
         <AnimatePresence mode="wait">
           <motion.div key={step} initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.25 }}>
             {step === 1 && <StepCustomer form={form} updateForm={updateForm} />}
-            {step === 2 && <StepDetails form={form} updateForm={updateForm} />}
+            {step === 2 && <StepDetails form={form} updateForm={updateForm} isEdit={isEdit} />}
             {step === 3 && <StepProducts form={form} updateForm={updateForm} showErrors={showProductErrors} />}
             {step === 4 && <StepPricing form={form} updateForm={updateForm} totals={totals} />}
             {step === 5 && <StepNotes form={form} updateForm={updateForm} />}
@@ -1092,7 +1130,7 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
 
   return {
     customer: { name: inv.customer, phone: inv.phone, altPhone: "", email: inv.email || "", company: inv.company || "", gstNumber: inv.gstNumber || "", customerId: inv.customerId },
-    details: { dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service", documentType: inv.documentType ?? "invoice", sourceEstimateId: inv.sourceEstimateId, sourceTicketId: inv.sourceTicketId, sourceProformaId: inv.sourceProformaId },
+    details: { createdAt: inv.createdAt || "", dueDate: inv.dueDate?.slice(0, 10) || "", employee: inv.employee || "", ticketId: inv.ticketId || "", ticketNo: ticketNo || inv.ticketId || "", ticketLocked: !!inv.ticketId, status: inv.status, repairStatus: inv.repairStatus ?? "repaired_collected", invoiceType: inv.invoiceType || "retail", serviceCategory: inv.serviceCategory || "service", documentType: inv.documentType ?? "invoice", sourceEstimateId: inv.sourceEstimateId, sourceTicketId: inv.sourceTicketId, sourceProformaId: inv.sourceProformaId },
     items: inv.items,
     devices,
     activeDeviceIndex: 0,
@@ -1261,9 +1299,31 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
 
 /* ─── Step 2: Details ────────────────────────────────────────────────── */
 
-function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void }) {
+function StepDetails({ form, updateForm, isEdit }: { form: InvoiceFormData; updateForm: (fn: (f: InvoiceFormData) => InvoiceFormData) => void; isEdit: boolean }) {
+  const { settings } = useStoreSettings();
   const d = form.details;
   const set = (k: keyof typeof d, v: string) => updateForm((f) => ({ ...f, details: { ...f.details, [k]: v } }));
+
+  // Creation Date back-dating window. `backdateLimitDays` (Invoice Settings)
+  // sets how many days before today the creation date may be set. The lower
+  // bound is start-of-day(today − limit); the upper bound is end-of-day(today)
+  // — future dates are never allowed.
+  const backdateLimit = Math.max(0, settings.invoiceDefaults.backdateLimitDays ?? 30);
+  const now = new Date();
+  const minAllowed = new Date(now); minAllowed.setHours(0, 0, 0, 0); minAllowed.setDate(minAllowed.getDate() - backdateLimit);
+  const maxAllowed = new Date(now); maxAllowed.setHours(23, 59, 59, 999);
+  const createdMs = d.createdAt ? new Date(d.createdAt).getTime() : NaN;
+  const tooOld = !isEdit && !isNaN(createdMs) && createdMs < minAllowed.getTime();
+  const inFuture = !isEdit && !isNaN(createdMs) && createdMs > maxAllowed.getTime();
+  const createdInvalid = tooOld || inFuture;
+  const minLabel = minAllowed.toLocaleDateString("en-IN", { dateStyle: "medium" });
+
+  const onCreatedChange = (iso: string) => {
+    // Keep whatever the user picked (so the message can explain it), but clamp
+    // nothing silently — the save guard + inline message enforce the rule.
+    set("createdAt", iso);
+  };
+
   return (
     <div className="mx-auto max-w-2xl rounded-2xl border border-black/15 bg-card p-6 shadow-card sm:p-10">
       <h2 className="font-display text-lg font-bold mb-1">Invoice Details</h2>
@@ -1285,7 +1345,47 @@ function StepDetails({ form, updateForm }: { form: InvoiceFormData; updateForm: 
             width and styling). Locked/read-only when the invoice originated from
             a "Push to Invoice" action; a searchable picker otherwise. */}
         <div className="space-y-1.5"><Label>Linked Ticket</Label><LinkedTicketField form={form} updateForm={updateForm} /></div>
-        <div className="space-y-1.5"><Label>Due Date</Label><Input type="date" value={d.dueDate} onChange={(e: any) => set("dueDate", e.target.value)} /></div>
+
+        {/* Creation Date — same pill + calendar used across the app. Defaults
+            to today; staff may back-date it within the configured window. The
+            chosen date is what prints as the Invoice Date everywhere. On edit
+            it is read-only (the original creation timestamp is preserved). */}
+        <div className="space-y-1.5">
+          <Label>Creation Date</Label>
+          {isEdit ? (
+            <div className="flex h-[38px] w-full items-center rounded-xl border border-input bg-muted/40 px-3 text-[13px] text-muted-foreground">
+              {d.createdAt ? new Date(d.createdAt).toLocaleDateString("en-IN", { dateStyle: "medium" }) : "—"}
+            </div>
+          ) : (
+            <DateTimeField
+              value={d.createdAt}
+              onChange={onCreatedChange}
+              title="Invoice Creation Date"
+              placeholder="Pick creation date"
+              invalid={createdInvalid}
+            />
+          )}
+          {!isEdit && tooOld && (
+            <p className="text-[11px] font-medium text-rose-600">
+              That date is past the allowed period. The creation date can&apos;t be older than {minLabel}
+              {backdateLimit === 0 ? " (today only)" : ` (${backdateLimit} day${backdateLimit === 1 ? "" : "s"} back)`}.
+            </p>
+          )}
+          {!isEdit && inFuture && (
+            <p className="text-[11px] font-medium text-rose-600">Future dates aren&apos;t allowed — pick today or an earlier date within the allowed period.</p>
+          )}
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Due Date</Label>
+          <DateTimeField
+            value={d.dueDate ? new Date(`${d.dueDate.slice(0, 10)}T00:00:00`).toISOString() : ""}
+            onChange={(iso) => set("dueDate", iso ? new Date(iso).toISOString().slice(0, 10) : "")}
+            title="Invoice Due Date"
+            placeholder="Pick due date"
+          />
+        </div>
+
         <div className="space-y-1.5"><Label>Created by</Label><Input value={d.employee} onChange={(e: any) => set("employee", e.target.value)} placeholder="Anjali R." /></div>
       </div>
     </div>
@@ -2503,8 +2603,8 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
                         </div>
                       )}
                       <table className="w-full text-sm">
-                        <thead className="bg-muted/30">
-                          <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <thead className="bg-[#EEF1FD]">
+                          <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                             <th className="px-4 py-1.5 text-left">Item</th>
                             <th className="w-14 py-1.5 text-center">Qty</th>
                             <th className="w-20 py-1.5 text-right">Price</th>
@@ -2533,8 +2633,8 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Line Items ({form.items.length})</p>
               <div className="flex flex-1 flex-col overflow-hidden rounded-xl border border-border">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/40">
-                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="bg-[#EEF1FD]">
+                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                       <th className="px-4 py-2 text-left">Item</th>
                       <th className="w-14 py-2 text-center">Qty</th>
                       <th className="w-20 py-2 text-right">Price</th>
@@ -2566,7 +2666,9 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
             <div className="flex flex-1 flex-col rounded-xl border border-border bg-muted/20 p-4 text-[13px]">
               <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Linked Ticket</span><span className="font-medium">{form.details.ticketNo || form.details.ticketId || "—"}</span></div>
               <div className="h-px bg-border/50" />
-              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Due Date</span><span className="font-medium">{form.details.dueDate || "7 days from now"}</span></div>
+              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Creation Date</span><span className="font-medium">{form.details.createdAt ? new Date(form.details.createdAt).toLocaleDateString("en-IN", { dateStyle: "medium" }) : "Today"}</span></div>
+              <div className="h-px bg-border/50" />
+              <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Due Date</span><span className="font-medium">{form.details.dueDate ? new Date(`${form.details.dueDate.slice(0, 10)}T00:00:00`).toLocaleDateString("en-IN", { dateStyle: "medium" }) : "7 days from now"}</span></div>
               <div className="h-px bg-border/50" />
               <div className="flex items-center justify-between gap-3 py-1.5"><span className="text-muted-foreground">Status</span><span className="rounded-md bg-[#4361EE]/10 px-2 py-0.5 text-xs font-semibold text-[#4361EE]">{statusLabel}</span></div>
             </div>

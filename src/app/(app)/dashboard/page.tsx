@@ -913,7 +913,7 @@ export default function Dashboard() {
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] table-fixed text-sm">
-              <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70"><th className="w-[10%] px-5 py-2.5">Ticket</th><th className="w-[18%] py-2.5">Customer</th><th className="w-[18%] py-2.5">Device</th><th className="w-[13%] py-2.5">Priority</th><th className="w-[17%] py-2.5 pl-[38px]">Status</th><th className="w-[12%] py-2.5 pl-[10px]">Waiting</th><th className="w-[12%] py-2.5 pr-5 text-right">Amount</th></tr></thead>
+              <thead className="bg-[#EEF1FD]"><tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]"><th className="w-[10%] px-5 py-2.5">Ticket</th><th className="w-[18%] py-2.5">Customer</th><th className="w-[18%] py-2.5">Device</th><th className="w-[13%] py-2.5">Priority</th><th className="w-[17%] py-2.5 pl-[38px]">Status</th><th className="w-[12%] py-2.5 pl-[10px]">Waiting</th><th className="w-[12%] py-2.5 pr-5 text-right">Amount</th></tr></thead>
               <tbody>
                 {criticalTickets.slice(0, 8).map((t, i) => (
                   <motion.tr

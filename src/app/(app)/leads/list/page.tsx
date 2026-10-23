@@ -2122,13 +2122,16 @@ export default function LeadsListPage() {
               <col key={c.key} style={{ width: c.width }} />
             ))}
           </colgroup>
-          {/* Lead Table header uses a SOLID brand-blue (#4261EE) fill, scoped
-              to this table only (other RepairOX tables keep the shared light
-              #D6DDFB head). White text + white frozen-cell fill keep it readable
+          {/* Lead Table header uses a SOLID brand-blue fill — the same blue as
+              #4261EE but with its saturation/intensity dialed down to #5368D4, so
+              it reads softer and calmer on the eyes over long sessions (same hue
+              and brightness, just less intense) — scoped to this table only
+              (other RepairOX tables keep the shared light #D6DDFB head). White
+              text + white frozen-cell fill keep it readable
               and the sticky/frozen layering intact. */}
           <thead
-            className="rox-table-head sticky top-0 z-[6] [&_.rox-frozen]:!bg-[#4261EE] [&_th]:!text-white"
-            style={{ background: "#4261EE", color: "#ffffff", borderBottom: "2px solid rgba(255,255,255,0.35)" }}
+            className="rox-table-head sticky top-0 z-[6] [&_.rox-frozen]:!bg-[#5368D4] [&_th]:!text-white"
+            style={{ background: "#5368D4", color: "#ffffff", borderBottom: "2px solid rgba(255,255,255,0.35)" }}
           >
             <tr className="text-[12px] font-bold uppercase tracking-wider">
               {orderedColumns.map((c) => {

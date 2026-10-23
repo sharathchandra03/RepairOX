@@ -715,8 +715,8 @@ export default function ManageCustomersPage() {
                   <col className="w-[7%]" />{/* Last Visit */}
                   <col className="w-[6%] min-w-[56px]" />{/* Actions — single "…" kebab menu */}
                 </colgroup>
-                <thead className="bg-[#EEF1FD] border-b-2 border-[#4361EE]/40">
-                  <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+                <thead className="bg-[#5368D4] border-b-2 border-white/35">
+                  <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white">
                     <th className="px-3 py-3">
                       <Checkbox
                         checked={allSelected}
@@ -1215,8 +1215,8 @@ function ContactsTab({ contacts, leads, hydrated, customers, canDelete, onDelete
               <col className="w-[9%]" />{/* Created */}
               {canDelete && <col className="w-[6%]" />}{/* Actions */}
             </colgroup>
-            <thead className="bg-[#EEF1FD] border-b-2 border-[#4361EE]/40">
-              <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+            <thead className="bg-[#5368D4] border-b-2 border-white/35">
+              <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white">
                 {canDelete && (
                   <th className="px-3 py-3">
                     <Checkbox

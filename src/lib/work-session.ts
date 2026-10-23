@@ -31,6 +31,18 @@
  *  without any wall-clock dependency. */
 export const STALE_MS = 30 * 60 * 1000; // 30 minutes
 
+/** Maximum span a SINGLE open session may ever accrue (a tunable CODE constant,
+ *  not an admin setting this phase). This is the safety cap that stops an
+ *  ABANDONED session — the browser left open/running, a crash, a machine that
+ *  never slept — from silently counting toward `now` day after day (the
+ *  "24h 0m every day" runaway). A real human workday never exceeds this, so any
+ *  open session older than MAX_OPEN_SESSION_MS is, by definition, no longer a
+ *  trustworthy live session: it is treated as interrupted and its elapsed is
+ *  capped at start + MAX_OPEN_SESSION_MS (estimated), never `now`, never a
+ *  fabricated end. Chosen generously (16h) so a long-but-real shift is still
+ *  honoured in full; only clearly-abandoned sessions are capped. */
+export const MAX_OPEN_SESSION_MS = 16 * 60 * 60 * 1000; // 16 hours
+
 export type WorkSessionStatus = "open" | "completed" | "interrupted";
 export type Confidence = "confirmed" | "provisional" | "estimated";
 export type CellTone = "green" | "amber" | "gray" | "blue";
@@ -115,24 +127,44 @@ function toMs(iso: string): number {
   return new Date(iso).getTime();
 }
 
-/** Is this session interrupted? Explicit status OR open-and-stale. Pure:
- *  the staleness decision is derived from data (now, lastSeenAt, staleMs),
- *  never from a wall-clock call inside the function. */
+/** Is this session interrupted? Explicit status OR open-and-stale OR
+ *  open-and-over-cap. Pure: every decision is derived from data (now,
+ *  lastSeenAt, start, staleMs), never from a wall-clock call inside. An open
+ *  session is "no longer live" when EITHER the heartbeat went stale (left) OR
+ *  it has been running past the single-session cap (abandoned/never closed). */
 export function isSessionInterrupted(session: WorkSessionRecord, nowMs: number, staleMs: number): boolean {
   if (session.status === "interrupted") return true;
   if (session.endedAt === null) {
-    return nowMs - toMs(session.lastSeenAt) > staleMs;
+    const stale = nowMs - toMs(session.lastSeenAt) > staleMs;
+    const overCap = nowMs - toMs(session.startedAt) > MAX_OPEN_SESSION_MS;
+    return stale || overCap;
   }
   return false;
+}
+
+/** The single authoritative END instant used for an OPEN session's duration.
+ *  Takes the EARLIEST trustworthy cutoff so an abandoned session can never
+ *  inflate the day:
+ *    • lastSeenAt   — the true last-active moment (heartbeat / leave stamp),
+ *    • start + cap  — the hard safety ceiling for a single session.
+ *  A healthy, recently-seen session simply computes to `now`. The result is
+ *  always clamped to [start, now] and is an ESTIMATE (never a fabricated end). */
+function openSessionEndMs(session: WorkSessionRecord, nowMs: number, staleMs: number): number {
+  const start = toMs(session.startedAt);
+  if (session.endedAt !== null) return toMs(session.endedAt);
+  const capEnd = start + MAX_OPEN_SESSION_MS;
+  if (isSessionInterrupted(session, nowMs, staleMs)) {
+    // Estimated: never `now`. Cap at the earlier of lastSeenAt / hard ceiling.
+    return Math.min(toMs(session.lastSeenAt), capEnd, nowMs);
+  }
+  // Healthy & live → now, but never beyond the hard ceiling.
+  return Math.min(nowMs, capEnd);
 }
 
 /** Elapsed duration with the CONDITIONAL end cutoff (design §3.2). */
 export function elapsedMs(session: WorkSessionRecord, nowMs: number, staleMs: number): number {
   const start = toMs(session.startedAt);
-  const interrupted = isSessionInterrupted(session, nowMs, staleMs);
-  let end: number;
-  if (session.endedAt !== null) end = toMs(session.endedAt);
-  else end = interrupted ? toMs(session.lastSeenAt) : nowMs;
+  const end = openSessionEndMs(session, nowMs, staleMs);
   return Math.max(0, end - start);
 }
 
@@ -256,9 +288,7 @@ export function splitAcrossLocalDates(
   staleMs: number,
 ): DaySplitPart[] {
   const start = toMs(session.startedAt);
-  const interrupted = isSessionInterrupted(session, nowMs, staleMs);
-  const end =
-    session.endedAt !== null ? toMs(session.endedAt) : interrupted ? toMs(session.lastSeenAt) : nowMs;
+  const end = openSessionEndMs(session, nowMs, staleMs);
   const spanEnd = Math.max(start, end);
 
   // Build the ordered list of local-day boundaries within [start, spanEnd].

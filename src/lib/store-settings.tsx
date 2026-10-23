@@ -76,6 +76,14 @@ export type InvoiceDefaults = {
   dueDateDays: number;
   /** Default total GST rate (%) pre-selected on new invoices. */
   gstRate: number;
+  /**
+   * How far back the invoice Creation Date may be back-dated, in days from
+   * today. The creation date can be changed only within this window (0 means
+   * "today only"). A fresh invoice defaults to today; choosing a date older
+   * than `today − backdateLimitDays` is rejected with a message. Future dates
+   * are never allowed. Owner-configurable in Settings → Invoice.
+   */
+  backdateLimitDays: number;
 };
 
 export type StoreSettings = {
@@ -369,6 +377,9 @@ WARRANTY IS VOID IF:
     paymentMode: "",
     dueDateDays: 7,
     gstRate: 0,
+    // Default: allow back-dating the creation date up to 30 days (current
+    // month + a little). Owners tighten/loosen this in Invoice Settings.
+    backdateLimitDays: 30,
   },
   invoiceGstRates: [0, 12, 18],
   invoicePaymentModes: ["cash", "upi", "bank_transfer", "card", "cheque", "wallet", "other"],

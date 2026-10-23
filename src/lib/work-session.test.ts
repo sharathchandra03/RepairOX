@@ -3,6 +3,7 @@ import { test } from "node:test";
 import {
   type WorkSessionRecord,
   STALE_MS,
+  MAX_OPEN_SESSION_MS,
   elapsedMs,
   breakMs,
   netMs,
@@ -219,6 +220,49 @@ test("interrupted + midnight: split up to lastSeenAt, never now, no fabricated e
   // Confirm none of the parts reaches `now`.
   const fabricated = new Date(start).getTime() + (nowMs - new Date(start).getTime());
   assert.notEqual(parts.reduce((a, p) => a + p.elapsedMs, 0), fabricated - new Date(start).getTime());
+});
+
+// 11. Abandoned open session (browser left running): heartbeat keeps
+// lastSeenAt fresh, but the span exceeds the single-session cap → interrupted,
+// elapsed capped at start + MAX_OPEN_SESSION_MS, NEVER `now`, NEVER 24h/day.
+test("open session over the cap is capped at start + MAX_OPEN_SESSION_MS, never now", () => {
+  const start = "2026-01-10T09:00:00.000Z";
+  // lastSeenAt is "fresh" relative to now (heartbeat kept running), so the old
+  // stale rule would NOT trip — only the cap should.
+  const nowMs = new Date(start).getTime() + 48 * HOUR; // ran 2 full days
+  const lastSeen = new Date(nowMs - 10 * MIN).toISOString(); // seen 10m ago
+  const s = session({ startedAt: start, endedAt: null, status: "open", lastSeenAt: lastSeen });
+  const d = sessionDurations(s, nowMs, STALE_MS);
+  assert.equal(d.isInterrupted, true);
+  assert.equal(d.confidence, "estimated");
+  assert.equal(d.elapsedMs, MAX_OPEN_SESSION_MS); // exactly the cap, not 48h
+  assert.notEqual(d.elapsedMs, nowMs - new Date(start).getTime());
+});
+
+// 12. A multi-day abandoned session never attributes a full 24h to every
+// intermediate day — the whole span is capped at the ceiling.
+test("over-cap session does not accrue 24h per intermediate local day", () => {
+  const start = "2026-01-10T00:00:00.000Z";
+  const nowMs = new Date(start).getTime() + 5 * 24 * HOUR; // 5 days later
+  const lastSeen = new Date(nowMs - 5 * MIN).toISOString();
+  const s = session({ startedAt: start, endedAt: null, status: "open", lastSeenAt: lastSeen });
+  const parts = splitAcrossLocalDates(s, IST, nowMs, STALE_MS);
+  const totalElapsed = parts.reduce((a, p) => a + p.elapsedMs, 0);
+  assert.equal(totalElapsed, MAX_OPEN_SESSION_MS); // total == cap, not 5×24h
+  // No single day part may exceed a full day, and the total proves no runaway.
+  assert.ok(parts.every((p) => p.elapsedMs <= 24 * HOUR));
+});
+
+// 13. A healthy open session UNDER the cap still computes to now (not clamped).
+test("healthy open session under the cap still uses now", () => {
+  const start = "2026-01-10T09:00:00.000Z";
+  const nowMs = new Date(start).getTime() + 3 * HOUR; // well under the cap
+  const lastSeen = new Date(nowMs - 2 * MIN).toISOString();
+  const s = session({ startedAt: start, endedAt: null, status: "open", lastSeenAt: lastSeen });
+  const d = sessionDurations(s, nowMs, STALE_MS);
+  assert.equal(d.isInterrupted, false);
+  assert.equal(d.confidence, "provisional");
+  assert.equal(d.elapsedMs, 3 * HOUR);
 });
 
 // Bonus: summarize across interrupted + completed sessions.

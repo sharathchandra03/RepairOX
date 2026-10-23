@@ -176,7 +176,7 @@ export function AccountSessionsSection() {
             <div className="hidden overflow-x-auto rounded-xl border border-border md:block">
               <table className="w-full min-w-[720px] text-sm">
                 <thead className="bg-[#EEF1FD]">
-                  <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]/70">
+                  <tr className="text-left text-[11px] font-semibold uppercase tracking-wider text-[#4361EE]">
                     <th className="px-4 py-3">Browser &amp; Device</th>
                     <th className="px-4 py-3">IP Address</th>
                     <th className="px-4 py-3">Login Time</th>

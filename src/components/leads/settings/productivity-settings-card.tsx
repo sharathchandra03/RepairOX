@@ -19,6 +19,7 @@
 import { useEffect, useState } from "react";
 import { Coffee, Check, Info, BellRing, BellOff } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toaster";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -77,6 +78,10 @@ export function ProductivitySettingsSection({ canEdit = true }: { canEdit?: bool
       <div className="rounded-xl border border-border bg-muted/20 p-4">
         <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
           <Coffee className="h-3.5 w-3.5 text-[#4361EE]" /> Remind to resume work after
+          <InfoHint label="About the break reminder">
+            This only controls when the on-screen reminder appears. It never changes recorded work
+            times — productivity is always calculated from the actual session and break records.
+          </InfoHint>
         </p>
         <div className="flex flex-wrap items-center gap-3">
           <div className="flex items-center gap-2">
@@ -131,10 +136,6 @@ export function ProductivitySettingsSection({ canEdit = true }: { canEdit?: bool
         )}
       </div>
 
-      <p className="text-[11px] text-muted-foreground">
-        This only controls when the on-screen reminder appears. It never changes recorded work times —
-        productivity is always calculated from the actual session and break records.
-      </p>
     </div>
   );
 }

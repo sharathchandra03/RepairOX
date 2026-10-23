@@ -166,7 +166,7 @@ export function ProfitabilityBreakdown({ invoice }: { invoice: Invoice }) {
             {/* Per-line breakdown with repair/labour sub-lines. */}
             <div className="mt-4 overflow-hidden rounded-xl border border-border">
               <table className="w-full text-left text-[13px]">
-                <thead className="bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <thead className="bg-[#EEF1FD] text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                   <tr>
                     <th className="px-3 py-2">Line</th>
                     <th className="px-3 py-2 text-right">Qty</th>

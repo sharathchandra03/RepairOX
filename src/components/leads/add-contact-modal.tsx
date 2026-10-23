@@ -904,9 +904,6 @@ function SectionNotes({
           placeholder="Add internal notes about this contact..."
           className="min-h-[120px]"
         />
-        <p className="mt-2 text-[11px] text-muted-foreground">
-          Not shared with the contact. Visible only to team members.
-        </p>
       </CardContent>
     </Card>
   );

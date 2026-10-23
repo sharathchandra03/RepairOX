@@ -458,8 +458,8 @@ function BucketTable({ rows }: { rows: { label: string; elapsed: number; brk: nu
   return (
     <div className="overflow-hidden rounded-xl border border-border">
       <table className="w-full text-[12px]">
-        <thead className="bg-muted/60">
-          <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <thead className="bg-[#EEF1FD]">
+          <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
             <th className="px-3 py-2">Date</th>
             <th className="px-3 py-2 text-right">Session</th>
             <th className="px-3 py-2 text-right">Break</th>

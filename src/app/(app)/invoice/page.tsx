@@ -1032,8 +1032,8 @@ export default function InvoicePage() {
       <div className="-mt-6 border-2 border-zinc-300 bg-card shadow-card">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
-            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
-              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-white">
                 <th className="w-10 px-3 py-3">
                   <Checkbox
                     checked={paged.length > 0 && paged.every((inv) => selected.has(inv.id))}

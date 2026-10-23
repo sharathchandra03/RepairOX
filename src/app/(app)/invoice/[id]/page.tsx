@@ -665,8 +665,8 @@ export default function InvoiceDetailPage() {
                       </div>
                       {/* Parts table */}
                       <table className="w-full text-sm">
-                        <thead className="bg-muted/30">
-                          <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                        <thead className="bg-[#EEF1FD]">
+                          <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                             <th className="px-4 py-1.5 text-left">Part / Service</th>
                             <th className="py-1.5 text-center w-14">Qty</th>
                             <th className="py-1.5 text-right w-20">Price</th>
@@ -698,8 +698,8 @@ export default function InvoiceDetailPage() {
               /* Legacy flat items table */
               <div className="rounded-xl border border-border overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/60">
-                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="bg-[#EEF1FD]">
+                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                       <th className="px-4 py-2 text-left">Item</th>
                       <th className="py-2 text-center w-16">Qty</th>
                       <th className="py-2 text-right w-24">Price</th>

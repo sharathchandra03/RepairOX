@@ -24,6 +24,7 @@ import { useMemo, useState } from "react";
 import { Store, Building2, Check, AlertTriangle, Info, ChevronDown, Users } from "lucide-react";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
+import { InfoHint } from "@/components/ui/info-hint";
 import Link from "next/link";
 import { toast } from "@/components/ui/toaster";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -186,8 +187,12 @@ export function LeadStoreModeSection({ canEdit = true }: { canEdit?: boolean }) 
         </div>
       )}
 
-      <p className="text-[11px] text-muted-foreground">
-        Changing this only affects <span className="font-medium">new</span> leads. Existing leads keep their current store.
+      <p className="flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+        Changing the mode only affects new leads.
+        <InfoHint label="What changing the mode affects">
+          Changing this only affects new leads — existing leads keep their current store and are
+          never reassigned.
+        </InfoHint>
       </p>
 
       {/* ── Multi-Store: per-user store access explanation ── */}
@@ -199,10 +204,13 @@ export function LeadStoreModeSection({ canEdit = true }: { canEdit?: boolean }) 
               <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
                 <Store className="h-3.5 w-3.5" />
               </span>
-              <p className="text-[12px] font-semibold text-foreground">
+              <p className="flex items-center gap-1.5 text-[12px] font-semibold text-foreground">
                 {canViewAllShops
                   ? `You have access to all ${stores.length} stores`
                   : `Your authorized stores (${stores.length})`}
+                <InfoHint label="About store access">
+                  Each user can only create and view leads in the stores they&apos;re authorized to access.
+                </InfoHint>
               </p>
             </div>
             <div className="flex flex-wrap gap-1.5">
@@ -221,9 +229,6 @@ export function LeadStoreModeSection({ canEdit = true }: { canEdit?: boolean }) 
                 </span>
               ))}
             </div>
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Each user can only create and view leads in the stores they&apos;re authorized to access.
-            </p>
           </div>
 
           {/* How-to for owners — grant store access */}

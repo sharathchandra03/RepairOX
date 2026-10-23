@@ -369,7 +369,17 @@ export default function LeadDashboardPage() {
           real filtered view). Grouping is tailored to THIS dashboard's metrics:
           Leads, Conversion, Revenue and Follow-ups. ── */}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        {/* 1 — Leads */}
+        {/* 1 — Revenue */}
+        <KpiGroupCard
+          label="Revenue" icon={IndianRupee} tone="emerald"
+          primaryValue={formatINR(perf.revenueWon)} primaryDescription="Revenue Won · finalized invoices"
+          onClick={() => goToLeads({ status: firstStatusMatching("won") })}
+          support={[
+            { label: "Invoices", value: String(perf.invoiceCount) },
+            { label: "Avg / Invoice", value: perf.invoiceCount > 0 ? formatINR(Math.round(perf.revenueWon / perf.invoiceCount)) : "—" },
+          ]}
+        />
+        {/* 2 — Leads */}
         <KpiGroupCard
           label="Leads" icon={Inbox} tone="indigo"
           primaryValue={String(perf.leads)} primaryDescription={`Total Leads · ${dateLabel}`}
@@ -380,7 +390,7 @@ export default function LeadDashboardPage() {
             { label: "Qualification Rate", value: perf.leads > 0 ? pct(perf.qualified / perf.leads) : "—" },
           ]}
         />
-        {/* 2 — Conversion */}
+        {/* 3 — Conversion */}
         <KpiGroupCard
           label="Conversion" icon={Trophy} tone="violet"
           primaryValue={String(perf.converted)} primaryDescription="Converted / Won"
@@ -389,16 +399,6 @@ export default function LeadDashboardPage() {
           support={[
             { label: "Conversion Rate", value: perf.leads > 0 ? pct(perf.conversionRate) : "—" },
             { label: "Pipeline Value", value: formatINR(perf.pipelineValue), onClick: () => goToLeads() },
-          ]}
-        />
-        {/* 3 — Revenue */}
-        <KpiGroupCard
-          label="Revenue" icon={IndianRupee} tone="emerald"
-          primaryValue={formatINR(perf.revenueWon)} primaryDescription="Revenue Won · finalized invoices"
-          onClick={() => goToLeads({ status: firstStatusMatching("won") })}
-          support={[
-            { label: "Invoices", value: String(perf.invoiceCount) },
-            { label: "Avg / Invoice", value: perf.invoiceCount > 0 ? formatINR(Math.round(perf.revenueWon / perf.invoiceCount)) : "—" },
           ]}
         />
         {/* 4 — Follow-ups */}

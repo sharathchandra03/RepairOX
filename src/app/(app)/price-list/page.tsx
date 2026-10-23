@@ -1591,11 +1591,11 @@ function PartsAndPricing({
       onDrop={() => onDrop(key)}
       style={{ top }}
       className={cn(
-        "sticky z-20 border-b border-l border-border bg-[#4261EE] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-white cursor-grab select-none whitespace-nowrap",
+        "sticky z-20 border-b border-l border-border bg-[#5368D4] px-4 py-2.5 text-[12px] font-semibold uppercase tracking-wider text-white cursor-grab select-none whitespace-nowrap",
         alignClass[key],
         // Move the whole Image column (header + content) right as one unit.
         key === "image" && "pl-[27px]",
-        overCol === key && dragCol && dragCol !== key && "bg-[#3049c9]",
+        overCol === key && dragCol && dragCol !== key && "bg-[#4258C4]",
         dragCol === key && "opacity-50"
       )}
       title="Drag to reorder column"
@@ -1819,12 +1819,12 @@ function PartsAndPricing({
               <tr>
                 <th
                   style={{ top: tableHeadTop }}
-                  className="sticky z-20 border-b border-r border-border bg-[#4261EE] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-white"
+                  className="sticky z-20 border-b border-r border-border bg-[#5368D4] pl-4 pr-2 py-2.5 text-left text-[12px] font-semibold uppercase tracking-wider text-white"
                 >#</th>
                 {order.map((key) => headerCell(key, tableHeadTop))}
                 <th
                   style={{ top: tableHeadTop }}
-                  className="sticky z-20 border-b border-l border-border bg-[#4261EE] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-white"
+                  className="sticky z-20 border-b border-l border-border bg-[#5368D4] px-4 py-2.5 text-center text-[12px] font-semibold uppercase tracking-wider text-white"
                 >Actions</th>
               </tr>
             </thead>

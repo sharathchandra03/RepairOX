@@ -912,8 +912,8 @@ export default function WalkInPage() {
                 <col className="w-[136px]" />{/* Final Status — N/A / Lost / Converted Ticket */}
                 <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
               </colgroup>
-              <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
-                <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+              <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+                <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white">
                   <th className="pl-5 pr-2 py-4">
                     <Checkbox
                       checked={allSelected}

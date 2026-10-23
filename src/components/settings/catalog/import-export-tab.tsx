@@ -241,15 +241,15 @@ export function ImportExportTab() {
           {/* Rows preview */}
           <div className="max-h-[360px] overflow-auto">
             <table className="w-full text-left text-[12px]">
-              <thead className="sticky top-0 bg-muted/50 backdrop-blur">
-                <tr className="border-b border-border">
-                  <th className="py-2 pl-4 pr-2 font-semibold text-muted-foreground">#</th>
-                  <th className="py-2 px-2 font-semibold text-muted-foreground">Category</th>
-                  <th className="py-2 px-2 font-semibold text-muted-foreground">Brand</th>
-                  <th className="py-2 px-2 font-semibold text-muted-foreground">Model</th>
-                  <th className="py-2 px-2 font-semibold text-muted-foreground">Part</th>
-                  <th className="py-2 px-2 font-semibold text-muted-foreground">Price</th>
-                  <th className="py-2 px-2 font-semibold text-muted-foreground">Status</th>
+              <thead className="sticky top-0 bg-[#EEF1FD] backdrop-blur">
+                <tr className="border-b border-border text-[#4361EE]">
+                  <th className="py-2 pl-4 pr-2 font-semibold">#</th>
+                  <th className="py-2 px-2 font-semibold">Category</th>
+                  <th className="py-2 px-2 font-semibold">Brand</th>
+                  <th className="py-2 px-2 font-semibold">Model</th>
+                  <th className="py-2 px-2 font-semibold">Part</th>
+                  <th className="py-2 px-2 font-semibold">Price</th>
+                  <th className="py-2 px-2 font-semibold">Status</th>
                 </tr>
               </thead>
               <tbody>

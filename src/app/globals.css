@@ -67,8 +67,9 @@
   /* Table — sharp, clean, visible. Canonical = Walk-In / Ticket. */
   --rox-table-border: 228 14% 78%;        /* outer card frame (2px) */
   --rox-table-divider: 228 10% 66%;       /* row separators — clearly visible */
-  --rox-table-head-bg: 231 80% 91%;       /* #D6DDFB — sticky header fill */
-  --rox-table-head-accent: 231 80% 57%;   /* #4361EE — header text + underline */
+  --rox-table-head-bg: 231 59% 58%;       /* #5368D4 — solid brand header fill (same hue as #4261EE, lower intensity) */
+  --rox-table-head-accent: 231 80% 57%;   /* #4361EE — header underline + grid scrollbar accent */
+  --rox-table-head-fg: 0 0% 100%;         /* #FFFFFF — header text on the solid fill */
   --rox-table-row-h: 68px;                /* default row height */
   --rox-table-cell-py: 1rem;              /* py-4 — vertical cell padding */
 
@@ -160,6 +161,7 @@
   --rox-table-divider: 223 14% 34%;
   --rox-table-head-bg: 231 40% 22%;
   --rox-table-head-accent: 231 85% 74%;
+  --rox-table-head-fg: 231 90% 92%;
   --rox-form-border: 223 16% 30%;
 }
 
@@ -390,11 +392,11 @@ body {
   border: 2px solid hsl(var(--rox-table-border));
   background: hsl(var(--card));
 }
-/* Sticky table header — light indigo fill + brand underline. */
+/* Sticky table header — solid brand-blue fill + white labels. */
 .rox-table-head {
   background: hsl(var(--rox-table-head-bg));
-  border-bottom: 2px solid hsl(var(--rox-table-head-accent) / 0.4);
-  color: hsl(var(--rox-table-head-accent));
+  border-bottom: 2px solid hsl(var(--rox-table-head-fg) / 0.35);
+  color: hsl(var(--rox-table-head-fg));
 }
 /* Row separator — clearly visible, never a faint hairline. */
 .rox-table-row {

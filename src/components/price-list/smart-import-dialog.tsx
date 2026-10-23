@@ -191,11 +191,11 @@ export function SmartImportDialog({
               {result.models.length > 0 && (
                 <div className="overflow-hidden rounded-xl border border-border">
                   <table className="w-full text-left text-[12px]">
-                    <thead className="bg-muted/40">
-                      <tr className="border-b border-border">
-                        <th className="py-2 pl-3 pr-2 font-semibold text-muted-foreground">Device</th>
-                        <th className="py-2 px-2 font-semibold text-muted-foreground">Parts</th>
-                        <th className="py-2 px-2 font-semibold text-muted-foreground">Sample metadata</th>
+                    <thead className="bg-[#EEF1FD]">
+                      <tr className="border-b border-border text-[#4361EE]">
+                        <th className="py-2 pl-3 pr-2 font-semibold">Device</th>
+                        <th className="py-2 px-2 font-semibold">Parts</th>
+                        <th className="py-2 px-2 font-semibold">Sample metadata</th>
                       </tr>
                     </thead>
                     <tbody>

@@ -513,10 +513,10 @@ export default function FieldPage() {
               <col className="w-[7%]" />   {/* Invoice Amt */}
               <col className="w-[64px]" /> {/* Action — fixed, always visible */}
             </colgroup>
-            <thead style={{ top: theadTop }} className="sticky z-[5] border-b-2 border-[#4361EE]/40 bg-[#D6DDFB]">
+            <thead style={{ top: theadTop }} className="sticky z-[5] border-b-2 border-white/35 bg-[#5368D4]">
               {/* Header alignment matches the data type of each column
                   (left for text, center for compact IDs/pill, right for money). */}
-              <tr className="text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
+              <tr className="text-[11px] font-bold uppercase tracking-wider text-white">
                 {multiStore && <th className="px-3 py-3 text-left">Store</th>}
                 <th className="px-3 py-3 text-left">Date</th>
                 <th className="px-3 py-3 text-left">Trip ID</th>

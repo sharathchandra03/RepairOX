@@ -3112,8 +3112,8 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
       <div className="mt-5 rounded-xl border border-border overflow-hidden">
         {parts.length > 0 ? (
           <table className="w-full text-sm">
-            <thead className="bg-muted/60">
-              <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <thead className="bg-[#EEF1FD]">
+              <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                 <th className="px-4 py-2 text-left">Item</th>
                 <th className="py-2 text-center w-28">Qty</th>
                 <th className="py-2 text-right w-24">Price</th>

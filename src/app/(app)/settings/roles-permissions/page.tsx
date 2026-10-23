@@ -1706,7 +1706,7 @@ function UsersTab({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[860px] border-collapse">
             <thead className="bg-[#EEF1FD]">
-              <tr className="text-left text-[11px] font-bold uppercase tracking-[0.08em] text-[#3347D6]">
+              <tr className="text-left text-[11px] font-bold uppercase tracking-[0.08em] text-[#4361EE]">
                 <th className="px-6 py-3.5">Member</th>
                 <th className="px-3 py-3.5">Role &amp; Access</th>
                 <th className="w-[150px] px-3 py-3.5">Modules</th>

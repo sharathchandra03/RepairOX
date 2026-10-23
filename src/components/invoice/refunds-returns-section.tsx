@@ -76,7 +76,7 @@ export function RefundsReturnsSection({ invoice }: { invoice: Invoice }) {
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Refunds</p>
               <div className="overflow-hidden rounded-xl border border-border">
                 <table className="w-full text-[12px]">
-                  <thead className="bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="bg-[#EEF1FD] text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                     <tr>
                       <th className="px-3 py-2 text-left">Refund</th>
                       <th className="px-3 py-2 text-left">Reason</th>
@@ -123,7 +123,7 @@ export function RefundsReturnsSection({ invoice }: { invoice: Invoice }) {
               <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Item Returns</p>
               <div className="overflow-hidden rounded-xl border border-border">
                 <table className="w-full text-[12px]">
-                  <thead className="bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="bg-[#EEF1FD] text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                     <tr>
                       <th className="px-3 py-2 text-left">Return</th>
                       <th className="px-3 py-2 text-left">Item</th>

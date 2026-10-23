@@ -308,8 +308,8 @@ function BreakdownTable({
             <col className="w-[11%]" />{/* Won */}
             <col className="w-[15%]" />{/* SR */}
           </colgroup>
-          <thead className="bg-[#D6DDFB] border-b-2 border-[#4361EE]/25">
-            <tr className="text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+          <thead className="bg-[#5368D4] border-b-2 border-white/30">
+            <tr className="text-[12px] font-bold uppercase tracking-wider text-white">
               <th className="px-4 py-3 text-left">Date</th>
               <th className="px-2 py-3 text-right">Organic</th>
               <th className="px-2 py-3 text-right">Mkt</th>

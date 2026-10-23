@@ -258,8 +258,8 @@ export default function QuotationDetailPage() {
             {q.items.length > 0 ? (
               <div className="rounded-xl border border-border overflow-hidden">
                 <table className="w-full text-sm">
-                  <thead className="bg-muted/60">
-                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <thead className="bg-[#EEF1FD]">
+                    <tr className="text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
                       <th className="px-3 py-2 text-left">Item / Service</th>
                       <th className="px-2 py-2 text-center">Qty</th>
                       <th className="px-2 py-2 text-right">Price</th>

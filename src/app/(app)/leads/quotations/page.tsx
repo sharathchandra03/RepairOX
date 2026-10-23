@@ -341,8 +341,8 @@ export default function QuotationsPage() {
               <col className="w-[100px]" />{/* Date */}
               <col className="w-[110px]" />{/* Actions */}
             </colgroup>
-            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
-              <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE] [&>th]:py-4 [&>th]:whitespace-nowrap">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+              <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white [&>th]:py-4 [&>th]:whitespace-nowrap">
                 {canDelete && (
                   <th className="pl-5 pr-1">
                     <Checkbox

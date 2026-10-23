@@ -117,8 +117,8 @@ export function WalkInFollowUpView({
             </colgroup>
             {/* Frozen header — pins flush below the topbar + sticky filter block
                 via the measured theadTop, same as the main table. */}
-            <thead style={theadTop != null ? { top: theadTop } : undefined} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
-              <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-[#4361EE]">
+            <thead style={theadTop != null ? { top: theadTop } : undefined} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+              <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white">
                 <th className="py-4"><span className="inline-block pl-5">Date</span></th>
                 <th className="py-4">ID</th>
                 <th className="pl-4 py-4">Customer</th>

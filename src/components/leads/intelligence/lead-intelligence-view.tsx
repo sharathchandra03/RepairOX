@@ -231,7 +231,19 @@ function SummaryGrid({ result, previous, salesMix, evidenceHref }: { result: Lea
   const conversionMedian = conversionTiming?.sufficient ? conversionTiming.medianHours : null;
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
-      {/* 1 — Lead Performance */}
+      {/* 1 — Sales Mix: what was actually sold and what it's worth */}
+      <KpiCard
+        label="Sales Mix" icon={IndianRupee} accent="emerald"
+        primaryValue={formatINR(salesMix.netRevenue)} primaryDescription="Net Revenue Won"
+        trend={delta(salesMix.netRevenue, previous?.revenueWon)}
+        href={evidenceHref(result.summaryEvidence.revenueWon)}
+        title={`Net Revenue = finalized (paid, non-proforma) invoices minus completed refunds. Gross ${formatINR(salesMix.grossRevenue)}.`}
+        support={[
+          { label: "Avg / Invoice", value: salesMix.finalizedInvoices ? formatINR(Math.round(salesMix.averageInvoiceValue)) : "—" },
+          { label: "Units Sold", value: salesMix.totalUnits ? `${salesMix.totalUnits} (${salesMix.productUnits}P · ${salesMix.serviceUnits}S)` : "—" },
+        ]}
+      />
+      {/* 2 — Lead Performance */}
       <KpiCard
         label="Lead Performance" icon={Users} accent="blue"
         primaryValue={String(s.totalLeads)} primaryDescription="Total Leads"
@@ -244,7 +256,7 @@ function SummaryGrid({ result, previous, salesMix, evidenceHref }: { result: Lea
           { label: "Qualification Rate", value: s.totalLeads ? pct(s.qualified / s.totalLeads) : "—" },
         ]}
       />
-      {/* 2 — Conversion Performance */}
+      {/* 3 — Conversion Performance */}
       <KpiCard
         label="Conversion Performance" icon={Target} accent="indigo"
         primaryValue={String(s.converted)} primaryDescription="Converted Leads"
@@ -255,18 +267,6 @@ function SummaryGrid({ result, previous, salesMix, evidenceHref }: { result: Lea
         support={[
           { label: "Conversion Rate", value: s.totalLeads ? pct(s.conversionRate) : "—" },
           { label: "Not Converted", value: String(notConverted) },
-        ]}
-      />
-      {/* 3 — Sales Mix: what was actually sold and what it's worth */}
-      <KpiCard
-        label="Sales Mix" icon={IndianRupee} accent="emerald"
-        primaryValue={formatINR(salesMix.netRevenue)} primaryDescription="Net Revenue Won"
-        trend={delta(salesMix.netRevenue, previous?.revenueWon)}
-        href={evidenceHref(result.summaryEvidence.revenueWon)}
-        title={`Net Revenue = finalized (paid, non-proforma) invoices minus completed refunds. Gross ${formatINR(salesMix.grossRevenue)}.`}
-        support={[
-          { label: "Avg / Invoice", value: salesMix.finalizedInvoices ? formatINR(Math.round(salesMix.averageInvoiceValue)) : "—" },
-          { label: "Units Sold", value: salesMix.totalUnits ? `${salesMix.totalUnits} (${salesMix.productUnits}P · ${salesMix.serviceUnits}S)` : "—" },
         ]}
       />
       {/* 4 — Velocity & Pipeline: how fast leads convert and what's still open.

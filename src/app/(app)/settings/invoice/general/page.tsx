@@ -3,7 +3,8 @@
 import { useState, useCallback } from "react";
 import { Palette, SlidersHorizontal, RotateCcw } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
-import { Label, Select } from "@/components/ui/input";
+import { Input, Label, Select } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/info-hint";
 import { useStoreSettings, DEFAULT_STORE_SETTINGS } from "@/lib/store-settings";
 import { useCanEdit } from "@/lib/use-can-edit";
 import { CAP } from "@/lib/capabilities";
@@ -74,7 +75,7 @@ export default function InvoiceGeneralSettingsPage() {
       >
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
           <div className="space-y-1.5">
-            <Label>Default Invoice Type</Label>
+            <Label className="flex min-h-[2.1em] items-end">Default Invoice Type</Label>
             <Select
               value={defaults.invoiceType}
               onChange={(e) => setDefaults((d) => ({ ...d, invoiceType: e.target.value as "retail" | "business" }))}
@@ -86,7 +87,7 @@ export default function InvoiceGeneralSettingsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Default Category</Label>
+            <Label className="flex min-h-[2.1em] items-end">Default Category</Label>
             <Select
               value={defaults.serviceCategory}
               onChange={(e) => setDefaults((d) => ({ ...d, serviceCategory: e.target.value as "service" | "accessories" }))}
@@ -98,7 +99,7 @@ export default function InvoiceGeneralSettingsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Default Status</Label>
+            <Label className="flex min-h-[2.1em] items-end">Default Status</Label>
             <Select
               value={defaults.status}
               onChange={(e) => setDefaults((d) => ({ ...d, status: e.target.value }))}
@@ -107,7 +108,7 @@ export default function InvoiceGeneralSettingsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Default Payment Mode</Label>
+            <Label className="flex min-h-[2.1em] items-end">Default Payment Mode</Label>
             <Select
               value={defaults.paymentMode}
               onChange={(e) => setDefaults((d) => ({ ...d, paymentMode: e.target.value }))}
@@ -116,19 +117,38 @@ export default function InvoiceGeneralSettingsPage() {
           </div>
 
           <div className="space-y-1.5">
-            <Label>Default Due Date (days from creation)</Label>
-            <input
+            <Label className="flex min-h-[2.1em] items-end">Default Due Date (days from creation)</Label>
+            <Input
               type="number"
               min={0}
               max={365}
               value={defaults.dueDateDays}
               onChange={(e) => setDefaults((d) => ({ ...d, dueDateDays: Math.max(0, Math.min(365, parseInt(e.target.value) || 0)) }))}
-              className="h-[34px] w-full rounded-xl border border-border bg-card px-3 text-[13px] focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15 focus:outline-none"
+              className="h-11 text-sm"
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label>Default GST Rate (%)</Label>
+            <Label className="flex min-h-[2.1em] items-end gap-1.5">
+              Creation Date Back-dating Limit (days)
+              <InfoHint label="About the back-dating limit">
+                How far back staff may set an invoice&apos;s Creation Date. New invoices default
+                to today; a date older than this many days is rejected. Future dates are never
+                allowed. Set to 0 to lock the creation date to today.
+              </InfoHint>
+            </Label>
+            <Input
+              type="number"
+              min={0}
+              max={365}
+              value={defaults.backdateLimitDays ?? 30}
+              onChange={(e) => setDefaults((d) => ({ ...d, backdateLimitDays: Math.max(0, Math.min(365, parseInt(e.target.value) || 0)) }))}
+              className="h-11 text-sm"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="flex min-h-[2.1em] items-end">Default GST Rate (%)</Label>
             <Select
               value={String(defaults.gstRate)}
               onChange={(e) => setDefaults((d) => ({ ...d, gstRate: Number(e.target.value) }))}

@@ -13,10 +13,22 @@
    cards, the daily table, AND the HR/payroll export — so export == on-screen.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useEffect, useMemo, useState } from "react";
-import { Clock, Users, FileSpreadsheet, FileText, RefreshCw, ChevronDown } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  Users,
+  FileSpreadsheet,
+  FileText,
+  RefreshCw,
+  ChevronDown,
+  Timer,
+  Zap,
+  CalendarDays,
+  AlertTriangle,
+  CheckCircle2,
+  type LucideIcon,
+} from "lucide-react";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DetailHero, SummaryCard } from "@/components/common/detail-page";
+import { DetailHero } from "@/components/common/detail-page";
 import { Reveal } from "@/components/common/reveal";
 import {
   RoxTableCard,
@@ -37,7 +49,7 @@ import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { useStoreSettings } from "@/lib/store-settings";
 import { allow, CAP } from "@/lib/capabilities";
-import { cn } from "@/lib/utils";
+import { cn, initials } from "@/lib/utils";
 import { toast } from "@/components/ui/toaster";
 import { downloadXLSX, downloadCSV, toCSV } from "@/lib/csv-utils";
 import {
@@ -234,6 +246,13 @@ export default function AgentProductivityPage() {
       .sort((a, b) => b.totalNetMs - a.totalNetMs || a.agent.name.localeCompare(b.agent.name));
   }, [scopedAgents, sessions, nowMs, tz]);
 
+  // Largest net across the visible agents — scales the per-row Net bar so the
+  // table reads as a relative leaderboard at a glance (presentation only).
+  const maxNetMs = useMemo(
+    () => agentRows.reduce((m, r) => Math.max(m, r.totalNetMs), 0),
+    [agentRows],
+  );
+
   useEffect(() => setPage(1), [agentFilter, storeFilter, fromISO, toISO]);
 
   const totalPages = Math.max(1, Math.ceil(agentRows.length / pageSize));
@@ -256,6 +275,17 @@ export default function AgentProductivityPage() {
     const agentSessions = sessions.filter((s) => s.staffId === detailAgent);
     return dailyBuckets(agentSessions, tz, nowMs, STALE_MS);
   }, [detailAgent, sessions, tz, nowMs]);
+
+  // The selected agent's period roll-up (same engine pass) for the detail header.
+  const detailSummary = useMemo(
+    () => agentRows.find((r) => r.agent.staffId === detailAgent) ?? null,
+    [agentRows, detailAgent],
+  );
+  // Largest per-day net — scales the per-day bars in the breakdown.
+  const detailMaxNetMs = useMemo(
+    () => detailRows.reduce((m, d) => Math.max(m, d.netMs), 0),
+    [detailRows],
+  );
 
   /* ── Export (Excel primary + CSV) from ONE shared row-builder ── */
   function buildRows() {
@@ -336,10 +366,34 @@ export default function AgentProductivityPage() {
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <SummaryCard label="Total Net Hours (sum)" value={formatHm(summary.totalNetMs)} tone="text-emerald-600" />
-          <SummaryCard label="Avg Net / Workday (avg)" value={formatHm(avgNetPerWorkday)} />
-          <SummaryCard label="Sessions (count)" value={summary.sessionCount} />
-          <SummaryCard label="Needs Review (count)" value={summary.interruptedCount} tone={summary.interruptedCount ? "text-rose-600" : undefined} />
+          <StatCard
+            icon={Zap}
+            accent="emerald"
+            label="Total Net Hours"
+            value={formatHm(summary.totalNetMs)}
+            hint={`${summary.workdays} workday${summary.workdays === 1 ? "" : "s"}`}
+          />
+          <StatCard
+            icon={Timer}
+            accent="blue"
+            label="Avg Net / Workday"
+            value={formatHm(avgNetPerWorkday)}
+            hint="productive per day"
+          />
+          <StatCard
+            icon={CalendarDays}
+            accent="indigo"
+            label="Sessions"
+            value={summary.sessionCount}
+            hint={`${summary.completedCount} completed`}
+          />
+          <StatCard
+            icon={AlertTriangle}
+            accent={summary.interruptedCount ? "rose" : "emerald"}
+            label="Needs Review"
+            value={summary.interruptedCount}
+            hint={summary.interruptedCount ? "interrupted sessions" : "all clean"}
+          />
         </div>
       </DetailHero>
 
@@ -378,30 +432,32 @@ export default function AgentProductivityPage() {
 
       {/* Daily comparison table */}
       <RoxTableCard>
-        {/* All columns share an equal proportional width so spacing is uniform
-            across the row (Store shown only in multi-store views). */}
+        {/* Proportional widths: the identity columns (Store / Agent) get the
+            room, the numeric columns stay tight, and Net is a touch wider for
+            the bar. table-fixed + these %s keep the layout uniform and reflow
+            cleanly when the sidebar collapses (the table just gets wider). */}
         <colgroup>
-          {multiStore && <col className="w-[11.11%]" />}
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
-          <col className="w-[11.11%]" />
+          {multiStore && <col className="w-[12%]" />}
+          <col className={multiStore ? "w-[20%]" : "w-[24%]" } />
+          <col className="w-[9%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
+          <col className={multiStore ? "w-[17%]" : "w-[19%]"} />
+          <col className="w-[9%]" />
+          <col className="w-[11%]" />
+          <col className="w-[11%]" />
         </colgroup>
         <RoxTableHead top={theadTop}>
           <RoxHeadRow>
-            {multiStore && <th className="px-3 py-4 text-[#4361EE]">Store</th>}
-            <th className="px-3 py-4 text-[#4361EE]">Agent</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Workdays</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Session</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Break</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Net</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Sessions</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Review</th>
-            <th className="px-3 py-4 text-right text-[#4361EE]">Details</th>
+            {multiStore && <th className="px-3 py-4">Store</th>}
+            <th className="px-3 py-4">Agent</th>
+            <th className="px-3 py-4 text-right">Workdays</th>
+            <th className="px-3 py-4 text-right">Session</th>
+            <th className="px-3 py-4 text-right">Break</th>
+            <th className="px-3 py-4 text-right">Net</th>
+            <th className="px-3 py-4 text-right">Sessions</th>
+            <th className="px-3 py-4 text-right">Review</th>
+            <th className="px-3 py-4 text-right">Details</th>
           </RoxHeadRow>
         </RoxTableHead>
         <tbody>
@@ -412,32 +468,67 @@ export default function AgentProductivityPage() {
               </RoxTableCell>
             </tr>
           ) : (
-            paged.map((r) => (
-              <RoxTableRow key={r.agent.staffId}>
+            paged.map((r, i) => {
+              const rank = (page - 1) * pageSize + i + 1;
+              const active = detailAgent === r.agent.staffId;
+              return (
+              <RoxTableRow
+                key={r.agent.staffId}
+                className={cn(active && "bg-[#EEF1FD]/60")}
+              >
                 {multiStore && (
                   <RoxTableCell className="px-3 py-4">
                     <StoreContextCell store={r.agent.branchId ? storeById.get(r.agent.branchId) ?? null : null} />
                   </RoxTableCell>
                 )}
-                <RoxTableCell className="px-3 py-4 font-semibold text-foreground">{r.agent.name}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{r.workdays}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{formatHm(r.totalElapsedMs)}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{formatHm(r.totalBreakMs)}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right font-semibold text-emerald-600 tabular-nums">{formatHm(r.totalNetMs)}</RoxTableCell>
-                <RoxTableCell className="px-3 py-4 text-right tabular-nums">{r.sessionCount}</RoxTableCell>
-                <RoxTableCell className={cn("px-3 py-4 text-right tabular-nums", r.interruptedCount && "font-semibold text-rose-600")}>
-                  {r.interruptedCount}
+                <RoxTableCell className="px-3 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <AgentAvatar name={r.agent.name} rank={rank} />
+                    <div className="min-w-0">
+                      <p className="truncate text-[13px] font-bold leading-tight text-foreground" title={r.agent.name}>
+                        {r.agent.name}
+                      </p>
+                      <p className="truncate text-[10.5px] text-muted-foreground">
+                        {r.agent.storeName ?? "Sales Agent"}
+                      </p>
+                    </div>
+                  </div>
+                </RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums text-foreground">{r.workdays}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums text-foreground">{formatHm(r.totalElapsedMs)}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums text-muted-foreground">{formatHm(r.totalBreakMs)}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4">
+                  <NetBar netMs={r.totalNetMs} maxMs={maxNetMs} estimated={r.interruptedCount > 0} />
+                </RoxTableCell>
+                <RoxTableCell className="px-3 py-4 text-right tabular-nums text-foreground">{r.sessionCount}</RoxTableCell>
+                <RoxTableCell className="px-3 py-4">
+                  <div className="flex justify-end">
+                    {r.interruptedCount > 0 ? (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2 py-0.5 text-[11px] font-semibold text-rose-600 ring-1 ring-inset ring-rose-200">
+                        <AlertTriangle className="h-3 w-3" /> {r.interruptedCount}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-600 ring-1 ring-inset ring-emerald-200">
+                        <CheckCircle2 className="h-3 w-3" /> OK
+                      </span>
+                    )}
+                  </div>
                 </RoxTableCell>
                 <RoxTableCell className="px-3 py-4 text-right">
                   <button
-                    onClick={() => setDetailAgent(r.agent.staffId)}
-                    className="text-[11px] font-medium text-[#4361EE] hover:underline"
+                    onClick={() => setDetailAgent(active ? null : r.agent.staffId)}
+                    className={cn(
+                      "inline-flex items-center gap-1 rounded-lg border px-2.5 py-1 text-[11px] font-semibold transition",
+                      active
+                        ? "border-[#4361EE] bg-[#4361EE] text-white"
+                        : "border-[#4361EE]/25 bg-[#EEF1FD] text-[#3B54CF] hover:bg-[#4361EE] hover:text-white",
+                    )}
                   >
-                    View Details
+                    {active ? "Hide" : "View Details"}
                   </button>
                 </RoxTableCell>
               </RoxTableRow>
-            ))
+            );})
           )}
         </tbody>
         <RoxTableFooter>
@@ -458,44 +549,98 @@ export default function AgentProductivityPage() {
       {/* Per-agent detail (within the owner's own session — no identity change). */}
       {detailAgent && (
         <Reveal>
-          <div className="rounded-2xl border-[1.5px] border-border bg-card p-5 shadow-card sm:p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="flex items-center gap-2 text-sm font-bold uppercase tracking-wider text-foreground">
-                <Clock className="h-4 w-4 text-[#4361EE]" />
-                {agents.find((a) => a.staffId === detailAgent)?.name ?? "Agent"} — Daily Breakdown
-              </h2>
-              <button onClick={() => setDetailAgent(null)} className="text-[12px] font-medium text-muted-foreground hover:text-foreground">
-                Close
-              </button>
+          <div className="overflow-hidden rounded-2xl border-[1.5px] border-border bg-card shadow-[0_1px_2px_rgba(20,30,80,0.04),0_10px_30px_-18px_rgba(20,30,80,0.22)]">
+            {/* Header strip — agent identity + period roll-up */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border/70 bg-gradient-to-r from-[#F3F6FF] to-transparent px-5 py-4">
+              <div className="flex items-center gap-3">
+                <AgentAvatar name={detailSummary?.agent.name ?? "Agent"} />
+                <div>
+                  <h2 className="flex items-center gap-1.5 text-sm font-bold text-foreground">
+                    {detailSummary?.agent.name ?? "Agent"}
+                    <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">· Daily Breakdown</span>
+                  </h2>
+                  <p className="text-[11px] text-muted-foreground">{periodLabel}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <DetailStat label="Net" value={formatHm(detailSummary?.totalNetMs ?? 0)} tone="text-emerald-600" />
+                <DetailStat label="Break" value={formatHm(detailSummary?.totalBreakMs ?? 0)} />
+                <DetailStat label="Workdays" value={String(detailSummary?.workdays ?? 0)} />
+                <button
+                  onClick={() => setDetailAgent(null)}
+                  className="rounded-lg border border-border bg-card px-2.5 py-1 text-[12px] font-medium text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                >
+                  Close
+                </button>
+              </div>
             </div>
+
             {detailRows.length === 0 ? (
-              <p className="py-4 text-center text-[13px] text-muted-foreground">No sessions in range.</p>
+              <p className="py-8 text-center text-[13px] text-muted-foreground">No sessions in range.</p>
             ) : (
-              <div className="overflow-hidden rounded-xl border border-border">
-                <table className="w-full text-[12px]">
-                  <thead className="bg-muted/60">
-                    <tr className="text-left text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
-                      <th className="px-3 py-2">Date</th>
-                      <th className="px-3 py-2 text-right">Session</th>
-                      <th className="px-3 py-2 text-right">Break</th>
-                      <th className="px-3 py-2 text-right">Net (Hh Mm)</th>
-                      <th className="px-3 py-2 text-right">Net (hrs)</th>
-                      <th className="px-3 py-2 text-right">Review</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {detailRows.map((d) => (
-                      <tr key={d.date} className="border-t border-border">
-                        <td className="px-3 py-2 font-medium text-foreground">{d.date}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatHm(d.elapsedMs)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{formatHm(d.breakMs)}</td>
-                        <td className="px-3 py-2 text-right font-semibold text-emerald-600 tabular-nums">{formatHm(d.netMs)}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{toDecimalHours(d.netMs)}</td>
-                        <td className={cn("px-3 py-2 text-right tabular-nums", d.interruptedCount && "font-semibold text-rose-600")}>{d.interruptedCount}</td>
+              <div className="p-5 sm:p-6">
+                <div className="[overflow-x:clip] rounded-xl border border-border">
+                  <table className="w-full table-fixed text-[12px]">
+                    {/* Fixed widths keep the Net value from wrapping and keep the
+                        columns stable whether the sidebar is open or collapsed. */}
+                    <colgroup>
+                      <col className="w-[22%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[14%]" />
+                      <col className="w-[28%]" />
+                      <col className="w-[12%]" />
+                      <col className="w-[10%]" />
+                    </colgroup>
+                    <thead className="bg-[#5368D4]">
+                      <tr className="text-left text-[10.5px] font-bold uppercase tracking-wider text-white">
+                        <th className="px-4 py-3">Date</th>
+                        <th className="px-4 py-3 text-right">Session</th>
+                        <th className="px-4 py-3 text-right">Break</th>
+                        <th className="px-4 py-3 text-right">Net Productive</th>
+                        <th className="px-4 py-3 text-right">Net (hrs)</th>
+                        <th className="px-4 py-3 text-center">Review</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {detailRows.map((d, i) => (
+                        <tr
+                          key={d.date}
+                          className={cn(
+                            "border-t border-border transition hover:bg-[#EEF1FD]/40",
+                            i % 2 === 1 && "bg-[#F8FAFC]",
+                          )}
+                        >
+                          <td className="px-4 py-2.5">
+                            <span className="truncate font-semibold text-foreground">{formatDayLabel(d.date)}</span>
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-foreground">{formatHm(d.elapsedMs)}</td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{formatHm(d.breakMs)}</td>
+                          <td className="px-4 py-2.5">
+                            <NetBar netMs={d.netMs} maxMs={detailMaxNetMs} estimated={d.interruptedCount > 0} />
+                          </td>
+                          <td className="px-4 py-2.5 text-right tabular-nums text-muted-foreground">{toDecimalHours(d.netMs)}</td>
+                          <td className="px-4 py-2.5">
+                            <div className="flex justify-center">
+                              {d.interruptedCount > 0 ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-600 ring-1 ring-inset ring-amber-200" title="Estimated — session not cleanly closed">
+                                  <AlertTriangle className="h-3 w-3" /> {d.interruptedCount}
+                                </span>
+                              ) : (
+                                <span className="inline-flex h-5 w-5 items-center justify-center rounded-full bg-emerald-50 text-emerald-500 ring-1 ring-inset ring-emerald-200" title="Confirmed">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                  <AlertTriangle className="h-3 w-3 text-amber-500" />
+                  Amber rows are estimated — the session wasn&apos;t cleanly closed, so time is capped at the last active moment (never counted to now).
+                </p>
               </div>
             )}
           </div>
@@ -503,6 +648,130 @@ export default function AgentProductivityPage() {
       )}
     </div>
   );
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Presentation helpers — KPI stat card, agent avatar, detail stat, day label.
+   Purely visual; they never touch the engine math or the real data.
+   ────────────────────────────────────────────────────────────────────────── */
+
+const STAT_ACCENT: Record<string, { chip: string; value: string }> = {
+  emerald: { chip: "bg-emerald-50 text-emerald-600", value: "text-emerald-600" },
+  blue: { chip: "bg-[#EEF1FD] text-[#4361EE]", value: "text-foreground" },
+  indigo: { chip: "bg-indigo-50 text-indigo-600", value: "text-foreground" },
+  rose: { chip: "bg-rose-50 text-rose-600", value: "text-rose-600" },
+};
+
+/** A premium header KPI card: tinted icon chip + big value + supporting hint. */
+function StatCard({
+  icon: Icon,
+  accent,
+  label,
+  value,
+  hint,
+}: {
+  icon: LucideIcon;
+  accent: "emerald" | "blue" | "indigo" | "rose";
+  label: string;
+  value: ReactNode;
+  hint?: string;
+}) {
+  const a = STAT_ACCENT[accent];
+  return (
+    <div className="rounded-xl border border-border bg-card p-3.5 shadow-sm transition hover:border-[#4361EE]/30 hover:shadow-md">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-[10.5px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+        <span className={cn("grid h-7 w-7 shrink-0 place-items-center rounded-lg", a.chip)}>
+          <Icon className="h-3.5 w-3.5" />
+        </span>
+      </div>
+      <p className={cn("mt-1.5 text-[22px] font-extrabold leading-none tabular-nums", a.value)}>{value}</p>
+      {hint && <p className="mt-1.5 text-[11px] text-muted-foreground">{hint}</p>}
+    </div>
+  );
+}
+
+/* Deterministic soft-tint avatar palette (initials-based, no random colours). */
+const AVATAR_TONES = [
+  "bg-[#EEF1FD] text-[#4361EE]",
+  "bg-emerald-50 text-emerald-600",
+  "bg-indigo-50 text-indigo-600",
+  "bg-amber-50 text-amber-600",
+  "bg-rose-50 text-rose-600",
+  "bg-teal-50 text-teal-600",
+];
+function avatarTone(name: string): string {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) >>> 0;
+  return AVATAR_TONES[h % AVATAR_TONES.length];
+}
+
+const RANK_RING: Record<number, string> = {
+  1: "ring-amber-400",
+  2: "ring-zinc-400",
+  3: "ring-amber-600",
+};
+
+/** Circular initials avatar with a soft tint + an optional top-3 rank badge. */
+function AgentAvatar({ name, rank }: { name: string; rank?: number }) {
+  const ring = rank && RANK_RING[rank] ? RANK_RING[rank] : "ring-white";
+  return (
+    <div className="relative shrink-0">
+      <span
+        className={cn(
+          "grid h-9 w-9 place-items-center rounded-full text-[12px] font-bold ring-2 shadow-sm",
+          avatarTone(name),
+          ring,
+        )}
+      >
+        {initials(name)}
+      </span>
+      {rank && rank <= 3 && (
+        <span className="absolute -bottom-1 -right-1 grid h-4 w-4 place-items-center rounded-full bg-white text-[9px] font-bold leading-none text-foreground shadow ring-1 ring-border">
+          {rank}
+        </span>
+      )}
+    </div>
+  );
+}
+
+/** The ONE shared "Net productive" cell — a bar that grows with the column
+ *  width (so it reads well whether the sidebar is expanded or collapsed) plus a
+ *  fixed-width, non-wrapping value on the right. Used identically in the agent
+ *  table and the daily breakdown so the two Net columns look uniform. */
+function NetBar({ netMs, maxMs, estimated }: { netMs: number; maxMs: number; estimated?: boolean }) {
+  const pct = maxMs > 0 ? Math.max(4, Math.round((netMs / maxMs) * 100)) : 0;
+  return (
+    <div className="flex items-center justify-end gap-2.5">
+      <span className="h-1.5 min-w-[36px] flex-1 overflow-hidden rounded-full bg-zinc-200/80">
+        <span
+          className={cn("block h-full rounded-full", estimated ? "bg-amber-500" : "bg-emerald-500")}
+          style={{ width: `${pct}%` }}
+        />
+      </span>
+      <span className="w-[56px] shrink-0 whitespace-nowrap text-right text-[13px] font-bold text-emerald-600 tabular-nums">
+        {formatHm(netMs)}
+      </span>
+    </div>
+  );
+}
+
+/** Compact labelled stat used in the detail panel header. */
+function DetailStat({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div className="text-right">
+      <p className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+      <p className={cn("text-[14px] font-bold tabular-nums", tone ?? "text-foreground")}>{value}</p>
+    </div>
+  );
+}
+
+/** Friendly day label, e.g. "Fri, Oct 23" from a YYYY-MM-DD local date key. */
+function formatDayLabel(dateKey: string): string {
+  const [y, m, d] = dateKey.split("-").map(Number);
+  if (!y || !m || !d) return dateKey;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  return dt.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", timeZone: "UTC" });
 }
 
 /* ──────────────────────────────────────────────────────────────────────────

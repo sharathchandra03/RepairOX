@@ -120,17 +120,17 @@ export function ModelsTab() {
       <div className="overflow-hidden rounded-2xl border border-border bg-card shadow-card">
         <table className="w-full text-left text-[13px]">
           <thead>
-            <tr className="border-b border-border bg-muted/30">
+            <tr className="border-b border-border bg-[#EEF1FD] text-[#4361EE]">
               <th className="w-10 py-3 pl-4">
-                <button onClick={toggleAll} className="text-muted-foreground hover:text-foreground">
+                <button onClick={toggleAll} className="text-[#4361EE]/70 hover:text-[#4361EE]">
                   {allSelected ? <CheckSquare className="h-4 w-4 text-[#4361EE]" /> : <Square className="h-4 w-4" />}
                 </button>
               </th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Model</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Year</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Parts</th>
-              <th className="py-3 px-3 font-semibold text-muted-foreground">Status</th>
-              <th className="w-24 py-3 px-3 font-semibold text-muted-foreground">Actions</th>
+              <th className="py-3 px-3 font-semibold">Model</th>
+              <th className="py-3 px-3 font-semibold">Year</th>
+              <th className="py-3 px-3 font-semibold">Parts</th>
+              <th className="py-3 px-3 font-semibold">Status</th>
+              <th className="w-24 py-3 px-3 font-semibold">Actions</th>
             </tr>
           </thead>
           <tbody>

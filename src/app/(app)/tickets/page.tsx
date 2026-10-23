@@ -1138,8 +1138,8 @@ export default function TicketsPage() {
       <div className="hidden -mt-5 border-2 border-zinc-300 bg-card shadow-card md:block">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
-            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#D6DDFB] border-b-2 border-[#4361EE]/40">
-              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-[#4361EE]">
+            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+              <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-white">
                 {activeColumns.map((col) => (
                   <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (

@@ -591,7 +591,7 @@ function AllocationTable({ allocation }: { allocation: Allocation }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border">
       <table className="w-full text-[12px]">
-        <thead className="bg-muted/60 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+        <thead className="bg-[#EEF1FD] text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
           <tr>
             <th className="px-3 py-2 text-left">Line</th>
             <th className="px-3 py-2 text-right">Net</th>

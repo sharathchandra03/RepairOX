@@ -152,6 +152,14 @@ export function SalesBookWorkspace({
       <Reveal>
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
           <Kpi
+            label="Revenue & Sales" icon={BadgeIndianRupee} accent="emerald"
+            primaryValue={formatINR(kpi.revenueNet)} primaryDescription="Net Revenue Won"
+            support={[
+              { label: "Pipeline Value", value: formatINR(kpi.pipeline) },
+              { label: "Avg / Invoice", value: kpi.invoices ? formatINR(Math.round(kpi.avgInvoice)) : "—" },
+            ]}
+          />
+          <Kpi
             label="Lead Performance" icon={Users} accent="blue"
             primaryValue={String(kpi.total)} primaryDescription="Total Leads"
             progress={kpi.qualificationRate}
@@ -167,14 +175,6 @@ export function SalesBookWorkspace({
             support={[
               { label: "Conversion Rate", value: kpi.total ? pct(kpi.conversion) : "—" },
               { label: "Not Converted", value: String(kpi.notConverted) },
-            ]}
-          />
-          <Kpi
-            label="Revenue & Sales" icon={BadgeIndianRupee} accent="emerald"
-            primaryValue={formatINR(kpi.revenueNet)} primaryDescription="Net Revenue Won"
-            support={[
-              { label: "Pipeline Value", value: formatINR(kpi.pipeline) },
-              { label: "Avg / Invoice", value: kpi.invoices ? formatINR(Math.round(kpi.avgInvoice)) : "—" },
             ]}
           />
           <Kpi

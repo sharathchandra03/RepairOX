@@ -77,7 +77,7 @@ export function AgentRoster({
             {COLS.map((c) => (
               <th key={c.key} className={cn("rox-table-cell", c.align === "right" && "text-right")} title={c.hint}>
                 {c.sortable ? (
-                  <button type="button" onClick={() => toggleSort(c.key as RosterSortKey)} className={cn("inline-flex items-center gap-1 transition hover:text-[#4361EE]", c.align === "right" && "flex-row-reverse")}>
+                  <button type="button" onClick={() => toggleSort(c.key as RosterSortKey)} className={cn("inline-flex items-center gap-1 transition hover:text-white/80", c.align === "right" && "flex-row-reverse")}>
                     {c.label}
                     {sortKey === c.key && (dir === "desc" ? <ArrowDown className="h-3 w-3" /> : <ArrowUp className="h-3 w-3" />)}
                   </button>

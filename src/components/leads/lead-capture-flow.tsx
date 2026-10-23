@@ -37,7 +37,7 @@ import {
   isNotContactedStatus, suggestPartCategory, emptyLeadDevice, statusRequiresFollowUp, followUpNounForStatus,
   type Lead, type LeadDraft, type LeadFieldKey, type LeadDevice,
 } from "@/lib/leads-data";
-import { isNotQualified } from "@/lib/lead-workflow";
+import { isNotQualified, isQualifiedValue } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
 import { CustomerIdentityLookup } from "@/components/common/customer-identity-lookup";
@@ -280,6 +280,56 @@ function ConfigurableSelect({
         document.body,
       )}
     </>
+  );
+}
+
+/* ─── Lead qualification pill (segmented Qualified / Not Qualified) ───────
+   A compact rounded pill selector that replaces the old "Lead Category"
+   dropdown. It resolves the ACTUAL configured `qualification` option values
+   (so the saved value still satisfies the `isQualifiedValue` / `isNotQualified`
+   gate), falling back to the canonical "Qualified Lead" / "Not Qualified Lead"
+   labels when the org hasn't configured them. Default is Qualified. */
+function QualificationPill({
+  value, onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const { optionsFor } = useLeads();
+  // Map the pill's two buckets to the org's configured option values so the
+  // stored value stays a real configurable label (never a hard-coded string
+  // that Settings can't rename). Fall back to the canonical labels.
+  const opts = optionsFor("qualification").map((o) => o.value).filter(Boolean);
+  const qualifiedValue = opts.find((v) => isQualifiedValue(v)) || "Qualified Lead";
+  const notQualifiedValue = opts.find((v) => isNotQualified(v)) || "Not Qualified Lead";
+
+  // Default (empty) reads as Qualified so a brand-new lead is Qualified.
+  const selectedNotQualified = isNotQualified(value);
+  const active: "q" | "nq" = selectedNotQualified ? "nq" : "q";
+
+  const Seg = ({ id, label, val }: { id: "q" | "nq"; label: string; val: string }) => (
+    <button
+      type="button"
+      onClick={() => onChange(val)}
+      aria-pressed={active === id}
+      className={cn(
+        "whitespace-nowrap rounded-full px-3 py-1 text-[11px] font-semibold leading-none transition",
+        active === id
+          ? id === "nq"
+            ? "bg-rose-500 text-white shadow-sm"
+            : "bg-[#4361EE] text-white shadow-sm"
+          : "text-zinc-600 hover:text-zinc-900",
+      )}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div className="inline-flex items-center gap-0.5 rounded-full border border-input bg-muted/50 p-0.5">
+      <Seg id="q" label="Qualified" val={qualifiedValue} />
+      <Seg id="nq" label="Not Qualified" val={notQualifiedValue} />
+    </div>
   );
 }
 
@@ -616,6 +666,23 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     if (!draft.status) set("status", opts[0]);
   }, [isEdit, optionsFor, draft.status]);
 
+  /* ── Default qualification = Qualified (new leads only) ──
+     The qualification pill lives in Device & Issue and defaults to Qualified.
+     Seed the draft with the org's configured "qualified" value (fallback
+     "Qualified Lead") once, only when nothing has been chosen — so a brand-new
+     lead carries a real value and the downstream workflow is open by default.
+     Edit never reseeds an existing lead's historical qualification. */
+  const qualDefaultApplied = useRef(false);
+  useEffect(() => {
+    if (isEdit || qualDefaultApplied.current) return;
+    qualDefaultApplied.current = true;
+    if (!(draft.qualification ?? "").trim()) {
+      const opts = optionsFor("qualification").map((o) => o.value).filter(Boolean);
+      const qualifiedValue = opts.find((v) => isQualifiedValue(v)) || "Qualified Lead";
+      set("qualification", qualifiedValue);
+    }
+  }, [isEdit, optionsFor, draft.qualification]);
+
   /* ── Contact / qualification GATE (progressive data capture) ──
      • Not-Contacted  → downstream qualification/workflow sections are locked
        (the lead is still at initial capture).
@@ -929,10 +996,10 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   /* ── Save (create or edit) — the ONLY place validation gates ── */
   const handleSave = async () => {
     setTouched(true);
-    // NOT-QUALIFIED gate: a reason is mandatory before saving. Jump to Lead
-    // Details (step 2) where the reason field lives.
+    // NOT-QUALIFIED gate: a reason is mandatory before saving. Jump to Device &
+    // Issue (step 3) where the qualification pill + reason field now live.
     if (qualificationReasonMissing) {
-      goToStage(2);
+      goToStage(3);
       return;
     }
     if (!validation.ok) {
@@ -1219,23 +1286,37 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         </p>
                       )}
                     </Field>
-                    {!isFieldHidden("qualification") && (
-                      <Field label={ft("qualification")}>
-                        <ConfigurableSelect field="qualification" value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} placeholder="Qualified Lead / Not Qualified Lead" />
-                      </Field>
-                    )}
-                  </div>
-                  {!isFieldHidden("contactStatus") && (
-                    <div className="grid grid-cols-2 gap-3">
+                    {!isFieldHidden("contactStatus") && (
                       <Field label={ft("contactStatus")}>
                         <ConfigurableSelect field="contactStatus" value={draft.contactStatus ?? ""} onChange={(v) => set("contactStatus", v)} placeholder="Contacted / Not Contacted" />
                       </Field>
-                    </div>
-                  )}
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* ── STEP 3 · Device & Issue ── */}
+              {!reviewOpen && stage === 3 && (
+                <div className="space-y-4">
+                  {/* Header + qualification pill. The pill sits top-right (the
+                      "Lead Category" control moved here) and stays OUTSIDE the
+                      disabled fieldset so it's always togglable — Not Qualified
+                      would otherwise disable itself. Default = Qualified. */}
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue</p>
+                    {!isFieldHidden("qualification") && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[13px] font-semibold text-zinc-700">Lead Qualification</span>
+                        <QualificationPill value={draft.qualification ?? ""} onChange={(v) => set("qualification", v)} />
+                      </div>
+                    )}
+                  </div>
+
                   {/* NOT-QUALIFIED → mandatory reason. Selecting Not Qualified
                       requires a reason before the lead can be saved; the reason
                       is preserved in Final Remarks (readable in Lead Detail +
-                      the Comment column) — never a throwaway UI-only value. */}
+                      the Comment column) — never a throwaway UI-only value.
+                      Kept OUTSIDE the disabled fieldset so it stays editable. */}
                   {notQualified && (
                     <div className="rounded-xl border border-amber-300 bg-amber-50/70 p-3">
                       <Field label="Why is this lead not qualified?" required error={touched && qualificationReasonMissing ? "A reason is required to mark a lead Not Qualified." : undefined}>
@@ -1248,22 +1329,15 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         />
                       </Field>
                       <p className="mt-1.5 text-[11px] text-amber-700">
-                        Downstream sales fields (device, value, status, follow-up) stay closed for a Not-Qualified lead. Requalify the lead to reopen the workflow.
+                        Downstream sales fields (device, value, status, follow-up) stay closed for a Not-Qualified lead. Mark the lead Qualified to reopen the workflow.
                       </p>
                     </div>
                   )}
-                </div>
-              )}
 
-              {/* ── STEP 3 · Device & Issue ── */}
-              {!reviewOpen && stage === 3 && (
-                <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue</p>
-                  {downstreamLocked && (
+                  <fieldset disabled={downstreamLocked} className={cn("space-y-4", downstreamLocked && "opacity-60")}>
+                  {downstreamLocked && !notQualified && (
                     <div className="rounded-xl border border-dashed border-amber-300 bg-amber-50/60 px-3 py-2.5 text-[12px] text-amber-800">
-                      {notQualified
-                        ? "This lead is Not Qualified — the operational workflow is closed. Requalify to reopen these fields."
-                        : "Complete contact to continue lead qualification. Set Contact Status to Contacted first."}
+                      Complete contact to continue lead qualification. Set Contact Status to Contacted first.
                     </div>
                   )}
                   {/* One card per device the customer mentioned. A single card
@@ -1313,7 +1387,8 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       className={cn("min-h-[70px] text-[13px]", touched && !!validation.errors.comments && "border-rose-400 focus:border-rose-400 focus:ring-rose-200/40")}
                     />
                   </Field>
-                </fieldset>
+                  </fieldset>
+                </div>
               )}
 
               {/* ── STEP 4 · Status & Assignment ── */}
@@ -1440,7 +1515,7 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                   ]} />
                   <ReviewGroup title="Lead Details" onEdit={() => goToStage(2)} rows={[
                     ["Source", draft.source], ["Mode of Contact", draft.modeOfContact],
-                    ["Agent (owner)", draft.assignedToName], ["Lead Category", draft.qualification],
+                    ["Agent (owner)", draft.assignedToName],
                     ["Contact Status", draft.contactStatus],
                   ]} />
                   {devices.length > 1 ? (
@@ -1448,6 +1523,10 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       <div className="mb-2 flex items-center justify-between">
                         <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Device &amp; Issue · {devices.length} devices</span>
                         <button type="button" onClick={() => goToStage(3)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Edit</button>
+                      </div>
+                      <div className="mb-2 flex items-center gap-2 text-[12px]">
+                        <span className="text-muted-foreground">Lead Category:</span>
+                        <span className="font-semibold text-zinc-800">{isNotQualified(draft.qualification ?? "") ? "Not Qualified" : "Qualified"}</span>
                       </div>
                       <div className="space-y-2.5">
                         {devices.map((dev, i) => (
@@ -1479,6 +1558,8 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                     </div>
                   ) : (
                     <ReviewGroup title="Device & Issue" onEdit={() => goToStage(3)} rows={[
+                      ["Lead Category", isNotQualified(draft.qualification ?? "") ? "Not Qualified" : "Qualified"],
+                      ...(isNotQualified(draft.qualification ?? "") ? [["Not-qualified reason", draft.finalRemarks] as [string, string | null | undefined]] : []),
                       ["Device", draft.device],
                       ["Repair Category", draft.subCategory], ["Part Category", draft.category],
                       ["Issue", draft.issue],

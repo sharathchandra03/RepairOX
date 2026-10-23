@@ -482,7 +482,7 @@ export function PerformanceTable({
                   shares the same strong RepairOX-blue header treatment and the
                   group-strength vertical dividers so the four metrics read as
                   four crisply separated standalone columns. */}
-              <tr className="bg-[#4261EE] text-white">
+              <tr className="bg-[#5368D4] text-white">
                 {isAgent && (
                   <th className={cn(HEAD_PRIMARY, "text-white/80")} style={accentBorder("transparent")}>#</th>
                 )}
@@ -522,7 +522,7 @@ export function PerformanceTable({
                 <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV)} style={accentBorder(ACCENT.conversion)}>
                   Conversion
                 </th>
-                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#4261EE]")} style={accentBorder(ACCENT.action)}>
+                <th className={cn(HEAD_PRIMARY, HEAD_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#5368D4]")} style={accentBorder(ACCENT.action)}>
                   Action
                 </th>
               </tr>
@@ -724,7 +724,7 @@ export function PerformanceTable({
             <table className={cn(TABLE_BASE, TABLE_MIN_W)}>
               <PerfCols isAgent={isAgent} />
               <tfoot>
-                <tr className="border-t-2 border-white/30 bg-[#4261EE] text-white">
+                <tr className="border-t-2 border-white/30 bg-[#5368D4] text-white">
                   {isAgent && <td className={cn(CELL)} />}
                   <td className={cn(CELL, "text-left")}>
                     <span className="text-[12px] font-extrabold uppercase tracking-wider text-white">Total</span>
@@ -768,7 +768,7 @@ export function PerformanceTable({
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <BarMetric primary={pct(totals.conversionRate)} ratio={totals.conversionRate} tone="bg-white" valueClass="text-white" trackClass="bg-white/25" />
                   </td>
-                  <td className={cn(CELL, FOOT_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#4261EE]")} />
+                  <td className={cn(CELL, FOOT_GRP_DIV, STICKY_ACTION, STICKY_ACTION_SHADOW, "bg-[#5368D4]")} />
                 </tr>
               </tfoot>
             </table>
