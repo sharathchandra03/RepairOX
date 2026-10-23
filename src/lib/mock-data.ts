@@ -153,6 +153,10 @@ export type DeviceRecord = {
   qc: Record<string, "ok" | "no" | "na" | undefined>;
   /** Optional per-QC-item technician notes, keyed by the same item id as `qc`. */
   qcNotes?: Record<string, string | undefined>;
+  /** Which QC template (checklist) was used for this device (e.g. Mobile vs
+   *  Laptop). Optional — historical devices + single-template orgs fall back to
+   *  the org's default template when rendering/labelling results. */
+  qcTemplateId?: string;
   /** Status tracking per device */
   status: TicketStatus;
 };

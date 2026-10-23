@@ -54,19 +54,47 @@ export type QCCategory = {
   items: QCItem[];
 };
 
+/**
+ * A single named QC template (e.g. "Mobile", "Laptop"). Multiple templates let
+ * a shop keep a different checklist per device type and pick the right one in
+ * the ticket QC step. Each template owns its own ordered categories/items.
+ */
+export type QCTemplate = {
+  /** Stable template id (the key persisted on a device's `qcTemplateId`). */
+  id: string;
+  /** Template display name shown on the selector pill + settings. */
+  name: string;
+  /** Hidden from NEW QC forms when true (kept for historical records). */
+  archived?: boolean;
+  /** Ordered QC categories (each with its checklist items) for this template. */
+  categories: QCCategory[];
+};
+
 export type QCConfig = {
   /** Schema/content version of the SEEDED default. Bump CURRENT_QC_VERSION
    *  whenever the canonical DEFAULT_QC_CONFIG changes in a way that should
    *  overwrite older saved configs (e.g. the authoritative 20-item list).
    *  A stored config with a lower version is force-migrated to the default. */
   version?: number;
+  /** All QC templates for the org. At least one always exists. */
+  templates: QCTemplate[];
+  /** The template selected by default in a NEW ticket QC step. */
+  defaultTemplateId?: string;
+  /** @deprecated Legacy single-checklist shape (pre-templates). Kept ONLY so
+   *  old stored configs / callers reading `config.categories` still resolve;
+   *  it mirrors the DEFAULT template's categories. New code reads templates. */
   categories: QCCategory[];
 };
 
 /** Current canonical QC config version. Any saved config with a lower (or
  *  missing) version is replaced by DEFAULT_QC_CONFIG on load and re-saved.
- *  v2 = the authoritative 20-item list (Device Powering On … WiFi / Bluetooth). */
-export const CURRENT_QC_VERSION = 2;
+ *  v2 = the authoritative 20-item list (Device Powering On … WiFi / Bluetooth).
+ *  v3 = multi-template model (legacy single checklist migrated to one template,
+ *       but the v2 20-item content is preserved so it is NOT force-reset). */
+export const CURRENT_QC_VERSION = 3;
+
+/** Default (seed) template id for a fresh org. */
+export const DEFAULT_QC_TEMPLATE_ID = "standard";
 
 /* ─── Defaults ───────────────────────────────────────────────────── */
 
@@ -76,9 +104,7 @@ export const CURRENT_QC_VERSION = 2;
  * labels themselves so historical per-device `qc` maps (keyed by label)
  * continue to line up exactly.
  */
-export const DEFAULT_QC_CONFIG: QCConfig = {
-  version: CURRENT_QC_VERSION,
-  categories: [
+const DEFAULT_QC_CATEGORIES: QCCategory[] = [
     // NOTE: The item SEQUENCE below is authoritative — flattening every
     // category top-to-bottom yields the required order 1→20. Category labels
     // are cosmetic grouping only and must never disturb the item order.
@@ -144,38 +170,99 @@ export const DEFAULT_QC_CONFIG: QCConfig = {
         { id: "WiFi / Bluetooth", label: "WiFi / Bluetooth" }, // 20
       ],
     },
+];
+
+export const DEFAULT_QC_CONFIG: QCConfig = {
+  version: CURRENT_QC_VERSION,
+  defaultTemplateId: DEFAULT_QC_TEMPLATE_ID,
+  templates: [
+    {
+      id: DEFAULT_QC_TEMPLATE_ID,
+      name: "Standard",
+      categories: structuredCloneSafe(DEFAULT_QC_CATEGORIES),
+    },
   ],
+  // Legacy mirror (the default template's categories) for any code still
+  // reading `config.categories`.
+  categories: structuredCloneSafe(DEFAULT_QC_CATEGORIES),
 };
 
 const STORAGE_KEY = "repairox-qc-config";
 
 /* ─── Normalization ──────────────────────────────────────────────── */
 
-/** Defensive: coerce any loaded value into a valid QCConfig. */
+/** Coerce a raw array into a clean QCCategory[]. */
+function normalizeCategories(raw: unknown): QCCategory[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((c) => c && typeof c.id === "string")
+    .map((c) => ({
+      id: c.id,
+      label: c.label ?? c.id,
+      archived: !!c.archived,
+      items: Array.isArray(c.items)
+        ? c.items
+            .filter((i: any) => i && typeof i.id === "string")
+            .map((i: any) => ({
+              id: i.id,
+              label: i.label ?? i.id,
+              archived: !!i.archived,
+              required: !!i.required,
+            }))
+        : [],
+    }));
+}
+
+/** Defensive: coerce any loaded value into a valid multi-template QCConfig.
+ *  Supports both the current `{ templates }` shape AND the legacy
+ *  `{ categories }` shape (auto-wrapped into a single "Standard" template), so
+ *  a pre-templates stored config is migrated WITHOUT losing its checklist. */
 function normalizeConfig(raw: unknown): QCConfig {
   if (!raw || typeof raw !== "object") return structuredCloneSafe(DEFAULT_QC_CONFIG);
-  const cats = (raw as QCConfig).categories;
-  if (!Array.isArray(cats)) return structuredCloneSafe(DEFAULT_QC_CONFIG);
-  const rawVersion = (raw as QCConfig).version;
+  const obj = raw as Partial<QCConfig>;
+  const rawVersion = obj.version;
+  const version = typeof rawVersion === "number" ? rawVersion : 1;
+
+  let templates: QCTemplate[] = [];
+
+  if (Array.isArray(obj.templates) && obj.templates.length > 0) {
+    templates = obj.templates
+      .filter((t) => t && typeof t.id === "string")
+      .map((t) => ({
+        id: t.id,
+        name: (t as QCTemplate).name ?? t.id,
+        archived: !!(t as QCTemplate).archived,
+        categories: normalizeCategories((t as QCTemplate).categories),
+      }));
+  } else if (Array.isArray(obj.categories)) {
+    // Legacy single-checklist config → wrap into one default template so no
+    // existing QC data is lost when migrating to the multi-template model.
+    templates = [
+      {
+        id: DEFAULT_QC_TEMPLATE_ID,
+        name: "Standard",
+        categories: normalizeCategories(obj.categories),
+      },
+    ];
+  }
+
+  if (templates.length === 0) return structuredCloneSafe(DEFAULT_QC_CONFIG);
+
+  // Resolve the default template: honour a valid stored id, else first.
+  const defaultTemplateId =
+    obj.defaultTemplateId && templates.some((t) => t.id === obj.defaultTemplateId)
+      ? obj.defaultTemplateId
+      : templates[0].id;
+
+  // Keep the legacy `categories` mirror pointing at the default template so any
+  // code still reading `config.categories` resolves to a sensible checklist.
+  const defaultTemplate = templates.find((t) => t.id === defaultTemplateId) ?? templates[0];
+
   return {
-    version: typeof rawVersion === "number" ? rawVersion : 1,
-    categories: cats
-      .filter((c) => c && typeof c.id === "string")
-      .map((c) => ({
-        id: c.id,
-        label: c.label ?? c.id,
-        archived: !!c.archived,
-        items: Array.isArray(c.items)
-          ? c.items
-              .filter((i) => i && typeof i.id === "string")
-              .map((i) => ({
-                id: i.id,
-                label: i.label ?? i.id,
-                archived: !!i.archived,
-                required: !!i.required,
-              }))
-          : [],
-      })),
+    version,
+    templates,
+    defaultTemplateId,
+    categories: structuredCloneSafe(defaultTemplate.categories),
   };
 }
 
@@ -183,10 +270,23 @@ function structuredCloneSafe<T>(v: T): T {
   return JSON.parse(JSON.stringify(v));
 }
 
-/** True when a stored config predates the current canonical default and must
- *  be force-migrated (replaced) to the authoritative 20-item list. */
+/** Minimum version whose CONTENT is still the authoritative checklist. A config
+ *  at or above this is migrated in place (its checklist preserved) rather than
+ *  being replaced. Only configs BELOW this (the pre-20-item v1 era) are
+ *  force-reset to DEFAULT_QC_CONFIG. The v2→v3 jump is the templates wrapper,
+ *  which `normalizeConfig` performs without losing data. */
+const MIN_PRESERVE_VERSION = 2;
+
+/** True when a stored config predates the authoritative 20-item checklist and
+ *  must be force-replaced with DEFAULT_QC_CONFIG. */
 function isOutdated(config: QCConfig): boolean {
-  return (config.version ?? 1) < CURRENT_QC_VERSION;
+  return (config.version ?? 1) < MIN_PRESERVE_VERSION;
+}
+
+/** True when a (non-outdated) config needs its version re-stamped to the
+ *  current version after an in-place migration (e.g. v2 → v3 templates wrap). */
+function needsVersionBump(config: QCConfig): boolean {
+  return !isOutdated(config) && (config.version ?? 1) < CURRENT_QC_VERSION;
 }
 
 /* ─── localStorage helpers (fallback) ────────────────────────────── */
@@ -197,12 +297,18 @@ function loadFromLocalStorage(): QCConfig {
     const rawStr = localStorage.getItem(STORAGE_KEY);
     if (!rawStr) return structuredCloneSafe(DEFAULT_QC_CONFIG);
     const parsed = normalizeConfig(JSON.parse(rawStr));
-    // Older saved list (e.g. the previous 18-item set) → replace with the
-    // canonical default and persist so it stays fixed.
+    // Pre-20-item list → replace with the canonical default and persist.
     if (isOutdated(parsed)) {
       const fresh = structuredCloneSafe(DEFAULT_QC_CONFIG);
       saveToLocalStorage(fresh);
       return fresh;
+    }
+    // In-place migration (e.g. legacy single checklist → templates): keep the
+    // content, re-stamp the version and persist so it isn't re-migrated.
+    if (needsVersionBump(parsed)) {
+      const migrated = { ...parsed, version: CURRENT_QC_VERSION };
+      saveToLocalStorage(migrated);
+      return migrated;
     }
     return parsed;
   } catch {
@@ -287,14 +393,21 @@ async function _loadQCConfigImpl(): Promise<QCConfig> {
     }
 
     const stored = normalizeConfig(data.config);
-    // Older saved list (e.g. the previous 18-item set with different names /
-    // grouping) → force-migrate to the canonical 20-item default and persist
-    // so every user's QC checklist matches the authoritative list.
+    // Pre-20-item list (different names / grouping) → force-migrate to the
+    // canonical default and persist so every user matches the authoritative list.
     if (isOutdated(stored)) {
       const fresh = structuredCloneSafe(DEFAULT_QC_CONFIG);
       saveToLocalStorage(fresh);
       await seedConfig(orgId, fresh).catch(() => {});
       return fresh;
+    }
+    // In-place migration (legacy single checklist → templates wrapper): keep
+    // the content, re-stamp the version and persist so it isn't re-migrated.
+    if (needsVersionBump(stored)) {
+      const migrated = { ...stored, version: CURRENT_QC_VERSION };
+      saveToLocalStorage(migrated);
+      await seedConfig(orgId, migrated).catch(() => {});
+      return migrated;
     }
     return stored;
   } catch {
@@ -309,7 +422,8 @@ async function _loadQCConfigImpl(): Promise<QCConfig> {
 export async function saveQCConfig(config: QCConfig): Promise<boolean> {
   // Any explicit save stamps the current version — an admin editing the list
   // is producing a current-version config, so it must not be force-migrated
-  // away on the next load.
+  // away on the next load. normalizeConfig also re-syncs the legacy
+  // `categories` mirror to the default template.
   const normalized = { ...normalizeConfig(config), version: CURRENT_QC_VERSION };
   invalidateQCConfigCache();
   saveToLocalStorage(normalized);
@@ -350,16 +464,46 @@ async function seedConfig(orgId: string, config: QCConfig) {
 
 /* ─── Derived helpers ────────────────────────────────────────────── */
 
-/** Active (non-archived) categories, each with only its active items.
- *  This is what the NEW ticket QC form should render. */
-export function activeCategories(config: QCConfig): QCCategory[] {
-  return config.categories
+/** Non-archived templates. At least one always resolves — if everything is
+ *  archived, the first template is still returned so the QC form never breaks. */
+export function activeTemplates(config: QCConfig): QCTemplate[] {
+  const live = config.templates.filter((t) => !t.archived);
+  if (live.length > 0) return live;
+  return config.templates.slice(0, 1);
+}
+
+/** Resolve a template by id, falling back to the config's default template,
+ *  then the first template. Never returns undefined for a valid config. */
+export function resolveTemplate(config: QCConfig, templateId?: string | null): QCTemplate {
+  if (templateId) {
+    const hit = config.templates.find((t) => t.id === templateId);
+    if (hit) return hit;
+  }
+  if (config.defaultTemplateId) {
+    const def = config.templates.find((t) => t.id === config.defaultTemplateId);
+    if (def) return def;
+  }
+  return config.templates[0] ?? DEFAULT_QC_CONFIG.templates[0];
+}
+
+/** Active (non-archived) categories (with only active items) for ONE template.
+ *  This is what the NEW ticket QC form renders for the selected template. */
+export function activeCategoriesForTemplate(template: QCTemplate | undefined): QCCategory[] {
+  if (!template) return [];
+  return template.categories
     .filter((c) => !c.archived)
     .map((c) => ({ ...c, items: c.items.filter((i) => !i.archived) }))
     .filter((c) => c.items.length > 0);
 }
 
-/** Flat list of active item ids across all active categories. */
+/** @deprecated Active categories of the DEFAULT template (legacy single-list
+ *  callers). New code should resolve a template then call
+ *  `activeCategoriesForTemplate`. */
+export function activeCategories(config: QCConfig): QCCategory[] {
+  return activeCategoriesForTemplate(resolveTemplate(config));
+}
+
+/** Flat list of active item ids across the default template's active categories. */
 export function activeItemIds(config: QCConfig): string[] {
   return activeCategories(config).flatMap((c) => c.items.map((i) => i.id));
 }
@@ -373,7 +517,10 @@ export function qcItemLabel(idOrLabel: string): string {
   if (!idOrLabel) return "";
   const search = (cfg: QCConfig | null): string | undefined => {
     if (!cfg) return undefined;
-    for (const cat of cfg.categories) {
+    // Search every template's categories so an item recorded under any
+    // template still resolves to a readable label on historical tickets.
+    const cats = cfg.templates.flatMap((t) => t.categories);
+    for (const cat of cats) {
       const hit = cat.items.find((i) => i.id === idOrLabel || i.label === idOrLabel);
       if (hit) return hit.label;
     }

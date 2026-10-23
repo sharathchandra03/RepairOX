@@ -75,8 +75,29 @@ export interface AppNotification {
 
 export type NotificationInput = Omit<AppNotification, "id" | "ts" | "read"> & { ts?: number };
 
-const STORAGE_KEY = "repairox-notifications";
+/** True for the lead follow-up kinds (due / overdue) — the "Follow-ups"
+ *  category in the bell. Everything else is "Others". Kept here so the feed UI
+ *  and any future consumer classify a notification identically. */
+export function isFollowUpNotification(n: AppNotification): boolean {
+  return n.kind === "lead_followup_due" || n.kind === "lead_followup_overdue";
+}
+
+const STORAGE_PREFIX = "repairox-notifications";
 const MAX = 300;
+
+/* ──────────────────────────────────────────────────────────────────────────
+   Per-account isolation. The feed is PRIVATE to the signed-in account: the
+   localStorage key carries the active user id, so account A and account B on
+   the same browser never share a feed, a read-state, or a dedupe set. The store
+   is rebound on login/logout via setNotificationUser(). Before any user is
+   known (or for a signed-out shell) a neutral "anon" bucket is used.
+   ────────────────────────────────────────────────────────────────────────── */
+let currentUserKey = "anon";
+
+/** localStorage key for the ACTIVE account's notifications. */
+function storageKey(): string {
+  return demoKey(`${STORAGE_PREFIX}::${currentUserKey}`);
+}
 
 let items: AppNotification[] = [];
 let hydrated = false;
@@ -85,16 +106,40 @@ let _counter = 0;
 
 function persist() {
   if (typeof window === "undefined") return;
-  try { localStorage.setItem(demoKey(STORAGE_KEY), JSON.stringify(items.slice(0, MAX))); } catch { /* quota */ }
+  try { localStorage.setItem(storageKey(), JSON.stringify(items.slice(0, MAX))); } catch { /* quota */ }
 }
 
 function hydrate() {
   if (hydrated || typeof window === "undefined") return;
   try {
-    const raw = localStorage.getItem(demoKey(STORAGE_KEY));
+    const raw = localStorage.getItem(storageKey());
     items = raw ? (JSON.parse(raw) as AppNotification[]) : [];
   } catch { items = []; }
   hydrated = true;
+}
+
+/**
+ * Bind the notification store to a specific account. Called whenever the
+ * signed-in user changes (login / logout / account switch). When the user id
+ * changes we re-hydrate from THAT account's bucket and notify subscribers, so
+ * one account can never see another account's notifications on a shared
+ * browser. Idempotent: a no-op when the user hasn't changed.
+ */
+export function setNotificationUser(userId?: string | null) {
+  const key = userId && userId.trim() ? userId.trim() : "anon";
+  if (key === currentUserKey && hydrated) return;
+  currentUserKey = key;
+  hydrated = false;
+  if (typeof window !== "undefined") {
+    try {
+      const raw = localStorage.getItem(storageKey());
+      items = raw ? (JSON.parse(raw) as AppNotification[]) : [];
+    } catch { items = []; }
+    hydrated = true;
+  } else {
+    items = [];
+  }
+  emitChange();
 }
 
 function emitChange() {
@@ -144,13 +189,27 @@ export function markRead(id: string) {
   if (changed) { persist(); emitChange(); }
 }
 
-export function markAllRead(recipientId?: string, recipientRole?: string) {
+/**
+ * Mark the current account's notifications read.
+ * @param predicate  optional category classifier (e.g. isFollowUpNotification)
+ * @param wantMatch  when a predicate is given, only mark items where
+ *                   predicate(n) === wantMatch — lets the UI mark a single
+ *                   category (Follow-ups OR Others) read independently.
+ */
+export function markAllRead(
+  recipientId?: string,
+  recipientRole?: string,
+  predicate?: (n: AppNotification) => boolean,
+  wantMatch = true,
+) {
   hydrate();
   let changed = false;
   items = items.map((n) => {
     if (n.read) return n;
-    if (isForRecipient(n, recipientId, recipientRole)) { changed = true; return { ...n, read: true }; }
-    return n;
+    if (!isForRecipient(n, recipientId, recipientRole)) return n;
+    if (predicate && predicate(n) !== wantMatch) return n;
+    changed = true;
+    return { ...n, read: true };
   });
   if (changed) { persist(); emitChange(); }
 }
@@ -163,15 +222,25 @@ export function clearNotification(id: string) {
 }
 
 /**
- * Remove ALL notifications addressed to the given user/role at once (a "clear
- * all" for the bell feed). Broadcast notifications (no recipient) are cleared
- * too, matching what {@link isForRecipient} shows the user. Notifications for
+ * Remove the current account's notifications addressed to the given user/role
+ * at once (a "clear all" for the bell feed), optionally scoped to one category
+ * via `predicate`/`wantMatch`. Broadcast notifications (no recipient) are
+ * cleared too, matching what {@link isForRecipient} shows the user. Items for
  * OTHER recipients are left untouched.
  */
-export function clearAllForRecipient(recipientId?: string, recipientRole?: string) {
+export function clearAllForRecipient(
+  recipientId?: string,
+  recipientRole?: string,
+  predicate?: (n: AppNotification) => boolean,
+  wantMatch = true,
+) {
   hydrate();
   const before = items.length;
-  items = items.filter((n) => !isForRecipient(n, recipientId, recipientRole));
+  items = items.filter((n) => {
+    if (!isForRecipient(n, recipientId, recipientRole)) return true; // keep others' items
+    if (predicate && predicate(n) !== wantMatch) return true;        // keep the other category
+    return false;                                                    // drop this one
+  });
   if (items.length !== before) { persist(); emitChange(); }
 }
 

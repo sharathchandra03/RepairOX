@@ -6,20 +6,19 @@ import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Progress } from "@/components/ui/progress";
 
-export const TOTAL_STEPS = 11;
 export const STEP_LABELS = [
   "Process",
+  "Customer",
   "Category",
   "Device",
   "Job Details",
   "Parts",
-  "Contact",
-  "Customer",
   "Quote",
   "QC Form",
   "Upload",
   "Confirmation",
 ];
+export const TOTAL_STEPS = STEP_LABELS.length;
 
 export function WizardShell({
   step,
@@ -74,7 +73,7 @@ export function WizardShell({
             <span className="font-display tnum text-base font-bold text-white">
               {String(step).padStart(2, "0")}
               <span className="mx-1 text-white/50">/</span>
-              <span className="text-white/90">11</span>
+              <span className="text-white/90">{TOTAL_STEPS}</span>
             </span>
           </motion.div>
         </div>
@@ -116,7 +115,7 @@ export function WizardShell({
 
       {/* Stepper labels (desktop) */}
       <div className="relative mx-auto hidden max-w-6xl px-6 md:block">
-        <ol className="grid grid-cols-11 gap-1.5 text-[10px]">
+        <ol className="grid grid-cols-10 gap-1.5 text-[10px]">
             {STEP_LABELS.map((label, i) => {
               const idx = i + 1;
               const done = idx < step;
@@ -164,11 +163,11 @@ export function WizardShell({
           </ol>
         </div>
 
-      {/* Title. The one-screen QC step (9) pulls its title up tighter so the
+      {/* Title. The one-screen QC step (8) pulls its title up tighter so the
           whole inspection block sits higher and fits the viewport better. */}
       <div className={cn(
         "relative mx-auto max-w-6xl px-4 text-center sm:px-6",
-        step === 9 ? "mt-2 sm:mt-3" : "mt-6 sm:mt-8"
+        step === 8 ? "mt-2 sm:mt-3" : "mt-6 sm:mt-8"
       )}>
         <motion.h1
           key={title}
@@ -192,14 +191,14 @@ export function WizardShell({
         )}
       </div>
 
-      {/* Step content. The QC step (9) is a purpose-built ONE-SCREEN layout
+      {/* Step content. The QC step (8) is a purpose-built ONE-SCREEN layout
           that fits without scrolling; it manages its own bottom spacing, so we
           drop the large default bottom padding there (in edit mode that padding
           + the fixed footer would otherwise push the checklist off-screen). */}
       <div className={cn(
         "relative mx-auto max-w-6xl px-4 sm:px-6",
-        step === 9 ? "mt-3 pb-4" : "mt-6",
-        step === 9 ? "" : isEdit ? "pb-24" : "pb-16"
+        step === 8 ? "mt-3 pb-4" : "mt-6",
+        step === 8 ? "" : isEdit ? "pb-24" : "pb-16"
       )}>
         <AnimatePresence mode="wait">
           <motion.div

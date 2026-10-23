@@ -9,14 +9,22 @@
    durable, targeted counterpart to the transient toast channel.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Bell, Check, Truck, Store, Package, CheckCircle2, Clock, Trash2, X } from "lucide-react";
+import { Bell, Check, Truck, Store, Package, CheckCircle2, Clock, CalendarClock, Trash2, X } from "lucide-react";
 import { Dropdown } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { useSession } from "@/lib/use-session";
-import { useNotificationsFor, markRead, markAllRead, clearAllForRecipient, type NotificationKind } from "@/lib/notifications";
+import {
+  useNotificationsFor,
+  markRead,
+  markAllRead,
+  clearAllForRecipient,
+  setNotificationUser,
+  isFollowUpNotification,
+  type NotificationKind,
+} from "@/lib/notifications";
 
 const KIND_ICON: Partial<Record<NotificationKind, React.ComponentType<{ className?: string }>>> = {
   lead_routed: Store,
@@ -30,7 +38,11 @@ const KIND_ICON: Partial<Record<NotificationKind, React.ComponentType<{ classNam
   drop_done: CheckCircle2,
   pickup_reminder: Clock,
   drop_reminder: Clock,
+  lead_followup_due: CalendarClock,
+  lead_followup_overdue: CalendarClock,
 };
+
+type FeedTab = "followups" | "others";
 
 function timeAgo(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -44,9 +56,25 @@ export function NotificationBell() {
   const router = useRouter();
   const { role } = usePermissions();
   const { id: userId } = useSession();
+  const [tab, setTab] = useState<FeedTab>("followups");
+
+  // Bind the notification store to the signed-in account so the feed, read
+  // state and dedupe set are PRIVATE per account (never shared across accounts
+  // on one browser). Re-binds on login / logout / account switch.
+  useEffect(() => { setNotificationUser(userId); }, [userId]);
+
   const items = useNotificationsFor(userId, role?.id);
+
+  // Two categories: Follow-ups (lead follow-up due/overdue) and Others.
+  const followUpItems = useMemo(() => items.filter(isFollowUpNotification), [items]);
+  const otherItems = useMemo(() => items.filter((n) => !isFollowUpNotification(n)), [items]);
+
   const unread = useMemo(() => items.filter((n) => !n.read).length, [items]);
-  const recent = items.slice(0, 20);
+  const followUpUnread = useMemo(() => followUpItems.filter((n) => !n.read).length, [followUpItems]);
+  const otherUnread = useMemo(() => otherItems.filter((n) => !n.read).length, [otherItems]);
+
+  const active = tab === "followups" ? followUpItems : otherItems;
+  const recent = active.slice(0, 20);
 
   return (
     <Dropdown
@@ -75,17 +103,18 @@ export function NotificationBell() {
           <div className="flex items-center justify-between gap-2 px-3 py-2">
             <p className="text-[13px] font-semibold text-zinc-800">Notifications</p>
             <div className="flex items-center gap-1.5">
-              {unread > 0 && (
-                <button onClick={() => markAllRead(userId, role?.id)} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
+              {active.some((n) => !n.read) && (
+                /* Mark the ACTIVE category's items read (scoped to this account). */
+                <button onClick={() => markAllRead(userId, role?.id, isFollowUpNotification, tab === "followups")} className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline">
                   <Check className="h-3 w-3" /> Mark all read
                 </button>
               )}
-              {items.length > 0 && (
-                /* Clear all — removes every notification addressed to this
-                   user/role from the feed (not just marks them read). */
+              {active.length > 0 && (
+                /* Clear all — removes this account's notifications in the ACTIVE
+                   category from the feed (not just marks them read). */
                 <button
-                  onClick={() => clearAllForRecipient(userId, role?.id)}
-                  title="Clear all notifications"
+                  onClick={() => clearAllForRecipient(userId, role?.id, isFollowUpNotification, tab === "followups")}
+                  title="Clear all notifications in this tab"
                   className="inline-flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-rose-600"
                 >
                   <Trash2 className="h-3 w-3" /> Clear all
@@ -101,10 +130,41 @@ export function NotificationBell() {
               </button>
             </div>
           </div>
+
+          {/* Two categories — Follow-ups vs Others — each with its own unread
+              dot so the user sees at a glance where attention is needed. */}
+          <div className="flex items-center gap-1 px-2 pb-1.5">
+            {([
+              { key: "followups" as const, label: "Follow-ups", count: followUpUnread },
+              { key: "others" as const, label: "Others", count: otherUnread },
+            ]).map((t) => (
+              <button
+                key={t.key}
+                onClick={() => setTab(t.key)}
+                className={cn(
+                  "inline-flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-[11.5px] font-semibold transition",
+                  tab === t.key ? "bg-[#4361EE]/10 text-[#4361EE]" : "text-muted-foreground hover:bg-muted hover:text-zinc-700",
+                )}
+              >
+                {t.label}
+                {t.count > 0 && (
+                  <span className={cn(
+                    "grid h-[15px] min-w-[15px] place-items-center rounded-full px-1 text-[9px] font-bold leading-none",
+                    tab === t.key ? "bg-[#4361EE] text-white" : "bg-rose-500 text-white",
+                  )}>
+                    {t.count > 9 ? "9+" : t.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
           <div className="my-1 h-px bg-border" />
           <div className="max-h-[360px] overflow-y-auto">
             {recent.length === 0 && (
-              <p className="px-3 py-8 text-center text-[12px] text-muted-foreground">You're all caught up.</p>
+              <p className="px-3 py-8 text-center text-[12px] text-muted-foreground">
+                {tab === "followups" ? "No follow-up notifications." : "You're all caught up."}
+              </p>
             )}
             {recent.map((n) => {
               const Icon = KIND_ICON[n.kind] ?? Bell;

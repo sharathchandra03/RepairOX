@@ -30,7 +30,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useLeads } from "@/lib/leads-context";
 import { useSession } from "@/lib/use-session";
-import { notify, hasNotification } from "@/lib/notifications";
+import { notify, hasNotification, setNotificationUser } from "@/lib/notifications";
 import { toast } from "@/components/ui/toaster";
 import { useWalkInSound, playWalkInSound } from "@/lib/walk-in-notification-sound";
 import { followUpLifecycle, type LeadFollowUp } from "@/lib/leads-data";
@@ -73,6 +73,10 @@ export function LeadFollowUpWatcher() {
 
   const soundPrefsRef = useRef(soundPrefs);
   soundPrefsRef.current = soundPrefs;
+
+  // Ensure every notify() from this watcher lands in the signed-in account's
+  // own feed bucket (idempotent; the topbar bell binds this too).
+  useEffect(() => { setNotificationUser(currentUserId); }, [currentUserId]);
 
   // Session-start baseline for the toast/sound backlog guard. Captured once on
   // the first announce-effect run (re-baselined when the user id changes — see

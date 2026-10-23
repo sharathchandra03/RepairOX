@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Trash2, Save, Loader2, Pencil, Check, X, Search, Shield,
   ChevronDown, ChevronUp, Archive, ArchiveRestore, ArrowUp, ArrowDown, Undo2,
+  Copy, Layers, Star,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -15,9 +16,11 @@ import {
   loadQCConfig,
   saveQCConfig,
   DEFAULT_QC_CONFIG,
+  DEFAULT_QC_TEMPLATE_ID,
   type QCConfig,
   type QCCategory,
   type QCItem,
+  type QCTemplate,
 } from "@/lib/qc-config";
 
 /* ─── Helpers ────────────────────────────────────────────────────── */
@@ -28,6 +31,11 @@ function makeId(label: string): string {
   const slug = label.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "");
   const rand = Math.random().toString(36).slice(2, 6);
   return `${slug || "item"}-${rand}`;
+}
+
+/** Deep clone (templates / categories) without external deps. */
+function clone<T>(v: T): T {
+  return JSON.parse(JSON.stringify(v));
 }
 
 function move<T>(arr: T[], from: number, to: number): T[] {
@@ -50,6 +58,10 @@ export default function QualityCheckSettingsPage() {
   const [saved, setSaved] = useState(false);
   const [dirty, setDirty] = useState(false);
 
+  // Which QC template is being edited. Defaults to the config's default
+  // template once loaded.
+  const [activeTemplateId, setActiveTemplateId] = useState<string>(DEFAULT_QC_TEMPLATE_ID);
+
   const [search, setSearch] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -61,9 +73,15 @@ export default function QualityCheckSettingsPage() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editingItemLabel, setEditingItemLabel] = useState("");
 
+  // Template rename (inline on the pill bar).
+  const [newTemplateName, setNewTemplateName] = useState("");
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editingTemplateName, setEditingTemplateName] = useState("");
+
   useEffect(() => {
     loadQCConfig().then((c) => {
       setConfig(c);
+      setActiveTemplateId(c.defaultTemplateId ?? c.templates[0]?.id ?? DEFAULT_QC_TEMPLATE_ID);
       setLoaded(true);
     });
   }, []);
@@ -73,13 +91,105 @@ export default function QualityCheckSettingsPage() {
     setDirty(true);
   }, []);
 
-  /* ── Category actions ── */
+  // The template currently being edited.
+  const activeTemplate = useMemo(
+    () => config.templates.find((t) => t.id === activeTemplateId) ?? config.templates[0],
+    [config.templates, activeTemplateId]
+  );
+
+  /** Mutate ONLY the active template's category list, keeping the rest of the
+   *  config (other templates, default id, legacy mirror) intact. */
+  const mutateTemplate = useCallback(
+    (updateCats: (cats: QCCategory[]) => QCCategory[]) => {
+      mutate((prev) => ({
+        ...prev,
+        templates: prev.templates.map((t) =>
+          t.id === activeTemplateId ? { ...t, categories: updateCats(t.categories) } : t
+        ),
+      }));
+    },
+    [mutate, activeTemplateId]
+  );
+
+  /* ── Template actions ── */
+  const addTemplate = () => {
+    const name = newTemplateName.trim();
+    if (!name) return;
+    const id = makeId(name);
+    mutate((prev) => ({
+      ...prev,
+      templates: [...prev.templates, { id, name, categories: [] }],
+    }));
+    setActiveTemplateId(id);
+    setNewTemplateName("");
+  };
+
+  // Duplicate a template (its full checklist) under a new id + "(Copy)" name.
+  const duplicateTemplate = (templateId: string) => {
+    const src = config.templates.find((t) => t.id === templateId);
+    if (!src) return;
+    const id = makeId(`${src.name} copy`);
+    // Fresh item ids so the copy is fully independent of the source checklist.
+    const categories: QCCategory[] = src.categories.map((c) => ({
+      ...clone(c),
+      id: makeId(c.label),
+      items: c.items.map((i) => ({ ...clone(i), id: makeId(i.label) })),
+    }));
+    mutate((prev) => ({
+      ...prev,
+      templates: [...prev.templates, { id, name: `${src.name} (Copy)`, categories }],
+    }));
+    setActiveTemplateId(id);
+  };
+
+  const saveTemplateName = () => {
+    if (editingTemplateId && editingTemplateName.trim()) {
+      const id = editingTemplateId;
+      const name = editingTemplateName.trim();
+      mutate((prev) => ({
+        ...prev,
+        templates: prev.templates.map((t) => (t.id === id ? { ...t, name } : t)),
+      }));
+    }
+    setEditingTemplateId(null);
+    setEditingTemplateName("");
+  };
+
+  const makeDefaultTemplate = (templateId: string) => {
+    mutate((prev) => ({ ...prev, defaultTemplateId: templateId }));
+  };
+
+  // Archive a template (kept for historical records). Can't archive the last
+  // active template, and never leave the default pointing at an archived one.
+  const toggleTemplateArchive = (templateId: string) => {
+    mutate((prev) => {
+      const target = prev.templates.find((t) => t.id === templateId);
+      if (!target) return prev;
+      const willArchive = !target.archived;
+      const activeCount = prev.templates.filter((t) => !t.archived).length;
+      if (willArchive && activeCount <= 1) return prev; // keep at least one active
+      const templates = prev.templates.map((t) =>
+        t.id === templateId ? { ...t, archived: willArchive } : t
+      );
+      let defaultTemplateId = prev.defaultTemplateId;
+      if (willArchive && defaultTemplateId === templateId) {
+        defaultTemplateId = templates.find((t) => !t.archived)?.id ?? templates[0]?.id;
+      }
+      return { ...prev, templates, defaultTemplateId };
+    });
+    // If we archived the template being edited, jump to another active one.
+    setActiveTemplateId((cur) => {
+      if (cur !== templateId) return cur;
+      const next = config.templates.find((t) => t.id !== templateId && !t.archived);
+      return next?.id ?? cur;
+    });
+  };
+
+  /* ── Category actions (scoped to the active template) ── */
   const addCategory = () => {
     const label = newCategoryLabel.trim();
     if (!label) return;
-    mutate((prev) => ({
-      categories: [...prev.categories, { id: makeId(label), label, items: [] }],
-    }));
+    mutateTemplate((cats) => [...cats, { id: makeId(label), label, items: [] }]);
     setNewCategoryLabel("");
   };
 
@@ -87,33 +197,27 @@ export default function QualityCheckSettingsPage() {
     if (editingCatId && editingCatLabel.trim()) {
       const id = editingCatId;
       const label = editingCatLabel.trim();
-      mutate((prev) => ({
-        categories: prev.categories.map((c) => (c.id === id ? { ...c, label } : c)),
-      }));
+      mutateTemplate((cats) => cats.map((c) => (c.id === id ? { ...c, label } : c)));
     }
     setEditingCatId(null);
     setEditingCatLabel("");
   };
 
   const toggleCategoryArchive = (id: string) => {
-    mutate((prev) => ({
-      categories: prev.categories.map((c) => (c.id === id ? { ...c, archived: !c.archived } : c)),
-    }));
+    mutateTemplate((cats) => cats.map((c) => (c.id === id ? { ...c, archived: !c.archived } : c)));
   };
 
   const moveCategory = (index: number, dir: -1 | 1) => {
-    mutate((prev) => ({ categories: move(prev.categories, index, index + dir) }));
+    mutateTemplate((cats) => move(cats, index, index + dir));
   };
 
-  /* ── Item actions ── */
+  /* ── Item actions (scoped to the active template) ── */
   const addItem = (categoryId: string) => {
     const label = (newItemLabel[categoryId] || "").trim();
     if (!label) return;
-    mutate((prev) => ({
-      categories: prev.categories.map((c) =>
-        c.id === categoryId ? { ...c, items: [...c.items, { id: makeId(label), label }] } : c
-      ),
-    }));
+    mutateTemplate((cats) =>
+      cats.map((c) => (c.id === categoryId ? { ...c, items: [...c.items, { id: makeId(label), label }] } : c))
+    );
     setNewItemLabel((m) => ({ ...m, [categoryId]: "" }));
   };
 
@@ -121,44 +225,42 @@ export default function QualityCheckSettingsPage() {
     if (editingItemId && editingItemLabel.trim()) {
       const itemId = editingItemId;
       const label = editingItemLabel.trim();
-      mutate((prev) => ({
-        categories: prev.categories.map((c) =>
+      mutateTemplate((cats) =>
+        cats.map((c) =>
           c.id === categoryId
             ? { ...c, items: c.items.map((i) => (i.id === itemId ? { ...i, label } : i)) }
             : c
-        ),
-      }));
+        )
+      );
     }
     setEditingItemId(null);
     setEditingItemLabel("");
   };
 
   const toggleItemArchive = (categoryId: string, itemId: string) => {
-    mutate((prev) => ({
-      categories: prev.categories.map((c) =>
+    mutateTemplate((cats) =>
+      cats.map((c) =>
         c.id === categoryId
           ? { ...c, items: c.items.map((i) => (i.id === itemId ? { ...i, archived: !i.archived } : i)) }
           : c
-      ),
-    }));
+      )
+    );
   };
 
   const toggleItemRequired = (categoryId: string, itemId: string) => {
-    mutate((prev) => ({
-      categories: prev.categories.map((c) =>
+    mutateTemplate((cats) =>
+      cats.map((c) =>
         c.id === categoryId
           ? { ...c, items: c.items.map((i) => (i.id === itemId ? { ...i, required: !i.required } : i)) }
           : c
-      ),
-    }));
+      )
+    );
   };
 
   const moveItem = (categoryId: string, index: number, dir: -1 | 1) => {
-    mutate((prev) => ({
-      categories: prev.categories.map((c) =>
-        c.id === categoryId ? { ...c, items: move(c.items, index, index + dir) } : c
-      ),
-    }));
+    mutateTemplate((cats) =>
+      cats.map((c) => (c.id === categoryId ? { ...c, items: move(c.items, index, index + dir) } : c))
+    );
   };
 
   const toggleCollapse = (id: string) => {
@@ -170,7 +272,9 @@ export default function QualityCheckSettingsPage() {
   };
 
   const resetToDefaults = () => {
-    setConfig(structuredCloneSafe(DEFAULT_QC_CONFIG));
+    const fresh = structuredCloneSafe(DEFAULT_QC_CONFIG);
+    setConfig(fresh);
+    setActiveTemplateId(fresh.defaultTemplateId ?? fresh.templates[0]?.id ?? DEFAULT_QC_TEMPLATE_ID);
     setDirty(true);
   };
 
@@ -187,10 +291,11 @@ export default function QualityCheckSettingsPage() {
     }
   };
 
-  /* ── Derived view (search + archive filter) ── */
+  /* ── Derived view (search + archive filter), scoped to the active template ── */
   const q = search.trim().toLowerCase();
+  const activeCats = activeTemplate?.categories ?? [];
   const visibleCategories = useMemo(() => {
-    return config.categories
+    return activeCats
       .filter((c) => showArchived || !c.archived)
       .map((c) => {
         const items = c.items.filter((i) => {
@@ -204,11 +309,18 @@ export default function QualityCheckSettingsPage() {
         if (!q) return true;
         return items.length > 0 || cat.label.toLowerCase().includes(q);
       });
-  }, [config, showArchived, q]);
+  }, [activeCats, showArchived, q]);
 
   const activeItemCount = useMemo(
-    () => config.categories.filter((c) => !c.archived).reduce((n, c) => n + c.items.filter((i) => !i.archived).length, 0),
-    [config]
+    () => activeCats.filter((c) => !c.archived).reduce((n, c) => n + c.items.filter((i) => !i.archived).length, 0),
+    [activeCats]
+  );
+
+  // Templates shown on the selector bar. Archived templates appear only when
+  // "Show archived" is on.
+  const visibleTemplates = useMemo(
+    () => config.templates.filter((t) => showArchived || !t.archived),
+    [config.templates, showArchived]
   );
 
   return (
@@ -216,8 +328,82 @@ export default function QualityCheckSettingsPage() {
       <PageHeader
         eyebrow="Settings › Tickets"
         title="Quality Check"
-        subtitle="Manage the QC inspection checklist used when creating tickets. Categories and items configured here appear in the ticket QC form."
+        subtitle="Manage QC templates (e.g. Mobile, Laptop) and the inspection checklist in each. The selected template's categories and items appear in the ticket QC form, where a technician can switch templates per device."
       />
+
+      {/* ── QC Template bar ── */}
+      <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
+        <div className="mb-3 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <Layers className="h-3.5 w-3.5 text-[#4361EE]" /> QC Templates
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          {visibleTemplates.map((t) => {
+            const isActive = t.id === activeTemplateId;
+            const isDefault = t.id === config.defaultTemplateId;
+            if (editingTemplateId === t.id) {
+              return (
+                <div key={t.id} className="flex items-center gap-1.5 rounded-full border border-[#4361EE] bg-white px-2 py-1">
+                  <Input
+                    value={editingTemplateName}
+                    onChange={(e: any) => setEditingTemplateName(e.target.value)}
+                    onKeyDown={(e: any) => { if (e.key === "Enter") saveTemplateName(); if (e.key === "Escape") { setEditingTemplateId(null); setEditingTemplateName(""); } }}
+                    autoFocus
+                    className="h-7 w-36"
+                  />
+                  <button onClick={saveTemplateName} className="grid h-6 w-6 place-items-center rounded-md text-emerald-600 hover:bg-emerald-50"><Check className="h-3.5 w-3.5" /></button>
+                  <button onClick={() => { setEditingTemplateId(null); setEditingTemplateName(""); }} className="grid h-6 w-6 place-items-center rounded-md text-zinc-400 hover:bg-muted"><X className="h-3.5 w-3.5" /></button>
+                </div>
+              );
+            }
+            return (
+              <div
+                key={t.id}
+                className={cn(
+                  "group inline-flex items-center gap-1.5 rounded-full border py-1 pl-3 pr-1.5 text-[12px] font-semibold transition",
+                  isActive ? "border-[#4361EE] bg-[#4361EE] text-white shadow-sm" : "border-border bg-white text-foreground hover:border-[#B3BFF6] hover:bg-[#EEF1FD]/40",
+                  t.archived && "opacity-60"
+                )}
+              >
+                <button type="button" onClick={() => setActiveTemplateId(t.id)} className="inline-flex items-center gap-1.5">
+                  {isDefault && <Star className={cn("h-3 w-3", isActive ? "fill-white text-white" : "fill-amber-400 text-amber-400")} />}
+                  {t.name}
+                  {t.archived && <span className={cn("rounded-full px-1.5 text-[9px] font-medium", isActive ? "bg-white/20" : "bg-zinc-100 text-zinc-500")}>Archived</span>}
+                </button>
+                {canManage && (
+                  <span className={cn("flex items-center gap-0.5 border-l pl-1", isActive ? "border-white/25" : "border-border")}>
+                    <button onClick={() => { setEditingTemplateId(t.id); setEditingTemplateName(t.name); }} title="Rename template" className={cn("grid h-5 w-5 place-items-center rounded-md", isActive ? "text-white/80 hover:bg-white/20" : "text-zinc-400 hover:bg-muted")}><Pencil className="h-3 w-3" /></button>
+                    <button onClick={() => duplicateTemplate(t.id)} title="Duplicate template" className={cn("grid h-5 w-5 place-items-center rounded-md", isActive ? "text-white/80 hover:bg-white/20" : "text-zinc-400 hover:bg-muted")}><Copy className="h-3 w-3" /></button>
+                    {!isDefault && !t.archived && (
+                      <button onClick={() => makeDefaultTemplate(t.id)} title="Make default" className={cn("grid h-5 w-5 place-items-center rounded-md", isActive ? "text-white/80 hover:bg-white/20" : "text-zinc-400 hover:bg-muted")}><Star className="h-3 w-3" /></button>
+                    )}
+                    <button onClick={() => toggleTemplateArchive(t.id)} title={t.archived ? "Restore template" : "Archive template"} className={cn("grid h-5 w-5 place-items-center rounded-md", isActive ? "text-white/80 hover:bg-white/20" : "text-zinc-400 hover:bg-muted")}>
+                      {t.archived ? <ArchiveRestore className="h-3 w-3" /> : <Archive className="h-3 w-3" />}
+                    </button>
+                  </span>
+                )}
+              </div>
+            );
+          })}
+
+          {canManage && (
+            <div className="inline-flex items-center gap-1.5">
+              <Input
+                value={newTemplateName}
+                onChange={(e: any) => setNewTemplateName(e.target.value)}
+                onKeyDown={(e: any) => e.key === "Enter" && addTemplate()}
+                placeholder="New template (e.g. Laptop)…"
+                className="h-9 w-48"
+              />
+              <Button size="sm" onClick={addTemplate} disabled={!newTemplateName.trim()}>
+                <Plus className="h-3.5 w-3.5" /> Add Template
+              </Button>
+            </div>
+          )}
+        </div>
+        <p className="mt-2 text-[11px] text-muted-foreground">
+          The <span className="font-semibold text-foreground">starred</span> template is the default used in a new ticket. Editing below applies to <span className="font-semibold text-foreground">{activeTemplate?.name ?? "—"}</span>.
+        </p>
+      </div>
 
       {/* Toolbar */}
       <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
@@ -258,7 +444,7 @@ export default function QualityCheckSettingsPage() {
       {/* Add category */}
       {canManage && (
         <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Add QC Category</p>
+          <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Add QC Category to {activeTemplate?.name ?? "template"}</p>
           <div className="flex items-end gap-3">
             <div className="flex-1 space-y-1">
               <Label>Category Name</Label>
@@ -285,7 +471,7 @@ export default function QualityCheckSettingsPage() {
         <div className="rounded-2xl border border-dashed border-border bg-muted/20 p-10 text-center">
           <Shield className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
           <p className="text-sm text-muted-foreground">
-            {q ? "No QC items match your search." : "No QC categories yet. Add one above to build your checklist."}
+            {q ? "No QC items match your search." : `No QC categories in ${activeTemplate?.name ?? "this template"} yet. Add one above to build its checklist.`}
           </p>
         </div>
       ) : (

@@ -9,7 +9,7 @@ import {
   Printer, FileText, Plus, Search, User, UserPlus, Building2, Sparkles,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
   Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
-  X, IndianRupee, Filter, Zap, BarChart3, Store as StoreIcon,
+  X, IndianRupee, Filter, Zap, BarChart3, Store as StoreIcon, Link2,
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
@@ -27,15 +27,18 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
-import { OpenLeadBanner } from "@/components/leads/open-lead-banner";
+import { InventorySearchBox } from "@/components/inventory/inventory-search-box";
+import { AddInventoryModal } from "@/components/inventory/add-inventory-modal";
+import { Can } from "@/components/common/can";
 import { useStoreSettings } from "@/lib/store-settings";
 import { cn, formatINR } from "@/lib/utils";
 import { deriveTicketStatus, createWalkInDevice, getWalkInDevices, getRecordType, getTicketDevices, getInvoiceDevices, type Ticket, type TicketStatus, type WalkIn, type WalkInDevice, type Invoice } from "@/lib/mock-data";
 import { loadDeviceColours, saveDeviceColours, getCachedColours, subscribeDeviceColours, DEFAULT_COLOURS, type DeviceColourItem } from "@/lib/device-colours";
 import type { InventoryItem } from "@/lib/inventory-data";
-import { searchCustomers, createCustomer, type Customer } from "@/lib/customer-data";
+import { createCustomer, type Customer } from "@/lib/customer-data";
 import { findOrCreateCustomer } from "@/lib/customer-service";
 import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidate } from "@/lib/customer-candidates";
+import { customerSalesAttribution, findOpenLeadMatches } from "@/lib/leads-data";
 import { CustomerBadges, resolveGroups, customerLifecycle } from "@/components/common/customer-classification";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, inferCategoryFromName, type Brand, type DeviceModel } from "@/lib/brand-model-data";
 import { parseIssueString, serializeIssues } from "@/lib/issue-library";
@@ -47,7 +50,7 @@ import { NoPermission } from "@/components/common/no-permission";
 import { type PermissionKey } from "@/lib/permissions";
 import { useStoreContext } from "@/lib/store-context";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
-import { loadQCConfig, getCachedQCConfig, activeCategories as qcActiveCategories, type QCConfig } from "@/lib/qc-config";
+import { loadQCConfig, getCachedQCConfig, resolveTemplate as qcResolveTemplate, activeTemplates as qcActiveTemplates, activeCategoriesForTemplate as qcActiveCategoriesForTemplate, type QCConfig } from "@/lib/qc-config";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
 import { nextWalkInNumber, genWalkInId, ticketSourceToWalkInType, canonicalizeSource } from "@/lib/walk-in-data";
 
@@ -157,6 +160,10 @@ type WizardDevice = {
   /** Optional per-item technician notes, keyed by the same QC item id as `qc`.
    *  Independent of the status map so existing QC persistence is untouched. */
   qcNotes?: Record<string, string | undefined>;
+  /** Selected QC template id for THIS device (which checklist was used). Lets
+   *  a multi-device ticket mix e.g. a Mobile template + a Laptop template.
+   *  Falls back to the config's default template when unset. */
+  qcTemplateId?: string;
   category?: string;
   /** Existing per-device operational status, carried through on EDIT so it is
    *  never reset. Undefined for brand-new devices (they take the default). */
@@ -271,6 +278,7 @@ function ticketToWizard(t: Ticket): WizardData {
       parts: dr.parts ? dr.parts.map((p) => ({ inventoryId: p.inventoryId, name: p.name, sku: p.sku, qty: p.qty, unitPrice: p.unitPrice, total: p.total, uom: p.uom })) : [],
       qc: dr.qc || {},
       qcNotes: dr.qcNotes || {},
+      qcTemplateId: dr.qcTemplateId,
       category: dr.category || category,
       // Carry the saved per-device status through EDIT so it is preserved
       // (not reset to the ticket default) when the wizard saves.
@@ -392,11 +400,12 @@ function NewTicketWizard() {
   const { updateLead, recordConversionEvent, autoLinkByIdentity, contacts, leads, updateContact } = useLeads();
   const { settings } = useStoreSettings();
 
-  // Start on Device Details (step 3) for edit, walk-in, field-job and
-  // estimate→ticket conversion. Start on Category (step 2) when entering
-  // directly from "Create Ticket".
+  // Start on Device Details (step 4) for edit, walk-in, field-job and
+  // estimate→ticket conversion (customer is already prefilled on those). Start
+  // on Customer (step 2) when entering directly from "Create Ticket" — the user
+  // captures the customer first, then Category, then the device.
   const [step, setStep] = useState(
-    editId || fromWalkInId || fromFieldJobId || fromEstimateId || fromProformaId || fromTicketId ? 3 : skipToCategory ? 2 : 1
+    editId || fromWalkInId || fromFieldJobId || fromEstimateId || fromProformaId || fromTicketId ? 4 : skipToCategory ? 2 : 1
   );
   const [data, setData] = useState<WizardData>(
     skipToCategory ? { ...DEFAULT, process: "ticket" } : DEFAULT
@@ -653,7 +662,10 @@ function NewTicketWizard() {
   // before. Each of these steps always starts back at device 1 — the shared
   // `activeDeviceIndex` is reset to 0 whenever we leave a device-scoped step,
   // so a leftover index from a previous step never leaks forward.
-  const DEVICE_SCOPED_STEPS = [3, 4, 5, 9];
+  // Device-scoped steps (walked per-device with multiple devices): Device
+  // Details (4), Job Details (5), Parts (6), QC (8). Customer is now step 2
+  // (before Category), so the device-scoped steps shifted up by one.
+  const DEVICE_SCOPED_STEPS = [4, 5, 6, 8];
   const next = () => {
     if (DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1) {
       setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex + 1 }));
@@ -662,14 +674,14 @@ function NewTicketWizard() {
     if (DEVICE_SCOPED_STEPS.includes(step)) {
       setData((prev) => ({ ...prev, activeDeviceIndex: 0 }));
     }
-    setStep((s) => Math.min(s + 1, 11));
+    setStep((s) => Math.min(s + 1, 10));
   };
   const back = () => {
     if (DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1 && data.activeDeviceIndex > 0) {
       setData((prev) => ({ ...prev, activeDeviceIndex: prev.activeDeviceIndex - 1 }));
       return;
     }
-    // When entered directly at Category (Process step skipped), Back from
+    // When entered directly at Customer (step 2, Process skipped), Back from
     // step 2 closes the wizard rather than revealing the skipped Process step.
     if (step === 1 || (step === 2 && skipToCategory)) {
       attemptNav(closeTarget);
@@ -691,7 +703,7 @@ function NewTicketWizard() {
   // Jumping into a device-scoped step always starts at device 1, consistent
   // with Next/Back.
   const goToStep = (target: number) => {
-    const clamped = Math.min(Math.max(1, target), 11);
+    const clamped = Math.min(Math.max(1, target), 10);
     if (DEVICE_SCOPED_STEPS.includes(clamped) && clamped !== step) {
       setData((prev) => ({ ...prev, activeDeviceIndex: 0 }));
     }
@@ -803,6 +815,7 @@ function NewTicketWizard() {
       parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
       qc: wd.qc,
       qcNotes: wd.qcNotes,
+      qcTemplateId: wd.qcTemplateId,
       // Per-device status. A device that already has a saved status (existing
       // ticket being edited) KEEPS it — so editing a multi-device ticket never
       // resets Device 2's independent status. Brand-new devices (and every
@@ -1247,10 +1260,10 @@ function NewTicketWizard() {
           ? `Edit ${isEstimateMode ? "Estimate" : "Ticket"} ${tickets.find((t) => t.id === editId)?.ticketNo ?? editId}`
           // On the final Confirmation step in estimate mode, relabel the big
           // heading "Estimate Confirmation" (matches the Create Estimate CTA).
-          : (isEstimateMode && step === 11 ? "Estimate Confirmation" : titleFor(step))}
+          : (isEstimateMode && step === 10 ? "Estimate Confirmation" : titleFor(step))}
         subtitle={isEdit
           ? `Update ${isEstimateMode ? "estimate" : "ticket"} details below.`
-          : (isEstimateMode && step === 11 ? "Verify all details before creating the estimate." : subtitleFor(step))}
+          : (isEstimateMode && step === 10 ? "Verify all details before creating the estimate." : subtitleFor(step))}
         isEdit={isEdit}
         footer={isEdit ? (
           <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
@@ -1260,7 +1273,7 @@ function NewTicketWizard() {
             <Button size="md" onClick={handleSave}>
               Save Changes
             </Button>
-            <Button variant="outline" size="md" onClick={next} disabled={step >= 11}>
+            <Button variant="outline" size="md" onClick={next} disabled={step >= 10}>
               {DEVICE_SCOPED_STEPS.includes(step) && data.devices.length > 1 && data.activeDeviceIndex < data.devices.length - 1
                 ? <>Next Device ({data.activeDeviceIndex + 2}/{data.devices.length})</>
                 : <>Next</>} <ArrowRight className="h-4 w-4" />
@@ -1268,7 +1281,7 @@ function NewTicketWizard() {
           </div>
         ) : undefined}
       >
-        <div className={cn("mx-auto", step === 9 ? "max-w-6xl" : (step === 2 || step === 3 || step === 4 || step === 7) ? "max-w-5xl" : "max-w-3xl")}>
+        <div className={cn("mx-auto", step === 8 ? "max-w-6xl" : (step === 2 || step === 3 || step === 4 || step === 5) ? "max-w-5xl" : "max-w-3xl")}>
           {step === 1 && (
             <ProcessSelector
               value={data.process}
@@ -1294,7 +1307,8 @@ function NewTicketWizard() {
               }}
             />
           )}
-          {step === 2 && (
+          {step === 2 && <CustomerStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 3 && (
             <CategoryWheel
               value={data.category}
               onChange={(id) => {
@@ -1316,15 +1330,13 @@ function NewTicketWizard() {
               isEdit={isEdit}
             />
           )}
-          {step === 3 && <DeviceForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 4 && <JobDetailsForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 5 && <PartsAssignment data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 6 && <ContactSearch data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 7 && <CustomerForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 8 && <QuoteSummary data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 9 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 10 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
-          {step === 11 && <ConfirmationStep onSubmit={handleSubmit} isEdit={isEdit} data={data} isEstimate={isEstimateMode} />}
+          {step === 4 && <DeviceForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 5 && <JobDetailsForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 6 && <PartsAssignment data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 7 && <QuoteSummary data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 8 && <QCForm data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 9 && <UploadStep data={data} setData={setData} onNext={next} isEdit={isEdit} />}
+          {step === 10 && <ConfirmationStep onSubmit={handleSubmit} isEdit={isEdit} data={data} isEstimate={isEstimateMode} />}
         </div>
       </WizardShell>
 
@@ -1596,12 +1608,11 @@ function ProcessSelector({ value, onChange }: { value?: string; onChange: (id: s
 function titleFor(step: number) {
   return [
     "What would you like to do today?",
+    "Customer Information",
     "Select Your Category",
     "Device Details",
     "Job Details",
     "Assign Items / Parts to Service",
-    "Contact Information",
-    "Customer Information",
     "Quotation Summary",
     "Pre-Quality Check",
     "Upload Photos & Documents",
@@ -1611,12 +1622,11 @@ function titleFor(step: number) {
 function subtitleFor(step: number) {
   return [
     "Choose a process to get started. We'll handle the rest.",
+    "Find an existing customer, or add a new one.",
     "What kind of device is it?",
     "Capture brand, model and identifiers.",
     "Capture job type, priority and repair notes.",
     "Add spare parts and services consumed.",
-    "Find an existing contact, or add a new one.",
-    "Make sure the customer details are correct.",
     "Review the estimate before approval.",
     "Mark each checkpoint as Pass, Fail or Skip.",
     "Attach device photos and any paperwork.",
@@ -1693,7 +1703,7 @@ function AddPersonDialog({
   );
 }
 
-/* ---------------- Step 3: Device Details (Simplified) ---------------- */
+/* ---------------- Step 4: Device Details (Simplified) ---------------- */
 function DeviceForm({ data, setData, onNext, isEdit }: any) {
   const { brands, deviceModels, addBrand, addDeviceModel, assignedByOptions, addAssignedByOption, assignedToOptions, addAssignedToOption } = useStore();
   // "+ Add Person" is gated on permission to manage the Assigned By/To master
@@ -2367,7 +2377,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 4: Job Details ---------------- */
+/* ---------------- Step 5: Job Details ---------------- */
 function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
@@ -2982,9 +2992,15 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
 
 /* ---------------- Step 5: Parts (Inventory Integrated) ---------------- */
 function PartsAssignment({ data, setData, onNext, isEdit }: any) {
+  const { can } = usePermissions();
   const { inventory } = useStore();
-  const [query, setQuery] = useState("");
-  const [showResults, setShowResults] = useState(false);
+  // Inventory search popover (select an EXISTING item → add as a part) and the
+  // Add Inventory modal (create a NEW Inventory Master record) are two DISTINCT
+  // workflows — matching the invoice Products step. Tracked separately.
+  const [showInventorySearch, setShowInventorySearch] = useState(false);
+  const [showAddInventory, setShowAddInventory] = useState(false);
+  const [addInventorySeed, setAddInventorySeed] = useState("");
+  const searchWrapRef = useRef<HTMLDivElement>(null);
 
   const activeIdx = data.activeDeviceIndex;
   const activeDevice = data.devices[activeIdx];
@@ -2992,17 +3008,20 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
 
   const total = parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
 
-  // Search inventory items
-  const results = query.trim().length >= 2
-    ? inventory.filter((item: InventoryItem) => {
-        const q = query.toLowerCase();
-        return item.active && (
-          item.name.toLowerCase().includes(q) ||
-          item.id.toLowerCase().includes(q) ||
-          item.category.toLowerCase().includes(q)
-        );
-      }).slice(0, 8)
-    : [];
+  // Close the inventory search popover on outside click (the results dropdown
+  // is portalled to <body>, so a click on a result isn't an "outside" click).
+  useEffect(() => {
+    if (!showInventorySearch) return;
+    const onDown = (e: MouseEvent) => {
+      const target = e.target as Node;
+      if ((target as HTMLElement)?.closest?.('[data-inventory-search-panel="true"]')) return;
+      if (searchWrapRef.current && !searchWrapRef.current.contains(target)) {
+        setShowInventorySearch(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [showInventorySearch]);
 
   const updateDeviceParts = (newParts: any[]) => {
     const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
@@ -3011,9 +3030,21 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
     setData({ ...data, devices: updatedDevices });
   };
 
+  // Add an EXISTING Inventory Master item as a part line. If the same item
+  // (matched by its id/sku) is already on this device, bump its quantity
+  // instead of duplicating the row — the master record is never touched.
   const addPart = (item: InventoryItem) => {
-    // Check if already added
-    if (parts.some((p: any) => p.inventoryId === item.id)) return;
+    const existing = parts.find((p: any) => p.inventoryId === item.id);
+    if (existing) {
+      updateDeviceParts(
+        parts.map((p: any) =>
+          p.inventoryId === item.id
+            ? { ...p, qty: p.qty + 1, total: (p.qty + 1) * p.unitPrice }
+            : p
+        )
+      );
+      return;
+    }
     const newPart = {
       inventoryId: item.id,
       name: item.name,
@@ -3024,8 +3055,6 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
       uom: item.uom,
     };
     updateDeviceParts([...parts, newPart]);
-    setQuery("");
-    setShowResults(false);
   };
 
   const removePart = (idx: number) => {
@@ -3045,68 +3074,46 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
       <DeviceSwitcher data={data} setData={setData} />
-      {/* Search */}
-      <div className="relative">
-        <Field label="Search Inventory">
-          <Input
-            value={query}
-            onChange={(e: any) => { setQuery(e.target.value); setShowResults(true); }}
-            onFocus={() => setShowResults(true)}
-            placeholder="Search by name, SKU, or category…"
-            iconLeft={<Search className="h-4 w-4 text-[#4361EE] drop-shadow-[0_0_4px_rgba(67,97,238,0.45)]" />}
-          />
-        </Field>
 
-        {/* Autocomplete Results */}
-        {showResults && results.length > 0 && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 max-h-[280px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-            {results.map((item: InventoryItem) => {
-              const alreadyAdded = parts.some((p: any) => p.inventoryId === item.id);
-              const available = item.currentStock - (item.reservedStock || 0);
-              const outOfStock = available <= 0;
-              const lowStock = available > 0 && available <= item.minStock;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  disabled={alreadyAdded || outOfStock}
-                  onClick={() => addPart(item)}
-                  className={cn(
-                    "flex w-full items-center gap-3 px-4 py-3 text-left transition border-b border-border last:border-0",
-                    alreadyAdded ? "opacity-50 cursor-not-allowed bg-muted/30" :
-                    outOfStock ? "opacity-50 cursor-not-allowed" :
-                    "hover:bg-indigo-50/50"
-                  )}
-                >
-                  <span className="grid h-9 w-9 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-                    <Package className="h-4 w-4" />
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium truncate">{item.name}</p>
-                    <p className="text-[11px] text-muted-foreground">{item.id} · {item.category} · {item.uom}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-semibold tabular-nums">{formatINR(item.regularSellingPrice)}</p>
-                    {outOfStock ? (
-                      <span className="text-[10px] font-medium text-rose-600">Out of Stock</span>
-                    ) : lowStock ? (
-                      <span className="text-[10px] font-medium text-amber-600">Low ({available})</span>
-                    ) : (
-                      <span className="text-[10px] text-muted-foreground">Available: {available}</span>
-                    )}
-                  </div>
-                  {alreadyAdded && <span className="text-[10px] font-medium text-[#4361EE]">Added</span>}
-                </button>
-              );
-            })}
-          </div>
-        )}
-        {showResults && query.trim().length >= 2 && results.length === 0 && (
-          <div className="absolute left-0 right-0 top-full z-20 mt-1 rounded-xl border border-border bg-card p-4 shadow-lg text-center text-sm text-muted-foreground">
-            No inventory items match "{query}"
-          </div>
-        )}
+      {/* Actions: Search Inventory (add existing) + Add Inventory (create a
+          master record). Mirrors the invoice Products step. */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Parts &amp; Items</p>
+          <p className="text-[12px] text-muted-foreground">Search inventory to add a part, or create a new inventory item.</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* Search Inventory is the PRIMARY action (filled) — it's the common
+              path. Add Inventory (create a master record) is secondary. */}
+          <Button size="sm" onClick={() => setShowInventorySearch((v) => !v)}>
+            <Search className="h-3.5 w-3.5" /> Search Inventory
+          </Button>
+          <Can permission={CAP.inventory.create}>
+            <Button size="sm" variant="outline" onClick={() => { setAddInventorySeed(""); setShowAddInventory(true); }} className="border-[#4361EE]/30 hover:border-[#4361EE]/50">
+              <Plus className="h-3.5 w-3.5" /> Add Inventory
+            </Button>
+          </Can>
+        </div>
       </div>
+
+      {/* Live inventory search — selecting a result adds it as a part line. The
+          empty-state "+ Add Inventory" is gated on CAP.inventory.create. */}
+      {showInventorySearch && (
+        <div className="relative z-30 mt-4" ref={searchWrapRef}>
+          <InventorySearchBox
+            placeholder="Search by name, SKU, category, or HSN…"
+            onSelect={(item) => { addPart(item); /* keep open for rapid multi-add */ }}
+            onClose={() => setShowInventorySearch(false)}
+            onAddInventory={(term) => {
+              if (allow(can, CAP.inventory.create)) {
+                setAddInventorySeed(term);
+                setShowInventorySearch(false);
+                setShowAddInventory(true);
+              }
+            }}
+          />
+        </div>
+      )}
 
       {/* Added Parts List */}
       <div className="mt-5 rounded-xl border border-border overflow-hidden">
@@ -3163,9 +3170,13 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
             </tbody>
           </table>
         ) : (
-          <div className="flex items-center justify-center px-4 py-8 text-sm text-muted-foreground">
-            <Package className="mr-2 h-4 w-4" /> No parts added yet - search inventory above or skip this step.
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowInventorySearch(true)}
+            className="flex w-full items-center justify-center gap-2 px-4 py-8 text-sm text-muted-foreground transition hover:bg-[#EEF1FD]/40 hover:text-foreground"
+          >
+            <Package className="h-4 w-4" /> No parts added yet — click to search inventory, or skip this step.
+          </button>
         )}
       </div>
 
@@ -3182,16 +3193,34 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
           </div>
         )}
       </div>
+
+      {/* Add Inventory modal — creates a canonical Inventory Master record and,
+          on success, adds it to this device as a part line so the user doesn't
+          have to search for what they just created. */}
+      <AddInventoryModal
+        open={showAddInventory}
+        onClose={() => setShowAddInventory(false)}
+        initialName={addInventorySeed}
+        onCreated={(item) => addPart(item)}
+      />
     </div>
   );
 }
 
-/* ---------------- Step 6: Contact Search ---------------- */
-function ContactSearch({ data, setData, onNext, isEdit }: any) {
-  const { customers, customerGroups } = useStore();
-  const { contacts } = useLeads();
+/* ---------------- Step 6: Customer (Search + Details merged) ----------------
+   One unified step: find & link an existing customer OR capture a new one, and
+   refine the customer detail fields — all in a single view. Previously this was
+   two steps (Contact Search + Customer Form); they share the exact same draft
+   fields (data.customer / data.customerId / data.contactType / data.gstNumber),
+   so merging keeps the data model unchanged and persists once on Continue. */
+function CustomerStep({ data, setData, onNext, isEdit }: any) {
+  const { customers, customerGroups, addCustomer, updateCustomer } = useStore();
+  const { contacts, leads } = useLeads();
   const [q, setQ] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(data.customerId || null);
+  const c = data.customer;
+  const set = (k: string, v: string) => setData({ ...data, customer: { ...c, [k]: v } });
+  const hasLinkedCustomer = !!data.customerId;
 
   // Live search over BOTH the Customer Master AND un-promoted CRM contacts, so
   // a contact captured via "Add Contact" is fetchable here too. Contact
@@ -3199,7 +3228,7 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
   // the save-time findOrCreateCustomer promotion turns it into a real Customer.
   const results: CustomerCandidate[] = q.trim().length >= 2 ? searchCustomerCandidates(customers, contacts, q) : [];
 
-  // Select a candidate (real customer or contact) and auto-populate step 7.
+  // Select a candidate (real customer or contact) and prefill the detail form.
   const selectCustomer = (c: CustomerCandidate) => {
     setSelectedId(c.id);
     setData({
@@ -3246,176 +3275,67 @@ function ContactSearch({ data, setData, onNext, isEdit }: any) {
         }
       : null;
 
-  return (
-    <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
-      <div className="flex flex-col items-center">
-        <SegmentedTabs value={data.contactType} onChange={(v) => { setData({ ...data, contactType: v }); setSelectedId(null); }} options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]} />
-        {/* Type explanation */}
-        <p className="mt-2 text-center text-[11px] text-muted-foreground">
-          {data.contactType === "personal"
-            ? "Retail customer — invoice will be generated without GST details."
-            : "GST / Business customer — invoice will include tax details and company billing."
-          }
-        </p>
+  // Sales attribution for the LINKED master customer: the most-recent lead
+  // this customer is tied to, with its owning Sales Agent + Lead No. Shown on
+  // the strip instead of the raw customer code so the user sees WHO owns the
+  // relationship and WHICH lead it came from. Only for a real linked customer.
+  const attribution = data.customerId ? customerSalesAttribution(data.customerId, leads) : [];
+  const topAttribution = attribution.find((a) => a.agentName || a.leadNo) || attribution[0] || null;
 
-        {/* Search Input */}
-        <div className="relative mt-6 w-full max-w-lg">
-          <Input
-            value={q}
-            onChange={(e: any) => { setQ(e.target.value); setSelectedId(null); }}
-            placeholder="Search by name, phone, email, company or ID…"
-            iconLeft={<Search className="h-4 w-4 text-[#4361EE] drop-shadow-[0_0_4px_rgba(67,97,238,0.45)]" />}
-            className="h-12"
-          />
-          <p className="mt-2 text-center text-xs text-muted-foreground">
-            {data.contactType === "personal" ? <User className="inline h-3 w-3 mr-1" /> : <Building2 className="inline h-3 w-3 mr-1" />}
-            Start typing to search existing customers.
-          </p>
+  // The lead already linked to THIS ticket draft (explicit link via the strip).
+  const linkedLead = data.linkedLeadId ? leads.find((l) => l.id === data.linkedLeadId) : null;
 
-          {/* Search Results Dropdown */}
-          {q.trim().length >= 2 && !selectedId && (
-            <div className="absolute left-0 right-0 top-[52px] z-30 mt-1 max-h-[340px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
-              {results.length > 0 ? (
-                results.slice(0, 8).map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    onClick={() => selectCustomer(c)}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition border-b border-border last:border-0 hover:bg-indigo-50/50"
-                  >
-                    {/* Avatar */}
-                    <span className={cn(
-                      "grid h-10 w-10 shrink-0 place-items-center rounded-full text-xs font-bold",
-                      c.type === "business" ? "bg-violet-100 text-violet-700" : "bg-[#EEF1FD] text-[#4361EE]"
-                    )}>
-                      {c.firstName[0]}{c.lastName[0] || ""}
-                    </span>
-                    {/* Info */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-sm font-semibold truncate">{c.fullName}</p>
-                        <CustomerBadges type={c.type} source={c.source} groups={resolveGroups(c.groupIds, customerGroups)} maxGroups={1} lifecycle={customerLifecycle(c)} />
-                      </div>
-                      <p className="text-[11px] text-muted-foreground truncate">
-                        {c.mobile}
-                        {c.email && <> · {c.email}</>}
-                        {c.company && <> · {c.company}</>}
-                      </p>
-                    </div>
-                    {/* Stats */}
-                    <div className="text-right shrink-0 hidden sm:block">
-                      {c.isContact ? (
-                        <p className="text-[10px] text-muted-foreground">Prospect · not yet a customer</p>
-                      ) : (
-                        <>
-                          <p className="text-[10px] text-muted-foreground">{c.totalTickets} tickets · {formatINR(c.lifetimeValue)}</p>
-                          <p className="text-[10px] text-muted-foreground">{c.id}</p>
-                        </>
-                      )}
-                    </div>
-                  </button>
-                ))
-              ) : (
-                <div className="p-5 text-center">
-                  <p className="text-sm text-muted-foreground">No matching customers found</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground">Click &quot;Add New&quot; to create a new customer in the next step.</p>
-                </div>
-              )}
-            </div>
-          )}
-        </div>
+  // An OPEN lead that matches this customer (Customer id / phone / email, never
+  // name) but ISN'T linked yet. Surfaced INSIDE the green strip as a "Link to
+  // Lead" action — no separate banner. Only meaningful for a real customer with
+  // no existing attribution + nothing already linked.
+  const openLeadMatch = useMemo(() => {
+    if (data.linkedLeadId) return null;
+    const matches = findOpenLeadMatches(leads, {
+      customerId: data.customerId || undefined,
+      phone: data.customer.phone || undefined,
+      email: data.customer.email || undefined,
+    });
+    return matches[0] || null;
+  }, [leads, data.linkedLeadId, data.customerId, data.customer.phone, data.customer.email]);
 
-        {/* Selected Customer Card */}
-        {selectedCustomer && (
-          <motion.div
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            className="mt-5 w-full max-w-lg rounded-xl border border-emerald-200 bg-emerald-50/50 p-4"
-          >
-            <div className="flex items-center gap-3">
-              <span className="grid h-11 w-11 place-items-center rounded-full bg-emerald-100 text-emerald-700 font-bold text-sm">
-                <CheckCircle2 className="h-5 w-5" />
-              </span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <p className="text-sm font-semibold text-emerald-900">{selectedCustomer.fullName}</p>
-                  <CustomerBadges type={selectedCustomer.type} source={selectedCustomer.source} groups={resolveGroups(selectedCustomer.groupIds, customerGroups)} lifecycle={customerLifecycle(selectedCustomer as any)} />
-                </div>
-                <p className="text-[11px] text-emerald-700">
-                  {selectedCustomer.mobile}
-                  {selectedCustomer.company && <> · {selectedCustomer.company}</>}
-                  {!(selectedCustomer as any).isContact && <> · {selectedCustomer.id}</>}
-                </p>
-              </div>
-              <button
-                onClick={() => {
-                  setSelectedId(null);
-                  setData({ ...data, customerId: null, linkedLeadId: null, customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" } });
-                }}
-                className="shrink-0 rounded-lg p-1.5 text-emerald-600 hover:bg-emerald-100 transition"
-                aria-label="Clear selection"
-              >
-                <XCircle className="h-4 w-4" />
-              </button>
-            </div>
-          </motion.div>
-        )}
+  // Link an open lead to this ticket draft (keeps the originating Sales Agent).
+  const linkLead = (leadId: string) => setData({ ...data, linkedLeadId: leadId });
 
-        {/* Attribution safety net (spec §25/§102/§103): a DIRECT ticket for a
-            customer who has an OPEN lead can be linked so the originating Sales
-            Agent keeps credit. Matches on Customer id / phone / email — never
-            name, and never auto-assigns a historical agent. */}
-        <div className="mt-4 w-full max-w-lg">
-          <OpenLeadBanner
-            phone={data.customer.phone}
-            email={data.customer.email}
-            customerId={data.customerId || undefined}
-            linkedLeadId={data.linkedLeadId || undefined}
-            onLink={(lead) => setData({ ...data, linkedLeadId: lead.id })}
-          />
-        </div>
+  // Clear the current selection and the draft identity fields so the user can
+  // start a fresh customer (or search again).
+  const clearSelection = () => {
+    setSelectedId(null);
+    setData({
+      ...data,
+      customerId: null,
+      linkedLeadId: null,
+      customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" },
+    });
+  };
 
-
-        {/* Action Buttons */}
-        <div className={cn("mt-6 flex w-full max-w-lg flex-col gap-2 sm:flex-row sm:justify-center", isEdit && "hidden")}>
-          <Button variant="outline" size="lg" onClick={() => { setData({ ...data, customerId: null, customer: { first: "", last: "", phone: "", altPhone: "", email: "", address: "", postal: "", city: "", company: "" } }); onNext(); }}>
-            <Plus className="h-4 w-4" /> Add New
-          </Button>
-          <Button size="lg" onClick={onNext} disabled={!selectedId}>
-            Continue <ArrowRight className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/* ---------------- Step 7: Customer (Premium) ---------------- */
-function CustomerForm({ data, setData, onNext, isEdit }: any) {
-  const { customers, addCustomer } = useStore();
-  const c = data.customer;
-  const set = (k: string, v: string) => setData({ ...data, customer: { ...c, [k]: v } });
-  const hasLinkedCustomer = !!data.customerId;
-
-  // Save new customer to Customer Master when proceeding to next step
+  // Persist on Continue:
+  //  • No linked customer + a name typed → dedup by normalized phone (link if
+  //    found) else create + link a new Customer Master record.
+  //  • A linked customer whose details were edited → write the edits BACK to
+  //    that master record, so the ticket's updated info updates the customer.
+  //    The mobile number is the identity key and is NEVER changed here (the
+  //    field is locked). Alternate number + name/email/company/address/GST are
+  //    all syncable.
   const handleNext = () => {
-    // Only create a new customer if no existing one is linked and we have at least a name
     if (!data.customerId && c.first.trim()) {
-      // Check if this customer already exists (by phone or name match) to avoid re-saving on back/forth navigation
       const existingByPhone = c.phone.trim()
         ? customers.find((cust) => cust.mobile.replace(/[\s\-\(\)\+]/g, "") === c.phone.replace(/[\s\-\(\)\+]/g, "") && c.phone.replace(/[\s\-\(\)\+]/g, "").length >= 10)
         : null;
-
       if (existingByPhone) {
-        // Link to existing customer found by phone
         setData({ ...data, customerId: existingByPhone.id });
       } else {
-        // Create new customer and link
         const newCustomer = createCustomer({
           type: data.contactType,
           firstName: c.first.trim(),
           lastName: c.last.trim(),
           mobile: c.phone.trim(),
+          altMobile: c.altPhone.trim(),
           email: c.email.trim(),
           company: c.company.trim(),
           gstNumber: data.gstNumber?.trim() || "",
@@ -3426,70 +3346,315 @@ function CustomerForm({ data, setData, onNext, isEdit }: any) {
         addCustomer(newCustomer);
         setData({ ...data, customerId: newCustomer.id });
       }
+    } else if (data.customerId) {
+      // Sync edited fields back onto the linked master. NEVER touch `mobile`
+      // (identity key, locked in the UI). Only write fields that actually
+      // changed so we don't churn the record needlessly.
+      const master = customers.find((cust) => cust.id === data.customerId);
+      if (master) {
+        const next: Partial<Customer> = {};
+        const trim = (v: string) => (v ?? "").trim();
+        const nameChanged = trim(c.first) !== (master.firstName ?? "") || trim(c.last) !== (master.lastName ?? "");
+        if (trim(c.first) !== (master.firstName ?? "")) next.firstName = trim(c.first);
+        if (trim(c.last) !== (master.lastName ?? "")) next.lastName = trim(c.last);
+        if (nameChanged) next.fullName = `${trim(c.first)} ${trim(c.last)}`.trim();
+        if (trim(c.altPhone) !== (master.altMobile ?? "")) next.altMobile = trim(c.altPhone);
+        if (trim(c.email) !== (master.email ?? "")) next.email = trim(c.email);
+        if (trim(c.company) !== (master.company ?? "")) next.company = trim(c.company);
+        if (trim(c.address) !== (master.address ?? "")) next.address = trim(c.address);
+        if (trim(c.city) !== (master.city ?? "")) next.city = trim(c.city);
+        if (trim(c.postal) !== (master.postalCode ?? "")) next.postalCode = trim(c.postal);
+        const gst = trim(data.gstNumber || "");
+        if (gst !== (master.gstNumber ?? "")) next.gstNumber = gst;
+        if (Object.keys(next).length > 0) {
+          void updateCustomer(data.customerId, next);
+        }
+      }
     }
     onNext();
   };
 
+  const selCust = selectedCustomer as any;
+
   return (
-    <div className={FORM_CARD}>
-      {/* Linked customer banner */}
-      {hasLinkedCustomer && (
-        <div className="mb-5 flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-2.5">
-          <CheckCircle2 className="h-4 w-4 text-emerald-600 shrink-0" />
-          <p className="text-[12px] font-medium text-emerald-800">
-            Linked to Customer Master <span className="font-mono font-bold">{data.customerId}</span> — edits here update this ticket only.
-          </p>
-        </div>
-      )}
-      <div className="grid grid-cols-1 gap-x-8 gap-y-6 lg:grid-cols-2">
-        {/* Left Column — Identity */}
-        <div className="space-y-4">
-          <SectionLabel icon={User}>Personal Details</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
-            <Field label="First Name"><Input value={c.first} onChange={(e: any) => set("first", e.target.value)} placeholder="Rahul" className="h-11" /></Field>
-            <Field label="Last Name"><Input value={c.last} onChange={(e: any) => set("last", e.target.value)} placeholder="Kapoor" className="h-11" /></Field>
-            <Field label="Contact Number"><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" className="h-11" /></Field>
-            <Field label="Alternate Number"><Input value={c.altPhone} onChange={(e: any) => set("altPhone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" className="h-11" /></Field>
-            <Field label="E-mail ID"><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} iconLeft={<Mail className="h-4 w-4" />} placeholder="rahul@email.com" className="h-11" /></Field>
-            <Field label="Company / Organization"><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} iconLeft={<Building2 className="h-4 w-4" />} placeholder="Optional" className="h-11" /></Field>
-          </div>
+    <div className={FORM_CARD_COMPACT}>
+      {/* ── Top bar: type toggle + inline search, on a highlighted toolbar ── */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-[#4361EE]/20 bg-gradient-to-r from-[#EEF1FD] via-[#F3F6FF] to-white px-3.5 py-3 shadow-[0_2px_4px_rgba(20,30,80,0.05),0_14px_32px_-20px_rgba(67,97,238,0.4)] sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-3">
+          <SegmentedTabs
+            value={data.contactType}
+            onChange={(v) => { setData({ ...data, contactType: v }); setSelectedId(null); }}
+            options={[{ label: "Personal", value: "personal" }, { label: "Business", value: "business" }]}
+            size="sm"
+          />
+          <span className="hidden text-[11px] text-muted-foreground sm:inline">
+            {data.contactType === "personal" ? "Retail — no GST" : "Business — GST invoice"}
+          </span>
         </div>
 
-        {/* Right Column — Address */}
-        <div className="space-y-4">
-          <SectionLabel icon={Building2}>Address</SectionLabel>
-          <div className="grid grid-cols-1 gap-x-3.5 gap-y-4 sm:grid-cols-2">
-            <div className="col-span-2"><Field label="Address"><Input value={c.address} onChange={(e: any) => set("address", e.target.value)} placeholder="House / Street / Locality" className="h-11" /></Field></div>
-            <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} placeholder="Bengaluru" className="h-11" /></Field>
-            <Field label="Postal Code"><Input value={c.postal} onChange={(e: any) => set("postal", e.target.value)} placeholder="560001" className="h-11" /></Field>
+        {/* Search — right-aligned, a bit wider, blue-accented; hidden once a
+            customer is linked. */}
+        {!hasLinkedCustomer && (
+          <div className="relative w-full sm:w-[28rem] sm:max-w-md">
+            <Input
+              value={q}
+              onChange={(e: any) => { setQ(e.target.value); setSelectedId(null); }}
+              placeholder="Search existing customer…"
+              iconLeft={<Search className="h-4 w-4 text-[#4361EE]" />}
+              className="border-[#4361EE]/50 hover:border-[#4361EE] focus:border-[#4361EE]"
+            />
+            {q.trim().length >= 2 && !selectedId && (
+              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[320px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+                {results.length > 0 ? (
+                  results.slice(0, 8).map((rc) => (
+                    <button
+                      key={rc.id}
+                      type="button"
+                      onClick={() => { selectCustomer(rc); setQ(""); }}
+                      className="flex w-full items-center gap-3 border-b border-border px-3.5 py-2.5 text-left transition last:border-0 hover:bg-[#EEF1FD]/50"
+                    >
+                      <span className={cn(
+                        "grid h-9 w-9 shrink-0 place-items-center rounded-full text-[11px] font-bold",
+                        rc.type === "business" ? "bg-violet-100 text-violet-700" : "bg-[#EEF1FD] text-[#4361EE]"
+                      )}>
+                        {rc.firstName[0]}{rc.lastName[0] || ""}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="truncate text-[13px] font-semibold">{rc.fullName}</p>
+                          <CustomerBadges type={rc.type} source={rc.source} groups={resolveGroups(rc.groupIds, customerGroups)} maxGroups={1} lifecycle={customerLifecycle(rc)} />
+                        </div>
+                        <p className="truncate text-[11px] text-muted-foreground">
+                          {rc.mobile}
+                          {rc.email && <> · {rc.email}</>}
+                          {rc.company && <> · {rc.company}</>}
+                        </p>
+                      </div>
+                      {!rc.isContact && <span className="shrink-0 text-[10px] text-muted-foreground">{rc.id}</span>}
+                    </button>
+                  ))
+                ) : (
+                  <div className="px-4 py-4 text-center text-[12px] text-muted-foreground">
+                    No match — fill the form below to create a new customer.
+                  </div>
+                )}
+              </div>
+            )}
           </div>
-
-          {/* GST Number — only for Business customers */}
-          {data.contactType === "business" && (
-            <div className="space-y-1 mt-4">
-              <Field label="GST Number">
-                <Input
-                  value={data.gstNumber || ""}
-                  onChange={(e: any) => setData({ ...data, gstNumber: e.target.value.toUpperCase() })}
-                  placeholder="e.g. 29ABCDE1234F1Z5"
-                  className="h-11 font-mono tracking-wider uppercase"
-                  maxLength={15}
-                />
-              </Field>
-            </div>
-          )}
-        </div>
+        )}
       </div>
+
+      {/* ── Linked / selected customer strip ──
+          ONE box that tells the whole attribution story:
+            • a lead linked to this ticket, or an existing attribution → show
+              the Sales Agent + Lead No pills;
+            • an OPEN lead matched but not yet linked → show it inline with a
+              "Link to Lead" action (no separate banner below);
+            • otherwise a plain direct/new customer note. */}
+      {selectedCustomer && (() => {
+        // Resolve the agent/lead to show: an explicitly linked lead wins, else a
+        // matched open lead (pre-link), else the historical attribution.
+        const shownAgent = linkedLead?.assignedToName || linkedLead?.agent
+          || topAttribution?.agentName
+          || (openLeadMatch?.lead.assignedToName || openLeadMatch?.lead.agent) || "";
+        const shownLeadNo = linkedLead?.leadNo || topAttribution?.leadNo || openLeadMatch?.lead.leadNo || "";
+        const hasAgentOrLead = !!(shownAgent || shownLeadNo);
+        const canLink = !!openLeadMatch && !data.linkedLeadId;
+
+        return (
+          <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-emerald-300/70 bg-gradient-to-r from-emerald-50 via-emerald-50/60 to-white px-4 py-3 shadow-[0_2px_4px_rgba(16,120,80,0.05),0_14px_30px_-20px_rgba(16,120,80,0.4)]">
+            <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br from-emerald-500 to-emerald-600 text-white shadow-[0_4px_10px_-2px_rgba(16,120,80,0.5)]">
+              <CheckCircle2 className="h-5 w-5" />
+            </span>
+
+            {/* Identity + attribution */}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <p className="truncate text-[14px] font-bold text-emerald-900">{selectedCustomer.fullName || "New customer"}</p>
+                <CustomerBadges type={selectedCustomer.type} source={selectedCustomer.source} groups={resolveGroups(selectedCustomer.groupIds, customerGroups)} lifecycle={customerLifecycle(selCust)} />
+              </div>
+              <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                {hasAgentOrLead ? (
+                  <>
+                    {shownAgent && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] py-1 pl-1.5 pr-2.5 ring-1 ring-inset ring-[#4361EE]/20">
+                        <span className="grid h-4 w-4 place-items-center rounded-full bg-[#4361EE] text-white"><User className="h-2.5 w-2.5" /></span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-[#4361EE]/70">Sales Agent</span>
+                        <span className="text-[11px] font-bold text-[#2A3BB5]">{shownAgent}</span>
+                      </span>
+                    )}
+                    {shownLeadNo && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-100 py-1 pl-1.5 pr-2.5 ring-1 ring-inset ring-violet-300/50">
+                        <span className="grid h-4 w-4 place-items-center rounded-full bg-violet-600 text-white"><ClipboardList className="h-2.5 w-2.5" /></span>
+                        <span className="text-[9px] font-bold uppercase tracking-wider text-violet-500">Lead No</span>
+                        <span className="text-[11px] font-bold text-violet-800">{shownLeadNo}</span>
+                        {data.linkedLeadId && <Check className="h-3 w-3 text-violet-700" />}
+                      </span>
+                    )}
+                    {/* A matched-but-unlinked open lead: offer to link it. */}
+                    {canLink && (
+                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2.5 py-1 text-[10.5px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-300/60">
+                        Open lead · {openLeadMatch!.matchedOn} match
+                      </span>
+                    )}
+                  </>
+                ) : hasLinkedCustomer ? (
+                  <span className="text-[11px] text-emerald-700">Direct customer — no linked lead.</span>
+                ) : (
+                  <span className="text-[11px] text-emerald-700">New customer — saved to Customer Master on Continue.</span>
+                )}
+              </div>
+            </div>
+
+            {/* Right actions: Link to Lead (when an open lead matched + unlinked),
+                then Clear. Kept inside the one green box. */}
+            {canLink && (
+              <button
+                onClick={() => linkLead(openLeadMatch!.lead.id)}
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-lg bg-[#4361EE] px-3 py-1.5 text-[12px] font-semibold text-white shadow-sm transition hover:bg-[#3347D6]"
+              >
+                <Link2 className="h-3.5 w-3.5" /> Link to Lead
+              </button>
+            )}
+            <button
+              onClick={clearSelection}
+              className="grid h-8 w-8 shrink-0 place-items-center rounded-lg text-emerald-600 transition hover:bg-emerald-100"
+              aria-label="Clear selection / start a new customer"
+              title="Clear"
+            >
+              <XCircle className="h-4 w-4" />
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* ── Detail fields — two accented panels (Identity | Address) ── */}
+      <div className="mt-5 grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Identity */}
+        <CustomerPanel
+          accent="blue"
+          icon={User}
+          title={data.contactType === "business" ? "Business Details" : "Personal Details"}
+          subtitle="Who the ticket is for"
+        >
+          <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
+            <Field label="First Name"><Input value={c.first} onChange={(e: any) => set("first", e.target.value)} placeholder="Rahul" /></Field>
+            <Field label="Last Name"><Input value={c.last} onChange={(e: any) => set("last", e.target.value)} placeholder="Kapoor" /></Field>
+            <Field label={hasLinkedCustomer ? "Contact Number (locked)" : "Contact Number"}>
+              <Input
+                value={c.phone}
+                onChange={(e: any) => set("phone", e.target.value)}
+                iconLeft={<Phone className="h-4 w-4" />}
+                placeholder="+91 …"
+                disabled={hasLinkedCustomer}
+                title={hasLinkedCustomer ? "The primary mobile verifies the customer and can't be changed here." : undefined}
+                className={hasLinkedCustomer ? "cursor-not-allowed bg-muted/50 text-muted-foreground" : undefined}
+              />
+            </Field>
+            <Field label="Alternate Number"><Input value={c.altPhone} onChange={(e: any) => set("altPhone", e.target.value)} iconLeft={<Phone className="h-4 w-4" />} placeholder="+91 …" /></Field>
+            {/* E-mail spans the full row for Personal (retail); for Business it
+                becomes half-width and shares the row with Company / Organization
+                (Company only makes sense for a business customer). */}
+            <div className={cn(data.contactType === "business" ? "" : "sm:col-span-2")}>
+              <Field label="E-mail ID"><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} iconLeft={<Mail className="h-4 w-4" />} placeholder="rahul@email.com" /></Field>
+            </div>
+            {data.contactType === "business" && (
+              <Field label="Company / Organization"><Input value={c.company} onChange={(e: any) => set("company", e.target.value)} iconLeft={<Building2 className="h-4 w-4" />} placeholder="Company name" /></Field>
+            )}
+          </div>
+        </CustomerPanel>
+
+        {/* Address */}
+        <CustomerPanel
+          accent="violet"
+          icon={StoreIcon}
+          title="Address"
+          subtitle={data.contactType === "business" ? "Billing & GST" : "Where to reach them"}
+        >
+          <div className="grid grid-cols-1 gap-x-3 gap-y-3 sm:grid-cols-2">
+            <div className="sm:col-span-2"><Field label="Address"><Input value={c.address} onChange={(e: any) => set("address", e.target.value)} placeholder="House / Street / Locality" /></Field></div>
+            <Field label="City"><Input value={c.city} onChange={(e: any) => set("city", e.target.value)} placeholder="Bengaluru" /></Field>
+            <Field label="Postal Code"><Input value={c.postal} onChange={(e: any) => set("postal", e.target.value)} placeholder="560001" /></Field>
+            {data.contactType === "business" && (
+              <div className="sm:col-span-2">
+                <Field label="GST Number">
+                  <Input
+                    value={data.gstNumber || ""}
+                    onChange={(e: any) => setData({ ...data, gstNumber: e.target.value.toUpperCase() })}
+                    placeholder="e.g. 29ABCDE1234F1Z5"
+                    className="font-mono uppercase tracking-wider"
+                    maxLength={15}
+                  />
+                </Field>
+              </div>
+            )}
+          </div>
+        </CustomerPanel>
+      </div>
+
       {!isEdit && (
-        <div className="mt-6 flex justify-end">
-          <Button size="lg" onClick={handleNext}>Next <ArrowRight className="h-4 w-4" /></Button>
+        <div className="mt-5 flex justify-end">
+          <Button size="lg" onClick={handleNext}>Continue <ArrowRight className="h-4 w-4" /></Button>
         </div>
       )}
     </div>
   );
 }
 
-/* ---------------- Step 8: Quote ---------------- */
+/* A premium section panel for the Customer step — a white card with a strong
+   layered 3D shadow (lifts on hover), a left colour-accent strip, and a bold,
+   highlighted header bar (tinted gradient + accent icon chip with its own
+   shadow + a coloured bottom edge) so the Identity / Address blocks read as
+   distinct, polished sections. */
+const CUSTOMER_PANEL_ACCENT: Record<"blue" | "violet", {
+  strip: string; chip: string; headerBar: string; headerEdge: string; title: string;
+}> = {
+  blue: {
+    strip: "bg-gradient-to-b from-[#4361EE] to-[#3347D6]",
+    chip: "bg-gradient-to-br from-[#4361EE] to-[#3347D6] text-white shadow-[0_4px_10px_-2px_rgba(67,97,238,0.5)]",
+    headerBar: "bg-gradient-to-r from-[#EEF1FD] via-[#F3F6FF] to-transparent",
+    headerEdge: "border-b-[#4361EE]/25",
+    title: "text-[#2A3BB5]",
+  },
+  violet: {
+    strip: "bg-gradient-to-b from-violet-500 to-violet-600",
+    chip: "bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-[0_4px_10px_-2px_rgba(139,92,246,0.5)]",
+    headerBar: "bg-gradient-to-r from-violet-100 via-violet-50 to-transparent",
+    headerEdge: "border-b-violet-500/25",
+    title: "text-violet-700",
+  },
+};
+
+function CustomerPanel({
+  accent, icon: Icon, title, subtitle, children,
+}: {
+  accent: "blue" | "violet";
+  icon: any;
+  title: string;
+  subtitle?: string;
+  children: React.ReactNode;
+}) {
+  const a = CUSTOMER_PANEL_ACCENT[accent];
+  return (
+    <div className="group relative overflow-hidden rounded-2xl border border-border bg-card shadow-[0_2px_4px_rgba(20,30,80,0.05),0_18px_40px_-20px_rgba(20,30,80,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(20,30,80,0.07),0_26px_55px_-22px_rgba(20,30,80,0.42)]">
+      {/* Left accent strip (slightly wider for a stronger 3D edge) */}
+      <span className={cn("absolute inset-y-0 left-0 w-1.5", a.strip)} />
+      {/* Highlighted header bar — tinted gradient + coloured bottom edge */}
+      <div className={cn("flex items-center gap-3 border-b-2 px-4 py-3.5 pl-5 sm:px-5 sm:pl-6", a.headerBar, a.headerEdge)}>
+        <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", a.chip)}>
+          <Icon className="h-5 w-5" />
+        </span>
+        <div className="min-w-0">
+          <p className={cn("text-[12.5px] font-extrabold uppercase tracking-wider", a.title)}>{title}</p>
+          {subtitle && <p className="text-[11px] font-medium text-muted-foreground">{subtitle}</p>}
+        </div>
+      </div>
+      <div className="px-4 py-4 pl-5 sm:px-5 sm:pl-6">{children}</div>
+    </div>
+  );
+}
+
+/* ---------------- Step 7: Quote ---------------- */
 function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const allParts = data.devices.flatMap((d: WizardDevice) => d.parts);
   const partsTotal = allParts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
@@ -3622,7 +3787,7 @@ function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
   );
 }
 
-/* ---------------- Step 9: QC (Premium Inspection) ---------------- */
+/* ---------------- Step 8: QC (Premium Inspection) ---------------- */
 function QCForm({ data, setData, onNext, isEdit }: any) {
   const [filter, setFilter] = useState<"all" | "pass" | "fail" | "skip" | "pending">("all");
   const [noteOpen, setNoteOpen] = useState<string | null>(null);
@@ -3648,14 +3813,41 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   const activeDevice = data.devices[activeIdx];
   const qc = activeDevice.qc || {};
 
-  // Build the render groups from the configured (active) QC categories. Item
-  // ids are stable keys stored in the per-device `qc` map. On edit/view, any
-  // historical item recorded on THIS device that is no longer in the active
-  // config (renamed/archived/removed) is appended to a "Previous Checks" group
-  // so old results never disappear — historical data safety.
+  // ── QC template selection (per device) ──
+  // The org can configure MULTIPLE QC templates (e.g. Mobile, Laptop) in
+  // Settings → Tickets → Quality Check. Each device remembers which template
+  // it used (`qcTemplateId`) so a multi-device ticket can mix checklists. When
+  // a device has no explicit choice yet, fall back to the config's default
+  // template. A pill selector at the top of the form lets the user switch.
+  const templateOptions = useMemo(
+    () => (qcConfig ? qcActiveTemplates(qcConfig) : []),
+    [qcConfig]
+  );
+  const selectedTemplate = useMemo(
+    () => (qcConfig ? qcResolveTemplate(qcConfig, activeDevice.qcTemplateId) : null),
+    [qcConfig, activeDevice.qcTemplateId]
+  );
+
+  // Switch the ACTIVE device's QC template. Only records the chosen id — the
+  // recorded Pass/Fail/Skip results on this device are preserved; items that
+  // exist in the new template keep their status, items that don't fall into the
+  // "Previous Checks" historical group (never lost).
+  const selectTemplate = (templateId: string) => {
+    if (templateId === (selectedTemplate?.id ?? "")) return;
+    const updated = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, qcTemplateId: templateId } : dev
+    );
+    setData({ ...data, devices: updated });
+  };
+
+  // Build the render groups from the SELECTED template's active QC categories.
+  // Item ids are stable keys stored in the per-device `qc` map. On edit/view,
+  // any historical item recorded on THIS device that is no longer in the active
+  // template (renamed/archived/removed, or from a different template) is
+  // appended to a "Previous Checks" group so old results never disappear.
   const { qcGroups, qcFields } = useMemo(() => {
-    const source = qcConfig ? qcActiveCategories(qcConfig) : null;
-    const groups = source
+    const source = selectedTemplate ? qcActiveCategoriesForTemplate(selectedTemplate) : null;
+    const groups = source && source.length > 0
       ? source.map((c) => ({ id: c.id, label: c.label, items: c.items.map((i) => i.id), labels: Object.fromEntries(c.items.map((i) => [i.id, i.label])) }))
       : QC_GROUPS.map((g) => ({ id: g.id, label: g.label, items: g.items, labels: Object.fromEntries(g.items.map((l) => [l, l])) }));
 
@@ -3666,7 +3858,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     }
     const fields = groups.flatMap((g) => g.items);
     return { qcGroups: groups, qcFields: fields };
-  }, [qcConfig, qc]);
+  }, [selectedTemplate, qc]);
 
   // Look up a display label for an item key (config label, else the key).
   const labelFor = (key: string): string => {
@@ -4015,6 +4207,40 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     <div className={cn("min-w-0", isEdit ? "pb-20" : "-mb-16")}>
       <DeviceSwitcher data={data} setData={setData} />
 
+      {/* QC Template selector — a pill row so the user picks the right
+          checklist for THIS device (e.g. Mobile vs Laptop). Shown only when the
+          org configured more than one template; a single template needs no
+          picker. The choice is saved on the active device (qcTemplateId). */}
+      {templateOptions.length > 1 && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
+          <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <ClipboardList className="h-3.5 w-3.5 text-[#4361EE]" /> QC Template
+          </span>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {templateOptions.map((t) => {
+              const active = t.id === (selectedTemplate?.id ?? "");
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectTemplate(t.id)}
+                  aria-pressed={active}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold ring-1 ring-inset transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/50",
+                    active
+                      ? "bg-[#4361EE] text-white ring-[#4361EE] shadow-sm"
+                      : "bg-white text-foreground ring-border hover:border-[#B3BFF6] hover:bg-[#EEF1FD]/40"
+                  )}
+                >
+                  {active && <Check className="h-3 w-3" />}
+                  {t.name}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Two-region layout: LEFT = QC workspace, RIGHT = compact utility panel.
           Both regions STRETCH to the same height (items-stretch) so the right
           utility panel ends at exactly the same length as the left workspace —
@@ -4061,7 +4287,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 10: Upload ---------------- */
+/* ---------------- Step 9: Upload ---------------- */
 function UploadStep({ data, setData, onNext, isEdit }: any) {
   return (
     <div className="rounded-[20px] border border-[#E2E8F8]/80 bg-[#F7FAFF] p-6 shadow-[0_2px_10px_-2px_rgba(15,23,42,0.05),0_10px_30px_-12px_rgba(67,97,238,0.06)] sm:p-8">
@@ -4108,7 +4334,7 @@ function UploadStep({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 11: Ticket Confirmation ---------------- */
+/* ---------------- Step 10: Ticket Confirmation ---------------- */
 function ConfirmationStep({ onSubmit, isEdit, data, isEstimate = false }: { onSubmit: () => void; isEdit: boolean; data: any; isEstimate?: boolean }) {
   const [confirmed, setConfirmed] = useState(false);
   // Estimate mode only swaps the wording — the checklist + submit path are
