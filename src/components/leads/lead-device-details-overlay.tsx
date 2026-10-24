@@ -29,6 +29,7 @@ import { useEffect, useMemo } from "react";
 import { useCatalog } from "@/lib/catalog-context";
 import { parseIssueString } from "@/lib/issue-library";
 import { getLeadDevices, type Lead, type LeadDevice } from "@/lib/leads-data";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn } from "@/lib/utils";
 
 /** Title-case a raw source value (mirrors the Ticket/Walk-In overlay). */
@@ -176,13 +177,14 @@ export function LeadDeviceDetailsOverlay({
   }, [lead, categories, brands, models]);
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && lead && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-foreground/40 p-4 backdrop-blur-[3px]"
+          className="fixed inset-0 z-[9998] grid place-items-center overflow-y-auto bg-foreground/40 p-4 backdrop-blur-[3px]"
           onClick={onClose}
         >
           <motion.div
@@ -228,5 +230,6 @@ export function LeadDeviceDetailsOverlay({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

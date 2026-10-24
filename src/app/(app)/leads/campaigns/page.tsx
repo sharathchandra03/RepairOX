@@ -10,6 +10,7 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { Can } from "@/components/common/can";
 import { cn, formatINR } from "@/lib/utils";
 
@@ -124,12 +125,12 @@ export default function CampaignsPage() {
 
 function CreateCampaignForm({ onClose }: { onClose: () => void }) {
   return (
-    <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-40 bg-foreground/40" onClick={onClose} />
+    <ModalPortal>
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[9998] bg-foreground/40" onClick={onClose} />
       <motion.aside
         initial={{ x: "100%" }} animate={{ x: 0 }} exit={{ x: "100%" }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="fixed inset-y-0 right-0 z-50 flex w-full max-w-lg flex-col border-l border-border bg-card shadow-2xl"
+        className="fixed inset-y-0 right-0 z-[9999] flex w-full max-w-lg flex-col border-l border-border bg-card shadow-2xl"
       >
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <h2 className="font-display text-lg font-bold">Create Campaign</h2>
@@ -175,6 +176,6 @@ function CreateCampaignForm({ onClose }: { onClose: () => void }) {
           <Button onClick={onClose}>Save & Add Activity</Button>
         </div>
       </motion.aside>
-    </>
+    </ModalPortal>
   );
 }

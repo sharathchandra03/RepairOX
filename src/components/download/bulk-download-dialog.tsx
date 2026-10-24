@@ -9,6 +9,7 @@ import { useState, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, FileDown, Archive, Download, CheckCircle2, AlertTriangle, RotateCcw, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import type { BulkDownloadFormat, BulkDownloadProgress } from "@/lib/pdf-generator";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
@@ -47,6 +48,7 @@ export function BulkDownloadDialog({
   if (!open) return null;
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && (
         <>
@@ -55,7 +57,7 @@ export function BulkDownloadDialog({
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 bg-black/40 backdrop-blur-sm"
+            className="fixed inset-0 z-[9998] bg-black/40 backdrop-blur-sm"
             onClick={!isProcessing ? onClose : undefined}
           />
 
@@ -65,7 +67,7 @@ export function BulkDownloadDialog({
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 8 }}
             transition={{ type: "spring", duration: 0.3 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            className="fixed inset-0 z-[9999] flex items-center justify-center p-4"
           >
             <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-border overflow-hidden">
               {/* Header */}
@@ -268,5 +270,6 @@ export function BulkDownloadDialog({
         </>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

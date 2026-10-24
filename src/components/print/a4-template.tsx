@@ -873,7 +873,8 @@ function InvoiceA4({ data }: { data: PrintDocumentData }) {
       if (dev.deviceColour) descLines.push({ label: "Colour", value: dev.deviceColour });
       if (dev.issue) descLines.push({ label: "Issue", value: dev.issue });
       if (dev.jobType) descLines.push({ label: "Job", value: dev.jobType });
-      if (dev.technician) descLines.push({ label: "Technician", value: dev.technician });
+      // Technician is internal attribution — captured on the invoice record /
+      // View Invoice, but intentionally NOT printed on the customer document.
       if (dev.priority && dev.priority !== "normal") descLines.push({ label: "Priority", value: String(dev.priority).replace(/_/g, " ") });
       if (dev.warrantyValue || dev.warranty) descLines.push({ label: "Warranty", value: formatWarranty(dev.warrantyValue, dev.warrantyUnit, dev.warranty) });
       if (dev.notes) descLines.push({ label: "Notes", value: dev.notes });

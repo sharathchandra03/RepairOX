@@ -30,6 +30,7 @@ import {
   CheckoutDrawer, EmailReceiptDrawer, WhatsAppReceiptDrawer, PrintDrawer,
 } from "@/components/tickets/ticket-drawers";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { DeviceDetailsOverlay } from "@/components/tickets/device-details-overlay";
 import { Pagination } from "@/components/ui/pagination";
 import { STATUS_LABEL, STATUS_TONE, PRIORITY_LABEL, PRIORITY_TONE, TICKET_TYPE_LABEL, type TicketStatus, type Ticket, type TicketPriority, getTicketDevices, getTicketType, ticketInvoiceCoverage, type TicketInvoiceCoverage, getRecordType, isEstimate, isWarranty, ESTIMATE_STATUS_LABEL, ESTIMATE_STATUS_TONE, ESTIMATE_STATUS_OPTIONS, WARRANTY_STATUS_LABEL, WARRANTY_STATUS_TONE, WARRANTY_STATUS_OPTIONS, type RecordType, type WarrantyStatus } from "@/lib/mock-data";
@@ -1356,7 +1357,8 @@ export default function TicketsPage() {
           the Estimate at Device Details; the Estimate is only marked Converted
           AFTER the new Ticket is finalized. Double-click protected. */}
       {pushTicketTarget && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => { if (!pushingToTicket) setPushTicketTarget(null); }}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => { if (!pushingToTicket) setPushTicketTarget(null); }}>
           <motion.div
             initial={{ scale: 0.95, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
@@ -1401,6 +1403,7 @@ export default function TicketsPage() {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Delete Confirmation */}
@@ -1437,7 +1440,8 @@ export default function TicketsPage() {
 
       {/* Priority Change Dialog */}
       {priorityTarget && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setPriorityTarget(null)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setPriorityTarget(null)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <p className="text-sm font-bold mb-1">Change Priority</p>
@@ -1454,6 +1458,7 @@ export default function TicketsPage() {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Bulk Download Dialog */}

@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select } from "@/components/ui/input";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn } from "@/lib/utils";
 import {
   recordTransaction,
@@ -109,6 +110,7 @@ export function ManualTransactionModal({ open, onClose, date, onSuccess }: Manua
   const isValid = amount && parseFloat(amount) > 0 && description.trim().length > 0;
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && (
         <>
@@ -251,5 +253,6 @@ export function ManualTransactionModal({ open, onClose, date, onSuccess }: Manua
         </>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

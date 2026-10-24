@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Drawer } from "@/components/ui/drawer";
 import { Input, Label, Select } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Avatar } from "@/components/ui/avatar";
 import { toast } from "@/components/ui/toaster";
 import { usePermissions, resolveGrantedKeys } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
@@ -46,7 +47,7 @@ const emptyForm = { name: "", code: "", address: "", city: "", state: "", postal
 
 export function StoreManagement() {
   const router = useRouter();
-  const { apiFetch, authReady, can, allRoles, grants } = usePermissions();
+  const { apiFetch, authReady, can, allRoles, grants, team } = usePermissions();
   const { refreshStores } = useStoreContext();
 
   const canManage = can("manage_branches") || can("full_access");
@@ -58,6 +59,12 @@ export function StoreManagement() {
   const roleOptions = useMemo(
     () => allRoles.map((r) => ({ label: r.label, value: r.id })),
     [allRoles]
+  );
+  // Role options for the "assign existing users" block (adds a "keep each
+  // user's role" default so assignment doesn't force a role change).
+  const assignRoleOptions = useMemo(
+    () => [{ label: "Keep each user's role", value: "" }, ...roleOptions],
+    [roleOptions]
   );
   // Default a store's first login to a STORE-MANAGER role — resolved by
   // CAPABILITY, not a hardcoded role id: the first role that grants
@@ -86,6 +93,13 @@ export function StoreManagement() {
   // Optional store login (only on create).
   const [createLogin, setCreateLogin] = useState(false);
   const [mgr, setMgr] = useState({ name: "", email: "", password: "", roleId: "" });
+
+  // Optional: assign EXISTING users to the new store (only on create). A picked
+  // user gets an additional (non-home) user_stores grant once the store exists.
+  const [assignExisting, setAssignExisting] = useState(false);
+  const [assignQuery, setAssignQuery] = useState("");
+  const [assignRoleId, setAssignRoleId] = useState(""); // "" = keep each user's role
+  const [assignPicked, setAssignPicked] = useState<Set<string>>(new Set());
 
   // Dedicated "add login to an existing store" drawer.
   const [loginDrawerStore, setLoginDrawerStore] = useState<StoreRow | null>(null);
@@ -116,8 +130,31 @@ export function StoreManagement() {
     setForm({ ...emptyForm });
     setCreateLogin(false);
     setMgr({ name: "", email: "", password: "", roleId: defaultRoleId });
+    setAssignExisting(false);
+    setAssignQuery("");
+    setAssignRoleId("");
+    setAssignPicked(new Set());
     setDrawerOpen(true);
   }
+
+  const toggleAssignPick = (id: string) =>
+    setAssignPicked((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  // The org's existing users, filtered by the assign-block search box.
+  const assignCandidates = useMemo(() => {
+    const q = assignQuery.trim().toLowerCase();
+    if (!q) return team;
+    return team.filter(
+      (m) =>
+        m.name.toLowerCase().includes(q) ||
+        (m.email ?? "").toLowerCase().includes(q) ||
+        (m.branch ?? "").toLowerCase().includes(q),
+    );
+  }, [team, assignQuery]);
 
   function openEdit(s: StoreRow) {
     setEditingId(s.id);
@@ -172,6 +209,7 @@ export function StoreManagement() {
 
     const newStoreId: string | undefined = res.json?.store?.id;
 
+    let loginFailed = false;
     if (createLogin) {
       const staffRes = await apiFetch("/api/staff", {
         method: "POST",
@@ -182,8 +220,8 @@ export function StoreManagement() {
           storeId: newStoreId, branch: form.name.trim(),
         }),
       });
-      setSaving(false);
       if (!staffRes.ok || !staffRes.json?.ok) {
+        loginFailed = true;
         const reason = staffRes.json?.reason;
         toast.error(
           reason === "duplicate_email" ? "Store created, but that manager email is already in use"
@@ -191,14 +229,43 @@ export function StoreManagement() {
           : reason === "invalid_role" ? "Store created, but the selected role no longer exists"
           : "Store created, but the manager login could not be created"
         );
-        setDrawerOpen(false);
-        await load(); await refreshStores();
-        return;
       }
-      toast.success(`Store "${form.name.trim()}" + manager login created`);
-    } else {
-      setSaving(false);
-      toast.success(`Store "${form.name.trim()}" created`);
+    }
+
+    // ── Assign existing users to the new store (additional store grants) ──
+    // Each picked user gets a non-home user_stores grant via the members route.
+    // Never creates a user and never changes their home store.
+    let assignFailed = 0;
+    let assignOk = 0;
+    if (assignExisting && newStoreId && assignPicked.size > 0) {
+      const ids = Array.from(assignPicked);
+      const results = await Promise.all(
+        ids.map((staffId) =>
+          apiFetch(`/api/owner/stores/${newStoreId}/members`, {
+            method: "POST",
+            body: JSON.stringify({ staffId, roleId: assignRoleId || undefined }),
+          }),
+        ),
+      );
+      assignFailed = results.filter((r) => !r.ok || !r.json?.ok).length;
+      assignOk = ids.length - assignFailed;
+    }
+
+    setSaving(false);
+
+    // One clear summary toast covering store + login + assignments.
+    if (!loginFailed) {
+      const parts: string[] = [];
+      if (createLogin) parts.push("manager login");
+      if (assignOk > 0) parts.push(`${assignOk} user${assignOk === 1 ? "" : "s"} assigned`);
+      toast.success(
+        parts.length > 0
+          ? `Store "${form.name.trim()}" created — ${parts.join(" + ")}`
+          : `Store "${form.name.trim()}" created`,
+      );
+    }
+    if (assignFailed > 0) {
+      toast.error(`${assignFailed} user assignment${assignFailed === 1 ? "" : "s"} failed`);
     }
 
     setDrawerOpen(false);
@@ -479,6 +546,80 @@ export function StoreManagement() {
                       <Input id="m-pass" type="text" value={mgr.password} placeholder="At least 6 characters" onChange={(e) => setMgr((m) => ({ ...m, password: e.target.value }))} />
                       <p className="mt-1 text-[11px] text-muted-foreground">Share this with the manager; they can change it after first login.</p>
                     </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Assign existing users to the new store */}
+              <div className="rounded-xl border border-border p-3">
+                <label className="flex cursor-pointer items-start gap-2.5">
+                  <Checkbox checked={assignExisting} onChange={setAssignExisting} className="mt-0.5" aria-label="Assign existing users" />
+                  <span>
+                    <span className="block text-[13px] font-semibold">Assign existing users</span>
+                    <span className="block text-[12px] text-muted-foreground">Give current team members access to this store too — no new account needed.</span>
+                  </span>
+                </label>
+                {assignExisting && (
+                  <div className="mt-3 space-y-3 border-t border-border pt-3">
+                    {team.length === 0 ? (
+                      <p className="text-[12px] text-muted-foreground">No existing users to assign yet.</p>
+                    ) : (
+                      <>
+                        <div>
+                          <Label htmlFor="a-role">Role for this store</Label>
+                          <Select id="a-role" value={assignRoleId} options={assignRoleOptions}
+                            onChange={(e) => setAssignRoleId(e.target.value)}
+                            className="h-[34px] px-3 text-[13px]" />
+                          <p className="mt-1 text-[11px] text-muted-foreground">Applies to everyone you assign here. &quot;Keep each user&apos;s role&quot; leaves their role unchanged.</p>
+                        </div>
+                        <div>
+                          <div className="flex items-center justify-between gap-2">
+                            <Label>Select users</Label>
+                            {assignPicked.size > 0 && (
+                              <span className="text-[11px] font-semibold text-[#4361EE]">{assignPicked.size} selected</span>
+                            )}
+                          </div>
+                          <div className="relative mb-2">
+                            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                            <input
+                              value={assignQuery}
+                              onChange={(e) => setAssignQuery(e.target.value)}
+                              placeholder="Search by name, email or home store…"
+                              className="h-9 w-full rounded-xl border border-input bg-card pl-9 pr-3 text-[13px] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+                            />
+                          </div>
+                          <div className="max-h-[32vh] space-y-1.5 overflow-y-auto pr-0.5">
+                            {assignCandidates.length === 0 ? (
+                              <p className="px-1 py-5 text-center text-[12.5px] text-muted-foreground">No users match “{assignQuery}”.</p>
+                            ) : (
+                              assignCandidates.map((m) => {
+                                const on = assignPicked.has(m.id);
+                                return (
+                                  <button
+                                    key={m.id}
+                                    type="button"
+                                    onClick={() => toggleAssignPick(m.id)}
+                                    className={cn(
+                                      "flex w-full items-center gap-2.5 rounded-xl border px-3 py-2 text-left transition",
+                                      on ? "border-[#4361EE] bg-[#EEF1FD]/60" : "border-border hover:bg-muted/40",
+                                    )}
+                                  >
+                                    <Checkbox checked={on} onChange={() => toggleAssignPick(m.id)} aria-label={`Select ${m.name}`} />
+                                    <Avatar name={m.name} size={28} />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="truncate text-[12.5px] font-semibold leading-tight">{m.name}</p>
+                                      <p className="truncate text-[11px] text-muted-foreground">
+                                        {m.email || "No email"}{m.branch ? ` · Home: ${m.branch}` : ""}
+                                      </p>
+                                    </div>
+                                  </button>
+                                );
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
                 )}
               </div>

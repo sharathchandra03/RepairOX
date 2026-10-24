@@ -13,6 +13,7 @@ import { useStore } from "@/lib/store";
 import { searchCustomers, createCustomer, CUSTOMER_SOURCES, CUSTOMER_SOURCE_LABEL, type Customer, type CustomerSource } from "@/lib/customer-data";
 import { CustomerGroupPicker } from "@/components/common/customer-group-picker";
 import { CustomerBadges, resolveGroups } from "@/components/common/customer-classification";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn, formatINR } from "@/lib/utils";
 
 const SOURCE_OPTIONS = [
@@ -360,7 +361,8 @@ function CustomerFormModal({ customer, onClose, onSave }: {
   };
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={onClose}>
+    <ModalPortal>
+    <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={onClose}>
       <motion.div
         initial={{ scale: 0.95, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -477,5 +479,6 @@ function CustomerFormModal({ customer, onClose, onSave }: {
         </div>
       </motion.div>
     </div>
+    </ModalPortal>
   );
 }

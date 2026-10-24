@@ -6,7 +6,7 @@ import {
   ArrowLeft, Store, Building2, MapPin, Phone, Mail, Power, Pencil, Users,
   ShieldCheck, KeyRound, Clock, Ticket, FileText, Footprints, Truck, BookUser,
   Package, IndianRupee, UserCog, CircleUser, Hash, CheckCircle2, AlertTriangle,
-  Trash2, Home, Loader2, Crown, ArrowRight, BarChart3,
+  Trash2, Home, Loader2, Crown, ArrowRight, BarChart3, UserPlus, UserMinus,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { ChangeStoreDrawer } from "@/components/settings/change-store-drawer";
 import { useStoreContext } from "@/lib/store-context";
 import { ResetPasswordDrawer } from "@/components/settings/reset-password-drawer";
 import { ArchiveStoreDialog } from "@/components/settings/archive-store-dialog";
+import { AssignUsersDrawer } from "@/components/settings/assign-users-drawer";
 import type { TeamMember } from "@/lib/mock-data";
 import { toast } from "@/components/ui/toaster";
 import { cn } from "@/lib/utils";
@@ -77,7 +78,7 @@ function ViewStoreInner() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const storeId = params?.id;
-  const { apiFetch, can, allRoles, setMemberRole, setMemberStore, resetPassword, toggleLogin, setStaffStatus } = usePermissions();
+  const { apiFetch, can, allRoles, team, setMemberRole, setMemberStore, resetPassword, toggleLogin, setStaffStatus } = usePermissions();
   const { stores } = useStoreContext();
 
   const [loading, setLoading] = useState(true);
@@ -91,6 +92,10 @@ function ViewStoreInner() {
   const [resettingMode, setResettingMode] = useState<"reset" | "enable">("reset");
   const [archiving, setArchiving] = useState(false);
   const [changingMgr, setChangingMgr] = useState(false);
+  const [assigning, setAssigning] = useState(false);
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [removingMember, setRemovingMember] = useState<StoreMember | null>(null);
+  const [removeSaving, setRemoveSaving] = useState(false);
 
   const canEdit = allow(can, CAP.store.edit);
   const canDeactivate = allow(can, CAP.store.deactivate);
@@ -141,6 +146,61 @@ function ViewStoreInner() {
     if (!res.ok || !res.json?.ok) { toast.error(res.json?.error ?? "Could not update manager"); return; }
     toast.success("Store manager updated");
     setChangingMgr(false);
+    load();
+  }
+
+  // Existing org users who DON'T already have access to this store — the
+  // candidates for "Assign existing users". Keyed by staff id so a person
+  // already in People With Access is never offered twice.
+  const assignCandidates = useMemo<TeamMember[]>(() => {
+    if (!detail) return [];
+    const taken = new Set(detail.members.map((m) => m.id));
+    return team.filter((m) => !taken.has(m.id));
+  }, [detail, team]);
+
+  // Assign one or MORE existing users to this store. Each becomes an additional
+  // (non-home) store grant via POST /api/owner/stores/[id]/members. A blank
+  // roleId keeps each user's own role (the route accepts roleId: null).
+  async function assignUsers(staffIds: string[], roleId: string) {
+    if (!detail || staffIds.length === 0) return;
+    setAssignSaving(true);
+    const results = await Promise.all(
+      staffIds.map((staffId) =>
+        apiFetch(`/api/owner/stores/${detail.store.id}/members`, {
+          method: "POST",
+          body: JSON.stringify({ staffId, roleId: roleId || undefined }),
+        }),
+      ),
+    );
+    setAssignSaving(false);
+    const failed = results.filter((r) => !r.ok || !r.json?.ok).length;
+    const ok = staffIds.length - failed;
+    if (ok > 0) toast.success(`${ok} ${ok === 1 ? "user" : "users"} assigned to ${detail.store.name}`);
+    if (failed > 0) toast.error(`${failed} ${failed === 1 ? "assignment" : "assignments"} failed`);
+    setAssigning(false);
+    load();
+  }
+
+  // Remove a user's access to this store (the membership only — never the
+  // user or their history). The server refuses to remove a HOME-store member.
+  async function removeMember(m: StoreMember) {
+    if (!detail) return;
+    setRemoveSaving(true);
+    const res = await apiFetch(
+      `/api/owner/stores/${detail.store.id}/members?staffId=${encodeURIComponent(m.id)}`,
+      { method: "DELETE" },
+    );
+    setRemoveSaving(false);
+    if (!res.ok || !res.json?.ok) {
+      toast.error(
+        res.json?.reason === "home_store"
+          ? "This is the user's home store. Reassign them to another store before removing access."
+          : (res.json?.error ?? "Could not remove access"),
+      );
+      return;
+    }
+    toast.success(`${m.name}'s access to ${detail.store.name} removed`);
+    setRemovingMember(null);
     load();
   }
 
@@ -342,32 +402,63 @@ function ViewStoreInner() {
           </RailCard>
 
           {/* People With Access */}
-          <RailCard title={`People With Access (${detail.members.length})`}>
+          <RailCard
+            title={`People With Access (${detail.members.length})`}
+            action={
+              canAssignUsers ? (
+                <button
+                  onClick={() => setAssigning(true)}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium text-[#4361EE] hover:underline"
+                >
+                  <UserPlus className="h-3 w-3" /> Assign users
+                </button>
+              ) : undefined
+            }
+          >
             {detail.members.length === 0 ? (
-              <p className="text-[12.5px] text-muted-foreground">No users assigned to this store yet.</p>
+              <div className="space-y-2">
+                <p className="text-[12.5px] text-muted-foreground">No users assigned to this store yet.</p>
+                {canAssignUsers && (
+                  <Button size="sm" variant="outline" className="gap-1.5 rounded-full" onClick={() => setAssigning(true)}>
+                    <UserPlus className="h-3.5 w-3.5" /> Assign existing users
+                  </Button>
+                )}
+              </div>
             ) : (
               <div className="space-y-1.5">
                 {detail.members.map((m) => (
-                  <button
+                  <div
                     key={m.id}
-                    onClick={() => setViewingMember(asTeamMember(m))}
-                    className="flex w-full items-center gap-2.5 rounded-xl border border-border px-3 py-2.5 text-left transition hover:bg-muted/40"
+                    className="group flex items-center gap-2.5 rounded-xl border border-border px-3 py-2.5 transition hover:bg-muted/40"
                   >
-                    <Avatar name={m.name} size={32} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-[13px] font-semibold leading-tight">{m.name}</p>
-                      <p className="truncate text-[11px] text-muted-foreground">{roleLabel(m.perStoreRoleId ?? m.roleId)}</p>
-                      <div className="mt-0.5 flex flex-wrap items-center gap-1">
-                        <Badge tone={m.status === "active" ? "success" : m.status === "suspended" ? "danger" : "warning"} dot={m.status === "active"}>
-                          {m.status === "active" ? "Active" : m.status === "suspended" ? "Suspended" : "Invited"}
-                        </Badge>
-                        {!m.loginEnabled && <Badge tone="neutral">No login</Badge>}
-                        {m.isHome && <span className="inline-flex items-center gap-0.5 text-[9.5px] font-semibold text-[#4361EE]"><Home className="h-2.5 w-2.5" /> Home</span>}
+                    <button onClick={() => setViewingMember(asTeamMember(m))} className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+                      <Avatar name={m.name} size={32} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-[13px] font-semibold leading-tight">{m.name}</p>
+                        <p className="truncate text-[11px] text-muted-foreground">{roleLabel(m.perStoreRoleId ?? m.roleId)}</p>
+                        <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                          <Badge tone={m.status === "active" ? "success" : m.status === "suspended" ? "danger" : "warning"} dot={m.status === "active"}>
+                            {m.status === "active" ? "Active" : m.status === "suspended" ? "Suspended" : "Invited"}
+                          </Badge>
+                          {!m.loginEnabled && <Badge tone="neutral">No login</Badge>}
+                          {m.isHome && <span className="inline-flex items-center gap-0.5 text-[9.5px] font-semibold text-[#4361EE]"><Home className="h-2.5 w-2.5" /> Home</span>}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-muted-foreground/80">{accessOriginLabel(m)}</p>
                       </div>
-                      <p className="mt-0.5 text-[10px] text-muted-foreground/80">{accessOriginLabel(m)}</p>
-                    </div>
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                  </button>
+                    </button>
+                    {canAssignUsers && !m.isHome ? (
+                      <button
+                        onClick={() => setRemovingMember(m)}
+                        title="Remove access to this store"
+                        aria-label={`Remove ${m.name}'s access`}
+                        className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-rose-50 hover:text-rose-600"
+                      >
+                        <UserMinus className="h-3.5 w-3.5" />
+                      </button>
+                    ) : (
+                      <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    )}
+                  </div>
                 ))}
               </div>
             )}
@@ -425,6 +516,26 @@ function ViewStoreInner() {
         canHardDelete={allow(can, CAP.store.delete)}
         onDone={(mode) => { setArchiving(false); if (mode === "deleted") router.push("/settings/store/configuration"); else load(); }}
       />
+
+      <AssignUsersDrawer
+        open={assigning}
+        onClose={() => setAssigning(false)}
+        storeName={s.name}
+        candidates={assignCandidates}
+        roles={allRoles}
+        saving={assignSaving}
+        onConfirm={assignUsers}
+      />
+
+      <ConfirmDialog
+        open={!!removingMember}
+        onClose={() => setRemovingMember(null)}
+        onConfirm={() => { if (removingMember) removeMember(removingMember); }}
+        title="Remove store access"
+        description={`Remove ${removingMember?.name ?? "this user"}'s access to ${s.name}? This removes their store membership only — their account and history are kept.`}
+        confirmLabel={removeSaving ? "Removing…" : "Remove access"}
+        danger
+      />
     </div>
   );
 }
@@ -472,10 +583,13 @@ function DetailField({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
-function RailCard({ title, children }: { title: string; children: React.ReactNode }) {
+function RailCard({ title, action, children }: { title: string; action?: React.ReactNode; children: React.ReactNode }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 shadow-card">
-      <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{title}</h3>
+        {action}
+      </div>
       {children}
     </div>
   );

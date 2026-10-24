@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import type { TeamMember } from "@/lib/mock-data";
 
 /** Confirmation dialog for removing a team member's login entirely — used
@@ -21,13 +22,14 @@ export function DeleteMemberDialog({
   onConfirm: () => void;
 }) {
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && member && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-center bg-zinc-900/55 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-zinc-900/55 p-4 backdrop-blur-sm"
           onClick={onClose}
         >
           <motion.div
@@ -81,5 +83,6 @@ export function DeleteMemberDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

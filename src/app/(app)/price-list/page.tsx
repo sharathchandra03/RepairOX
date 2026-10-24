@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel, sortCategories } from "@/lib/catalog-context";
 import { uploadCatalogImage } from "@/components/settings/catalog/upload-image";
 import { collectMedia } from "@/components/settings/catalog/media-library";
@@ -1372,7 +1373,8 @@ function PartLibraryPicker({ onClose, onPick }: { onClose: () => void; onPick: (
   const total = filtered.reduce((n, g) => n + g.images.length, 0);
 
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onClick={onClose}>
+    <ModalPortal>
+    <div className="fixed inset-0 z-[9998] grid place-items-center bg-black/40 p-4" onClick={onClose}>
       <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between gap-3 border-b border-border px-5 py-3.5">
           <div className="flex items-center gap-2">
@@ -1423,6 +1425,7 @@ function PartLibraryPicker({ onClose, onPick }: { onClose: () => void; onPick: (
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
 

@@ -6,10 +6,11 @@ import { motion, AnimatePresence } from "framer-motion";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
-  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2, PackageSearch, Wrench,
+  User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2, PackageSearch, Wrench, Info,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
@@ -84,10 +85,15 @@ type InvoiceFormDevice = {
   deviceColour: string;
   technician: string;
   /** Commercial estimate value (₹) for this device. Sourced from the linked
-   *  ticket's estimate when invoicing from a ticket; a REFERENCE amount only —
-   *  never a Parts & Services inventory line. Held as a string for the input,
-   *  persisted as a number. */
+   *  ticket's estimate when invoicing from a ticket. A REFERENCE value the
+   *  invoicer can edit — never a Parts & Services inventory line. It is billed
+   *  ONLY when `includeEstimate` is on (chosen on the Pricing step). Held as a
+   *  string for the input, persisted as a number. */
   estimateValue: string;
+  /** Whether the Estimate Value is INCLUDED in the billed total. Chosen on the
+   *  Pricing step ("Add estimate"). Defaults on when the device carried a
+   *  ticket estimate, off otherwise. */
+  includeEstimate?: boolean;
   /** Agreed repair/labour charge (₹) for this device. NOTE: this is no longer
    *  entered in the Products step (removed — the Products step is Device + Job +
    *  Inventory only). The field is retained for backward compatibility with
@@ -133,6 +139,7 @@ function createFormDevice(overrides?: Partial<InvoiceFormDevice>): InvoiceFormDe
     deviceColour: "",
     technician: "",
     estimateValue: "",
+    includeEstimate: false,
     repairCost: "",
     notes: "",
     parts: [],
@@ -337,13 +344,12 @@ function InvoiceWizard() {
               };
             });
 
-            // The ticket estimate is a COMMERCIAL REFERENCE VALUE — it maps to
-            // the device's Estimate Value field below, NOT to a Parts & Services
-            // line item. We deliberately do NOT synthesise a "Repair Service"
-            // labour line from the estimate any more: Parts & Services carries
-            // only the real ticket parts, and the estimate stays a separate
-            // financial value the user can see and adjust.
-            const estimateValue = Number(dev.estimate) || 0;
+            // The ticket estimate is the OPTIONAL service charge agreed on the
+            // ticket. It is carried over as the device's EDITABLE Estimate
+            // Value — a reference the invoicer can keep, change, or drop. On the
+            // Pricing step they choose whether to INCLUDE it in the billed total
+            // (the "Add estimate" toggle). It is never an inventory line.
+            const ticketEstimate = Number(dev.estimate) || 0;
 
             return createFormDevice({
               // Durable link to the originating ticket device (selective invoicing).
@@ -372,8 +378,12 @@ function InvoiceWizard() {
               warrantyUnit: dev.warrantyUnit || "",
               deviceColour: dev.deviceColour || "",
               technician: dev.technician || "",
-              // Ticket estimate → Estimate Value (reference), not an item.
-              estimateValue: estimateValue > 0 ? String(estimateValue) : "",
+              // Ticket estimate → editable Estimate Value (reference). It is
+              // INCLUDED in billing by default when the ticket carried one, so
+              // the invoice total matches the ticket's final price; the invoicer
+              // can toggle it off on the Pricing step.
+              estimateValue: ticketEstimate > 0 ? String(ticketEstimate) : "",
+              includeEstimate: ticketEstimate > 0,
               repairCost: "",
               notes: dev.notes || "",
               parts,
@@ -394,15 +404,16 @@ function InvoiceWizard() {
         const serial = searchParams.get("serial") || "";
 
         // Legacy single-device push carries only a total `amount` (the ticket
-        // estimate). That is a COMMERCIAL REFERENCE VALUE → Estimate Value, not
-        // a synthetic Parts & Services line. Parts & Services stays empty here;
-        // the user adds real billable items as needed.
+        // final price) → the editable Estimate Value, included in billing by
+        // default so the invoice total matches the ticket. Parts & Services
+        // stays empty (no synthetic inventory line).
         formDevices = [createFormDevice({
           brand,
           model: device,
           imei: serial,
           issue: service,
           estimateValue: amount > 0 ? String(amount) : "",
+          includeEstimate: amount > 0,
         })];
         flatItems = [];
       }
@@ -548,10 +559,10 @@ function InvoiceWizard() {
   //  • partsTotal   = sum of all Parts & Services line totals (inventory).
   //  • repairCost   = sum of each device's agreed Repair Cost (a separate,
   //                   non-inventory financial component that IS billed).
-  //  • estimateTotal = sum of device Estimate Values — a COMMERCIAL REFERENCE
-  //                   only; it is NOT added to the billed subtotal/total.
-  //  Billed subtotal = partsTotal + repairCost, then discount → GST → total,
-  //  reusing the existing SGST/CGST split so nothing else in pricing changes.
+  //  • estimateTotal = sum of each device's Estimate Value — billed ONLY for
+  //                   devices where "Add estimate" is on (includeEstimate).
+  //  Billed subtotal = partsTotal + repairCost + estimateTotal, then
+  //  discount → GST → total, reusing the existing SGST/CGST split.
   const totals = useMemo(() => {
     const hasDevices = form.devices.length > 0;
     const allItems = hasDevices
@@ -561,10 +572,11 @@ function InvoiceWizard() {
     const repairCost = hasDevices
       ? form.devices.reduce((s, d) => s + (Number(d.repairCost) || 0), 0)
       : 0;
+    // Estimate billed only where the invoicer opted in.
     const estimateTotal = hasDevices
-      ? form.devices.reduce((s, d) => s + (Number(d.estimateValue) || 0), 0)
+      ? form.devices.reduce((s, d) => s + (d.includeEstimate ? (Number(d.estimateValue) || 0) : 0), 0)
       : 0;
-    const subtotal = partsTotal + repairCost;
+    const subtotal = partsTotal + repairCost + estimateTotal;
     const discount = form.pricing.discount;
     const taxable = subtotal - discount;
     const gstRate = form.pricing.gstRate;
@@ -629,9 +641,10 @@ function InvoiceWizard() {
       deviceColour: d.deviceColour || undefined,
       technician: d.technician,
       // Financial reference (estimate) + agreed repair charge — persisted as
-      // numbers. Estimate Value is a reference; Repair Cost participates in
-      // pricing. Neither is an inventory line item.
+      // numbers. Estimate Value is billed only when includeEstimate is on;
+      // Repair Cost participates in pricing. Neither is an inventory line item.
       estimateValue: d.estimateValue ? Number(d.estimateValue) : 0,
+      includeEstimate: !!d.includeEstimate && Number(d.estimateValue) > 0,
       repairCost: d.repairCost ? Number(d.repairCost) : 0,
       parts: d.parts,
       notes: d.notes,
@@ -1122,6 +1135,7 @@ function invoiceToForm(inv: Invoice, ticketNo?: string): InvoiceFormData {
         deviceColour: d.deviceColour || "",
         technician: d.technician,
         estimateValue: d.estimateValue ? String(d.estimateValue) : "",
+        includeEstimate: !!(d as any).includeEstimate,
         repairCost: d.repairCost ? String(d.repairCost) : "",
         notes: d.notes,
         parts: d.parts,
@@ -2149,7 +2163,24 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                   { label: "Service", value: "service" }, { label: "Accessories", value: "accessories" }, { label: "Warranty", value: "warranty" }, { label: "Estimate", value: "estimate" }, { label: "Buyback", value: "buyback" },
                 ]} />
               </div>
-              <div className="space-y-1"><Label>Technician</Label><Input value={activeDevice.technician} onChange={(e: any) => setDeviceField("technician", e.target.value)} placeholder="Anand" className="h-9" /></div>
+              {/* Technician is NOT entered here — it's internal attribution,
+                  carried from the ticket and editable later in View Invoice
+                  (and never printed). */}
+              {/* Estimate — a reference value carried from the ticket (or ₹0),
+                  editable here. Whether it's billed is chosen on the Pricing
+                  step ("Add estimate"). */}
+              <div className="space-y-1">
+                <Label>Estimate <span className="font-normal text-muted-foreground">(reference)</span></Label>
+                <Input
+                  value={activeDevice.estimateValue}
+                  onChange={(e: any) => setDeviceField("estimateValue", e.target.value.replace(/[^0-9.]/g, ""))}
+                  placeholder="0"
+                  inputMode="numeric"
+                  className="h-9 tabular-nums pl-8 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]"
+                  iconLeft={<IndianRupee className="h-3.5 w-3.5" />}
+                />
+                <p className="text-[11px] leading-snug text-muted-foreground">From the ticket. Add it to the bill on the Pricing step.</p>
+              </div>
             </div>
           </div>
 
@@ -2353,6 +2384,11 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
     ? ([activeDevice.brand, activeDevice.model].filter(Boolean).join(" ") || `Device ${activeIdx + 1}`)
     : "";
   const switchDevice = (idx: number) => updateForm((f) => ({ ...f, activeDeviceIndex: idx }));
+  // Toggle whether the ACTIVE device's estimate (reference) is billed.
+  const toggleActiveEstimate = () => updateForm((f) => ({
+    ...f,
+    devices: f.devices.map((dev, i) => i === activeIdx ? { ...dev, includeEstimate: !dev.includeEstimate } : dev),
+  }));
   const ticketId = form.details.ticketId;
   const ticketHasInvoice = !!ticketId && invoices.some((inv) => inv.ticketId === ticketId);
   // Effective Repair Status for the active device (falls back to the invoice
@@ -2492,6 +2528,43 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
             </div>
           )}
         </div>
+        {/* Add estimate? — fills the slot beside GST Rate, matching the other
+            fields' height/style. The Estimate is a REFERENCE from the ticket
+            (set on the Products step); turning this on INCLUDES it in the total.
+            The explanation lives in the (i) tooltip to keep the row compact. */}
+        {activeDevice && (
+          <div className="space-y-1.5">
+            <Label className="flex items-center gap-1">
+              Estimate{multiDevice ? ` — ${activeDeviceLabel}` : ""}
+              <span
+                className="group/est relative inline-flex cursor-help items-center text-muted-foreground"
+                tabIndex={0}
+              >
+                <Info className="h-3.5 w-3.5" />
+                <span className="pointer-events-none absolute bottom-full left-1/2 z-20 mb-1.5 w-56 -translate-x-1/2 rounded-lg bg-foreground px-2.5 py-1.5 text-[11px] font-normal leading-snug text-background opacity-0 shadow-lg transition-opacity group-hover/est:opacity-100 group-focus/est:opacity-100">
+                  A reference amount carried from the ticket. It isn&apos;t billed unless you include it here — turn it on to add it to the total.
+                </span>
+              </span>
+            </Label>
+            <button
+              type="button"
+              onClick={() => toggleActiveEstimate()}
+              aria-pressed={!!activeDevice.includeEstimate}
+              className={cn(
+                "flex h-11 w-full items-center gap-2.5 rounded-xl border px-3.5 text-left transition",
+                activeDevice.includeEstimate
+                  ? "border-[#4361EE] bg-[#EEF1FD]/60"
+                  : "border-input bg-card hover:border-[#4361EE]/40",
+              )}
+            >
+              <Checkbox checked={!!activeDevice.includeEstimate} onChange={() => toggleActiveEstimate()} aria-label="Include estimate in the bill" />
+              <span className="flex-1 text-[13px] font-medium text-foreground">Include estimate</span>
+              <span className={cn("shrink-0 text-sm font-semibold tabular-nums", activeDevice.includeEstimate ? "text-[#3347D6]" : "text-muted-foreground")}>
+                {formatINR(Number(activeDevice.estimateValue) || 0)}
+              </span>
+            </button>
+          </div>
+        )}
       </div>
       {/* Summary */}
       <div className="mt-6 rounded-xl border border-border bg-gradient-to-b from-indigo-50/40 to-white p-5">
@@ -2499,18 +2572,17 @@ function StepPricing({ form, updateForm, totals }: { form: InvoiceFormData; upda
           {multiDevice && activeDevice && (
             <div className="flex justify-between border-b border-border/60 pb-2"><span className="text-muted-foreground">{activeDeviceLabel} subtotal</span><span className="tabular-nums font-medium">{formatINR(activeDeviceSubtotal)}</span></div>
           )}
-          {/* Estimate Value is a REFERENCE only — shown for context, never added
-              to the billed subtotal/total. */}
-          {totals.estimateTotal > 0 && (
-            <div className="flex justify-between"><span className="text-muted-foreground">Estimate Value <span className="text-[11px]">(reference)</span></span><span className="tabular-nums text-muted-foreground">{formatINR(totals.estimateTotal)}</span></div>
+          {/* Billed components of the subtotal: Parts, plus Estimate (when the
+              invoicer opted in) and any Repair Cost. Shown as separate lines
+              when there's more than parts, so the breakdown is clear. */}
+          {(totals.estimateTotal > 0 || totals.repairCost > 0) && (
+            <div className="flex justify-between"><span className="text-muted-foreground">Parts &amp; Services</span><span className="tabular-nums font-medium">{formatINR(totals.partsTotal)}</span></div>
           )}
-          {/* Parts & Repair Cost are the two billed components that make up the
-              subtotal. Show them separately when a repair cost exists. */}
+          {totals.estimateTotal > 0 && (
+            <div className="flex justify-between"><span className="text-muted-foreground">Estimate</span><span className="tabular-nums font-medium">{formatINR(totals.estimateTotal)}</span></div>
+          )}
           {totals.repairCost > 0 && (
-            <>
-              <div className="flex justify-between"><span className="text-muted-foreground">Parts &amp; Services</span><span className="tabular-nums font-medium">{formatINR(totals.partsTotal)}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Repair Cost</span><span className="tabular-nums font-medium">{formatINR(totals.repairCost)}</span></div>
-            </>
+            <div className="flex justify-between"><span className="text-muted-foreground">Repair Cost</span><span className="tabular-nums font-medium">{formatINR(totals.repairCost)}</span></div>
           )}
           <div className="flex justify-between"><span className="text-muted-foreground">{multiDevice ? "Invoice Subtotal" : "Subtotal"}</span><span className="tabular-nums font-medium">{formatINR(totals.subtotal)}</span></div>
           {totals.discount > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div>}
@@ -2677,8 +2749,9 @@ function StepReview({ form, totals, isEdit }: { form: InvoiceFormData; totals: {
           <section className="flex flex-col">
             <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Summary</p>
             <div className="flex flex-1 flex-col rounded-xl border border-border bg-muted/20 p-4 text-[13px]">
-              {totals.estimateTotal > 0 && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Estimate Value <span className="text-[11px]">(reference)</span></span><span className="tabular-nums text-muted-foreground">{formatINR(totals.estimateTotal)}</span></div><div className="h-px bg-border/50" /></>}
-              {totals.repairCost > 0 && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Parts &amp; Services</span><span className="tabular-nums">{formatINR(totals.partsTotal)}</span></div><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Repair Cost</span><span className="tabular-nums">{formatINR(totals.repairCost)}</span></div><div className="h-px bg-border/50" /></>}
+              {(totals.estimateTotal > 0 || totals.repairCost > 0) && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Parts &amp; Services</span><span className="tabular-nums">{formatINR(totals.partsTotal)}</span></div><div className="h-px bg-border/50" /></>}
+              {totals.estimateTotal > 0 && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Estimate</span><span className="tabular-nums">{formatINR(totals.estimateTotal)}</span></div><div className="h-px bg-border/50" /></>}
+              {totals.repairCost > 0 && <><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Repair Cost</span><span className="tabular-nums">{formatINR(totals.repairCost)}</span></div><div className="h-px bg-border/50" /></>}
               <div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Subtotal</span><span className="tabular-nums">{formatINR(totals.subtotal)}</span></div>
               {totals.discount > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">Discount</span><span className="tabular-nums text-emerald-600">-{formatINR(totals.discount)}</span></div></>}
               {totals.sgst > 0 && <><div className="h-px bg-border/50" /><div className="flex items-center justify-between py-1.5"><span className="text-muted-foreground">SGST ({totals.sgstRate}%)</span><span className="tabular-nums">{formatINR(totals.sgst)}</span></div></>}

@@ -277,6 +277,24 @@ export default function InvoiceDetailPage() {
     setShowStatusDrawer(false);
   }, [invoice, statusDraft, paidDraft, paymentModeDraft, paymentNoteDraft, updateInvoice]);
 
+  // ── Inline technician edit (per device) ──
+  // Technician is internal attribution captured on the invoice; it is editable
+  // here and never printed. Editing one device writes back the devices array.
+  const [techEditId, setTechEditId] = useState<string | null>(null);
+  const [techDraft, setTechDraft] = useState("");
+  const startTechEdit = useCallback((devId: string, current: string) => {
+    setTechEditId(devId);
+    setTechDraft(current || "");
+  }, []);
+  const saveTechnician = useCallback(() => {
+    if (!invoice || !invoice.devices || !techEditId) { setTechEditId(null); return; }
+    const nextDevices = invoice.devices.map((d) =>
+      d.id === techEditId ? { ...d, technician: techDraft.trim() } : d
+    );
+    updateInvoice(invoice.id, { devices: nextDevices });
+    setTechEditId(null);
+  }, [invoice, techEditId, techDraft, updateInvoice]);
+
   const [footerDraft, setFooterDraft] = useState("");
 
   const openNotesDrawer = useCallback(() => {
@@ -659,7 +677,30 @@ export default function InvoiceDetailPage() {
                       <div className="px-4 py-2 border-b border-border bg-muted/20 grid grid-cols-2 gap-x-6 gap-y-1 sm:grid-cols-4 text-[11px]">
                         {dev.issue && <div><span className="text-muted-foreground">Issue:</span> <span className="font-medium">{dev.issue}</span></div>}
                         {dev.deviceColour && <div><span className="text-muted-foreground">Colour:</span> <span className="font-medium">{formatDeviceColour(dev.deviceColour)}</span></div>}
-                        {dev.technician && <div><span className="text-muted-foreground">Tech:</span> <span className="font-medium">{dev.technician}</span></div>}
+                        {/* Technician — internal attribution, inline-editable (not printed). */}
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-muted-foreground">Tech:</span>
+                          {techEditId === dev.id ? (
+                            <span className="inline-flex items-center gap-1">
+                              <input
+                                autoFocus
+                                value={techDraft}
+                                onChange={(e) => setTechDraft(e.target.value)}
+                                onKeyDown={(e) => { if (e.key === "Enter") saveTechnician(); if (e.key === "Escape") setTechEditId(null); }}
+                                placeholder="Technician"
+                                className="h-6 w-28 rounded-md border border-[#4361EE]/40 bg-card px-1.5 text-[11px] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
+                              />
+                              <button onClick={saveTechnician} className="grid h-5 w-5 place-items-center rounded text-emerald-600 hover:bg-emerald-50" aria-label="Save technician"><Check className="h-3 w-3" /></button>
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1">
+                              <span className="font-medium">{dev.technician || "Unassigned"}</span>
+                              {canEditInvoice && (
+                                <button onClick={() => startTechEdit(dev.id, dev.technician)} className="grid h-5 w-5 place-items-center rounded text-[#4361EE] hover:bg-[#EEF1FD]" aria-label="Edit technician"><Pencil className="h-2.5 w-2.5" /></button>
+                              )}
+                            </span>
+                          )}
+                        </div>
                         {dev.jobType && <div><span className="text-muted-foreground">Type:</span> <span className="font-medium capitalize">{dev.jobType}</span></div>}
                         {dev.priority && dev.priority !== "normal" && <div><span className="text-muted-foreground">Priority:</span> <span className="font-medium capitalize">{dev.priority}</span></div>}
                       </div>

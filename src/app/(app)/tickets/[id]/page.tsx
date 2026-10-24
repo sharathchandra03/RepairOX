@@ -18,6 +18,7 @@ import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { Drawer } from "@/components/ui/drawer";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { StatusPillSelect } from "@/components/ui/status-pill-select";
 import { StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 import { useStore } from "@/lib/store";
@@ -1432,7 +1433,8 @@ export default function TicketDetailPage() {
 
       {/* ─── Status Change Dialog ─────────────────────────────────────── */}
       {showStatusMenu && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowStatusMenu(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowStatusMenu(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <p className="text-sm font-bold mb-1">Change Status</p>
@@ -1462,11 +1464,13 @@ export default function TicketDetailPage() {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ─── Priority Change Dialog ───────────────────────────────────── */}
       {showPriorityMenu && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowPriorityMenu(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowPriorityMenu(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <p className="text-sm font-bold mb-1">Change Priority</p>
@@ -1483,13 +1487,15 @@ export default function TicketDetailPage() {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ─── Estimate Status Dialog (Waiting for Approval / Lost Customer) ──
           "Converted Ticket" is intentionally absent — it is set only by the
           Push to Ticket flow, never chosen manually (spec §11/§22/§33). */}
       {showEstimateStatusMenu && estimate && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowEstimateStatusMenu(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowEstimateStatusMenu(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <p className="text-sm font-bold mb-1">Change Estimate Status</p>
@@ -1520,6 +1526,7 @@ export default function TicketDetailPage() {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* ─── Section Quick-Edit Drawers ───────────────────────────────── */}

@@ -6,6 +6,7 @@ import { AlertTriangle, Trash2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Select } from "@/components/ui/input";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import type { RoleDef } from "@/lib/permissions";
 import type { TeamMember } from "@/lib/mock-data";
 
@@ -44,13 +45,14 @@ export function DeleteRoleDialog({
   const needsReassignment = affectedMembers.length > 0;
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && role && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-center bg-zinc-900/55 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-zinc-900/55 p-4 backdrop-blur-sm"
           onClick={onClose}
         >
           <motion.div
@@ -143,5 +145,6 @@ export function DeleteRoleDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

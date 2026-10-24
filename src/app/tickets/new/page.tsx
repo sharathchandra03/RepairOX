@@ -24,6 +24,7 @@ import { RSelect } from "@/components/ui/rselect";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { useStore } from "@/lib/store";
 import { useField } from "@/lib/field-context";
 import { useLeads } from "@/lib/leads-context";
@@ -126,6 +127,10 @@ type WizardDeviceData = {
 type WizardJobData = {
   jobType: string;
   estimate: string;
+  /** Whether the optional service estimate is added for this device. Toggled in
+   *  the Parts step; the amount is entered in Job Details. When false the
+   *  estimate is NOT billed regardless of any value left in `estimate`. */
+  estimateEnabled?: boolean;
   warranty: string;
   warrantyValue: string;
   warrantyUnit: string;
@@ -174,7 +179,7 @@ function createWizardDevice(category?: string): WizardDevice {
   return {
     id: `wd-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
     device: { brand: "", model: "", brandId: undefined, modelId: undefined, imei: "", imeiType: "imei", assignedBy: "", assignedTo: "", source: "", type: "" },
-    job: { jobType: "service", estimate: "", warranty: "", warrantyValue: "", warrantyUnit: "", deviceColour: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
+    job: { jobType: "service", estimate: "", estimateEnabled: false, warranty: "", warrantyValue: "", warrantyUnit: "", deviceColour: "", issue: "", priority: "normal", resolutionMinutes: "", customResolutionDate: "", accessories: "", description: "", notes: "" },
     parts: [],
     qc: {},
     qcNotes: {},
@@ -260,7 +265,8 @@ function ticketToWizard(t: Ticket): WizardData {
       },
       job: {
         jobType: dr.jobType || "service",
-        estimate: String(dr.estimate || 0),
+        estimate: Number(dr.estimate) > 0 ? String(dr.estimate) : "",
+        estimateEnabled: Number(dr.estimate) > 0,
         warranty: dr.warranty || "",
         warrantyValue: dr.warrantyValue ? String(dr.warrantyValue) : "",
         warrantyUnit: dr.warrantyUnit || "",
@@ -315,7 +321,8 @@ function ticketToWizard(t: Ticket): WizardData {
     },
     job: {
       jobType: "service",
-      estimate: String(t.amount || 0),
+      estimate: Number(t.amount) > 0 ? String(t.amount) : "",
+      estimateEnabled: Number(t.amount) > 0,
       warranty: "",
       warrantyValue: "",
       warrantyUnit: "",
@@ -811,7 +818,11 @@ function NewTicketWizard() {
       resolutionMinutes: Number(wd.job.resolutionMinutes) || defaultResMinutes,
       accessories: wd.job.accessories,
       notes: wd.job.notes,
-      estimate: Number(wd.job.estimate) || wd.parts.reduce((s, p) => s + p.total, 0) || 0,
+      // Estimate = the OPTIONAL service charge, counted ONLY when the device's
+      // "Add service estimate" toggle (Parts step) is on. 0 means no estimate —
+      // so downstream surfaces bill parts + estimate (the final price) instead
+      // of estimate-or-parts.
+      estimate: wd.job.estimateEnabled ? (Number(wd.job.estimate) || 0) : 0,
       parts: wd.parts.length > 0 ? wd.parts.map((p) => ({ ...p, status: "planned" as const })) : [],
       qc: wd.qc,
       qcNotes: wd.qcNotes,
@@ -824,16 +835,11 @@ function NewTicketWizard() {
       status: wd.status ?? defaultStatus,
     }));
 
-    // Total amount across all devices (estimate + parts, matching quotation logic)
-    const totalAmount = deviceRecords.reduce((s, dr) => {
-      const partsTotal = dr.parts.reduce((ps: number, p: any) => ps + (p.total || 0), 0);
-      return s + dr.estimate + partsTotal;
-    }, 0);
-    // Avoid double-counting: if estimate already includes parts (fallback case), use just estimate
-    // The estimate field = Number(job.estimate) || partsTotal, so when job.estimate is set it's service-only
-    // We need: service estimate + parts total
+    // Ticket final price = (optional service estimate) + (inventory parts) per
+    // device, summed across devices. When no estimate was added the device
+    // total is simply its parts; the estimate is never a parts fallback.
     const subtotal = data.devices.reduce((s: number, wd: any) => {
-      const est = Number(wd.job.estimate) || 0;
+      const est = wd.job.estimateEnabled ? (Number(wd.job.estimate) || 0) : 0;
       const parts = wd.parts.reduce((ps: number, p: any) => ps + (Number(p.total) || 0), 0);
       return s + est + parts;
     }, 0);
@@ -1342,7 +1348,8 @@ function NewTicketWizard() {
 
       {/* Unsaved changes dialog */}
       {showLeaveDialog && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowLeaveDialog(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowLeaveDialog(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-6">
             <h3 className="text-base font-bold">Unsaved Changes</h3>
@@ -1360,6 +1367,7 @@ function NewTicketWizard() {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Save toast */}
@@ -1674,7 +1682,8 @@ function AddPersonDialog({
   };
 
   return (
-    <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={onClose}>
+    <ModalPortal>
+    <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={onClose}>
       <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
         className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
         <h3 className="text-base font-bold">Add Person</h3>
@@ -1700,6 +1709,7 @@ function AddPersonDialog({
         </div>
       </motion.div>
     </div>
+    </ModalPortal>
   );
 }
 
@@ -2309,7 +2319,8 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
 
       {/* Add New Brand Modal */}
       {showNewBrand && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewBrand(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewBrand(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <h3 className="text-base font-bold">Add New Brand</h3>
@@ -2326,11 +2337,13 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Add New Model Modal */}
       {showNewModel && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewModel(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowNewModel(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <h3 className="text-base font-bold">Add New Model</h3>
@@ -2349,6 +2362,7 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Add Person dialog — shared by Assigned By & Assigned To. Persists the
@@ -2588,18 +2602,18 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               <IssueSelector
                 value={j.issue}
                 onChange={(v) => set("issue", v)}
-                className="min-h-[82px] items-start py-1.5"
               />
             </Field>
           </div>
           <div className="mt-auto pt-2">
             <Field label="User Accessories"><Input value={j.accessories} onChange={(e: any) => set("accessories", e.target.value)} placeholder="e.g. Charger, case, SIM tray received" className="h-[34px]" /></Field>
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">Items received with the device (charger, case, SIM tray…).</p>
           </div>
         </div>
 
-        {/* Right Column — Notes & Estimate */}
+        {/* Right Column — Notes */}
         <div className="flex flex-col">
-          <SectionLabel icon={StickyNote}>Notes & Estimate</SectionLabel>
+          <SectionLabel icon={StickyNote}>Notes &amp; Estimate</SectionLabel>
           <div className="mt-2">
             <Field label="Problem Description">
               <Textarea
@@ -2623,19 +2637,29 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
             </Field>
           </div>
           <div className="mt-auto pt-2">
+            {/* Estimate AMOUNT is entered here. Whether it is actually billed is
+                controlled by the "Add service estimate" toggle in the Parts step
+                (j.estimateEnabled). When off, the field is disabled + muted so
+                the value never silently counts. */}
             <Field label="Estimate">
               <Input
                 value={j.estimate}
-                onChange={(e: any) => {
-                  const v = e.target.value.replace(/[^0-9.]/g, "");
-                  set("estimate", v);
-                }}
+                onChange={(e: any) => set("estimate", e.target.value.replace(/[^0-9.]/g, ""))}
                 placeholder="0"
                 inputMode="numeric"
-                className="h-[34px] tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]"
+                disabled={!j.estimateEnabled}
+                className={cn(
+                  "h-[34px] tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]",
+                  !j.estimateEnabled && "opacity-60",
+                )}
                 iconLeft={<IndianRupee className="h-3.5 w-3.5" />}
               />
             </Field>
+            <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
+              {j.estimateEnabled
+                ? "A service / labour charge added on top of the parts."
+                : "Turn on “Add service estimate” in the Parts step to include this."}
+            </p>
           </div>
         </div>
       </div>
@@ -2651,7 +2675,8 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
 
       {/* Custom Date & Time Picker Modal */}
       {showCustomPicker && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowCustomPicker(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowCustomPicker(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <h3 className="text-base font-bold">Select Resolution Date & Time</h3>
@@ -2741,11 +2766,13 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Add Colour dialog — name + colour picker, saved to Device Colours */}
       {showAddColour && (
-        <div className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowAddColour(false)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setShowAddColour(false)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()}
             className="w-full max-w-sm rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <h3 className="text-base font-bold">Add Colour</h3>
@@ -2792,6 +2819,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );
@@ -2919,11 +2947,13 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
 
   return (
     <div ref={containerRef} className="relative">
-      {/* Trigger / pill container */}
+      {/* Trigger / pill container — CONSTANT height; chips wrap and the box
+          scrolls internally (thin blue scrollbar kept inside the rounded
+          border via the right padding + gutter). */}
       <div
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }}
         className={cn(
-          "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-center gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
+          "rox-rail-scroll flex h-[82px] w-full flex-wrap content-start items-start gap-1.5 overflow-y-auto rounded-xl border bg-card py-2 pl-3 pr-1.5 text-sm transition-all duration-150 cursor-text [scrollbar-gutter:stable]",
           "border-input hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/10",
           className
         )}
@@ -2990,7 +3020,7 @@ function IssueSelector({ value, onChange, className }: { value: string; onChange
   );
 }
 
-/* ---------------- Step 5: Parts (Inventory Integrated) ---------------- */
+/* ---------------- Step 6: Parts (Inventory Integrated) ---------------- */
 function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   const { can } = usePermissions();
   const { inventory } = useStore();
@@ -3007,6 +3037,26 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   const parts = activeDevice.parts;
 
   const total = parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+
+  // ── Optional service estimate (per device) ──
+  // The estimate is a service/labour charge added ON TOP of the inventory
+  // parts. It lives here, in the Parts step, so the user decides it while they
+  // can see the parts total it adds to (parts + estimate = final price). Off by
+  // default — a device is billed on its parts alone unless the user opts in.
+  const estimate = activeDevice.job.estimate;
+  const estimateEnabled = activeDevice.job.estimateEnabled ?? false;
+  const toggleEstimate = () => {
+    // Flip the per-device enabled flag. The amount (entered in Job Details) is
+    // preserved either way; the flag alone decides whether it's billed, so the
+    // user can toggle off/on without re-typing.
+    const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, job: { ...dev.job, estimateEnabled: !estimateEnabled } } : dev
+    );
+    setData({ ...data, devices: updatedDevices });
+  };
+  // The estimate is only counted when the toggle is ON.
+  const estimateNum = estimateEnabled ? (Number(estimate) || 0) : 0;
+  const finalTotal = total + estimateNum;
 
   // Close the inventory search popover on outside click (the results dropdown
   // is portalled to <body>, so a click on a result isn't an "outside" click).
@@ -3180,19 +3230,53 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
         )}
       </div>
 
-      <div className="mt-5 flex flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="text-sm"><span className="text-muted-foreground">Parts total: </span><span className="font-semibold tabular-nums">{formatINR(total)}</span></div>
-        {!isEdit && (
-          <div className="flex gap-2">
-            <Button variant="outline" size="lg" onClick={onNext}>Skip</Button>
-            <Button size="lg" onClick={onNext} className="min-w-[190px] justify-center">
-              {data.devices.length > 1 && activeIdx < data.devices.length - 1
-                ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
-                : <>Continue</>} <ArrowRight className="h-4 w-4" />
-            </Button>
+      {/* ── Summary row: small "Add service estimate" checkbox (left) +
+          Parts / Estimate / Device total breakdown (right). The amount is
+          entered in Job Details; here you only choose whether to include it. */}
+      <div className="mt-4 flex flex-col gap-4 rounded-xl border border-border bg-background px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        {/* Left — small checkbox + label (whole area toggles) */}
+        <div className="flex cursor-pointer select-none items-start gap-2.5" onClick={toggleEstimate}>
+          <Checkbox checked={estimateEnabled} onChange={toggleEstimate} aria-label="Add service estimate" className="mt-0.5" />
+          <span className="min-w-0">
+            <span className="block text-[13px] font-semibold text-foreground">Add service estimate</span>
+            <span className="block text-[11px] leading-snug text-muted-foreground">
+              Optional charge on top of the parts — amount is set in Job Details.
+            </span>
+            {estimateEnabled && estimateNum === 0 && (
+              <span className="mt-1 flex items-center gap-1 text-[11px] text-amber-600">
+                <AlertTriangle className="h-3 w-3" /> Enter the amount in the Job Details step.
+              </span>
+            )}
+          </span>
+        </div>
+
+        {/* Right — compact breakdown */}
+        <div className="shrink-0 text-sm sm:min-w-[200px]">
+          <div className="flex items-center justify-between gap-6">
+            <span className="text-muted-foreground">Parts</span>
+            <span className="font-medium tabular-nums">{formatINR(total)}</span>
           </div>
-        )}
+          <div className="mt-1 flex items-center justify-between gap-6">
+            <span className="text-muted-foreground">Estimate</span>
+            <span className={cn("font-medium tabular-nums", estimateNum === 0 && "text-muted-foreground")}>{estimateNum > 0 ? formatINR(estimateNum) : "—"}</span>
+          </div>
+          <div className="mt-1.5 flex items-center justify-between gap-6 border-t border-border/70 pt-1.5">
+            <span className="font-semibold text-foreground">Device total</span>
+            <span className="font-bold tabular-nums text-[#4361EE]">{formatINR(finalTotal)}</span>
+          </div>
+        </div>
       </div>
+
+      {!isEdit && (
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="outline" size="lg" onClick={onNext}>Skip</Button>
+          <Button size="lg" onClick={onNext} className="min-w-[190px] justify-center">
+            {data.devices.length > 1 && activeIdx < data.devices.length - 1
+              ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
+              : <>Continue</>} <ArrowRight className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
 
       {/* Add Inventory modal — creates a canonical Inventory Master record and,
           on success, adds it to this device as a part line so the user doesn't
@@ -3207,7 +3291,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
   );
 }
 
-/* ---------------- Step 6: Customer (Search + Details merged) ----------------
+/* ---------------- Step 2: Customer (Search + Details merged) ----------------
    One unified step: find & link an existing customer OR capture a new one, and
    refine the customer detail fields — all in a single view. Previously this was
    two steps (Contact Search + Customer Form); they share the exact same draft
@@ -3655,10 +3739,14 @@ function CustomerPanel({
 }
 
 /* ---------------- Step 7: Quote ---------------- */
+// A device's estimate counts only when its "Add service estimate" toggle is on.
+function devEstimateOf(d: WizardDevice): number {
+  return d.job.estimateEnabled ? (Number(d.job.estimate) || 0) : 0;
+}
 function QuoteSummary({ data, onNext, isEdit, setData }: any) {
   const allParts = data.devices.flatMap((d: WizardDevice) => d.parts);
   const partsTotal = allParts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
-  const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + (Number(d.job.estimate) || 0), 0);
+  const estimatesTotal = data.devices.reduce((s: number, d: WizardDevice) => s + devEstimateOf(d), 0);
   const subtotal = (estimatesTotal + partsTotal) || 0;
 
   // GST/Tax removed from ticket quotation — total = subtotal (estimate + parts)
@@ -3674,7 +3762,7 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
             {data.devices.map((d: WizardDevice, idx: number) => {
               const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
               const devPartsTotal = d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
-              const devEstimate = Number(d.job.estimate) || 0;
+              const devEstimate = devEstimateOf(d);
               const devTotal = devEstimate + devPartsTotal;
               const hasLines = d.parts.length > 0 || devEstimate > 0;
               return (
@@ -3710,14 +3798,14 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                       ))}
                       {devEstimate > 0 && (
                         <div className="grid grid-cols-[1fr_auto_auto] gap-x-4 border-t border-border/60 px-4 py-2 text-[13px]">
-                          <div>Service Charges</div>
+                          <div>Estimate</div>
                           <div className="w-8 text-center text-muted-foreground">1</div>
                           <div className="tnum w-24 text-right">{formatINR(devEstimate)}</div>
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="border-t border-border px-4 py-2.5 text-[12px] text-muted-foreground">No parts or service charges added.</div>
+                    <div className="border-t border-border px-4 py-2.5 text-[12px] text-muted-foreground">No parts or estimate added.</div>
                   )}
                 </div>
               );
@@ -3760,13 +3848,24 @@ function QuoteSummary({ data, onNext, isEdit, setData }: any) {
                 <li className="pb-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Devices ({data.devices.length})</li>
                 {data.devices.map((d: WizardDevice, idx: number) => {
                   const devLabel = [d.device.brand, d.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
-                  const devTotal = (Number(d.job.estimate) || 0) + d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
-                  return <QRow key={d.id} k={devLabel} v={formatINR(devTotal)} />;
+                  const devParts = d.parts.reduce((s: number, p: any) => s + Number(p.total || 0), 0);
+                  const devEstimate = devEstimateOf(d);
+                  const devTotal = devParts + devEstimate;
+                  return (
+                    <li key={d.id} className="space-y-1 pb-1.5">
+                      {/* Device name + its subtotal */}
+                      <QRow k={devLabel} v={formatINR(devTotal)} bold />
+                      {/* Parts + Estimate breakdown under the device */}
+                      {devParts > 0 && <QSub k="Parts" v={formatINR(devParts)} />}
+                      {devEstimate > 0 && <QSub k="Estimate" v={formatINR(devEstimate)} />}
+                      {devParts === 0 && devEstimate === 0 && <QSub k="No parts or estimate" v="—" />}
+                    </li>
+                  );
                 })}
               </>
             )}
-            {data.devices.length <= 1 && estimatesTotal > 0 && partsTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
             {data.devices.length <= 1 && partsTotal > 0 && <QRow k="Parts" v={formatINR(partsTotal)} />}
+            {data.devices.length <= 1 && estimatesTotal > 0 && <QRow k="Estimate" v={formatINR(estimatesTotal)} />}
             {data.devices.length > 1 && <li className="border-t border-border/70 pt-1.5" />}
             <QRow k="Total" v={formatINR(total)} bold />
           </ul>
@@ -3784,6 +3883,16 @@ function QRow({ k, v, bold }: { k: string; v: string; bold?: boolean }) {
       <span className={cn("min-w-0 truncate text-muted-foreground", bold && "text-foreground font-semibold")}>{k}</span>
       <span className={cn("tnum shrink-0", bold && "font-semibold")}>{v}</span>
     </li>
+  );
+}
+/** Indented sub-line under a device in the Customer Pays breakdown
+ *  (e.g. Parts / Estimate). Rendered inside a device <li>, so it is a div. */
+function QSub({ k, v }: { k: string; v: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 pl-3 text-[12px] text-muted-foreground">
+      <span className="min-w-0 truncate">{k}</span>
+      <span className="tnum shrink-0">{v}</span>
+    </div>
   );
 }
 
@@ -3926,6 +4035,17 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
       i === activeIdx ? { ...dev, qc: updated } : dev
     );
     setData({ ...data, devices: updatedDevicesMarkAllFail });
+  };
+
+  // Mark every UNSET item as Skip — existing pass/fail are preserved. Updates
+  // all real inspection records on the active device (not just the visuals).
+  const markAllSkip = () => {
+    const updated = { ...qc };
+    qcFields.forEach((f) => { if (!updated[f]) updated[f] = "na"; });
+    const updatedDevicesMarkAllSkip = data.devices.map((dev: WizardDevice, i: number) =>
+      i === activeIdx ? { ...dev, qc: updated } : dev
+    );
+    setData({ ...data, devices: updatedDevicesMarkAllSkip });
   };
 
   // Reset clears status + notes on the active device only.
@@ -4090,7 +4210,50 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   // Actions, Summary and Finish QC. Replaces the old horizontal KPI row + the
   // filter/search strip above the grid. All handlers are the existing ones.
   const utilityPanel = (
-    <aside className="flex h-full flex-col gap-2.5 rounded-2xl border border-border bg-card p-3 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]">
+    <aside className="flex h-full min-h-0 flex-col gap-2.5 rounded-2xl border border-border bg-card p-3 shadow-[0_2px_10px_-4px_rgba(15,23,42,0.08)]">
+      {/* Scrollable section stack — if the panel's sections (Device, QC
+          Template, Filter Status, Quick Actions, Summary) are taller than the
+          available height, they scroll INSIDE the panel so nothing is clipped;
+          the Finish QC button stays pinned below. */}
+      <div className="rox-rail-scroll flex min-h-0 flex-1 flex-col gap-2.5 overflow-y-auto">
+      {/* QC Template — pick the right checklist for THIS device (e.g. Mobile vs
+          Laptop). Lives in the right panel (above Filter Status) so it never
+          steals a full row above the grid — important when the multi-device
+          switcher is also shown. Only rendered when >1 template is configured;
+          the choice is saved per device (qcTemplateId). */}
+      {templateOptions.length > 1 && (
+        <section>
+          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <ClipboardList className="h-3.5 w-3.5 text-[#4361EE]" /> QC Template
+          </div>
+          {/* Horizontal pill rail — scrolls sideways to explore every template
+              (fixed height, so adding more templates never grows the panel). */}
+          <div className="rox-rail-scroll -mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-1">
+            {templateOptions.map((t) => {
+              const active = t.id === (selectedTemplate?.id ?? "");
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => selectTemplate(t.id)}
+                  aria-pressed={active}
+                  title={t.name}
+                  className={cn(
+                    "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-3 py-1 text-[12px] font-semibold ring-1 ring-inset transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/50",
+                    active
+                      ? "bg-[#4361EE] text-white ring-[#4361EE] shadow-sm"
+                      : "bg-white text-foreground ring-border hover:border-[#B3BFF6] hover:bg-[#EEF1FD]/40"
+                  )}
+                >
+                  {active && <Check className="h-3 w-3 shrink-0" />}
+                  {t.name}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       {/* Filters — contextual store only (search removed) */}
       {activeStore && (
         <section>
@@ -4132,10 +4295,22 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
         </div>
       </section>
 
-      {/* Quick Actions — Mark All Pass, Mark All Fail, Reset */}
+      {/* Quick Actions — Mark All Pass / Fail / Skip. Reset sits top-right in
+          the header (a de-emphasised secondary action, away from the mark-all
+          buttons). */}
       <section>
-        <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-          <Zap className="h-3.5 w-3.5 text-[#4361EE]" /> Quick Actions
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+            <Zap className="h-3.5 w-3.5 text-[#4361EE]" /> Quick Actions
+          </span>
+          <button
+            type="button"
+            onClick={resetQC}
+            className="inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-muted-foreground transition hover:bg-muted hover:text-foreground"
+            title="Clear all results on this device"
+          >
+            <RotateCcw className="h-3 w-3" /> Reset
+          </button>
         </div>
         <div className="flex flex-col gap-1.5">
           <Button variant="outline" size="sm" className="w-full justify-center border-emerald-300 bg-emerald-50 text-emerald-700 hover:bg-emerald-100 hover:text-emerald-800" onClick={markAll}>
@@ -4144,8 +4319,8 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
           <Button variant="outline" size="sm" className="w-full justify-center border-rose-300 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800" onClick={markAllFail}>
             <XCircle className="h-3.5 w-3.5" /> Mark All Fail
           </Button>
-          <Button variant="outline" size="sm" className="w-full justify-center" onClick={resetQC}>
-            <RotateCcw className="h-3.5 w-3.5" /> Reset
+          <Button variant="outline" size="sm" className="w-full justify-center border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 hover:text-amber-800" onClick={markAllSkip}>
+            <MinusCircle className="h-3.5 w-3.5" /> Mark All Skip
           </Button>
         </div>
       </section>
@@ -4183,11 +4358,13 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
         </div>
       </section>
 
-      {/* Finish QC — pinned to the BOTTOM (mt-auto) so the utility panel fills
-          the full height of the left workspace and its bottom edge lines up.
+      </div>
+
+      {/* Finish QC — pinned to the BOTTOM, OUTSIDE the scroll region, so it is
+          always visible even when the sections above scroll internally.
           Hidden in edit mode (Save lives in the fixed edit footer). */}
       {!isEdit && (
-        <Button size="md" className="mt-auto w-full justify-center" onClick={onNext}>
+        <Button size="md" className="w-full shrink-0 justify-center" onClick={onNext}>
           <CheckCircle2 className="h-4 w-4" />
           {data.devices.length > 1 && activeIdx < data.devices.length - 1
             ? <>Next Device ({activeIdx + 2}/{data.devices.length})</>
@@ -4205,41 +4382,9 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
     // (Previous / Save / Next) overlays the bottom, so we reserve that height
     // (pb-20) so the LAST rows clear the footer instead of hiding under it.
     <div className={cn("min-w-0", isEdit ? "pb-20" : "-mb-16")}>
-      <DeviceSwitcher data={data} setData={setData} />
-
-      {/* QC Template selector — a pill row so the user picks the right
-          checklist for THIS device (e.g. Mobile vs Laptop). Shown only when the
-          org configured more than one template; a single template needs no
-          picker. The choice is saved on the active device (qcTemplateId). */}
-      {templateOptions.length > 1 && (
-        <div className="mb-2 flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card px-3 py-2">
-          <span className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            <ClipboardList className="h-3.5 w-3.5 text-[#4361EE]" /> QC Template
-          </span>
-          <div className="flex flex-wrap items-center gap-1.5">
-            {templateOptions.map((t) => {
-              const active = t.id === (selectedTemplate?.id ?? "");
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => selectTemplate(t.id)}
-                  aria-pressed={active}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[12px] font-semibold ring-1 ring-inset transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/50",
-                    active
-                      ? "bg-[#4361EE] text-white ring-[#4361EE] shadow-sm"
-                      : "bg-white text-foreground ring-border hover:border-[#B3BFF6] hover:bg-[#EEF1FD]/40"
-                  )}
-                >
-                  {active && <Check className="h-3 w-3" />}
-                  {t.name}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
+      {/* The device switcher lives INSIDE the right utility panel for this step
+          (not a row above the grid), so multiple devices never push the QC
+          layout down — the grid starts at the same height either way. */}
 
       {/* Two-region layout: LEFT = QC workspace, RIGHT = compact utility panel.
           Both regions STRETCH to the same height (items-stretch) so the right
@@ -4248,11 +4393,38 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
       <div className="grid grid-cols-1 items-stretch gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
         {/* LEFT — QC inspection workspace */}
         <div className="flex min-w-0 flex-col">
-          {/* Inspection Progress — compact, near the top of the workspace */}
+          {/* Inspection Progress — compact. In multi-device the device pill rail
+              shares THIS row (left side) so switching devices never adds a row
+              above the grid; the progress label + bar sit on the right. */}
           <div className="mb-2 rounded-xl border border-border bg-card px-4 py-2">
-            <div className="mb-1 flex items-center justify-between">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspection Progress</span>
-              <span className="text-[12px] font-bold">{completed} / {total} <span className="text-[#4361EE]">· {pct}%</span></span>
+            <div className="mb-1 flex items-center justify-between gap-3">
+              {data.devices.length > 1 ? (
+                <div className="rox-rail-scroll flex min-w-0 flex-1 items-center gap-1.5 overflow-x-auto pb-0.5">
+                  {data.devices.map((dev: WizardDevice, idx: number) => {
+                    const label = [dev.device.brand, dev.device.model].filter(Boolean).join(" ") || `Device ${idx + 1}`;
+                    const active = idx === activeIdx;
+                    return (
+                      <button
+                        key={dev.id}
+                        type="button"
+                        onClick={() => setData({ ...data, activeDeviceIndex: idx })}
+                        aria-pressed={active}
+                        title={label}
+                        className={cn(
+                          "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full py-0.5 pl-0.5 pr-2.5 text-[11.5px] font-semibold ring-1 ring-inset transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/50",
+                          active ? "bg-[#4361EE] text-white ring-[#4361EE] shadow-sm" : "bg-white text-foreground ring-border hover:border-[#B3BFF6] hover:bg-[#EEF1FD]/40"
+                        )}
+                      >
+                        <span className={cn("grid h-4.5 w-4.5 shrink-0 place-items-center rounded-full text-[9px] font-bold", active ? "bg-white/20 text-white" : "bg-muted text-muted-foreground")} style={{ height: 18, width: 18 }}>{idx + 1}</span>
+                        <span className="max-w-[110px] truncate">{label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : (
+                <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Inspection Progress</span>
+              )}
+              <span className="shrink-0 text-[12px] font-bold">{completed} / {total} <span className="text-[#4361EE]">· {pct}%</span></span>
             </div>
             <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
               <motion.div className="h-full rounded-full bg-[#4361EE]" animate={{ width: `${pct}%` }} transition={{ duration: 0.4 }} />
@@ -4268,7 +4440,8 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
 
       {/* Note Modal */}
       {noteOpen && (
-        <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setNoteOpen(null)}>
+        <ModalPortal>
+        <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4" onClick={() => setNoteOpen(null)}>
           <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} onClick={(e) => e.stopPropagation()} className="w-full max-w-sm rounded-2xl bg-card p-5 shadow-2xl ring-1 ring-border">
             <p className="mb-1 text-sm font-bold">Note: {labelFor(noteOpen)}</p>
             <p className="mb-3 text-[11px] text-muted-foreground">Add technician notes for this item.</p>
@@ -4282,6 +4455,7 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
     </div>
   );

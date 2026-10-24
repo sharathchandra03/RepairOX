@@ -13,6 +13,7 @@ import {
   type DeviceRecord,
 } from "@/lib/mock-data";
 import { parseIssueString } from "@/lib/issue-library";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn, formatINR } from "@/lib/utils";
 
 /** Human-readable labels for the job type saved on device.jobType. */
@@ -148,13 +149,14 @@ export function DeviceDetailsOverlay({
   const devices = ticket ? getTicketDevices(ticket) : [];
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && ticket && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-[80] grid place-items-center overflow-y-auto bg-foreground/40 backdrop-blur-[3px] p-4"
+          className="fixed inset-0 z-[9998] grid place-items-center overflow-y-auto bg-foreground/40 backdrop-blur-[3px] p-4"
           onClick={onClose}
         >
           <motion.div
@@ -202,5 +204,6 @@ export function DeviceDetailsOverlay({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

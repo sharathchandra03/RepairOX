@@ -5,6 +5,7 @@ import { Upload, X, Image as ImageIcon, Loader2, Images, Search } from "lucide-r
 import { cn } from "@/lib/utils";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { useCatalog } from "@/lib/catalog-context";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { collectMedia } from "./media-library";
 
 const BUCKET_NAME = "catalog-images";
@@ -238,7 +239,8 @@ function ImageLibraryPicker({ onClose, onPick }: { onClose: () => void; onPick: 
   const total = filtered.reduce((n, g) => n + g.images.length, 0);
 
   return (
-    <div className="fixed inset-0 z-[100] grid place-items-center bg-black/40 p-4" onClick={onClose}>
+    <ModalPortal>
+    <div className="fixed inset-0 z-[9998] grid place-items-center bg-black/40 p-4" onClick={onClose}>
       <div
         className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
         onClick={(e) => e.stopPropagation()}
@@ -304,5 +306,6 @@ function ImageLibraryPicker({ onClose, onPick }: { onClose: () => void; onPick: 
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }

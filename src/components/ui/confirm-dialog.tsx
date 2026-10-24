@@ -4,6 +4,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, X } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { ModalPortal } from "@/components/ui/modal-portal";
 
 export function ConfirmDialog({
   open,
@@ -38,13 +39,14 @@ export function ConfirmDialog({
   }, [open, onClose]);
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
           onClick={onClose}
         >
           <motion.div
@@ -97,5 +99,6 @@ export function ConfirmDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

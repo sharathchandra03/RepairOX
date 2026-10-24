@@ -20,6 +20,7 @@ import { useStoreSettings } from "@/lib/store-settings";
 import { A4Template } from "@/components/print/a4-template";
 import { ThermalTemplate } from "@/components/print/thermal-template";
 import { LabelTemplate } from "@/components/print/label-template";
+import { ModalPortal } from "@/components/ui/modal-portal";
 
 /* ─── Shared Completion Screen ───────────────────────────────────────── */
 /*
@@ -198,10 +199,11 @@ export function CompletionScreen({ type, id, isEdit = false, isEstimate = false,
       </div>
 
       {/* ── Read-only View preview overlay ── */}
+      <ModalPortal>
       <AnimatePresence>
         {showView && (
           <motion.div
-            className="fixed inset-0 z-[120] flex flex-col bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[10060] flex flex-col bg-black/60 backdrop-blur-sm"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -242,6 +244,7 @@ export function CompletionScreen({ type, id, isEdit = false, isEstimate = false,
           </motion.div>
         )}
       </AnimatePresence>
+      </ModalPortal>
     </div>
   );
 }

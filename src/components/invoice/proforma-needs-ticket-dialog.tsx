@@ -17,6 +17,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { X, AlertTriangle, TicketCheck } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { formatINR } from "@/lib/utils";
 import type { Invoice } from "@/lib/mock-data";
 
@@ -49,13 +50,14 @@ export function ProformaNeedsTicketDialog({
   }, [open, onCancel]);
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && proforma && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
           onClick={onCancel}
         >
           <motion.div
@@ -124,5 +126,6 @@ export function ProformaNeedsTicketDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

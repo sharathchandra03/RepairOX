@@ -5,6 +5,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { X, Lock, AlertTriangle, CheckCircle2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn, formatINR } from "@/lib/utils";
 import { closeDay, type DailySummary } from "@/lib/daily-ledger-service";
 
@@ -43,6 +44,7 @@ export function CloseDayModal({ open, onClose, summary, onSuccess }: CloseDayMod
   const dateDisplay = new Date(summary.date + "T00:00:00").toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && (
         <>
@@ -203,5 +205,6 @@ export function CloseDayModal({ open, onClose, summary, onSuccess }: CloseDayMod
         </>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

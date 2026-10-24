@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { AlertTriangle, X, Archive, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { usePermissions } from "@/lib/permissions-context";
 import { toast } from "@/components/ui/toaster";
 
@@ -64,6 +65,7 @@ export function ArchiveStoreDialog({
   }
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && (
         <motion.div
@@ -147,5 +149,6 @@ export function ArchiveStoreDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

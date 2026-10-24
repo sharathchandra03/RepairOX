@@ -120,8 +120,8 @@ export function StatusPillSelect({
         onClick={() => !disabled && setOpen((o) => !o)}
         className={cn(
           "flex h-11 w-full items-center justify-between gap-2 rounded-xl border bg-card px-3.5 text-sm transition-all duration-150",
-          open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-border hover:border-[#4361EE]/40",
-          disabled && "cursor-not-allowed opacity-50 hover:border-border",
+          open ? "border-[#4361EE] ring-2 ring-[#4361EE]/15" : "border-input hover:border-[#4361EE]/40",
+          disabled && "cursor-not-allowed opacity-50 hover:border-input",
           className
         )}
       >

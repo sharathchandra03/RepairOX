@@ -30,6 +30,7 @@ import { X, Receipt, CheckCircle2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { cn, formatINR } from "@/lib/utils";
 import { parseIssueString } from "@/lib/issue-library";
 import {
@@ -42,10 +43,15 @@ import {
   type DeviceRecord,
 } from "@/lib/mock-data";
 
-/** The billable amount shown for a device: its estimate, else the parts total. */
+/** The billable amount shown for a device = its FINAL price: inventory parts
+ *  total PLUS the optional service estimate (when one was added on the ticket).
+ *  The estimate is a separate, additive charge — it is no longer an
+ *  "estimate-or-parts" either/or, so a device with both parts and an estimate
+ *  shows the sum. */
 function deviceAmount(dev: DeviceRecord): number {
   const partsTotal = (dev.parts ?? []).reduce((s, p) => s + (p.total ?? 0), 0);
-  return dev.estimate && dev.estimate > 0 ? dev.estimate : partsTotal;
+  const estimate = dev.estimate && dev.estimate > 0 ? dev.estimate : 0;
+  return partsTotal + estimate;
 }
 
 function deviceLabel(dev: DeviceRecord, idx: number): string {
@@ -166,13 +172,14 @@ export function PushToInvoiceDialog({
   const docNoun = estimate ? "Proforma" : "Invoice";
 
   return (
+    <ModalPortal>
     <AnimatePresence>
       {open && ticket && (
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
           onClick={onClose}
         >
           <motion.div
@@ -322,5 +329,6 @@ export function PushToInvoiceDialog({
         </motion.div>
       )}
     </AnimatePresence>
+    </ModalPortal>
   );
 }

@@ -1318,6 +1318,10 @@ export type InvoiceDeviceRecord = {
    *  amount only — it is NOT a Parts & Services inventory line and never
    *  becomes billable stock. Optional for legacy records; defaults to 0. */
   estimateValue?: number;
+  /** Whether the Estimate Value is INCLUDED in the billed invoice total. The
+   *  invoicer opts in on the Pricing step. When false the estimate is a pure
+   *  reference and is not billed. Optional for legacy records; defaults off. */
+  includeEstimate?: boolean;
   /** The agreed repair/labour charge for this device — a structured monetary
    *  value that participates in invoice pricing as its own breakdown component
    *  (separate from parts, discount, tax and the estimate reference). It is NOT
@@ -1353,6 +1357,7 @@ export function createInvoiceDeviceRecord(overrides?: Partial<InvoiceDeviceRecor
     deviceColour: undefined,
     technician: "",
     estimateValue: 0,
+    includeEstimate: false,
     repairCost: 0,
     parts: [],
     notes: "",

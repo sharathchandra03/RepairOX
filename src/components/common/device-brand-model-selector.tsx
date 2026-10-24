@@ -14,6 +14,7 @@ import { motion } from "framer-motion";
 import { Check, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label } from "@/components/ui/input";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
@@ -329,8 +330,9 @@ export function DeviceBrandModelSelector({
 
       {/* Add New Brand Modal */}
       {showNewBrand && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
           onClick={() => setShowNewBrand(false)}
         >
           <motion.div
@@ -371,12 +373,14 @@ export function DeviceBrandModelSelector({
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
 
       {/* Add New Model Modal */}
       {showNewModel && (
+        <ModalPortal>
         <div
-          className="fixed inset-0 z-[60] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
+          className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 backdrop-blur-[2px] p-4"
           onClick={() => setShowNewModel(false)}
         >
           <motion.div
@@ -421,6 +425,7 @@ export function DeviceBrandModelSelector({
             </div>
           </motion.div>
         </div>
+        </ModalPortal>
       )}
     </>
   );

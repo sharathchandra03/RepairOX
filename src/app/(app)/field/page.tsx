@@ -29,6 +29,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Pagination } from "@/components/ui/pagination";
 import { RoxFilterPanelHeader } from "@/components/ui/rox-filter";
 import { SegmentedTabs } from "@/components/ui/tabs";
+import { ModalPortal } from "@/components/ui/modal-portal";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
@@ -875,7 +876,8 @@ function EmptyState({ hasJobs }: { hasJobs: boolean }) {
    than creating an orphan job with no lead/customer. */
 function NewFieldJobHint({ onClose, onGoLeads }: { onClose: () => void; onGoLeads: () => void }) {
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-foreground/40 p-4 backdrop-blur-[2px]" onClick={onClose}>
+    <ModalPortal>
+    <div className="fixed inset-0 z-[9998] grid place-items-center bg-foreground/40 p-4 backdrop-blur-[2px]" onClick={onClose}>
       <div className="w-full max-w-sm rounded-2xl bg-card p-6 shadow-2xl ring-1 ring-border" onClick={(e) => e.stopPropagation()}>
         <div className="mb-3 flex items-center gap-2.5">
           <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]"><Truck className="h-5 w-5" /></span>
@@ -890,5 +892,6 @@ function NewFieldJobHint({ onClose, onGoLeads }: { onClose: () => void; onGoLead
         </div>
       </div>
     </div>
+    </ModalPortal>
   );
 }
