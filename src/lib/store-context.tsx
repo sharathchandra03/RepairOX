@@ -359,11 +359,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     if (!ready) return;
     const current = stores.find((s) => s.id === activeStoreId) ?? null;
-    // TEMP DEBUG — remove after diagnosis. Tells us the real active store.
-    if (typeof window !== "undefined") {
-      // eslint-disable-next-line no-console
-      console.log("[RepairOX debug] activeStoreId =", activeStoreId, "| store =", current?.name ?? "(All Shops / none)", "| totalStores =", stores.length);
-    }
     setCurrentStore(activeStoreId, current?.name ?? null);
   }, [ready, activeStoreId, stores]);
 

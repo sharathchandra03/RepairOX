@@ -9,7 +9,7 @@ import {
   Printer, FileText, Plus, Search, User, UserPlus, Building2, Sparkles,
   Upload, ArrowLeft, RotateCcw, Trash2, Package, AlertTriangle, Minus,
   Shield, ChevronDown, ChevronUp, StickyNote, CircleDot, ClipboardList, Clock,
-  X, IndianRupee, Filter, Zap, BarChart3, Store as StoreIcon, Link2,
+  X, IndianRupee, Zap, BarChart3, Store as StoreIcon, Link2,
 } from "lucide-react";
 import { WizardShell } from "@/components/wizard/wizard-shell";
 import { OptionGrid } from "@/components/wizard/option-grid";
@@ -49,7 +49,6 @@ import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { NoPermission } from "@/components/common/no-permission";
 import { type PermissionKey } from "@/lib/permissions";
-import { useStoreContext } from "@/lib/store-context";
 import { loadDeviceCategories, getCachedCategories, categoryLabel } from "@/lib/device-categories";
 import { loadQCConfig, getCachedQCConfig, resolveTemplate as qcResolveTemplate, activeTemplates as qcActiveTemplates, activeCategoriesForTemplate as qcActiveCategoriesForTemplate, type QCConfig } from "@/lib/qc-config";
 import { detectIdentifier, sanitizeIdentifierInput, resolveIdentifierType, normalizeIdentifierType, IDENTIFIER_NEUTRAL_LABEL, IDENTIFIER_PLACEHOLDER } from "@/lib/identifier-detection";
@@ -3909,11 +3908,6 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
   const [noteOpen, setNoteOpen] = useState<string | null>(null);
   const [noteText, setNoteText] = useState("");
 
-  // Active store is shown as read-only CONTEXT in the utility panel (not a
-  // filter). QC is scoped to the ticket being created in the current store, so
-  // we surface the store name for orientation without inventing a false filter.
-  const { activeStore } = useStoreContext();
-
   // ── QC checklist comes from Settings → Tickets → Quality Check ──
   // Load the org's configured QC checklist. Falls back to the built-in
   // defaults (QC_GROUPS/QC_FIELDS) until it resolves, so the form always
@@ -4257,19 +4251,6 @@ function QCForm({ data, setData, onNext, isEdit }: any) {
                 </button>
               );
             })}
-          </div>
-        </section>
-      )}
-
-      {/* Filters — contextual store only (search removed) */}
-      {activeStore && (
-        <section>
-          <div className="mb-2 flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
-            <Filter className="h-3.5 w-3.5 text-[#4361EE]" /> Filters
-          </div>
-          <div className="flex items-center gap-1.5 rounded-lg border border-border bg-muted/40 px-2.5 py-1.5">
-            <StoreIcon className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
-            <span className="truncate text-[12px] font-semibold text-foreground">{activeStore.name}</span>
           </div>
         </section>
       )}
