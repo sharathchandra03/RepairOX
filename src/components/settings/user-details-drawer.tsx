@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react";
 import {
   UserCog, Mail, Phone, ShieldCheck, Store, Home, KeyRound, Clock,
   CircleUser, CheckCircle2, AlertTriangle, Lock, Ban, Power, Pencil,
-  Loader2, Fingerprint, Building2, ArrowRight, Plus, X, Trash2,
+  Loader2, Fingerprint, Building2, ArrowRight,
 } from "lucide-react";
 import { Drawer } from "@/components/ui/drawer";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar } from "@/components/ui/avatar";
@@ -131,8 +132,7 @@ export function UserDetailsDrawer({
   const [identityErr, setIdentityErr] = useState<string | null>(null);
 
   // Additional-store access management (multi-store).
-  const [addingStore, setAddingStore] = useState(false);
-  const [savingStore, setSavingStore] = useState(false);
+  const [savingStoreId, setSavingStoreId] = useState<string | null>(null);
 
   const canManage = can("manage_users") || can("edit_users") || can("full_access");
 
@@ -184,9 +184,8 @@ export function UserDetailsDrawer({
   // a multi-store org (more than one store the admin can see). Independent of
   // the home-store relocation ("Change store") control.
   const canManageStoreAccess = canManage && allow(can, CAP.store.assignUsers) && canViewAllShops && allStores.length > 1;
-  // Stores not yet granted to the user (available to add).
+  // The set of stores the user already has access to (home + grants).
   const assignedStoreIds = new Set(stores.map((s) => s.id));
-  const addableStores = allStores.filter((s) => !assignedStoreIds.has(s.id));
 
   const statusTone: "success" | "warning" | "danger" =
     d.status === "active" ? "success" : d.status === "suspended" ? "danger" : "warning";
@@ -213,20 +212,16 @@ export function UserDetailsDrawer({
     load();
   }
 
-  /** Grant the user access to an additional store (non-home user_stores grant). */
-  async function grantStore(storeId: string) {
-    setSavingStore(true);
-    await apiFetch(`/api/staff/${d.id}`, { method: "PATCH", body: JSON.stringify({ addStoreIds: [storeId] }) });
-    setSavingStore(false);
-    setAddingStore(false);
-    load();
-  }
-
-  /** Revoke an additional store grant (never the home store). */
-  async function revokeStore(storeId: string) {
-    setSavingStore(true);
-    await apiFetch(`/api/staff/${d.id}`, { method: "PATCH", body: JSON.stringify({ removeStoreIds: [storeId] }) });
-    setSavingStore(false);
+  /** Toggle access to a store: ticking grants an additional (non-home)
+   *  user_stores grant, unticking revokes it. The HOME store can never be
+   *  toggled off here (relocate it via "Change store" instead). */
+  async function toggleStore(storeId: string, nextGranted: boolean) {
+    setSavingStoreId(storeId);
+    await apiFetch(`/api/staff/${d.id}`, {
+      method: "PATCH",
+      body: JSON.stringify(nextGranted ? { addStoreIds: [storeId] } : { removeStoreIds: [storeId] }),
+    });
+    setSavingStoreId(null);
     load();
   }
 
@@ -337,97 +332,103 @@ export function UserDetailsDrawer({
             )}
           </Section>
 
-          {/* ── Assigned stores ── */}
+          {/* ── Store Access ──────────────────────────────────────────────
+              A check/uncheck list of EVERY store: ticked = this user can work
+              in that store. The HOME store is always ticked + locked (relocate
+              it via "Change store"). Ticking grants a user_stores row; unticking
+              revokes it. This is how you give "full access, but only these
+              stores" without granting all-shops. */}
           <Section
             icon={Store}
-            title={`Assigned Store${stores.length === 1 ? "" : "s"}`}
+            title="Store Access"
             action={canChangeStore ? (
               <button
                 onClick={() => onChangeStore!(d)}
                 className="inline-flex items-center gap-1 text-[12px] font-medium text-[#4361EE] hover:underline"
               >
-                <Pencil className="h-3 w-3" /> Change store
+                <Pencil className="h-3 w-3" /> Change home store
               </button>
             ) : undefined}
           >
-            {stores.length === 0 ? (
-              <p className="text-[12.5px] text-muted-foreground">No store assigned.</p>
-            ) : (
-              <div className="space-y-2">
-                {stores.map((s) => {
-                  const sRole = s.roleId ? roles.find((r) => r.id === s.roleId) : null;
-                  return (
+            {!canManageStoreAccess ? (
+              // Read-only view (single-store org, or no store-assign authority).
+              stores.length === 0 ? (
+                <p className="text-[12.5px] text-muted-foreground">No store assigned.</p>
+              ) : (
+                <div className="space-y-2">
+                  {stores.map((s) => (
                     <div key={s.id} className="flex items-center gap-2.5 rounded-xl border border-border bg-muted/20 px-3 py-2.5">
                       <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">
                         {(s.code || s.name).slice(0, 2).toUpperCase()}
                       </span>
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-[13px] font-semibold leading-tight">{s.name}</p>
-                        <p className="text-[11px] text-muted-foreground">
-                          {s.isHome ? "Home store" : sRole ? `${sRole.label} · this store` : "Additional access"}
-                        </p>
+                        <p className="text-[11px] text-muted-foreground">{s.isHome ? "Home store" : "Additional access"}</p>
                       </div>
-                      {s.isHome ? (
+                      {s.isHome && (
                         <span className="inline-flex items-center gap-1 rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">
                           <Home className="h-3 w-3" /> Home
                         </span>
-                      ) : canManageStoreAccess && !isSelf ? (
-                        <button
-                          onClick={() => revokeStore(s.id)}
-                          disabled={savingStore}
-                          title="Remove store access"
-                          className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-zinc-400 transition hover:bg-rose-50 hover:text-rose-600 disabled:opacity-50"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </button>
-                      ) : null}
+                      )}
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* Add additional store access (multi-store). */}
-            {canManageStoreAccess && !isSelf && (
-              <div className="pt-1">
-                {addingStore ? (
-                  <div className="rounded-xl border border-border bg-muted/20 p-2.5">
-                    <div className="mb-1.5 flex items-center justify-between">
-                      <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Grant access to</p>
-                      <button onClick={() => setAddingStore(false)} className="text-zinc-400 hover:text-zinc-600"><X className="h-3.5 w-3.5" /></button>
-                    </div>
-                    {addableStores.length === 0 ? (
-                      <p className="px-1 py-1 text-[12px] text-muted-foreground">This user already has access to every store.</p>
-                    ) : (
-                      <div className="max-h-[200px] space-y-1 overflow-y-auto">
-                        {addableStores.map((s) => (
-                          <button
-                            key={s.id}
-                            onClick={() => grantStore(s.id)}
-                            disabled={savingStore}
-                            className="flex w-full items-center gap-2.5 rounded-lg border border-border bg-card px-2.5 py-2 text-left transition hover:border-[#4361EE]/40 hover:bg-[#EEF1FD]/30 disabled:opacity-50"
-                          >
-                            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">
-                              {(s.code || s.name).slice(0, 2).toUpperCase()}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{s.name}</span>
-                            {!s.isActive && <span className="shrink-0 text-[10px] text-amber-600">Inactive</span>}
-                            <Plus className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" />
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setAddingStore(true)}
-                    disabled={addableStores.length === 0}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-dashed border-[#4361EE]/40 px-3 py-2 text-[12px] font-medium text-[#4361EE] transition hover:bg-[#EEF1FD]/40 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> {addableStores.length === 0 ? "All stores granted" : "Add store access"}
-                  </button>
-                )}
-              </div>
+                  ))}
+                </div>
+              )
+            ) : (
+              <>
+                <p className="text-[11.5px] leading-relaxed text-muted-foreground">
+                  Tick the stores {isSelf ? "you" : d.name.split(" ")[0]} can work in. The home store is always
+                  included — relocate it with &ldquo;Change home store&rdquo;.
+                </p>
+                <div className="max-h-[320px] space-y-1.5 overflow-y-auto pr-0.5">
+                  {allStores.map((s) => {
+                    const granted = assignedStoreIds.has(s.id);
+                    const isHome = homeStore?.id === s.id;
+                    const busy = savingStoreId === s.id;
+                    // Home store is locked on; self can't revoke their own access.
+                    const locked = isHome || (isSelf && granted);
+                    return (
+                      <label
+                        key={s.id}
+                        className={cn(
+                          "flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-sm transition",
+                          locked ? "cursor-default" : "cursor-pointer",
+                          granted ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border hover:bg-muted/50",
+                          busy && "opacity-60"
+                        )}
+                      >
+                        <Checkbox
+                          checked={granted}
+                          disabled={locked || busy}
+                          onChange={() => { if (!locked && !busy) toggleStore(s.id, !granted); }}
+                          aria-label={`${granted ? "Remove" : "Grant"} access to ${s.name}`}
+                        />
+                        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[10px] font-bold text-[#4361EE]">
+                          {(s.code || s.name).slice(0, 2).toUpperCase()}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-semibold leading-tight">{s.name}</p>
+                          <p className="text-[11px] text-muted-foreground">
+                            {isHome ? "Home store · always included" : granted ? "Has access" : "No access"}
+                          </p>
+                        </div>
+                        {busy ? (
+                          <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#4361EE]" />
+                        ) : isHome ? (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-[#EEF1FD] px-2 py-0.5 text-[10px] font-semibold text-[#4361EE]">
+                            <Home className="h-3 w-3" /> Home
+                          </span>
+                        ) : !s.isActive ? (
+                          <span className="shrink-0 text-[10px] font-medium text-amber-600">Inactive</span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                  {allStores.length === 0 && (
+                    <p className="text-[12.5px] text-muted-foreground">No stores available.</p>
+                  )}
+                </div>
+              </>
             )}
           </Section>
 

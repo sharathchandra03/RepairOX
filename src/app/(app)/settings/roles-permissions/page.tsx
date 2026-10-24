@@ -10,7 +10,7 @@ import {
   Mail, UserCog, Plus, MapPin, KeyRound, MoreHorizontal, Power, Ban, Phone,
   Sparkles, Home, Ticket, FileText, Footprints, ClipboardList, Truck,
   BookUser, UsersRound, IndianRupee, BarChart3, Settings, Lock, Pencil, CircleUser,
-  Headset, UserCheck,
+  Headset, UserCheck, Check, Store,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -292,6 +292,7 @@ function RolesPermissionsInner() {
               activeRoleId={activeRoleId}
               setActiveRoleId={setActiveRoleId}
               updateRoleWorkspaces={updateRoleWorkspaces}
+              setActiveTab={setTab}
             />
           )}
           {tab === "users" && (
@@ -362,9 +363,12 @@ function RolesTab({
   setStaffStatus: ReturnType<typeof usePermissions>["setStaffStatus"];
   toggleLogin: ReturnType<typeof usePermissions>["toggleLogin"];
 }) {
-  const { grants, currentUser, canDeleteRole, deleteRole, isCustomRole } = usePermissions();
+  const { grants, currentUser, canDeleteRole, deleteRole, isCustomRole, updateRoleMeta, can } = usePermissions();
   const selfEmail = currentUser?.email ?? "";
   const [addOpen, setAddOpen] = useState(false);
+  // Inline role rename (name + description). Platform Owner is never renamable.
+  const [editingMeta, setEditingMeta] = useState(false);
+  const [metaDraft, setMetaDraft] = useState({ label: "", summary: "" });
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletedToast, setDeletedToast] = useState<string | null>(null);
   const [detailView, setDetailView] = useState<"members" | "permissions">("members");
@@ -386,6 +390,13 @@ function RolesTab({
     const id = onAddRole({ label: input.label, summary: input.summary, workspaces: input.workspaces, permissions: [] });
     setActiveRoleId(id);
     setAddOpen(false);
+  }
+
+  function saveMeta() {
+    const label = metaDraft.label.trim();
+    if (!label) return;
+    updateRoleMeta(active.id, { label, summary: metaDraft.summary.trim() });
+    setEditingMeta(false);
   }
 
   function handleDeleteRole(reassignTo?: string) {
@@ -508,9 +519,54 @@ function RolesTab({
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl brand-gradient text-white shadow-glow">
                 {(() => { const Icon = ROLE_ICON[active.id] ?? Users; return <Icon className="h-5 w-5" />; })()}
               </span>
-              <div>
-                <h2 className="font-display text-xl font-extrabold tracking-tight">{active.label}</h2>
-                <p className="mt-1 max-w-lg text-sm text-zinc-600">{active.summary}</p>
+              <div className="min-w-0">
+                {editingMeta ? (
+                  <div className="space-y-2">
+                    <Input
+                      autoFocus
+                      value={metaDraft.label}
+                      onChange={(e) => setMetaDraft((p) => ({ ...p, label: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveMeta();
+                        if (e.key === "Escape") setEditingMeta(false);
+                      }}
+                      placeholder="Role name"
+                      className="h-10 text-[15px] font-semibold"
+                    />
+                    <Input
+                      value={metaDraft.summary}
+                      onChange={(e) => setMetaDraft((p) => ({ ...p, summary: e.target.value }))}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") saveMeta();
+                        if (e.key === "Escape") setEditingMeta(false);
+                      }}
+                      placeholder="Description (optional)"
+                      className="h-9 text-[13px]"
+                    />
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <Button size="sm" className="gap-1.5" disabled={!metaDraft.label.trim()} onClick={saveMeta}>
+                        <Check className="h-3.5 w-3.5" /> Save
+                      </Button>
+                      <Button size="sm" variant="ghost" onClick={() => setEditingMeta(false)}>Cancel</Button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <h2 className="truncate whitespace-nowrap font-display text-base font-extrabold tracking-tight" title={active.label}>{active.label}</h2>
+                      {active.id !== "platform_owner" && can("manage_roles") && (
+                        <button
+                          onClick={() => { setMetaDraft({ label: active.label, summary: active.summary }); setEditingMeta(true); }}
+                          title="Rename role"
+                          className="grid h-6 w-6 shrink-0 place-items-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#3347D6]"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                    <p className="mt-1 max-w-lg text-[12.5px] leading-relaxed text-zinc-600">{active.summary}</p>
+                  </>
+                )}
               </div>
             </div>
             <div className="flex shrink-0 items-center gap-2">
@@ -1091,7 +1147,7 @@ function ModuleAccessRow({
 function MatrixTab({
   savedGrants, saveGrants, enterPreview, allRoles, addRole,
   isCustomRole, canDeleteRole, deleteRole, membersInRole, activeRoleId, setActiveRoleId,
-  updateRoleWorkspaces,
+  updateRoleWorkspaces, setActiveTab,
 }: {
   savedGrants: ReturnType<typeof usePermissions>["grants"];
   saveGrants: ReturnType<typeof usePermissions>["saveGrants"];
@@ -1105,6 +1161,7 @@ function MatrixTab({
   activeRoleId: string;
   setActiveRoleId: (id: string) => void;
   updateRoleWorkspaces: ReturnType<typeof usePermissions>["updateRoleWorkspaces"];
+  setActiveTab?: (tab: TabId) => void;
 }) {
   const [grants, setGrants] = useState<Record<string, Set<PermissionKey>>>(() => draftFromContext(savedGrants, allRoles));
   const [query, setQuery] = useState("");
@@ -1569,6 +1626,29 @@ function MatrixTab({
                 );
               })}
             </div>
+          </div>
+
+          {/* Store access — assigned PER USER, not per role (two users on the
+              same role can work different stores). The checklist lives on each
+              user in Users & Assignment → User details → Store Access. */}
+          <div className="rounded-2xl border border-dashed border-zinc-300 bg-card p-4">
+            <div className="flex items-center gap-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+                <Store className="h-3.5 w-3.5" />
+              </span>
+              <p className="text-[13px] font-semibold">Store access</p>
+            </div>
+            <p className="mt-2 text-[11.5px] leading-relaxed text-muted-foreground">
+              Which specific stores a user can work in is set <span className="font-semibold text-zinc-700">per user</span> —
+              so you can grant {activeRole.label} full capabilities but limit them to chosen stores. Tick the stores
+              on each person in Users &amp; Assignment.
+            </p>
+            <button
+              onClick={() => setActiveTab?.("users")}
+              className="mt-3 inline-flex items-center gap-1.5 text-[12px] font-semibold text-[#4361EE] hover:underline"
+            >
+              <Users className="h-3.5 w-3.5" /> Manage store access per user
+            </button>
           </div>
         </div>
       </div>

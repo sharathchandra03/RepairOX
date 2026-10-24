@@ -232,6 +232,10 @@ interface PermissionsContextValue {
   addRole: (input: AddRoleInput) => string;
   deleteRole: (roleId: string, reassignTo?: string) => DeleteRoleResult;
   updateRoleWorkspaces: (roleId: string, workspaces: WorkspaceId[]) => void;
+  /** Rename a role / edit its description. The role id (the stable key every
+   *  staff row + grant references) is NEVER changed — only the display label
+   *  and summary. Platform Owner can't be renamed. */
+  updateRoleMeta: (roleId: string, meta: { label?: string; summary?: string }) => void;
 
   team: TeamMember[];
   membersInRole: (roleId: string) => TeamMember[];
@@ -362,17 +366,38 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       else if (gmap[g.role_id] !== "all") (gmap[g.role_id] as PermissionKey[]).push(g.permission_key);
     }
 
-    const builtinIds = new Set(ROLES.map((r) => r.id));
+    const builtinById = new Map(ROLES.map((r) => [r.id, r]));
     const presentIds = new Set(dbRoles.map((r) => r.id));
+    // A role becomes an "override" (surfaced via customRoles) when it is a true
+    // custom role, OR when a built-in role's DB row differs from the hardcoded
+    // default — including a RENAMED label/summary or changed workspaces. Without
+    // this, a rename of a built-in role (e.g. "Shop Owner / Branch Manager")
+    // would be read back from the DB but then discarded in favour of the static
+    // default, making the new name "snap back".
     const custom: RoleDef[] = dbRoles
-      .filter((r) => r.is_custom || !builtinIds.has(r.id))
-      .map((r) => ({
-        id: r.id,
-        label: r.label,
-        summary: r.summary ?? "",
-        workspaces: (r.workspaces ?? []) as WorkspaceId[],
-        permissions: gmap[r.id] === "all" ? "all" : ((gmap[r.id] as PermissionKey[]) ?? []),
-      }));
+      .filter((r) => {
+        const builtIn = builtinById.get(r.id);
+        if (!r.is_custom && !builtIn) return true; // unknown id → treat as custom
+        if (r.is_custom) return true;
+        if (!builtIn) return true;
+        // Built-in: keep the DB row only when it overrides label/summary/workspaces.
+        const dbWs = JSON.stringify((r.workspaces ?? []) as WorkspaceId[]);
+        const defWs = JSON.stringify(builtIn.workspaces);
+        const labelChanged = typeof r.label === "string" && r.label.trim() !== "" && r.label !== builtIn.label;
+        const summaryChanged = (r.summary ?? "") !== (builtIn.summary ?? "");
+        return labelChanged || summaryChanged || dbWs !== defWs;
+      })
+      .map((r) => {
+        const builtIn = builtinById.get(r.id);
+        return {
+          id: r.id,
+          // Fall back to the built-in default for an empty DB value.
+          label: (typeof r.label === "string" && r.label.trim() !== "") ? r.label : (builtIn?.label ?? r.id),
+          summary: r.summary ?? builtIn?.summary ?? "",
+          workspaces: ((r.workspaces ?? builtIn?.workspaces ?? []) as WorkspaceId[]),
+          permissions: gmap[r.id] === "all" ? "all" : ((gmap[r.id] as PermissionKey[]) ?? []),
+        };
+      });
     const removed = ROLES.filter((r) => !presentIds.has(r.id)).map((r) => r.id);
 
     setGrants({ ...initialGrants(), ...gmap });
@@ -527,10 +552,19 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
 
   const allRoles = useMemo(
     () => {
-      const customIds = new Set(customRoles.map((r) => r.id));
-      const builtIn = ROLES.filter((r) => !customIds.has(r.id) && !removedBuiltInRoles.includes(r.id));
-      const custom = customRoles.filter((r) => !removedBuiltInRoles.includes(r.id));
-      return [...builtIn, ...custom];
+      const customById = new Map(customRoles.map((r) => [r.id, r]));
+      const builtinIds = new Set(ROLES.map((r) => r.id));
+      // Built-in roles keep their original ORDER and slot — but if a built-in
+      // has been overridden (e.g. RENAMED), use the override so the new name
+      // shows in place rather than jumping to the end of the list.
+      const builtIn = ROLES
+        .filter((r) => !removedBuiltInRoles.includes(r.id))
+        .map((r) => customById.get(r.id) ?? r);
+      // Purely custom roles (new ids) append after the built-ins.
+      const purelyCustom = customRoles.filter(
+        (r) => !builtinIds.has(r.id) && !removedBuiltInRoles.includes(r.id)
+      );
+      return [...builtIn, ...purelyCustom];
     },
     [customRoles, removedBuiltInRoles]
   );
@@ -648,6 +682,44 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
     });
     if (isSupabaseConfigured) {
       apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify({ workspaces }) })
+        .then(() => loadAccessFromDb());
+    }
+  }, [apiFetch, loadAccessFromDb]);
+
+  /* Rename a role / edit its description. Mirrors updateRoleWorkspaces: a
+     built-in role is cloned into customRoles (an override) so the new name
+     shows immediately; a custom role is updated in place. The role id is
+     immutable — assignments and grants (which reference the id) are untouched.
+     Platform Owner's identity is protected (server also rejects). */
+  const updateRoleMeta = useCallback((roleId: string, meta: { label?: string; summary?: string }) => {
+    if (roleId === "platform_owner") return;
+    const label = meta.label?.trim();
+    const summary = meta.summary?.trim();
+    if (meta.label !== undefined && !label) return; // never blank the name
+
+    setCustomRoles((prev) => {
+      const apply = (r: RoleDef): RoleDef => ({
+        ...r,
+        ...(meta.label !== undefined ? { label: label! } : {}),
+        ...(meta.summary !== undefined ? { summary: summary ?? "" } : {}),
+      });
+      const existing = prev.find((r) => r.id === roleId);
+      if (existing) return prev.map((r) => (r.id === roleId ? apply(r) : r));
+      const builtIn = ROLES.find((r) => r.id === roleId);
+      if (builtIn) return [...prev, apply(builtIn)];
+      return prev;
+    });
+
+    if (isSupabaseConfigured) {
+      // Send the role's full base shape so the server can UPSERT when a
+      // built-in role has no row yet (older seeds). The server ignores the
+      // extra fields when the row already exists.
+      const base = ROLES.find((r) => r.id === roleId);
+      const payload: { label?: string; summary?: string; workspaces?: WorkspaceId[] } = {};
+      if (meta.label !== undefined) payload.label = label!;
+      if (meta.summary !== undefined) payload.summary = summary ?? "";
+      if (base) payload.workspaces = base.workspaces;
+      apiFetch(`/api/roles/${roleId}`, { method: "PATCH", body: JSON.stringify(payload) })
         .then(() => loadAccessFromDb());
     }
   }, [apiFetch, loadAccessFromDb]);
@@ -1038,7 +1110,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       // In demo mode, expose demo team instead of real staff
       const exposedTeam = isDemoMode ? DEMO_TEAM : team;
       return {
-        grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
+        grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces, updateRoleMeta,
         team: exposedTeam, membersInRole: isDemoMode ? ((roleId: string) => DEMO_TEAM.filter((m) => m.roleId === roleId)) : membersInRole, getStaffById, setMemberRole, setMemberStore, deleteMember,
         addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
         authReady: hydrated, currentUser, login, logout, landingForRole,
@@ -1049,7 +1121,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       };
     },
     [
-      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces,
+      grants, saveGrants, allRoles, getRoleById, isCustomRole, canDeleteRole, addRole, deleteRole, updateRoleWorkspaces, updateRoleMeta,
       team, membersInRole, getStaffById, setMemberRole, setMemberStore, deleteMember,
       addStaff, updateStaff, updateProfile, apiFetch, resetPassword, setStaffStatus, toggleLogin,
       hydrated, currentUser, login, logout, landingForRole,

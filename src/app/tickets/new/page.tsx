@@ -2621,7 +2621,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 onChange={(e: any) => set("description", e.target.value)}
                 placeholder="Customer reported intermittent reboots when charging…"
                 rows={3}
-                className="min-h-0 h-[103px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+                className="min-h-0 h-[103px] border-amber-300 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
               />
             </Field>
           </div>
@@ -2632,33 +2632,36 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
                 onChange={(e: any) => set("notes", e.target.value)}
                 placeholder="Visible water damage on bottom left"
                 rows={3}
-                className="min-h-0 h-[82px] border-[#F0E68C]/70 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
+                className="min-h-0 h-[82px] border-amber-300 bg-[#FFFDE7] placeholder:text-foreground/50 focus:border-amber-400 focus:ring-amber-300/20 hover:border-amber-400/60"
               />
             </Field>
           </div>
           <div className="mt-auto pt-2">
-            {/* Estimate AMOUNT is entered here. Whether it is actually billed is
-                controlled by the "Add service estimate" toggle in the Parts step
-                (j.estimateEnabled). When off, the field is disabled + muted so
-                the value never silently counts. */}
+            {/* Estimate AMOUNT is entered here — always editable. Typing a value
+                auto-enables it (so it's included by default); the Parts step
+                still lets the user add it to the bill or leave it out. */}
             <Field label="Estimate">
               <Input
                 value={j.estimate}
-                onChange={(e: any) => set("estimate", e.target.value.replace(/[^0-9.]/g, ""))}
+                onChange={(e: any) => {
+                  const v = e.target.value.replace(/[^0-9.]/g, "");
+                  // Update the amount and auto-set the enabled flag so entering
+                  // a value includes it by default; clearing it disables.
+                  const updatedDevices = data.devices.map((dev: WizardDevice, i: number) =>
+                    i === activeIdx
+                      ? { ...dev, job: { ...dev.job, estimate: v, estimateEnabled: Number(v) > 0 } }
+                      : dev
+                  );
+                  setData({ ...data, devices: updatedDevices });
+                }}
                 placeholder="0"
                 inputMode="numeric"
-                disabled={!j.estimateEnabled}
-                className={cn(
-                  "h-[34px] tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]",
-                  !j.estimateEnabled && "opacity-60",
-                )}
+                className="h-[34px] tabular-nums pl-9 [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none [appearance:textfield]"
                 iconLeft={<IndianRupee className="h-3.5 w-3.5" />}
               />
             </Field>
             <p className="mt-1 text-[11px] leading-snug text-muted-foreground">
-              {j.estimateEnabled
-                ? "A service / labour charge added on top of the parts."
-                : "Turn on “Add service estimate” in the Parts step to include this."}
+              A service / labour charge. Choose whether to add it in the Parts step.
             </p>
           </div>
         </div>
@@ -3691,17 +3694,17 @@ function CustomerStep({ data, setData, onNext, isEdit }: any) {
    shadow + a coloured bottom edge) so the Identity / Address blocks read as
    distinct, polished sections. */
 const CUSTOMER_PANEL_ACCENT: Record<"blue" | "violet", {
-  strip: string; chip: string; headerBar: string; headerEdge: string; title: string;
+  frame: string; chip: string; headerBar: string; headerEdge: string; title: string;
 }> = {
   blue: {
-    strip: "bg-gradient-to-b from-[#4361EE] to-[#3347D6]",
+    frame: "border-l-[#4361EE] border-b-[#4361EE] border-r-border border-t-border",
     chip: "bg-gradient-to-br from-[#4361EE] to-[#3347D6] text-white shadow-[0_4px_10px_-2px_rgba(67,97,238,0.5)]",
     headerBar: "bg-gradient-to-r from-[#EEF1FD] via-[#F3F6FF] to-transparent",
     headerEdge: "border-b-[#4361EE]/25",
     title: "text-[#2A3BB5]",
   },
   violet: {
-    strip: "bg-gradient-to-b from-violet-500 to-violet-600",
+    frame: "border-l-violet-500 border-b-violet-500 border-r-border border-t-border",
     chip: "bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-[0_4px_10px_-2px_rgba(139,92,246,0.5)]",
     headerBar: "bg-gradient-to-r from-violet-100 via-violet-50 to-transparent",
     headerEdge: "border-b-violet-500/25",
@@ -3720,9 +3723,12 @@ function CustomerPanel({
 }) {
   const a = CUSTOMER_PANEL_ACCENT[accent];
   return (
-    <div className="group relative overflow-hidden rounded-2xl border border-border bg-card shadow-[0_2px_4px_rgba(20,30,80,0.05),0_18px_40px_-20px_rgba(20,30,80,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(20,30,80,0.07),0_26px_55px_-22px_rgba(20,30,80,0.42)]">
-      {/* Left accent strip (slightly wider for a stronger 3D edge) */}
-      <span className={cn("absolute inset-y-0 left-0 w-1.5", a.strip)} />
+    <div className="group relative rounded-2xl bg-card shadow-[0_2px_4px_rgba(20,30,80,0.05),0_18px_40px_-20px_rgba(20,30,80,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(20,30,80,0.07),0_26px_55px_-22px_rgba(20,30,80,0.42)]">
+      {/* Accent frame — a single rounded element hugging the left + bottom edges
+          so the accent follows the card's exact corner radius (no sharp notch) */}
+      <span className={cn("pointer-events-none absolute inset-0 rounded-2xl border-l-[6px] border-b-[6px] border-r border-t", a.frame)} />
+      {/* Inner surface — clips the content to the same rounded corners */}
+      <div className="relative overflow-hidden rounded-2xl">
       {/* Highlighted header bar — tinted gradient + coloured bottom edge */}
       <div className={cn("flex items-center gap-3 border-b-2 px-4 py-3.5 pl-5 sm:px-5 sm:pl-6", a.headerBar, a.headerEdge)}>
         <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl", a.chip)}>
@@ -3733,7 +3739,8 @@ function CustomerPanel({
           {subtitle && <p className="text-[11px] font-medium text-muted-foreground">{subtitle}</p>}
         </div>
       </div>
-      <div className="px-4 py-4 pl-5 sm:px-5 sm:pl-6">{children}</div>
+      <div className="px-4 pt-4 pb-[23px] pl-5 sm:px-5 sm:pl-6">{children}</div>
+      </div>
     </div>
   );
 }

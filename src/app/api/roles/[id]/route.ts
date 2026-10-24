@@ -13,7 +13,54 @@ export async function PATCH(req: Request, { params }: { params: { id: string } }
   const { admin, user, roleId: callerRoleId, permissions: callerPerms } = guard;
 
   const body = await req.json();
-  const { permissions, workspaces } = body ?? {};
+  const { permissions, workspaces, label, summary } = body ?? {};
+
+  // ── Metadata update (rename the role / edit its description) ──────────────
+  // Renaming a role NEVER changes its permission grants or who is assigned to
+  // it — the role id (the stable key every staff row / grant references) is
+  // immutable; only the human-facing label/summary change. Platform Owner's
+  // identity is protected so the always-full-access owner can't be disguised.
+  //
+  // This branch fires whenever a label/summary is present and we're NOT
+  // changing permissions. It UPSERTS: a built-in role that was seeded before
+  // this feature (or any row that doesn't exist yet) is inserted with its
+  // base fields so the rename always lands — never a silent zero-row update.
+  if (permissions === undefined && (label !== undefined || summary !== undefined)) {
+    if (params.id === "platform_owner") {
+      return NextResponse.json({ ok: false, error: "Platform Owner can't be renamed." }, { status: 400 });
+    }
+
+    const meta: Record<string, unknown> = {};
+    if (label !== undefined) {
+      const trimmed = String(label).trim();
+      if (!trimmed) return NextResponse.json({ ok: false, error: "Role name can't be empty." }, { status: 400 });
+      meta.label = trimmed;
+    }
+    if (summary !== undefined) meta.summary = String(summary).trim() || null;
+    if (Array.isArray(workspaces)) meta.workspaces = workspaces;
+
+    // Does the row already exist?
+    const { data: existing } = await admin
+      .from("roles").select("id").eq("id", params.id).maybeSingle();
+
+    if (existing) {
+      const { error } = await admin.from("roles").update(meta).eq("id", params.id);
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    } else {
+      // Insert the role row (built-in override that was never persisted). Mark
+      // it is_custom:false so it keeps its built-in identity — only its
+      // label/summary/workspaces override the hardcoded defaults.
+      const { error } = await admin.from("roles").insert({
+        id: params.id,
+        label: (meta.label as string) ?? params.id,
+        summary: (meta.summary as string | null) ?? null,
+        workspaces: Array.isArray(workspaces) ? workspaces : [],
+        is_custom: false,
+      });
+      if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+    return NextResponse.json({ ok: true });
+  }
 
   // Workspaces-only update (no permission grant change).
   if (permissions === undefined && Array.isArray(workspaces)) {

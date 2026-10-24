@@ -1487,7 +1487,8 @@ export default function TicketsPage() {
 /**
  * InvoiceCoverageCheck — the small circular check next to a Ticket ID that
  * signals how much of a multi-device ticket has been invoiced:
- *   • "full"    → BLUE check   — every eligible device is invoiced.
+ *   • "full"    → GREEN check  — every eligible device is invoiced (matches the
+ *                                Lead table's "invoice created" green tick).
  *   • "partial" → AMBER check  — some, but not all, eligible devices invoiced.
  *   • "none"    → nothing rendered.
  * Same check shape/size as before — only the semantic colour + tooltip change.
@@ -1506,7 +1507,7 @@ function InvoiceCoverageCheck({ coverage, size = "sm" }: { coverage: TicketInvoi
       style={{
         background: partial
           ? "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)"
-          : "linear-gradient(135deg, #4361EE 0%, #3049C6 100%)",
+          : "linear-gradient(135deg, #10B981 0%, #059669 100%)",
       }}
       title={label}
       aria-label={label}

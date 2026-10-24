@@ -23,12 +23,12 @@
   --popover-foreground: 228 25% 12%;
 
   --border: 228 20% 88%;
-  /* Form-input idle border — deliberately a touch DARKER than the generic
-     --border so data-entry controls read with better definition/contrast,
-     WITHOUT affecting card/table/divider borders (which keep --border). Same
-     thickness/radius/shape; only the colour is darker. Hover/focus/error keep
-     their existing RepairOX treatments. */
-  --input-border: 228 16% 76%;
+  /* Form-input idle border — a soft "light black" line so every data-entry
+     control (inputs, selects, textareas, pill fields) reads with a clear,
+     visible outline, WITHOUT affecting card/table/divider borders (which keep
+     --border). Same thickness/radius/shape; only the colour is darker.
+     Hover/focus/error keep their existing RepairOX treatments. */
+  --input-border: 220 14% 60%;
   --ring: 231 80% 57%;
 
   --primary: 231 80% 57%;
@@ -129,7 +129,7 @@
   --popover-foreground: 210 24% 94%;
 
   --border: 223 16% 20%;           /* soft, low-contrast gray/blue borders */
-  --input-border: 223 16% 32%;     /* form-input idle border — a touch darker */
+  --input-border: 223 12% 46%;     /* form-input idle border — clearly visible soft line */
   --ring: 231 85% 66%;             /* focus ring — bright RepairOX blue */
 
   /* Primary — keep the RepairOX royal blue, brightened slightly for contrast */
