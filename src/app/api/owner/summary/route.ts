@@ -57,7 +57,20 @@ export async function GET(req: Request) {
     .order("created_at", { ascending: true });
   if (bErr) return NextResponse.json({ ok: false, error: bErr.message }, { status: 400 });
 
-  const branchList = branches ?? [];
+  let branchList = branches ?? [];
+
+  // ── Constrain to the caller's accessible stores ────────────────────────────
+  // True org owners see every store. Everyone else is limited to the stores
+  // they are actually assigned to (home branch + active user_stores grants) —
+  // so a user given "full access but only 2 stores" sees a consolidated view of
+  // just those 2, never the whole org. This mirrors the DB auth_store_ids()
+  // rule (migration 0081). A caller with NO explicit grants keeps the prior
+  // org-wide behaviour (no checklist set = all stores).
+  const accessible = await callerAccessibleBranchIds(admin, user.id, orgId);
+  if (accessible !== null) {
+    branchList = branchList.filter((b) => accessible.has(b.id));
+  }
+
   const branchIds = branchList.map((b) => b.id);
 
   // Pull the compact fields we need per table, scoped to this org. We select
@@ -205,4 +218,53 @@ export async function GET(req: Request) {
   );
 
   return NextResponse.json({ ok: true, stores, totals, days });
+}
+
+/* The set of branch ids the caller may see in a CONSOLIDATED view, or `null`
+   when they should see every store in the org.
+
+   • TRUE org owners (master_shop_owner / platform_owner / developer_admin) →
+     null (all stores).
+   • A caller WITH active user_stores grants → home branch + those grants ONLY,
+     even if they hold multi_store_access (mirrors DB auth_store_ids / 0081).
+   • A caller with NO explicit grants → null (all stores — preserves the prior
+     "no checklist set = all stores" behaviour).
+
+   The service-role client bypasses RLS, so this reproduces the RLS scope by
+   hand for the consolidated route (same pattern the codebase uses elsewhere). */
+async function callerAccessibleBranchIds(
+  admin: import("@supabase/supabase-js").SupabaseClient,
+  authUserId: string,
+  orgId: string
+): Promise<Set<string> | null> {
+  const OWNER_ROLES = new Set(["master_shop_owner", "platform_owner", "developer_admin"]);
+
+  const { data: me } = await admin
+    .from("staff")
+    .select("id, role_id, branch_id")
+    .eq("auth_user_id", authUserId)
+    .maybeSingle();
+  if (!me) return null; // can't resolve → don't over-restrict (RLS elsewhere guards)
+
+  if (me.role_id && OWNER_ROLES.has(me.role_id as string)) return null;
+
+  const grantIds = new Set<string>();
+  try {
+    const { data: grants } = await admin
+      .from("user_stores")
+      .select("branch_id, status")
+      .eq("staff_id", me.id)
+      .eq("status", "active");
+    for (const g of grants ?? []) if (g.branch_id) grantIds.add(g.branch_id as string);
+  } catch {
+    /* user_stores optional — treated as no grants below */
+  }
+
+  // No explicit checklist → unchanged org-wide behaviour.
+  if (grantIds.size === 0) return null;
+
+  // Explicit grants constrain scope (even with multi_store_access): home + grants.
+  const ids = new Set<string>(grantIds);
+  if (me.branch_id) ids.add(me.branch_id as string);
+  return ids;
 }

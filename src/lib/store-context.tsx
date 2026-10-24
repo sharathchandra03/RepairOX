@@ -192,17 +192,47 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     const all = branchRows.map(rowToStore);
 
-    // Owner / cross-branch → all stores.
-    if (canCrossBranch) {
+    // ── TRUE org owners always see every store ──────────────────────────────
+    // master_shop_owner / platform_owner / developer_admin manage the whole
+    // org (mirrors the DB is_admin()). Everyone else is resolved below.
+    const OWNER_ROLES = new Set(["master_shop_owner", "platform_owner", "developer_admin"]);
+    if (currentUser?.roleId && OWNER_ROLES.has(currentUser.roleId)) {
       return sortStores(all);
     }
 
-    // Otherwise: the user's own branch + any explicit user_stores grants.
-    const allowedIds = new Set<string>();
+    // ── Explicit per-user store grants (the Store Access checklist) ─────────
+    // Fetch these FIRST, because they CONSTRAIN scope even for a user who holds
+    // multi_store_access/full access. This is what makes "full access, but only
+    // these stores" work: a granted user is limited to home + grants; an
+    // ungranted cross-branch user still sees the whole org (unchanged default).
+    const grantIds = new Set<string>();
+    if (currentUser?.id) {
+      try {
+        const { data: grants, error: gErr } = await supabase
+          .from("user_stores")
+          .select("branch_id, status")
+          .eq("staff_id", currentUser.id)
+          .eq("status", "active");
+        if (!gErr && grants) for (const g of grants) grantIds.add(g.branch_id);
+      } catch {
+        /* user_stores not migrated yet — treated as "no grants" below. */
+      }
+    }
 
-    // 1) The staff row's assigned branch. Prefer the ROBUST relational
-    //    branch_id (never stale); fall back to matching the branch NAME only
-    //    when no id is present (legacy rows).
+    // A cross-branch user with NO explicit grants keeps the prior behaviour:
+    // the whole org (so nobody who was never given a checklist is locked out).
+    if (canCrossBranch && grantIds.size === 0) {
+      return sortStores(all);
+    }
+
+    // Otherwise: the user's own branch + any explicit user_stores grants ONLY —
+    // this applies EVEN when the user has multi_store_access, so an explicit
+    // checklist limits them to exactly those stores.
+    const allowedIds = new Set<string>(grantIds);
+
+    // The staff row's assigned branch. Prefer the ROBUST relational branch_id
+    // (never stale); fall back to matching the branch NAME only when no id is
+    // present (legacy rows).
     const myBranchId = currentUser?.branchId ?? null;
     const myBranchName = currentUser?.branch ?? null;
     if (myBranchId && all.some((s) => s.id === myBranchId)) {
@@ -212,26 +242,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (mine) allowedIds.add(mine.id);
     }
 
-    // 2) Explicit multi-store grants (optional table; tolerate absence).
-    if (currentUser?.id) {
-      try {
-        const { data: grants, error: gErr } = await supabase
-          .from("user_stores")
-          .select("branch_id, status")
-          .eq("staff_id", currentUser.id)
-          .eq("status", "active");
-        if (!gErr && grants) for (const g of grants) allowedIds.add(g.branch_id);
-      } catch {
-        /* user_stores not migrated yet — fall back to the single branch. */
-      }
-    }
-
     const scoped = all.filter((s) => allowedIds.has(s.id));
     // Safety: never leave a user with zero stores if their branch is unknown —
     // fall back to the first store so the app stays usable (RLS still guards
     // the data itself server-side).
     return sortStores(scoped.length > 0 ? scoped : all.slice(0, 1));
-  }, [canCrossBranch, currentUser?.branch, currentUser?.branchId, currentUser?.id]);
+  }, [canCrossBranch, currentUser?.branch, currentUser?.branchId, currentUser?.id, currentUser?.roleId]);
 
   /* Resolve the signed-in user's OWN assigned store id from the store list,
      using the robust branch_id first and the branch name as a fallback. This is
