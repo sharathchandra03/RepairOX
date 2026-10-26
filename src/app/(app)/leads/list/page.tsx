@@ -313,13 +313,22 @@ function LeadStatusTick({ wf, lead }: { wf: LeadWorkflow; lead?: Lead }) {
     const statusIsFollowUp = /follow/.test((lead?.status || "").toLowerCase());
     if (wf.action === "follow_up" || statusIsFollowUp) {
       return (
+        // Follow-up badge, warm-rose language (replaces the old violet). A pale
+        // fill washed the "FW" out, so we use a SATURATED rose gradient with
+        // white letters — the same high-contrast treatment the green/blue/orange
+        // conversion ticks use — plus a soft rose halo ring so it pops off the
+        // white row. Slightly larger (16px) + extrabold so the tiny "FW" reads.
         <span
-          className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full text-[6px] font-bold uppercase leading-none tracking-[-0.03em] text-white"
-          style={{ background: "linear-gradient(135deg, #7C5CFC 0%, #5B3FD6 100%)" }}
+          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[6.5px] font-extrabold uppercase text-white shadow-[0_0_0_2px_rgba(244,63,94,0.18)]"
+          style={{ background: "linear-gradient(135deg, #FB5581 0%, #E11D48 100%)" }}
           title="Follow-up in progress — the lead is being actively worked"
           aria-label="Follow-up in progress"
         >
-          FW
+          {/* The glyph is centered with flex; a 1px top nudge + a left pad equal
+              to the trailing letter-spacing optically centers "FW" in the tiny
+              circle (uppercase cap-height + letter-spacing otherwise bias it
+              up-left). */}
+          <span className="relative top-[0.5px] pl-[0.5px] leading-none tracking-[0.04em]">FW</span>
         </span>
       );
     }
@@ -839,10 +848,14 @@ function LeadValueCell({ lead }: { lead: Lead }) {
    tooltip. N/A stays a plain muted dash (never a tinted box). */
 function CommentCell({ text }: { text: string }) {
   if (!text?.trim()) return <EmptyDash />;
+  // Match the Notepad sticky-note colour system (notepad-widget.tsx): soft
+  // amber body + amber-200 border + the saturated amber-400 left accent stripe,
+  // with neutral foreground text (NOT amber-900) so it reads identically.
   return (
-    <div className="mr-2 flex min-h-[48px] w-full items-center rounded-lg border border-amber-200/70 bg-amber-50/70 px-2.5 py-1.5">
+    <div className="relative mr-2 flex min-h-[48px] w-full items-center overflow-hidden rounded-lg border border-amber-200/80 bg-amber-50/70 pl-3 pr-2.5 py-1.5">
+      <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-amber-400" />
       <p
-        className="line-clamp-2 w-full break-words whitespace-pre-line text-[13px] leading-snug text-amber-900/90"
+        className="line-clamp-2 w-full break-words whitespace-pre-line text-[13px] leading-snug text-foreground/90"
         title={text}
       >
         {text}

@@ -7,6 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import {
   ArrowRight, ArrowLeft, Check, Plus, Trash2, Copy, Save,
   User, FileText, Package, IndianRupee, StickyNote, ClipboardCheck, Sparkles, X, Search, Link2, PackageSearch, Wrench, Info,
+  Mail, Phone, Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea, Select, NumericInput } from "@/components/ui/input";
@@ -1206,48 +1207,54 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
     }));
   };
 
-  return (
-    <div className="mx-auto max-w-2xl rounded-2xl border border-black/15 bg-card shadow-card">
-      {/* Invoice Type — compact inline selector */}
-      <div className="border-b border-border px-6 py-5 sm:px-8">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-3">Invoice Type</p>
-        <div className="flex gap-2">
-          <button type="button" onClick={() => setType("retail")}
-            className={cn("flex items-center gap-2.5 rounded-lg border px-4 py-2.5 transition-all text-left flex-1", d.invoiceType === "retail" ? "border-[#4361EE] bg-indigo-50/60 shadow-sm" : "border-border hover:border-zinc-300")}>
-            <span className={cn("grid h-8 w-8 place-items-center rounded-lg text-xs font-bold", d.invoiceType === "retail" ? "bg-[#4361EE] text-white" : "bg-indigo-100 text-[#4361EE]")}>R</span>
-            <div>
-              <p className="text-[13px] font-semibold leading-tight">Retail Invoice</p>
-              <p className="text-[10px] text-muted-foreground">Individual / walk-in</p>
-            </div>
-          </button>
-          <button type="button" onClick={() => setType("business")}
-            className={cn("flex items-center gap-2.5 rounded-lg border px-4 py-2.5 transition-all text-left flex-1", d.invoiceType === "business" ? "border-[#4361EE] bg-indigo-50/60 shadow-sm" : "border-border hover:border-zinc-300")}>
-            <span className={cn("grid h-8 w-8 place-items-center rounded-lg text-xs font-bold", d.invoiceType === "business" ? "bg-[#4361EE] text-white" : "bg-emerald-100 text-emerald-700")}>B</span>
-            <div>
-              <p className="text-[13px] font-semibold leading-tight">Business Invoice</p>
-              <p className="text-[10px] text-muted-foreground">GST / company billing</p>
-            </div>
-          </button>
-        </div>
-      </div>
+  const isBiz = d.invoiceType === "business";
 
-      {/* Customer Info */}
-      <div className="px-6 py-8 sm:px-8">
-        <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground mb-5">Customer Information</p>
-        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          {/* Customer Name with inline search */}
-          <div className="space-y-1 relative">
-            <Label>Customer Name *</Label>
-            <Input
+  return (
+    <div className="mx-auto max-w-5xl">
+      {/* Top control bar — invoice type pills + inline customer search */}
+      <div className="mb-6 rounded-2xl border border-black/10 bg-card p-3.5 shadow-card sm:p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          {/* Retail / Business segmented toggle */}
+          <div className="flex shrink-0 items-center gap-2">
+            <div className="inline-flex rounded-full border border-border bg-muted p-1">
+              <button
+                type="button"
+                onClick={() => setType("retail")}
+                className={cn(
+                  "rounded-full px-4 py-1.5 text-[13px] font-semibold transition-all",
+                  !isBiz ? "bg-[#4361EE] text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Retail
+              </button>
+              <button
+                type="button"
+                onClick={() => setType("business")}
+                className={cn(
+                  "rounded-full px-4 py-1.5 text-[13px] font-semibold transition-all",
+                  isBiz ? "bg-[#4361EE] text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
+                )}
+              >
+                Business
+              </button>
+            </div>
+            <span className="hidden text-[12px] font-medium text-muted-foreground sm:inline">
+              {isBiz ? "GST — company billing" : "Retail — no GST"}
+            </span>
+          </div>
+
+          {/* Inline customer search */}
+          <div className="relative flex-1">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <input
               value={c.name}
-              onChange={(e: any) => { set("name", e.target.value); setShowResults(true); }}
+              onChange={(e) => { set("name", e.target.value); setShowResults(true); }}
               onFocus={() => setShowResults(true)}
-              placeholder="Type to search or enter name"
-              iconLeft={<Search className="h-3.5 w-3.5" />}
+              placeholder="Search existing customer…"
+              className="h-11 w-full rounded-xl border border-input bg-background pl-10 pr-4 text-sm outline-none transition focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15"
             />
-            {/* Autocomplete dropdown */}
             {showResults && results.length > 0 && (
-              <div className="absolute left-0 right-0 top-full z-30 mt-1 max-h-[240px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
+              <div className="absolute left-0 right-0 top-full z-30 mt-1.5 max-h-[260px] overflow-y-auto rounded-xl border border-border bg-card shadow-lg">
                 {results.slice(0, 6).map((cust) => (
                   <button
                     key={cust.id}
@@ -1280,18 +1287,71 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
               </div>
             )}
           </div>
-          <div className="space-y-1"><Label>Phone</Label><Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" /></div>
-          <div className="space-y-1"><Label>Alternate Number</Label><Input value={c.altPhone} onChange={(e: any) => set("altPhone", e.target.value)} placeholder="+91 …" /></div>
-          <div className="space-y-1"><Label>Email</Label><Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="customer@email.com" type="email" /></div>
-          {/* Company / Organization + GST Number — Business invoices only.
-              Like GST, the org name is a business-billing detail, so it stays
-              hidden for a Retail (individual / walk-in) invoice and appears as a
-              paired row only when Business is selected. */}
-          {d.invoiceType === "business" && (
-            <>
+        </div>
+      </div>
+
+      {/* Two-panel card layout — gradient headers */}
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+        {/* Customer details — blue */}
+        <div className="overflow-hidden rounded-2xl border border-[#4361EE]/40 bg-card shadow-card">
+          <div className="flex items-center gap-3 bg-gradient-to-r from-[#3B4FE0] to-[#4361EE] px-5 py-4 text-white sm:px-6">
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 ring-1 ring-white/25">
+              <User className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-[13px] font-bold uppercase tracking-wider leading-tight">Customer Details</p>
+              <p className="text-[11px] text-white/75">Who the invoice is for</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 gap-x-5 gap-y-4 p-5 sm:grid-cols-2 sm:p-6">
+            <div className="space-y-1 sm:col-span-2">
+              <Label>Customer Name *</Label>
+              <Input
+                value={c.name}
+                onChange={(e: any) => { set("name", e.target.value); setShowResults(false); }}
+                placeholder="Rahul Kapoor"
+                iconLeft={<User className="h-3.5 w-3.5" />}
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Contact Number</Label>
+              <Input value={c.phone} onChange={(e: any) => set("phone", e.target.value)} placeholder="+91 98456 12345" iconLeft={<Phone className="h-3.5 w-3.5" />} />
+            </div>
+            <div className="space-y-1">
+              <Label>Alternate Number</Label>
+              <Input value={c.altPhone} onChange={(e: any) => set("altPhone", e.target.value)} placeholder="+91 …" iconLeft={<Phone className="h-3.5 w-3.5" />} />
+            </div>
+            <div className="space-y-1 sm:col-span-2">
+              <Label>E-mail ID</Label>
+              <Input value={c.email} onChange={(e: any) => set("email", e.target.value)} placeholder="rahul@email.com" type="email" iconLeft={<Mail className="h-3.5 w-3.5" />} />
+            </div>
+          </div>
+        </div>
+
+        {/* Second panel — Business billing (orange) when Business, else a
+            friendly info panel for Retail. Fields only appear for Business so
+            no hidden/unsaved value ever lands on a Retail invoice. */}
+        <div className={cn(
+          "overflow-hidden rounded-2xl border bg-card shadow-card",
+          isBiz ? "border-[#F97316]/40" : "border-border"
+        )}>
+          <div className={cn(
+            "flex items-center gap-3 px-5 py-4 text-white sm:px-6",
+            isBiz ? "bg-gradient-to-r from-[#F97316] to-[#FB8C3C]" : "bg-gradient-to-r from-zinc-500 to-zinc-400"
+          )}>
+            <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 ring-1 ring-white/25">
+              <Building2 className="h-5 w-5" />
+            </span>
+            <div>
+              <p className="text-[13px] font-bold uppercase tracking-wider leading-tight">Business Billing</p>
+              <p className="text-[11px] text-white/80">{isBiz ? "GST & company details" : "Only for GST invoices"}</p>
+            </div>
+          </div>
+          {isBiz ? (
+            <div className="grid grid-cols-1 gap-x-5 gap-y-4 p-5 sm:p-6">
               <div className="space-y-1">
                 <Label>Company / Organization</Label>
-                <Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="e.g. Kapoor Electronics" />
+                <Input value={c.company} onChange={(e: any) => set("company", e.target.value)} placeholder="e.g. Kapoor Electronics" iconLeft={<Building2 className="h-3.5 w-3.5" />} />
               </div>
               <div className="space-y-1">
                 <Label>GST Number</Label>
@@ -1303,7 +1363,17 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
                   maxLength={15}
                 />
               </div>
-            </>
+            </div>
+          ) : (
+            <div className="flex h-[calc(100%-72px)] min-h-[160px] flex-col items-center justify-center gap-2 p-6 text-center">
+              <span className="grid h-12 w-12 place-items-center rounded-full bg-muted text-muted-foreground">
+                <Building2 className="h-6 w-6" />
+              </span>
+              <p className="text-sm font-semibold text-foreground">Retail invoice</p>
+              <p className="max-w-[240px] text-[12px] leading-relaxed text-muted-foreground">
+                No GST or company details needed. Switch to <span className="font-semibold text-foreground">Business</span> above to add billing info.
+              </p>
+            </div>
           )}
         </div>
       </div>
@@ -2219,22 +2289,21 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-1.5">
-                {/* ONE unified catalogue search over BOTH parts AND services.
-                    Results are differentiated by icon/tag; on select the item's
-                    `kind` routes it to the part vs service line builder, so the
-                    costing stays correct without separate buttons. */}
+                {/* Search Inventory — ONE unified catalogue search over BOTH
+                    parts AND services. Results are differentiated by icon/tag;
+                    on select the item's `kind` routes it to the part vs service
+                    line builder, so the costing stays correct without separate
+                    buttons. */}
                 <Button size="sm" variant={showInventorySearch ? "secondary" : "outline"} onClick={() => { setShowInventorySearch((v) => !v); }} className={showInventorySearch ? undefined : "border-[#4361EE]/30 hover:border-[#4361EE]/50"}>
-                  <Search className="h-3.5 w-3.5" /> Add Item
-                </Button>
-                <Button size="sm" variant="outline" onClick={addService} className="border-[#4361EE]/30 hover:border-[#4361EE]/50">
-                  <Plus className="h-3.5 w-3.5" /> Add Row
+                  <Search className="h-3.5 w-3.5" /> Search Inventory
                 </Button>
                 {/* Add Inventory (create a master record) — only when the user
                     holds an inventory create capability. Search/select stays
-                    available to any invoice user regardless. */}
+                    available to any invoice user regardless. Add Row (a manual
+                    free-text line) lives INSIDE the line-item box below. */}
                 <Can permission={CAP.inventory.create}>
                   <Button size="sm" onClick={() => { setAddInventorySeed(""); setShowAddInventory(true); }}>
-                    <Plus className="h-3.5 w-3.5" /> Add Inventory
+                    <Plus className="h-3.5 w-3.5" /> Add New Inventory
                   </Button>
                 </Can>
               </div>
@@ -2272,21 +2341,30 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
               {/* Line-item workspace */}
               {activeDevice.parts.length === 0 ? (
                 // Empty state — compact prompt only. The actions live in the
-                // section header above, so we DON'T repeat the three buttons
-                // here; a single "Search Inventory" link is enough to get going.
-                <button
-                  type="button"
-                  onClick={() => setShowInventorySearch(true)}
-                  className="flex w-full items-center justify-center gap-2.5 rounded-xl border border-dashed border-[#4361EE]/30 bg-card/60 px-4 py-4 text-center transition hover:border-[#4361EE]/50 hover:bg-[#EEF1FD]/40"
-                >
-                  <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-                    <Search className="h-4 w-4" />
-                  </span>
-                  <span className="text-left">
-                    <span className="block text-[13px] font-semibold text-foreground">No items added yet</span>
-                    <span className="block text-[11px] text-muted-foreground">Click to search the inventory and add an item.</span>
-                  </span>
-                </button>
+                // section header above, so we DON'T repeat the search/create
+                // buttons here; the prompt is a one-click way to open search.
+                // "Add Row" (a manual free-text line) lives INSIDE this box so
+                // it reads as part of the line-item workspace, not a header tool.
+                <div className="rounded-xl border border-dashed border-[#4361EE]/30 bg-card/60 p-3">
+                  <button
+                    type="button"
+                    onClick={() => setShowInventorySearch(true)}
+                    className="flex w-full items-center justify-center gap-2.5 rounded-lg px-4 py-4 text-center transition hover:bg-[#EEF1FD]/40"
+                  >
+                    <span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
+                      <Search className="h-4 w-4" />
+                    </span>
+                    <span className="text-left">
+                      <span className="block text-[13px] font-semibold text-foreground">No items added yet</span>
+                      <span className="block text-[11px] text-muted-foreground">Click to search the inventory and add an item.</span>
+                    </span>
+                  </button>
+                  <div className="mt-2 flex justify-center border-t border-dashed border-[#4361EE]/20 pt-2.5">
+                    <Button size="sm" variant="ghost" onClick={addService} className="text-[#4361EE] hover:bg-[#EEF1FD]/60">
+                      <Plus className="h-3.5 w-3.5" /> Add Row
+                    </Button>
+                  </div>
+                </div>
               ) : (
                 <div className="overflow-hidden rounded-xl border-2 border-zinc-300 bg-card">
                   {/* Table header */}
@@ -2326,6 +2404,13 @@ function StepProducts({ form, updateForm, showErrors = false }: { form: InvoiceF
                       </div>
                     </div>
                   ))}
+                  {/* Add Row (a manual free-text line) lives INSIDE the line-item
+                      box as a footer action, so it reads as part of the workspace. */}
+                  <div className="border-t border-zinc-300 px-3 py-2">
+                    <Button size="sm" variant="ghost" onClick={addService} className="text-[#4361EE] hover:bg-[#EEF1FD]/60">
+                      <Plus className="h-3.5 w-3.5" /> Add Row
+                    </Button>
+                  </div>
                 </div>
               )}
 

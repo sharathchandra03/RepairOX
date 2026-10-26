@@ -3142,7 +3142,7 @@ function PartsAssignment({ data, setData, onNext, isEdit }: any) {
           </Button>
           <Can permission={CAP.inventory.create}>
             <Button size="sm" variant="outline" onClick={() => { setAddInventorySeed(""); setShowAddInventory(true); }} className="border-[#4361EE]/30 hover:border-[#4361EE]/50">
-              <Plus className="h-3.5 w-3.5" /> Add Inventory
+              <Plus className="h-3.5 w-3.5" /> Add New Inventory
             </Button>
           </Can>
         </div>
@@ -3465,7 +3465,7 @@ function CustomerStep({ data, setData, onNext, isEdit }: any) {
   return (
     <div className={FORM_CARD_COMPACT}>
       {/* ── Top bar: type toggle + inline search, on a highlighted toolbar ── */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-[#4361EE]/20 bg-gradient-to-r from-[#EEF1FD] via-[#F3F6FF] to-white px-3.5 py-3 shadow-[0_2px_4px_rgba(20,30,80,0.05),0_14px_32px_-20px_rgba(67,97,238,0.4)] sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 rounded-2xl border border-black/30 bg-gradient-to-r from-[#EEF1FD] via-[#F3F6FF] to-white px-3.5 py-3 shadow-[0_2px_4px_rgba(20,30,80,0.05),0_14px_32px_-20px_rgba(67,97,238,0.4)] sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <SegmentedTabs
             value={data.contactType}
@@ -3652,7 +3652,7 @@ function CustomerStep({ data, setData, onNext, isEdit }: any) {
 
         {/* Address */}
         <CustomerPanel
-          accent="violet"
+          accent="orange"
           icon={StoreIcon}
           title="Address"
           subtitle={data.contactType === "business" ? "Billing & GST" : "Where to reach them"}
@@ -3692,29 +3692,31 @@ function CustomerStep({ data, setData, onNext, isEdit }: any) {
    highlighted header bar (tinted gradient + accent icon chip with its own
    shadow + a coloured bottom edge) so the Identity / Address blocks read as
    distinct, polished sections. */
-const CUSTOMER_PANEL_ACCENT: Record<"blue" | "violet", {
-  frame: string; chip: string; headerBar: string; headerEdge: string; title: string;
+const CUSTOMER_PANEL_ACCENT: Record<"blue" | "orange", {
+  frame: string; chip: string; headerBar: string; headerEdge: string; title: string; subtitle: string;
 }> = {
   blue: {
     frame: "border-l-[#4361EE] border-b-[#4361EE] border-r-border border-t-border",
-    chip: "bg-gradient-to-br from-[#4361EE] to-[#3347D6] text-white shadow-[0_4px_10px_-2px_rgba(67,97,238,0.5)]",
-    headerBar: "bg-gradient-to-r from-[#EEF1FD] via-[#F3F6FF] to-transparent",
-    headerEdge: "border-b-[#4361EE]/25",
-    title: "text-[#2A3BB5]",
+    chip: "bg-white/20 text-white ring-1 ring-inset ring-white/40",
+    headerBar: "bg-gradient-to-r from-[#4361EE] to-[#3347D6]",
+    headerEdge: "border-b-[#2A3BB5]",
+    title: "text-white",
+    subtitle: "text-white/80",
   },
-  violet: {
-    frame: "border-l-violet-500 border-b-violet-500 border-r-border border-t-border",
-    chip: "bg-gradient-to-br from-violet-500 to-violet-600 text-white shadow-[0_4px_10px_-2px_rgba(139,92,246,0.5)]",
-    headerBar: "bg-gradient-to-r from-violet-100 via-violet-50 to-transparent",
-    headerEdge: "border-b-violet-500/25",
-    title: "text-violet-700",
+  orange: {
+    frame: "border-l-orange-500 border-b-orange-500 border-r-border border-t-border",
+    chip: "bg-white/20 text-white ring-1 ring-inset ring-white/40",
+    headerBar: "bg-gradient-to-r from-orange-500 to-orange-600",
+    headerEdge: "border-b-orange-700",
+    title: "text-white",
+    subtitle: "text-white/80",
   },
 };
 
 function CustomerPanel({
   accent, icon: Icon, title, subtitle, children,
 }: {
-  accent: "blue" | "violet";
+  accent: "blue" | "orange";
   icon: any;
   title: string;
   subtitle?: string;
@@ -3725,7 +3727,7 @@ function CustomerPanel({
     <div className="group relative rounded-2xl bg-card shadow-[0_2px_4px_rgba(20,30,80,0.05),0_18px_40px_-20px_rgba(20,30,80,0.35)] transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_4px_8px_rgba(20,30,80,0.07),0_26px_55px_-22px_rgba(20,30,80,0.42)]">
       {/* Accent frame — a single rounded element hugging the left + bottom edges
           so the accent follows the card's exact corner radius (no sharp notch) */}
-      <span className={cn("pointer-events-none absolute inset-0 rounded-2xl border-l-[6px] border-b-[6px] border-r border-t", a.frame)} />
+      <span className={cn("pointer-events-none absolute inset-0 rounded-2xl border-l-[3px] border-b-[3px] border-r border-t", a.frame)} />
       {/* Inner surface — clips the content to the same rounded corners */}
       <div className="relative overflow-hidden rounded-2xl">
       {/* Highlighted header bar — tinted gradient + coloured bottom edge */}
@@ -3735,7 +3737,7 @@ function CustomerPanel({
         </span>
         <div className="min-w-0">
           <p className={cn("text-[12.5px] font-extrabold uppercase tracking-wider", a.title)}>{title}</p>
-          {subtitle && <p className="text-[11px] font-medium text-muted-foreground">{subtitle}</p>}
+          {subtitle && <p className={cn("text-[11px] font-medium", a.subtitle)}>{subtitle}</p>}
         </div>
       </div>
       <div className="px-4 pt-4 pb-[23px] pl-5 sm:px-5 sm:pl-6">{children}</div>

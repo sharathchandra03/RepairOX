@@ -5,9 +5,11 @@
 
    Opens the CANONICAL Inventory Master create form (InventoryItemFields) inside
    the shared RoxCenteredForm shell so a new Inventory Master record can be
-   created WITHOUT leaving the Create Invoice flow. It persists through the same
-   DB-first path as the Inventory module (useStore().addInventoryItem) — there
-   is no invoice-only inventory record. On success it returns the created
+   created WITHOUT leaving the Create Invoice / Ticket flow. It persists through
+   the same DB-first path as the Inventory module (useStore().addInventoryItem) —
+   there is no invoice-only inventory record, and a part created here may carry
+   an opening stock quantity through the canonical `opening` side-channel just
+   like the Inventory → Add Item page. On success it returns the created
    InventoryItem so the caller can optionally add it as an invoice line item.
 
    This modal is DISTINCT from adding an invoice line item:
@@ -94,11 +96,13 @@ export function AddInventoryModal({
     if (err) { toast.error(err); return; }
     setSaving(true);
     try {
-      // The modal hides opening-stock inputs, so `opening` is always undefined
-      // (invoice flows never establish stock — FR-8/AC-9). A cost-authorized
-      // creator still forwards `cost`.
-      const { item, cost } = buildInventoryItem(values);
-      await addInventoryItem(item, { cost });
+      // A part may carry an opening stock quantity entered here; it flows through
+      // the canonical `opening = {qty, unitCost}` side-channel → the atomic
+      // post_opening_stock RPC (ledger layer + Inward movement + master balance),
+      // exactly like the Inventory → Add Item page. A cost-authorized creator
+      // also forwards `cost`. Services never produce an opening layer.
+      const { item, cost, opening } = buildInventoryItem(values);
+      await addInventoryItem(item, { cost, opening });
       toast.success(`${item.name} added to Inventory Master`);
       onCreated?.(item);
       onClose();
@@ -129,7 +133,7 @@ export function AddInventoryModal({
         </>
       }
     >
-      <InventoryItemFields values={values} onChange={patch} canEdit={canCreate} hideOpeningStock invalidFields={invalid} />
+      <InventoryItemFields values={values} onChange={patch} canEdit={canCreate} invalidFields={invalid} />
     </RoxCenteredForm>
   );
 }

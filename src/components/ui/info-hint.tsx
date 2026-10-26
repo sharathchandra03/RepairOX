@@ -1,114 +1,119 @@
 "use client";
 
-/* ─── InfoHint — the canonical click-to-reveal "(i)" helper ───────────────
-   A compact info icon that reveals a short explanation in a popover on click.
-   Use it INSTEAD of a long helper paragraph next to / below a field, pill or
-   label — it keeps dense forms clean while the detail stays one click away.
+/* ──────────────────────────────────────────────────────────────────────────
+   RepairOX — InfoHint: a compact (i) tooltip for field help text.
 
-   Usage:
-     <Label className="flex items-center gap-1.5">
-       Creation Date Back-dating Limit (days)
-       <InfoHint>How far back staff may set an invoice's Creation Date…</InfoHint>
-     </Label>
+   Use this to keep a field label short while still offering the full
+   explanation on demand. When a hint is long enough to push a field's label
+   onto a second line (which breaks the baseline alignment of a row of fields),
+   render the hint inside an InfoHint next to the label instead of as an inline
+   sub-line.
 
-   The content may be a string or any React node. The popover is portalled to
-   <body> and positioned from the trigger's live rect, so it never clips inside
-   an overflow-hidden card and never disturbs the field's layout.
+   Why a portal: the tooltip is often rendered inside a modal/drawer body that
+   is `overflow-y-auto` / `overflow-hidden`, which would clip a normal absolutely
+   positioned bubble. The bubble is therefore portalled to <body> and positioned
+   from the trigger's live bounding rect. It flips above/below depending on the
+   available space, and is clamped to the viewport horizontally.
+
+   UX: compact, readable, dark surface + white text (matching SidebarTooltip),
+   a small open delay to avoid flicker, opens on hover AND keyboard focus, and
+   closes on Escape / blur / pointer-leave. Accessible: the trigger is a real
+   <button> with an aria-label and the bubble has role="tooltip".
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useState, useRef, useCallback, useEffect, type ReactNode } from "react";
+import { useCallback, useId, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import { Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export function InfoHint({
+  content,
   children,
   label = "More information",
   className,
+  delay = 90,
 }: {
-  children: ReactNode;
+  /** The help text (or rich node) shown inside the bubble. Either `content` or
+   *  `children` may be used — `children` is the common call-site form. */
+  content?: ReactNode;
+  /** Alias for `content` so <InfoHint>…</InfoHint> works. */
+  children?: ReactNode;
   /** Accessible label for the trigger button. */
   label?: string;
+  /** Extra classes for the trigger button. */
   className?: string;
+  delay?: number;
 }) {
-  const [open, setOpen] = useState(false);
-  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const body = content ?? children;
+  const id = useId();
+  const [coords, setCoords] = useState<{ top: number; left: number; placement: "top" | "bottom" } | null>(null);
   const btnRef = useRef<HTMLButtonElement | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const place = useCallback(() => {
     const el = btnRef.current;
     if (!el) return;
     const r = el.getBoundingClientRect();
-    // Positioned just below the icon, left-aligned to it, clamped to the viewport.
-    const left = Math.min(Math.max(8, r.left), window.innerWidth - 272);
-    setCoords({ top: r.bottom + 8, left });
+    // Prefer below the icon; flip above when there isn't enough room.
+    const spaceBelow = window.innerHeight - r.bottom;
+    const placement: "top" | "bottom" = spaceBelow < 120 && r.top > spaceBelow ? "top" : "bottom";
+    const left = Math.min(Math.max(r.left + r.width / 2, 120), window.innerWidth - 120);
+    const top = placement === "bottom" ? r.bottom + 8 : r.top - 8;
+    setCoords({ top, left, placement });
   }, []);
 
-  const toggle = useCallback(() => {
-    setOpen((o) => {
-      const next = !o;
-      if (next) place();
-      return next;
-    });
-  }, [place]);
+  const show = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(place, delay);
+  }, [place, delay]);
 
-  // Close on outside click / Escape / scroll / resize.
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (btnRef.current && btnRef.current.contains(e.target as Node)) return;
-      const pop = document.getElementById("info-hint-popover");
-      if (pop && pop.contains(e.target as Node)) return;
-      setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
-    const onScrollOrResize = () => place();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    window.addEventListener("scroll", onScrollOrResize, true);
-    window.addEventListener("resize", onScrollOrResize);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onScrollOrResize, true);
-      window.removeEventListener("resize", onScrollOrResize);
-    };
-  }, [open, place]);
+  const hide = useCallback(() => {
+    if (timer.current) clearTimeout(timer.current);
+    setCoords(null);
+  }, []);
 
   return (
     <>
       <button
         ref={btnRef}
         type="button"
-        onClick={(e) => { e.stopPropagation(); e.preventDefault(); toggle(); }}
         aria-label={label}
-        aria-expanded={open}
+        aria-describedby={coords ? id : undefined}
+        onMouseEnter={show}
+        onMouseLeave={hide}
+        onFocus={place}
+        onBlur={hide}
+        onClick={(e) => { e.preventDefault(); coords ? hide() : place(); }}
+        onKeyDown={(e) => { if (e.key === "Escape") hide(); }}
         className={cn(
-          "inline-grid h-4 w-4 shrink-0 place-items-center rounded-full text-[#4361EE] transition hover:bg-[#4361EE]/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/30",
-          open && "bg-[#4361EE]/10",
+          "inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-muted-foreground/70 transition-colors",
+          "hover:text-[#4361EE] focus:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/25",
           className,
         )}
       >
-        <Info className="h-3.5 w-3.5" strokeWidth={2.25} />
+        <Info className="h-3.5 w-3.5" />
       </button>
-
       {typeof document !== "undefined" &&
         createPortal(
           <AnimatePresence>
-            {open && coords && (
+            {coords && (
               <motion.div
-                id="info-hint-popover"
-                initial={{ opacity: 0, y: -4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.15, ease: [0.22, 1, 0.36, 1] }}
+                id={id}
                 role="tooltip"
-                onMouseDown={(e) => e.stopPropagation()}
-                style={{ position: "fixed", top: coords.top, left: coords.left }}
-                className="z-[10060] w-64 rounded-xl bg-slate-900 px-3 py-2.5 text-[12px] font-medium leading-relaxed text-white/90 shadow-[0_12px_32px_-8px_rgba(15,23,42,0.5)] ring-1 ring-white/10"
+                initial={{ opacity: 0, y: coords.placement === "bottom" ? -4 : 4 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: coords.placement === "bottom" ? -4 : 4 }}
+                transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
+                style={{
+                  position: "fixed",
+                  top: coords.top,
+                  left: coords.left,
+                  transform: `translateX(-50%)${coords.placement === "top" ? " translateY(-100%)" : ""}`,
+                }}
+                className="pointer-events-none z-[10060] max-w-[240px] rounded-lg bg-slate-900 px-2.5 py-1.5 text-[11.5px] font-medium leading-snug text-white shadow-[0_8px_24px_-6px_rgba(15,23,42,0.45)] ring-1 ring-white/10"
               >
-                {children}
+                {body}
               </motion.div>
             )}
           </AnimatePresence>,

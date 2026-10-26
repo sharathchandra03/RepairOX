@@ -37,6 +37,7 @@
 import { useMemo, useState } from "react";
 import { Wand2, Package, IndianRupee, Boxes, Info, Wrench, Lock, ChevronDown, Truck } from "lucide-react";
 import { Input, Label, Select, type FieldAccent } from "@/components/ui/input";
+import { InfoHint } from "@/components/ui/info-hint";
 import { Button } from "@/components/ui/button";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { SectionCard, HealthBadge } from "@/components/inventory/widgets";
@@ -358,20 +359,22 @@ function Field({
   accent?: FieldAccent;
 }) {
   return (
-    // Natural height: label (+ optional hint/required line) directly above the
-    // pill with a small consistent gap. Row-level alignment is handled by the
-    // grid (items-end) so a hinted field and a non-hinted field in the same row
-    // keep their pills on the same baseline.
+    // Fixed single-line header (label + optional (i) hint) directly above the
+    // pill. Keeping the hint inside an (i) tooltip — instead of a sub-line —
+    // means a hinted field and a non-hinted field keep an IDENTICAL header
+    // height, so every pill in a row stays baseline-aligned regardless of hint
+    // length. The required-error note is the only thing allowed to add a line.
     <div className="flex flex-col gap-1.5" data-field={fieldKey}>
       <div className="flex flex-col gap-0.5">
-        <Label className={cn("leading-tight", invalid ? "text-rose-600" : accent && ACCENT_LABEL[accent])}>
-          {label}
-          {required && <span className="ml-0.5 text-rose-500">*</span>}
-        </Label>
-        {invalid ? (
+        <div className="flex items-center gap-1">
+          <Label className={cn("leading-tight", invalid ? "text-rose-600" : accent && ACCENT_LABEL[accent])}>
+            {label}
+            {required && <span className="ml-0.5 text-rose-500">*</span>}
+          </Label>
+          {hint && <InfoHint content={hint} label={`About ${label}`} />}
+        </div>
+        {invalid && (
           <span className="text-[11px] leading-tight font-medium text-rose-600">This field is required</span>
-        ) : (
-          hint && <span className="truncate text-[11px] leading-tight text-muted-foreground">{hint}</span>
         )}
       </div>
       <div>{children}</div>
