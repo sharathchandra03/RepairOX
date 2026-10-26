@@ -91,12 +91,10 @@ function cheerFor(name: string, kind: FeedKind): string {
   return `✨ Keep it up, ${who}!`;
 }
 
-function relTime(ms: number): string {
-  const mins = Math.round((Date.now() - ms) / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins} min ago`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
+/* Always show the explicit date + time of the event (e.g. "24 Oct, 7:05 pm"),
+   matching the rest of the app's activity stamps. Every entry in this feed is
+   from today, but we still label the date so the stamp is unambiguous. */
+function stampTime(ms: number): string {
   const d = new Date(ms);
   const date = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
   const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
@@ -105,9 +103,32 @@ function relTime(ms: number): string {
 
 const WIN_KINDS = new Set<FeedKind>(["won", "invoice_created", "ticket_created"]);
 
+/* Local start-of-day (today, 00:00:00.000) as an epoch ms. The feed only ever
+   shows activity from the CURRENT calendar day — a full 24h window from midnight
+   12AM to the next midnight 12AM, in the viewer's local timezone. */
+function startOfToday(now = Date.now()): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+}
+
 export function LeadActivityFeed() {
   const { leads, assignmentHistory, conversionHistory, followUps } = useLeads();
   const reduce = useReducedMotion();
+
+  /* The midnight boundary for "today". Re-evaluated when the day rolls over so a
+     feed left open overnight automatically clears yesterday's activity at 12AM. */
+  const [dayStart, setDayStart] = useState(() => startOfToday());
+  useEffect(() => {
+    const tick = () => {
+      const s = startOfToday();
+      setDayStart((prev) => (prev === s ? prev : s));
+    };
+    // Check on a modest cadence; cheap and resilient to sleep/wake.
+    const t = setInterval(tick, 60_000);
+    return () => clearInterval(t);
+  }, []);
+  const dayEnd = dayStart + 24 * 60 * 60 * 1000; // next midnight 12AM
 
   /* Build the unified, deduped, newest-first feed from REAL streams only. */
   const feed = useMemo<FeedEntry[]>(() => {
@@ -159,13 +180,15 @@ export function LeadActivityFeed() {
       }
     }
 
-    // Dedupe by id, newest first, keep a bounded recent window.
+    // Keep only TODAY's activity (midnight 12AM → next midnight 12AM, local),
+    // then dedupe by id, newest first, bounded to a recent window.
     const seen = new Set<string>();
     return out
+      .filter((e) => e.at >= dayStart && e.at < dayEnd)
       .filter((e) => (seen.has(e.id) ? false : (seen.add(e.id), true)))
       .sort((a, b) => b.at - a.at)
       .slice(0, 12);
-  }, [leads, assignmentHistory, conversionHistory, followUps]);
+  }, [leads, assignmentHistory, conversionHistory, followUps, dayStart, dayEnd]);
 
   /* Rotate through the recent feed so the whole floor's momentum is visible,
      not just the single newest line. Pauses on reduced-motion (shows newest). */
@@ -212,7 +235,7 @@ export function LeadActivityFeed() {
           {cur.win && cur.value ? (
             <span className="shrink-0 font-bold text-emerald-700">· {formatINR(cur.value)}</span>
           ) : null}
-          <span className="shrink-0 text-muted-foreground/70">· {relTime(cur.at)}</span>
+          <span className="shrink-0 text-muted-foreground/70">· {stampTime(cur.at)}</span>
           {cur.win && (
             <span className="ml-0.5 hidden shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-px text-[10px] font-bold text-emerald-700 lg:inline-flex">
               <Sparkles className="h-2.5 w-2.5" /> {cheerFor(cur.who, cur.kind)}

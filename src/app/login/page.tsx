@@ -3,7 +3,7 @@
 import { motion } from "framer-motion";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Mail, Lock, Eye, EyeOff, ArrowRight, ShieldCheck, Cloud, Truck,
   Users, FileText, Boxes, Phone, Sparkles,
@@ -39,6 +39,19 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  // Friendly banner when the session tracker signed this device out because the
+  // account was used on another device (single-device login). Read from the URL
+  // on mount — no Suspense boundary needed — then clean the query string.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const reason = new URLSearchParams(window.location.search).get("reason");
+    if (reason === "signed-in-elsewhere") {
+      setNotice("You were signed out because your account was used to sign in on another device.");
+      window.history.replaceState(null, "", window.location.pathname);
+    }
+  }, []);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -200,6 +213,13 @@ export default function LoginPage() {
                   }
                 />
               </div>
+
+              {notice && !error && (
+                <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[12.5px] font-medium text-amber-800">
+                  <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0" />
+                  {notice}
+                </div>
+              )}
 
               {error && (
                 <div className="flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-[12.5px] font-medium text-rose-700">

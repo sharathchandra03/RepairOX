@@ -20,7 +20,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
 import {
   X, Check, ChevronRight, ChevronLeft, UserPlus, Search, Plus,
-  ClipboardList, CalendarClock, AlertCircle, ChevronDown, MapPin, Store,
+  ClipboardList, CalendarClock, AlertCircle, ChevronDown, MapPin, Store, UserCheck,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/input";
@@ -35,14 +35,14 @@ import { CAP, allow } from "@/lib/capabilities";
 import {
   emptyLeadDraft, validateLead, needsFollowUp, monthFromDate,
   isNotContactedStatus, suggestPartCategory, emptyLeadDevice, statusRequiresFollowUp, followUpNounForStatus,
+  findActiveOwnedLead,
   type Lead, type LeadDraft, type LeadFieldKey, type LeadDevice,
 } from "@/lib/leads-data";
 import { isNotQualified, isQualifiedValue } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
 import { CustomerIdentityLookup } from "@/components/common/customer-identity-lookup";
-import { findOrCreateCustomer, formatCustomerName } from "@/lib/customer-service";
-import { toast } from "@/components/ui/toaster";
+import { findOrCreateCustomer } from "@/lib/customer-service";
 import type { Customer } from "@/lib/customer-data";
 import { normalizeCustomerPhone, normalizeCustomerEmail } from "@/lib/customer-data";
 import { IssueSelector } from "@/components/common/issue-selector";
@@ -550,7 +550,7 @@ export function LeadCaptureFlow({
 
 
 function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
-  const { addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft, isFieldHidden } = useLeads();
+  const { leads, addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft, isFieldHidden } = useLeads();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { team, can, currentUser } = usePermissions();
   const { customers, addCustomer } = useStore();
@@ -910,6 +910,27 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
   const [newCustomerType, setNewCustomerType] = useState<"personal" | "business">("personal");
   const [savingCustomer, setSavingCustomer] = useState(false);
 
+  /* ── Repeat-call ownership hint (spec: active-ownership window) ──
+     When this (new) lead's typed identity already belongs to a still-active
+     lead — created within the 40-day window and NOT yet turned into a ticket —
+     surface the OWNING agent + lead no so the capturing agent knows the
+     opportunity is already someone's. Once a ticket exists, or the window has
+     lapsed, nothing is shown (a repeat call is then a fresh opportunity).
+
+     Only for NEW leads (not when editing), and the lead being edited is
+     excluded from its own match. IDENTITY HINT ONLY — it never changes the new
+     lead's owner. Visibility follows the same RLS-scoped `leads` the rest of
+     the app uses. */
+  const editLeadId = editLead ? editLead.id : undefined;
+  const activeOwnedLead = useMemo(() => {
+    if (isEdit) return null;
+    const phone = draft.number ?? "";
+    const email = draft.email ?? "";
+    const customerId = draft.customerId || "";
+    if (!customerId && normalizeCustomerPhone(phone).length < 10 && !email.trim()) return null;
+    return findActiveOwnedLead(leads, { customerId, phone, email }, { exceptLeadId: editLeadId });
+  }, [isEdit, leads, draft.number, draft.email, draft.customerId, editLeadId]);
+
   /** Split the single "Name" field into first / last on the FIRST space.
    *  "Rahul Sharma" → { first: "Rahul", last: "Sharma" }; "Rahul" →
    *  { first: "Rahul", last: "" }. */
@@ -919,16 +940,27 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     return { first, last: parts.join(" ") };
   };
 
-  // The pill is offered only while NO customer is linked, and enabled once the
-  // required identity (Name + valid Number) is present and the user may create.
+  // A customer is saved from the lead's own identity once the required fields
+  // (Name + valid Number) are present and the user may create — no separate
+  // button: this runs automatically as part of creating the lead (below).
   const canSaveAsCustomer =
     !draft.customerId &&
     canCreateCustomer &&
     !validation.errors.name &&
     !validation.errors.number;
 
-  const saveAsCustomer = async () => {
-    if (!canSaveAsCustomer || savingCustomer) return;
+  /* ── Resolve the customer for a NEW lead from the Step-1 identity ──
+     Called during lead creation (handleSave) so the customer is persisted when
+     the lead is created — never as a separate manual step. Returns the resolved
+     customer id (existing or newly created), or "" when nothing could be saved.
+
+     - Already linked → keep that customerId (no-op).
+     - findOrCreateCustomer dedups on the normalized phone, so an existing
+       customer with this number is LINKED (never duplicated).
+     - Only sales attribution is left untouched (identity only). */
+  const ensureCustomerForLead = async (): Promise<string> => {
+    if (draft.customerId) return draft.customerId;           // already linked
+    if (!canSaveAsCustomer) return "";                        // missing identity / no permission
     setSavingCustomer(true);
     try {
       const { first, last } = splitName(draft.name ?? "");
@@ -954,13 +986,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
       // link that canonical record instead of creating a duplicate.
       if (!result.created) {
         linkCustomer(result.customer);
-        toast.success("Existing customer linked", { description: `${formatCustomerName(result.customer)} already in the Customer Master — no duplicate created.` });
-        return;
+        return result.customer.id;
       }
       const saved = await addCustomer(result.customer);
-      if (!saved) return; // addCustomer surfaces its own DB error toast
+      if (!saved) return "";          // addCustomer surfaces its own DB error toast
       linkCustomer(saved);
-      toast.success("Customer created", { description: `${formatCustomerName(saved)} was added to the Customer Master.` });
+      return saved.id;
     } finally {
       setSavingCustomer(false);
     }
@@ -1024,7 +1055,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         if (!ok) return;
         savedLead = { ...editLead, ...(draft as Partial<Lead>) } as Lead;
       } else {
-        savedLead = await addLead(draft);
+        // Persist the customer AS PART OF creating the lead — when no customer
+        // is linked yet, the lead's own Step-1 identity becomes (or links to) a
+        // canonical Customer Master record, which the new lead then references.
+        // Identity only — the Sales Agent / attribution is never touched.
+        const customerId = await ensureCustomerForLead();
+        savedLead = await addLead(customerId ? { ...draft, customerId } : draft);
         if (!savedLead) return;
       }
 
@@ -1123,11 +1159,12 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
               {/* ── STEP 1 · Customer ── */}
               {!reviewOpen && stage === 1 && (
                 <div className="space-y-4">
-                  {/* Header row — the inline "Save as Customer" pill lives
-                      top-right (no separate New Customer sheet). It turns the
-                      lead's own typed fields + location into a canonical
-                      Customer Master record. The Personal/Business selector
-                      sits beside it so the type is chosen in one place. */}
+                  {/* Header row — no separate "Save as Customer" button: the
+                      customer is persisted automatically when the lead is
+                      created (the lead's own Step-1 identity becomes, or links
+                      to, a canonical Customer Master record). The Personal /
+                      Business selector stays so the saved customer's type is
+                      chosen here. */}
                   <div className="flex min-h-[28px] items-center justify-between gap-3">
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</p>
                     {!draft.customerId && canCreateCustomer && (
@@ -1148,22 +1185,6 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                             </button>
                           ))}
                         </div>
-                        {/* The pill — saves the customer from the lead fields. */}
-                        <button
-                          type="button"
-                          onClick={saveAsCustomer}
-                          disabled={!canSaveAsCustomer || savingCustomer}
-                          title={canSaveAsCustomer ? "Save these details as a customer" : "Enter a name and valid number first"}
-                          className={cn(
-                            "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[12px] font-semibold transition",
-                            canSaveAsCustomer && !savingCustomer
-                              ? "border-[#4361EE]/40 bg-white text-[#4361EE] hover:bg-[#EEF1FD]"
-                              : "cursor-not-allowed border-border bg-muted text-muted-foreground",
-                          )}
-                        >
-                          <UserPlus className="h-3.5 w-3.5" />
-                          {savingCustomer ? "Saving…" : "Save as Customer"}
-                        </button>
                       </div>
                     )}
                   </div>
@@ -1189,20 +1210,34 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                       <input className={inputCls()} value={draft.alternateNumber ?? ""} onChange={(e) => set("alternateNumber", e.target.value)} placeholder="Secondary / office no." inputMode="tel" />
                     </Field>
                   </div>
-                  {/* Inline Customer Master identity lookup — searches as the
-                      salesperson types the phone/email. Shows "Customer Found"
-                      (Use Existing) when the number already belongs to a
-                      customer. Creating a NEW customer is done via the "Save as
-                      Customer" pill above (no separate sheet), so no Create-New
-                      affordance is passed here. IDENTITY ONLY — never surfaces
-                      or assigns a historical sales agent. */}
+                  {/* Inline Customer Master identity lookup — a SMALL inline
+                      indication as the salesperson types the phone/email: it
+                      says whether the number is an existing or a new customer,
+                      with a tiny "Use" button to adopt an existing match. A new
+                      customer is saved automatically with the lead (no separate
+                      sheet), so no Create-New affordance is passed here.
+                      IDENTITY ONLY — never surfaces/assigns a historical agent. */}
                   <CustomerIdentityLookup
+                    compact
                     phone={draft.number ?? ""}
                     email={draft.email ?? ""}
                     linkedCustomerId={draft.customerId || ""}
                     onUseExisting={linkCustomer}
                     onClearLink={() => set("customerId", "")}
                   />
+                  {/* Repeat-call ownership hint — small amber line telling the
+                      agent this customer already has a live lead owned by
+                      another agent (within the 40-day window, no ticket yet).
+                      Attribution hint only; it never changes the new owner. */}
+                  {activeOwnedLead && (
+                    <div className="flex items-center gap-1.5 text-[11.5px] text-amber-700">
+                      <UserCheck className="h-3.5 w-3.5 shrink-0" />
+                      <span className="min-w-0 truncate">
+                        Already owned by <span className="font-semibold">{activeOwnedLead.agentName}</span> · {activeOwnedLead.leadNo}
+                        <span className="text-amber-600/80"> · {activeOwnedLead.ageDays === 0 ? "today" : `${activeOwnedLead.ageDays}d ago`}</span>
+                      </span>
+                    </div>
+                  )}
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>
                       <input className={inputCls(touched && !!validation.errors.email)} value={draft.email ?? ""} onChange={(e) => setContactField("email", e.target.value)} placeholder="name@email.com" inputMode="email" />

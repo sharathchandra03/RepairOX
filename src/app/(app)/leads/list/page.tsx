@@ -140,7 +140,7 @@ const COLUMN_TO_FIELD: Record<string, LeadFieldKey | undefined> = {
    changing column widths. Negative = move left. Used to free up space for the
    "Mode of Contact" heading: Lead Value −25px, Agent −12px. */
 const COLUMN_SHIFT_X: Record<string, number | undefined> = {
-  value: -25,
+  value: -4,
   agent: -12,
 };
 
@@ -270,8 +270,16 @@ function NACell() {
  *    • BLUE   → a Ticket exists (customer's device booked), no invoice yet.
  *    • ORANGE → "Lead Won" only (routed / walk-in / field assigned), no
  *               ticket/invoice yet.
- *  Nothing before that (plain pipeline / gated) shows no tick. */
-function LeadStatusTick({ wf }: { wf: LeadWorkflow }) {
+ *    • FW (amber) → an open Follow-up is being worked — ONLY when the lead has
+ *               no ticket / invoice / lead-won (those always win the Action).
+ *    • CROSS (red) → the lead is Lost / dropped — ONLY when the lead has no
+ *               ticket / invoice / lead-won.
+ *  The Follow-up and Lost states are mutually exclusive with a converted lead:
+ *  the workflow derivation places Lost (step 7) and Follow-up (step 8) BELOW
+ *  every operational record, so they can never surface for a lead that already
+ *  has a ticket, invoice, or lead-won outcome.
+ *  Nothing before that (plain pipeline / gated) shows no icon. */
+function LeadStatusTick({ wf, lead }: { wf: LeadWorkflow; lead?: Lead }) {
   if (wf.gated) return null;
   const kind = wf.result.kind;
   // Invoice (green) wins, then ticket (blue), then lead-won (orange).
@@ -280,7 +288,44 @@ function LeadStatusTick({ wf }: { wf: LeadWorkflow }) {
   if (kind === "invoice") { tone = "green"; label = "🎉 Congratulations! You closed this deal — revenue is in the bank."; }
   else if (kind === "ticket" || wf.action === "ticket_created" || wf.action === "visited_store") { tone = "blue"; label = "Ticket created for this customer"; }
   else if (kind === "lead_won") { tone = "orange"; label = "🏆 Lead won! The customer is on board — close it out with a ticket & invoice."; }
-  if (!tone) return null;
+
+  // No converted outcome → surface the Follow-up / Lost status icons. These are
+  // only reachable when the lead has NO ticket / invoice / lead-won (guaranteed
+  // by the derivation priority), so they never clash with a conversion tick.
+  if (!tone) {
+    // LOST — red circular cross (same shape/size as the tick, different glyph).
+    if (wf.action === "lost" || kind === "lost") {
+      return (
+        <span
+          className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full text-white"
+          style={{ background: "linear-gradient(135deg, #F43F5E 0%, #E11D48 100%)" }}
+          title="Lead lost — closed without conversion"
+          aria-label="Lead lost"
+        >
+          <X className="h-2 w-2" strokeWidth={3} />
+        </span>
+      );
+    }
+    // FOLLOW-UP — amber circular "FW" badge (same shape/size as the tick).
+    // Surfaces for a due follow-up (derived Action) OR a lead whose own status
+    // reads as "Follow-up" — never for a lost lead (handled above) and never
+    // for a converted lead (guarded by `!tone`).
+    const statusIsFollowUp = /follow/.test((lead?.status || "").toLowerCase());
+    if (wf.action === "follow_up" || statusIsFollowUp) {
+      return (
+        <span
+          className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full text-[6px] font-bold uppercase leading-none tracking-[-0.03em] text-white"
+          style={{ background: "linear-gradient(135deg, #7C5CFC 0%, #5B3FD6 100%)" }}
+          title="Follow-up in progress — the lead is being actively worked"
+          aria-label="Follow-up in progress"
+        >
+          FW
+        </span>
+      );
+    }
+    return null;
+  }
+
   const bg =
     tone === "green" ? "linear-gradient(135deg, #10B981 0%, #059669 100%)"
     : tone === "blue" ? "linear-gradient(135deg, #4361EE 0%, #3049C6 100%)"
@@ -785,11 +830,24 @@ function LeadValueCell({ lead }: { lead: Lead }) {
   );
 }
 
-/* Column 10 — COMMENT (readable preview; full text on hover via title). */
+/* Column 10 — COMMENT (readable preview; full text on hover via title).
+   A fixed-size, vertically-centered 2-line note box with a soft distinct
+   background so the free-text comment is visually differentiated from the
+   surrounding columns and NEVER bleeds into the Lead Value cell. The box is a
+   fixed height (always 2 lines tall) so the column reads uniformly down the
+   table; longer text clamps to 2 lines with the full value in the title
+   tooltip. N/A stays a plain muted dash (never a tinted box). */
 function CommentCell({ text }: { text: string }) {
   if (!text?.trim()) return <EmptyDash />;
   return (
-    <p className="line-clamp-2 whitespace-pre-line text-[13px] leading-snug text-zinc-600" title={text}>{text}</p>
+    <div className="mr-2 flex min-h-[48px] w-full items-center rounded-lg border border-amber-200/70 bg-amber-50/70 px-2.5 py-1.5">
+      <p
+        className="line-clamp-2 w-full break-words whitespace-pre-line text-[13px] leading-snug text-amber-900/90"
+        title={text}
+      >
+        {text}
+      </p>
+    </div>
   );
 }
 
@@ -1640,7 +1698,7 @@ export default function LeadsListPage() {
               )}
               {lead.pinnedAt && <Pin className="h-3.5 w-3.5 shrink-0 fill-[#7C5CFC] text-[#7C5CFC]" aria-label="Pinned" />}
               <span className="min-w-0 truncate">{lead.leadNo || "—"}</span>
-              <LeadStatusTick wf={wf} />
+              <LeadStatusTick wf={wf} lead={lead} />
             </button>
           );
         case "agent":
@@ -2138,11 +2196,12 @@ export default function LeadsListPage() {
                 // HEADER alignment: most headers are CENTERED to sit symmetrically
                 // over their column, EXCEPT "select" (checkbox) and "actions"
                 // (right-aligned). The multi-line / rich-text columns (Contact
-                // Info, Device & Issue, Comment) are LEFT-aligned so their header
-                // sits over their LEFT-aligned body content. Long header names
-                // wrap naturally within the column width — the column never
-                // expands to fit a long header.
-                const LEFT_HEADERS = new Set(["contactInfo", "device", "comment"]);
+                // Info, Device & Issue) are LEFT-aligned so their header sits
+                // over their LEFT-aligned body content. Comment is CENTERED
+                // because its body is a centered note box that fills the column.
+                // Long header names wrap naturally within the column width — the
+                // column never expands to fit a long header.
+                const LEFT_HEADERS = new Set(["contactInfo", "device"]);
                 const align = c.key === "select" ? "text-left"
                   : c.key === "actions" ? "text-right"
                   : LEFT_HEADERS.has(c.key) ? "text-left"
@@ -2330,7 +2389,7 @@ export default function LeadsListPage() {
                     )}
                     {lead.pinnedAt && <Pin className="h-3 w-3 fill-[#7C5CFC] text-[#7C5CFC]" />}
                     {lead.name || "—"}
-                    {!mLocked && (() => { const wf = workflowByLead[lead.id]; return wf ? <LeadStatusTick wf={wf} /> : null; })()}
+                    {!mLocked && (() => { const wf = workflowByLead[lead.id]; return wf ? <LeadStatusTick wf={wf} lead={lead} /> : null; })()}
                   </p>
                   <p className="text-[11px] text-muted-foreground">{lead.leadNo}{mLocked ? "" : ` · ${lead.source || "—"}`}</p>
                 </div>

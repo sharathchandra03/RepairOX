@@ -58,6 +58,9 @@ export interface CustomerIdentityLookupProps {
   onCreateNew?: () => void;
   /** Debounce for the lookup, ms (default 300). */
   debounceMs?: number;
+  /** Compact single-line indication (a small chip + a tiny "Use" button)
+   *  instead of the full card. Use in dense forms like the Lead capture flow. */
+  compact?: boolean;
   className?: string;
 }
 
@@ -73,6 +76,7 @@ export function CustomerIdentityLookup({
   onClearLink,
   onCreateNew,
   debounceMs = 300,
+  compact = false,
   className,
 }: CustomerIdentityLookupProps) {
   const { customers } = useStore();
@@ -99,6 +103,63 @@ export function CustomerIdentityLookup({
 
   // The currently-linked customer (confirmation state).
   const linked = linkedCustomerId ? customers.find((c) => c.id === linkedCustomerId) : undefined;
+
+  // ── COMPACT variant ── a single small inline row (no big card). Used in
+  //    dense forms like the Lead capture flow: a tiny coloured chip tells the
+  //    user whether the typed number is an existing or new customer, with a
+  //    small "Use" button to adopt an existing match.
+  if (compact) {
+    const name = (c: Customer) => c.fullName || `${c.firstName} ${c.lastName}`.trim() || "Customer";
+
+    if (linked) {
+      return (
+        <div className={cn("flex items-center gap-1.5 text-[11.5px]", className)}>
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+          <span className="min-w-0 truncate font-medium text-emerald-700">
+            Existing · {name(linked)} linked
+          </span>
+          {onClearLink && (
+            <button
+              type="button"
+              onClick={onClearLink}
+              className="shrink-0 rounded px-1 text-zinc-400 hover:text-zinc-600"
+              title="Unlink customer"
+              aria-label="Unlink customer"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+      );
+    }
+
+    if (!hasEnoughToSearch) return null;
+
+    if (match) {
+      return (
+        <div className={cn("flex items-center gap-1.5 text-[11.5px]", className)}>
+          <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-[#3347D6]" />
+          <span className="min-w-0 truncate font-medium text-[#3347D6]">
+            Existing customer · {name(match)}
+          </span>
+          <button
+            type="button"
+            onClick={() => onUseExisting(match)}
+            className="ml-0.5 inline-flex shrink-0 items-center gap-1 rounded-md bg-[#4361EE] px-2 py-0.5 text-[11px] font-semibold text-white transition hover:bg-[#3347D6]"
+          >
+            <Link2 className="h-3 w-3" /> Use
+          </button>
+        </div>
+      );
+    }
+
+    return (
+      <div className={cn("flex items-center gap-1.5 text-[11.5px] text-muted-foreground", className)}>
+        <UserRound className="h-3.5 w-3.5 shrink-0" />
+        <span>New customer — will be saved with the lead</span>
+      </div>
+    );
+  }
 
   // ── Already linked → compact confirmation (spec §78) ──
   if (linked) {

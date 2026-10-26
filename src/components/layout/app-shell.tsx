@@ -18,6 +18,7 @@ import { ComingSoonPage } from "@/components/common/coming-soon";
 import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visibility";
 import { resetDemoData } from "@/lib/demo-mode";
 import { useSessionTracker } from "@/lib/use-session-tracker";
+import { useLoginAlerts } from "@/lib/use-login-alerts";
 import { useSalesPresenceTracker } from "@/lib/use-sales-presence";
 import { useWorkSessionAutoStart } from "@/lib/work-session-context";
 import { useLeads } from "@/lib/leads-context";
@@ -105,8 +106,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
 
   // Record this device as a real, revocable session (Settings → Active Sessions)
-  // and heartbeat its last-activity while the app is open. No effect in local mode.
+  // and heartbeat its last-activity while the app is open. Also enforces
+  // single-device login: if this device's session was revoked because the
+  // account signed in elsewhere, the heartbeat gets a 410 and signs out cleanly.
+  // No effect in local mode.
   useSessionTracker();
+
+  // Owner-only: surface "an employee signed in on a device" alerts into the
+  // owner's own topbar bell (durable notifications written by the sessions
+  // route). Empty / no-op for every non-owner. No effect in local mode.
+  useLoginAlerts();
 
   // Publish app-wide "online" presence for the signed-in user, with an idle
   // timeout (option C). Marks the user online whenever ANY RepairOX page is open

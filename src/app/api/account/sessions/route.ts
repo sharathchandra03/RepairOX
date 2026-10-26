@@ -4,6 +4,23 @@ import { requireUser, parseUserAgent, extractIp } from "@/lib/account-security";
 export const dynamic = "force-dynamic";
 
 /* ──────────────────────────────────────────────────────────────────────────
+   Single-device login + owner login alerts (additive).
+
+   • OWNER_ROLES — the true org owners. They are EXEMPT from both behaviours:
+     they are never single-device-restricted and their own logins never raise
+     an alert. Everyone else (employees) is single-device + alerts the owners.
+     This is only a TARGETING helper, never a security gate (RLS + the route's
+     own self-scoping remain the real boundary).
+   ────────────────────────────────────────────────────────────────────────── */
+const OWNER_ROLES = ["master_shop_owner", "platform_owner"];
+
+function deviceDescription(browser: string, os: string): string {
+  const b = browser && browser !== "Unknown" ? browser : "a browser";
+  const o = os && os !== "Unknown" ? os : "an unknown device";
+  return `${b} on ${o}`;
+}
+
+/* ──────────────────────────────────────────────────────────────────────────
    Active Sessions API — real, self-owned session records (user_sessions).
 
    POST   /api/account/sessions   Register or heartbeat THIS device's session.
@@ -26,10 +43,89 @@ export const dynamic = "force-dynamic";
 async function resolveStaff(admin: any, authUserId: string) {
   const { data } = await admin
     .from("staff")
-    .select("id, organization_id")
+    .select("id, organization_id, name, role_id, branch_id")
     .eq("auth_user_id", authUserId)
     .maybeSingle();
-  return data as { id: string; organization_id: string | null } | null;
+  return data as {
+    id: string;
+    organization_id: string | null;
+    name: string | null;
+    role_id: string | null;
+    branch_id: string | null;
+  } | null;
+}
+
+/* On a genuinely NEW session for an employee (non-owner), two additive side
+   effects run with the service-role client. Both are best-effort and each is
+   wrapped so a failure NEVER blocks the session registration (the core
+   behaviour is unchanged):
+     1. Single-device — revoke this employee's OTHER living sessions.
+     2. Owner alert   — write ONE durable notification (per org, per session)
+        addressed to the org owners: "<name> signed in on <device>".           */
+async function onNewEmployeeSession(
+  admin: any,
+  opts: {
+    authUserId: string;
+    staff: { id: string; organization_id: string | null; name: string | null; branch_id: string | null };
+    newSessionId: string;
+    browser: string;
+    os: string;
+    loginAtIso: string;
+  }
+) {
+  const { authUserId, staff, newSessionId, browser, os, loginAtIso } = opts;
+
+  // 1. Single-device enforcement — revoke every OTHER non-revoked session row
+  //    for this employee. The row just inserted (newSessionId) is excluded, so
+  //    the current device stays live. A revoked device's next heartbeat returns
+  //    410, and the client logs it out on that tick.
+  try {
+    await admin
+      .from("user_sessions")
+      .update({ revoked_at: new Date().toISOString() })
+      .eq("auth_user_id", authUserId)
+      .is("revoked_at", null)
+      .neq("id", newSessionId);
+  } catch {
+    /* best-effort — never blocks sign-in */
+  }
+
+  // 2. Owner login alert — one durable notification row per login event. The
+  //    dedupe_key is unique per (org, session row), so a heartbeat or retry
+  //    never produces a second alert, and the org's unique index backs it up.
+  try {
+    if (!staff.organization_id) return;
+    const device = deviceDescription(browser, os);
+    const who = staff.name?.trim() || "An employee";
+    await admin.from("notifications").insert({
+      organization_id: staff.organization_id,
+      branch_id: staff.branch_id,
+      kind: "employee_login",
+      title: "Employee signed in",
+      body: `${who} signed in on ${device}.`,
+      // recipient_role targets the owners' bell; two owner roles → two rows so
+      // both a Master Shop Owner and a Platform Owner can receive it.
+      recipient_role: "master_shop_owner",
+      reference: staff.id,
+      dedupe_key: `login:${newSessionId}:mso`,
+      created_by: staff.id,
+      created_at: loginAtIso,
+    });
+    await admin.from("notifications").insert({
+      organization_id: staff.organization_id,
+      branch_id: staff.branch_id,
+      kind: "employee_login",
+      title: "Employee signed in",
+      body: `${who} signed in on ${device}.`,
+      recipient_role: "platform_owner",
+      reference: staff.id,
+      dedupe_key: `login:${newSessionId}:po`,
+      created_by: staff.id,
+      created_at: loginAtIso,
+    });
+  } catch {
+    /* best-effort — an alert failure never blocks sign-in */
+  }
 }
 
 export async function POST(req: Request) {
@@ -98,6 +194,28 @@ export async function POST(req: Request) {
     .single();
 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+
+  // A genuinely new device just registered. For EMPLOYEES (non-owner roles)
+  // run the two additive side effects: single-device revoke + owner login
+  // alert. Owners are exempt. Awaited but fully guarded, so neither can break
+  // the response the client depends on.
+  const isOwner = staff.role_id ? OWNER_ROLES.includes(staff.role_id) : false;
+  if (!isOwner) {
+    await onNewEmployeeSession(admin, {
+      authUserId: user.id,
+      staff: {
+        id: staff.id,
+        organization_id: staff.organization_id,
+        name: staff.name,
+        branch_id: staff.branch_id,
+      },
+      newSessionId: inserted.id,
+      browser: parsed.browser,
+      os: parsed.os,
+      loginAtIso: now,
+    });
+  }
+
   return NextResponse.json({ ok: true, id: inserted.id });
 }
 

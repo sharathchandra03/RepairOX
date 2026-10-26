@@ -1491,6 +1491,82 @@ export function findOpenLeadMatches(
   return matches;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+   ACTIVE-OWNERSHIP WINDOW (repeat-call attribution hint)
+
+   When a customer who ALREADY has a lead calls again, the new lead looks fresh
+   to the agent — but the opportunity may still belong to another agent. This
+   finds the customer's still-active owned lead so the New-Lead form can show
+   "already owned by <agent> · <lead no>".
+
+   A lead counts as actively owned only while ALL hold:
+     • it is still OPEN (no ticket created yet, not lost/converted) — once a
+       ticket exists the service cycle has started, so a repeat call is a new
+       opportunity and NOTHING is shown;
+     • it was created within the ownership window (default 40 days) — after
+       that the attribution lapses and nothing is shown;
+     • it has a real owner (assignedTo / assignedToName).
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/** Days a freshly-created lead stays "actively owned" for repeat-call hints. */
+export const ACTIVE_OWNERSHIP_WINDOW_DAYS = 40;
+
+export interface ActiveOwnedLead {
+  lead: Lead;
+  agentName: string;
+  leadNo: string;
+  /** Whole days since the lead was created (0 = today). */
+  ageDays: number;
+}
+
+/** Best timestamp for a lead's creation (ISO `createdAt`, else `date`). */
+function leadCreatedMs(l: Lead): number {
+  const iso = l.createdAt || (l.date ? `${l.date}T00:00:00` : "");
+  const t = iso ? new Date(iso).getTime() : NaN;
+  return Number.isNaN(t) ? 0 : t;
+}
+
+/**
+ * Find the customer's single most-recent ACTIVELY-OWNED lead matching the given
+ * identity (Customer Master id → phone → email, never name), created within the
+ * ownership window and not yet turned into a ticket. Returns `null` when there
+ * is none (new customer, lapsed >window, or a ticket already exists).
+ *
+ * IDENTITY/ATTRIBUTION HINT ONLY — it never changes the new lead's owner; it
+ * just tells the capturing agent whose lead this already is.
+ */
+export function findActiveOwnedLead(
+  leads: Lead[],
+  ident: { customerId?: string; phone?: string; email?: string },
+  opts?: { windowDays?: number; nowMs?: number; exceptLeadId?: string },
+): ActiveOwnedLead | null {
+  const windowDays = opts?.windowDays ?? ACTIVE_OWNERSHIP_WINDOW_DAYS;
+  const nowMs = opts?.nowMs ?? Date.now();
+  const windowMs = windowDays * 24 * 60 * 60 * 1000;
+
+  // Reuse the open-lead matcher (already excludes linked-ticket / lost /
+  // converted leads and never matches on name alone).
+  const matches = findOpenLeadMatches(leads, ident)
+    .map((m) => m.lead)
+    .filter((l) => l.id !== opts?.exceptLeadId)
+    .filter((l) => !!(l.assignedTo || l.assignedToName))   // must have a real owner
+    .filter((l) => {
+      const created = leadCreatedMs(l);
+      return created > 0 && nowMs - created <= windowMs;     // inside the window
+    })
+    .sort((a, b) => leadCreatedMs(b) - leadCreatedMs(a));    // newest first
+
+  const lead = matches[0];
+  if (!lead) return null;
+  const ageDays = Math.max(0, Math.floor((nowMs - leadCreatedMs(lead)) / (24 * 60 * 60 * 1000)));
+  return {
+    lead,
+    agentName: lead.assignedToName || lead.agent || "Unassigned",
+    leadNo: lead.leadNo || lead.id,
+    ageDays,
+  };
+}
+
 /** True when an operational record is already attributed to a different lead. */
 export function operationalRecordAttributedElsewhere(
   leads: Lead[],

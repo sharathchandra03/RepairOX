@@ -46,6 +46,8 @@ export type NotificationKind =
   | "deal_rejected"
   | "deal_resubmitted"
   | "deal_comment"
+  /* Security: an employee signed in on a device (owner-facing alert). */
+  | "employee_login"
   | "generic";
 
 export interface AppNotification {

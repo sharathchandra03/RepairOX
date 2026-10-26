@@ -14,7 +14,8 @@
    is an opaque random id, NOT an auth token.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { useRouter } from "next/navigation";
 import { usePermissions } from "@/lib/permissions-context";
 import { isSupabaseConfigured } from "@/lib/supabase";
 
@@ -37,29 +38,51 @@ export function getSessionToken(): string {
 }
 
 export function useSessionTracker() {
-  const { currentUser, authReady, apiFetch } = usePermissions();
+  const { currentUser, authReady, apiFetch, logout } = usePermissions();
+  const router = useRouter();
+  // Guards a one-time, clean sign-out when this device is revoked from another
+  // device (single-device login). Prevents a revoke response from firing the
+  // logout + redirect more than once.
+  const kickedRef = useRef(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
     if (!authReady || !currentUser) return;
 
+    kickedRef.current = false;
     let cancelled = false;
     const token = getSessionToken();
 
-    const ping = () => {
-      if (cancelled) return;
-      // Fire-and-forget; failures are non-fatal (the page still works).
-      apiFetch("/api/account/sessions", {
-        method: "POST",
-        body: JSON.stringify({ sessionToken: token }),
-      }).catch(() => {});
+    const ping = async () => {
+      if (cancelled || kickedRef.current) return;
+      try {
+        const res = await apiFetch("/api/account/sessions", {
+          method: "POST",
+          body: JSON.stringify({ sessionToken: token }),
+        });
+        // Single-device enforcement: the server revoked THIS device's session
+        // because the account signed in elsewhere (HTTP 410). Sign out cleanly
+        // and send the user to the login screen with a short explanation. This
+        // is the ONLY new behaviour on the heartbeat — every other response is
+        // handled exactly as before (fire-and-forget).
+        if (!cancelled && res.status === 410 && res.json?.revoked && !kickedRef.current) {
+          kickedRef.current = true;
+          try { logout(); } catch { /* never trap the user */ }
+          const reason = encodeURIComponent("signed-in-elsewhere");
+          router.replace(`/login?reason=${reason}`);
+        }
+      } catch {
+        // Network / transient failure is non-fatal; the app keeps working and
+        // the next heartbeat retries.
+      }
     };
 
-    ping(); // register / refresh immediately on mount
+    void ping(); // register / refresh immediately on mount
 
-    const interval = window.setInterval(ping, HEARTBEAT_MS);
-    // Also touch when the tab regains focus, so long-idle tabs update promptly.
-    const onFocus = () => ping();
+    const interval = window.setInterval(() => { void ping(); }, HEARTBEAT_MS);
+    // Also touch when the tab regains focus, so long-idle tabs update promptly
+    // and a revoked device is kicked as soon as the user returns to the tab.
+    const onFocus = () => { void ping(); };
     window.addEventListener("focus", onFocus);
 
     return () => {
@@ -67,5 +90,5 @@ export function useSessionTracker() {
       window.clearInterval(interval);
       window.removeEventListener("focus", onFocus);
     };
-  }, [authReady, currentUser?.id, apiFetch]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [authReady, currentUser?.id, apiFetch, logout, router]); // eslint-disable-line react-hooks/exhaustive-deps
 }
