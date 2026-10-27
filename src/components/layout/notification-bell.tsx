@@ -11,6 +11,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { motion, useReducedMotion } from "framer-motion";
 import { Bell, Check, Truck, Store, Package, CheckCircle2, Clock, CalendarClock, Trash2, X } from "lucide-react";
 import { Dropdown } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
@@ -40,6 +41,8 @@ const KIND_ICON: Partial<Record<NotificationKind, React.ComponentType<{ classNam
   drop_reminder: Clock,
   lead_followup_due: CalendarClock,
   lead_followup_overdue: CalendarClock,
+  walkin_followup_due: CalendarClock,
+  walkin_followup_overdue: CalendarClock,
 };
 
 type FeedTab = "followups" | "others";
@@ -76,6 +79,16 @@ export function NotificationBell() {
   const active = tab === "followups" ? followUpItems : otherItems;
   const recent = active.slice(0, 20);
 
+  // CONTINUOUS bell vibration while ANY follow-up is still pending (an unread
+  // follow-up notification exists). Completing or rescheduling the follow-up
+  // marks that notification read / clears it (a reschedule mints a new dueKey,
+  // completion silences the old one), so the vibration stops on its own — no
+  // extra wiring. Honours prefers-reduced-motion (no animation; info stays in
+  // the badge). This is the whole-app topbar bell, so it covers lead AND
+  // walk-in (and any future) follow-ups uniformly.
+  const reduceMotion = useReducedMotion();
+  const vibrate = !reduceMotion && followUpUnread > 0;
+
   return (
     <Dropdown
       align="right"
@@ -86,7 +99,18 @@ export function NotificationBell() {
           className="relative grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition"
           aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
         >
-          <Bell className="h-4 w-4" />
+          <motion.span
+            className="grid place-items-center"
+            style={{ transformOrigin: "50% 15%" }}
+            animate={vibrate ? { rotate: [0, -14, 12, -10, 8, -5, 0] } : { rotate: 0 }}
+            transition={
+              vibrate
+                ? { duration: 0.9, repeat: Infinity, repeatDelay: 0.6, ease: "easeInOut" }
+                : { duration: 0.2 }
+            }
+          >
+            <Bell className="h-4 w-4" />
+          </motion.span>
           {unread > 0 && (
             /* Compact circular red badge, lifted onto the upper-right of the bell
                with a card-coloured ring so it reads as a distinct pill (same

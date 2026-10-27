@@ -31,10 +31,11 @@ import { useMemo, useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Lock, ChevronDown, ChevronUp, Trophy, IndianRupee, CalendarClock,
+  Lock, ChevronDown, Trophy, IndianRupee, CalendarClock,
   UserCheck, Megaphone, Check,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
+import { WorkspaceCollapseBar } from "@/components/common/workspace-collapse-bar";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Dropdown, MenuItem } from "@/components/ui/dropdown";
 import { RoxFilterPanelHeader, ActiveFilterChip } from "@/components/ui/rox-filter";
@@ -72,34 +73,6 @@ const DATE_OPTIONS: { label: string; value: PerfDateRange }[] = [
 
 function pct(v: number): string {
   return `${Math.round(v * 100)}%`;
-}
-
-/* The single Collapse/Expand control for the Agent Performance workspace. It
-   contracts everything ABOVE the filter strip (the page header + the four KPI
-   cards) so the agent table maximises its viewport ("work mode"). It sits on
-   the filter-strip row (top-right), so there is exactly ONE collapse mechanism.
-   Presentation only — it never touches period/store/filter state or data.
-   Keyboard + a11y: a native <button> with an explicit aria-label + tooltip. */
-function WorkspaceCollapseBar({
-  collapsed,
-  onToggle,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-      aria-label={collapsed ? "Show header and expand controls" : "Collapse the header and maximize the agent table"}
-      title={collapsed ? "Show header" : "Collapse header and maximize table"}
-      className="inline-flex h-[34px] shrink-0 items-center gap-1.5 rounded-full border border-[#4261EE] bg-[#4261EE] px-3 text-[12px] font-semibold text-white shadow-sm transition hover:bg-[#3450D8] hover:border-[#3450D8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40"
-    >
-      {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-      {collapsed ? "Show Header" : "Collapse Header"}
-    </button>
-  );
 }
 
 function Restricted() {
@@ -516,7 +489,14 @@ export default function AgentPerformancePage() {
           {dateControl}
           <div className="flex flex-wrap items-center gap-2">
             {filterControls}
-            <WorkspaceCollapseBar collapsed={workspace.collapsed} onToggle={workspace.toggle} />
+            <WorkspaceCollapseBar
+              collapsed={workspace.collapsed}
+              onToggle={workspace.toggle}
+              labelCollapsed="Show Header"
+              labelExpanded="Collapse Header"
+              noun="header"
+              className="h-[34px] py-0"
+            />
           </div>
         </div>
         {chipsRow}
@@ -597,7 +577,14 @@ export default function AgentPerformancePage() {
             {dateControl}
             <div className="flex flex-wrap items-center gap-2">
               {filterControls}
-              <WorkspaceCollapseBar collapsed={workspace.collapsed} onToggle={workspace.toggle} />
+              <WorkspaceCollapseBar
+              collapsed={workspace.collapsed}
+              onToggle={workspace.toggle}
+              labelCollapsed="Show Header"
+              labelExpanded="Collapse Header"
+              noun="header"
+              className="h-[34px] py-0"
+            />
             </div>
           </div>
           {chipsRow}
@@ -605,7 +592,14 @@ export default function AgentPerformancePage() {
         </div>
       ) : (
         <div className="flex justify-end">
-          <WorkspaceCollapseBar collapsed={workspace.collapsed} onToggle={workspace.toggle} />
+          <WorkspaceCollapseBar
+            collapsed={workspace.collapsed}
+            onToggle={workspace.toggle}
+            labelCollapsed="Show Header"
+            labelExpanded="Collapse Header"
+            noun="header"
+            className="h-[34px] py-0"
+          />
         </div>
       )}
 

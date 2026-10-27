@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Plus, Filter, Download, Search, Clock, RefreshCw, Settings,
-  Eye, EyeOff, X, ChevronDown, ChevronUp, Trash2,
+  Eye, EyeOff, X, ChevronDown, Trash2,
   Pin, PinOff, Check, TicketCheck, FileSpreadsheet, FileText,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -45,6 +45,8 @@ import { rememberOrigin } from "@/lib/settings-origin";
 import { formatINR, cn } from "@/lib/utils";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { usePinnedFilters } from "@/hooks/use-pinned-filters";
+import { useWorkspaceCollapsed } from "@/hooks/use-workspace-collapsed";
+import { WorkspaceCollapseBar } from "@/components/common/workspace-collapse-bar";
 import { PinnedFilterBar, type PinnableFilterDef } from "@/components/tickets/pinned-filter-bar";
 import { usePdfDownload } from "@/hooks/use-pdf-download";
 import { BulkDownloadDialog } from "@/components/download/bulk-download-dialog";
@@ -175,8 +177,13 @@ export default function TicketsPage() {
   // Permission gate for the estimate-only "Push to Ticket" conversion. Creating
   // a Ticket from an Estimate requires ticket-create rights — a user who can
   // only VIEW estimates must not be able to convert (spec §54/§56/§86).
-  const { can } = usePermissions();
+  const { can, currentUser } = usePermissions();
   const canPushToTicket = can("create_ticket") || can("manage_repair_jobs");
+  // Per-user Expand/Collapse for the control area above the table. Collapsed =
+  // work mode (only the header + date strip visible, table maximized);
+  // expanded = management mode. Presentation only — never touches filters/data.
+  const workspace = useWorkspaceCollapsed("ticket_table", currentUser?.id);
+  const controlsCollapsed = workspace.collapsed;
   // Bulk-action capability gates (granular OR backward-compatible coarse).
   const canBulkStatus = allow(can, CAP.ticket.changeStatus);
   const canBulkDeleteTickets = allow(can, CAP.ticket.delete);
@@ -351,12 +358,17 @@ export default function TicketsPage() {
      wrapper height) so the header sits flush with no gap and no layout jump,
      whatever the banner/filter-panel state. Uses CSS position:sticky — no
      scroll listeners — so scrolling stays smooth. */
+  const pageRef = useRef<HTMLDivElement>(null);
+  const headerWrapRef = useRef<HTMLDivElement>(null);
   const stickyWrapRef = useRef<HTMLDivElement>(null);
   const [stickyTop, setStickyTop] = useState(60);   // app topbar height
-  const [wrapH, setWrapH] = useState(0);            // frozen wrapper height
+  const [headerH, setHeaderH] = useState(0);        // page header (title + actions) height
+  const [wrapH, setWrapH] = useState(0);            // frozen filter-wrapper height
   useEffect(() => {
     const wrap = stickyWrapRef.current;
     if (!wrap) return;
+    const header = headerWrapRef.current;
+    const page = pageRef.current;
     // Topbar = first child of the nearest scroll container (see AppShell).
     let node: HTMLElement | null = wrap;
     let bar: HTMLElement | null = null;
@@ -366,19 +378,54 @@ export default function TicketsPage() {
       if (oy === "auto" || oy === "scroll") { bar = parent.firstElementChild as HTMLElement | null; break; }
       node = parent;
     }
-    const measure = () => {
+    // The table header (thead) pins flush at the BOTTOM edge of the frozen
+    // filter wrapper. Its sticky `top` is driven by a CSS variable
+    // (--rox-thead-top) written DIRECTLY to the DOM — NOT React state — so it
+    // can track the wrapper's height every frame while the collapse/expand
+    // animation resizes it, with ZERO re-renders. Writing state every frame is
+    // what caused the collapse glitch (the header stayed at the old tall `top`
+    // and snapped up only when a debounced setState finally committed). Writing
+    // the CSS var synchronously on each ResizeObserver tick keeps the header
+    // locked to the wrapper's live bottom edge the whole way down and up.
+    const writeVar = () => {
+      if (!page) return;
+      const barH = bar ? bar.offsetHeight : stickyTop;
+      const hH = header ? header.offsetHeight : 0;
+      const wH = wrap.offsetHeight;
+      page.style.setProperty("--rox-thead-top", `${barH + hH + wH}px`);
+    };
+    // Commit the measured heights to React state too — used by the sticky
+    // wrapper `top` offsets (header + workspace). These only need to be correct
+    // AT REST, so they are debounced to avoid per-frame re-renders during the
+    // animation (the thead `top` no longer depends on them — the CSS var does).
+    const commit = () => {
       setWrapH(wrap.offsetHeight);
+      if (header) setHeaderH(header.offsetHeight);
       if (bar) setStickyTop(bar.offsetHeight);
     };
-    measure();
-    const ro = new ResizeObserver(measure);
+    let settleId: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      writeVar();                       // live, every frame — no re-render
+      if (settleId) clearTimeout(settleId);
+      settleId = setTimeout(commit, 60); // settle the React-state offsets at rest
+    };
+    // Initial measure is immediate.
+    writeVar();
+    commit();
+    const ro = new ResizeObserver(onResize);
     ro.observe(wrap);
+    if (header) ro.observe(header);
     if (bar) ro.observe(bar);
-    return () => ro.disconnect();
+    return () => {
+      ro.disconnect();
+      if (settleId) clearTimeout(settleId);
+    };
   }, []);
-  // The thead pins flush at the wrapper's bottom edge so there is no seam for
-  // rows to bleed through.
-  const theadTop = stickyTop + wrapH;
+  // The page header pins directly under the app topbar; the filter wrapper pins
+  // directly under the frozen header — both at rest offsets from React state.
+  // The thead `top` is the live CSS variable (see above) so it never lags the
+  // collapse/expand animation.
+  const workspaceTop = stickyTop + headerH;
 
   // Unique technicians for filter
   const technicians = useMemo(() => {
@@ -789,7 +836,26 @@ export default function TicketsPage() {
   }, [router]);
 
   return (
-    <div className="space-y-5">
+    <div
+      ref={pageRef}
+      className="space-y-5"
+      // Sensible initial value so the sticky thead has a valid `top` before the
+      // measure effect runs (overwritten live by the ResizeObserver). Defaults
+      // to topbar + header + a typical filter-wrapper height.
+      style={{ "--rox-thead-top": `${stickyTop}px` } as React.CSSProperties}
+    >
+      {/* ── FROZEN PAGE HEADER ───────────────────────────────────────────
+          The title + actions row (Filter / Settings / Export / Create Ticket)
+          pins directly below the app topbar so it stays visible while the user
+          scrolls the ticket list. Opaque page-canvas background so rows never
+          show through; z-20 keeps it above the filter workspace (z-10) and the
+          thead (z-5). The -32px/32px side shadows extend the opaque fill into
+          the page gutters so nothing bleeds through at the edges. */}
+      <div
+        ref={headerWrapRef}
+        style={{ top: stickyTop }}
+        className="sticky z-20 -mt-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
+      >
       <PageHeader
         eyebrow="Shop"
         title="Tickets"
@@ -836,34 +902,60 @@ export default function TicketsPage() {
           </>
         }
       />
+      </div>{/* ── /FROZEN PAGE HEADER ── */}
 
       {/* ── STICKY FROZEN WORKSPACE ──────────────────────────────────────
           Date pills → Custom picker → Pinned filters → Filter panel →
-          Status pills + Search all pin together as one block just below the
-          app topbar. Opaque page-canvas background so ticket rows never show
-          through; z-30 keeps it above the rows and below opened dropdowns.
+          Status pills + Search all pin together as one block, frozen directly
+          BELOW the frozen page header (top = topbar + header height). Opaque
+          page-canvas background so ticket rows never show through; z-10 keeps
+          it above the rows and below the header (z-20) and opened dropdowns.
           space-y-5 preserves the exact spacing the elements had before, and
           -mt-5/pt-5 keeps the top gap consistent while giving the sticky block
           an opaque top edge. */}
       <div
         ref={stickyWrapRef}
-        style={{ top: stickyTop }}
+        style={{ top: workspaceTop }}
         className="sticky z-10 -mt-5 space-y-5 bg-[hsl(var(--background))] pt-5 pb-5 shadow-[-32px_0_0_0_hsl(var(--background)),32px_0_0_0_hsl(var(--background))]"
       >
-      {/* Date Range — shared 8-option strip as ONE connected segmented control
-          (RepairOX standard: all filter strips use the connected SegmentedTabs
-          container, not detached pills). Scrolls horizontally on narrow screens.
-          px-0.5 py-1 keeps the rounded border + active-pill shadow from being
-          clipped by the scroll container's edges. */}
-      <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-        <SegmentedTabs
-          value={dateRange}
-          onChange={(v) => setDateRange(v as DateRange)}
-          options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
-          size="sm"
-        />
+      {/* Date Range — stays ALWAYS visible (never collapses), on the same row as
+          the ONE Collapse/Expand control (top-right). The date strip + the
+          Create-Ticket header are the only controls that remain in work mode.
+          Shared 8-option strip as ONE connected segmented control (RepairOX
+          standard: connected SegmentedTabs, not detached pills). Scrolls
+          horizontally on narrow screens. px-0.5 py-1 keeps the rounded border +
+          active-pill shadow from being clipped by the scroll container's edges. */}
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1 max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <SegmentedTabs
+            value={dateRange}
+            onChange={(v) => setDateRange(v as DateRange)}
+            options={DATE_RANGES.map((dr) => ({ label: dr.label, value: dr.value }))}
+            size="sm"
+          />
+        </div>
+        <WorkspaceCollapseBar collapsed={controlsCollapsed} onToggle={workspace.toggle} />
       </div>
 
+      {/* ── COLLAPSIBLE CONTROL AREA ──────────────────────────────────────
+          Everything below the date strip (custom picker, pinned filters, the
+          advanced filter panel, the Status + Store + Search bar, the record-type
+          strip, bulk bars and the search banner) lives inside this one
+          collapsible region. In work mode the whole area animates to height 0
+          with NO leftover padding/margins, so the table grows into the freed
+          space. The children stay MOUNTED (only height/opacity animate), so
+          collapsing never resets or refetches any filter/search/selection. */}
+      <AnimatePresence initial={false}>
+        {!controlsCollapsed && (
+          <motion.div
+            key="ticket-controls"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="space-y-5">
       {/* Custom Date Range — reuses the same Date Range picker pattern as Invoice */}
       <DateRangePicker
         open={dateRange === "custom"}
@@ -1127,6 +1219,11 @@ export default function TicketsPage() {
         </motion.div>
       )}
 
+            </div>{/* /collapsible inner */}
+          </motion.div>
+        )}
+      </AnimatePresence>{/* ── /COLLAPSIBLE CONTROL AREA ── */}
+
       </div>{/* ── /STICKY FROZEN WORKSPACE ── */}
 
       {/* Desktop table */}
@@ -1139,7 +1236,7 @@ export default function TicketsPage() {
       <div className="hidden -mt-5 border-2 border-zinc-300 bg-card shadow-card md:block">
         <div className="[overflow-x:clip]">
           <table className="w-full text-sm table-fixed">
-            <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+            <thead style={{ top: "var(--rox-thead-top)" }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-white">
                 {activeColumns.map((col) => (
                   <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>

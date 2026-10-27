@@ -138,15 +138,26 @@ export function WalkInFollowUpWatcher() {
       // ONE durable notification (idempotent via dedupeKey). The Walk-In bell
       // derives from the SAME walk-in record + shared clock, so both bells surface
       // it on this exact tick — one event, observed everywhere at once.
-      notify({
-        kind: "generic",
-        title: `Walk-In follow-up due${w.followUpAttempt ? ` · ${ordinal(w.followUpAttempt)}` : ""}`,
-        body: desc,
-        href: `/walk-in?walkIn=${encodeURIComponent(w.id)}`,
-        reference: walkInDisplayId(w),
-        recipientId: w.salesPersonId || undefined,
-        dedupeKey: key,
-      });
+      //
+      // kind: "walkin_followup_due" so it is classified under the bell's
+      // "Follow-ups" tab (like lead follow-ups), never "Others".
+      //
+      // recipientId is the responsible Sales Person. A follow-up with NO
+      // salesperson is NOT broadcast to everyone (a null recipient would show to
+      // every account, including the owner) — the follow-up agent owns their own
+      // notification. Without a salesperson we skip the targeted bell record (the
+      // Walk-In module's own page bell still surfaces it in context).
+      if (w.salesPersonId) {
+        notify({
+          kind: "walkin_followup_due",
+          title: `Walk-In follow-up due${w.followUpAttempt ? ` · ${ordinal(w.followUpAttempt)}` : ""}`,
+          body: desc,
+          href: `/walk-in?walkIn=${encodeURIComponent(w.id)}`,
+          reference: walkInDisplayId(w),
+          recipientId: w.salesPersonId,
+          dedupeKey: key,
+        });
+      }
 
       if (!isBacklog) {
         toast.info("Walk-In follow-up due", {

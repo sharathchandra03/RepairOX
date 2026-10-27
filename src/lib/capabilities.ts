@@ -114,9 +114,12 @@ export const CAP = {
   recordScope: {
     ticketsViewAll: ["tickets_view_all", "manage_repair_jobs"],
     invoicesViewAll: ["invoices_view_all", "manage_invoices"],
-    // Mirrors CAP.lead.viewAll / the DB's auth_lead_see_all(). manage_sales is a
-    // write key and does NOT widen lead visibility in RLS, so it isn't here.
-    leadsViewAll: ["leads_view_all", "leads_view_team", "leads_performance_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
+    // Mirrors CAP.lead.viewTeam / the DB's auth_lead_see_all(). manage_sales is
+    // a write key and does NOT widen lead visibility in RLS, so it isn't here.
+    // leads_performance_view_all is the LEADERBOARD key, NOT a lead-row
+    // visibility key — kept out so an agent with the scoreboard still only sees
+    // their own/assigned lead rows.
+    leadsViewAll: ["leads_view_all", "leads_view_team", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     fieldViewAll: ["field_view_all", "manage_field_jobs"],
     customersViewAll: ["customers_view_all", "manage_customers"],
   },
@@ -279,9 +282,13 @@ export const CAP = {
     // Scope: see every lead in the user's STORE scope (team = store). MUST match
     // the DB's auth_lead_see_all() (migration 0049) so UI = RLS. `manage_sales`
     // is deliberately NOT here — it is a write key, not a visibility key.
-    // `leads_performance_view_all` is included so the owner All-Agents
-    // leaderboard actually resolves every agent's leads (not just the owner's).
-    viewTeam: ["leads_view_team", "leads_view_all", "leads_performance_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
+    // `leads_performance_view_all` is deliberately NOT here either: it is the
+    // shared Agent Performance LEADERBOARD key (a read-only scoreboard), not a
+    // lead-row visibility key. A plain Sales Agent may hold it to see the
+    // leaderboard, but must still see ONLY their own/assigned leads in the Lead
+    // Table. Only true owner/manager keys below grant see-all lead rows. MUST
+    // match the DB's auth_lead_see_all() (migration 0076) so UI = RLS.
+    viewTeam: ["leads_view_team", "leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     // Scope: see every lead in the org/store (own-vs-all record scope).
     viewAll: ["leads_view_all", "view_sales_reports", "view_financial_reports", "manage_reports", "manage_users"],
     // Sales Agent identity marker. Resolve ELIGIBILITY with the exact-key check

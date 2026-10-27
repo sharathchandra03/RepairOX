@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, ChevronUp, CalendarClock, Pin,
+  Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
   Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -26,6 +26,7 @@ import { CustomizeColumnsMenu } from "@/components/common/customize-columns-menu
 import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
 import { useColumnOrder } from "@/hooks/use-column-order";
 import { useWorkspaceCollapsed } from "@/hooks/use-workspace-collapsed";
+import { WorkspaceCollapseBar } from "@/components/common/workspace-collapse-bar";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { useLeadStoreMode } from "@/lib/lead-store-mode";
@@ -182,40 +183,6 @@ function useScrollEdges(ref: React.RefObject<HTMLElement>) {
     ro.observe(el);
     return () => { el.removeEventListener("scroll", onScroll); ro.disconnect(); if (raf) cancelAnimationFrame(raf); };
   }, [ref]);
-}
-
-/* ── Workspace collapse/expand bar ─────────────────────────────────────────
-   The single control that switches the Lead workspace between MANAGEMENT MODE
-   (expanded — all filters/tools visible) and WORK MODE (collapsed — the control
-   area contracts so the Lead Table maximizes its viewport). It sits in the
-   table toolbar (top-right, immediately above the table) so the user naturally
-   understands it governs the area above the table.
-
-   When collapsed it also surfaces compact, non-interactive indicators —
-   "Filters · N" and the active date range — so the user still knows filters are
-   active WITHOUT reproducing the whole filter area. There is exactly ONE
-   collapse mechanism (no duplicate toggles). Keyboard + a11y: it is a native
-   <button> (Enter/Space work) with an explicit aria-label and a tooltip. */
-function WorkspaceCollapseBar({
-  collapsed,
-  onToggle,
-}: {
-  collapsed: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-expanded={!collapsed}
-      aria-label={collapsed ? "Show filters and expand controls" : "Collapse filters and maximize the lead table"}
-      title={collapsed ? "Show filters" : "Collapse filters and maximize table"}
-      className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-semibold text-zinc-700 shadow-sm transition hover:border-[#4361EE]/40 hover:text-[#4361EE] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/30"
-    >
-      {collapsed ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronUp className="h-3.5 w-3.5" />}
-      {collapsed ? "Show Filters" : "Collapse Filters"}
-    </button>
-  );
 }
 
 /* ── Follow-up cell — mirrors the Ticket due-date reddish/pink treatment.

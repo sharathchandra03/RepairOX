@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useReducedMotion } from "framer-motion";
 import { Bell, X, CheckCheck, ExternalLink, Clock } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -115,6 +115,14 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
   // Bell badge reflects BOTH categories so nothing is missed from the Lead Table.
   const unreadCount = followUpUnread + otherUnread;
 
+  // CONTINUOUS vibration while this user has a Due/Overdue follow-up still open.
+  // `due` is the live set of the user's Due/Overdue scheduled follow-ups, so the
+  // moment they COMPLETE it (leaves the scheduled set) or RESCHEDULE it to the
+  // future (no longer Due), `due` empties and the bell stops — exactly the
+  // requested behaviour. Honours prefers-reduced-motion.
+  const reduceMotion = useReducedMotion();
+  const vibrate = !reduceMotion && due.length > 0;
+
   const handleMarkAllRead = () =>
     markAllRead(currentUserId, roleId, isFollowUpNotification, tab === "followups");
   const handleClearAll = () =>
@@ -135,8 +143,8 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
         )}
       >
         <motion.span
-          animate={unreadCount > 0 ? { rotate: [0, -12, 12, -8, 8, 0] } : { rotate: 0 }}
-          transition={unreadCount > 0 ? { duration: 1.1, repeat: Infinity, repeatDelay: 2.4, ease: "easeInOut" } : { duration: 0.2 }}
+          animate={vibrate ? { rotate: [0, -14, 12, -10, 8, -5, 0] } : { rotate: 0 }}
+          transition={vibrate ? { duration: 0.9, repeat: Infinity, repeatDelay: 0.6, ease: "easeInOut" } : { duration: 0.2 }}
           style={{ transformOrigin: "50% 15%" }}
         >
           <Bell className="h-[18px] w-[18px]" />

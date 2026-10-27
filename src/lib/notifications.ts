@@ -25,6 +25,11 @@ export type NotificationKind =
   | "lead_assigned"
   | "lead_followup_due"
   | "lead_followup_overdue"
+  /* Walk-In follow-up (its own kind so it is classified under "Follow-ups",
+     not "Others"). Every module's follow-up uses a `*_followup_due` /
+     `*_followup_overdue` kind so the ONE classifier groups them all. */
+  | "walkin_followup_due"
+  | "walkin_followup_overdue"
   | "store_handoff"
   | "field_new_job"
   | "field_assignment"
@@ -77,11 +82,15 @@ export interface AppNotification {
 
 export type NotificationInput = Omit<AppNotification, "id" | "ts" | "read"> & { ts?: number };
 
-/** True for the lead follow-up kinds (due / overdue) — the "Follow-ups"
- *  category in the bell. Everything else is "Others". Kept here so the feed UI
- *  and any future consumer classify a notification identically. */
+/** True for EVERY follow-up kind (due / overdue), regardless of the module it
+ *  came from — Leads, Walk-In, and any future module — so they ALL fall under
+ *  the "Follow-ups" tab of the bell and never land in "Others". Any kind named
+ *  `<module>_followup_due` / `<module>_followup_overdue` is treated as a
+ *  follow-up, so a new module is grouped correctly without editing this
+ *  function. Kept here so every feed UI classifies a notification identically.
+ */
 export function isFollowUpNotification(n: AppNotification): boolean {
-  return n.kind === "lead_followup_due" || n.kind === "lead_followup_overdue";
+  return n.kind.endsWith("_followup_due") || n.kind.endsWith("_followup_overdue");
 }
 
 const STORAGE_PREFIX = "repairox-notifications";
