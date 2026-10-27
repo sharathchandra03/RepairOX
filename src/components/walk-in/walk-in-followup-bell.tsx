@@ -11,7 +11,7 @@
 
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Bell, X, CheckCheck, ExternalLink, Clock, Trash2 } from "lucide-react";
+import { Bell, X, CheckCheck, ExternalLink, Clock } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { type WalkIn, followUpDueAt } from "@/lib/mock-data";
 import { useFollowUpClock, dueFollowUps } from "@/lib/walk-in-followup-engine";
@@ -39,22 +39,10 @@ function loadDismissed(): Set<string> {
   return dismissed;
 }
 
-function persistDismissed() {
-  if (!dismissed || typeof window === "undefined") return;
-  try { localStorage.setItem(DISMISSED_KEY, JSON.stringify(Array.from(dismissed).slice(-300))); } catch { /* quota */ }
-}
-
 /** Stable key for a specific due event — matches the watcher's dueKey shape. */
 function dueEventKey(w: WalkIn): string {
   const due = followUpDueAt(w);
   return `${w.id}@${due ? due.getTime() : 0}`;
-}
-
-function dismissEvents(keys: string[]) {
-  const set = loadDismissed();
-  let changed = false;
-  for (const k of keys) { if (!set.has(k)) { set.add(k); changed = true; } }
-  if (changed) { persistDismissed(); dismissListeners.forEach((l) => l()); }
 }
 
 function subscribeDismissed(cb: () => void): () => void {
@@ -192,33 +180,10 @@ export function WalkInFollowUpBell({
                   <X className="h-4 w-4" />
                 </button>
               </div>
-              {/* Bulk actions row:
-                  • Mark all read — clears the unread dot on every due follow-up
-                    (marks them seen; never completes or moves to History).
-                  • Clear all — DISMISSES every shown follow-up from the bell so
-                    the panel empties. It only hides the bell entries; the
-                    follow-ups stay on the Walk-In page and re-appear if
-                    rescheduled to a new time. */}
-              {dueList.length > 0 && (
-                <div className="mt-2 flex items-center gap-2">
-                  {unreadCount > 0 && (
-                    <button
-                      onClick={() => onMarkAllRead(unread)}
-                      title="Mark all follow-up notifications as read"
-                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] px-2.5 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:bg-indigo-100"
-                    >
-                      <CheckCheck className="h-3.5 w-3.5" /> Mark all read
-                    </button>
-                  )}
-                  <button
-                    onClick={() => dismissEvents(dueList.map(dueEventKey))}
-                    title="Clear all follow-up notifications from the bell"
-                    className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground ring-1 ring-inset ring-border transition hover:bg-muted hover:text-rose-600"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" /> Clear all
-                  </button>
-                </div>
-              )}
+              {/* No bulk "Mark all read" / "Clear all" — a Walk-In follow-up
+                  notification is cleared only by ACTING on it (Complete
+                  Follow-Up / reschedule on the Walk-In). A manual read/dismiss
+                  would let a due follow-up be silenced without being handled. */}
             </div>
 
             <div className="max-h-[360px] overflow-y-auto">

@@ -26,7 +26,7 @@ import { useSession } from "@/lib/use-session";
 import { followUpLifecycle, type Lead, type LeadFollowUp } from "@/lib/leads-data";
 import { useLeadFollowUpClock, dueLeadFollowUps } from "@/lib/lead-followup-engine";
 import {
-  useNotificationsFor, markRead, markAllRead, clearNotification, clearAllForRecipient,
+  useNotificationsFor, markRead, markAllRead, clearAllForRecipient,
   isFollowUpNotification,
 } from "@/lib/notifications";
 
@@ -80,8 +80,19 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
     const list = dueLeadFollowUps(followUps, now).filter((fu) => {
       const lead = leadById.get(fu.leadId);
       if (!lead) return false;
-      const recipientId = fu.followUpUserId || lead.assignedTo || "";
-      return !currentUserId || !recipientId || recipientId === currentUserId;
+      if (!currentUserId) return true;
+      // Surface the follow-up to the CURRENT user when they are its responsible
+      // agent, the lead's follow-up agent / owner, OR the one who
+      // scheduled/rescheduled it — so a follow-up I just (re)scheduled always
+      // appears for me, even if the resolved agent id differs. An unassigned
+      // follow-up (no agent + no owner) is shown to whoever can see the lead.
+      const mine =
+        fu.followUpUserId === currentUserId ||
+        fu.createdBy === currentUserId ||
+        lead.followUpAgentId === currentUserId ||
+        lead.assignedTo === currentUserId ||
+        (!fu.followUpUserId && !lead.assignedTo);
+      return mine;
     });
     return list.sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -96,17 +107,26 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
     return m;
   }, [myNotifs]);
 
-  const rows = useMemo(() => due.map((fu) => {
+  // Only follow-ups whose EXACT scheduled instant has been reached (now >=
+  // dueAt) count as "needs attention now" — a follow-up scheduled for later
+  // today does NOT alert until its time. This is what drives the list, the
+  // badge count and the shake, so the bell triggers at the exact minute set.
+  const pastDue = useMemo(
+    () => due.filter((fu) => { const t = new Date(fu.dueAt).getTime(); return !isNaN(t) && now >= t; }),
+    [due, now],
+  );
+
+  const rows = useMemo(() => pastDue.map((fu) => {
     const state = followUpLifecycle(fu, now);
     const notif = notifByKey.get(dueKey(fu, state));
     return { fu, state, lead: leadById.get(fu.leadId)!, notifId: notif?.id, read: notif?.read ?? true };
-  }), [due, now, notifByKey, leadById]);
+  }), [pastDue, now, notifByKey, leadById]);
 
-  // The follow-up badge counts every LIVE Due/Overdue follow-up (what the list
-  // shows + what drives the shake), NOT just unread stored notifications — so a
-  // pending follow-up is never silently un-counted just because its durable
+  // The follow-up badge counts every follow-up whose time has ARRIVED (what the
+  // list shows + what drives the shake), NOT just unread stored notifications —
+  // so a due follow-up is never silently un-counted just because its durable
   // notification hasn't been written yet or was already read. It clears only
-  // when the follow-up is COMPLETED or RESCHEDULED (it leaves the `due` set).
+  // when the follow-up is COMPLETED or RESCHEDULED (it leaves the set).
   const followUpUnread = rows.length;
 
   // "Others" = this user's non-follow-up notifications from the shared feed
@@ -120,13 +140,13 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
   // Bell badge reflects BOTH categories so nothing is missed from the Lead Table.
   const unreadCount = followUpUnread + otherUnread;
 
-  // CONTINUOUS vibration while this user has a Due/Overdue follow-up still open.
-  // `due` is the live set of the user's Due/Overdue scheduled follow-ups, so the
-  // moment they COMPLETE it (leaves the scheduled set) or RESCHEDULE it to the
-  // future (no longer Due), `due` empties and the bell stops — exactly the
-  // requested behaviour. Honours prefers-reduced-motion.
+  // CONTINUOUS vibration ONLY once a follow-up's exact instant has arrived
+  // (pastDue). It starts at the scheduled minute (the precise clock ticks then)
+  // and keeps shaking until the follow-up is COMPLETED or RESCHEDULED to the
+  // future (it then leaves `pastDue`). A follow-up scheduled for later today
+  // does NOT shake early. Honours prefers-reduced-motion.
   const reduceMotion = useReducedMotion();
-  const vibrate = !reduceMotion && due.length > 0;
+  const vibrate = !reduceMotion && pastDue.length > 0;
 
   const handleMarkAllRead = () =>
     markAllRead(currentUserId, roleId, isFollowUpNotification, tab === "followups");
@@ -209,16 +229,20 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
                 ))}
               </div>
 
-              {((tab === "followups" && followUpUnread > 0) || (tab === "others" && otherUnread > 0)) && (
-                <div className="mt-2 flex items-center gap-2">
-                  <button onClick={handleMarkAllRead} className="inline-flex items-center gap-1.5 rounded-lg bg-[#EEF1FD] px-2.5 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:bg-indigo-100">
-                    <CheckCheck className="h-3.5 w-3.5" /> Mark all read
-                  </button>
-                  {tab === "others" && (
-                    <button onClick={handleClearAll} className="inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted-foreground transition hover:bg-muted hover:text-rose-600">
-                      <X className="h-3.5 w-3.5" /> Clear all
+              {/* Bulk actions live ONLY on the Others tab. Follow-up
+                  notifications are cleared by ACTING on the lead (complete /
+                  reschedule) — never by a manual read/dismiss — so they have no
+                  bulk controls. Small, right-aligned to match the UI. */}
+              {tab === "others" && otherNotifs.length > 0 && (
+                <div className="mt-2 flex items-center justify-end gap-1">
+                  {otherUnread > 0 && (
+                    <button onClick={handleMarkAllRead} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-[#4361EE] transition hover:bg-[#EEF1FD]">
+                      <CheckCheck className="h-3 w-3" /> Mark all read
                     </button>
                   )}
+                  <button onClick={handleClearAll} className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium text-muted-foreground transition hover:bg-muted hover:text-rose-600">
+                    <X className="h-3 w-3" /> Dismiss all
+                  </button>
                 </div>
               )}
             </div>
@@ -275,23 +299,16 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
                       </div>
                       <p className="text-[11px] text-muted-foreground">{lead.leadNo}{lead.device ? ` · ${lead.device}` : ""} · Follow-up #{fu.seq}</p>
                       <p className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-[#4361EE]"><Clock className="h-3 w-3" /> {fmtDue(fu)}</p>
+                      {/* Follow-up notifications are resolved by ACTING on the
+                          lead (complete / reschedule) — not a manual read or
+                          dismiss. So the only action here is Open Lead. */}
                       <div className="mt-1.5 flex flex-wrap items-center gap-2">
                         <button
-                          onClick={() => { if (notifId) markRead(notifId); onOpenLead(lead); setOpen(false); }}
+                          onClick={() => { onOpenLead(lead); setOpen(false); }}
                           className="inline-flex items-center gap-1 rounded-md bg-[#EEF1FD] px-2 py-1 text-[11px] font-medium text-[#4361EE] transition hover:bg-indigo-100"
                         >
                           <ExternalLink className="h-3 w-3" /> Open Lead
                         </button>
-                        {notifId && !read && (
-                          <button onClick={() => markRead(notifId)} className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-foreground">
-                            <CheckCheck className="h-3 w-3" /> Mark read
-                          </button>
-                        )}
-                        {notifId && (
-                          <button onClick={() => clearNotification(notifId)} className="inline-flex items-center gap-1 text-[11px] font-medium text-muted-foreground transition hover:text-rose-600">
-                            <X className="h-3 w-3" /> Dismiss
-                          </button>
-                        )}
                       </div>
                     </div>
                   </div>

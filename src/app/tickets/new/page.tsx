@@ -17,7 +17,7 @@ import { CategoryWheel } from "@/components/wizard/category-wheel";
 import { CreationSuccess } from "@/components/ui/creation-success";
 import { CompletionScreen } from "@/components/completion/completion-screen";
 import { AddContactModal } from "@/components/common/add-contact-modal";
-import { SearchDropdownPanel } from "@/components/common/search-dropdown-panel";
+import { IssueSelector } from "@/components/common/issue-selector";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Textarea } from "@/components/ui/input";
 import { RSelect } from "@/components/ui/rselect";
@@ -42,7 +42,7 @@ import { searchCustomerCandidates, resolvePromotionOrigin, type CustomerCandidat
 import { customerSalesAttribution, findOpenLeadMatches } from "@/lib/leads-data";
 import { CustomerBadges, resolveGroups, customerLifecycle } from "@/components/common/customer-classification";
 import { searchModels, getModelsForBrand, createBrand, createDeviceModel, searchBrandsInCategory, findBrandInCategory, inferCategoryFromName, type Brand, type DeviceModel } from "@/lib/brand-model-data";
-import { parseIssueString, serializeIssues } from "@/lib/issue-library";
+
 import { createAssignedByOption } from "@/lib/assigned-by-data";
 import { createAssignedToOption } from "@/lib/assigned-to-data";
 import { usePermissions } from "@/lib/permissions-context";
@@ -2607,6 +2607,7 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
               <IssueSelector
                 value={j.issue}
                 onChange={(v) => set("issue", v)}
+                fieldClassName="min-h-[82px] max-h-[82px] rounded-lg"
               />
             </Field>
           </div>
@@ -2922,137 +2923,6 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
           are inherited from <Label> unchanged. Scoped to the ticket wizard. */}
       <Label className="text-foreground/70">{label}</Label>
       {children}
-    </div>
-  );
-}
-
-/* ── Issue Multi-Select with search, pills, and "create new" ── */
-function IssueSelector({ value, onChange, className }: { value: string; onChange: (v: string) => void; className?: string }) {
-  const { issueLibrary, addIssueToStore } = useStore();
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  const selected = parseIssueString(value);
-
-  // Close on outside click
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [open]);
-
-  const filtered = issueLibrary
-    .filter(
-      (item) =>
-        !selected.some((s) => s.toLowerCase() === item.toLowerCase()) &&
-        item.toLowerCase().includes(query.trim().toLowerCase())
-    )
-    .sort((a, b) => a.localeCompare(b));
-
-  const addIssue = (issue: string) => {
-    const trimmed = issue.trim();
-    if (!trimmed) return;
-    if (selected.some((s) => s.toLowerCase() === trimmed.toLowerCase())) return;
-    const updated = [...selected, trimmed];
-    onChange(serializeIssues(updated));
-    // Persist to the global store
-    addIssueToStore(trimmed);
-    setQuery("");
-  };
-
-  const removeIssue = (issue: string) => {
-    const updated = selected.filter((s) => s.toLowerCase() !== issue.toLowerCase());
-    onChange(serializeIssues(updated));
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && query.trim()) {
-      e.preventDefault();
-      addIssue(query);
-    }
-    if (e.key === "Backspace" && !query && selected.length > 0) {
-      removeIssue(selected[selected.length - 1]);
-    }
-  };
-
-  const showCreate = query.trim() && !issueLibrary.some((i) => i.toLowerCase() === query.trim().toLowerCase());
-
-  return (
-    <div ref={containerRef} className="relative">
-      {/* Trigger / pill container — CONSTANT height; chips wrap and the box
-          scrolls internally (thin blue scrollbar kept inside the rounded
-          border via the right padding + gutter). */}
-      <div
-        onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }}
-        className={cn(
-          "rox-rail-scroll flex h-[82px] w-full flex-wrap content-start items-start gap-1.5 overflow-y-auto rounded-xl border bg-card py-2 pl-3 pr-1.5 text-sm transition-all duration-150 cursor-text [scrollbar-gutter:stable]",
-          "border-input hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/10",
-          className
-        )}
-      >
-        {selected.map((issue) => (
-          <span
-            key={issue}
-            className="inline-flex items-center gap-1.5 rounded-full bg-[#EEF1FD] px-3 py-1.5 text-[13px] font-medium text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/40"
-          >
-            {issue}
-            <button
-              type="button"
-              onClick={(e) => { e.stopPropagation(); removeIssue(issue); }}
-              className="grid h-4 w-4 place-items-center rounded-full hover:bg-[#4361EE]/10 transition"
-            >
-              <X className="h-3 w-3" />
-            </button>
-          </span>
-        ))}
-        <input
-          ref={inputRef}
-          value={query}
-          onChange={(e) => { setQuery(e.target.value); if (!open) setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onKeyDown={handleKeyDown}
-          placeholder={selected.length === 0 ? "Search or add issues…" : "Add more…"}
-          className="min-w-[100px] flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground focus:outline-none focus-visible:outline-none focus-visible:shadow-none focus-visible:ring-0"
-        />
-      </div>
-
-      {/* Dropdown */}
-      {open && (
-        <SearchDropdownPanel label="Issues" onClose={() => setOpen(false)}>
-          {showCreate && (
-            <button
-              type="button"
-              onClick={() => addIssue(query)}
-              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#EEF1FD]/60 transition-colors"
-            >
-              <Plus className="h-3.5 w-3.5 text-[#4361EE]" />
-              <span>Create &ldquo;<span className="font-medium text-[#4361EE]">{query.trim()}</span>&rdquo;</span>
-            </button>
-          )}
-          {filtered.length > 0 ? (
-            filtered.slice(0, 15).map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => addIssue(item)}
-                className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[13px] hover:bg-[#EEF1FD]/60 transition-colors"
-              >
-                <span className="grid h-4 w-4 shrink-0 place-items-center text-muted-foreground opacity-0">
-                  <Check className="h-3.5 w-3.5" />
-                </span>
-                <span className="truncate">{item}</span>
-              </button>
-            ))
-          ) : !showCreate ? (
-            <p className="px-2.5 py-3 text-center text-[12px] text-muted-foreground">No issues found</p>
-          ) : null}
-        </SearchDropdownPanel>
-      )}
     </div>
   );
 }
@@ -3732,19 +3602,19 @@ const CUSTOMER_PANEL_ACCENT: Record<"blue" | "orange", {
 }> = {
   blue: {
     frame: "border-l-[#4361EE] border-b-[#4361EE] border-r-border border-t-border",
-    chip: "bg-white/20 text-white ring-1 ring-inset ring-white/40",
-    headerBar: "bg-gradient-to-r from-[#4361EE] to-[#3347D6]",
-    headerEdge: "border-b-[#2A3BB5]",
-    title: "text-white",
-    subtitle: "text-white/80",
+    chip: "bg-white/25 text-white ring-1 ring-inset ring-white/50",
+    headerBar: "bg-gradient-to-r from-[#5B73F0] to-[#4361EE]",
+    headerEdge: "border-b-[#3347D6]",
+    title: "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]",
+    subtitle: "text-white/95",
   },
   orange: {
-    frame: "border-l-orange-500 border-b-orange-500 border-r-border border-t-border",
-    chip: "bg-white/20 text-white ring-1 ring-inset ring-white/40",
-    headerBar: "bg-gradient-to-r from-orange-500 to-orange-600",
-    headerEdge: "border-b-orange-700",
-    title: "text-white",
-    subtitle: "text-white/80",
+    frame: "border-l-[#FB923C] border-b-[#FB923C] border-r-border border-t-border",
+    chip: "bg-white/25 text-white ring-1 ring-inset ring-white/50",
+    headerBar: "bg-gradient-to-r from-[#FB923C] to-[#F97316]",
+    headerEdge: "border-b-[#EA7A1E]",
+    title: "text-white drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]",
+    subtitle: "text-white/95",
   },
 };
 

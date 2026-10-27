@@ -24,7 +24,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   CalendarClock, History as HistoryIcon, Table as TableIcon, Calendar as CalendarIcon,
-  ChevronLeft, ChevronRight, Pencil, MessageSquare, Send, X,
+  ChevronLeft, ChevronRight, Eye, MessageSquare, Send, X,
 } from "lucide-react";
 import { Avatar } from "@/components/ui/avatar";
 import { Pagination } from "@/components/ui/pagination";
@@ -64,13 +64,17 @@ export function LeadFollowUpView({
   leads,
   theadTop,
   onOpenLead,
+  highlightLeadId,
 }: {
   /** The already-scoped + store-filtered lead set the page is showing. */
   leads: Lead[];
   /** Runtime-measured sticky offset so the <thead> pins flush like the main table. */
   theadTop?: number;
-  /** Open the lead detail (drawer) — same interaction as clicking a table row. */
+  /** Open the FULL lead page (the Action-column View-Lead / eye action). */
   onOpenLead: (lead: Lead) => void;
+  /** When set (e.g. from the follow-up bell's "Open Lead"), the matching row is
+   *  scrolled into view and blinks for ~3s so the agent sees which lead. */
+  highlightLeadId?: string | null;
 }) {
   const { followUps } = useLeads();
   const [view, setView] = useState<ViewMode>("table");
@@ -112,6 +116,7 @@ export function LeadFollowUpView({
           onSubChange={setSub}
           theadTop={theadTop}
           onOpenLead={onOpenLead}
+          highlightLeadId={highlightLeadId}
         />
       ) : (
         <FollowUpCalendar followUps={visibleFollowUps} leadById={leadById} onOpenLead={onOpenLead} />
@@ -123,7 +128,7 @@ export function LeadFollowUpView({
 /* ── Active / History table ──────────────────────────────────────────────── */
 
 function FollowUpTable({
-  leads, leadById, followUps, sub, onSubChange, theadTop, onOpenLead,
+  leads, leadById, followUps, sub, onSubChange, theadTop, onOpenLead, highlightLeadId,
 }: {
   leads: Lead[];
   leadById: Map<string, Lead>;
@@ -132,6 +137,7 @@ function FollowUpTable({
   onSubChange: (m: SubMode) => void;
   theadTop?: number;
   onOpenLead: (lead: Lead) => void;
+  highlightLeadId?: string | null;
 }) {
   // Group follow-ups per lead.
   const byLead = useMemo(() => {
@@ -173,6 +179,30 @@ function FollowUpTable({
   const currentPage = Math.min(page, totalPages);
   useEffect(() => { setPage(1); }, [sub, rows.length]);
   const paged = useMemo(() => rows.slice((currentPage - 1) * pageSize, currentPage * pageSize), [rows, currentPage, pageSize]);
+
+  /* ── Highlight a lead's row (from the follow-up bell's "Open Lead") ──
+     A highlighted lead lives in the ACTIVE tab (it has an open follow-up), so
+     switch to Active, jump to the page that contains it, scroll it into view
+     and let the row blink (see the `blink` class below). */
+  const rowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map());
+  useEffect(() => {
+    if (!highlightLeadId) return;
+    // The highlighted lead is an active (open) follow-up — make sure that tab
+    // is showing.
+    if (sub !== "active" && activeRows.some((r) => r.lead.id === highlightLeadId)) {
+      onSubChange("active");
+      return; // re-runs after the tab switch re-renders
+    }
+    const idx = rows.findIndex((r) => r.lead.id === highlightLeadId);
+    if (idx < 0) return;
+    const targetPage = Math.floor(idx / pageSize) + 1;
+    if (targetPage !== currentPage) { setPage(targetPage); return; }
+    // On the right page now — scroll the row into view on the next frame.
+    const raf = requestAnimationFrame(() => {
+      rowRefs.current.get(highlightLeadId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [highlightLeadId, sub, activeRows, rows, pageSize, currentPage, onSubChange]);
 
   return (
     <div className="space-y-3">
@@ -222,11 +252,15 @@ function FollowUpTable({
                 return (
                   <motion.tr
                     key={lead.id}
+                    ref={(el) => { if (el) rowRefs.current.set(lead.id, el as HTMLTableRowElement); else rowRefs.current.delete(lead.id); }}
                     initial={{ opacity: 0, y: 3 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: Math.min(0.015 * i, 0.2) }}
                     onClick={() => onOpenLead(lead)}
-                    className="group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition hover:bg-muted/40"
+                    className={cn(
+                      "group h-[68px] cursor-pointer border-t border-zinc-500 align-middle transition hover:bg-muted/40",
+                      highlightLeadId === lead.id && "rox-row-blink",
+                    )}
                   >
                     {/* DATE — when the lead was created (same source as Lead Table). */}
                     <td className="py-4 pl-5 pr-3 text-[13px]">
@@ -291,11 +325,11 @@ function FollowUpTable({
                       <div className="flex items-center justify-end">
                         <button
                           onClick={() => onOpenLead(lead)}
-                          title="Open lead"
-                          aria-label={`Open lead ${lead.leadNo}`}
+                          title="View lead"
+                          aria-label={`View lead ${lead.leadNo}`}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
                         >
-                          <Pencil className="h-4 w-4" />
+                          <Eye className="h-4 w-4" />
                         </button>
                       </div>
                     </td>

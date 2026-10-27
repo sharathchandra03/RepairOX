@@ -111,14 +111,32 @@ export function LeadFollowUpWatcher() {
 
     for (const fu of followUps) {
       if (fu.status !== "scheduled") continue;
-      const state = followUpLifecycle(fu, asOf);          // Pending | Due | Overdue
-      if (state !== "Due" && state !== "Overdue") continue;
+      // Fire ONLY when the EXACT due instant has been reached (now >= dueAt) —
+      // never for a same-day-future "Due" state (that would alert the moment a
+      // follow-up is scheduled for later today). A follow-up set for 5:45 PM
+      // alerts at 5:45 PM, not when it's created. The precise clock ticks at
+      // that instant so this fires right on time.
+      const dueTs = new Date(fu.dueAt).getTime();
+      if (isNaN(dueTs) || asOf < dueTs) continue;
+      const state = followUpLifecycle(fu, asOf);          // Overdue (past due)
 
-      // Address the follow-up agent, else the lead owner. Only announce in the
-      // recipient's own session (do NOT notify every user — §9).
+      // Address the follow-up agent, else the lead owner. Announce in the
+      // recipient's own session (do NOT notify every user — §9), where the
+      // "recipient" is the follow-up agent, the lead owner / follow-up agent,
+      // OR whoever scheduled it — so a follow-up I just (re)scheduled always
+      // alerts me. An unassigned follow-up (no agent + no owner) alerts the
+      // viewer. The durable notification is targeted to the current user so it
+      // reliably lands in their bell feed.
       const lead = leads.find((l) => l.id === fu.leadId);
-      const recipientId = fu.followUpUserId || lead?.assignedTo || undefined;
-      if (currentUserId && recipientId && recipientId !== currentUserId) continue;
+      const isMine =
+        !currentUserId ||
+        fu.followUpUserId === currentUserId ||
+        fu.createdBy === currentUserId ||
+        lead?.followUpAgentId === currentUserId ||
+        lead?.assignedTo === currentUserId ||
+        (!fu.followUpUserId && !lead?.assignedTo);
+      if (!isMine) continue;
+      const recipientId = currentUserId || fu.followUpUserId || lead?.assignedTo || undefined;
 
       const key = dueKey(fu, state);
       if (seen.has(key) || hasNotification(key)) { seen.add(key); continue; }
@@ -129,8 +147,7 @@ export function LeadFollowUpWatcher() {
       // record the durable bell notification below, but must not toast/sound
       // (that is the login burst). A follow-up crossing its time live, or an
       // event routed to this user during the session, has dueTs >= sessionStart
-      // and still toasts.
-      const dueTs = new Date(fu.dueAt).getTime();
+      // and still toasts. (`dueTs` is computed above.)
       const isBacklog = dueTs < sessionStart;
 
       const who = lead?.name || lead?.leadNo || "Lead";

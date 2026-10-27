@@ -77,6 +77,18 @@ export function DateTimeDialog({
   const [month, setMonth] = React.useState(initialDate.getMonth());
   const [saving, setSaving] = React.useState(false);
 
+  // Auto-scroll the selected hour/minute into view on open (the minute list is
+  // now 60 rows, so the selected value can start off-screen).
+  const selHourRef = React.useRef<HTMLButtonElement>(null);
+  const selMinRef = React.useRef<HTMLButtonElement>(null);
+  React.useEffect(() => {
+    const opts: ScrollIntoViewOptions = { block: "center" };
+    selHourRef.current?.scrollIntoView(opts);
+    selMinRef.current?.scrollIntoView(opts);
+    // Run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   /* Inline time parts derived from `time` ("HH:mm", 24h). */
   const [h24, minute] = React.useMemo(() => {
     const [hh, mm] = (time || "00:00").split(":").map((v) => parseInt(v, 10));
@@ -90,7 +102,10 @@ export function DateTimeDialog({
     setTime(`${pad(h)}:${pad(nextMin)}`);
   };
   const HOURS = Array.from({ length: 12 }, (_, i) => i + 1);
-  const MINUTES = Array.from({ length: 12 }, (_, i) => i * 5); // 00,05,…,55
+  // Every exact minute (00–59) so a precise instant (e.g. 5:42 PM) can be set —
+  // not just 5-minute steps. The scrollable column auto-scrolls to the selected
+  // value on open so the current minute is visible even deep in the list.
+  const MINUTES = Array.from({ length: 60 }, (_, i) => i); // 00,01,…,59
 
   const daysInMonth = getDaysInMonth(year, month);
   const firstDay = getFirstDayOfMonth(year, month);
@@ -205,6 +220,7 @@ export function DateTimeDialog({
                   {HOURS.map((h) => (
                     <button
                       key={h}
+                      ref={h === hour12 ? selHourRef : undefined}
                       type="button"
                       onClick={() => setTimeParts(h, minute, meridiem)}
                       className={cn(
@@ -220,6 +236,7 @@ export function DateTimeDialog({
                   {MINUTES.map((m) => (
                     <button
                       key={m}
+                      ref={m === minute ? selMinRef : undefined}
                       type="button"
                       onClick={() => setTimeParts(hour12, m, meridiem)}
                       className={cn(

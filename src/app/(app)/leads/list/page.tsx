@@ -1446,6 +1446,21 @@ export default function LeadsListPage() {
      URL/state so returning via "Back to Leads" restores them. */
   const openLead = useCallback((lead: Lead) => { router.push(`/leads/${lead.id}`); }, [router]);
 
+  /* ── "Open Lead" from the follow-up bell ──
+     Instead of jumping straight to the View Lead page, switch to the Follow-Up
+     view and briefly HIGHLIGHT (blink) the selected lead's row for 3s so the
+     agent can see exactly which lead needs attention. From there the Action
+     column's View-Lead (eye) opens the full lead. */
+  const [highlightLeadId, setHighlightLeadId] = useState<string | null>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openFollowUpForLead = useCallback((lead: Lead) => {
+    setFilters((f) => ({ ...f, view: "followUps" }));
+    setHighlightLeadId(lead.id);
+    if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    highlightTimerRef.current = setTimeout(() => setHighlightLeadId(null), 3000);
+  }, [setFilters]);
+  useEffect(() => () => { if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current); }, []);
+
   const handleAction = (action: LeadAction, lead: Lead, anchor?: HTMLElement) => {
     switch (action) {
       case "view": openLead(lead); break;
@@ -1844,8 +1859,9 @@ export default function LeadsListPage() {
           <div className="flex items-center gap-2">
             {/* Live roster of Sales Agents who are active right now (shared). */}
             <SalesAgentsOnline />
-            {/* Lead follow-up bell — the current user's Due/Overdue follow-ups. */}
-            <LeadFollowUpBell onOpenLead={openLead} />
+            {/* Lead follow-up bell — the current user's Due/Overdue follow-ups.
+                "Open Lead" switches to the Follow-Up view and blinks the row. */}
+            <LeadFollowUpBell onOpenLead={openFollowUpForLead} />
             <div className="hidden items-center gap-0.5 rounded-xl border border-border bg-card p-0.5 shadow-sm sm:flex">
               <Link href="/leads/list" className="grid h-8 w-8 place-items-center rounded-lg bg-[#4361EE] text-white" title="List View"><List className="h-3.5 w-3.5" /></Link>
               <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
@@ -2116,7 +2132,7 @@ export default function LeadsListPage() {
           and month calendar), so multiple follow-ups per lead are planned and
           reviewed in one place. */}
       {view === "followUps" ? (
-        <LeadFollowUpView leads={filteredLeads} onOpenLead={openLead} />
+        <LeadFollowUpView leads={filteredLeads} onOpenLead={openLead} highlightLeadId={highlightLeadId} />
       ) : (
       <>
       {/* Not-Contacted accountability banner — explains the queue + the lock. */}

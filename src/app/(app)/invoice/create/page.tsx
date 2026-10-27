@@ -1294,13 +1294,13 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         {/* Customer details — blue */}
         <div className="overflow-hidden rounded-2xl border border-[#4361EE]/40 bg-card shadow-card">
-          <div className="flex items-center gap-3 bg-gradient-to-r from-[#3B4FE0] to-[#4361EE] px-5 py-4 text-white sm:px-6">
+          <div className="flex items-center gap-3 bg-gradient-to-r from-[#5B73F0] to-[#4361EE] px-5 py-4 text-white sm:px-6">
             <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 ring-1 ring-white/25">
               <User className="h-5 w-5" />
             </span>
             <div>
-              <p className="text-[13px] font-bold uppercase tracking-wider leading-tight">Customer Details</p>
-              <p className="text-[11px] text-white/75">Who the invoice is for</p>
+              <p className="text-[13px] font-bold uppercase tracking-wider leading-tight drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]">Customer Details</p>
+              <p className="text-[11px] text-white/95">Who the invoice is for</p>
             </div>
           </div>
           <div className="grid grid-cols-1 gap-x-5 gap-y-4 p-5 sm:grid-cols-2 sm:p-6">
@@ -1333,18 +1333,18 @@ function StepCustomer({ form, updateForm }: { form: InvoiceFormData; updateForm:
             no hidden/unsaved value ever lands on a Retail invoice. */}
         <div className={cn(
           "overflow-hidden rounded-2xl border bg-card shadow-card",
-          isBiz ? "border-[#F97316]/40" : "border-border"
+          isBiz ? "border-[#FB923C]/40" : "border-border"
         )}>
           <div className={cn(
             "flex items-center gap-3 px-5 py-4 text-white sm:px-6",
-            isBiz ? "bg-gradient-to-r from-[#F97316] to-[#FB8C3C]" : "bg-gradient-to-r from-zinc-500 to-zinc-400"
+            isBiz ? "bg-gradient-to-r from-[#FB923C] to-[#F97316]" : "bg-gradient-to-r from-zinc-500 to-zinc-400"
           )}>
             <span className="grid h-10 w-10 place-items-center rounded-full bg-white/15 ring-1 ring-white/25">
               <Building2 className="h-5 w-5" />
             </span>
             <div>
-              <p className="text-[13px] font-bold uppercase tracking-wider leading-tight">Business Billing</p>
-              <p className="text-[11px] text-white/80">{isBiz ? "GST & company details" : "Only for GST invoices"}</p>
+              <p className="text-[13px] font-bold uppercase tracking-wider leading-tight drop-shadow-[0_1px_1px_rgba(0,0,0,0.25)]">Business Billing</p>
+              <p className="text-[11px] text-white/95">{isBiz ? "GST & company details" : "Only for GST invoices"}</p>
             </div>
           </div>
           {isBiz ? (

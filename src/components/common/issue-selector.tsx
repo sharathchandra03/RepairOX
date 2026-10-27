@@ -36,6 +36,7 @@ export function IssueSelector({
   className,
   placeholder,
   pillClassName,
+  fieldClassName,
 }: {
   /** Canonical comma-separated issue string. */
   value: string;
@@ -44,6 +45,10 @@ export function IssueSelector({
   placeholder?: string;
   /** Optional extra classes applied to each selected issue pill (compact use). */
   pillClassName?: string;
+  /** Optional extra classes applied to the field/search box itself — lets a
+   *  caller render a taller box (e.g. a textarea-sized box) instead of the
+   *  compact default. Overrides the default min/max height. */
+  fieldClassName?: string;
 }) {
   const { issueLibrary, addIssueToStore } = useStore();
   const [open, setOpen] = useState(false);
@@ -66,7 +71,7 @@ export function IssueSelector({
     const GAP = 6;      // gap between field and list
     const EDGE = 12;    // keep off the viewport edge
     const MIN = 120;
-    const MAX = 320;
+    const MAX = 280;
 
     const roomBelow = window.innerHeight - r.bottom - GAP - EDGE;
     const roomAbove = r.top - GAP - EDGE;
@@ -162,8 +167,9 @@ export function IssueSelector({
         ref={fieldRef}
         onClick={() => { setOpen(true); setTimeout(() => inputRef.current?.focus(), 0); }}
         className={cn(
-          "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-center gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
+          "flex min-h-[44px] max-h-[110px] w-full flex-wrap items-start content-start gap-1.5 overflow-y-auto rounded-xl border bg-card px-3 py-2 text-sm transition-all duration-150 cursor-text",
           "border-input hover:border-[#4361EE]/40 focus-within:border-[#4361EE] focus-within:ring-2 focus-within:ring-[#4361EE]/10",
+          fieldClassName,
         )}
       >
         {selected.map((issue) => (
@@ -201,19 +207,17 @@ export function IssueSelector({
           style={{ position: "fixed", left: pos.left, top: pos.top, width: pos.width, zIndex: 10099 }}
           className="overflow-hidden rounded-xl border border-border bg-card shadow-xl ring-1 ring-black/[0.03]"
         >
-          {/* Compact header with a manual close × (design-system requirement). */}
-          <div className="flex items-center justify-between gap-2 border-b border-border/70 bg-muted/30 px-2.5 py-1.5">
-            <span className="text-[10.5px] font-semibold uppercase tracking-wider text-muted-foreground">Issues</span>
-            <button
-              type="button"
-              onMouseDown={(e) => e.preventDefault()}
-              onClick={() => { setOpen(false); setQuery(""); }}
-              className="grid h-6 w-6 shrink-0 place-items-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground"
-              aria-label="Close dropdown"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
+          {/* Floating close × (design-system requirement) — overlaid in the
+              top-right corner so no header row wastes vertical space. */}
+          <button
+            type="button"
+            onMouseDown={(e) => e.preventDefault()}
+            onClick={() => { setOpen(false); setQuery(""); }}
+            className="absolute right-1.5 top-1.5 z-10 grid h-6 w-6 shrink-0 place-items-center rounded-md bg-card/80 text-muted-foreground backdrop-blur-sm transition hover:bg-muted hover:text-foreground"
+            aria-label="Close dropdown"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
 
           {/* Option list — scrolls internally, capped to viewport room. */}
           <div className="overflow-y-auto p-1.5" style={{ maxHeight: pos.maxListH }}>

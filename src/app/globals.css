@@ -572,11 +572,14 @@ body {
      table-white, never a bare page gap. */
   background-color: hsl(var(--card));
 }
-.rox-grid-scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.rox-grid-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
 .rox-grid-scroll::-webkit-scrollbar-track { background: transparent; }
+/* The track is inset below the sticky table header (~64px, allowing for a
+   wrapped two-line header label) so the thumb never rides up over the frozen
+   <thead> while scrolling to the top. */
+.rox-grid-scroll::-webkit-scrollbar-track-piece:start { margin-top: 64px; }
 .rox-grid-scroll::-webkit-scrollbar-thumb {
   background: hsl(var(--rox-table-divider));
-  border: 2px solid hsl(var(--card));
   border-radius: 9999px;
 }
 .rox-grid-scroll::-webkit-scrollbar-thumb:hover {
@@ -1546,4 +1549,24 @@ html, body {
 .no-spinner[type="number"] {
   -moz-appearance: textfield;
   appearance: textfield;
+}
+
+/* ─── Follow-up "Open Lead" row highlight ──────────────────────────────────
+   When the follow-up bell's "Open Lead" is clicked, the matching row blinks a
+   soft brand-blue wash for ~3 seconds (6 × 0.5s pulses) so the agent instantly
+   spots which lead needs attention. Honours prefers-reduced-motion (a single
+   static tint, no flashing). */
+.rox-row-blink {
+  animation: rox-row-blink 0.5s ease-in-out 6;
+  will-change: background-color;
+}
+@keyframes rox-row-blink {
+  0%, 100% { background-color: transparent; }
+  50% { background-color: rgba(67, 97, 238, 0.18); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rox-row-blink {
+    animation: none;
+    background-color: rgba(67, 97, 238, 0.12);
+  }
 }
