@@ -2068,11 +2068,14 @@ function DeviceForm({ data, setData, onNext, isEdit }: any) {
         </div>
       )}
 
-    <div ref={formRef} className={FORM_CARD_COMPACT}>
+    <div ref={formRef} className={cn(FORM_CARD_COMPACT, "relative overflow-hidden")}>
+      {/* Left accent strip keyed to the section's header colour — a quiet cue
+          that makes the card feel designed rather than a plain grey panel. */}
+      <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-[#4361EE] to-[#6E86FF]" />
       <div className="space-y-6">
         {/* Row 1 — Device Identity: Category | Brand | Model | IMEI/Serial */}
         <div className="space-y-3">
-          <SectionLabel icon={Package}>Device Identity</SectionLabel>
+          <SectionLabel icon={Package} accent="blue" hint="Brand, model & identifiers — who the device is.">Device Identity</SectionLabel>
           <div className="grid grid-cols-1 gap-x-2 gap-y-3 sm:grid-cols-2 lg:grid-cols-4">
             {/* Per-device Category — reuses the Settings-backed category master.
                 Writes only to the active device so each device keeps its own.
@@ -2508,12 +2511,15 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
   const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
   return (
-    <div className={FORM_CARD_COMPACT}>
+    <div className={cn(FORM_CARD_COMPACT, "relative overflow-hidden")}>
+      {/* Dual accent strip — indigo (Job Overview) fading into amber (Notes &
+          Estimate) to echo the two columns below. */}
+      <span className="pointer-events-none absolute inset-y-0 left-0 w-1 bg-gradient-to-b from-[#5B5BD6] via-[#8A7CF0] to-[#F0C14B]" />
       <DeviceSwitcher data={data} setData={setData} />
       <div className="grid grid-cols-1 gap-x-4 lg:grid-cols-2 lg:items-stretch">
         {/* Left Column — Job Overview */}
         <div className="flex flex-col">
-          <SectionLabel icon={ClipboardList}>Job Overview</SectionLabel>
+          <SectionLabel icon={ClipboardList} accent="indigo" hint="Type, priority & timing for this job.">Job Overview</SectionLabel>
           <div className="mt-2 grid grid-cols-1 gap-x-2 gap-y-1.5 sm:grid-cols-2">
             <Field label="Job Type">
               <RSelect value={j.jobType} onChange={(v) => set("jobType", v)} options={[
@@ -2611,8 +2617,8 @@ function JobDetailsForm({ data, setData, onNext, isEdit }: any) {
         </div>
 
         {/* Right Column — Notes */}
-        <div className="flex flex-col">
-          <SectionLabel icon={StickyNote}>Notes &amp; Estimate</SectionLabel>
+        <div className="flex flex-col lg:border-l lg:border-border/60 lg:pl-4">
+          <SectionLabel icon={StickyNote} accent="amber" hint="What's wrong & the service charge.">Notes &amp; Estimate</SectionLabel>
           <div className="mt-2">
             <Field label="Problem Description">
               <Textarea
@@ -2867,13 +2873,42 @@ function DeviceSwitcher({ data, setData }: { data: any; setData: (d: any) => voi
   );
 }
 
-function SectionLabel({ icon: Icon, children }: { icon: any; children: React.ReactNode }) {
+/** Accent palette for section headers — restrained, semantic tints. Colour is
+ *  carried only by the icon chip + the thin divider line, never the card body. */
+const SECTION_ACCENTS = {
+  blue:   { chip: "from-[#4361EE] to-[#6E86FF]", ring: "ring-[#4361EE]/15", line: "from-[#4361EE]/40", dot: "bg-[#4361EE]" },
+  indigo: { chip: "from-[#5B5BD6] to-[#8A7CF0]", ring: "ring-[#5B5BD6]/15", line: "from-[#5B5BD6]/40", dot: "bg-[#5B5BD6]" },
+  amber:  { chip: "from-[#D99A2B] to-[#F0C14B]", ring: "ring-[#D99A2B]/15", line: "from-[#D99A2B]/40", dot: "bg-[#D99A2B]" },
+} as const;
+
+function SectionLabel({
+  icon: Icon,
+  children,
+  hint,
+  accent = "blue",
+}: {
+  icon: any;
+  children: React.ReactNode;
+  hint?: string;
+  accent?: keyof typeof SECTION_ACCENTS;
+}) {
+  const a = SECTION_ACCENTS[accent];
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="grid h-5 w-5 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">
-        <Icon className="h-3 w-3" />
+    <div className="flex items-center gap-2.5">
+      {/* Gradient icon chip — soft ring + shadow gives the header a tactile,
+          inviting anchor instead of a flat grey square. */}
+      <span className={cn("grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-sm ring-4", a.chip, a.ring)}>
+        <Icon className="h-4 w-4" strokeWidth={2.25} />
       </span>
-      <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{children}</p>
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex items-center gap-2">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-foreground/80">{children}</p>
+          {/* Soft gradient hairline fades the title into the row — a subtle
+              stroke of colour that keeps the eye moving across the section. */}
+          <span className={cn("h-px flex-1 rounded-full bg-gradient-to-r to-transparent", a.line)} />
+        </div>
+        {hint && <p className="mt-0.5 truncate text-[11px] leading-snug text-muted-foreground">{hint}</p>}
+      </div>
     </div>
   );
 }

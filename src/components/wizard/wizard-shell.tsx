@@ -55,7 +55,7 @@ export function WizardShell({
           onClick={onBack}
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
-          className="grid h-10 w-10 place-items-center rounded-2xl border border-black/25 bg-card text-zinc-700 shadow-card transition hover:bg-muted hover:border-[#B3BFF6]"
+          className="grid h-10 w-10 place-items-center rounded-2xl border border-[#4361EE] bg-[#4361EE] text-white shadow-card transition hover:bg-[#3B54E8] hover:border-[#3B54E8]"
           aria-label="Back"
         >
           <ArrowLeft className="h-4 w-4" />
@@ -66,14 +66,42 @@ export function WizardShell({
           <motion.div
             initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="flex items-center gap-3 rounded-full bg-[#4361EE] px-4 py-1.5 shadow-lg shadow-[#4361EE]/25"
+            className="relative flex items-center gap-3 overflow-hidden rounded-full bg-[#4361EE] px-4 py-1.5 shadow-lg shadow-[#4361EE]/25"
           >
-            <Sparkles className="h-3.5 w-3.5 text-white/80" />
+            {/* Soft sheen sweeps across the pill on each step change, then fades */}
+            <motion.span
+              key={`sheen-${step}`}
+              aria-hidden="true"
+              initial={{ x: "-150%", opacity: 0 }}
+              animate={{ x: "150%", opacity: [0, 1, 1, 0] }}
+              transition={{ duration: 0.9, ease: "easeInOut", times: [0, 0.15, 0.85, 1] }}
+              className="pointer-events-none absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-white/25 to-transparent"
+            />
+            <motion.span
+              animate={{ scale: [1, 1.15, 1], rotate: [0, 8, -8, 0] }}
+              transition={{ duration: 2.4, ease: "easeInOut", repeat: Infinity }}
+            >
+              <Sparkles className="h-3.5 w-3.5 text-white/80" />
+            </motion.span>
             <span className="text-xs uppercase tracking-wider text-white/70">Step</span>
-            <span className="font-display tnum text-base font-bold text-white">
-              {String(step).padStart(2, "0")}
+            <span className="font-display tnum flex items-center text-base font-bold leading-none text-white">
+              {/* Rolling step number: old slides up/out, new slides up/in */}
+              <span className="relative inline-flex h-[1.1em] w-[1.6em] items-center justify-center overflow-hidden">
+                <AnimatePresence mode="popLayout" initial={false}>
+                  <motion.span
+                    key={step}
+                    initial={{ y: "100%", opacity: 0 }}
+                    animate={{ y: "0%", opacity: 1 }}
+                    exit={{ y: "-100%", opacity: 0 }}
+                    transition={{ duration: 0.35, ease: [0.22, 1, 0.36, 1] }}
+                    className="absolute inset-0 flex items-center justify-center leading-none"
+                  >
+                    {String(step).padStart(2, "0")}
+                  </motion.span>
+                </AnimatePresence>
+              </span>
               <span className="mx-1 text-white/50">/</span>
-              <span className="text-white/90">{TOTAL_STEPS}</span>
+              <span className="text-white/90 leading-none">{TOTAL_STEPS}</span>
             </span>
           </motion.div>
         </div>
@@ -81,7 +109,7 @@ export function WizardShell({
         {onClose ? (
           <button
             onClick={onClose}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-black/25 bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-[#4361EE] bg-[#4361EE] text-white shadow-card transition hover:bg-[#3B54E8] hover:border-[#3B54E8]"
             aria-label="Close"
           >
             <X className="h-4 w-4" />
@@ -89,7 +117,7 @@ export function WizardShell({
         ) : (
           <Link
             href={closeHref || "/tickets"}
-            className="grid h-10 w-10 place-items-center rounded-2xl border border-black/25 bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200"
+            className="grid h-10 w-10 place-items-center rounded-2xl border border-[#4361EE] bg-[#4361EE] text-white shadow-card transition hover:bg-[#3B54E8] hover:border-[#3B54E8]"
             aria-label="Close"
           >
             <X className="h-4 w-4" />

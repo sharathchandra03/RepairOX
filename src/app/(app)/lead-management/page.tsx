@@ -559,22 +559,22 @@ export default function LeadDashboardPage() {
           <EmptyRow text="No recent leads in this period." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-border">
-            <table className="w-full min-w-[720px] text-[13px]">
-              {/* Fixed proportions so the Lead number never wraps and Owner
-                  doesn't crowd the narrow columns. */}
+            <table className="w-full min-w-[760px] table-fixed text-[13px]">
+              {/* Balanced proportions (sum to 100%) so every column gets even,
+                  predictable breathing room — no crowded/odd gaps. */}
               <colgroup>
-                <col className="w-[72px]" />
+                <col className="w-[9%]" />
                 <col className="w-[22%]" />
-                <col className="w-[18%]" />
-                <col className="w-[16%]" />
-                <col className="w-[13%]" />
+                <col className="w-[20%]" />
                 <col className="w-[14%]" />
-                <col className="w-[12%]" />
+                <col className="w-[13%]" />
+                <col className="w-[13%]" />
+                <col className="w-[9%]" />
               </colgroup>
               <thead className="bg-muted/60">
                 <tr>
                   {["Lead", "Customer", "Device", "Owner", "Value", "Status", "Follow-up"].map((h, i) => (
-                    <th key={h} className={cn("whitespace-nowrap px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", i === 4 ? "text-right" : "text-left")}>
+                    <th key={h} className={cn("whitespace-nowrap py-2.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground", i === 4 ? "pl-4 pr-6 text-right" : "px-4 text-left")}>
                       {h}
                     </th>
                   ))}
@@ -587,29 +587,29 @@ export default function LeadDashboardPage() {
                     onClick={() => openLead(l.id)}
                     className="cursor-pointer border-t border-border transition hover:bg-muted/40"
                   >
-                    <td className="whitespace-nowrap px-3 py-2.5 font-semibold text-[#4361EE] tabular-nums">{l.leadNo || "—"}</td>
-                    <td className="px-3 py-2.5">
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-[#4361EE] tabular-nums">{l.leadNo || "—"}</td>
+                    <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <Avatar name={l.name || l.leadNo} size={24} />
                         <span className="truncate font-medium text-foreground">{l.name || "—"}</span>
                       </div>
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">
+                    <td className="px-4 py-3 text-muted-foreground">
                       <span className="flex items-center gap-1.5">
                         {l.device && <Smartphone className="h-3.5 w-3.5 shrink-0 text-zinc-400" />}
                         <span className="truncate">{l.device || "—"}</span>
                       </span>
                     </td>
-                    <td className="px-3 py-2.5 text-muted-foreground">{l.assignedToName || l.agent || "Unassigned"}</td>
-                    <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{l.estimate != null ? formatINR(l.estimate) : "—"}</td>
-                    <td className="px-3 py-2.5">
+                    <td className="px-4 py-3 text-muted-foreground"><span className="truncate block">{l.assignedToName || l.agent || "Unassigned"}</span></td>
+                    <td className="py-3 pl-4 pr-6 text-right font-semibold tabular-nums">{l.estimate != null ? formatINR(l.estimate) : "—"}</td>
+                    <td className="px-4 py-3">
                       {l.status ? (
                         <span className={cn("inline-flex whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", statusTone(l.status))}>
                           {l.status}
                         </span>
                       ) : <span className="text-zinc-400">—</span>}
                     </td>
-                    <td className="px-3 py-2.5"><RecentFollowUpCell lead={l} followUps={scopedFollowUps} /></td>
+                    <td className="px-4 py-3"><RecentFollowUpCell lead={l} followUps={scopedFollowUps} /></td>
                   </tr>
                 ))}
               </tbody>

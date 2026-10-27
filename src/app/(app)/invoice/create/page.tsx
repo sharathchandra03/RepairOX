@@ -995,7 +995,7 @@ function InvoiceWizard() {
 
         {/* Back + Breadcrumb — centered group. Matches the Ticket flow's blue
             hover treatment (indigo tint + brand-blue border on hover). */}
-        <button onClick={goBack} disabled={step === 1} className="grid h-10 w-10 place-items-center rounded-xl border border-black/25 bg-card text-zinc-700 shadow-card transition hover:bg-indigo-50 hover:border-[#B3BFF6] disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
+        <button onClick={goBack} disabled={step === 1} className="grid h-10 w-10 place-items-center rounded-xl border border-[#4361EE] bg-[#4361EE] text-white shadow-card transition hover:bg-[#3B54E8] hover:border-[#3B54E8] disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
           <ArrowLeft className="h-5 w-5" />
         </button>
 
@@ -1013,7 +1013,7 @@ function InvoiceWizard() {
         <Button variant="outline" size="sm" onClick={handleSaveDraft} disabled={savingDraft}>
           <Save className="h-3.5 w-3.5" /> {savingDraft ? "Saving…" : "Save Draft"}
         </Button>
-        <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-black/25 bg-card text-indigo-600 shadow-card transition hover:bg-indigo-50 hover:border-indigo-200" aria-label="Close">
+        <button onClick={() => attemptNav("/invoice")} className="grid h-9 w-9 place-items-center rounded-xl border border-[#4361EE] bg-[#4361EE] text-white shadow-card transition hover:bg-[#3B54E8] hover:border-[#3B54E8]" aria-label="Close">
           <X className="h-4 w-4" />
         </button>
       </div>
