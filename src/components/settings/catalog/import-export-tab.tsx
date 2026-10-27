@@ -11,7 +11,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { useCatalog, type ImportResult } from "@/lib/catalog-context";
 import {
   parseCatalogCSV, validateRows, downloadCSV, catalogToCSV, toCSV,
-  downloadCatalogTemplateXLSX, downloadCatalogXLSX,
+  downloadCatalogTemplateXLSX, downloadCatalogXLSX, catalogHeaderRowIndex,
   CATALOG_COLUMNS, type ValidatedRow, type ParsedCatalogCSV,
 } from "@/lib/csv-utils";
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
@@ -46,8 +46,11 @@ export function ImportExportTab() {
     setFileName(file.name);
     setResult(null);
     try {
-      const { matrix, sheetName, sheetNames } = await readSheet(file);
-      if (matrix.length === 0) return;
+      const { matrix: rawMatrix, sheetName, sheetNames } = await readSheet(file);
+      if (rawMatrix.length === 0) return;
+      // Skip any decorative "group band" rows above the real header row so the
+      // self-documenting template still imports cleanly.
+      const matrix = rawMatrix.slice(catalogHeaderRowIndex(rawMatrix));
       const headerSet = new Set(matrix[0].map((h) => h.trim().toLowerCase()));
       const isLongTemplate =
         headerSet.has("model") &&

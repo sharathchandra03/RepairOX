@@ -21,6 +21,10 @@ export const CATALOG_COLUMNS = [
 
 export const REQUIRED_COLUMNS = ["Category", "Brand", "Model"] as const;
 
+/** Visible label of the decorative divider column the template inserts between
+ *  the MODEL/DEVICE group and the PART group. Never a real data column. */
+export const CATALOG_DIVIDER_HEADER = "│";
+
 /** Map a normalized header string to a CatalogImportRow key. */
 const HEADER_MAP: Record<string, keyof CatalogImportRow> = {
   category: "category",
@@ -52,6 +56,29 @@ const HEADER_MAP: Record<string, keyof CatalogImportRow> = {
 
 function normalizeHeader(h: string): string {
   return h.trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/**
+ * Find the real catalog header row inside a raw sheet matrix.
+ *
+ * The downloadable template carries a decorative "group band" row (MODEL /
+ * DEVICE INFO vs PART DETAILS) ABOVE the actual column headers so users can see
+ * which columns describe the device and which describe an individual part. That
+ * band must never be mistaken for the header row. This locates the first row
+ * that actually looks like the catalog header (recognizes "Model" plus a part
+ * or price column) so importers can slice the matrix from there. Falls back to
+ * row 0 when nothing matches, so plain header-first sheets are unaffected.
+ */
+export function catalogHeaderRowIndex(matrix: string[][]): number {
+  for (let r = 0; r < Math.min(matrix.length, 10); r++) {
+    const keys = new Set(matrix[r].map((c) => normalizeHeader(c)));
+    const hasModel = keys.has("model") || keys.has("model name");
+    const hasPartOrPrice =
+      keys.has("part name") || keys.has("part") ||
+      keys.has("price") || keys.has("price (inr)");
+    if (hasModel && hasPartOrPrice) return r;
+  }
+  return 0;
 }
 
 /* ─── Parser ─────────────────────────────────────────────────────── */
@@ -118,7 +145,11 @@ export function parseCatalogCSV(text: string): ParsedCatalogCSV {
 
   const rawHeaders = matrix[0].map((h) => h.trim());
   const mappedKeys = rawHeaders.map((h) => HEADER_MAP[normalizeHeader(h)]);
-  const unknownHeaders = rawHeaders.filter((h) => !HEADER_MAP[normalizeHeader(h)]);
+  const unknownHeaders = rawHeaders.filter(
+    // The template's decorative "│" group-divider column (and empty spacer
+    // headers) are intentional — never flag them as unrecognized.
+    (h) => !HEADER_MAP[normalizeHeader(h)] && h.trim() !== "" && h.trim() !== CATALOG_DIVIDER_HEADER,
+  );
 
   const presentKeys = new Set(mappedKeys.filter(Boolean));
   const missingRequired = REQUIRED_COLUMNS.filter((col) => {
@@ -321,31 +352,145 @@ export async function readSpreadsheetFileToCSV(file: File): Promise<string> {
   return first ? XLSX.utils.sheet_to_csv(wb.Sheets[first], { blankrows: false, dateNF: "yyyy-mm-dd" }) : "";
 }
 
-/** One canonical example row for the catalog template (shared by CSV + XLSX). */
-export const CATALOG_TEMPLATE_EXAMPLE: (string | number)[] = [
-  "Laptop", "Apple", "MacBook Air M3", "2024", "Base", "Apple M3", "256GB",
-  "13.6 inch", "Display Assembly", "661-28751", "18500", "3 Months", "In Stock", "",
+/**
+ * The catalog columns split into two meaning-groups:
+ *  • MODEL / DEVICE INFO — describes the device; repeated on every part row.
+ *  • PART DETAILS        — one row per individual part of that model.
+ * The split is at "Part Name": everything before it is header/model data,
+ * everything from it onward is per-part data. (Device Image belongs to the
+ * model, so it lives in the model group at the end.)
+ */
+export const CATALOG_MODEL_COLUMNS = [
+  "Category", "Brand", "Model", "Year", "Variant", "Chip", "Storage", "Display Size",
+] as const;
+export const CATALOG_PART_COLUMNS = [
+  "Part Name", "SKU", "Price", "Warranty", "Availability",
+] as const;
+/** Index of the first PART column within CATALOG_COLUMNS. */
+export const CATALOG_PART_START = CATALOG_MODEL_COLUMNS.length; // 8 → "Part Name"
+/** Index of the last PART column within CATALOG_COLUMNS. */
+export const CATALOG_PART_END = CATALOG_PART_START + CATALOG_PART_COLUMNS.length - 1; // 12 → "Availability"
+
+/** Example rows — TWO parts for the SAME model so it is obvious the model
+ *  columns repeat on every row and each row is one part. */
+export const CATALOG_TEMPLATE_EXAMPLES: (string | number)[][] = [
+  ["Laptop", "Apple", "MacBook Air M3", "2024", "Base", "Apple M3", "256GB",
+    "13.6 inch", "Display Assembly", "661-28751", "18500", "3 Months", "In Stock", ""],
+  ["Laptop", "Apple", "MacBook Air M3", "2024", "Base", "Apple M3", "256GB",
+    "13.6 inch", "Battery", "661-30123", "6500", "6 Months", "In Stock", ""],
 ];
 
-/** Downloadable blank template with the canonical headers + one example row. */
+/** Back-compat single example (first row). */
+export const CATALOG_TEMPLATE_EXAMPLE: (string | number)[] = CATALOG_TEMPLATE_EXAMPLES[0];
+
+/** Downloadable blank template with the canonical headers + example rows. */
 export function catalogTemplateCSV(): string {
-  return toCSV([...CATALOG_COLUMNS], [CATALOG_TEMPLATE_EXAMPLE]);
+  return toCSV([...CATALOG_COLUMNS], CATALOG_TEMPLATE_EXAMPLES);
 }
 
-/** Download the catalog IMPORT TEMPLATE as an Excel (.xlsx) file (Excel-only). */
-export function downloadCatalogTemplateXLSX(filename = "repairox-catalog-template"): Promise<void> {
-  return downloadXLSX(filename, [...CATALOG_COLUMNS], [CATALOG_TEMPLATE_EXAMPLE], "Catalog");
+/**
+ * Download the catalog IMPORT TEMPLATE as an Excel (.xlsx) file (Excel-only).
+ *
+ * The template is self-documenting so users immediately see which columns are
+ * the DEVICE / MODEL header (shared by every part) and which are the per-PART
+ * fields:
+ *   • A merged "group band" row sits ABOVE the column headers — one band over
+ *     the model columns ("◀ MODEL / DEVICE INFO — same on every row") and one
+ *     over the part columns ("PART DETAILS — one row per part ▶").
+ *   • A thin "│" divider column is inserted at the boundary (Display Size │
+ *     Part Name) and filled on every row, drawing a visible vertical line that
+ *     splits header-left from parts-right.
+ * This uses only values + merges (works with the community SheetJS build — no
+ * cell-style dependency). Imports stay safe: the parser finds the real header
+ * row via `catalogHeaderRowIndex`, the band row is skipped, and the "│" column
+ * maps to no known field so it is ignored on upload.
+ */
+export async function downloadCatalogTemplateXLSX(filename = "repairox-catalog-template"): Promise<void> {
+  if (typeof window === "undefined") return;
+  const XLSX = await import("xlsx");
+  const ws = buildGroupedCatalogSheet(XLSX, CATALOG_TEMPLATE_EXAMPLES);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Catalog");
+  const name = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, name);
 }
 
-/** Export the full catalog as an Excel (.xlsx) file. */
-export function downloadCatalogXLSX(
+/**
+ * Build a worksheet laid out with the self-documenting GROUP layout shared by
+ * the import template and the catalog export: a merged MODEL/DEVICE INFO vs
+ * PART DETAILS band row above the headers, a "│" divider column at the
+ * boundary, and sized columns. `dataRows` are canonical 14-column catalog rows
+ * (CATALOG_COLUMNS order); the divider cell is inserted automatically.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildGroupedCatalogSheet(XLSX: any, dataRows: (string | number | undefined)[][]) {
+  const headerCols: string[] = [
+    ...CATALOG_MODEL_COLUMNS,
+    CATALOG_DIVIDER_HEADER,
+    ...CATALOG_PART_COLUMNS,
+    "Device Image",
+  ];
+  const dividerCol = CATALOG_MODEL_COLUMNS.length;            // index of "│"
+  const partStart = dividerCol + 1;                           // "Part Name"
+  const partEnd = partStart + CATALOG_PART_COLUMNS.length - 1; // "Availability"
+  const imageCol = headerCols.length - 1;                     // "Device Image"
+  const nCols = headerCols.length;
+
+  // Insert the divider cell into each canonical data row.
+  const gridRows = dataRows.map((r) => {
+    const modelPart = r.slice(0, CATALOG_MODEL_COLUMNS.length);
+    const partPart = r.slice(CATALOG_MODEL_COLUMNS.length, CATALOG_MODEL_COLUMNS.length + CATALOG_PART_COLUMNS.length);
+    const image = r[r.length - 1] ?? "";
+    return [...modelPart, "│", ...partPart, image].map((c) => (c ?? "") as string | number);
+  });
+
+  // Row 0: group band. Row 1: real headers. Row 2+: data.
+  const band: (string | number)[] = new Array(nCols).fill("");
+  band[0] = "◀  MODEL / DEVICE INFO  —  same on every part row of this model";
+  band[dividerCol] = "│";
+  band[partStart] = "PART DETAILS  —  one row per individual part  ▶";
+  band[imageCol] = "(model)";
+
+  const aoa: (string | number)[][] = [band, headerCols, ...gridRows];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+
+  // Merge the band into the two groups.
+  ws["!merges"] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: dividerCol - 1 } },  // MODEL group
+    { s: { r: 0, c: partStart }, e: { r: 0, c: partEnd } }, // PART group
+  ];
+
+  // Column widths — narrow divider, sized groups (from header + content).
+  ws["!cols"] = headerCols.map((h, i) => {
+    if (i === dividerCol) return { wch: 3 };
+    const maxCell = gridRows.reduce((m, r) => Math.max(m, String(r[i] ?? "").length), String(h ?? "").length);
+    return { wch: Math.min(Math.max(maxCell + 2, 12), 40) };
+  });
+  ws["!rows"] = [{ hpt: 20 }];
+
+  return ws;
+}
+
+/**
+ * Export the full catalog as an Excel (.xlsx) file, using the SAME grouped
+ * layout as the import template (MODEL/DEVICE band on the left, PART DETAILS on
+ * the right, "│" divider between) so a downloaded catalog reads exactly like
+ * the template it round-trips through.
+ */
+export async function downloadCatalogXLSX(
   filename: string,
   categories: DeviceCategory[],
   brands: PriceListBrand[],
   models: PriceListModel[],
   parts: DevicePart[],
 ): Promise<void> {
-  return downloadXLSX(filename, [...CATALOG_COLUMNS], buildCatalogRows(categories, brands, models, parts), "Catalog");
+  if (typeof window === "undefined") return;
+  const XLSX = await import("xlsx");
+  const ws = buildGroupedCatalogSheet(XLSX, buildCatalogRows(categories, brands, models, parts));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Catalog");
+  const name = filename.toLowerCase().endsWith(".xlsx") ? filename : `${filename}.xlsx`;
+  XLSX.writeFile(wb, name);
 }
 
 /** Flatten the whole catalog into CSV rows (one row per part; models with no

@@ -22,7 +22,7 @@ import { ModalPortal } from "@/components/ui/modal-portal";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel, sortCategories } from "@/lib/catalog-context";
 import { uploadCatalogImage } from "@/components/settings/catalog/upload-image";
 import { collectMedia } from "@/components/settings/catalog/media-library";
-import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, downloadCatalogXLSX, toCSV } from "@/lib/csv-utils";
+import { parseCatalogCSV, validateRows, catalogToCSV, downloadCSV, downloadCatalogXLSX, toCSV, catalogHeaderRowIndex } from "@/lib/csv-utils";
 import { readSheet, readSheetByName } from "@/lib/sheet-reader";
 import { parseSmartSheet, type SmartImportResult } from "@/lib/smart-import";
 import { SmartImportDialog } from "@/components/price-list/smart-import-dialog";
@@ -374,11 +374,14 @@ export default function PriceListPage() {
   const handleImportFile = useCallback(async (file?: File) => {
     if (!file) return;
     try {
-      const { matrix, sheetName, sheetNames } = await readSheet(file);
-      if (matrix.length === 0) {
+      const { matrix: rawMatrix, sheetName, sheetNames } = await readSheet(file);
+      if (rawMatrix.length === 0) {
         setImportNotice({ tone: "error", text: "The file appears to be empty." });
         return;
       }
+      // Skip any decorative "group band" rows above the real header row so the
+      // self-documenting template still imports cleanly.
+      const matrix = rawMatrix.slice(catalogHeaderRowIndex(rawMatrix));
       const headerSet = new Set(matrix[0].map((h) => h.trim().toLowerCase()));
       const isLongTemplate =
         headerSet.has("model") &&
