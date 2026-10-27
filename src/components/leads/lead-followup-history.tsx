@@ -23,13 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { TimePicker } from "@/components/ui/time-picker";
+import { Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow, CAP } from "@/lib/capabilities";
 import {
   followUpLifecycle, followUpStateTone, openFollowUp,
-  LEAD_FOLLOWUP_OUTCOMES,
   type Lead, type LeadFollowUp,
 } from "@/lib/leads-data";
 
@@ -48,12 +48,20 @@ function toIso(date: string, time: string): string {
 
 export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; readOnly?: boolean }) {
   const { can } = usePermissions();
-  const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent } = useLeads();
+  const { followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistoryFor, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, optionsFor } = useLeads();
   const canFollowUp = allow(can, CAP.lead.followup) && !readOnly;
 
   const followUps = followUpsFor(lead.id);
   const open = openFollowUp(followUps);
   const history = assignmentHistoryFor(lead.id);
+
+  // Complete outcomes are DERIVED from the lead's configured statuses (synced to
+  // what the agent is doing next), hiding the transient call dispositions —
+  // matching the status form. The lead's CURRENT status is always kept.
+  const hiddenOutcome = new Set(["rnr", "not connected", "call back", "callback"]);
+  const completeOutcomes = optionsFor("status")
+    .map((o) => o.value)
+    .filter((v) => !!v && (!hiddenOutcome.has(v.trim().toLowerCase()) || v === lead.status));
 
   // Follow-up agents = eligible SALES AGENTS for this lead's store (never the
   // whole staff list). The follow-up agent may differ from the lead owner and
@@ -74,14 +82,14 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
 
   /* ── Complete form state ── */
   const [completingId, setCompletingId] = useState<string | null>(null);
-  const [outcome, setOutcome] = useState<string>(LEAD_FOLLOWUP_OUTCOMES[0]);
+  const [outcome, setOutcome] = useState<string>(lead.status || "");
   const [completeComments, setCompleteComments] = useState("");
   const [scheduleNext, setScheduleNext] = useState(false);
   const [nextDate, setNextDate] = useState("");
   const [nextTime, setNextTime] = useState("10:00");
 
   const resetSchedule = () => { setScheduling(false); setDate(""); setTime("10:00"); setAgentId(""); setNotes(""); };
-  const resetComplete = () => { setCompletingId(null); setOutcome(LEAD_FOLLOWUP_OUTCOMES[0]); setCompleteComments(""); setScheduleNext(false); setNextDate(""); setNextTime("10:00"); };
+  const resetComplete = () => { setCompletingId(null); setOutcome(lead.status || ""); setCompleteComments(""); setScheduleNext(false); setNextDate(""); setNextTime("10:00"); };
 
   const handleSchedule = async () => {
     if (!date) return;
@@ -103,6 +111,9 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
     try {
       await completeFollowUp(fu.id, outcome, {
         comments: completeComments || undefined,
+        // The outcome IS a lifecycle status — sync the lead status + save the
+        // comment to the lead's comments (handled in the context).
+        syncStatus: outcome || undefined,
         // The next follow-up stays with the same agent while they're still an
         // eligible Sales Agent; otherwise it falls back to the lead's default.
         next: scheduleNext && nextDate
@@ -145,17 +156,26 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
               <div className="mt-1"><TimePicker value={time} onChange={setTime} /></div>
             </label>
           </div>
-          <label className="mt-2 block text-[11px] font-medium text-muted-foreground">
-            Follow-up Agent <span className="font-normal normal-case">(Sales Agent — defaults to the lead&apos;s follow-up agent / owner)</span>
-            <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={agents.length === 0} className="mt-1 h-[34px] w-full rounded-lg border border-input bg-card px-2 text-[13px] disabled:bg-muted/40">
-              <option value="">
-                {defaultAgentName ? `Default — ${defaultAgentName}`
-                  : agents.length === 0 ? "No sales agents available"
-                  : currentUserIsSalesAgent(lead.branchId || null) ? "Default — me" : "Select a Sales Agent"}
-              </option>
-              {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
-          </label>
+          <div className="mt-2">
+            <p className="mb-1 text-[11px] font-medium text-muted-foreground">
+              Follow-up Agent <span className="font-normal normal-case">(Sales Agent — defaults to the lead&apos;s follow-up agent / owner)</span>
+            </p>
+            {(() => {
+              const placeholder = defaultAgentName ? `Default — ${defaultAgentName}`
+                : agents.length === 0 ? "No sales agents available"
+                : currentUserIsSalesAgent(lead.branchId || null) ? "Default — me" : "Select a Sales Agent";
+              return (
+                <Select
+                  value={agentId}
+                  onChange={(e) => setAgentId(e.target.value)}
+                  disabled={agents.length === 0}
+                  className="h-[34px]"
+                  placeholder={placeholder}
+                  options={[{ label: placeholder, value: "" }, ...agents.map((a) => ({ label: a.name, value: a.id }))]}
+                />
+              );
+            })()}
+          </div>
           <label className="mt-2 block text-[11px] font-medium text-muted-foreground">
             Notes
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="What to do next…" className="mt-1 min-h-[52px] w-full rounded-lg border border-input bg-card px-2 py-1.5 text-[13px]" />
@@ -209,12 +229,13 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
                 {/* Complete form */}
                 {canFollowUp && isCompleting && (
                   <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50/50 p-2.5">
-                    <label className="block text-[11px] font-medium text-muted-foreground">
-                      Outcome
-                      <select value={outcome} onChange={(e) => setOutcome(e.target.value)} className="mt-1 h-[34px] w-full rounded-lg border border-input bg-card px-2 text-[13px]">
-                        {LEAD_FOLLOWUP_OUTCOMES.map((o) => <option key={o} value={o}>{o}</option>)}
-                      </select>
-                    </label>
+                    <p className="mb-1 text-[11px] font-medium text-muted-foreground">Outcome <span className="font-normal normal-case">(updates the lead status)</span></p>
+                    <Select
+                      value={outcome}
+                      onChange={(e) => setOutcome(e.target.value)}
+                      className="h-[34px]"
+                      options={completeOutcomes.map((o) => ({ label: o === lead.status ? `${o} (current)` : o, value: o }))}
+                    />
                     <textarea value={completeComments} onChange={(e) => setCompleteComments(e.target.value)} placeholder="Notes (optional)…" className="mt-2 min-h-[44px] w-full rounded-lg border border-input bg-card px-2 py-1.5 text-[13px]" />
                     <label className="mt-2 flex items-center gap-2 text-[12px] text-zinc-700">
                       <Checkbox checked={scheduleNext} onChange={(next) => setScheduleNext(next)} aria-label="Schedule next follow-up" />

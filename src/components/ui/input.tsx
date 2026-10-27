@@ -2,6 +2,7 @@
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { cn } from "@/lib/utils";
+import { useAnimatedPlaceholder } from "@/hooks/use-animated-placeholder";
 
 /** Optional semantic border accent for a field (idle + hover + focus border).
  *  Used e.g. to colour-distinguish Cost vs Selling inputs. */
@@ -19,16 +20,34 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   invalid?: boolean;
   /** Semantic colour accent for the border (overrides the default). */
   accent?: FieldAccent;
+  /** ANIMATED PLACEHOLDER — a constant prefix (e.g. "Search by ") with the
+   *  trailing word typewriter-cycling through `animatedWords`. Overrides the
+   *  static `placeholder` while the field is empty + blurred; freezes (prefix +
+   *  first word) once focused or filled. Honours prefers-reduced-motion. */
+  animatedPrefix?: string;
+  animatedWords?: string[];
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ className, iconLeft, iconRight, invalid, accent, type, ...props }, ref) => {
+  ({ className, iconLeft, iconRight, invalid, accent, type, animatedPrefix, animatedWords, placeholder, value, defaultValue, onFocus, onBlur, ...props }, ref) => {
     const internalRef = React.useRef<HTMLInputElement>(null);
     const combinedRef = (node: HTMLInputElement | null) => {
       (internalRef as React.MutableRefObject<HTMLInputElement | null>).current = node;
       if (typeof ref === "function") ref(node);
       else if (ref) (ref as React.MutableRefObject<HTMLInputElement | null>).current = node;
     };
+
+    // Animate the placeholder only when a prefix + words are supplied. It pauses
+    // while the input is focused or already carries a value, so it never
+    // distracts mid-search.
+    const animate = !!animatedPrefix && !!animatedWords && animatedWords.length > 0;
+    const [focused, setFocused] = React.useState(false);
+    const hasValue = value != null ? String(value).length > 0 : undefined;
+    const animated = useAnimatedPlaceholder({
+      prefix: animatedPrefix ?? "",
+      words: animatedWords ?? [],
+      paused: !animate || focused || (hasValue ?? false),
+    });
 
     return (
       <div className={cn("group relative flex items-center")}>
@@ -40,6 +59,11 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
         <input
           ref={combinedRef}
           type={type}
+          value={value}
+          defaultValue={defaultValue}
+          placeholder={animate ? animated : placeholder}
+          onFocus={(e) => { setFocused(true); onFocus?.(e); }}
+          onBlur={(e) => { setFocused(false); onBlur?.(e); }}
           className={cn(
             "flex h-[34px] w-full rounded-xl border border-input bg-card px-3 py-1.5 text-[13px] placeholder:text-muted-foreground transition-all duration-150",
             "hover:border-[#4361EE]/40",

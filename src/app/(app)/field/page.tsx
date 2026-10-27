@@ -287,6 +287,8 @@ export default function FieldPage() {
                 value={filters.query}
                 onChange={(e: any) => setFilters((f) => ({ ...f, query: e.target.value }))}
                 placeholder="Search field jobs…"
+                animatedPrefix="Search by "
+                animatedWords={["job no", "customer", "device", "contact", "ninja"]}
                 iconLeft={<Search className="h-4 w-4" />}
               />
             </div>

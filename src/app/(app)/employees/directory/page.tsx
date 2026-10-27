@@ -90,6 +90,8 @@ export default function EmployeeDirectoryPage() {
             value={query}
             onChange={(e: any) => setQuery(e.target.value)}
             placeholder="Search by name, email, phone or ID…"
+            animatedPrefix="Search by "
+            animatedWords={["name", "email", "phone", "ID"]}
             iconLeft={<Search className="h-4 w-4" />}
           />
         </div>

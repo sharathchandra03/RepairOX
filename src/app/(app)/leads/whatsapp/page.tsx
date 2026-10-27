@@ -94,7 +94,7 @@ export default function WhatsAppPage() {
         <div className="flex w-[320px] shrink-0 flex-col border-r border-border">
           {/* Search + tabs */}
           <div className="border-b border-border p-3 space-y-2">
-            <Input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search..." iconLeft={<Search className="h-4 w-4" />} className="h-9" />
+            <Input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search chats by name, phone or company…" animatedPrefix="Search by " animatedWords={["name", "phone", "company"]} iconLeft={<Search className="h-4 w-4" />} className="h-9" />
             <SegmentedTabs
               value={tab}
               onChange={(v) => setTab(v as typeof tab)}

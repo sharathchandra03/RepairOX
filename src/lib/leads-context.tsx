@@ -527,9 +527,12 @@ interface LeadsContextValue {
   scheduleFollowUp: (leadId: string, draft: LeadFollowUpDraft) => Promise<LeadFollowUp | null>;
   /** Complete a follow-up with a structured outcome. Optionally schedule the
    *  next follow-up in the same action (retains history). Does NOT win the lead. */
-  completeFollowUp: (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft }) => Promise<void>;
+  completeFollowUp: (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft; syncStatus?: string }) => Promise<void>;
   /** Cancel a scheduled follow-up (kept in history as cancelled). */
   cancelFollowUp: (followUpId: string, reason?: string) => Promise<void>;
+  /** Edit the free-text comment on an existing follow-up record in place
+   *  (combined comment box). Never changes status / outcome / agent / lead. */
+  updateFollowUpComment: (followUpId: string, comments: string) => Promise<void>;
 
   /* ── Assignment history (public.lead_assignment_history) ── */
   assignmentHistory: LeadAssignmentEvent[];
@@ -1942,11 +1945,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     await persistLeadPatch(lead.id, { followUpDate: dueAt.slice(0, 10), followUpAgentId: fuUserId, followUpAgent: fuUserName });
     logActivity({ module: "Lead", action: "Follow-up Scheduled", severity: "info", entity: "Lead", reference: lead.leadNo, description: `Follow-up #${saved.seq} scheduled for ${lead.leadNo} on ${dueAt.slice(0, 10)}${fuUserName ? ` · ${fuUserName}` : ""}.` });
     if (fuUserId && fuUserId !== currentUserIdRef.current) {
+      // Transfer / assignment notification — clearly names WHO handed this
+      // follow-up over, so the receiving agent knows the source.
+      const byName = currentUserNameRef.current?.trim();
+      const dueLabel = new Date(dueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
       notify({
         kind: "lead_assigned",
         recipientId: fuUserId,
-        title: "Follow-up assigned to you",
-        body: `${lead.leadNo} · ${lead.name || "Unnamed"} — due ${new Date(dueAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}.`,
+        title: byName ? `Follow-up transferred to you by ${byName}` : "Follow-up assigned to you",
+        body: `${lead.leadNo} · ${lead.name || "Unnamed"} — due ${dueLabel}${byName ? ` · transferred by ${byName}` : ""}.`,
         href: `/leads/list?lead=${lead.id}`,
         reference: lead.leadNo,
         followUpId: saved.id,
@@ -1955,25 +1962,45 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  const completeFollowUp = useCallback(async (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft }) => {
+  const completeFollowUp = useCallback(async (followUpId: string, outcome: string, opts?: { comments?: string; next?: LeadFollowUpDraft; syncStatus?: string }) => {
     const fu = followUpsRef.current.find((f) => f.id === followUpId);
     if (!fu) return;
     const lead = leadsRef.current.find((l) => l.id === fu.leadId);
     const nowIso = new Date().toISOString();
-    const patch: Partial<LeadFollowUp> = { status: "completed", completedAt: nowIso, outcome, comments: opts?.comments ?? fu.comments };
+    const comment = opts?.comments ?? fu.comments;
+    const patch: Partial<LeadFollowUp> = { status: "completed", completedAt: nowIso, outcome, comments: comment };
 
     setFollowUps((prev) => { const next = prev.map((f) => (f.id === followUpId ? { ...f, ...patch } : f)); if (!useDb) writeLS(FOLLOWUPS_KEY, next); return next; });
     if (useDb) {
-      const { error } = await db.from("lead_followup_history").update({ status: "completed", completed_at: nowIso, outcome, result: outcome, comments: opts?.comments ?? fu.comments ?? null }).eq("id", followUpId);
+      const { error } = await db.from("lead_followup_history").update({ status: "completed", completed_at: nowIso, outcome, result: outcome, comments: comment ?? null }).eq("id", followUpId);
       if (error && !isMissingTableError(error)) console.error("[leads] completeFollowUp failed:", error.message);
     }
-    logActivity({ module: "Lead", action: "Follow-up Completed", severity: "success", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} completed — outcome: ${outcome}. (Lead status unchanged.)` });
+
+    // LINK the comment to the LEAD's own comment (not a separate, unlinked note):
+    // append it to lead.comments with agent + timestamp attribution so the
+    // combined comment thread captures it too. Never destroys an earlier note.
+    if (opts?.comments && opts.comments.trim()) {
+      const who = currentUserNameRef.current?.trim() || fu.followUpUserName || "Agent";
+      const stamp = new Date().toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+      const line = `[Follow-up #${fu.seq} · ${outcome} · ${who} · ${stamp}] ${opts.comments.trim()}`;
+      const existing = (lead?.comments ?? "").trim();
+      await updateLead(fu.leadId, { comments: existing ? `${existing}\n${line}` : line });
+    }
+
+    logActivity({ module: "Lead", action: "Follow-up Completed", severity: "success", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} completed — outcome: ${outcome}.${opts?.syncStatus ? ` Status → ${opts.syncStatus}.` : " (Lead status unchanged.)"}` });
+
+    // SYNC the lead status to what the agent is doing next, when the outcome
+    // maps to a real lifecycle status. Routed through changeLeadStatus so the
+    // status-history + terminal timestamps are written (never a silent auto-win).
+    if (opts?.syncStatus && lead && opts.syncStatus !== lead.status) {
+      await changeLeadStatus(fu.leadId, opts.syncStatus, { note: `Follow-up #${fu.seq} outcome: ${outcome}` });
+    }
 
     // Optionally chain the NEXT follow-up while retaining this one's history.
     if (opts?.next?.dueAt) await scheduleFollowUp(fu.leadId, opts.next);
     else await updateLead(fu.leadId, { followUpDate: "" }); // no open follow-up left
     toast.success("Follow-up completed", { description: `Outcome: ${outcome}` });
-  }, [useDb, db, scheduleFollowUp, updateLead]);
+  }, [useDb, db, scheduleFollowUp, updateLead, changeLeadStatus]);
 
   const cancelFollowUp = useCallback(async (followUpId: string, reason?: string) => {
     const fu = followUpsRef.current.find((f) => f.id === followUpId);
@@ -2000,6 +2027,24 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     }
     if (Object.keys(patch).length > 0) await persistLeadPatch(fu.leadId, patch);
   }, [useDb, db, persistLeadPatch]);
+
+  /** Update the free-text comment on an existing follow-up record in place
+   *  (used by the combined comment box). Append-only in spirit: it edits the
+   *  current attempt's note; it NEVER changes status, outcome, agent or the
+   *  lead. History (other follow-up rows) is untouched. */
+  const updateFollowUpComment = useCallback(async (followUpId: string, comments: string) => {
+    const fu = followUpsRef.current.find((f) => f.id === followUpId);
+    if (!fu) return;
+    const lead = leadsRef.current.find((l) => l.id === fu.leadId);
+    const next = comments.trim();
+    if ((fu.comments ?? "") === next) return;
+    setFollowUps((prev) => { const n = prev.map((f) => (f.id === followUpId ? { ...f, comments: next } : f)); if (!useDb) writeLS(FOLLOWUPS_KEY, n); return n; });
+    if (useDb) {
+      const { error } = await db.from("lead_followup_history").update({ comments: next || null }).eq("id", followUpId);
+      if (error && !isMissingTableError(error)) { console.error("[leads] updateFollowUpComment failed:", error.message); toast.error("Comment not saved", { description: "We couldn't save this follow-up comment. Please try again." }); return; }
+    }
+    logActivity({ module: "Lead", action: "Follow-up Comment", severity: "info", entity: "Lead", reference: lead?.leadNo || fu.leadId, description: `Follow-up #${fu.seq} comment updated.` });
+  }, [useDb, db]);
 
   const assignmentHistoryFor = useCallback((leadId: string): LeadAssignmentEvent[] => {
     return assignmentHistory.filter((h) => h.leadId === leadId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
@@ -2191,9 +2236,18 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     return open;
   }, [followUps]);
 
+  /** Every lead id that has ANY follow-up record (scheduled / completed /
+   *  cancelled). Drives the Follow-Up view so leads whose follow-ups are all
+   *  completed/cancelled still reach the view and populate its History tab. */
+  const leadsWithAnyFollowUp = useMemo(() => {
+    const s = new Set<string>();
+    for (const f of followUps) s.add(f.leadId);
+    return s;
+  }, [followUps]);
+
   const filteredLeads = useMemo(
-    () => pinnedFirst(applyLeadFilters(scopedLeads, filters, openFollowUpsByLead)),
-    [scopedLeads, filters, openFollowUpsByLead],
+    () => pinnedFirst(applyLeadFilters(scopedLeads, filters, openFollowUpsByLead, leadsWithAnyFollowUp)),
+    [scopedLeads, filters, openFollowUpsByLead, leadsWithAnyFollowUp],
   );
 
   /* ── Option CRUD ── */
@@ -2455,7 +2509,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
     viewAsAgentId: effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent,
-    followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp,
+    followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment,
     assignmentHistory, assignmentHistoryFor,
     conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity,
     leadMetrics,
@@ -2463,7 +2517,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

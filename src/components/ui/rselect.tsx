@@ -17,6 +17,7 @@ export function RSelect({
   onChange,
   options,
   placeholder = "Select…",
+  searchPlaceholder,
   searchable = false,
   menuWidth,
   className,
@@ -28,6 +29,10 @@ export function RSelect({
   onChange: (v: string) => void;
   options: { label: string; value: string; swatch?: string }[];
   placeholder?: string;
+  /** Placeholder for the in-dropdown search box. Defaults to "Search options…"
+   *  (relevant to what the box does — filters this select's options). Pass a
+   *  more specific hint when the list has a clear subject. */
+  searchPlaceholder?: string;
   searchable?: boolean;
   /** Tailwind width class for the menu panel. Defaults to full trigger width. */
   menuWidth?: string;
@@ -99,7 +104,7 @@ export function RSelect({
                 autoFocus
                 value={q}
                 onChange={(e) => setQ(e.target.value)}
-                placeholder="Search…"
+                placeholder={searchPlaceholder || "Search options…"}
                 className="h-9 w-full rounded-lg border border-border bg-card pl-8 pr-2 text-[13px] focus:border-[#4361EE] focus:outline-none focus:ring-2 focus:ring-[#4361EE]/15"
               />
             </div>

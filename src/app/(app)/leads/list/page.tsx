@@ -204,8 +204,13 @@ function FollowUpCell({ lead, open }: { lead: Lead; open?: LeadFollowUp }) {
 }
 
 /** Label for a primary-view segment with an optional count badge (matches the
- *  Walk-In follow-up tab: white pill on the active blue tab, blue pill otherwise). */
-function ViewTabLabel({ text, count, active }: { text: string; count: number; active: boolean }) {
+ *  Walk-In follow-up tab: white pill on the active tab, tinted pill otherwise).
+ *  `tone` controls the badge accent — "red" for the accountability queues
+ *  (Not Contacted / Follow-Ups) so their counts read as urgency, not a neutral
+ *  blue tally. */
+function ViewTabLabel({ text, count, active, tone = "blue" }: { text: string; count: number; active: boolean; tone?: "blue" | "red" }) {
+  const idle = tone === "red" ? "bg-[#DC2626] text-white" : "bg-[#4361EE] text-white";
+  const on = tone === "red" ? "bg-white text-[#DC2626]" : "bg-white text-[#4361EE]";
   return (
     <span className="inline-flex items-center gap-2">
       {text}
@@ -213,7 +218,7 @@ function ViewTabLabel({ text, count, active }: { text: string; count: number; ac
         <span
           className={cn(
             "inline-flex h-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-bold leading-none tabular-nums",
-            active ? "bg-white text-[#4361EE]" : "bg-[#4361EE] text-white",
+            active ? on : idle,
           )}
           style={{ minWidth: 18 }}
         >
@@ -604,7 +609,7 @@ function LeadSelectCell({
                         autoFocus
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
-                        placeholder="Search…"
+                        placeholder="Search options…"
                         className="rox-search-input h-7 w-full bg-transparent text-[11px] text-foreground outline-none placeholder:text-zinc-400"
                       />
                       {query && (
@@ -1277,45 +1282,40 @@ export default function LeadsListPage() {
      configured status value. */
   const NOT_CONTACTED_TAB = "__notContacted__";
   const FOLLOWUPS_TAB = "__followUps__";
-  // Strip 2 reflects only the VIEW now (status lives in strip 3), so the "all"
-  // view keeps "All" selected here even when a status filter is active.
-  const combinedTab = view === "notContacted" ? NOT_CONTACTED_TAB
-    : view === "followUps" ? FOLLOWUPS_TAB
-    : "all";
-  // Strip 2 = the primary VIEW segments ONLY: All · Not Contacted · Follow-Ups.
-  // Lifecycle STATUS filters live in their OWN strip (strip 3) below, so this
-  // strip never grows as new statuses are configured.
-  const combinedTabs = useMemo(() => {
-    return [
-      { label: "All", value: "all" },
-      { label: <ViewTabLabel text="Not Contacted" count={notContactedCount} active={view === "notContacted"} />, value: NOT_CONTACTED_TAB },
-      { label: <ViewTabLabel text="Follow-Ups" count={followUpsCount} active={view === "followUps"} />, value: FOLLOWUPS_TAB },
-    ];
-  }, [notContactedCount, followUpsCount, view]);
-  const onCombinedTabChange = useCallback((v: string) => {
-    if (v === NOT_CONTACTED_TAB) { setFilters((f) => ({ ...f, view: "notContacted" })); return; }
-    if (v === FOLLOWUPS_TAB) { setFilters((f) => ({ ...f, view: "followUps" })); return; }
-    // "All" → the working table view. The status filter lives in its own strip
-    // (strip 3) and is preserved — switching back to the working view doesn't
-    // wipe a chosen status.
-    setFilters((f) => ({ ...f, view: "all" }));
-  }, [setFilters]);
 
-  /* Strip 3 — the lifecycle STATUS filter strip. Lists ALL configured lead
-     statuses from Settings (lead_options "status"), so it matches the Status
-     dropdown and UPDATES LIVE when a status is renamed/added/removed in
-     Settings (the leads-realtime subscription refreshes optionsFor). Any legacy
-     status still present on existing leads but no longer in the options is
-     appended so those leads stay filterable (no silent data loss). */
+  /* Strip 3 — the SINGLE primary filter strip. It now carries BOTH the
+     accountability VIEWS (Not Contacted / Follow-Ups, with their own red count
+     badges) AND the lifecycle STATUS filters, behind one leading "All". The
+     old separate top "view" strip is gone — these two view segments live here
+     now, right after "All", ahead of the configured statuses.
+       - "All"               → view=all, status=""   (the working table)
+       - "__notContacted__"  → view=notContacted     (the accountability queue)
+       - "__followUps__"     → view=followUps         (the follow-up table + calendar)
+       - any status value    → view=all, status=<that status>
+     Lifecycle statuses come from Settings (lead_options "status") so the strip
+     UPDATES LIVE on rename/add/remove; any legacy status still in use is
+     appended so those leads stay filterable. */
   const statusStripTabs = useMemo(() => {
     const configured = optionsFor("status").map((o) => o.value).filter(Boolean);
     const inUse = Array.from(new Set(leads.map((l) => l.status).filter(Boolean)));
     const legacy = inUse.filter((s) => !configured.includes(s));
-    const all = [...configured, ...legacy];
-    return [{ label: "All", value: "all" }, ...all.map((s) => ({ label: s, value: s }))];
-  }, [optionsFor, leads]);
-  const statusStripValue = filters.status || "all";
+    const statuses = [...configured, ...legacy];
+    return [
+      { label: "All", value: "all" },
+      { label: <ViewTabLabel text="Not Contacted" count={notContactedCount} active={view === "notContacted"} tone="red" />, value: NOT_CONTACTED_TAB },
+      { label: <ViewTabLabel text="Follow-Ups" count={followUpsCount} active={view === "followUps"} tone="red" />, value: FOLLOWUPS_TAB },
+      ...statuses.map((s) => ({ label: s, value: s })),
+    ];
+  }, [optionsFor, leads, notContactedCount, followUpsCount, view]);
+  // The strip's selected value reflects either the active VIEW token or the
+  // chosen lifecycle status (working view).
+  const statusStripValue = view === "notContacted" ? NOT_CONTACTED_TAB
+    : view === "followUps" ? FOLLOWUPS_TAB
+    : (filters.status || "all");
   const onStatusStripChange = useCallback((v: string) => {
+    if (v === NOT_CONTACTED_TAB) { setFilters((f) => ({ ...f, view: "notContacted" })); return; }
+    if (v === FOLLOWUPS_TAB) { setFilters((f) => ({ ...f, view: "followUps" })); return; }
+    // "All" or a status → the working table view.
     setFilters((f) => ({ ...f, view: "all", status: v === "all" ? "" : v }));
   }, [setFilters]);
 
@@ -1882,39 +1882,32 @@ export default function LeadsListPage() {
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="space-y-5 overflow-hidden"
           >
-      {/* ONE connected filter strip (STRIP 1) — the primary VIEW segments (Not
-          Contacted, Follow-Ups) live alongside the lifecycle STATUS filters,
-          with a single leading "All". Picking Not Contacted / Follow-Ups
-          switches the view; picking a status filters within the working (All)
-          view. No stacked, duplicate "All" pills. */}
+      {/* TOP CONTROL ROW — the DATE-RANGE strip (STRIP 2) on the LEFT shares ONE
+          line with Search + Filters + Customize/Freeze on the RIGHT, so the
+          control area is one row shorter and the table gains that vertical
+          space. The date strip is the SAME connected 8-option control used on
+          Tickets, Walk-In, Field and the Dashboard (All / Today / Yesterday /
+          7 Days / 1 Month / Last Month / 1 Year / Custom). The primary VIEW
+          segments (Not Contacted / Follow-Ups) live in the Status strip below;
+          the New/Existing customer-link filter sits next to the Collapse
+          control. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+        <div className="min-w-0 flex-1 max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
           <SegmentedTabs
-            value={combinedTab}
-            onChange={onCombinedTabChange}
-            options={combinedTabs}
+            value={filters.dateRange}
+            onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
+            options={LEAD_DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))}
             size="sm"
           />
         </div>
-        <div className="flex items-center gap-2">
-          {/* Customer Master linkage — New (fresh prospect) vs Existing (linked). */}
-          <div className="hidden shrink-0 sm:block">
-            <SegmentedTabs
-              value={filters.customerLink}
-              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
-              options={[
-                { label: "All", value: "any" },
-                { label: "New", value: "new" },
-                { label: "Existing", value: "existing" },
-              ]}
-              size="sm"
-            />
-          </div>
+        <div className="flex shrink-0 items-center gap-2">
           <div className="w-full lg:w-72">
             <Input
               value={filters.query}
               onChange={(e: any) => setFilters((f) => ({ ...f, query: e.target.value }))}
-              placeholder="Search ID, name, number, email, device…"
+              placeholder="Search leads by ID, name, phone, email or device…"
+              animatedPrefix="Search by "
+              animatedWords={["lead ID", "name", "phone", "email", "device"]}
               iconLeft={<Search className="h-4 w-4" />}
             />
           </div>
@@ -1940,45 +1933,34 @@ export default function LeadsListPage() {
         </div>
       </div>
 
-      {/* DATE-RANGE strip (STRIP 2) — the SAME connected 8-option control used on
-          Tickets, Walk-In, Field and the Dashboard (All / Today / Yesterday /
-          7 Days / 1 Month / Last Month / 1 Year / Custom). Filters by lead
-          creation date via the shared boundary logic. */}
-      <div className="space-y-2">
-        <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <SegmentedTabs
-            value={filters.dateRange}
-            onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
-            options={LEAD_DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))}
-            size="sm"
-          />
-        </div>
-        <DateRangePicker
-          open={filters.dateRange === "custom"}
-          from={filters.customFrom || ""}
-          to={filters.customTo || ""}
-          onFromChange={(v) => setFilters((f) => ({ ...f, customFrom: v, dateRange: "custom" }))}
-          onToChange={(v) => setFilters((f) => ({ ...f, customTo: v, dateRange: "custom" }))}
-        />
-      </div>
+      {/* Custom date-range picker — opens only when the Custom date segment is
+          selected. Full-width under the merged top row. */}
+      <DateRangePicker
+        open={filters.dateRange === "custom"}
+        from={filters.customFrom || ""}
+        to={filters.customTo || ""}
+        onFromChange={(v) => setFilters((f) => ({ ...f, customFrom: v, dateRange: "custom" }))}
+        onToChange={(v) => setFilters((f) => ({ ...f, customTo: v, dateRange: "custom" }))}
+      />
 
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* STRIP 3 ROW — lifecycle STATUS filters on the LEFT, sharing ONE line
-          with the Collapse/Expand control on the RIGHT (so the toggle no longer
-          needs its own row and the table gains that vertical space). The status
-          strip is part of the control area, so it animates to height 0 when
-          collapsed; the collapse control sits OUTSIDE that animation and stays
-          visible in both modes (single collapse mechanism, no duplicate). In
-          collapsed WORK MODE the compact "Filters · N" + date indicators show on
-          the left where the strip was. Only the working ("all") view shows the
-          status strip (the Not-Contacted / Follow-Ups views replace the table). */}
+      {/* STRIP 3 ROW — the single primary filter strip on the LEFT (Not
+          Contacted / Follow-Ups VIEWS + lifecycle STATUS filters, one leading
+          "All"), sharing ONE line with the New/Existing customer-link filter
+          and the Collapse/Expand control on the RIGHT. The strip is part of the
+          control area, so it animates to height 0 when collapsed; the right-
+          side controls sit OUTSIDE that animation and stay visible in both
+          modes (single collapse mechanism, no duplicate). In collapsed WORK
+          MODE the compact "Filters · N" + date indicators show on the left
+          where the strip was. The strip stays visible for the Not-Contacted /
+          Follow-Ups views too, since those segments now live inside it. */}
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <AnimatePresence initial={false}>
-            {!controlsCollapsed && view === "all" && statusStripTabs.length > 1 && (
+            {!controlsCollapsed && statusStripTabs.length > 1 && (
               <motion.div
                 key="lead-status-strip"
                 initial={{ height: 0, opacity: 0 }}
@@ -2027,12 +2009,30 @@ export default function LeadsListPage() {
             </div>
           )}
         </div>
-        {/* The ONE Collapse/Expand control — on the same line as the status
-            strip (top-right), outside the collapse animation. */}
-        <WorkspaceCollapseBar
-          collapsed={controlsCollapsed}
-          onToggle={workspace.toggle}
-        />
+        {/* Right-side controls (outside the collapse animation, visible in both
+            modes). Customer Master linkage — New (fresh prospect) vs Existing
+            (linked) — now lives here next to the Collapse control, with its
+            field name labelled so its meaning is clear. */}
+        <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</span>
+            <SegmentedTabs
+              value={filters.customerLink}
+              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
+              options={[
+                { label: "All", value: "any" },
+                { label: "New", value: "new" },
+                { label: "Existing", value: "existing" },
+              ]}
+              size="sm"
+            />
+          </div>
+          {/* The ONE Collapse/Expand control. */}
+          <WorkspaceCollapseBar
+            collapsed={controlsCollapsed}
+            onToggle={workspace.toggle}
+          />
+        </div>
       </div>
 
       {/* Structured, faceted filter panel (slide-over) — grouped sections,

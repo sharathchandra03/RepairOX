@@ -84,7 +84,7 @@ export default function EmailPage() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <SegmentedTabs value={tab} onChange={setTab} options={TABS} size="sm" />
         <div className="w-full sm:w-72">
-          <Input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search emails..." iconLeft={<Search className="h-4 w-4" />} />
+          <Input value={query} onChange={(e: any) => setQuery(e.target.value)} placeholder="Search emails by subject, contact or company…" animatedPrefix="Search by " animatedWords={["subject", "contact", "company"]} iconLeft={<Search className="h-4 w-4" />} />
         </div>
       </div>
 

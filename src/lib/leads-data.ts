@@ -733,6 +733,12 @@ export function applyLeadFilters(
    *  lead_followup_history records (Overdue/Due/Upcoming); otherwise it falls
    *  back to the flat `followUpDate` calendar-date classification. */
   openFollowUpsByLead?: Map<string, LeadFollowUp>,
+  /** Optional set of lead ids that have ANY follow-up record (open, completed,
+   *  cancelled). Used for the "followUps" view so a lead whose follow-ups are
+   *  all completed/cancelled still reaches the Follow-Up view → its HISTORY tab.
+   *  Without it the view would only keep leads with an OPEN follow-up and the
+   *  History tab could never populate. */
+  leadsWithAnyFollowUp?: Set<string>,
 ): Lead[] {
   const q = f.query.trim().toLowerCase();
   const evidence = f.evidenceIds?.length ? new Set(f.evidenceIds) : null;
@@ -753,9 +759,17 @@ export function applyLeadFilters(
     } else if (!evidence && view === "all") {
       if (isNotContactedLocked(l, asOf)) return false;
     } else if (!evidence && view === "followUps") {
-      const hasFu = openFollowUpsByLead
-        ? openFollowUpRowState(openFollowUpsByLead.get(l.id), asOf) !== "none"
-        : followUpState(l.followUpDate) !== "none";
+      // Keep a lead in the Follow-Up view when it has ANY follow-up record —
+      // an OPEN (scheduled) one feeds the Active tab, and a completed/cancelled
+      // one feeds the History tab. (A lead with an open follow-up is always in
+      // `leadsWithAnyFollowUp` too, so this is a superset of the old open-only
+      // rule.) Fall back to the flat followUpDate only when no follow-up set is
+      // supplied (local/legacy path).
+      const hasFu = leadsWithAnyFollowUp
+        ? leadsWithAnyFollowUp.has(l.id)
+        : openFollowUpsByLead
+          ? openFollowUpRowState(openFollowUpsByLead.get(l.id), asOf) !== "none"
+          : followUpState(l.followUpDate) !== "none";
       if (!hasFu) return false;
     }
 

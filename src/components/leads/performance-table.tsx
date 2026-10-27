@@ -110,7 +110,7 @@ const STICKY_ACTION_SHADOW = "shadow-[-8px_0_8px_-6px_rgba(15,23,42,0.12)]";
 
 /* The table's intrinsic min width — shared by all three tables so their
    columns line up exactly inside the single horizontal-scroll wrapper. */
-const TABLE_MIN_W = "min-w-[1238px]";
+const TABLE_MIN_W = "min-w-[1304px]";
 const TABLE_BASE = "w-full table-fixed border-separate border-spacing-0 text-[13px]";
 
 /* ── Semantic accent colors for group header bottom borders ──────────── */
@@ -160,12 +160,16 @@ function AgentAvatar({ name, avatarUrl }: { name: string; avatarUrl?: string }) 
   );
 }
 
-/* A metric cell: bold primary + an optional small muted secondary line. */
-function Metric({ primary, secondary, accent }: { primary: React.ReactNode; secondary?: React.ReactNode; accent?: "green" | "amber" | "red" }) {
+/* A metric cell: bold primary + an optional small muted secondary line.
+   `money` tightens the primary (nowrap + 13px) so large Indian-grouped currency
+   values — up to ₹1,00,00,000 (8 digits) and beyond — stay on one line and
+   don't overflow the Revenue / Projection columns or clip under the divider. */
+function Metric({ primary, secondary, accent, money = false }: { primary: React.ReactNode; secondary?: React.ReactNode; accent?: "green" | "amber" | "red"; money?: boolean }) {
   return (
-    <span className="flex flex-col items-center leading-tight">
+    <span className="flex max-w-full flex-col items-center leading-tight">
       <span className={cn(
-        "text-[14px] font-bold tabular-nums",
+        "font-bold tabular-nums",
+        money ? "text-[13px] whitespace-nowrap" : "text-[14px]",
         accent === "green" ? "text-emerald-700" : accent === "red" ? "text-red-600" : "text-foreground",
       )}>{primary}</span>
       {secondary != null && (
@@ -253,49 +257,40 @@ function FollowUpCell({
       ? (onSummary ? "bg-white/15 text-white ring-white/40" : "bg-emerald-50 text-emerald-700 ring-emerald-200/70")
       : (onSummary ? "bg-white/15 text-white/90 ring-white/40" : "bg-zinc-50 text-zinc-500 ring-zinc-200/70");
 
+  // Compact, single-line-first layout — SAME facts (overdue · total · closed ·
+  // closed %) but in a fraction of the vertical space: one tight stat row
+  // (overdue dot/count when present, then total → closed) with the completion
+  // % inline, over a slim amber bar. No stacked chip + stat block + labelled
+  // bar; the cell stays short so the table rows and the Total footer don't grow
+  // tall. Colours still honour the blue summary band (onSummary).
   return (
-    <span className="flex flex-col items-center gap-1.5 leading-tight">
-      {/* 1 ─ Overdue hero chip */}
-      <span className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 ring-1 ring-inset",
-        chipTone,
-      )}>
-        {hasOverdue ? (
-          <>
+    <span className="flex flex-col items-center gap-1 leading-tight">
+      {/* 1 ─ One compact stat row: [• N] status · closed/total */}
+      <span className="flex items-center gap-1.5 whitespace-nowrap">
+        {hasOverdue && (
+          <span className="inline-flex items-center gap-0.5 text-red-600" title={`${overdue} overdue`}>
             <span className="h-1.5 w-1.5 rounded-full bg-red-500" />
             <span className="text-[12px] font-extrabold tabular-nums">{overdue}</span>
-            <span className="text-[9px] font-semibold uppercase tracking-wide">overdue</span>
-          </>
-        ) : hasData ? (
-          <span className="text-[9px] font-bold uppercase tracking-wide">On track</span>
+          </span>
+        )}
+        {hasData ? (
+          <span className="inline-flex items-baseline gap-1" title={`${closed} of ${total} closed`}>
+            <span className={cn("text-[13px] font-bold tabular-nums", valTone)}>{closed}</span>
+            <span className={cn("text-[10px] tabular-nums", labelMuted)}>/ {total}</span>
+            <span className={cn("text-[8.5px] font-medium uppercase", labelMuted)}>closed</span>
+          </span>
         ) : (
-          <span className="text-[9px] font-semibold uppercase tracking-wide">No F/U</span>
+          <span className={cn("text-[9px] font-bold uppercase tracking-wide", labelMuted)}>No F/U</span>
         )}
       </span>
 
-      {/* 2 ─ Total · Closed aligned stat row */}
-      <span className="flex items-stretch gap-2">
-        <span className="flex flex-col items-center">
-          <span className={cn("text-[13px] font-bold tabular-nums", valTone)}>{total}</span>
-          <span className={cn("text-[8.5px] font-medium uppercase tracking-wide", labelMuted)}>total</span>
-        </span>
-        <span className={cn("w-px self-stretch", divider)} />
-        <span className="flex flex-col items-center">
-          <span className={cn("text-[13px] font-bold tabular-nums", valTone)}>{closed}</span>
-          <span className={cn("text-[8.5px] font-medium uppercase tracking-wide", labelMuted)}>closed</span>
-        </span>
-      </span>
-
-      {/* 3 ─ Labelled completion bar */}
-      <span className="flex w-16 flex-col items-stretch gap-0.5">
-        <span className="flex items-center justify-between">
-          <span className={cn("text-[8px] font-semibold uppercase tracking-wide", labelMuted)}>Closed</span>
-          <span className={cn("text-[9px] font-bold tabular-nums", hasData ? valTone : labelMuted)}>
-            {hasData ? pct(closedRatio) : "—"}
-          </span>
-        </span>
-        <span className={cn("h-[5px] w-full overflow-hidden rounded-full", track)}>
+      {/* 2 ─ Slim completion bar with the % inline on the right */}
+      <span className="flex w-20 items-center gap-1.5">
+        <span className={cn("h-[4px] flex-1 overflow-hidden rounded-full", track)}>
           <span className="block h-full rounded-full bg-amber-500 transition-all" style={{ width: `${w * 100}%` }} />
+        </span>
+        <span className={cn("w-8 text-right text-[9px] font-bold tabular-nums", hasData ? valTone : labelMuted)}>
+          {hasData ? pct(closedRatio) : "—"}
         </span>
       </span>
     </span>
@@ -349,11 +344,11 @@ function PerfCols({ isAgent }: { isAgent: boolean }) {
       <col style={{ width: isAgent ? "158px" : "140px" }} />
       <col style={{ width: "70px" }} /><col style={{ width: "92px" }} />{/* Total Leads / Qualified Leads */}
       <col style={{ width: "82px" }} /><col style={{ width: "82px" }} />{/* Walk-In Assigned / Walk-In Visited */}
-      <col style={{ width: "62px" }} /><col style={{ width: "66px" }} />{/* Pickup / On-Site */}
-      <col style={{ width: "108px" }} /><col style={{ width: "92px" }} />{/* Revenue / Projection */}
-      <col style={{ width: "66px" }} /><col style={{ width: "112px" }} />{/* Ticket Won / Follow Ups */}
+      <col style={{ width: "82px" }} /><col style={{ width: "82px" }} />{/* Pickup / On-Site */}
+      <col style={{ width: "124px" }} /><col style={{ width: "118px" }} />{/* Revenue / Projection */}
+      <col style={{ width: "82px" }} /><col style={{ width: "112px" }} />{/* Ticket Won / Follow Ups */}
       <col style={{ width: "100px" }} />{/* Conversion */}
-      <col style={{ width: "120px" }} />{/* Action */}
+      <col style={{ width: "92px" }} />{/* Action */}
     </colgroup>
   );
 }
@@ -407,7 +402,12 @@ export function PerformanceTable({
      NOT forced into an empty scroll region (no scrollbar when unnecessary). */
   const cardRef = useRef<HTMLDivElement>(null);
   const scrollBodyRef = useRef<HTMLDivElement>(null);
-  const footerRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLDivElement | null>(null);
+  // Header + footer horizontal-scroll wrappers. The BODY owns the real
+  // left/right scrollbar (a thin bar at the bottom of the data); the header and
+  // footer mirror the body's scrollLeft so all three column grids stay aligned.
+  const headerScrollRef = useRef<HTMLDivElement>(null);
+  const footerScrollRef = useRef<HTMLDivElement | null>(null);
   const [bodyMaxH, setBodyMaxH] = useState<number | null>(null);
   // In fill-viewport (collapsed "work mode") the whole card is stretched to the
   // bottom gap so the footer drops to the bottom and the body flex-grows up.
@@ -453,6 +453,37 @@ export function PerformanceTable({
     return () => { window.clearTimeout(settle); window.removeEventListener("resize", measure); ro.disconnect(); };
   }, [rows.length, hasFooter, fillViewport]);
 
+  /* ── Horizontal scroll sync ───────────────────────────────────────────────
+     The BODY is the real left/right scroller (its thin bar sits at the bottom
+     of the data). The header + footer have overflow-x hidden and simply mirror
+     the body's scrollLeft so every column stays aligned while you scroll
+     sideways. Scrolling the header/footer (e.g. shift-wheel over them) drives
+     the body back. */
+  useEffect(() => {
+    const body = scrollBodyRef.current;
+    if (!body) return;
+    const header = headerScrollRef.current;
+    const footer = footerScrollRef.current;
+    let lock = false;
+    const sync = (from: HTMLElement, ...rest: (HTMLElement | null)[]) => {
+      if (lock) return;
+      lock = true;
+      for (const el of rest) if (el && el.scrollLeft !== from.scrollLeft) el.scrollLeft = from.scrollLeft;
+      lock = false;
+    };
+    const onBody = () => sync(body, header, footer);
+    const onHeader = () => header && sync(header, body, footer);
+    const onFooter = () => footer && sync(footer, body, header);
+    body.addEventListener("scroll", onBody, { passive: true });
+    header?.addEventListener("scroll", onHeader, { passive: true });
+    footer?.addEventListener("scroll", onFooter, { passive: true });
+    return () => {
+      body.removeEventListener("scroll", onBody);
+      header?.removeEventListener("scroll", onHeader);
+      footer?.removeEventListener("scroll", onFooter);
+    };
+  }, [rows.length, hasFooter, fillViewport]);
+
   return (
     <div
       ref={cardRef}
@@ -462,16 +493,20 @@ export function PerformanceTable({
       )}
       style={fillViewport && cardH != null ? { height: `${cardH}px` } : undefined}
     >
-      {/* ── Shared horizontal-scroll wrapper ──────────────────────────────
-          All three tables (header / body / footer) live inside this ONE wrapper
-          so on narrow screens they scroll sideways TOGETHER and stay perfectly
-          column-aligned. The page itself never overflows horizontally. In fill
-          mode it becomes a flex column so the body can flex-grow and push the
-          footer to the bottom. */}
-      <div className={cn("overflow-x-auto rox-rail-scroll", fillViewport && "flex min-h-0 flex-1 flex-col")}>
+      {/* ── Tables wrapper ────────────────────────────────────────────────
+          Holds the header / body / footer tables. The BODY owns the real
+          left/right scrollbar (a thin bar at the bottom of the data); the
+          header + footer mirror its scrollLeft (sync effect) so all three stay
+          perfectly column-aligned on narrow screens / when the sidebar is open.
+          The page itself never overflows horizontally. In fill mode this is a
+          flex column so the body flex-grows and pushes the footer to the
+          bottom. */}
+      <div className={cn("overflow-hidden", fillViewport && "flex min-h-0 flex-1 flex-col")}>
 
-        {/* ═══ FIXED HEADER TABLE (outside the vertical scroll region) ═══ */}
-        <div style={{ paddingRight: scrollbarW }}>
+        {/* ═══ FIXED HEADER TABLE (outside the vertical scroll region) ═══
+            overflow-x hidden + mirrors the body's scrollLeft (see the sync
+            effect) so the header stays aligned while the body scrolls sideways. */}
+        <div ref={headerScrollRef} className="overflow-x-hidden" style={{ paddingRight: scrollbarW }}>
           <table className={cn(TABLE_BASE, TABLE_MIN_W)}>
             <PerfCols isAgent={isAgent} />
             <thead>
@@ -540,7 +575,10 @@ export function PerformanceTable({
         <div
           ref={scrollBodyRef}
           className={cn(
-            "min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain [scrollbar-width:thin] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-slate-300",
+            // Body owns BOTH scrolls: vertical (up/down) AND the thin horizontal
+            // (left/right) bar that sits at the bottom of the data. The header +
+            // footer mirror its scrollLeft (sync effect) so columns stay aligned.
+            "min-h-0 overflow-auto overscroll-contain rox-hscroll",
             // Fill mode: the body grows to absorb all the freed height (pushing
             // the footer to the bottom) and scrolls only when rows overflow it.
             fillViewport && "flex-1",
@@ -649,11 +687,12 @@ export function PerformanceTable({
                           primary={formatINR(r.revenueWonAgentDriven)}
                           secondary={r.revenueWonSelfInitiated > 0 ? `+${formatINR(r.revenueWonSelfInitiated)} self` : `${r.invoiceCount} inv`}
                           accent="green"
+                          money
                         />
                       </td>
 
                       {/* ═══ Projection (weighted) ═══ */}
-                      <td className={cn(CELL, BODY_GRP_DIV)}><Metric primary={formatINR(r.projection)} secondary="weighted" /></td>
+                      <td className={cn(CELL, BODY_GRP_DIV)}><Metric primary={formatINR(r.projection)} secondary="weighted" money /></td>
 
                       {/* ═══ Ticket Won — earned count; self-initiated separately ═══ */}
                       <td className={cn(CELL, BODY_GRP_DIV)}>
@@ -687,16 +726,18 @@ export function PerformanceTable({
                         {showReport && onReport ? (
                           <button
                             onClick={() => onReport(r)}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#4361EE]/25 bg-[#EEF1FD] px-3 py-1.5 text-[11px] font-semibold text-[#3B54CF] shadow-sm transition hover:bg-[#4361EE] hover:text-white hover:shadow-md active:scale-[0.97]"
+                            className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-[#4361EE]/25 bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-semibold text-[#3B54CF] shadow-sm transition hover:bg-[#4361EE] hover:text-white hover:shadow-md active:scale-[0.97]"
+                            title="View Details"
                           >
-                            View Details <ArrowRight className="h-3 w-3" />
+                            View <ArrowRight className="h-3 w-3" />
                           </button>
                         ) : showReport && href ? (
                           <Link
                             href={href}
-                            className="inline-flex items-center gap-1.5 rounded-lg border border-[#4361EE]/25 bg-[#EEF1FD] px-3 py-1.5 text-[11px] font-semibold text-[#3B54CF] shadow-sm transition hover:bg-[#4361EE] hover:text-white hover:shadow-md active:scale-[0.97]"
+                            className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-[#4361EE]/25 bg-[#EEF1FD] px-2.5 py-1 text-[11px] font-semibold text-[#3B54CF] shadow-sm transition hover:bg-[#4361EE] hover:text-white hover:shadow-md active:scale-[0.97]"
+                            title="View Details"
                           >
-                            View Details <ArrowRight className="h-3 w-3" />
+                            View <ArrowRight className="h-3 w-3" />
                           </Link>
                         ) : (
                           <span className="text-[11px] text-muted-foreground">—</span>
@@ -720,7 +761,11 @@ export function PerformanceTable({
             clearly against the band. Shares the same colgroup so it stays
             column-aligned; padded right by the body's live scrollbar width. */}
         {hasFooter && (
-          <div ref={footerRef} style={{ paddingRight: scrollbarW }}>
+          <div
+            ref={(el) => { footerRef.current = el; footerScrollRef.current = el; }}
+            className="overflow-x-hidden"
+            style={{ paddingRight: scrollbarW }}
+          >
             <table className={cn(TABLE_BASE, TABLE_MIN_W)}>
               <PerfCols isAgent={isAgent} />
               <tfoot>
@@ -748,10 +793,10 @@ export function PerformanceTable({
                     <span className="text-[14px] font-extrabold tabular-nums">{totals.onSite}</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
-                    <span className="text-[14px] font-extrabold tabular-nums text-emerald-200">{formatINR(totals.revenueWonAgentDriven)}</span>
+                    <span className="whitespace-nowrap text-[13px] font-extrabold tabular-nums text-emerald-200">{formatINR(totals.revenueWonAgentDriven)}</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
-                    <span className="text-[14px] font-extrabold tabular-nums">{formatINR(totals.projection)}</span>
+                    <span className="whitespace-nowrap text-[13px] font-extrabold tabular-nums">{formatINR(totals.projection)}</span>
                   </td>
                   <td className={cn(CELL, FOOT_GRP_DIV)}>
                     <span className="text-[14px] font-extrabold tabular-nums">{totals.ticketsWonAgentDriven}</span>

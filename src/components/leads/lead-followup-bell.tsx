@@ -102,7 +102,12 @@ export function LeadFollowUpBell({ onOpenLead }: { onOpenLead: (lead: Lead) => v
     return { fu, state, lead: leadById.get(fu.leadId)!, notifId: notif?.id, read: notif?.read ?? true };
   }), [due, now, notifByKey, leadById]);
 
-  const followUpUnread = rows.filter((r) => r.notifId && !r.read).length;
+  // The follow-up badge counts every LIVE Due/Overdue follow-up (what the list
+  // shows + what drives the shake), NOT just unread stored notifications — so a
+  // pending follow-up is never silently un-counted just because its durable
+  // notification hasn't been written yet or was already read. It clears only
+  // when the follow-up is COMPLETED or RESCHEDULED (it leaves the `due` set).
+  const followUpUnread = rows.length;
 
   // "Others" = this user's non-follow-up notifications from the shared feed
   // (assignments, routing, deals, field, etc.), newest first.

@@ -334,6 +334,8 @@ export default function WarrantySearchPage() {
             value={q}
             onChange={(e) => setQ((e.target as HTMLInputElement).value)}
             placeholder="Search ticket, customer name or phone number…"
+            animatedPrefix="Search by "
+            animatedWords={["ticket no", "customer name", "phone number"]}
             className="pl-10"
             aria-label="Search tickets for warranty"
           />

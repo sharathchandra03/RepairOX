@@ -271,6 +271,8 @@ export default function QuotationsPage() {
           searchValue={query}
           onSearchChange={setQuery}
           searchPlaceholder="Search number, customer, device, agent…"
+          searchAnimatedPrefix="Search by "
+          searchAnimatedWords={["number", "customer", "device", "agent"]}
           left={
             <div className="flex flex-wrap items-center gap-2">
               <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">

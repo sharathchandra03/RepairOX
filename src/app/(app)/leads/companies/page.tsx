@@ -90,7 +90,9 @@ export default function CompaniesPage() {
           <Input
             value={query}
             onChange={(e: any) => setQuery(e.target.value)}
-            placeholder="Search companies..."
+            placeholder="Search companies by name, industry or location…"
+            animatedPrefix="Search by "
+            animatedWords={["company name", "industry", "location"]}
             iconLeft={<Search className="h-4 w-4" />}
           />
         </div>

@@ -36,18 +36,30 @@ import {
 } from "lucide-react";
 import { TimePicker } from "@/components/ui/time-picker";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow, CAP } from "@/lib/capabilities";
 import {
   openFollowUp, followUpLifecycle, followUpStateTone, followUpTone, openFollowUpRowState,
-  LEAD_FOLLOWUP_OUTCOMES,
   type Lead, type LeadFollowUp,
 } from "@/lib/leads-data";
 import { statusTone } from "@/components/leads/lead-pills";
 
 type Mode = "menu" | "schedule" | "reschedule" | "complete" | "history";
+
+/** Statuses hidden from the FOLLOW-UP status dropdown specifically. These are
+ *  transient call-outcome dispositions (captured as a follow-up OUTCOME on
+ *  completion), not lifecycle stages a user should set from the follow-up
+ *  status control. Matched case-insensitively so an admin-renamed label with
+ *  the same intent still hides. They remain valid org-wide `lead_options`
+ *  everywhere else — this only scopes the follow-up status form. */
+const FOLLOWUP_HIDDEN_STATUSES = ["rnr", "not connected", "call back", "callback"];
+function isHiddenFollowUpStatus(value: string): boolean {
+  const v = (value || "").trim().toLowerCase();
+  return FOLLOWUP_HIDDEN_STATUSES.includes(v);
+}
 
 /** Combine a YYYY-MM-DD date + HH:mm time into an ISO string (default 10:00). */
 function toIso(date: string, time: string): string {
@@ -59,6 +71,32 @@ function fmt(iso?: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
   return d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" });
+}
+
+/** A short, human "time left / overdue by" descriptor for a follow-up due time,
+ *  e.g. "in 3 days", "in 5 hrs", "in 20 min", "due now", "overdue 2 days",
+ *  "overdue 4 hrs". Datetime-precise (uses the exact dueAt instant). */
+function relativeFollowUpLabel(dueIso: string, asOf: number = Date.now()): string {
+  const due = new Date(dueIso).getTime();
+  if (isNaN(due)) return "";
+  const diff = due - asOf;                 // >0 = future (time left), <0 = overdue
+  const abs = Math.abs(diff);
+  const MIN = 60_000, HR = 3_600_000, DAY = 86_400_000;
+  const unit = (ms: number): string => {
+    if (ms < MIN) return "<1m";
+    if (ms < HR) { const m = Math.round(ms / MIN); return `${m}m`; }
+    if (ms < DAY) { const h = Math.round(ms / HR); return `${h}h`; }
+    const d = Math.round(ms / DAY); return `${d}d`;
+  };
+  if (abs < MIN) return "due now";
+  return diff > 0 ? `in ${unit(abs)}` : `overdue ${unit(abs)}`;
+}
+
+/** Full date + time for the pill's secondary line, e.g. "29 Oct, 11:04 AM". */
+function fmtDueDateTime(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 export function LeadFollowUpCell({
@@ -75,8 +113,17 @@ export function LeadFollowUpCell({
   const canFollowUp = allow(can, CAP.lead.followup);
   const {
     followUpsFor, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateLead,
-    salesAgentsFor, isEligibleSalesAgent,
+    salesAgentsFor, isEligibleSalesAgent, optionsFor,
   } = useLeads();
+
+  // Outcome options for "Complete Follow-Up" are DERIVED from the lead's
+  // configured statuses (the SAME source as the Status pill) so the outcome is
+  // synced to what the agent is going to do next — never a disconnected list.
+  // RNR / Not Connected / Call Back are hidden here too (matching the status
+  // form); the lead's CURRENT status is always kept so it stays selectable.
+  const completeOutcomes = optionsFor("status")
+    .map((o) => o.value)
+    .filter((v) => !!v && (!isHiddenFollowUpStatus(v) || v === lead.status));
 
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<Mode>("menu");
@@ -99,13 +146,17 @@ export function LeadFollowUpCell({
     || "";
 
   // Pill label/tone — reuse the shared follow-up palette (matches the row tint).
+  // The pill is richer now: a primary line (sequence + how much time is LEFT /
+  // how OVERDUE it is) and a secondary line (the exact due date + time).
   const tone = followUpTone(rowState);
-  const pillLabel = !openFu
-    ? "Set follow-up"
-    : rowState === "overdue" ? `Overdue · #${openFu.seq}`
-    : rowState === "today" ? `Due today · #${openFu.seq}`
-    : `#${openFu.seq} · ${new Date(openFu.dueAt).toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`;
   const pillTone = openFu ? tone.chip : "bg-zinc-100 text-zinc-500 ring-zinc-200";
+  const relLabel = openFu ? relativeFollowUpLabel(openFu.dueAt) : "";
+  const pillPrimary = !openFu
+    ? "Set follow-up"
+    : rowState === "overdue" ? `#${openFu.seq} · ${relLabel}`
+    : rowState === "today" ? `#${openFu.seq} · due today`
+    : `#${openFu.seq} · ${relLabel}`;
+  const pillSecondary = openFu ? fmtDueDateTime(openFu.dueAt) : "";
 
   /* Portal positioning — flip above when a bottom row lacks space below. Same
      approach as the Walk-In cell so it's never clipped by table overflow. */
@@ -195,6 +246,10 @@ export function LeadFollowUpCell({
     try {
       await completeFollowUp(openFu.id, outcome, {
         comments: comment || undefined,
+        // The outcome IS a lifecycle status — sync the lead's status to it so
+        // the record reflects what the agent is doing next (routed through
+        // changeLeadStatus: writes status-history, never a silent auto-win).
+        syncStatus: outcome || undefined,
         next: next?.date
           ? {
               dueAt: toIso(next.date, next.time),
@@ -214,16 +269,22 @@ export function LeadFollowUpCell({
         ref={btnRef}
         type="button"
         onClick={(e) => { e.stopPropagation(); open ? close() : openMenu(); }}
-        title="Manage follow-up"
+        title={openFu ? `Follow-up #${openFu.seq} · ${pillPrimary.replace(/^#\d+ · /, "")} · ${pillSecondary}${openFu.followUpUserName ? ` · ${openFu.followUpUserName}` : ""}` : "Set a follow-up"}
         className={cn(
-          "inline-flex max-w-full items-center gap-1.5 rounded-full px-2.5 py-1 text-[11.5px] font-semibold ring-1 ring-inset whitespace-nowrap transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+          "inline-flex max-w-full items-center gap-1.5 rounded-xl py-1 pl-2.5 pr-3 ring-1 ring-inset transition hover:brightness-95 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
           pillTone,
         )}
       >
-        {openFu && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" />}
-        {!openFu && <CalendarPlus className="h-3 w-3 shrink-0" />}
-        <span className="truncate">{pillLabel}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 opacity-70" />
+        {openFu ? <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-current" /> : <CalendarPlus className="h-3.5 w-3.5 shrink-0" />}
+        {openFu ? (
+          <span className="flex min-w-0 flex-col leading-tight">
+            <span className="truncate text-[11.5px] font-semibold capitalize">{pillPrimary}</span>
+            <span className="block w-full truncate text-center text-[10px] font-medium opacity-80">{pillSecondary}</span>
+          </span>
+        ) : (
+          <span className="truncate text-[11.5px] font-semibold">Set follow-up</span>
+        )}
+        <ChevronDown className="ml-1.5 h-3.5 w-3.5 shrink-0 self-center opacity-70" />
       </button>
 
       {typeof document !== "undefined" && createPortal(
@@ -283,7 +344,7 @@ export function LeadFollowUpCell({
                 )}
 
                 {mode === "complete" && (
-                  <CompleteView busy={busy} onDone={doComplete} />
+                  <CompleteView busy={busy} onDone={doComplete} outcomes={completeOutcomes} currentStatus={lead.status || ""} />
                 )}
 
                 {mode === "history" && <HistoryView followUps={followUps} />}
@@ -384,11 +445,17 @@ function ScheduleView({
       </div>
       <div className="space-y-1">
         <label className="text-[10.5px] font-medium text-muted-foreground">Follow-Up Agent</label>
-        <select value={agentId} onChange={(e) => setAgentId(e.target.value)} disabled={agents.length === 0}
-          className="h-9 w-full rounded-lg border border-input bg-background px-2 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20 disabled:bg-muted/40">
-          <option value="">{defaultAgentName ? `Default — ${defaultAgentName}` : agents.length === 0 ? "No sales agents available" : "Select a Sales Agent"}</option>
-          {agents.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
+        <Select
+          value={agentId}
+          onChange={(e) => setAgentId(e.target.value)}
+          disabled={agents.length === 0}
+          className="h-9"
+          placeholder={defaultAgentName ? `Default — ${defaultAgentName}` : agents.length === 0 ? "No sales agents available" : "Select a Sales Agent"}
+          options={[
+            { label: defaultAgentName ? `Default — ${defaultAgentName}` : agents.length === 0 ? "No sales agents available" : "Select a Sales Agent", value: "" },
+            ...agents.map((a) => ({ label: a.name, value: a.id })),
+          ]}
+        />
       </div>
       <div className="space-y-1">
         <label className="text-[10.5px] font-medium text-muted-foreground">Comment <span className="font-normal">(optional)</span></label>
@@ -404,8 +471,19 @@ function ScheduleView({
   );
 }
 
-function CompleteView({ busy, onDone }: { busy: boolean; onDone: (outcome: string, comment: string, next?: { date: string; time: string }) => void }) {
-  const [outcome, setOutcome] = useState<string | null>(null);
+function CompleteView({
+  busy, onDone, outcomes, currentStatus,
+}: {
+  busy: boolean;
+  onDone: (outcome: string, comment: string, next?: { date: string; time: string }) => void;
+  /** Outcome options derived from the lead's configured statuses (synced to
+   *  what the agent is going to do next). */
+  outcomes: string[];
+  currentStatus: string;
+}) {
+  // Default the outcome to the lead's current status so completing without a
+  // change simply confirms it; the agent picks a different one to progress.
+  const [outcome, setOutcome] = useState<string | null>(currentStatus || null);
   const [comment, setComment] = useState("");
   const [scheduleNext, setScheduleNext] = useState(false);
   const [nextDate, setNextDate] = useState("");
@@ -413,21 +491,36 @@ function CompleteView({ busy, onDone }: { busy: boolean; onDone: (outcome: strin
   return (
     <div className="space-y-3 p-3.5">
       <div className="space-y-1">
-        <label className="text-[10.5px] font-medium text-muted-foreground">Outcome</label>
-        <div className="grid grid-cols-2 gap-1.5">
-          {LEAD_FOLLOWUP_OUTCOMES.map((o) => (
-            <button key={o} onClick={() => setOutcome(o)}
-              className={cn("rounded-lg border px-2 py-1.5 text-[11.5px] font-medium transition",
-                outcome === o ? "border-[#4361EE] bg-[#EEF1FD] text-[#4361EE]" : "border-input text-foreground hover:bg-muted/60")}>
-              {o}
-            </button>
-          ))}
-        </div>
+        <label className="text-[10.5px] font-medium text-muted-foreground">Outcome <span className="font-normal normal-case">(updates the lead status)</span></label>
+        {outcomes.length === 0 ? (
+          <p className="rounded-lg border border-dashed border-border bg-muted/30 px-2.5 py-2 text-[11.5px] text-muted-foreground">No statuses configured.</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-1.5">
+            {outcomes.map((o) => {
+              const selected = outcome === o;
+              return (
+                <button
+                  key={o}
+                  onClick={() => setOutcome(o)}
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[11.5px] font-semibold ring-1 ring-inset transition",
+                    selected ? statusTone(o) : "bg-card text-foreground ring-border hover:bg-muted/60",
+                    selected && "shadow-sm",
+                  )}
+                >
+                  <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", selected ? "bg-current" : "bg-zinc-300")} />
+                  <span className="truncate">{o}</span>
+                  {o === currentStatus && <span className="ml-auto shrink-0 text-[9px] font-normal opacity-70">current</span>}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
       <div className="space-y-1">
         <label className="text-[10.5px] font-medium text-muted-foreground">Comment <span className="font-normal">(optional)</span></label>
         <textarea value={comment} onChange={(e) => setComment(e.target.value)} rows={2}
-          placeholder="What happened on this attempt…"
+          placeholder="What happened on this attempt… (also saved to the lead's comments)"
           className="w-full rounded-lg border border-input bg-background px-2.5 py-2 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20" />
       </div>
       <label className="flex items-center gap-2 text-[12px] text-zinc-700">
@@ -441,7 +534,7 @@ function CompleteView({ busy, onDone }: { busy: boolean; onDone: (outcome: strin
           <TimePicker value={nextTime} onChange={setNextTime} />
         </div>
       )}
-      <p className="text-[10px] text-muted-foreground">Completing records the activity only — it does not change the lead&apos;s status.</p>
+      <p className="text-[10px] text-muted-foreground">The outcome updates the lead status; the comment is saved to the lead&apos;s comments too.</p>
       <button
         onClick={() => outcome && onDone(outcome, comment, scheduleNext && nextDate ? { date: nextDate, time: nextTime } : undefined)}
         disabled={!outcome || busy || (scheduleNext && !nextDate)}
@@ -469,7 +562,12 @@ export function LeadStatusCell({ lead, align = "left" }: { lead: Lead; align?: "
   const popRef = useRef<HTMLDivElement>(null);
   const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
 
-  const statuses = optionsFor("status").map((o) => o.value).filter(Boolean);
+  // Exclude RNR / Not Connected / Call Back from the follow-up status form —
+  // but always keep the lead's CURRENT status in the list (so a lead already on
+  // one of those can still be shown and changed away from it).
+  const statuses = optionsFor("status")
+    .map((o) => o.value)
+    .filter((v) => !!v && (!isHiddenFollowUpStatus(v) || v === lead.status));
 
   useEffect(() => {
     if (!open) return;

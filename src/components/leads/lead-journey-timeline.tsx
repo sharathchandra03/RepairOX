@@ -102,8 +102,13 @@ export function LeadJourneyTimeline({ lead }: { lead: Lead }) {
       out.push({
         key: `fu:${f.id}`, at: f.createdAt, icon: CalendarClock,
         color: "bg-amber-50 text-amber-600 ring-amber-200",
-        title: `Follow-up #${f.seq} ${f.status === "completed" ? "completed" : "scheduled"}`,
-        detail: [f.followUpUserName, f.status === "completed" ? `outcome: ${f.outcome || "—"}` : `due ${fmt(f.dueAt)}`, state].filter(Boolean).join(" · "),
+        title: `Follow-up #${f.seq} ${f.status === "completed" ? "completed" : f.status === "cancelled" ? "cancelled" : "scheduled"}`,
+        detail: [
+          f.followUpUserName,
+          f.status === "completed" ? `outcome: ${f.outcome || "—"}` : `due ${fmt(f.dueAt)}`,
+          state,
+          f.comments ? `“${f.comments}”` : undefined,
+        ].filter(Boolean).join(" · "),
       });
     }
 

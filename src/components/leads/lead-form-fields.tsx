@@ -286,7 +286,7 @@ function MiniSelect({
                 <Search className="h-3.5 w-3.5 text-muted-foreground" />
                 <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && canAdd) { e.preventDefault(); doAdd(); } }}
-                  placeholder={onAdd ? "Search or type to add…" : "Search…"}
+                  placeholder={onAdd ? "Search or type to add…" : "Search options…"}
                   className="w-full bg-transparent text-[13px] outline-none !shadow-none focus-visible:!shadow-none placeholder:text-muted-foreground" />
               </div>
             )}

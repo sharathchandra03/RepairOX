@@ -319,6 +319,34 @@ body {
   background-clip: padding-box;
 }
 
+/* Horizontal data-table scrollbar — a THIN, always-present bottom bar for wide
+   tables (e.g. Agent Performance) so when the table is cramped (the sidebar
+   open / a narrow viewport) the user can grab it and scroll left/right. A
+   light rail keeps the (thin) track visible so the bar is easy to find without
+   being bulky. */
+.rox-hscroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(67, 97, 238, 0.55) rgba(67, 97, 238, 0.10);
+}
+.rox-hscroll::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+.rox-hscroll::-webkit-scrollbar-track {
+  background: rgba(67, 97, 238, 0.10);
+  border-radius: 999px;
+}
+.rox-hscroll::-webkit-scrollbar-thumb {
+  background: rgba(67, 97, 238, 0.55);
+  border-radius: 999px;
+  border: 0;
+  background-clip: padding-box;
+}
+.rox-hscroll::-webkit-scrollbar-thumb:hover {
+  background: #4361ee;
+  background-clip: padding-box;
+}
+
 /* Pinned rail (PinnedRail component) — desktop-only sticky offset + height cap.
    72px = the app's sticky topbar stack; the 88px viewport deduction leaves a
    small bottom breathing gap. Mobile keeps the rail as a normal stacked block

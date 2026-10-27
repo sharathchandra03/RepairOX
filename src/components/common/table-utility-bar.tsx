@@ -38,6 +38,7 @@
 import * as React from "react";
 import { Search } from "lucide-react";
 import { StoreMultiSelect } from "@/components/common/store-multi-select";
+import { useAnimatedPlaceholder } from "@/hooks/use-animated-placeholder";
 import { cn } from "@/lib/utils";
 
 export function TableUtilityBar({
@@ -45,7 +46,13 @@ export function TableUtilityBar({
   onStoreChange,
   searchValue,
   onSearchChange,
-  searchPlaceholder = "Search…",
+  // Callers MUST pass a surface-specific placeholder (see the Search Placeholder
+  // standard). This relevant fallback only guards an accidental omission.
+  searchPlaceholder = "Search records…",
+  /** ANIMATED PLACEHOLDER — constant prefix + typewriter-cycling words, passed
+   *  straight to the inner TableSearch. */
+  searchAnimatedPrefix,
+  searchAnimatedWords,
   /** Optional module-specific controls rendered on the LEFT (e.g. status tabs). */
   left,
   /** Extra classes for the outer row. */
@@ -60,6 +67,8 @@ export function TableUtilityBar({
   searchValue: string;
   onSearchChange: (value: string) => void;
   searchPlaceholder?: string;
+  searchAnimatedPrefix?: string;
+  searchAnimatedWords?: string[];
   left?: React.ReactNode;
   className?: string;
   searchClassName?: string;
@@ -85,6 +94,8 @@ export function TableUtilityBar({
           value={searchValue}
           onChange={onSearchChange}
           placeholder={searchPlaceholder}
+          animatedPrefix={searchAnimatedPrefix}
+          animatedWords={searchAnimatedWords}
           className={searchClassName}
         />
       </div>
@@ -98,21 +109,37 @@ export function TableUtilityBar({
 export function TableSearch({
   value,
   onChange,
-  placeholder = "Search…",
+  placeholder = "Search records…",
+  animatedPrefix,
+  animatedWords,
   className,
 }: {
   value: string;
   onChange: (value: string) => void;
   placeholder?: string;
+  /** ANIMATED PLACEHOLDER — constant prefix + typewriter-cycling trailing word
+   *  (see useAnimatedPlaceholder). Pauses while focused/filled. When provided,
+   *  overrides the static `placeholder` for the idle empty state. */
+  animatedPrefix?: string;
+  animatedWords?: string[];
   className?: string;
 }) {
+  const animate = !!animatedPrefix && !!animatedWords && animatedWords.length > 0;
+  const [focused, setFocused] = React.useState(false);
+  const animated = useAnimatedPlaceholder({
+    prefix: animatedPrefix ?? "",
+    words: animatedWords ?? [],
+    paused: !animate || focused || value.length > 0,
+  });
   return (
     <div className={cn("relative", className)}>
       <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
       <input
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        placeholder={animate ? animated : placeholder}
         className={cn(
           "h-[34px] w-full rounded-xl border border-input bg-card pl-9 pr-3 text-[13px] outline-none transition-all duration-150",
           "placeholder:text-muted-foreground hover:border-[#4361EE]/40",

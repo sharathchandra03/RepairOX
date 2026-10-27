@@ -491,6 +491,8 @@ export default function ManageCustomersPage() {
                   value={search}
                   onChange={(e: any) => { setSearch(e.target.value); resetFiltersAndPage(); }}
                   placeholder="Search name, phone, email, ID, company"
+                  animatedPrefix="Search by "
+                  animatedWords={["name", "phone", "email", "ID", "company"]}
                   iconLeft={<Search className="h-4 w-4" />}
                   className="h-10"
                 />
@@ -1168,6 +1170,8 @@ function ContactsTab({ contacts, leads, hydrated, customers, canDelete, onDelete
               value={search}
               onChange={(e: any) => { setSearch(e.target.value); setPage(1); }}
               placeholder="Search name, phone, email, ID"
+              animatedPrefix="Search by "
+              animatedWords={["name", "phone", "email", "ID"]}
               iconLeft={<Search className="h-4 w-4" />}
               className="h-10"
             />

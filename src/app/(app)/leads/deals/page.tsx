@@ -343,6 +343,8 @@ export default function DealsPage() {
           searchValue={query}
           onSearchChange={setQuery}
           searchPlaceholder="Search deal, lead, customer, agent…"
+          searchAnimatedPrefix="Search by "
+          searchAnimatedWords={["deal ID", "lead", "customer", "agent"]}
           left={
             <div className="max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <SegmentedTabs

@@ -27,7 +27,7 @@
    records — no dummy values, no fabricated trends.
    ────────────────────────────────────────────────────────────────────────── */
 
-import { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -212,6 +212,30 @@ export default function AgentPerformancePage() {
   // header + the four KPI cards) so the agent table can fill the viewport.
   // Presentation only — never touches period/store/filter state.
   const workspace = useWorkspaceCollapsed("agent_performance", currentUserId);
+
+  // Auto-collapse the header on ENTERING Agent Performance so the agent table
+  // gets the full viewport immediately — mirrors how the Lead Table
+  // auto-collapses the sidebar on entry. This fires ONCE per page entry (after
+  // the per-user preference hydrates), and the user's prior expanded/collapsed
+  // preference is RESTORED when they leave the page. The user may still
+  // manually re-expand while here — we never force it back collapsed.
+  const didAutoCollapse = useRef(false);
+  const collapsedBeforeEntry = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!workspace.hydrated || didAutoCollapse.current) return;
+    // Remember the stored preference, then collapse once on entry.
+    collapsedBeforeEntry.current = workspace.collapsed;
+    workspace.setCollapsed(true);
+    didAutoCollapse.current = true;
+  }, [workspace.hydrated]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    // On unmount (leaving the page), restore whatever the header was before.
+    return () => {
+      if (collapsedBeforeEntry.current !== null) {
+        workspace.setCollapsed(collapsedBeforeEntry.current);
+      }
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
   // Owner's Individual analytical subject. "" → resolve to self (or first
   // agent). Seeded from the ?agent= deep link when present.
   const [scopeAgentId, setScopeAgentId] = useState<string>(viewAsAgentId || initialAgentParam);

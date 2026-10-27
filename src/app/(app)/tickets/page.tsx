@@ -1123,6 +1123,8 @@ export default function TicketsPage() {
         searchValue={q}
         onSearchChange={setQ}
         searchPlaceholder="Search tickets…"
+        searchAnimatedPrefix="Search by "
+        searchAnimatedWords={["ticket no", "customer", "device", "issue", "phone"]}
         searchClassName="w-56"
         left={
           <SegmentedTabs

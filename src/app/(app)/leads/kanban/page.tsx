@@ -367,7 +367,9 @@ export default function KanbanPage() {
             <Input
               value={query}
               onChange={(e: any) => setQuery(e.target.value)}
-              placeholder="Search ID, name, number, email, device…"
+              placeholder="Search cards by lead ID, name, phone, device or agent…"
+              animatedPrefix="Search by "
+              animatedWords={["lead ID", "name", "phone", "device", "agent"]}
               iconLeft={<Search className="h-4 w-4" />}
             />
           </div>

@@ -883,7 +883,7 @@ export default function InvoicePage() {
         />
         <div className="flex shrink-0 items-center gap-2">
           <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />
-          <TableSearch value={q} onChange={setQ} placeholder="Search invoices…" className="w-56" />
+          <TableSearch value={q} onChange={setQ} placeholder="Search invoices…" animatedPrefix="Search by " animatedWords={["invoice ID", "customer", "company", "phone", "ticket no"]} className="w-56" />
         </div>
       </div>
 

@@ -183,7 +183,7 @@ function MapViewContent() {
         <div className="flex shrink-0 flex-col gap-2 sm:flex-row sm:items-center">
           <CitySelect cities={cities} value={cityId} label={cityLabel} onChange={setCityId} />
           {leadMode.isMulti && <StoreMultiSelect value={storeFilter} onChange={setStoreFilter} />}
-          <TableSearch value={query} onChange={setQuery} placeholder="Search leads…" />
+          <TableSearch value={query} onChange={setQuery} placeholder="Search leads by name, phone, region or location…" animatedPrefix="Search by " animatedWords={["name", "phone", "region", "location"]} />
         </div>
       </div>
 

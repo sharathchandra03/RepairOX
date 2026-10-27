@@ -69,6 +69,8 @@ export default function CustomersPage() {
             value={query}
             onChange={(e: any) => setQuery(e.target.value)}
             placeholder="Search by name, phone, email, company or ID…"
+            animatedPrefix="Search by "
+            animatedWords={["name", "phone", "email", "company", "ID"]}
             iconLeft={<Search className="h-4 w-4" />}
           />
         </div>
