@@ -174,6 +174,18 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   // longer implies cross-store visibility unless multi-store access is granted.
   const canCrossBranch = canMultiStore;
 
+  // Explicit per-user store grants (`user_stores`) are a SEPARATE axis from the
+  // org-wide `multi_store_access` capability. When an admin deliberately assigns
+  // a user to an ADDITIONAL store (View Store → People With Access), that user
+  // must be able to SWITCH between exactly their granted stores — even without
+  // `multi_store_access` (which is the broader "roam the whole org / All Shops"
+  // capability). The DB already honours this (auth_store_ids includes explicit
+  // grants regardless of multi_store_access); this mirrors it on the client so
+  // the selector can't disagree with the data boundary. `true` once the user
+  // has MORE THAN ONE accessible store that came from explicit grants/home —
+  // i.e. the resolved `stores` list has >1 entry for a non-cross-branch user.
+  const [hasExtraGrantedStores, setHasExtraGrantedStores] = useState(false);
+
   const storageKey = currentUser?.id
     ? `${STORAGE_PREFIX}${currentUser.id}`
     : `${STORAGE_PREFIX}anon`;
@@ -197,6 +209,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // org (mirrors the DB is_admin()). Everyone else is resolved below.
     const OWNER_ROLES = new Set(["master_shop_owner", "platform_owner", "developer_admin"]);
     if (currentUser?.roleId && OWNER_ROLES.has(currentUser.roleId)) {
+      setHasExtraGrantedStores(false); // owners already roam via canCrossBranch
       return sortStores(all);
     }
 
@@ -222,6 +235,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // A cross-branch user with NO explicit grants keeps the prior behaviour:
     // the whole org (so nobody who was never given a checklist is locked out).
     if (canCrossBranch && grantIds.size === 0) {
+      setHasExtraGrantedStores(false); // roams the org via canCrossBranch
       return sortStores(all);
     }
 
@@ -246,7 +260,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     // Safety: never leave a user with zero stores if their branch is unknown —
     // fall back to the first store so the app stays usable (RLS still guards
     // the data itself server-side).
-    return sortStores(scoped.length > 0 ? scoped : all.slice(0, 1));
+    const resolved = sortStores(scoped.length > 0 ? scoped : all.slice(0, 1));
+    // A non-cross-branch user who nonetheless resolved to MORE THAN ONE store
+    // got there via explicit user_stores grants (home + grants). They must be
+    // able to switch between exactly those stores even without
+    // multi_store_access — record that so the selector/switch guard can allow
+    // it. (It never enables All Shops — that stays gated on multi_store_access.)
+    setHasExtraGrantedStores(resolved.length > 1);
+    return resolved;
   }, [canCrossBranch, currentUser?.branch, currentUser?.branchId, currentUser?.id, currentUser?.roleId]);
 
   /* Resolve the signed-in user's OWN assigned store id from the store list,
@@ -389,13 +410,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (idOrAll: string | null | typeof ALL_SHOPS) => {
       let nextId: string | null;
       if (idOrAll === ALL_SHOPS || idOrAll === null) {
-        // Guard: only allow All Shops for users who can cross branches.
+        // Guard: All Shops stays a true multi_store_access privilege. A user who
+        // only has explicit per-store grants (hasExtraGrantedStores) can switch
+        // between their stores but can NEVER enter the consolidated view.
         nextId = canCrossBranch ? null : (stores[0]?.id ?? null);
       } else if (stores.some((s) => s.id === idOrAll)) {
-        // Switching to a DIFFERENT store is a multi-store action. Without the
-        // capability, keep the user pinned to their current/home store even if
-        // extra stores exist in their accessible list.
-        if (!canCrossBranch && idOrAll !== activeStoreId) {
+        // Switching to a DIFFERENT store is allowed when the user may roam the
+        // org (canCrossBranch) OR was explicitly assigned more than one store
+        // (hasExtraGrantedStores). A single-store user with neither stays pinned.
+        if (!canCrossBranch && !hasExtraGrantedStores && idOrAll !== activeStoreId) {
           return;
         }
         nextId = idOrAll;
@@ -407,7 +430,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       // and the link stays shareable.
       writeStoreParam(paramForStoreId(nextId, stores));
     },
-    [canCrossBranch, stores, activeStoreId]
+    [canCrossBranch, hasExtraGrantedStores, stores, activeStoreId]
   );
 
   const activeStore = useMemo(
@@ -486,10 +509,15 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       activeStoreId,
       activeStore,
       isAllShops: activeStoreId === null,
-      // The switch affordance is a CAPABILITY, not a store-count. A user without
-      // multi_store_access must never get a switcher, even if they happen to have
-      // more than one accessible store (branch + explicit user_stores grants).
-      canSwitchStores: canCrossBranch && stores.length > 1,
+      // The switch affordance is allowed when the user may roam the org
+      // (multi_store_access) OR has been EXPLICITLY assigned more than one store
+      // via user_stores grants. The second case is the deliberate "assign this
+      // user to an additional store" flow: they must be able to switch between
+      // exactly their granted stores even without the org-wide capability
+      // (the DB already permits those stores via auth_store_ids). All Shops,
+      // however, stays a true multi_store_access privilege — a grant-only user
+      // switches between their stores but never enters the consolidated view.
+      canSwitchStores: (canCrossBranch || hasExtraGrantedStores) && stores.length > 1,
       canViewAllShops: canCrossBranch && stores.length > 1,
       ready,
       setActiveStore,
@@ -499,7 +527,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       prefixesFor,
       saveActivePrefixes,
     }),
-    [stores, activeStoreId, activeStore, canCrossBranch, ready, setActiveStore, getStore, refreshStores, activePrefixes, prefixesFor, saveActivePrefixes]
+    [stores, activeStoreId, activeStore, canCrossBranch, hasExtraGrantedStores, ready, setActiveStore, getStore, refreshStores, activePrefixes, prefixesFor, saveActivePrefixes]
   );
 
   return <StoreCtx.Provider value={value}>{children}</StoreCtx.Provider>;

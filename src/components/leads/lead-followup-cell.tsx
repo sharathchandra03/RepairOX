@@ -21,7 +21,9 @@
                           (NEVER wins the lead)
      • Reschedule       → cancel the open one + schedule a new record (history is
                           preserved; a new Follow-up #N is created)
-     • Cancel           → cancelFollowUp (kept as cancelled history)
+     (No per-follow-up Cancel: a follow-up resolves only as Complete or
+      Reschedule. Abandoning a lead is a lead-level Lost/Disqualified status
+      change, not a silent follow-up cancel.)
      • Schedule         → scheduleFollowUp
 
    Every write goes through the leads context (DB + audit + history + notify) —
@@ -32,7 +34,7 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  CalendarPlus, CalendarClock, PhoneCall, CheckCheck, History, ChevronDown, X, XCircle,
+  CalendarPlus, CalendarClock, PhoneCall, CheckCheck, History, ChevronDown, X,
 } from "lucide-react";
 import { TimePicker } from "@/components/ui/time-picker";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -209,12 +211,6 @@ export function LeadFollowUpCell({
     try { await updateLead(lead.id, { contactStatus: "Contacted" }); close(); }
     finally { setBusy(false); }
   };
-  const doCancel = async () => {
-    if (!openFu) return;
-    setBusy(true);
-    try { await cancelFollowUp(openFu.id); close(); }
-    finally { setBusy(false); }
-  };
   const doSchedule = async (date: string, time: string, agentId: string, comment: string) => {
     setBusy(true);
     try {
@@ -324,7 +320,6 @@ export function LeadFollowUpCell({
                     onMarkContacted={markContacted}
                     onComplete={() => setMode("complete")}
                     onReschedule={() => setMode("reschedule")}
-                    onCancel={doCancel}
                     onSchedule={() => setMode("schedule")}
                     onHistory={() => setMode("history")}
                     busy={busy}
@@ -392,10 +387,10 @@ function MenuAction({ icon: Icon, label, onClick, tone, disabled }: { icon: any;
 
 function MenuView({
   canFollowUp, hasOpen, due, seqCount, isNotContacted,
-  onMarkContacted, onComplete, onReschedule, onCancel, onSchedule, onHistory, busy,
+  onMarkContacted, onComplete, onReschedule, onSchedule, onHistory, busy,
 }: {
   canFollowUp: boolean; hasOpen: boolean; due: boolean; seqCount: number; isNotContacted: boolean;
-  onMarkContacted: () => void; onComplete: () => void; onReschedule: () => void; onCancel: () => void; onSchedule: () => void; onHistory: () => void; busy: boolean;
+  onMarkContacted: () => void; onComplete: () => void; onReschedule: () => void; onSchedule: () => void; onHistory: () => void; busy: boolean;
 }) {
   return (
     <div className="py-1">
@@ -407,7 +402,6 @@ function MenuView({
           <MenuAction icon={CheckCheck} label="Complete Follow-Up" onClick={onComplete} disabled={busy} />
           <MenuAction icon={CalendarClock} label="Reschedule" onClick={onReschedule} disabled={busy} />
           {!due && isNotContacted && <MenuAction icon={PhoneCall} label="Mark Contacted" onClick={onMarkContacted} disabled={busy} />}
-          <MenuAction icon={XCircle} label="Cancel Follow-Up" onClick={onCancel} tone="danger" disabled={busy} />
         </>
       ) : (
         <MenuAction icon={CalendarPlus} label={seqCount > 0 ? `Schedule Follow-Up #${seqCount + 1}` : "Schedule Follow-Up"} onClick={onSchedule} disabled={busy} />
