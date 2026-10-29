@@ -420,6 +420,17 @@ export function followUpNounForStatus(status: string): string {
   return isCallBackStatus(status) ? "Call Back" : "Follow-Up";
 }
 
+/** True when a lead's LIFECYCLE STATUS is specifically a "Follow-Up" stage
+ *  (contains "follow", but not a Call Back stage). The numbered "Follow-Ups"
+ *  view uses this so it also behaves as the old standalone "Follow-Up" status
+ *  filter — a lead at the Follow-Up stage is surfaced there even before any
+ *  structured follow-up record exists. Case/separator tolerant so an
+ *  admin-renamed value ("Follow Up", "Follow-up") still classifies. */
+export function isFollowUpStatus(status: string): boolean {
+  const s = (status || "").toLowerCase().replace(/[-_]/g, " ");
+  return s.includes("follow") && !isCallBackStatus(status);
+}
+
 /* ─── Lead devices (for the shared Device & Issue details popup) ─────────
    A lead currently captures ONE device (flat catalog-reference fields on the
    Lead). This helper normalises that into an ARRAY so the Device Details popup
@@ -765,12 +776,17 @@ export function applyLeadFilters(
       // `leadsWithAnyFollowUp` too, so this is a superset of the old open-only
       // rule.) Fall back to the flat followUpDate only when no follow-up set is
       // supplied (local/legacy path).
+      // ALSO keep a lead whose LIFECYCLE STATUS is a Follow-Up status: this view
+      // absorbed the old standalone "Follow-Up" status segment, so the numbered
+      // Follow-Ups view doubles as that status filter and no follow-up lead is
+      // missed (a lead moved to the "Follow-Up" stage before any structured
+      // follow-up record was scheduled still appears here).
       const hasFu = leadsWithAnyFollowUp
         ? leadsWithAnyFollowUp.has(l.id)
         : openFollowUpsByLead
           ? openFollowUpRowState(openFollowUpsByLead.get(l.id), asOf) !== "none"
           : followUpState(l.followUpDate) !== "none";
-      if (!hasFu) return false;
+      if (!hasFu && !isFollowUpStatus(l.status)) return false;
     }
 
     if (f.status && l.status !== f.status) return false;

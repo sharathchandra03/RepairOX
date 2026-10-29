@@ -7,7 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal,
+  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal, MessageSquare, Send,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -52,7 +52,7 @@ import { DealRequestModal } from "@/components/deals/deal-request-modal";
 import { DealConversationPopover } from "@/components/deals/deal-conversation-popover";
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
-  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, type LeadFollowUp,
+  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, openFollowUp, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, isFollowUpStatus, type LeadFollowUp,
   isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
 } from "@/lib/leads-data";
@@ -269,12 +269,12 @@ function LeadStatusTick({ wf, lead }: { wf: LeadWorkflow; lead?: Lead }) {
     if (wf.action === "lost" || kind === "lost") {
       return (
         <span
-          className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full text-white"
+          className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-white shadow-sm"
           style={{ background: "linear-gradient(135deg, #F43F5E 0%, #E11D48 100%)" }}
           title="Lead lost — closed without conversion"
           aria-label="Lead lost"
         >
-          <X className="h-2 w-2" strokeWidth={3} />
+          <X className="h-2.5 w-2.5" strokeWidth={3} />
         </span>
       );
     }
@@ -285,22 +285,17 @@ function LeadStatusTick({ wf, lead }: { wf: LeadWorkflow; lead?: Lead }) {
     const statusIsFollowUp = /follow/.test((lead?.status || "").toLowerCase());
     if (wf.action === "follow_up" || statusIsFollowUp) {
       return (
-        // Follow-up badge, warm-rose language (replaces the old violet). A pale
-        // fill washed the "FW" out, so we use a SATURATED rose gradient with
-        // white letters — the same high-contrast treatment the green/blue/orange
-        // conversion ticks use — plus a soft rose halo ring so it pops off the
-        // white row. Slightly larger (16px) + extrabold so the tiny "FW" reads.
+        // Follow-up indicator — bold red "FW" text on a white circular
+        // background. The disc is sized so the two letters stay clearly
+        // readable (a 16px circle crammed them); it's centered on the Lead ID
+        // via the flex row, with a soft shadow + rose ring so the white disc
+        // pops against the row.
         <span
-          className="inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[6.5px] font-extrabold uppercase text-white shadow-[0_0_0_2px_rgba(244,63,94,0.18)]"
-          style={{ background: "linear-gradient(135deg, #FB5581 0%, #E11D48 100%)" }}
+          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-[10px] font-extrabold uppercase leading-none tracking-[0.02em] text-rose-600 shadow-sm ring-1 ring-rose-200"
           title="Follow-up in progress — the lead is being actively worked"
           aria-label="Follow-up in progress"
         >
-          {/* The glyph is centered with flex; a 1px top nudge + a left pad equal
-              to the trailing letter-spacing optically centers "FW" in the tiny
-              circle (uppercase cap-height + letter-spacing otherwise bias it
-              up-left). */}
-          <span className="relative top-[0.5px] pl-[0.5px] leading-none tracking-[0.04em]">FW</span>
+          FW
         </span>
       );
     }
@@ -313,12 +308,12 @@ function LeadStatusTick({ wf, lead }: { wf: LeadWorkflow; lead?: Lead }) {
     : "linear-gradient(135deg, #F59E0B 0%, #D97706 100%)";
   return (
     <span
-      className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full text-white"
+      className="grid h-4 w-4 shrink-0 place-items-center rounded-full text-white shadow-sm"
       style={{ background: bg }}
       title={label}
       aria-label={label}
     >
-      <Check className="h-2 w-2" strokeWidth={3} />
+      <Check className="h-2.5 w-2.5" strokeWidth={3} />
     </span>
   );
 }
@@ -811,28 +806,240 @@ function LeadValueCell({ lead }: { lead: Lead }) {
   );
 }
 
-/* Column 10 — COMMENT (readable preview; full text on hover via title).
-   A fixed-size, vertically-centered 2-line note box with a soft distinct
-   background so the free-text comment is visually differentiated from the
-   surrounding columns and NEVER bleeds into the Lead Value cell. The box is a
-   fixed height (always 2 lines tall) so the column reads uniformly down the
-   table; longer text clamps to 2 lines with the full value in the title
-   tooltip. N/A stays a plain muted dash (never a tinted box). */
-function CommentCell({ text }: { text: string }) {
-  if (!text?.trim()) return <EmptyDash />;
-  // Match the Notepad sticky-note colour system (notepad-widget.tsx): soft
-  // amber body + amber-200 border + the saturated amber-400 left accent stripe,
-  // with neutral foreground text (NOT amber-900) so it reads identically.
+/* Column 10 — COMMENT (readable preview + click-to-open chat thread).
+   A fixed-size, vertically-centered 2-line note box with a DARKER, more
+   prominent amber sticky-note surface + DARK text so the free-text comment
+   stands out from the surrounding columns and NEVER bleeds into the Lead Value
+   cell. Clicking the box opens a portalled chat-style thread (same pattern as
+   the Follow-Up comment box): it shows the lead comment + every follow-up
+   comment, and lets an authorized user add a comment to the open follow-up.
+   N/A still shows a plain muted dash when there is nothing to display. */
+function fmtCommentChatTime(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  return d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+type CommentThreadEntry = {
+  id: string;
+  kind: "lead" | "followup";
+  text: string;
+  who: string;
+  at?: string;
+  seq?: number;
+  state?: string;
+};
+
+function CommentCell({ lead, fallbackText }: { lead: Lead; fallbackText: string }) {
+  const { can } = usePermissions();
+  const canFollowUp = allow(can, CAP.lead.followup);
+  const { followUpsFor, updateFollowUpComment, openFollowUpsByLead, viewAsReadOnly } = useLeads();
+
+  const [open, setOpen] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const popRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [pos, setPos] = useState<{ top: number; left: number; maxHeight: number } | null>(null);
+
+  const followUps = followUpsFor(lead.id);
+  const openFu = openFollowUpsByLead.get(lead.id) ?? openFollowUp(followUps);
+  const leadComment = (lead.comments || lead.finalRemarks || "").trim();
+
+  // Combined, chronological thread: lead comment first, then each follow-up.
+  const entries = useMemo<CommentThreadEntry[]>(() => {
+    const out: CommentThreadEntry[] = [];
+    if (leadComment) {
+      out.push({
+        id: `lead:${lead.id}`, kind: "lead", text: leadComment,
+        who: lead.assignedToName || lead.agent || "Lead",
+        at: lead.createdAt || (lead.date ? `${lead.date}T${lead.time || "00:00"}:00` : undefined),
+      });
+    }
+    for (const f of [...followUps].sort((a, b) => a.seq - b.seq)) {
+      const text = (f.comments || "").trim();
+      if (!text && !f.outcome) continue;
+      out.push({
+        id: `fu:${f.id}`, kind: "followup",
+        text: text || (f.outcome ? `Outcome: ${f.outcome}` : ""),
+        who: f.followUpUserName || f.createdByName || "Agent",
+        at: f.completedAt || f.createdAt, seq: f.seq, state: f.outcome || followUpLifecycle(f),
+      });
+    }
+    return out;
+  }, [lead, followUps, leadComment]);
+
+  // Collapsed preview = the latest note in the thread (fallback = raw text).
+  const latest = entries[entries.length - 1];
+  const previewText = latest?.text || fallbackText || "";
+
+  /* Portal positioning — flip above when there isn't room below. */
+  useEffect(() => {
+    if (!open) return;
+    const GAP = 6, MARGIN = 8, WIDTH = 340;
+    const place = () => {
+      const btn = btnRef.current; if (!btn) return;
+      const r = btn.getBoundingClientRect();
+      const vh = window.innerHeight, vw = window.innerWidth;
+      const popH = popRef.current?.offsetHeight || 380;
+      const spaceBelow = vh - r.bottom - GAP - MARGIN, spaceAbove = r.top - GAP - MARGIN;
+      let top: number, maxHeight: number;
+      if (spaceBelow >= popH || spaceBelow >= spaceAbove) { top = r.bottom + GAP; maxHeight = Math.max(220, spaceBelow); }
+      else { maxHeight = Math.max(220, spaceAbove); top = r.top - GAP - Math.min(popH, maxHeight); }
+      top = Math.max(MARGIN, Math.min(top, vh - MARGIN - Math.min(popH, maxHeight)));
+      const left = Math.max(MARGIN, Math.min(r.left, vw - WIDTH - MARGIN));
+      setPos({ top, left, maxHeight });
+    };
+    place();
+    const raf = requestAnimationFrame(place);
+    window.addEventListener("scroll", place, true);
+    window.addEventListener("resize", place);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
+  }, [open]);
+
+  // Close on outside click / escape.
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => { if (popRef.current && !popRef.current.contains(e.target as Node) && btnRef.current && !btnRef.current.contains(e.target as Node)) setOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDown); document.addEventListener("keydown", onKey);
+    return () => { document.removeEventListener("mousedown", onDown); document.removeEventListener("keydown", onKey); };
+  }, [open]);
+
+  // Keep the thread scrolled to the bottom whenever it opens / grows.
+  useEffect(() => {
+    if (open && scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+  }, [open, entries.length]);
+
+  const send = async () => {
+    const text = draft.trim();
+    if (!text || !openFu) return;
+    setBusy(true);
+    try {
+      const combined = openFu.comments && openFu.comments.trim() ? `${openFu.comments.trim()}\n${text}` : text;
+      await updateFollowUpComment(openFu.id, combined);
+      setDraft("");
+    } finally { setBusy(false); }
+  };
+
+  const canCompose = canFollowUp && !viewAsReadOnly;
+
+  // Nothing to show AND nothing to add → plain muted dash (no tinted box).
+  if (entries.length === 0 && !previewText && !canCompose) return <EmptyDash />;
+
   return (
-    <div className="relative mr-2 flex min-h-[48px] w-full items-center overflow-hidden rounded-lg border border-amber-200/80 bg-amber-50/70 pl-3 pr-2.5 py-1.5">
-      <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-amber-400" />
-      <p
-        className="line-clamp-2 w-full break-words whitespace-pre-line text-[13px] leading-snug text-foreground/90"
-        title={text}
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
+        title="View & add comments"
+        // Darker, more attractive sticky-note surface: a solid amber-100 body,
+        // a saturated amber-500 left accent stripe, an amber-300 border, and a
+        // bolder amber-900 text so the comment reads clearly and pops off the
+        // white row. Hover deepens the surface to signal it's interactive.
+        className="group/cmt relative mr-2 flex min-h-[48px] w-full items-center gap-2 overflow-hidden rounded-lg border border-amber-300 bg-amber-100/90 pl-3 pr-2.5 py-1.5 text-left shadow-[0_1px_2px_rgba(146,64,14,0.12)] transition hover:border-amber-400 hover:bg-amber-100"
       >
-        {text}
-      </p>
-    </div>
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3.5px] bg-amber-500" />
+        <div className="min-w-0 flex-1">
+          {previewText ? (
+            <p className="line-clamp-2 w-full break-words whitespace-pre-line text-[13px] font-medium leading-snug text-amber-950" title={previewText}>
+              {previewText}
+            </p>
+          ) : (
+            <p className="text-[12px] italic text-amber-700/80">No comments yet — click to add</p>
+          )}
+          {entries.length > 1 && <p className="mt-0.5 text-[10.5px] font-semibold text-amber-800">{entries.length} notes · tap to view</p>}
+        </div>
+        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-amber-700" />
+      </button>
+
+      {typeof document !== "undefined" && createPortal(
+        <AnimatePresence>
+          {open && pos && (
+            <motion.div
+              ref={popRef}
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ duration: 0.14 }}
+              style={{ position: "fixed", top: pos.top, left: pos.left, width: 340, maxHeight: pos.maxHeight }}
+              className="z-[9999] flex flex-col overflow-hidden rounded-2xl border border-zinc-300/80 bg-card shadow-[0_20px_50px_-12px_rgba(20,30,80,0.35)]"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
+                <div className="flex items-center gap-2">
+                  <span className="grid h-6 w-6 place-items-center rounded-md bg-amber-100 text-amber-700"><MessageSquare className="h-3.5 w-3.5" /></span>
+                  <div className="min-w-0">
+                    <p className="truncate text-[13px] font-semibold leading-none">Comments</p>
+                    <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground">{lead.leadNo} · {lead.name || "Unnamed"}</p>
+                  </div>
+                </div>
+                <button onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground" aria-label="Close"><X className="h-3.5 w-3.5" /></button>
+              </div>
+
+              {/* Thread */}
+              <div ref={scrollRef} className="min-h-0 flex-1 space-y-2.5 overflow-y-auto bg-muted/20 p-3">
+                {entries.length === 0 ? (
+                  <p className="py-6 text-center text-[12px] text-muted-foreground">No comments yet.</p>
+                ) : (
+                  entries.map((e) => (
+                    <div key={e.id} className={cn("rounded-xl border px-3 py-2", e.kind === "lead" ? "border-sky-200 bg-sky-50/70" : "border-amber-200 bg-amber-50/70")}>
+                      <div className="mb-1 flex items-center justify-between gap-2">
+                        <span className={cn("inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-wide ring-1 ring-inset",
+                          e.kind === "lead" ? "bg-sky-100 text-sky-700 ring-sky-200" : "bg-amber-100 text-amber-700 ring-amber-200")}>
+                          {e.kind === "lead" ? "Lead comment" : `Follow-up #${e.seq}`}
+                        </span>
+                        {e.at && <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{fmtCommentChatTime(e.at)}</span>}
+                      </div>
+                      <p className="whitespace-pre-line break-words text-[12.5px] leading-snug text-foreground/90">{e.text}</p>
+                      <div className="mt-1.5 flex items-center gap-1.5">
+                        <Avatar name={e.who} size={16} />
+                        <span className="truncate text-[10.5px] font-medium text-muted-foreground">{e.who}</span>
+                        {e.kind === "followup" && e.state && <span className="ml-auto truncate text-[10px] text-emerald-700">{e.state}</span>}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Composer — writes to the OPEN follow-up's comment (same logic as
+                  the Follow-Up comment box). */}
+              <div className="shrink-0 border-t border-border p-2.5">
+                {!canCompose ? (
+                  <p className="px-1 py-1.5 text-[11px] text-muted-foreground">You don&apos;t have permission to add follow-up comments.</p>
+                ) : !openFu ? (
+                  <p className="px-1 py-1.5 text-[11px] text-muted-foreground">No open follow-up. Schedule one from the Follow-Up cell to add a comment.</p>
+                ) : (
+                  <div className="flex items-end gap-2">
+                    <textarea
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) { e.preventDefault(); void send(); } }}
+                      rows={2}
+                      placeholder={`Add a comment to Follow-up #${openFu.seq}…`}
+                      className="min-h-[38px] flex-1 resize-none rounded-lg border border-input bg-background px-2.5 py-1.5 text-[12.5px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20"
+                    />
+                    <button
+                      onClick={() => void send()}
+                      disabled={!draft.trim() || busy}
+                      title="Add comment (Cmd/Ctrl+Enter)"
+                      className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-lg bg-[#4361EE] text-white transition hover:bg-[#3550d8] disabled:opacity-50"
+                    >
+                      <Send className="h-4 w-4" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body,
+      )}
+    </>
   );
 }
 
@@ -1265,8 +1472,11 @@ export default function LeadsListPage() {
     () => leads.filter((l) => isNotContactedStatus(l.contactStatus)).length,
     [leads],
   );
+  // Count = leads with an OPEN follow-up OR at the "Follow-Up" lifecycle stage,
+  // matching exactly what the numbered "Follow-Ups" view now surfaces (it
+  // absorbed the old standalone "Follow-Up" status segment).
   const followUpsCount = useMemo(
-    () => leads.filter((l) => openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none").length,
+    () => leads.filter((l) => openFollowUpRowState(openFollowUpsByLead.get(l.id)) !== "none" || isFollowUpStatus(l.status)).length,
     [leads, openFollowUpsByLead],
   );
   const view = filters.view ?? "all";
@@ -1299,7 +1509,11 @@ export default function LeadsListPage() {
     const configured = optionsFor("status").map((o) => o.value).filter(Boolean);
     const inUse = Array.from(new Set(leads.map((l) => l.status).filter(Boolean)));
     const legacy = inUse.filter((s) => !configured.includes(s));
-    const statuses = [...configured, ...legacy];
+    // Drop any standalone "Follow-Up" lifecycle STATUS segment — it duplicated
+    // the numbered "Follow-Ups" VIEW segment (same name, confusing). The
+    // numbered view now also behaves as that status filter (see
+    // applyLeadFilters → isFollowUpStatus), so no follow-up lead is missed.
+    const statuses = [...configured, ...legacy].filter((s) => !isFollowUpStatus(s));
     return [
       { label: "All", value: "all" },
       { label: <ViewTabLabel text="Not Contacted" count={notContactedCount} active={view === "notContacted"} tone="red" />, value: NOT_CONTACTED_TAB },
@@ -1709,7 +1923,9 @@ export default function LeadsListPage() {
           return gated ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />;
         case "comment":
           // The Not-Qualified reason stays readable here (never masked to N/A).
-          return locked ? <NACell /> : <CommentCell text={lead.comments || lead.finalRemarks || ""} />;
+          // Clicking the box opens a chat-style comment thread (same logic as
+          // the Follow-Up comment box).
+          return locked ? <NACell /> : <CommentCell lead={lead} fallbackText={lead.comments || lead.finalRemarks || ""} />;
         case "value":
           return gated ? <NACell /> : <LeadValueCell lead={lead} />;
         case "region":
