@@ -2,14 +2,18 @@ import { cn, initials } from "@/lib/utils";
 import { TICKET_TYPE_CODE, type TicketType } from "@/lib/mock-data";
 
 /**
- * Two-colour identity/type avatar language shared across Tickets and Invoices.
- * There are intentionally ONLY two colours — no purple/green/teal variants:
- *   • Type PROVIDED (Walk-In / Pick-Up / On-Site) → the SAME dark blue used by
- *     the customer/name avatar (brand indigo #4361EE), white code text so
- *     WK / PD / OS stays clearly readable.
- *   • Type NOT PROVIDED (N/A) → the existing light-blue (sky) treatment.
+ * Type avatar language shared across Tickets and Invoices.
+ *   • Type PROVIDED (Walk-In / Pick-Up / On-Site) → each intake type gets its
+ *     OWN shade of blue so WK and OS no longer blend into the RepairOX brand
+ *     blue. Pick-Up keeps the brand indigo (#4361EE); Walk-In uses a deeper
+ *     navy and On-Site a brighter cyan-blue — all with white code text.
+ *   • Type NOT PROVIDED (N/A) → the existing light-blue (sky) treatment (kept).
  */
-const TICKET_TYPE_AVATAR_PROVIDED = "bg-[#4361EE] text-white";
+const TICKET_TYPE_AVATAR_COLOR: Record<TicketType, string> = {
+  walkin: "bg-[#1E3A8A] text-white",
+  pickup: "bg-[#4361EE] text-white",
+  onsite: "bg-[#0EA5E9] text-white",
+};
 const TICKET_TYPE_AVATAR_NONE = "bg-sky-100 text-sky-700";
 
 export function Avatar({
@@ -63,7 +67,7 @@ export function Avatar({
       <div
         className={cn(
           "inline-flex shrink-0 items-center justify-center rounded-full font-semibold tracking-wide select-none ring-2 ring-white shadow-sm",
-          isProvided ? TICKET_TYPE_AVATAR_PROVIDED : TICKET_TYPE_AVATAR_NONE,
+          isProvided ? TICKET_TYPE_AVATAR_COLOR[ticketType] : TICKET_TYPE_AVATAR_NONE,
           className
         )}
         style={{ width: size, height: size, fontSize: size * (isProvided ? 0.36 : 0.3) }}
