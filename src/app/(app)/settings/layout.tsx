@@ -19,7 +19,9 @@ export default function SettingsLayout({ children }: { children: React.ReactNode
     // Device Catalog (Price List) is a data-grid-heavy admin page — it needs the
     // full width so its 6-tab bar stays on one line and its tables/galleries
     // use the available space.
-    pathname.startsWith("/settings/inventory/price-lists");
+    pathname.startsWith("/settings/inventory/price-lists") ||
+    // Trash Bin is a wide data table (6+ columns with people + dates).
+    pathname.startsWith("/settings/system/trash");
 
   return (
     <div className="flex -mx-4 -mt-2 -mb-4 sm:-mx-6 lg:-mx-8" style={{ height: "calc(100vh - 56px)" }}>

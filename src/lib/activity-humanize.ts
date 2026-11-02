@@ -68,8 +68,9 @@ const HIDDEN_ENTITIES = new Set<string>([
 const HIDDEN_PHRASES = /\b(history|revision|sequence|preference|option)s?\b/i;
 
 /** Verb from the raw table op. */
-function verb(row: RawAuditRow): "created" | "updated" | "deleted" | "changed" {
+function verb(row: RawAuditRow): "created" | "updated" | "deleted" | "restored" | "changed" {
   const a = `${row.action ?? ""} ${row.action_type ?? ""}`.toLowerCase();
+  if (/\b(restor)/.test(a)) return "restored";
   if (/\b(insert|create|add|new)/.test(a)) return "created";
   if (/\b(delete|remov|cancel)/.test(a)) return "deleted";
   if (/\b(update|edit|chang)/.test(a)) return "updated";

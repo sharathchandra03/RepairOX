@@ -426,6 +426,23 @@ body {
   border-bottom: 2px solid hsl(var(--rox-table-head-fg) / 0.35);
   color: hsl(var(--rox-table-head-fg));
 }
+/* Header cell that pins to the top of its OWN scroll box (Trash Bin). Sticky
+   is applied per <th> (reliable in every browser incl. Safari, unlike a sticky
+   <thead>), with an opaque fill so rows never show through, and the divider
+   drawn as a shadow because borders don't travel with sticky cells. */
+.trash-th {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  background: hsl(var(--rox-table-head-bg));
+  color: hsl(var(--rox-table-head-fg));
+  box-shadow: inset 0 -2px 0 hsl(var(--rox-table-head-fg) / 0.35);
+}
+/* With border-separate (needed for per-cell sticky) a <tr> border isn't
+   drawn, so the canonical row divider lives on the cells instead. */
+.trash-table .rox-table-row > td {
+  border-top: 1px solid hsl(var(--rox-table-divider));
+}
 /* Row separator — clearly visible, never a faint hairline. */
 .rox-table-row {
   border-top: 1px solid hsl(var(--rox-table-divider));

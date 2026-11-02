@@ -69,6 +69,7 @@ let _counter = 0;
 /* ─── Dynamic actor + active-store context ───────────────────────── */
 let _currentActor: string | null = null;
 let _currentBranch: string | null = null;
+let _currentActorId: string | null = null;
 // Active store scope: the branch id (null = All Shops) + its display name.
 let _activeStoreId: string | null = null;
 let _activeStoreName: string | null = null;
@@ -79,9 +80,16 @@ let _storeInitialised = false;
 /** Call this from the permissions context whenever the signed-in user changes.
  *  logActivity() uses this REAL account name (set when the user was created)
  *  instead of any hardcoded fallback — no manual re-editing needed. */
-export function setCurrentActor(name: string | null, branch?: string | null) {
+export function setCurrentActor(name: string | null, branch?: string | null, staffId?: string | null) {
   _currentActor = name;
   _currentBranch = branch ?? null;
+  _currentActorId = staffId ?? null;
+}
+
+/** The signed-in user's staff id + name (for stamping `deleted_by` and for the
+ *  local-mode Trash Bin). `null` when unknown. */
+export function getCurrentActor(): { id: string | null; name: string | null } {
+  return { id: _currentActorId, name: _currentActor };
 }
 
 /** Call this from the store context whenever the active store changes. It:

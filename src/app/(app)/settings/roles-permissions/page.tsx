@@ -893,7 +893,7 @@ const PRESET_ICON: Record<string, React.ComponentType<{ className?: string }>> =
 const MODULE_ICON: Record<string, React.ComponentType<{ className?: string }>> = {
   Home, Ticket, FileText, Footprints, Users, Truck, Package, ClipboardList,
   BookUser, UsersRound, IndianRupee, BarChart3, Building2, ShieldCheck, Settings, UserCog,
-  UserCheck,
+  UserCheck, Trash2,
 };
 
 /** Icon shown inside each access-level option button (icon-only, tooltip on hover). */

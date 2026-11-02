@@ -595,9 +595,10 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     setCurrentActor(
       currentUser?.name ?? null,
-      currentUser?.branch ?? CURRENT_USER.branch
+      currentUser?.branch ?? CURRENT_USER.branch,
+      currentUser?.id ?? null
     );
-  }, [currentUser?.name, currentUser?.branch]);
+  }, [currentUser?.name, currentUser?.branch, currentUser?.id]);
 
   const adminRoleId = currentUser?.roleId ?? CURRENT_USER.roleId;
   const activeRoleId = previewRoleId ?? adminRoleId;

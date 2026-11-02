@@ -26,6 +26,7 @@ import { useSession } from "@/lib/use-session";
 import { demoKey } from "@/lib/demo-mode";
 import { toast } from "@/components/ui/toaster";
 import { logActivity } from "@/lib/activity-log";
+import { softDeletePatch, pushLocalTombstone } from "@/lib/trash";
 import { notify } from "@/lib/notifications";
 import { createProspectContact, findContactMatches } from "@/lib/contact-service";
 import { recordTemperatureChange } from "@/hooks/use-lead-temperature";
@@ -474,6 +475,8 @@ interface LeadsContextValue {
   /** May the current user change THIS lead's owner (mirrors the DB guard)? */
   canChangeLeadOwner: (lead: Pick<Lead, "assignedTo" | "createdBy">) => boolean;
   deleteLead: (id: string) => Promise<void>;
+  /** Local (no-backend) mode only: put a lead taken from the Trash Bin back. */
+  restoreTrashedLead: (record: Lead) => void;
   /** Assign or reassign a lead to an eligible Sales Agent (pass "" to unassign).
    *  The DB validates eligibility + permission and writes the assignment-history
    *  row in the same transaction; this also notifies the assignee. */
@@ -1453,16 +1456,38 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [persistLeadPatch]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const deleteLead = useCallback(async (id: string) => {
+    const gone = leadsRef.current.find((l) => l.id === id);
     if (useDb) {
-      const { error } = await db.from("leads").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      const { error } = await db.from("leads").update(softDeletePatch()).eq("id", id);
       if (error) {
         console.error("[leads] deleteLead failed:", error.message);
         reportLeadError("Lead not deleted", error.message, "We couldn't delete this lead in the database. Please try again.");
         return;
       }
+    } else if (gone) {
+      // Local mode: keep a tombstone so the Trash Bin can restore it.
+      pushLocalTombstone({
+        kind: "lead", id, ref: gone.leadNo || id, title: gone.name || "—",
+        subtitle: [gone.device, gone.number].filter(Boolean).join(" · "),
+        status: gone.status || "", amount: typeof gone.estimate === "number" ? gone.estimate : null,
+        branchId: gone.branchId ?? null, createdAt: gone.createdAt ?? null,
+      }, gone);
     }
     setLeads((prev) => { const next = prev.filter((l) => l.id !== id); if (!useDb) writeLS(LEADS_KEY, next); return next; });
   }, [useDb, db]);
+
+  /** Local (no-backend) mode only: put a lead taken from the Trash Bin back.
+   *  In Supabase mode restores go through /api/trash and the leads realtime
+   *  channel brings the row back. */
+  const restoreTrashedLead = useCallback((record: Lead) => {
+    if (!record?.id) return;
+    setLeads((prev) => {
+      if (prev.some((l) => l.id === record.id)) return prev;
+      const next = [record, ...prev];
+      if (!useDb) writeLS(LEADS_KEY, next);
+      return next;
+    });
+  }, [useDb]);
 
   /* ── CRM Contacts ── */
   const addContact = useCallback(async (input: Omit<Contact, "id" | "fullName" | "createdAt" | "updatedAt"> & { fullName?: string }): Promise<Contact | null> => {
@@ -2506,7 +2531,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const value = useMemo<LeadsContextValue>(() => ({
     leads: scopedLeads, filteredLeads, options, hydrated, loadErrors, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
-    optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
+    optionsFor, addLead, updateLead, deleteLead, restoreTrashedLead, assignLead, pinLead, routeLead, changeLeadStatus,
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
     viewAsAgentId: effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent,
     followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment,
@@ -2516,7 +2541,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden,
     contacts, addContact, updateContact, deleteContact,
-  }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, assignLead, pinLead, routeLead, changeLeadStatus,
+  }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, restoreTrashedLead, assignLead, pinLead, routeLead, changeLeadStatus,
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;

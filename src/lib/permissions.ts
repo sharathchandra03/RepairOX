@@ -484,7 +484,10 @@ export type PermissionKey =
   | "work_sessions_view_own"       // see & operate the signed-in user's own work sessions / My Productivity
   | "work_sessions_view_team"      // owner/manager — see work records for agents in the caller's store scope
   | "work_sessions_view_all"       // owner — see every eligible Sales Agent's records + run the owner report/export
-  | "work_sessions_correct";       // review & correct a completed/interrupted session (append-only)
+  | "work_sessions_correct"        // review & correct a completed/interrupted session (append-only)
+  /* Trash Bin (Settings) — OFF by default for every role except owners (full_access) */
+  | "settings_trash_view"          // open Settings → Trash Bin and see deleted tickets/invoices/walk-ins/leads
+  | "settings_trash_restore";      // restore a deleted record from the Trash Bin
 
 export interface PermissionDef {
   key: PermissionKey;
@@ -1053,6 +1056,15 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "work_sessions_view_team", label: "View Team Productivity" },
       { key: "work_sessions_view_all", label: "View All Sales Agent Productivity" },
       { key: "work_sessions_correct", label: "Review / Correct Interrupted Sessions" },
+    ],
+  },
+  {
+    id: "trash_bin",
+    label: "Trash Bin",
+    description: "Settings → Trash Bin — deleted tickets, invoices, walk-ins and leads. Off by default.",
+    permissions: [
+      { key: "settings_trash_view", label: "View Trash Bin" },
+      { key: "settings_trash_restore", label: "Restore Deleted Records" },
     ],
   },
 ];

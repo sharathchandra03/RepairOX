@@ -412,6 +412,19 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       full: ["work_sessions_correct"],
     },
   },
+  {
+    // Settings → Trash Bin is its OWN module (not part of `settings`) so it is
+    // OFF unless explicitly granted: a role at any Settings tier does NOT get it.
+    // View = open the Trash Bin and see deleted records; Manage = restore them.
+    id: "trash",
+    label: "Trash Bin",
+    blurb: "Deleted tickets, invoices, walk-ins and leads — View to see them, Manage to restore them.",
+    icon: "Trash2",
+    levels: {
+      view: ["settings_trash_view"],
+      manage: ["settings_trash_restore"],
+    },
+  },
 ];
 
 export const MODULE_BY_ID: Record<string, ModuleDef> = Object.fromEntries(
@@ -486,7 +499,7 @@ export const ROLE_PRESETS: RolePreset[] = [
       field: "manage", inventory: "manage", catalog: "manage", customers: "manage", loyalty: "manage",
       employees: "manage", accounts: "manage", reports: "manage", stores: "full",
       employees_admin: "manage", settings: "full", account: "work", deals: "full",
-      work_session: "full",
+      work_session: "full", trash: "manage",
     },
   },
   {

@@ -129,6 +129,9 @@ const SETTINGS_NAV: NavSection[] = [
       { label: "Module Access", href: "/settings/module-access" },
       { label: "Branches", href: "/settings/branches" },
       { label: "Dashboard", href: "/settings/dashboard" },
+      // Deleted tickets / invoices / walk-ins / leads. OFF by default — only
+      // roles granted the Trash Bin permission see this entry.
+      { label: "Trash Bin", href: "/settings/system/trash", anyOf: CAP.settings.trashView as PermissionKey[] },
     ],
   },
   {

@@ -165,6 +165,11 @@ export const CAP = {
     webhooks: ["manage_webhooks", "manage_integrations"],
     rolePreview: ["roles_preview", "manage_roles"],
     activityLog: ["view_activity_log", "view_audit_logs"],
+    // Trash Bin: granular keys ONLY (no coarse manage_settings fallback) so the
+    // feature stays OFF for every role until explicitly granted; owners hold it
+    // through full_access.
+    trashView: ["settings_trash_view", "settings_trash_restore"],
+    trashRestore: ["settings_trash_restore"],
     // Can the user even OPEN settings (read-only view)? Anything above implies it.
     viewAny: ["view_settings", "manage_settings"],
   },

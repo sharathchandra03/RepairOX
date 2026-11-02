@@ -15,6 +15,7 @@
 import { createContext, useContext, useState, useCallback, useEffect, useRef, type ReactNode } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { logActivity, buildChanges, type ActivitySeverity } from "./activity-log";
+import { softDeletePatch, pushLocalTombstone } from "./trash";
 import { toast } from "@/components/ui/toaster";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
@@ -147,6 +148,10 @@ interface StoreActions {
   addWalkIn: (walkIn: WalkIn) => Promise<void>;
   updateWalkIn: (id: string, updates: Partial<WalkIn>) => Promise<void>;
   deleteWalkIn: (id: string) => Promise<void>;
+  /** Local (no-backend) mode only: put a record taken from the Trash Bin back
+   *  into state. In Supabase mode restores go through /api/trash and arrive via
+   *  the realtime channel. */
+  restoreTrashed: (kind: "ticket" | "invoice" | "walkin", record: any) => void;
   pinWalkIn: (id: string, pinned: boolean) => Promise<void>;
   updateTeamMember: (email: string, updates: Partial<TeamMember>) => void;
   deductPartsForTicket: (ticketId: string) => Promise<void>;
@@ -2349,8 +2354,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteTicket = useCallback(async (id: string) => {
     const prev = stateRef.current.tickets.find((t) => t.id === id);
     if (shouldUseDb()) {
-      const { error } = await db.from("tickets").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      const { error } = await db.from("tickets").update(softDeletePatch()).eq("id", id);
       if (error) { console.error("[store] deleteTicket failed:", error.message); toast.error("Ticket not deleted", { description: "We couldn't delete this ticket in the database. Please try again." }); return; }
+    } else if (prev) {
+      // Local mode: keep a tombstone so the Trash Bin can restore it.
+      pushLocalTombstone({
+        kind: "ticket", id, ref: prev.id, title: prev.customer || "—",
+        subtitle: [prev.model || prev.device, prev.phone].filter(Boolean).join(" · "),
+        status: STATUS_LABEL[prev.status] ?? String(prev.status), amount: prev.amount ?? null,
+        branchId: prev.branchId ?? null, createdAt: prev.createdAt ?? null,
+      }, prev);
     }
     setState((s) => ({ ...s, tickets: s.tickets.filter((t) => t.id !== id) }));
     logActivity({ module: "Ticket", action: "Ticket Deleted", severity: "critical", entity: "Ticket", reference: id, description: prev ? `Deleted ticket for ${prev.model || prev.device} (${prev.customer}).` : `Deleted ticket ${id}.`, meta: prev ? { Status: STATUS_LABEL[prev.status] ?? prev.status, Amount: inr(prev.amount) } : undefined });
@@ -3119,8 +3132,14 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteInvoice = useCallback(async (id: string) => {
     const prev = stateRef.current.invoices.find((inv) => inv.id === id);
     if (shouldUseDb()) {
-      const { error } = await db.from("invoices").update({ deleted_at: new Date().toISOString() }).eq("id", id);
+      const { error } = await db.from("invoices").update(softDeletePatch()).eq("id", id);
       if (error) { console.error("[store] deleteInvoice failed:", error.message); toast.error("Invoice not deleted", { description: "We couldn't delete this invoice in the database. Please try again." }); return; }
+    } else if (prev) {
+      pushLocalTombstone({
+        kind: "invoice", id, ref: prev.reference || prev.id, title: prev.customer || "—",
+        subtitle: prev.phone || "", status: String(prev.status), amount: prev.total ?? null,
+        branchId: prev.branchId ?? null, createdAt: prev.createdAt ?? null,
+      }, prev);
     }
     setState((s) => ({ ...s, invoices: s.invoices.filter((inv) => inv.id !== id) }));
     logActivity({ module: "Invoice", action: "Invoice Deleted", severity: "critical", entity: "Invoice", reference: prev?.reference || id, description: prev ? `Deleted invoice ${prev.reference} for ${prev.customer}.` : `Deleted invoice ${id}.`, meta: prev ? { Total: inr(prev.total) } : undefined });
@@ -3823,11 +3842,27 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const deleteWalkIn = useCallback(async (id: string) => {
     const prev = stateRef.current.walkIns.find((w) => w.id === id);
     if (shouldUseDb()) {
-      const { error } = await db.from("walk_ins").update({ deleted_at: new Date().toISOString() }).eq("id", id);
-      if (error) { console.error("[store] deleteWalkIn failed:", error.message); return; }
+      const { error } = await db.from("walk_ins").update(softDeletePatch()).eq("id", id);
+      if (error) { console.error("[store] deleteWalkIn failed:", error.message); toast.error("Walk-in not deleted", { description: "We couldn't delete this walk-in in the database. Please try again." }); return; }
+    } else if (prev) {
+      pushLocalTombstone({
+        kind: "walkin", id, ref: prev.id, title: prev.customer || "—",
+        subtitle: [prev.model || prev.category, prev.phone].filter(Boolean).join(" · "),
+        status: String(prev.status), amount: null,
+        branchId: prev.branchId ?? null, createdAt: null,
+      }, prev);
     }
     setState((s) => ({ ...s, walkIns: s.walkIns.filter((w) => w.id !== id) }));
     logActivity({ module: "Walk-In", action: "Walk-In Deleted", severity: "critical", entity: "Walk-In", reference: id, description: prev ? `Deleted walk-in for ${prev.customer} (${prev.model}).` : `Deleted walk-in ${id}.` });
+  }, []);
+
+  const restoreTrashed = useCallback((kind: "ticket" | "invoice" | "walkin", record: any) => {
+    if (!record?.id) return;
+    setState((s) => {
+      if (kind === "ticket") return s.tickets.some((t) => t.id === record.id) ? s : { ...s, tickets: [record, ...s.tickets] };
+      if (kind === "invoice") return s.invoices.some((i) => i.id === record.id) ? s : { ...s, invoices: [record, ...s.invoices] };
+      return s.walkIns.some((w) => w.id === record.id) ? s : { ...s, walkIns: [record, ...s.walkIns] };
+    });
   }, []);
 
   const pinWalkIn = useCallback(async (id: string, pinned: boolean) => {
@@ -4776,6 +4811,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     addWalkIn,
     updateWalkIn,
     deleteWalkIn,
+    restoreTrashed,
     pinWalkIn,
     updateTeamMember,
     deductPartsForTicket,
