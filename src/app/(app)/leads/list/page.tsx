@@ -59,7 +59,7 @@ import {
   type NotContactedSub, type NotContactedFocus,
 } from "@/lib/leads-data";
 import { LeadWorkspaceTabs } from "@/components/leads/lead-workspace-tabs";
-import { NotContactedControls, NotContactedBanner, useContactTransitions } from "@/components/leads/not-contacted-controls";
+import { NotContactedControls, notContactedHint, useContactTransitions } from "@/components/leads/not-contacted-controls";
 import { AssignLeadsDialog } from "@/components/leads/assign-leads-dialog";
 import { useStoreSettings } from "@/lib/store-settings";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
@@ -75,6 +75,7 @@ import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/l
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { resolveLeadEvidenceIds } from "@/lib/lead-intelligence-url";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* Page-size options for the detached pagination footer (matches Tickets). */
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
@@ -103,7 +104,7 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
     { key: "agent", label: "Agent", width: 160 },
     // MODE OF LEAD — how the lead came in (modeOfContact). Structurally separate
     // from Source (acquisition) and Capture Channel.
-    { key: "mode", label: "Mode of Lead", width: 132 },
+    { key: "mode", label: "Mode of Lead", width: 172 },
     { key: "contactInfo", label: "Contact Info", width: 230 },
     { key: "device", label: "Device & Issue", width: 210 },
     { key: "comment", label: "Comment", width: 210 },
@@ -149,6 +150,7 @@ const COLUMN_TO_FIELD: Record<string, LeadFieldKey | undefined> = {
 const COLUMN_SHIFT_X: Record<string, number | undefined> = {
   value: -4,
   agent: -12,
+  contactInfo: 15,
 };
 
 /* Merge a column's frozen props (className + inline offset style) with the
@@ -366,7 +368,7 @@ function DateCell({ lead }: { lead: Lead }) {
   return (
     <div className="leading-snug">
       <p className="font-semibold text-zinc-800 tnum">{dateLabel}</p>
-      {lead.time && <p className="mt-0.5 text-[12px] text-zinc-500 tnum">{lead.time}</p>}
+      {lead.time && <p className="mt-0.5 text-[12px] text-zinc-500 tnum">{formatHHmm(lead.time)}</p>}
     </div>
   );
 }
@@ -384,9 +386,9 @@ function AssignedDateCell({ lead, tz, overdue }: { lead: Lead; tz: string; overd
   };
   if (!valid) return <DateCell lead={lead} />;
   const dateLabel = fmt({ day: "2-digit", month: "short" });
-  const timeLabel = fmt({ hour: "2-digit", minute: "2-digit", hour12: false });
-  const full = `${fmt({ dateStyle: "medium", timeStyle: "short" })} (${tz})`;
-  const created = [lead.date, lead.time].filter(Boolean).join(" ");
+  const timeLabel = formatClock(at as Date, { timeZone: tz });
+  const full = `${fmt({ dateStyle: "medium" })}, ${formatClock(at as Date, { timeZone: tz })} (${tz})`;
+  const created = [lead.date, formatHHmm(lead.time)].filter(Boolean).join(" ");
   return (
     <div
       className="leading-snug"
@@ -423,7 +425,7 @@ function NcStatusNote({ lead, sub, transition, actorName }: {
   }
   const when = transition?.at || lead.firstContactedAt || "";
   const d = when ? new Date(when) : null;
-  const whenLabel = d && !isNaN(d.getTime()) ? d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  const whenLabel = d && !isNaN(d.getTime()) ? `${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}, ${formatClock(d)}` : "";
   return (
     <span className="mt-1 block text-center text-[10.5px] leading-tight text-zinc-500" title="Previous contact status → when it changed → who recorded it">
       {transition?.from !== undefined ? `Was ${transition.from || "Not Contacted"}` : "Previously uncontacted"}
@@ -813,10 +815,10 @@ function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) =>
       onClick={(e) => { e.stopPropagation(); onOpen(lead); }}
       aria-label="View device and issue details"
       title={extra > 0 ? allLabels : undefined}
-      className="group/device flex w-full min-w-0 items-center gap-1.5 rounded-lg text-left transition hover:bg-indigo-50/50"
+      className="group/device flex w-full min-w-0 items-center gap-1.5 rounded-lg text-center transition hover:bg-indigo-50/50"
     >
-      <div className="min-w-0 flex-1 leading-snug">
-        <p className="flex min-w-0 items-center gap-1.5 font-medium text-zinc-800">
+      <div className="min-w-0 flex-1 text-center leading-snug">
+        <p className="flex min-w-0 items-center justify-center gap-1.5 font-medium text-zinc-800">
           <span className="truncate">{first.label || (first.issue ? "Device" : "—")}</span>
           {extra > 0 && (
             <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
@@ -1416,7 +1418,9 @@ export default function LeadsListPage() {
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
-    const FOOTER_RESERVE = 72; // space kept below the grid for the pagination row
+    // Compact: just the 32px pagination row + a few px of breathing room, so the
+    // grid claims the rest of the viewport (more lead rows visible).
+    const FOOTER_RESERVE = 50;
     const measure = () => {
       const top = el.getBoundingClientRect().top; // distance from viewport top
       setGridMaxH(Math.max(240, window.innerHeight - top - FOOTER_RESERVE));
@@ -2081,7 +2085,11 @@ export default function LeadsListPage() {
         case "contactInfo":
           return locked ? <NACell /> : <ContactInfoCell lead={lead} />;
         case "device":
-          return gated ? <NACell /> : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />;
+          // A fresh assignment shows the device / issue the coordinator captured
+          // (the progressive gate only hides fields nobody has filled yet).
+          return gated && !(contactStatusClass(lead.contactStatus) === "unset" && (lead.device || lead.issue))
+            ? <NACell />
+            : <DeviceIssueCell lead={lead} onOpen={setDeviceDetailsLead} />;
         case "comment":
           // The Not-Qualified reason stays readable here (never masked to N/A).
           // Clicking the box opens a chat-style comment thread (same logic as
@@ -2331,6 +2339,13 @@ export default function LeadsListPage() {
           value={view}
           onChange={changeView}
           counts={{ assigned: assignedCount, notContacted: notContactedCount, followUps: followUpsCount }}
+          hint={
+            view === "assigned"
+              ? `Fresh assignments waiting for the agent's first action. A lead leaves this inbox once a contact result, status change or follow-up is recorded — it always stays in All Leads.${slaMinutes ? ` Leads untouched for more than ${slaMinutes} min are flagged Overdue.` : ""}`
+              : view === "notContacted"
+                ? notContactedHint((filters.ncSub ?? "active") as NotContactedSub)
+                : undefined
+          }
         />
         {/* Outside All Leads there is no status strip, so the Customer filter +
             Collapse control sit on the tabs line instead of leaving an empty row. */}
@@ -2575,14 +2590,6 @@ export default function LeadsListPage() {
       ) : (
       <>
       {/* Not-Contacted accountability banner — explains the queue + the lock. */}
-      {view === "notContacted" && <NotContactedBanner sub={(filters.ncSub ?? "active") as NotContactedSub} />}
-      {view === "assigned" && (
-        <div className="rounded-xl border border-[#4361EE]/20 bg-[#EEF1FD]/60 px-4 py-3 text-[12.5px] text-[#2B3FB8]">
-          <span className="font-semibold">Fresh assignments</span> waiting for the agent&apos;s first action. A lead leaves this inbox
-          once a contact result, status change or follow-up is recorded — it always stays in <span className="font-semibold">All Leads</span>.
-          {slaMinutes ? <> Leads untouched for more than {slaMinutes} min are flagged <span className="font-semibold">Overdue</span>.</> : null}
-        </div>
-      )}
 
       {/* Desktop Data-Grid — professional CRM/ERP table (spec).
           A single BOUNDED, DUAL-SCROLL container scrolls BOTH axes internally.
@@ -2637,7 +2644,7 @@ export default function LeadsListPage() {
                 // because its body is a centered note box that fills the column.
                 // Long header names wrap naturally within the column width — the
                 // column never expands to fit a long header.
-                const LEFT_HEADERS = new Set(["contactInfo", "device"]);
+                const LEFT_HEADERS = new Set(["contactInfo"]);
                 const align = c.key === "select" ? "text-left"
                   : c.key === "actions" ? "text-right"
                   : LEFT_HEADERS.has(c.key) ? "text-left"
@@ -2650,7 +2657,7 @@ export default function LeadsListPage() {
                 // "Mode of Contact" heading gets room: Lead Value −25px,
                 // Agent −12px. translateX keeps column widths unchanged.
                 const shift = COLUMN_SHIFT_X[c.key];
-                const headProps = mergeFrozen(frozenCellProps(c.key), `${pad} ${align}`);
+                const headProps = mergeFrozen(frozenCellProps(c.key), `${pad} ${align}${c.key === "mode" ? " whitespace-nowrap" : ""}`);
                 if (shift) headProps.style = { ...headProps.style, transform: `translateX(${shift}px)` };
                 return (
                   <th key={c.key} {...headProps}>
@@ -2686,8 +2693,13 @@ export default function LeadsListPage() {
               // Not-Contacted lead reads pinkish-red for its entire row until it
               // is moved to Contacted (previously this tint came from the open
               // follow-up state — that treatment is removed).
-              const notContacted = isNotContactedStatus(lead.contactStatus || "");
-              const tint = notContacted ? "bg-red-100/80" : "";
+              // Fresh assignments (awaiting the agent's first action) read light
+              // TEAL; only an EXPLICIT "Not Contacted" reads pink. In the
+              // Assigned Leads view every inbox row is teal.
+              const explicitNC = contactStatusClass(lead.contactStatus || "") === "not_contacted";
+              const freshRow = isFreshAssignment(lead, leadsWithAnyFollowUp.has(lead.id));
+              const freshTealRow = freshRow && (view === "assigned" || !explicitNC);
+              const tint = freshTealRow ? "bg-[#D9F2EE]/80" : explicitNC ? "bg-red-100/80" : "";
               const tinted = !!tint || !!lead.pinnedAt;
               // A LOCKED Not-Contacted lead: it only reaches the grid for a
               // senior/owner (a plain Sales Agent's scope hides it). Everything
@@ -2714,7 +2726,9 @@ export default function LeadsListPage() {
               // the identical colour + alpha here so the frozen block and the
               // middle cells composite to one shade (no seam). Pinned mirrors
               // bg-[#7C5CFC]/[0.04].
-              const rowTintVar = tint
+              const rowTintVar = freshTealRow
+                ? "rgb(217 242 238 / 0.8)"
+                : tint
                 ? "rgb(254 226 226 / 0.8)"
                 : lead.pinnedAt ? "rgb(124 92 252 / 0.04)" : undefined;
               return (
@@ -2807,7 +2821,7 @@ export default function LeadsListPage() {
         {paged.map((lead) => {
           const mLocked = isNotContactedLocked(lead);
           return (
-          <div key={lead.id} onClick={() => openLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", isNotContactedStatus(lead.contactStatus || "") && "bg-red-100/80")}>
+          <div key={lead.id} onClick={() => openLead(lead)} className={cn("cursor-pointer rounded-2xl border border-border bg-card p-4 shadow-card", selected.has(lead.id) && "border-[#4361EE] ring-1 ring-[#4361EE]/20", lead.pinnedAt && "border-[#7C5CFC]/30", contactStatusClass(lead.contactStatus || "") === "not_contacted" && "bg-red-100/80")}>
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2.5">
                 <Checkbox
@@ -2889,6 +2903,9 @@ export default function LeadsListPage() {
         pageSizeOptions={PAGE_SIZE_OPTIONS}
         onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
         itemLabel="lead"
+        // Pull the footer up against the table (cancels most of the page's
+        // space-y gap) and drop its vertical padding.
+        className="-mt-3 !py-0"
       />
       </>
       )}

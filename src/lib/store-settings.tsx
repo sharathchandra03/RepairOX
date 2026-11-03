@@ -26,6 +26,7 @@ import {
 } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
+import { setTimeFormat } from "@/lib/time-format";
 import { DEFAULT_ORDER as TICKET_DEFAULT_ORDER, DEFAULT_VISIBLE as TICKET_DEFAULT_VISIBLE } from "@/lib/ticket-columns";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
@@ -704,6 +705,10 @@ export function StoreSettingsProvider({ children }: { children: ReactNode }) {
   const [settings, setSettings] = useState<StoreSettings>(DEFAULT_STORE_SETTINGS);
   const [hydrated, setHydrated] = useState(false);
   const orgIdRef = useRef<string | null>(null);
+
+  // Publish the org time-format preference to the shared formatter during render
+  // so every child renders its clock times in the chosen 12h/24h format.
+  setTimeFormat(settings.timeFormat);
 
   // ── Load settings based on mode (waits for auth to be ready) ──
   useEffect(() => {

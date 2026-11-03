@@ -38,6 +38,7 @@ import {
   type Lead, type LeadFollowUp,
 } from "@/lib/leads-data";
 import { LeadFollowUpCell, LeadStatusCell } from "@/components/leads/lead-followup-cell";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100];
 
@@ -54,7 +55,7 @@ function fmtTime(iso?: string): string {
   if (!iso) return "";
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+  return formatClock(d);
 }
 function sameDay(a: Date, b: Date): boolean {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();

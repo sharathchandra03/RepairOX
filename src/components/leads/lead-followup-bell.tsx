@@ -29,6 +29,7 @@ import {
   useNotificationsFor, markRead, markAllRead, clearAllForRecipient,
   isFollowUpNotification,
 } from "@/lib/notifications";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 type FeedTab = "followups" | "others";
 
@@ -52,7 +53,7 @@ function fmtDue(fu: LeadFollowUp): string {
   const now = new Date();
   const sameDay = d.toDateString() === now.toDateString();
   const datePart = sameDay ? "Today" : d.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
-  const timePart = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  const timePart = formatClock(d);
   return `${datePart} · ${timePart}`;
 }
 

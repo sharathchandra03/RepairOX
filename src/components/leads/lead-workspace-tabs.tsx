@@ -16,6 +16,8 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { CalendarClock, Inbox, PhoneOff, Users } from "lucide-react";
+import type { ReactNode } from "react";
+import { InfoHint } from "@/components/ui/info-hint";
 import type { LeadView } from "@/lib/leads-data";
 import { cn } from "@/lib/utils";
 
@@ -23,24 +25,27 @@ interface TabDef {
   value: LeadView;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  tone: "blue" | "rose" | "red";
+  tone: "blue" | "teal" | "rose" | "red";
 }
 
 const TABS: TabDef[] = [
-  { value: "assigned", label: "Assigned Leads", icon: Inbox, tone: "blue" },
+  { value: "assigned", label: "Assigned Leads", icon: Inbox, tone: "teal" },
   { value: "all", label: "All Leads", icon: Users, tone: "blue" },
   { value: "notContacted", label: "Not Contacted", icon: PhoneOff, tone: "rose" },
   { value: "followUps", label: "Follow-ups", icon: CalendarClock, tone: "red" },
 ];
 
 export function LeadWorkspaceTabs({
-  value, onChange, counts,
+  value, onChange, counts, hint,
 }: {
   value: LeadView;
   onChange: (v: LeadView) => void;
   counts: { assigned: number; notContacted: number; followUps: number };
+  /** Explanation of the current view, shown behind an (i) beside the tabs. */
+  hint?: ReactNode;
 }) {
   return (
+    <div className="flex min-w-0 items-center gap-1.5">
     <div
       role="tablist"
       aria-label="Lead views"
@@ -66,9 +71,13 @@ export function LeadWorkspaceTabs({
               active
                 ? t.tone === "rose"
                   ? "bg-[#E11D48] text-white shadow-[0_6px_16px_-8px_rgba(225,29,72,0.6)] focus-visible:ring-[#E11D48]/40"
+                  : t.tone === "teal"
+                  ? "bg-[#0F766E] text-white shadow-[0_6px_16px_-8px_rgba(15,118,110,0.6)] focus-visible:ring-[#0F766E]/40"
                   : "bg-[#4361EE] text-white shadow-[0_6px_16px_-8px_rgba(67,97,238,0.6)] focus-visible:ring-[#4361EE]/40"
                 : t.tone === "rose"
                   ? "text-rose-700 hover:bg-rose-50 focus-visible:ring-[#E11D48]/30"
+                  : t.tone === "teal"
+                  ? "text-[#0F766E] hover:bg-[#ECFAF7] focus-visible:ring-[#0F766E]/30"
                   : "text-zinc-600 hover:bg-card hover:text-zinc-900 focus-visible:ring-[#4361EE]/30",
             )}
           >
@@ -79,8 +88,9 @@ export function LeadWorkspaceTabs({
                 className={cn(
                   "grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[10px] font-bold leading-none tabular-nums",
                   active
-                    ? t.tone === "rose" ? "bg-white text-[#E11D48]" : "bg-white text-[#4361EE]"
+                    ? t.tone === "rose" ? "bg-white text-[#E11D48]" : t.tone === "teal" ? "bg-white text-[#0F766E]" : "bg-white text-[#4361EE]"
                     : t.tone === "rose" ? "bg-[#E11D48] text-white"
+                    : t.tone === "teal" ? "bg-[#0F766E] text-white"
                     : t.tone === "red" ? "bg-[#DC2626] text-white"
                     : "bg-[#4361EE] text-white",
                 )}
@@ -92,6 +102,8 @@ export function LeadWorkspaceTabs({
           </button>
         );
       })}
+    </div>
+    {hint && <InfoHint label="About this view">{hint}</InfoHint>}
     </div>
   );
 }

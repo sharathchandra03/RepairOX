@@ -174,6 +174,11 @@ function StoreSettingsInner() {
               { label: "Asia/Kolkata (IST)", value: "Asia/Kolkata" }, { label: "Asia/Dubai (GST)", value: "Asia/Dubai" }, { label: "America/New_York (EST)", value: "America/New_York" }, { label: "Europe/London (GMT)", value: "Europe/London" },
             ]} />
           </Field>
+          <Field label="Time Format">
+            <Select value={draft.timeFormat} onChange={(e) => set("timeFormat", e.target.value as "12h" | "24h")} options={[
+              { label: "12-hour (5:40 PM)", value: "12h" }, { label: "24-hour (17:40)", value: "24h" },
+            ]} />
+          </Field>
           <Field label="Start Time">
             <TimePicker value={draft.startTime} onChange={(v) => set("startTime", v)} />
           </Field>

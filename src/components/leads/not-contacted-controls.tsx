@@ -91,24 +91,11 @@ export function NotContactedControls({
   );
 }
 
-export function NotContactedBanner({ sub }: { sub: NotContactedSub }) {
-  return (
-    <div className="rounded-xl border border-rose-200 bg-rose-50/60 px-4 py-3 text-[12.5px] text-rose-900">
-      {sub === "active" ? (
-        <>
-          Leads that have <span className="font-semibold">not had a successful two-way conversation</span> yet. A lead
-          leaves this list only when a real contact result is recorded — opening the dialer is not an attempt. After 48 hours
-          at <span className="font-semibold">Not Contacted</span> a lead is <span className="font-semibold">locked</span> for its
-          agent and a manager must reassign it (the other columns show N/A until then).
-        </>
-      ) : (
-        <>
-          Leads that <span className="font-semibold">were uncontacted and have since been reached</span>. Each row keeps the
-          previous contact status, when it changed and who recorded it.
-        </>
-      )}
-    </div>
-  );
+/** Explanation for the Not Contacted view — rendered behind an (i), not a banner. */
+export function notContactedHint(sub: NotContactedSub): string {
+  return sub === "active"
+    ? "Leads without a successful two-way conversation yet. A lead leaves this list only when a real contact result is recorded — opening the dialer is not an attempt. After 48 hours at Not Contacted a lead is locked for its agent and a manager must reassign it."
+    : "Leads that were uncontacted and have since been reached. Each row keeps the previous contact status, when it changed and who recorded it.";
 }
 
 /* ─── History evidence ─────────────────────────────────────────────────── */

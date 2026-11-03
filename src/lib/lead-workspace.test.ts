@@ -25,7 +25,7 @@ const f = (over: Partial<LeadFilters>): LeadFilters => ({ ...EMPTY_LEAD_FILTERS,
 const ids = (ls: Lead[]) => ls.map((l) => l.id).sort();
 
 test("contact class: not contacted / attempted / contacted", () => {
-  assert.equal(contactStatusClass(""), "not_contacted");
+  assert.equal(contactStatusClass(""), "unset");
   assert.equal(contactStatusClass("Not Contacted"), "not_contacted");
   for (const s of ["RNR", "Busy", "Switched Off", "No Answer", "Not Reachable", "Not Connected"]) {
     assert.equal(contactStatusClass(s), "attempted", s);
@@ -60,6 +60,17 @@ test("scenario 3: successful contact moves Active → History and out of the inb
   assert.deepEqual(ids(applyLeadFilters([l], f({ view: "notContacted", ncSub: "active" }), undefined, new Set())), []);
   assert.deepEqual(ids(applyLeadFilters([l], f({ view: "notContacted", ncSub: "history" }), undefined, new Set())), ["l1"]);
   assert.deepEqual(ids(applyLeadFilters([l], f({ view: "assigned" }), undefined, new Set())), []);
+});
+
+test("unset contact status: in the Assigned inbox, NOT in Not Contacted; explicit Not Contacted is in both", () => {
+  const fresh = lead({ contactStatus: "" });
+  assert.equal(isFreshAssignment(fresh, false), true);
+  assert.equal(isNotContactedActive(fresh), false);
+  assert.deepEqual(ids(applyLeadFilters([fresh], f({ view: "assigned" }), undefined, new Set())), ["l1"]);
+  assert.deepEqual(ids(applyLeadFilters([fresh], f({ view: "notContacted" }), undefined, new Set())), []);
+  const explicit = lead({ contactStatus: "Not Contacted" });
+  assert.deepEqual(ids(applyLeadFilters([explicit], f({ view: "notContacted" }), undefined, new Set())), ["l1"]);
+  assert.deepEqual(ids(applyLeadFilters([explicit], f({ view: "assigned" }), undefined, new Set())), ["l1"]);
 });
 
 test("born-contacted lead never appears in Not Contacted history", () => {

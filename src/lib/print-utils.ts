@@ -3,6 +3,7 @@ import type { Ticket, Invoice, InvoiceLineItem, DeviceRecord, InvoiceDeviceRecor
 import { getTicketDevices, getInvoiceDevices, formatDeviceColour, getRecordType } from "@/lib/mock-data";
 import { identifierDisplayLabel } from "@/lib/identifier-detection";
 import { qcItemLabel } from "@/lib/qc-config";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* ─── Print Format Types ─────────────────────────────────────────────── */
 
@@ -432,7 +433,7 @@ export function buildTicketPrintData(
     ticket: buildTicketInfo(ticket),
     printTitle: isEstimateRecord ? "Repair Estimate" : "Service Report",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
-    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    printTime: formatClock(now),
     // Ticket documents use Settings → Tickets → Terms & Notes as their source
     // of truth. They no longer inherit from Store Information.
     termsAndConditions: settings.ticketTerms,
@@ -482,7 +483,7 @@ export function buildDiagnosticReportPrintData(
     diagnostic: { comment, terms: diagnosticTerms },
     printTitle: "Diagnostic Report",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
-    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    printTime: formatClock(now),
     // The ticket/invoice Terms & Warranty blocks stay blank — a diagnostic
     // report carries ONLY its own diagnostic Terms (rendered in place of the
     // price breakdown), never the service-report Terms or Warranty.
@@ -527,7 +528,7 @@ export function buildInvoicePrintData(
     invoice: invoiceInfo,
     printTitle: title,
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
-    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    printTime: formatClock(now),
     // Invoice documents use Settings → Invoice → Terms & Notes as their source
     // of truth. Per-invoice terms/footer are seeded from those defaults at
     // creation and persisted on the invoice (see invoice/create). We therefore
@@ -609,7 +610,7 @@ export function buildQuotationPrintData(
     },
     printTitle: "Quotation",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
-    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    printTime: formatClock(now),
     // A quotation uses the store master-default print text (its own terms /
     // warranty / footer live in the message + warranty line, not accounting
     // terms). Keep these blank-safe — the A4 quotation doc only renders them
@@ -663,7 +664,7 @@ export function buildCreditNotePrintData(
     },
     printTitle: "Credit Note",
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
-    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    printTime: formatClock(now),
     termsAndConditions: "",
     warrantyText: "",
     printFooter: invoice.footer || settings.invoiceFooter || "",
@@ -780,7 +781,7 @@ export function buildCustomTemplatePrintData(
     invoice: base.invoice,
     printTitle: base.printTitle,
     printDate: now.toLocaleDateString("en-IN", { dateStyle: "medium" }),
-    printTime: now.toLocaleTimeString("en-IN", { timeStyle: "short" }),
+    printTime: formatClock(now),
     termsAndConditions: resolved.termsAndConditions,
     warrantyText: resolved.warrantyText,
     printFooter: resolved.printFooter,
@@ -798,7 +799,7 @@ export function formatPrintDate(iso: string): string {
 export function formatPrintTime(iso: string): string {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return "";
-  return d.toLocaleTimeString("en-IN", { timeStyle: "short" });
+  return formatClock(d);
 }
 
 export function formatPrintDateTime(iso: string): string {

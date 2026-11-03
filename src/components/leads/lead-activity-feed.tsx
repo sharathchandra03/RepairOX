@@ -45,6 +45,7 @@ import { useLeads } from "@/lib/leads-context";
 import {
   LEAD_CONVERSION_EVENT_LABEL, type LeadConversionEventType,
 } from "@/lib/leads-data";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* ── One normalized feed entry (built only from real event streams) ── */
 type FeedKind =
@@ -97,7 +98,7 @@ function cheerFor(name: string, kind: FeedKind): string {
 function stampTime(ms: number): string {
   const d = new Date(ms);
   const date = d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
-  const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true });
+  const time = formatClock(d);
   return `${date}, ${time}`;
 }
 

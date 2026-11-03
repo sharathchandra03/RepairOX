@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, ArrowRight, Check, ClipboardList, Inbox, Search, Send, Smartphone, Store as StoreIcon, UserCheck, UserPlus, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input, Select, Textarea } from "@/components/ui/input";
+import { IssueSelector } from "@/components/common/issue-selector";
 import { InfoHint } from "@/components/ui/info-hint";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { toast } from "@/components/ui/toaster";
@@ -141,13 +142,9 @@ export function AssignLeadsDialog({ open, onClose }: { open: boolean; onClose: (
     savingRef.current = false; setSaving(false);
   }, [open]);
 
-  // Default Contact Status = an existing "Not Contacted" value (no verified
-  // interaction has happened yet) — resolved from the configured vocabulary.
-  useEffect(() => {
-    if (!open) return;
-    const nc = contactOptions.find((v) => contactStatusClass(v) === "not_contacted");
-    setContactStatus(nc ?? "Not Contacted");
-  }, [open, contactOptions]);
+  // Contact Status starts UNSET: a fresh assignment is not "Not Contacted"
+  // until someone explicitly chooses that status.
+  useEffect(() => { if (open) setContactStatus(""); }, [open]);
 
   // Lead Store Mode: Single → the configured default; Multi → authorised pick.
   useEffect(() => {
@@ -385,8 +382,8 @@ export function AssignLeadsDialog({ open, onClose }: { open: boolean; onClose: (
                     <DeviceCatalogPicker value={device} onChange={setDevice} />
                   </Field>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <Field label="Issue / problem" className="sm:col-span-2">
-                      <Input value={issue} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setIssue(e.target.value)} placeholder="e.g. Screen cracked, battery draining" />
+                    <Field label="Issue / problem" hint="Pick from the shared Issue list (same as Tickets). Type a new one to add it to the list." className="sm:col-span-2">
+                      <IssueSelector value={issue} onChange={setIssue} placeholder="Search or add issues…" pillClassName="py-0.5" />
                     </Field>
                     <Field label="Source" required error={touched ? errors.source : undefined} hint="Where the enquiry came from — Google, Meta, Reference…">
                       <Select className="h-[38px]" value={source} placeholder="Select source…" options={sourceOptions.map((v) => ({ label: v, value: v }))} onChange={(e) => setSource(e.target.value)} />
@@ -397,8 +394,8 @@ export function AssignLeadsDialog({ open, onClose }: { open: boolean; onClose: (
                     <Field label="Region">
                       <Select className="h-[38px]" value={region} placeholder="Select region…" options={regionOptions.map((v) => ({ label: v, value: v }))} onChange={(e) => setRegion(e.target.value)} />
                     </Field>
-                    <Field label="Contact status" hint="Keep “Not Contacted” unless you have genuinely spoken to the customer.">
-                      <Select className="h-[38px]" value={contactStatus} placeholder="Select status…" options={contactOptions.map((v) => ({ label: v, value: v }))} onChange={(e) => setContactStatus(e.target.value)} />
+                    <Field label="Contact status" hint="Leave unset for a fresh assignment — it goes to the agent's Assigned Leads inbox. Choose “Not Contacted” only if the customer was already tried and not reached (it then also appears in Not Contacted). Choose Contacted only if you have genuinely spoken to them.">
+                      <Select className="h-[38px]" value={contactStatus} placeholder="Not set — fresh assignment" options={[{ label: "Not set — fresh assignment", value: "" }, ...contactOptions.map((v) => ({ label: v, value: v }))]} onChange={(e) => setContactStatus(e.target.value)} />
                     </Field>
                     <Field label={contactStatusClass(contactStatus) === "contacted" ? "Conversation notes" : "Note for the agent (optional)"} required={contactStatusClass(contactStatus) === "contacted"} error={touched ? errors.notes : undefined} className="sm:col-span-2">
                       <Textarea value={notes} rows={2} onChange={(e) => setNotes(e.target.value)} placeholder="Anything the agent should know before calling…" className="w-full rounded-xl border border-input bg-card px-3 py-2 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" />

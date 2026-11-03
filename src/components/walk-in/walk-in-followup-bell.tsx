@@ -16,6 +16,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { type WalkIn, followUpDueAt } from "@/lib/mock-data";
 import { useFollowUpClock, dueFollowUps } from "@/lib/walk-in-followup-engine";
 import { cn } from "@/lib/utils";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* ─── Dismissed due-events (Clear all) ──────────────────────────────────────
    "Clear all" empties the bell by DISMISSING each currently-due follow-up from
@@ -61,7 +62,7 @@ function fmtDue(w: WalkIn): string {
   const now = new Date();
   const sameDay = due.toDateString() === now.toDateString();
   const datePart = sameDay ? "Today" : due.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "2-digit" });
-  const timePart = w.followUpTime ? due.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "";
+  const timePart = w.followUpTime ? formatClock(due) : "";
   return timePart ? `${datePart} · ${timePart}` : datePart;
 }
 

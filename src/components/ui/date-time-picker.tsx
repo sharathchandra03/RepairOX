@@ -22,6 +22,7 @@ import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight, CalendarClock, CalendarDays, Clock } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* ─── ISO helpers (local wall-clock) ── */
 function pad(n: number) { return String(n).padStart(2, "0"); }
@@ -157,7 +158,7 @@ export function DateTimeDialog({
             <p className="text-[14px] font-bold text-foreground">{title}</p>
             <p className="text-[12px] font-semibold text-[#4361EE]">
               {selected.toLocaleDateString("en-IN", { dateStyle: "medium" })}
-              {previewIso ? ` · ${new Date(previewIso).toLocaleTimeString("en-IN", { timeStyle: "short" })}` : ""}
+              {previewIso ? ` · ${formatClock(previewIso)}` : ""}
             </p>
           </div>
 

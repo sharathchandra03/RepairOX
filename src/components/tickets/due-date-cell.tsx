@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils";
 import { useStore } from "@/lib/store";
 import { DateTimePopover } from "@/components/ui/date-time-picker";
 import type { Ticket } from "@/lib/mock-data";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* ─── The cell (trigger + popover) ─────────────────────────────────────── */
 
@@ -72,7 +73,7 @@ export function DueDateCell({ ticket, overdue }: { ticket: Ticket; overdue: bool
         )}
       >
         <p>{new Date(ticket.dueDate).toLocaleDateString("en-IN", { dateStyle: "medium" })}</p>
-        <p className="text-[11px]">{new Date(ticket.dueDate).toLocaleTimeString("en-IN", { timeStyle: "short" })}</p>
+        <p className="text-[11px]">{formatClock(ticket.dueDate)}</p>
       </button>
 
       {mounted && anchorRect && createPortal(

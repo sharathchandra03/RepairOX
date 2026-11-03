@@ -897,13 +897,16 @@ export function isNotContactedStatus(contactStatus: string): boolean {
      • contacted     — genuine two-way contact (anything else)
    A phone-button click never changes contactStatus, so it never counts.
    ═══════════════════════════════════════════════════════════════════════ */
-export type ContactClass = "not_contacted" | "attempted" | "contacted";
+export type ContactClass = "unset" | "not_contacted" | "attempted" | "contacted";
 
 const ATTEMPT_RE = /(rnr|busy|switched off|switch off|no answer|not reachable|unreachable|not connected|no response|not picked|ringing|voicemail)/;
 
 export function contactStatusClass(contactStatus: string): ContactClass {
   const raw = (contactStatus || "").trim();
-  if (!raw || raw.toLowerCase().startsWith("not contacted")) return "not_contacted";
+  // EMPTY = "unset": a fresh assignment nobody has classified yet. It is NOT
+  // Not Contacted — a lead joins Not Contacted only when that status is chosen.
+  if (!raw) return "unset";
+  if (raw.toLowerCase().startsWith("not contacted")) return "not_contacted";
   if (ATTEMPT_RE.test(raw.toLowerCase())) return "attempted";
   return "contacted";
 }
@@ -921,12 +924,13 @@ export function isFreshAssignment(
   hasAnyFollowUp: boolean,
 ): boolean {
   return !!l.assignedTo && !!l.assignedAt && !l.firstActionAt && !hasAnyFollowUp &&
-    contactStatusClass(l.contactStatus) === "not_contacted" && !isTerminalLead(l);
+    ["unset", "not_contacted"].includes(contactStatusClass(l.contactStatus)) && !isTerminalLead(l);
 }
 
 /** Currently uncontacted (no successful two-way contact) and still open. */
 export function isNotContactedActive(l: Pick<Lead, "contactStatus" | "convertedAt" | "lostAt">): boolean {
-  return contactStatusClass(l.contactStatus) !== "contacted" && !isTerminalLead(l);
+  const c = contactStatusClass(l.contactStatus);
+  return (c === "not_contacted" || c === "attempted") && !isTerminalLead(l);
 }
 
 /** Active sub-category: Awaiting First Attempt vs Attempted – No Response. */

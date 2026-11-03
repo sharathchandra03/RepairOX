@@ -15,6 +15,7 @@ import { useSyncExternalStore } from "react";
 import { supabase, isSupabaseConfigured } from "./supabase";
 import { currentRole } from "./permissions";
 import { humanizeActivity, isUserFacingActivity } from "./activity-humanize";
+import { formatClock, formatHHmm } from "@/lib/time-format";
 
 /* ─── Types ──────────────────────────────────────────────────────── */
 
@@ -328,7 +329,7 @@ export function formatWhen(ts: number): string {
   const d = new Date(ts);
   const now = new Date();
   const diffMs = now.getTime() - ts;
-  const time = d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+  const time = formatClock(d);
   if (diffMs < 60_000) return "Just now";
   if (diffMs < 3_600_000) return `${Math.floor(diffMs / 60_000)} min ago`;
   if (isSameDay(d, now)) return `Today • ${time}`;
