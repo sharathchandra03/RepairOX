@@ -368,6 +368,11 @@ export type PermissionKey =
   /* Lead Management configuration — org-level Lead Store Mode (Single/Multi)
      + Default Lead Store. Distinct from the coarse manage_settings. */
   | "leads_store_mode_manage"
+  /* Lead Assignment workspace — manual intake + the future Pending queue.
+     Distinct from leads_assign (re-owning existing leads) and from any
+     lead-visibility key: neither grants all-lead / cross-store scope. */
+  | "leads_assign_intake"
+  | "leads_pending_access"
   /* Deals & quotations */
   | "deals_view"
   | "deals_create"
@@ -886,6 +891,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_performance_view_own", label: "View Own Sales Performance" },
       { key: "leads_performance_view_all", label: "View All Sales Agents' Performance" },
       { key: "leads_store_mode_manage", label: "Manage Lead Store Mode (Single/Multi) & Default Lead Store" },
+      { key: "leads_assign_intake", label: "Assign Leads (create an incoming lead & assign it to a Sales Agent)" },
+      { key: "leads_pending_access", label: "Access Pending Leads (unassigned inbound queue)" },
       { key: "deals_view", label: "View Deals (own / submitted)" },
       { key: "deals_create", label: "Create / Submit Deal (discount approval request)" },
       { key: "deals_edit", label: "Edit / Resubmit Own Deal" },

@@ -201,6 +201,70 @@ export function isInListDateRange(
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────────
+ * ORG-TIMEZONE variant (Assigned Leads inbox). Same preset semantics as
+ * `isInListDateRange`, but "today" / "yesterday" / month edges are calendar
+ * days in the ORGANISATION timezone (organization_settings.timezone) instead
+ * of the browser's. Falls back to the local-timezone logic if `tz` is invalid.
+ * ──────────────────────────────────────────────────────────────────────── */
+function dayKeyInTz(ms: number, tz: string): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: tz, year: "numeric", month: "2-digit", day: "2-digit" }).format(ms);
+}
+function keyToDayNum(key: string): number {
+  const [y, m, d] = key.split("-").map(Number);
+  return Math.floor(Date.UTC(y, (m || 1) - 1, d || 1) / 86_400_000);
+}
+function dayNumFromUtcParts(y: number, monthIndex: number, d: number): number {
+  return Math.floor(Date.UTC(y, monthIndex, d) / 86_400_000);
+}
+
+export function isInListDateRangeTz(
+  iso: string,
+  preset: ListDatePreset,
+  customFrom: string | undefined,
+  customTo: string | undefined,
+  tz: string,
+  nowMs: number = Date.now(),
+): boolean {
+  if (preset === "all") return true;
+  const t = new Date(iso).getTime();
+  if (isNaN(t)) return true;
+  let todayKey: string;
+  let rowKey: string;
+  try {
+    todayKey = dayKeyInTz(nowMs, tz);
+    rowKey = dayKeyInTz(t, tz);
+  } catch {
+    return isInListDateRange(iso, preset, customFrom, customTo);
+  }
+  const today = keyToDayNum(todayKey);
+  const n = keyToDayNum(rowKey);
+  const [ty, tm, td] = todayKey.split("-").map(Number);
+  switch (preset) {
+    case "today": return n === today;
+    case "yesterday": return n === today - 1;
+    case "7days": return n >= today - 7 && n <= today;
+    case "1month": {
+      const d = new Date(Date.UTC(ty, tm - 1, td));
+      d.setUTCMonth(d.getUTCMonth() - 1);
+      return n >= dayNumFromUtcParts(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()) && n <= today;
+    }
+    case "lastmonth": {
+      const start = dayNumFromUtcParts(ty, tm - 2, 1);
+      const end = dayNumFromUtcParts(ty, tm - 1, 1);
+      return n >= start && n < end;
+    }
+    case "1year": return n >= dayNumFromUtcParts(ty - 1, tm - 1, td) && n <= today;
+    case "custom": {
+      if (!customFrom && !customTo) return true;
+      const from = customFrom ? keyToDayNum(customFrom.slice(0, 10)) : -Infinity;
+      const to = customTo ? keyToDayNum(customTo.slice(0, 10)) : Infinity;
+      return n >= from && n <= to;
+    }
+    default: return true;
+  }
+}
+
 /**
  * Convenience: apply a DASHBOARD preset (this_month / this_year / …) using the
  * SAME boundary logic as the destination pages, by first mapping it to the

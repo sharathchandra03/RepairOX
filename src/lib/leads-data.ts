@@ -13,7 +13,7 @@
 
 import { CAP, allow } from "@/lib/capabilities";
 import type { PermissionKey } from "@/lib/permissions";
-import { isInListDateRange, type ListDatePreset } from "@/lib/date-filter";
+import { isInListDateRange, isInListDateRangeTz, type ListDatePreset } from "@/lib/date-filter";
 
 /* ─── Lead ────────────────────────────────────────────────────────────── */
 
@@ -132,7 +132,12 @@ export interface Lead {
      manual KPIs. Empty means the historical event is unavailable — analytics
      must show a data-quality state rather than infer a timestamp. */
   expectedValue?: number | null; // canonical open-pipeline value; estimate is fallback
-  firstContactedAt?: string;     // first successful contact activity
+  firstContactedAt?: string;     // first successful contact activity (DB trigger-owned)
+  /** First MEANINGFUL agent action (contact-status / status / category change,
+   *  terminal event, or a scheduled follow-up). Trigger-owned in the DB
+   *  (migration 0086). While empty on an assigned lead it is a FRESH assignment
+   *  that belongs in the Assigned Leads inbox. Never client-written to the DB. */
+  firstActionAt?: string;
   qualifiedAt?: string;          // first time the lead reached qualification
   convertedAt?: string;          // terminal WON / converted timestamp
   lostAt?: string;               // terminal LOST timestamp
@@ -671,7 +676,12 @@ export type LeadFilterField =
  *                     accountability queue where seniors reassign stale leads.
  *  - "followUps"    → leads with follow-up activity (mirrors Walk-In's
  *                     Active/History follow-up view + calendar). */
-export type LeadView = "all" | "notContacted" | "followUps";
+export type LeadView = "assigned" | "all" | "notContacted" | "followUps";
+
+/** Not Contacted workspace sub-views (mirrors the Follow-ups Active/History). */
+export type NotContactedSub = "active" | "history";
+/** Active sub-categories: no outreach yet vs. attempted-with-no-response. */
+export type NotContactedFocus = "all" | "awaiting" | "attempted";
 
 export interface LeadFilters {
   query: string;
@@ -689,6 +699,17 @@ export interface LeadFilters {
    *  exact match, so it lives as its own axis like dateRange/followUp. */
   customerLink: "any" | "existing" | "new";
   fields: Partial<Record<LeadFilterField, string>>;
+  /** Not Contacted view: Active / History. */
+  ncSub?: NotContactedSub;
+  /** Not Contacted → Active: Awaiting First Attempt / Attempted – No Response. */
+  ncFocus?: NotContactedFocus;
+  /** Organisation IANA timezone, used ONLY by the Assigned Leads date basis. */
+  timeZone?: string;
+  /** Assigned Leads inbox owner scope. Set to the signed-in staff id for users
+   *  WITHOUT a see-all key (their own fresh assignments only); left empty for
+   *  owner / coordinator users with team scope (team inbox). Presentation only —
+   *  RLS remains the real visibility boundary. */
+  ownerScope?: string;
   /** Exact traceability cohort from Lead Intelligence. Hidden from the normal
    * filter UI; every id still passes through RLS before it can appear. */
   evidenceIds?: string[];
@@ -704,6 +725,8 @@ export const EMPTY_LEAD_FILTERS: LeadFilters = {
   followUp: "any",
   customerLink: "any",
   fields: {},
+  ncSub: "active",
+  ncFocus: "all",
 };
 
 export function hasActiveLeadFilters(f: LeadFilters): boolean {
@@ -765,10 +788,21 @@ export function applyLeadFilters(
     // Exact Intelligence evidence cohorts bypass normal operational view
     // segmentation (including the stale Not-Contacted queue) but never bypass
     // RLS. This keeps "View leads" numerators/denominators traceable.
-    if (!evidence && view === "notContacted") {
-      if (!isNotContactedStatus(l.contactStatus)) return false;
+    if (!evidence && view === "assigned") {
+      // Fresh-assignment INBOX: assigned, awaiting first meaningful action.
+      if (!isFreshAssignment(l, leadsWithAnyFollowUp?.has(l.id) ?? false)) return false;
+      if (f.ownerScope && l.assignedTo !== f.ownerScope) return false;
+    } else if (!evidence && view === "notContacted") {
+      const sub = f.ncSub ?? "active";
+      if (sub === "history") {
+        if (!isNotContactedHistory(l)) return false;
+      } else {
+        if (!isNotContactedActive(l)) return false;
+        const focus = f.ncFocus ?? "all";
+        if (focus !== "all" && notContactedFocusOf(l) !== focus) return false;
+      }
     } else if (!evidence && view === "all") {
-      if (isNotContactedLocked(l, asOf)) return false;
+      // All Leads = the complete authorised dataset (no view-level exclusions).
     } else if (!evidence && view === "followUps") {
       // Keep a lead in the Follow-Up view when it has ANY follow-up record —
       // an OPEN (scheduled) one feeds the Active tab, and a completed/cancelled
@@ -793,7 +827,11 @@ export function applyLeadFilters(
     for (const [k, v] of Object.entries(f.fields)) {
       if (v && String((l as any)[k] ?? "") !== v) return false;
     }
-    if (!leadInDateRange(l.createdAt || l.date, f.dateRange, f.customFrom, f.customTo)) return false;
+    // Date basis: Assigned Leads filter by ASSIGNMENT time (org timezone);
+    // every other view keeps the lead CREATION date.
+    if (!evidence && view === "assigned") {
+      if (!isInListDateRangeTz(l.assignedAt || l.createdAt || l.date, f.dateRange, f.customFrom, f.customTo, f.timeZone || "Asia/Kolkata")) return false;
+    } else if (!leadInDateRange(l.createdAt || l.date, f.dateRange, f.customFrom, f.customTo)) return false;
 
     if (f.customerLink !== "any") {
       const existing = leadIsExistingCustomer(l);
@@ -845,6 +883,63 @@ export const NOT_CONTACTED_LOCK_MS = 48 * 60 * 60 * 1000;
 export function isNotContactedStatus(contactStatus: string): boolean {
   const s = (contactStatus || "").trim().toLowerCase();
   return s === "" || s.startsWith("not contacted") || s === "not contacted";
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CONTACT CLASS + WORKSPACE VIEW MEMBERSHIP
+   ONE source of truth for the Assigned Leads inbox and the Not Contacted
+   Active/History views. Built on the existing `contactStatus` vocabulary —
+   no second contact-status source. MUST mirror public.lead_contact_class()
+   in migration 0086.
+     • not_contacted — never reached ("" / "Not Contacted…")
+     • attempted     — an outreach attempt was recorded but the customer did
+                       not respond (RNR / Busy / Switched Off / No Answer …)
+     • contacted     — genuine two-way contact (anything else)
+   A phone-button click never changes contactStatus, so it never counts.
+   ═══════════════════════════════════════════════════════════════════════ */
+export type ContactClass = "not_contacted" | "attempted" | "contacted";
+
+const ATTEMPT_RE = /(rnr|busy|switched off|switch off|no answer|not reachable|unreachable|not connected|no response|not picked|ringing|voicemail)/;
+
+export function contactStatusClass(contactStatus: string): ContactClass {
+  const raw = (contactStatus || "").trim();
+  if (!raw || raw.toLowerCase().startsWith("not contacted")) return "not_contacted";
+  if (ATTEMPT_RE.test(raw.toLowerCase())) return "attempted";
+  return "contacted";
+}
+
+/** Lead reached a terminal outcome (won / lost) — it leaves the working queues. */
+export function isTerminalLead(l: Pick<Lead, "convertedAt" | "lostAt">): boolean {
+  return !!l.convertedAt || !!l.lostAt;
+}
+
+/** Fresh assignment awaiting the agent's FIRST meaningful action. It leaves the
+ *  inbox on the first recorded action (contact attempt/result, status change,
+ *  scheduled follow-up) or a terminal event — but stays in All Leads. */
+export function isFreshAssignment(
+  l: Pick<Lead, "assignedTo" | "assignedAt" | "firstActionAt" | "contactStatus" | "convertedAt" | "lostAt">,
+  hasAnyFollowUp: boolean,
+): boolean {
+  return !!l.assignedTo && !!l.assignedAt && !l.firstActionAt && !hasAnyFollowUp &&
+    contactStatusClass(l.contactStatus) === "not_contacted" && !isTerminalLead(l);
+}
+
+/** Currently uncontacted (no successful two-way contact) and still open. */
+export function isNotContactedActive(l: Pick<Lead, "contactStatus" | "convertedAt" | "lostAt">): boolean {
+  return contactStatusClass(l.contactStatus) !== "contacted" && !isTerminalLead(l);
+}
+
+/** Active sub-category: Awaiting First Attempt vs Attempted – No Response. */
+export function notContactedFocusOf(l: Pick<Lead, "contactStatus" | "firstActionAt">): "awaiting" | "attempted" {
+  const c = contactStatusClass(l.contactStatus);
+  if (c === "attempted") return "attempted";
+  return l.firstActionAt ? "attempted" : "awaiting";
+}
+
+/** Previously uncontacted, later reached (trigger stamps firstContactedAt on the
+ *  not-contacted/attempted → contacted transition). Read from existing records. */
+export function isNotContactedHistory(l: Pick<Lead, "contactStatus" | "firstContactedAt">): boolean {
+  return !!l.firstContactedAt && contactStatusClass(l.contactStatus) === "contacted";
 }
 
 /** The instant the Not-Contacted lock trips for a lead, or null when the lead

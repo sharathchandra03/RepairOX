@@ -38,7 +38,7 @@ import {
 import {
   LEAD_DROPDOWN_FIELDS, monthFromDate, applyLeadFilters, pinnedFirst,
   isQualifiedStatus, isWonStatus, isLostStatus,
-  isNotContactedStatus, isNotContactedLocked,
+  isNotContactedStatus, isNotContactedLocked, contactStatusClass,
   computeLeadMetrics, openFollowUp, leadsOwnedBy,
   type LeadFollowUp, type LeadFollowUpDraft, type LeadAssignmentEvent, type LeadMetrics,
   operationalRecordAttributedElsewhere, findOpenLeadMatches,
@@ -172,6 +172,7 @@ function rowToLead(r: any): Lead {
     companyId: r.company_id ?? undefined,
     expectedValue: r.expected_value == null ? null : Number(r.expected_value),
     firstContactedAt: r.first_contacted_at ?? undefined,
+    firstActionAt: r.first_action_at ?? undefined,
     qualifiedAt: r.qualified_at ?? undefined,
     convertedAt: r.converted_at ?? undefined,
     lostAt: r.lost_at ?? undefined,
@@ -1144,7 +1145,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       toast.error("Lead not saved", { description: "The lead owner must be an active Sales Agent who can work this store." });
       return null;
     }
-    if (ownerId && ownerId !== me && !allow(can, CAP.lead.assign)) {
+    if (ownerId && ownerId !== me && !allow(can, CAP.lead.assign) && !allow(can, CAP.lead.assignIntake)) {
       toast.error("Lead not saved", { description: "You can only create leads owned by yourself." });
       return null;
     }
@@ -1402,6 +1403,25 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       }
       // willNC && wasNC → leave the existing since untouched (clock keeps running).
     }
+    // ── First-action / first-contact tracking (mirrors the DB trigger, 0086) ──
+    // In Supabase mode the trigger owns these columns (leadToRow never writes
+    // first_action_at, and first_contacted_at is only mirrored locally in
+    // local mode); this keeps the inbox/history views correct optimistically
+    // and is the real implementation in local/demo mode.
+    if (current) {
+      const nowIso = new Date().toISOString();
+      const contactChanged = updates.contactStatus !== undefined && (updates.contactStatus || "") !== (current.contactStatus || "");
+      const changedMeaningfully =
+        contactChanged ||
+        (updates.status !== undefined && (updates.status || "") !== (current.status || "")) ||
+        (updates.leadCategory !== undefined && (updates.leadCategory || "") !== (current.leadCategory || ""));
+      if (!current.firstActionAt && changedMeaningfully) updates.firstActionAt = nowIso;
+      if (contactChanged && !useDb) {
+        const was = contactStatusClass(current.contactStatus);
+        const will = contactStatusClass(updates.contactStatus ?? "");
+        if (was !== "contacted" && will === "contacted" && !current.firstContactedAt) updates.firstContactedAt = nowIso;
+      }
+    }
     const storeId = updates.branchId ?? current?.branchId ?? "";
     const previousFollowUpAgent = current?.followUpAgent || "";
 
@@ -1609,6 +1629,9 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
             // Reset effort attribution so credit is the new owner's to earn.
             attributionMode: "",
             routedAt: "",
+            // Back into the new owner's Assigned Leads inbox (the DB trigger
+            // does the same for a still-uncontacted lead; not written by client).
+            firstActionAt: "",
           }
         : {}),
     };

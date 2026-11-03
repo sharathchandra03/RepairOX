@@ -207,6 +207,11 @@ export type StoreSettings = {
   /** The store every NEW lead is assigned to in Single-Store mode ("" = none
    *  configured yet — a configuration error that blocks lead creation). */
   defaultLeadStoreId: string;
+  /** Minutes a freshly assigned lead may wait for its FIRST meaningful agent
+   *  action before it is flagged "Overdue" in the Assigned Leads inbox.
+   *  null = no SLA configured (nothing is flagged). Flag only — a lead is
+   *  never silently removed from the inbox. */
+  leadFirstResponseSlaMinutes: number | null;
 
   /* ── Work Session / Productivity configuration (Settings → Lead
    *    Management → Productivity) ──
@@ -402,6 +407,7 @@ CLAIM PROCEDURE:
   // org must still pick a Default Lead Store before leads can be created.
   leadStoreMode: "single",
   defaultLeadStoreId: "",
+  leadFirstResponseSlaMinutes: null,
 
   // Remind an agent to resume work after 5 minutes on break by default.
   productivityConfig: {
@@ -511,6 +517,9 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
       return m === "multi" ? "multi" : "single";
     })(),
     defaultLeadStoreId: (row.default_lead_store_id as string) ?? DEFAULT_STORE_SETTINGS.defaultLeadStoreId,
+    leadFirstResponseSlaMinutes: typeof row.lead_first_response_sla_minutes === "number" && row.lead_first_response_sla_minutes > 0
+      ? (row.lead_first_response_sla_minutes as number)
+      : null,
     productivityConfig: parseJsonColumn(row.productivity_config, DEFAULT_STORE_SETTINGS.productivityConfig),
     loyaltyConfig: parseJsonColumn(row.loyalty_config, DEFAULT_STORE_SETTINGS.loyaltyConfig),
     refundConfig: parseJsonColumn(row.refund_config, DEFAULT_STORE_SETTINGS.refundConfig),
@@ -608,6 +617,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     invoiceWarrantyText: "invoice_warranty_text",
     leadStoreMode: "lead_store_mode",
     defaultLeadStoreId: "default_lead_store_id",
+    leadFirstResponseSlaMinutes: "lead_first_response_sla_minutes",
     productivityConfig: "productivity_config",
     loyaltyConfig: "loyalty_config",
     refundConfig: "refund_config",

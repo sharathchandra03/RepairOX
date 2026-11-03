@@ -306,6 +306,14 @@ export const CAP = {
     // Manage the org-level Lead Store Mode (Single/Multi) + Default Lead Store.
     // Granular key first; coarse admin fallbacks preserve existing owner access.
     settings: ["leads_store_mode_manage", "manage_settings", "manage_sales"],
+    // Assign Leads (manual intake): create an incoming lead with an initial
+    // Sales Agent. Granular key ONLY — deliberately NO manage_sales / leads_assign
+    // fallback so it never silently widens existing roles. MUST match the DB
+    // guard (leads_ownership_guard / leads_ins in migration 0086).
+    assignIntake: ["leads_assign_intake"],
+    // Pending Leads queue (unassigned inbound). Separate from assignIntake and
+    // from every lead-visibility key. MUST match pending_leads RLS (0086).
+    pendingAccess: ["leads_pending_access"],
   },
   deal: {
     // See the Deal page / a lead's deal panel. Submitting a request implies

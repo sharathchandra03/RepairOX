@@ -9,6 +9,7 @@ import { SettingsPage, SettingsSection } from "@/components/settings/settings-pa
 import { useStoreSettings, type StoreSettings } from "@/lib/store-settings";
 import { StoreNumberingSection } from "@/components/settings/store-numbering-section";
 import { LeadStoreModeSection } from "@/components/leads/settings/lead-store-mode-card";
+import { LeadFirstResponseSlaSection } from "@/components/leads/settings/lead-sla-card";
 import { RequireCapability } from "@/components/common/require-capability";
 import { CAP } from "@/lib/capabilities";
 import { useCanEdit } from "@/lib/use-can-edit";
@@ -194,6 +195,9 @@ function StoreSettingsInner() {
           running leads from a single store. */}
       <SettingsSection title="Lead Management" description="Choose how Lead Management assigns stores to new leads. Saves instantly — independent of the Save Changes button above." icon={Target}>
         <LeadStoreModeSection canEdit={canEdit} />
+        <div className="mt-4">
+          <LeadFirstResponseSlaSection canEdit={canEdit} />
+        </div>
       </SettingsSection>
 
       {/* Printing configuration lives under Store → Printing (a single place for

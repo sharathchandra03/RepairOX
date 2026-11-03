@@ -7,7 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal, MessageSquare, Send,
+  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal, MessageSquare, Send, UserPlus, AlertTriangle,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -54,8 +54,14 @@ import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
   followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, openFollowUp, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, isFollowUpStatus, type LeadFollowUp,
   isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
-  type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters,
+  isFreshAssignment, isNotContactedActive, isNotContactedHistory, notContactedFocusOf, contactStatusClass,
+  type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters, type LeadView,
+  type NotContactedSub, type NotContactedFocus,
 } from "@/lib/leads-data";
+import { LeadWorkspaceTabs } from "@/components/leads/lead-workspace-tabs";
+import { NotContactedControls, NotContactedBanner, useContactTransitions } from "@/components/leads/not-contacted-controls";
+import { AssignLeadsDialog } from "@/components/leads/assign-leads-dialog";
+import { useStoreSettings } from "@/lib/store-settings";
 import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { LeadFollowUpView } from "@/components/leads/lead-followup-view";
 import { LeadFollowUpBell } from "@/components/leads/lead-followup-bell";
@@ -362,6 +368,68 @@ function DateCell({ lead }: { lead: Lead }) {
       <p className="font-semibold text-zinc-800 tnum">{dateLabel}</p>
       {lead.time && <p className="mt-0.5 text-[12px] text-zinc-500 tnum">{lead.time}</p>}
     </div>
+  );
+}
+
+/* Assigned Leads — "ASSIGNED ON": the server-stamped assignment instant in the
+   ORGANISATION timezone (date + time), with who assigned it. The lead's own
+   creation date/time stays separate (tooltip) and is never overwritten.
+   An Overdue chip appears only when an org first-response SLA is configured. */
+function AssignedDateCell({ lead, tz, overdue }: { lead: Lead; tz: string; overdue: boolean }) {
+  const at = lead.assignedAt ? new Date(lead.assignedAt) : null;
+  const valid = !!at && !isNaN(at.getTime());
+  const fmt = (o: Intl.DateTimeFormatOptions) => {
+    try { return new Intl.DateTimeFormat("en-IN", { timeZone: tz, ...o }).format(at as Date); }
+    catch { return new Intl.DateTimeFormat("en-IN", o).format(at as Date); }
+  };
+  if (!valid) return <DateCell lead={lead} />;
+  const dateLabel = fmt({ day: "2-digit", month: "short" });
+  const timeLabel = fmt({ hour: "2-digit", minute: "2-digit", hour12: false });
+  const full = `${fmt({ dateStyle: "medium", timeStyle: "short" })} (${tz})`;
+  const created = [lead.date, lead.time].filter(Boolean).join(" ");
+  return (
+    <div
+      className="leading-snug"
+      title={`Assigned ${full}${lead.assignedByName ? ` by ${lead.assignedByName}` : ""}${created ? ` · Lead created ${created}` : ""}`}
+    >
+      <p className="font-semibold text-zinc-800 tnum">{dateLabel}</p>
+      <p className="mt-0.5 text-[12px] text-zinc-500 tnum">{timeLabel}</p>
+      {lead.assignedByName && <p className="mt-0.5 truncate text-[10.5px] text-zinc-400">by {lead.assignedByName}</p>}
+      {overdue && (
+        <span className="mt-0.5 inline-flex items-center gap-0.5 rounded-full bg-rose-50 px-1.5 py-px text-[9.5px] font-bold uppercase tracking-wide text-rose-700 ring-1 ring-inset ring-rose-200">
+          <AlertTriangle className="h-2.5 w-2.5" aria-hidden /> Overdue
+        </span>
+      )}
+    </div>
+  );
+}
+
+/* Not Contacted — one-line evidence under the Contact Status pill.
+   Active → which sub-category; History → previous status, when and by whom
+   (from lead_activity_history; falls back to firstContactedAt). */
+function NcStatusNote({ lead, sub, transition, actorName }: {
+  lead: Lead;
+  sub: "active" | "history";
+  transition?: { from: string; at: string } | null;
+  actorName?: string;
+}) {
+  if (sub === "active") {
+    const awaiting = notContactedFocusOf(lead) === "awaiting";
+    return (
+      <span className="mt-1 block text-center text-[10px] font-semibold uppercase tracking-wide text-rose-600">
+        {awaiting ? "Awaiting first attempt" : "Attempted · no response"}
+      </span>
+    );
+  }
+  const when = transition?.at || lead.firstContactedAt || "";
+  const d = when ? new Date(when) : null;
+  const whenLabel = d && !isNaN(d.getTime()) ? d.toLocaleString("en-IN", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit", hour12: false }) : "";
+  return (
+    <span className="mt-1 block text-center text-[10.5px] leading-tight text-zinc-500" title="Previous contact status → when it changed → who recorded it">
+      {transition?.from !== undefined ? `Was ${transition.from || "Not Contacted"}` : "Previously uncontacted"}
+      {whenLabel && ` · ${whenLabel}`}
+      {actorName && ` · ${actorName}`}
+    </span>
   );
 }
 
@@ -1192,11 +1260,11 @@ const FOLLOWUP_FILTERS = [
 
 export default function LeadsListPage() {
   const { leads, filteredLeads, hydrated, filters, setFilters, clearFilters, optionsFor, fieldTitle, deleteLead, pinLead, changeLeadStatus, updateLead, scheduleFollowUp, salesAgents, openFollowUpsByLead,
-    viewAsReadOnly } = useLeads();
+    viewAsReadOnly, followUps: allFollowUps, canSeeAllLeads } = useLeads();
   // OWNER "view as agent" (Option A — NOT impersonation): when active, the whole
   // Leads workspace is READ-ONLY. Every mutation gate ANDs in `!viewAsReadOnly`.
   const canAssign = useCanAssignLeads() && !viewAsReadOnly;
-  const { currentUser, can } = usePermissions();
+  const { currentUser, can, team } = usePermissions();
 
   /* ── Live operational records for SYSTEM-DERIVED Action / Result / Store ──
      Action and Result are NEVER stored on the lead. They are derived at read
@@ -1430,6 +1498,7 @@ export default function LeadsListPage() {
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
   const [editLead, setEditLead] = useState<Lead | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Lead | null>(null);
   const [routeLeadTarget, setRouteLeadTarget] = useState<Lead | null>(null);
@@ -1468,10 +1537,54 @@ export default function LeadsListPage() {
 
   /* Counts for the primary view segments (Not Contacted / Follow-ups).
      Derived from the scoped `leads` + open follow-ups — never a stored counter. */
-  const notContactedCount = useMemo(
-    () => leads.filter((l) => isNotContactedStatus(l.contactStatus)).length,
-    [leads],
+  /* ── Lead workspace (4 primary views) ─────────────────────────────────────
+     Assigned Leads · All Leads · Not Contacted · Follow-ups. One canonical
+     lead set; membership is DERIVED here, never stored per view, so a lead can
+     sit in several views at once (e.g. Not Contacted + Follow-ups). */
+  const { settings: orgSettings } = useStoreSettings();
+  const orgTz = orgSettings.timeZone || "Asia/Kolkata";
+  const slaMinutes = orgSettings.leadFirstResponseSlaMinutes;
+  const meId = currentUser?.id || "";
+  // Inbox scope: users WITHOUT a see-all key work their OWN fresh assignments;
+  // owners / coordinators with team scope see the team inbox. (RLS is the real
+  // visibility boundary — this only shapes the presentation.)
+  const ownerScope = canSeeAllLeads ? "" : meId;
+  useEffect(() => {
+    if (filters.timeZone === orgTz && (filters.ownerScope ?? "") === ownerScope) return;
+    setFilters((f) => ({ ...f, timeZone: orgTz, ownerScope }));
+  }, [filters.timeZone, filters.ownerScope, orgTz, ownerScope, setFilters]);
+
+  const leadsWithAnyFollowUp = useMemo(() => new Set(allFollowUps.map((f) => f.leadId)), [allFollowUps]);
+  const assignedInbox = useMemo(
+    () => leads.filter((l) => isFreshAssignment(l, leadsWithAnyFollowUp.has(l.id)) && (!ownerScope || l.assignedTo === ownerScope)),
+    [leads, leadsWithAnyFollowUp, ownerScope],
   );
+  const assignedCount = assignedInbox.length;
+  const ncCounts = useMemo(() => {
+    let active = 0, history = 0, awaiting = 0, attempted = 0;
+    for (const l of leads) {
+      if (isNotContactedActive(l)) {
+        active += 1;
+        if (notContactedFocusOf(l) === "awaiting") awaiting += 1; else attempted += 1;
+      } else if (isNotContactedHistory(l)) history += 1;
+    }
+    return { active, history, awaiting, attempted };
+  }, [leads]);
+  const notContactedCount = ncCounts.active;
+
+  // First-response SLA (org setting, optional): FLAG only — an unworked lead is
+  // never silently dropped from the inbox. Re-evaluated every minute.
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!slaMinutes) return;
+    const t = setInterval(() => setNowMs(Date.now()), 60_000);
+    return () => clearInterval(t);
+  }, [slaMinutes]);
+  const isSlaOverdue = useCallback((l: Lead) => {
+    if (!slaMinutes || !l.assignedAt) return false;
+    const t = new Date(l.assignedAt).getTime();
+    return !isNaN(t) && nowMs - t > slaMinutes * 60_000;
+  }, [slaMinutes, nowMs]);
   // Count = leads with an OPEN follow-up OR at the "Follow-Up" lifecycle stage,
   // matching exactly what the numbered "Follow-Ups" view now surfaces (it
   // absorbed the old standalone "Follow-Up" status segment).
@@ -1480,6 +1593,19 @@ export default function LeadsListPage() {
     [leads, openFollowUpsByLead],
   );
   const view = filters.view ?? "all";
+
+  /* Not Contacted → History evidence (previous status / when / by whom) from
+     lead_activity_history. Fetched only while the History sub-view is open. */
+  const historyLeadIds = useMemo(
+    () => (view === "notContacted" && (filters.ncSub ?? "active") === "history" ? filteredLeads.map((l) => l.id) : []),
+    [view, filters.ncSub, filteredLeads],
+  );
+  const contactTransitions = useContactTransitions(historyLeadIds, historyLeadIds.length > 0);
+  const teamNameById = useMemo(() => {
+    const m: Record<string, string> = {};
+    for (const t of team) m[t.id] = t.name;
+    return m;
+  }, [team]);
 
   /* ── ONE combined filter strip ────────────────────────────────────────────
      Merges the primary VIEW segments (Not Contacted / Follow-Ups) with the
@@ -1490,8 +1616,6 @@ export default function LeadsListPage() {
      - any status value     → view=all, status=<that status>
      The special view tokens are prefixed so they never collide with a real
      configured status value. */
-  const NOT_CONTACTED_TAB = "__notContacted__";
-  const FOLLOWUPS_TAB = "__followUps__";
 
   /* Strip 3 — the SINGLE primary filter strip. It now carries BOTH the
      accountability VIEWS (Not Contacted / Follow-Ups, with their own red count
@@ -1513,25 +1637,45 @@ export default function LeadsListPage() {
     // the numbered "Follow-Ups" VIEW segment (same name, confusing). The
     // numbered view now also behaves as that status filter (see
     // applyLeadFilters → isFollowUpStatus), so no follow-up lead is missed.
-    const statuses = [...configured, ...legacy].filter((s) => !isFollowUpStatus(s));
+    // Not Contacted, Follow-Ups and New Lead are NOT chips here any more: the
+    // first two are primary workspace views, and "New Lead" is represented by
+    // the Assigned Leads inbox. Their meaning in the data is unchanged — a
+    // lead's status is still filterable from the Filters panel.
+    const statuses = [...configured, ...legacy].filter(
+      (s) => !isFollowUpStatus(s) && s.trim().toLowerCase() !== "new lead",
+    );
     return [
       { label: "All", value: "all" },
-      { label: <ViewTabLabel text="Not Contacted" count={notContactedCount} active={view === "notContacted"} tone="red" />, value: NOT_CONTACTED_TAB },
-      { label: <ViewTabLabel text="Follow-Ups" count={followUpsCount} active={view === "followUps"} tone="red" />, value: FOLLOWUPS_TAB },
       ...statuses.map((s) => ({ label: s, value: s })),
     ];
-  }, [optionsFor, leads, notContactedCount, followUpsCount, view]);
-  // The strip's selected value reflects either the active VIEW token or the
-  // chosen lifecycle status (working view).
-  const statusStripValue = view === "notContacted" ? NOT_CONTACTED_TAB
-    : view === "followUps" ? FOLLOWUPS_TAB
-    : (filters.status || "all");
+  }, [optionsFor, leads]);
+  const statusStripValue = filters.status || "all";
   const onStatusStripChange = useCallback((v: string) => {
-    if (v === NOT_CONTACTED_TAB) { setFilters((f) => ({ ...f, view: "notContacted" })); return; }
-    if (v === FOLLOWUPS_TAB) { setFilters((f) => ({ ...f, view: "followUps" })); return; }
-    // "All" or a status → the working table view.
+    // "All" or a lifecycle status → narrows the All Leads view.
     setFilters((f) => ({ ...f, view: "all", status: v === "all" ? "" : v }));
   }, [setFilters]);
+
+  /* Primary view switch. Resets the view-specific status chip; keeps search,
+     customer link and the other filters. The last view is remembered per user. */
+  const WORKSPACE_VIEW_KEY = `repairox-lead-workspace-view::${meId || "anon"}`;
+  const changeView = useCallback((v: LeadView) => {
+    setFilters((f) => ({
+      ...f,
+      view: v,
+      status: "",
+      ncSub: f.ncSub ?? "active",
+      ncFocus: f.ncFocus ?? "all",
+      // Assigned Leads offers a shorter range strip; fall back safely.
+      dateRange: v === "assigned" && (f.dateRange === "lastmonth" || f.dateRange === "1year") ? "all" : f.dateRange,
+    }));
+    try { window.localStorage.setItem(WORKSPACE_VIEW_KEY, v); } catch { /* storage unavailable */ }
+  }, [setFilters, WORKSPACE_VIEW_KEY]);
+  /** Clear-all that keeps the user on the same primary view. */
+  const clearFiltersKeepView = useCallback(() => {
+    const keep = { view: filters.view, ncSub: filters.ncSub, ncFocus: filters.ncFocus, timeZone: filters.timeZone, ownerScope: filters.ownerScope };
+    clearFilters();
+    setFilters((f) => ({ ...f, ...keep }));
+  }, [clearFilters, setFilters, filters.view, filters.ncSub, filters.ncFocus, filters.timeZone, filters.ownerScope]);
 
   /* Reset to page 1 + scroll the grid back to the top whenever the filtered
      dataset changes (filter/search/page-size). Freeze config is untouched. */
@@ -1724,6 +1868,21 @@ export default function LeadsListPage() {
      useLeads) to lock its own controls. */
   const urlFilterKey = searchParams.toString();
   const appliedUrlFiltersRef = useRef("");
+  /* Remember the user's last primary view (per user). All Leads stays the
+     default for first visits and for any deep link / evidence URL, which carry
+     their own context. */
+  const viewRestoredRef = useRef(false);
+  useEffect(() => {
+    if (viewRestoredRef.current || !hydrated || !meId) return;
+    viewRestoredRef.current = true;
+    if (urlFilterKey) return;
+    try {
+      const saved = window.localStorage.getItem(WORKSPACE_VIEW_KEY);
+      if (saved === "assigned" || saved === "notContacted" || saved === "followUps") {
+        setFilters((f) => ({ ...f, view: saved as LeadView }));
+      }
+    } catch { /* storage unavailable */ }
+  }, [hydrated, meId, urlFilterKey, WORKSPACE_VIEW_KEY, setFilters]);
   /* Intelligence evidence links are refresh-safe and exact. URL values are
      allowlisted into the canonical structured filter model; RLS still decides
      which ids can actually render. */
@@ -1882,7 +2041,9 @@ export default function LeadsListPage() {
             />
           );
         case "date":
-          return locked ? <NACell /> : <DateCell lead={lead} />;
+          return locked ? <NACell /> : view === "assigned"
+            ? <AssignedDateCell lead={lead} tz={orgTz} overdue={isSlaOverdue(lead)} />
+            : <DateCell lead={lead} />;
         case "store":
           // Structural multi-store column (branch the lead belongs to).
           return <StoreContextCell store={getStore(lead.branchId || null)} mode="stacked" />;
@@ -1942,6 +2103,14 @@ export default function LeadsListPage() {
                 locked={locked || !canEditLead}
               />
               {locked && <span className="mt-1 block text-center text-[10px] font-semibold uppercase tracking-wide text-amber-600">Locked · reassign to unlock</span>}
+              {!locked && view === "notContacted" && (
+                <NcStatusNote
+                  lead={lead}
+                  sub={(filters.ncSub ?? "active") as NotContactedSub}
+                  transition={contactTransitions[lead.id]}
+                  actorName={contactTransitions[lead.id]?.actorId ? teamNameById[contactTransitions[lead.id].actorId] : undefined}
+                />
+              )}
             </>
           );
         case "leadCategory":
@@ -2062,7 +2231,57 @@ export default function LeadsListPage() {
       leadCategoryOptions, subCategoryOptions, applyLeadCategory,
       statusOptions, applyLeadStatus, canBulkStatus, canViewTicket, canViewInvoice,
       viewAsReadOnly, dealConvoByLead,
+      view, orgTz, isSlaOverdue, filters.ncSub, contactTransitions, teamNameById,
     ],
+  );
+
+  const collapsedIndicators = (
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-1">
+      <span
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset",
+          collapsedFilterCount > 0
+            ? "bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20"
+            : "bg-zinc-50 text-zinc-500 ring-zinc-200",
+        )}
+        title={collapsedFilterCount > 0 ? `${collapsedFilterCount} active filter${collapsedFilterCount > 1 ? "s" : ""}` : "No filters applied"}
+      >
+        <SlidersHorizontal className="h-3 w-3" />
+        {collapsedFilterCount > 0 ? `Filters · ${collapsedFilterCount}` : "Filters"}
+      </span>
+      {collapsedDateLabel && (
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200"
+          title={`Date range: ${collapsedDateLabel}`}
+        >
+          <CalendarClock className="h-3 w-3" />
+          {collapsedDateLabel}
+        </span>
+      )}
+    </div>
+  );
+
+  const rightControls = (
+      <div className="flex shrink-0 items-center gap-2">
+          <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</span>
+            <SegmentedTabs
+              value={filters.customerLink}
+              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
+              options={[
+                { label: "All", value: "any" },
+                { label: "New", value: "new" },
+                { label: "Existing", value: "existing" },
+              ]}
+              size="sm"
+            />
+          </div>
+          {/* The ONE Collapse/Expand control. */}
+          <WorkspaceCollapseBar
+            collapsed={controlsCollapsed}
+            onToggle={workspace.toggle}
+          />
+        </div>
   );
 
   return (
@@ -2083,6 +2302,15 @@ export default function LeadsListPage() {
               <Link href="/leads/kanban" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Kanban View"><LayoutGrid className="h-3.5 w-3.5" /></Link>
               <Link href="/leads/map-view" className="grid h-8 w-8 place-items-center rounded-lg text-zinc-400 hover:text-zinc-700 hover:bg-muted transition" title="Map View"><Map className="h-3.5 w-3.5" /></Link>
             </div>
+            {/* Assign Leads — manual intake + assignment. Separate permission
+                (leads_assign_intake); the ordinary Add Lead stays untouched. */}
+            {!viewAsReadOnly && (
+              <Can permission={CAP.lead.assignIntake}>
+                <Button size="sm" variant="outline" className="rounded-full gap-1.5" onClick={() => setShowAssign(true)}>
+                  <UserPlus className="h-3.5 w-3.5" /> Assign Leads
+                </Button>
+              </Can>
+            )}
             {!viewAsReadOnly && (
               <Can permission={CAP.lead.create}>
                 <Button size="sm" className="rounded-full gap-1.5" onClick={() => setShowCreate(true)}>
@@ -2093,6 +2321,39 @@ export default function LeadsListPage() {
           </div>
         }
       />
+
+      {/* PRIMARY VIEWS — Assigned Leads · All Leads · Not Contacted · Follow-ups.
+          Always visible (outside the collapsible control area): this is the
+          page's primary navigation, distinct from the operational filters
+          below. */}
+      <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+        <LeadWorkspaceTabs
+          value={view}
+          onChange={changeView}
+          counts={{ assigned: assignedCount, notContacted: notContactedCount, followUps: followUpsCount }}
+        />
+        {/* Outside All Leads there is no status strip, so the Customer filter +
+            Collapse control sit on the tabs line instead of leaving an empty row. */}
+        {view !== "all" && (
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+            {controlsCollapsed && collapsedIndicators}
+            {rightControls}
+          </div>
+        )}
+      </div>
+
+      {/* Not Contacted sub-navigation (Active / History) — mirrors the
+          Follow-ups Active/History pattern. Kept outside the collapse so the
+          sub-view is always reachable. */}
+      {view === "notContacted" && (
+        <NotContactedControls
+          sub={(filters.ncSub ?? "active") as NotContactedSub}
+          onSub={(v) => setFilters((f) => ({ ...f, ncSub: v }))}
+          focus={(filters.ncFocus ?? "all") as NotContactedFocus}
+          onFocus={(v) => setFilters((f) => ({ ...f, ncFocus: v }))}
+          counts={ncCounts}
+        />
+      )}
 
       {/* ── COLLAPSIBLE CONTROL AREA ───────────────────────────────────────────
           Everything between here and the matching close tag is the
@@ -2128,9 +2389,16 @@ export default function LeadsListPage() {
           <SegmentedTabs
             value={filters.dateRange}
             onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
-            options={LEAD_DATE_RANGES.map((d) => ({ label: d.label, value: d.value }))}
+            options={LEAD_DATE_RANGES
+              // Assigned Leads: All | Today | Yesterday | 7 Days | 1 Month | Custom
+              // (filtered by ASSIGNMENT time in the organisation timezone).
+              .filter((d) => view !== "assigned" || ["all", "today", "yesterday", "7days", "1month", "custom"].includes(d.value))
+              .map((d) => ({ label: d.label, value: d.value }))}
             size="sm"
           />
+          {view === "assigned" && (
+            <p className="mt-1 px-1 text-[11px] text-muted-foreground">Filtering by assigned date &amp; time ({orgTz}).</p>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <div className="w-full lg:w-72">
@@ -2189,10 +2457,11 @@ export default function LeadsListPage() {
           MODE the compact "Filters · N" + date indicators show on the left
           where the strip was. The strip stays visible for the Not-Contacted /
           Follow-Ups views too, since those segments now live inside it. */}
+      {view === "all" && (
       <div className="flex items-center justify-between gap-2">
         <div className="min-w-0 flex-1">
           <AnimatePresence initial={false}>
-            {!controlsCollapsed && statusStripTabs.length > 1 && (
+            {!controlsCollapsed && view === "all" && statusStripTabs.length > 1 && (
               <motion.div
                 key="lead-status-strip"
                 initial={{ height: 0, opacity: 0 }}
@@ -2215,57 +2484,11 @@ export default function LeadsListPage() {
           {/* Compact active-state indicators (collapsed WORK MODE only) — shown
               where the status strip was, so the user still knows filters/date
               are active without reproducing the whole control area. */}
-          {controlsCollapsed && (
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5 py-1">
-              <span
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset",
-                  collapsedFilterCount > 0
-                    ? "bg-[#EEF1FD] text-[#4361EE] ring-[#4361EE]/20"
-                    : "bg-zinc-50 text-zinc-500 ring-zinc-200",
-                )}
-                title={collapsedFilterCount > 0 ? `${collapsedFilterCount} active filter${collapsedFilterCount > 1 ? "s" : ""}` : "No filters applied"}
-              >
-                <SlidersHorizontal className="h-3 w-3" />
-                {collapsedFilterCount > 0 ? `Filters · ${collapsedFilterCount}` : "Filters"}
-              </span>
-              {collapsedDateLabel && (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full bg-zinc-50 px-2.5 py-1 text-[11px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200"
-                  title={`Date range: ${collapsedDateLabel}`}
-                >
-                  <CalendarClock className="h-3 w-3" />
-                  {collapsedDateLabel}
-                </span>
-              )}
-            </div>
-          )}
+          {controlsCollapsed && collapsedIndicators}
         </div>
-        {/* Right-side controls (outside the collapse animation, visible in both
-            modes). Customer Master linkage — New (fresh prospect) vs Existing
-            (linked) — now lives here next to the Collapse control, with its
-            field name labelled so its meaning is clear. */}
-        <div className="flex shrink-0 items-center gap-2">
-          <div className="hidden shrink-0 items-center gap-2 sm:flex">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</span>
-            <SegmentedTabs
-              value={filters.customerLink}
-              onChange={(v) => setFilters((f) => ({ ...f, customerLink: v as LeadFilters["customerLink"] }))}
-              options={[
-                { label: "All", value: "any" },
-                { label: "New", value: "new" },
-                { label: "Existing", value: "existing" },
-              ]}
-              size="sm"
-            />
-          </div>
-          {/* The ONE Collapse/Expand control. */}
-          <WorkspaceCollapseBar
-            collapsed={controlsCollapsed}
-            onToggle={workspace.toggle}
-          />
-        </div>
+        {rightControls}
       </div>
+      )}
 
       {/* Structured, faceted filter panel (slide-over) — grouped sections,
           searchable facets with live counts, and a live "Show N leads"
@@ -2275,7 +2498,7 @@ export default function LeadsListPage() {
         onClose={() => setShowFilters(false)}
         filters={filters}
         onApply={(next) => setFilters(() => next)}
-        onClearAll={clearFilters}
+        onClearAll={clearFiltersKeepView}
         leads={leads}
         openFollowUpsByLead={openFollowUpsByLead}
         facets={filterFacets}
@@ -2291,7 +2514,7 @@ export default function LeadsListPage() {
             <ActiveFilterChip key={`${c.label}-${i}`} label={c.label} value={c.value} onClear={c.onClear} />
           ))}
           <button
-            onClick={clearFilters}
+            onClick={clearFiltersKeepView}
             className="text-[12px] font-medium text-[#4361EE] hover:underline"
           >
             Clear all
@@ -2352,11 +2575,12 @@ export default function LeadsListPage() {
       ) : (
       <>
       {/* Not-Contacted accountability banner — explains the queue + the lock. */}
-      {view === "notContacted" && (
-        <div className="rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3 text-[12.5px] text-amber-800">
-          Leads still marked <span className="font-semibold">Not Contacted</span>. After 48 hours with no contact a lead is
-          <span className="font-semibold"> locked</span> — its Sales Agent loses access and a manager must reassign it (all other
-          columns show N/A until then). Reassigning restarts the clock and gives conversion credit to the new owner.
+      {view === "notContacted" && <NotContactedBanner sub={(filters.ncSub ?? "active") as NotContactedSub} />}
+      {view === "assigned" && (
+        <div className="rounded-xl border border-[#4361EE]/20 bg-[#EEF1FD]/60 px-4 py-3 text-[12.5px] text-[#2B3FB8]">
+          <span className="font-semibold">Fresh assignments</span> waiting for the agent&apos;s first action. A lead leaves this inbox
+          once a contact result, status change or follow-up is recorded — it always stays in <span className="font-semibold">All Leads</span>.
+          {slaMinutes ? <> Leads untouched for more than {slaMinutes} min are flagged <span className="font-semibold">Overdue</span>.</> : null}
         </div>
       )}
 
@@ -2446,6 +2670,8 @@ export default function LeadsListPage() {
                       </span>
                     ) : c.key === "id" ? (
                       "ID"
+                    ) : c.key === "date" && view === "assigned" ? (
+                      "Assigned On"
                     ) : (
                       c.label
                     )}
@@ -2468,7 +2694,9 @@ export default function LeadsListPage() {
               // but Contact Status + the reassign control is masked to N/A until
               // it's reassigned — so the flow is not visible to anyone until a
               // new owner picks it up.
-              const locked = isNotContactedLocked(lead);
+              // The 48h lock masks the row only in the accountability views;
+              // All Leads shows the complete authorised record.
+              const locked = view !== "all" && isNotContactedLocked(lead);
               // System-derived workflow (Action / Result / Store) for this lead.
               const wf = workflowByLead[lead.id] ?? deriveLeadWorkflow(lead, workflowSources);
               // Downstream (qualification-dependent) columns render N/A when the
@@ -2666,6 +2894,7 @@ export default function LeadsListPage() {
       )}
 
       {/* Create / Edit flow */}
+      <AssignLeadsDialog open={showAssign} onClose={() => setShowAssign(false)} />
       <LeadCaptureFlow open={showCreate} onClose={() => setShowCreate(false)} />
       <LeadCaptureFlow open={!!editLead} onClose={() => setEditLead(null)} editLead={editLead} />
 
