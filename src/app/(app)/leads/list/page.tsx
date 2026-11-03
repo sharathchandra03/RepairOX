@@ -58,7 +58,7 @@ import {
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters, type LeadView,
   type NotContactedSub, type NotContactedFocus,
 } from "@/lib/leads-data";
-import { LeadWorkspaceTabs } from "@/components/leads/lead-workspace-tabs";
+import { AssignedSubTabs, type AssignedSubValue, LeadWorkspaceTabs } from "@/components/leads/lead-workspace-tabs";
 import { NotContactedControls, notContactedHint, useContactTransitions } from "@/components/leads/not-contacted-controls";
 import { AssignLeadsDialog } from "@/components/leads/assign-leads-dialog";
 import { useStoreSettings } from "@/lib/store-settings";
@@ -1394,7 +1394,24 @@ export default function LeadsListPage() {
      order so the left frozen block + its sticky offsets always follow what the
      user actually sees. Freeze + order remain independent preferences, but the
      frozen offsets must honour the current order to stay in lockstep. */
-  const frozen = useFrozenColumns("lead_table", currentUser?.id, orderedColumns);
+  /* INDEPENDENT pins: freezing a column freezes ONLY that column. It is then
+     DISPLAYED beside its edge anchor (left → after Date, right → before Last
+     Action) so the scrolling columns never slide under it or overlap. The saved
+     column order is never rewritten; unfreezing returns the column to its slot. */
+  const frozen = useFrozenColumns("lead_table", currentUser?.id, orderedColumns, { independent: true });
+  const displayColumns = useMemo(() => {
+    const leftSet = new Set(frozen.leftKeys);
+    const rightSet = new Set(frozen.rightKeys);
+    const byKey: Record<string, GridColumn> = {};
+    for (const c of orderedColumns) byKey[c.key] = c;
+    const keys = [
+      ...orderedColumns.filter((c) => c.key === "select").map((c) => c.key),
+      ...frozen.leftKeys,
+      ...orderedColumns.map((c) => c.key).filter((k) => k !== "select" && !leftSet.has(k) && !rightSet.has(k)),
+      ...frozen.rightKeys,
+    ];
+    return keys.map((k) => byKey[k]).filter((c): c is GridColumn => !!c);
+  }, [orderedColumns, frozen.leftKeys, frozen.rightKeys]);
   const scrollRef = useRef<HTMLDivElement>(null);
   useScrollEdges(scrollRef);
 
@@ -1554,9 +1571,9 @@ export default function LeadsListPage() {
   // visibility boundary — this only shapes the presentation.)
   const ownerScope = canSeeAllLeads ? "" : meId;
   useEffect(() => {
-    if (filters.timeZone === orgTz && (filters.ownerScope ?? "") === ownerScope) return;
-    setFilters((f) => ({ ...f, timeZone: orgTz, ownerScope }));
-  }, [filters.timeZone, filters.ownerScope, orgTz, ownerScope, setFilters]);
+    if (filters.timeZone === orgTz && (filters.ownerScope ?? "") === ownerScope && filters.assignedSub) return;
+    setFilters((f) => ({ ...f, timeZone: orgTz, ownerScope, assignedSub: f.assignedSub ?? "all" }));
+  }, [filters.timeZone, filters.ownerScope, filters.assignedSub, orgTz, ownerScope, setFilters]);
 
   const leadsWithAnyFollowUp = useMemo(() => new Set(allFollowUps.map((f) => f.leadId)), [allFollowUps]);
   const assignedInbox = useMemo(
@@ -1575,6 +1592,10 @@ export default function LeadsListPage() {
     return { active, history, awaiting, attempted };
   }, [leads]);
   const notContactedCount = ncCounts.active;
+  const assignedAllCount = useMemo(
+    () => leads.filter((l) => (isFreshAssignment(l, leadsWithAnyFollowUp.has(l.id)) || isNotContactedActive(l)) && (!ownerScope || l.assignedTo === ownerScope)).length,
+    [leads, leadsWithAnyFollowUp, ownerScope],
+  );
 
   // First-response SLA (org setting, optional): FLAG only — an unworked lead is
   // never silently dropped from the inbox. Re-evaluated every minute.
@@ -1669,8 +1690,9 @@ export default function LeadsListPage() {
       status: "",
       ncSub: f.ncSub ?? "active",
       ncFocus: f.ncFocus ?? "all",
+      assignedSub: v === "assigned" ? "all" : f.assignedSub,
       // Assigned Leads offers a shorter range strip; fall back safely.
-      dateRange: v === "assigned" && (f.dateRange === "lastmonth" || f.dateRange === "1year") ? "all" : f.dateRange,
+      dateRange: (v === "assigned" || v === "notContacted") && ["lastmonth", "1year", "7days", "1month"].includes(f.dateRange) ? "all" : f.dateRange,
     }));
     try { window.localStorage.setItem(WORKSPACE_VIEW_KEY, v); } catch { /* storage unavailable */ }
   }, [setFilters, WORKSPACE_VIEW_KEY]);
@@ -2338,7 +2360,7 @@ export default function LeadsListPage() {
         <LeadWorkspaceTabs
           value={view}
           onChange={changeView}
-          counts={{ assigned: assignedCount, notContacted: notContactedCount, followUps: followUpsCount }}
+          counts={{ assigned: assignedAllCount, notContacted: notContactedCount, followUps: followUpsCount }}
           hint={
             view === "assigned"
               ? `Fresh assignments waiting for the agent's first action. A lead leaves this inbox once a contact result, status change or follow-up is recorded — it always stays in All Leads.${slaMinutes ? ` Leads untouched for more than ${slaMinutes} min are flagged Overdue.` : ""}`
@@ -2401,16 +2423,27 @@ export default function LeadsListPage() {
           control. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
         <div className="min-w-0 flex-1 max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          <div className="flex min-w-max items-center gap-3">
           <SegmentedTabs
             value={filters.dateRange}
             onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
             options={LEAD_DATE_RANGES
-              // Assigned Leads: All | Today | Yesterday | 7 Days | 1 Month | Custom
-              // (filtered by ASSIGNMENT time in the organisation timezone).
-              .filter((d) => view !== "assigned" || ["all", "today", "yesterday", "7days", "1month", "custom"].includes(d.value))
+              // Assigned workspace: All | Today | Yesterday | Custom
+              // (Assigned filters by ASSIGNMENT time in the organisation timezone).
+              .filter((d) => (view !== "assigned" && view !== "notContacted") || ["all", "today", "yesterday", "custom"].includes(d.value))
               .map((d) => ({ label: d.label, value: d.value }))}
             size="sm"
           />
+            {(view === "assigned" || view === "notContacted") && (
+              <AssignedSubTabs
+                value={(view === "notContacted" ? "noResponse" : filters.assignedSub === "new" ? "new" : "all") as AssignedSubValue}
+                onChange={(v) => setFilters((f) => v === "noResponse"
+                  ? { ...f, view: "notContacted", status: "", ncSub: f.ncSub ?? "active", ncFocus: f.ncFocus ?? "all" }
+                  : { ...f, view: "assigned", status: "", assignedSub: v })}
+                counts={{ all: assignedAllCount, new: assignedCount, noResponse: notContactedCount }}
+              />
+            )}
+          </div>
           {view === "assigned" && (
             <p className="mt-1 px-1 text-[11px] text-muted-foreground">Filtering by assigned date &amp; time ({orgTz}).</p>
           )}
@@ -2443,7 +2476,7 @@ export default function LeadsListPage() {
               and Freeze are two SEPARATE per-user preferences. */}
           <div className="hidden items-center gap-2 md:flex">
             <CustomizeColumnsMenu columns={orderedColumns} state={columnOrder} />
-            <FreezeColumnsMenu columns={orderedColumns} state={frozen} />
+            <FreezeColumnsMenu columns={orderedColumns} state={frozen} independent />
           </div>
         </div>
       </div>
@@ -2619,7 +2652,7 @@ export default function LeadsListPage() {
             scrolls horizontally on narrower viewports. */}
         <table className="w-full min-w-[2910px] table-fixed text-[14px]">
           <colgroup>
-            {orderedColumns.map((c) => (
+            {displayColumns.map((c) => (
               <col key={c.key} style={{ width: c.width }} />
             ))}
           </colgroup>
@@ -2635,7 +2668,7 @@ export default function LeadsListPage() {
             style={{ background: "#5368D4", color: "#ffffff", borderBottom: "2px solid rgba(255,255,255,0.35)" }}
           >
             <tr className="text-[12px] font-bold uppercase tracking-wider">
-              {orderedColumns.map((c) => {
+              {displayColumns.map((c) => {
                 // HEADER alignment: most headers are CENTERED to sit symmetrically
                 // over their column, EXCEPT "select" (checkbox) and "actions"
                 // (right-aligned). The multi-line / rich-text columns (Contact
@@ -2758,7 +2791,7 @@ export default function LeadsListPage() {
                     only its POSITION follows the personal layout. The two frozen
                     anchors (Date left, Last Action right) and the structural
                     Selection / multi-store Store columns keep their fixed slots. */}
-                {orderedColumns.map((c) => {
+                {displayColumns.map((c) => {
                   // Columns whose cell owns interactive controls stop the row's
                   // open-detail click (same as the original per-cell wrappers).
                   const stops = c.key === "select" || c.key === "agent" || c.key === "device"

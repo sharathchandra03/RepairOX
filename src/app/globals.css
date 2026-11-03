@@ -574,6 +574,14 @@ body {
 [data-scroll-left="true"] .rox-frozen-left-edge::after { opacity: 1; }
 [data-scroll-right="true"] .rox-frozen-right-edge::after { opacity: 1; }
 
+/* Agent Performance grid — frozen BODY cells take the row's resolved surface
+   (alternating / highlight / hover) from the --perf-cell-bg variable set on the
+   <tr>, so a frozen cell is always 100% opaque yet still reads the same as the
+   scrolling cells beside it. Header + footer set their own inline brand fill. */
+.rox-perf-table tbody .rox-frozen {
+  background-color: var(--perf-cell-bg, #ffffff);
+}
+
 /* Polished, unobtrusive scrollbar for the grid scroll container (spec §10). */
 .rox-grid-scroll {
   scrollbar-width: thin;

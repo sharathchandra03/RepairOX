@@ -115,7 +115,13 @@ export function useFrozenColumns(
   gridId: string,
   userId: string | null | undefined,
   columns: GridColumn[],
+  /** `independent: true` → each ticked column is frozen ON ITS OWN (no
+   *  contiguous block). The consumer is then responsible for DISPLAYING frozen
+   *  columns beside their edge anchor (see PerformanceTable). Default false
+   *  keeps the Lead Table's contiguous-block behaviour. */
+  options?: { independent?: boolean },
 ): FrozenColumnsState {
+  const independent = options?.independent === true;
   // Optional (user-selected) frozen tokens — encoded (plain = left,
   // "right:" prefixed = right). Mandatory anchors are implicit. Persisted
   // verbatim as a flat string[] (no storage-schema change).
@@ -237,19 +243,27 @@ export function useFrozenColumns(
   // with gaps/overlap.
   const leftKeys = useMemo(() => {
     const set = new Set(validLeft);
+    if (independent) {
+      const picked = freezableOrder.filter((k) => set.has(k));
+      return lockedLeftKey ? [lockedLeftKey, ...picked] : picked;
+    }
     const ordered: string[] = [];
     for (const key of freezableOrder) {
       if (!set.has(key)) break;
       ordered.push(key);
     }
     return lockedLeftKey ? [lockedLeftKey, ...ordered] : ordered;
-  }, [freezableOrder, validLeft, lockedLeftKey]);
+  }, [freezableOrder, validLeft, lockedLeftKey, independent]);
 
   // RIGHT frozen block: a CONTIGUOUS SUFFIX of the freezable columns, then the
   // mandatory right anchor LAST. Built by walking from the right edge inward
   // and stopping at the first gap.
   const rightKeys = useMemo(() => {
     const set = new Set(validRight);
+    if (independent) {
+      const picked = freezableOrder.filter((k) => set.has(k));
+      return rightKey ? [...picked, rightKey] : picked;
+    }
     const ordered: string[] = [];
     for (let i = freezableOrder.length - 1; i >= 0; i--) {
       const key = freezableOrder[i];
@@ -257,7 +271,7 @@ export function useFrozenColumns(
       ordered.unshift(key);
     }
     return rightKey ? [...ordered, rightKey] : ordered;
-  }, [freezableOrder, validRight, rightKey]);
+  }, [freezableOrder, validRight, rightKey, independent]);
 
   const toggle = useCallback(
     (key: string) => {
@@ -271,6 +285,15 @@ export function useFrozenColumns(
         const { left, right } = splitStored(prev);
         const leftSet = new Set(left);
         const rightSet = new Set(right);
+
+        if (independent) {
+          // Freeze / unfreeze ONLY this column on its own side.
+          const nextLeft = left.filter((k) => k !== key);
+          const nextRight = right.filter((k) => k !== key);
+          const was = side === "left" ? leftSet.has(key) : rightSet.has(key);
+          if (!was) (side === "left" ? nextLeft : nextRight).push(key);
+          return joinStored(nextLeft, nextRight);
+        }
 
         if (side === "left") {
           const wasFrozen = leftSet.has(key);
@@ -301,7 +324,7 @@ export function useFrozenColumns(
         return joinStored(nextLeft, nextRight);
       });
     },
-    [columns, freezableOrder, sideFor],
+    [columns, freezableOrder, sideFor, independent],
   );
 
   const reset = useCallback(() => setStored([]), []);

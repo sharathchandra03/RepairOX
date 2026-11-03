@@ -703,6 +703,9 @@ export interface LeadFilters {
   ncSub?: NotContactedSub;
   /** Not Contacted → Active: Awaiting First Attempt / Attempted – No Response. */
   ncFocus?: NotContactedFocus;
+  /** Assigned Leads workspace: "new" = fresh-assignment inbox (default when unset),
+   *  "all" = inbox + active No Response (Not Contacted) leads. */
+  assignedSub?: "new" | "all";
   /** Organisation IANA timezone, used ONLY by the Assigned Leads date basis. */
   timeZone?: string;
   /** Assigned Leads inbox owner scope. Set to the signed-in staff id for users
@@ -790,7 +793,8 @@ export function applyLeadFilters(
     // RLS. This keeps "View leads" numerators/denominators traceable.
     if (!evidence && view === "assigned") {
       // Fresh-assignment INBOX: assigned, awaiting first meaningful action.
-      if (!isFreshAssignment(l, leadsWithAnyFollowUp?.has(l.id) ?? false)) return false;
+      const fresh = isFreshAssignment(l, leadsWithAnyFollowUp?.has(l.id) ?? false);
+      if (f.assignedSub === "all" ? !(fresh || isNotContactedActive(l)) : !fresh) return false;
       if (f.ownerScope && l.assignedTo !== f.ownerScope) return false;
     } else if (!evidence && view === "notContacted") {
       const sub = f.ncSub ?? "active";

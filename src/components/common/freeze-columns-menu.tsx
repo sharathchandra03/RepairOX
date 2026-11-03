@@ -26,7 +26,11 @@ export function FreezeColumnsMenu({
   columns,
   state,
   className,
+  independent = false,
 }: {
+  /** True when each column freezes on its own (frozen columns are shown next
+   *  to their edge anchor). Only changes the helper copy. */
+  independent?: boolean;
   /** Columns in visual order (same array passed to useFrozenColumns). */
   columns: GridColumn[];
   state: FrozenColumnsState;
@@ -108,8 +112,9 @@ export function FreezeColumnsMenu({
                 Freeze a column
               </p>
               <p className="px-2.5 pb-1.5 text-[10.5px] leading-snug text-muted-foreground/70">
-                A left-side column pins to the left (with the columns before it);
-                a right-side column pins to the right (with the columns after it).
+                {independent
+                  ? "Only the ticked column is frozen. It sits beside the Agent column (left) or the Action column (right) and stays visible while the rest scroll."
+                  : "A left-side column pins to the left (with the columns before it); a right-side column pins to the right (with the columns after it)."}
               </p>
               {optional.map((c) => {
                 const side = state.sideFor(c.key);

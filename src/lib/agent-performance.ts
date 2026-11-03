@@ -27,6 +27,8 @@ import {
   type LeadFollowUp,
   computeLeadMetrics,
   openFollowUp,
+  isFreshAssignment,
+  isNotContactedActive,
   isQualifiedLead,
   isLeadPipelineEligible,
   isWonStatus,
@@ -158,6 +160,14 @@ export interface AgentPerformance {
   pendingFollowUp: number; // leads with an open follow-up
   overdueFollowUp: number;
   conversionRate: number;  // converted / leads (0..1)
+
+  /* Work-queue counts — the SAME membership the Lead Table uses:
+       pendingLeads = fresh assignments awaiting the first action
+                      (Assigned Leads → "New", `isFreshAssignment`)
+       noResponse   = open leads with no successful two-way contact
+                      (Not Contacted → Active, `isNotContactedActive`) */
+  pendingLeads: number;
+  noResponse: number;
 
   /* Money */
   pipelineValue: number;   // Σ expected value of OPEN leads (NOT revenue)
@@ -291,6 +301,11 @@ export function computeAgentPerformance(
   let convDaysSum = 0;
   let convDaysCount = 0;
   let invoiceCount = 0;
+  let pendingLeads = 0;
+  let noResponse = 0;
+  // A lead with ANY follow-up record has had its first action (same rule the
+  // Lead Table uses for the Assigned inbox).
+  const leadsWithAnyFollowUp = new Set(allFollowUps.map((f) => f.leadId));
 
   const funnel: LeadFunnel = {
     total: agentLeads.length,
@@ -317,6 +332,8 @@ export function computeAgentPerformance(
     expectedValueSum += ev;
 
     if (isContactedLead(l, hasOpen)) contacted += 1;
+    if (isFreshAssignment(l, leadsWithAnyFollowUp.has(l.id))) pendingLeads += 1;
+    if (isNotContactedActive(l)) noResponse += 1;
 
     // Projection: probability-weighted expected value of OPEN pipeline only.
     if (!won && !lost && isLeadPipelineEligible(l)) projection += ev * leadStageProbability(l, hasOpen);
@@ -391,6 +408,8 @@ export function computeAgentPerformance(
     pendingFollowUp: base.pendingFollowUp,
     overdueFollowUp: base.overdue,
     conversionRate: base.conversionRate,
+    pendingLeads,
+    noResponse,
 
     pipelineValue: base.pipelineValue,
     projection,
@@ -613,6 +632,9 @@ export interface PerfTotals {
   followUpsOverdue: number;
   followUpsCompleted: number;
   followUpOverdueRate: number; // overdue / total (0..1)
+  /* Work-queue counts (see AgentPerformance.pendingLeads / noResponse). */
+  pendingLeads: number;
+  noResponse: number;
 }
 
 /** Sum any set of performance rows (agent rows or month rows) into totals that
@@ -623,7 +645,8 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
   | "pickupCompleted" | "onSiteCompleted" | "revenueWon" | "revenueWonNet" | "invoiceCount" | "projection"
   | "ticketsWon" | "pendingFollowUp" | "overdueFollowUp"
   | "convertedAgentDriven" | "convertedSelfInitiated" | "ticketsWonAgentDriven"
-  | "ticketsWonSelfInitiated" | "revenueWonAgentDriven" | "revenueWonSelfInitiated" | "followUps">[]): PerfTotals {
+  | "ticketsWonSelfInitiated" | "revenueWonAgentDriven" | "revenueWonSelfInitiated" | "followUps"
+  | "pendingLeads" | "noResponse">[]): PerfTotals {
   const t: PerfTotals = {
     leads: 0, qualified: 0, converted: 0, routeAssigned: 0, walkIn: 0, pickup: 0, onSite: 0,
     pickupCompleted: 0, onSiteCompleted: 0, revenueWon: 0, revenueWonNet: 0, invoiceCount: 0, projection: 0,
@@ -631,6 +654,7 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
     convertedAgentDriven: 0, convertedSelfInitiated: 0, ticketsWonAgentDriven: 0,
     ticketsWonSelfInitiated: 0, revenueWonAgentDriven: 0, revenueWonSelfInitiated: 0,
     followUpsTotal: 0, followUpsOverdue: 0, followUpsCompleted: 0, followUpOverdueRate: 0,
+    pendingLeads: 0, noResponse: 0,
   };
   for (const r of rows) {
     t.leads += r.leads;
@@ -658,6 +682,8 @@ export function sumPerfRows(rows: Pick<AgentPerformance,
     t.followUpsTotal += r.followUps.total;
     t.followUpsOverdue += r.followUps.overdue;
     t.followUpsCompleted += r.followUps.completed;
+    t.pendingLeads += r.pendingLeads;
+    t.noResponse += r.noResponse;
   }
   // Weighted rates re-derived from summed counts (never an average of rates).
   t.conversionRate = t.leads > 0 ? t.converted / t.leads : 0;
