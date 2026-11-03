@@ -86,13 +86,28 @@ export function LeadJourneyTimeline({ lead }: { lead: Lead }) {
     const createdAt = lead.createdAt || (lead.date ? `${lead.date}T${lead.time || "00:00"}:00` : "");
     out.push({ key: "created", at: createdAt, icon: Sparkles, color: "bg-[#EEF1FD] text-[#4361EE] ring-[#B3BFF6]", title: "Lead created", detail: `${lead.leadNo}${lead.source ? ` · ${lead.source}` : ""}` });
 
-    // Assignment history (ownership)
+    // Assignment history (ownership) — every owner change is its own milestone:
+    // first assignment, manual intake assignment, reassignment. Exact server
+    // time, who assigned it, and the recorded reason. Read from the append-only
+    // lead_assignment_history rows (written by the DB trigger).
     for (const a of assignmentHistoryFor(lead.id)) {
+      const reassigned = !!a.fromUserName || !!a.fromUserId;
+      const manual = /assign leads|manual/i.test(a.reason || "");
+      const title = !a.toUserName
+        ? "Unassigned"
+        : reassigned
+          ? `Reassigned ${a.fromUserName ? `from ${a.fromUserName} ` : ""}to ${a.toUserName}`
+          : manual ? `Manually assigned to ${a.toUserName}` : `Assigned to ${a.toUserName}`;
+      const reason = a.reason && a.reason !== "Lead created" ? a.reason : undefined;
       out.push({
         key: `assign:${a.id}`, at: a.createdAt, icon: UserCheck,
         color: "bg-violet-50 text-violet-600 ring-violet-200",
-        title: a.toUserName ? `Assigned to ${a.toUserName}` : "Unassigned",
-        detail: a.assignedByName ? `by ${a.assignedByName}` : undefined,
+        title,
+        detail: [
+          a.assignedByName ? `by ${a.assignedByName}` : undefined,
+          a.createdAt ? fmt(a.createdAt) : undefined,
+          reason,
+        ].filter(Boolean).join(" · ") || undefined,
       });
     }
 

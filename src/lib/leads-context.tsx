@@ -470,7 +470,9 @@ interface LeadsContextValue {
   /** Active option values for a field, in sort order. */
   optionsFor: (field: LeadFieldKey) => LeadOption[];
 
-  addLead: (draft: LeadDraft) => Promise<Lead | null>;
+  /** `assignmentReason` labels the initial assignment in the Lead Journey
+   *  (e.g. "Manual assignment (Assign Leads)"); defaults to "Lead created". */
+  addLead: (draft: LeadDraft, opts?: { assignmentReason?: string }) => Promise<Lead | null>;
   /** Resolves false when nothing (or not everything) could be saved. */
   updateLead: (id: string, updates: Partial<Lead>) => Promise<boolean>;
   /** May the current user change THIS lead's owner (mirrors the DB guard)? */
@@ -1120,7 +1122,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [useDb, db]);
 
   /* ── Lead CRUD ── */
-  const addLead = useCallback(async (draft: LeadDraft): Promise<Lead | null> => {
+  const addLead = useCallback(async (draft: LeadDraft, opts?: { assignmentReason?: string }): Promise<Lead | null> => {
     const { date, time, month } = nowParts();
     let contactId = draft.contactId ?? "";
     try {
@@ -1184,6 +1186,8 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
         // (never left to the DB's home-store default).
         ...(storeId ? { branch_id: storeId } : {}),
         ...(leadNo ? { lead_no: leadNo } : {}),
+        // Recorded by the DB trigger in lead_assignment_history (Lead Journey).
+        ...(ownerId && opts?.assignmentReason ? { last_assignment_reason: opts.assignmentReason } : {}),
       };
       let res = await db.from("leads").insert(row).select("*").single();
       // Schema-drift: drop optional columns the DB doesn't have yet and retry.
@@ -1248,7 +1252,7 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
       const ev: LeadAssignmentEvent = {
         id: uid(), leadId: lead.id, toUserId: ownerId, toUserName: ownerName,
         assignedBy: me || undefined, assignedByName: currentUserNameRef.current || undefined,
-        reason: "Lead created", createdAt: new Date().toISOString(),
+        reason: opts?.assignmentReason || "Lead created", createdAt: new Date().toISOString(),
       };
       setAssignmentHistory((prev) => { const next = [ev, ...prev]; writeLS(ASSIGN_HISTORY_KEY, next); return next; });
     }
