@@ -3,6 +3,7 @@
 /* RepairOX — Reporting · Saved report library. Favourite, pin, run, export or
    edit any report the user has built. */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useMemo, useState } from "react";
 import { Star, Pin, Trash2, Pencil, FileSpreadsheet, FileText, Printer, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -60,9 +61,7 @@ export function SavedReportsPanel({
   if (creating || editing) {
     return (
       <div className="space-y-3">
-        <button onClick={() => { setCreating(false); setEditing(null); }} className="text-[12px] font-medium text-[#4361EE] hover:underline">
-          ← Back to library
-        </button>
+        <BackPill label="Back to library" onClick={() => { setCreating(false); setEditing(null); }} />
         <CustomReportBuilder
           data={data}
           baseFilters={baseFilters}

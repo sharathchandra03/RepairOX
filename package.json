@@ -18,6 +18,7 @@
     "ms:verify": "node scripts/ms-verify.mjs",
     "ms:security": "node scripts/ms-security.mjs",
     "leads:verify": "node scripts/sales-agent-verify.mjs",
+    "leads:search:verify": "node scripts/lead-search-verify.mjs",
     "leads:intelligence:test": "tsx --test src/lib/lead-intelligence.test.ts src/lib/lead-sales-mix.test.ts",
     "leads:workspace:test": "tsx --test src/lib/lead-workspace.test.ts",
     "leads:salesbook:test": "tsx --test src/lib/lead-sales-book.test.ts",

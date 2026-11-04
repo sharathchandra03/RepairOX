@@ -158,6 +158,21 @@ export const PERMISSION_MODULES: ModuleDef[] = [
     },
   },
   {
+    // Lead Intelligence Search + shared READ-ONLY reference is its OWN module so
+    // cross-agent read access is never switched on as a side-effect of a higher
+    // Leads tier. None of these keys grants edit, performance-all, or lead
+    // see-all scope (those stay in the `leads` module).
+    id: "lead_shared_access",
+    label: "Lead Search & Shared Reference",
+    blurb: "Search leads/customers and read other agents' leads and customer history (read-only).",
+    icon: "Search",
+    levels: {
+      view: ["leads_search"],
+      work: ["leads_customer_history"],
+      manage: ["leads_shared_reference"],
+    },
+  },
+  {
     // Sales Agent identity is its OWN module (single Work tier) so it is never
     // switched on as a side-effect of giving a manager/owner a higher Leads
     // tier. Only roles explicitly set to "Work" here become eligible lead

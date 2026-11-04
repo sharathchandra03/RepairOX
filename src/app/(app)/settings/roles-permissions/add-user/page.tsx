@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
@@ -174,9 +175,7 @@ function AddStaffInner() {
         title="Add staff member"
         subtitle="Create the employee's profile and their RepairOX login in one step. You choose their role — they never choose it themselves."
         actions={
-          <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={() => router.push("/settings/roles-permissions")}>
-            <ArrowLeft className="h-4 w-4" /> Back
-          </Button>
+          <BackPill href="/settings/roles-permissions" />
         }
       />
 

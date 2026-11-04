@@ -1,9 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { BackLink } from "@/components/common/back-pill";
 import { resolveOrigin, type SettingsOrigin } from "@/lib/settings-origin";
 
 /**
@@ -29,13 +28,7 @@ export function SettingsBackBar() {
   return (
     // Right-aligned, compact, RepairOX blue outline button.
     <div className="mb-4 flex justify-end">
-      <Link
-        href={origin.returnTo}
-        className="inline-flex items-center gap-1.5 rounded-xl border border-[#4361EE]/50 bg-white px-3 py-1.5 text-[13px] font-semibold text-[#4361EE] shadow-sm transition-colors hover:border-[#4361EE] hover:bg-[#EEF1FD]"
-      >
-        <ArrowLeft className="h-4 w-4 text-[#4361EE]" />
-        Back to {origin.label}
-      </Link>
+      <BackLink href={origin.returnTo} label={`Back to ${origin.label}`} />
     </div>
   );
 }

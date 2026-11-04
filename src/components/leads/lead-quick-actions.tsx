@@ -103,7 +103,7 @@ export function LeadQuickActions({ lead, readOnly = false }: { lead: Lead; readO
   const canRoute = allow(can, CAP.lead.convert) && !readOnly;
   const canDeal = allow(can, CAP.deal.create) && !readOnly;
   const canQuote = allow(can, CAP.quotation.view) && !readOnly;
-  const canViewCustomer = allow(can, CAP.customer.view);
+  const canViewCustomer = allow(can, CAP.customer.master);
   const canAssign = (allow(can, CAP.lead.assign) || allow(can, CAP.lead.reassign)) && !readOnly;
 
   const phoneDigits = (lead.number || "").replace(/\D/g, "");

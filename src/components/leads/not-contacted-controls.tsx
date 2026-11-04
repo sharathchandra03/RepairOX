@@ -17,7 +17,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
-import { contactStatusClass, type NotContactedFocus, type NotContactedSub } from "@/lib/leads-data";
+import { contactStatusClass, type NotContactedSub } from "@/lib/leads-data";
 import { cn } from "@/lib/utils";
 
 function RosePills<T extends string>({
@@ -29,7 +29,7 @@ function RosePills<T extends string>({
   label: string;
 }) {
   return (
-    <div role="tablist" aria-label={label} className="inline-flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50/60 p-1">
+    <div role="tablist" aria-label={label} className="inline-flex items-center gap-1 rounded-full border border-[#4361EE]/60 bg-rose-50/60 p-1">
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -56,18 +56,16 @@ function RosePills<T extends string>({
 }
 
 export function NotContactedControls({
-  sub, onSub, focus, onFocus, counts,
+  sub, onSub, counts,
 }: {
   sub: NotContactedSub;
   onSub: (v: NotContactedSub) => void;
-  focus: NotContactedFocus;
-  onFocus: (v: NotContactedFocus) => void;
-  counts: { active: number; history: number; awaiting: number; attempted: number };
+  counts: { active: number; history: number };
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
       <RosePills
-        label="Not Contacted sub-views"
+        label="No Response sub-views"
         value={sub}
         onChange={onSub}
         options={[
@@ -75,18 +73,6 @@ export function NotContactedControls({
           { value: "history", label: "History", count: counts.history },
         ]}
       />
-      {sub === "active" && (
-        <RosePills
-          label="Not Contacted categories"
-          value={focus}
-          onChange={onFocus}
-          options={[
-            { value: "all", label: "All", count: counts.active },
-            { value: "awaiting", label: "Awaiting First Attempt", count: counts.awaiting },
-            { value: "attempted", label: "Attempted – No Response", count: counts.attempted },
-          ]}
-        />
-      )}
     </div>
   );
 }

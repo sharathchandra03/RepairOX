@@ -11,6 +11,7 @@
    to access — never a generic "coming soon" message.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -160,15 +161,7 @@ export function ComingSoonPage({ content }: { content: ComingSoonContent }) {
           transition={{ delay: 0.7, duration: 0.4 }}
           className="mt-10 flex items-center gap-3"
         >
-          <Button
-            variant="outline"
-            size="lg"
-            className="gap-2 rounded-full"
-            onClick={() => router.back()}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Go back
-          </Button>
+          <BackPill label="Go back" onClick={() => router.back()} />
           <Button
             size="lg"
             className="gap-2 rounded-full"

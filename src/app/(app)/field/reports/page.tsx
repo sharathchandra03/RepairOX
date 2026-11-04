@@ -9,6 +9,7 @@
        computed from actual linked Lead / Walk-In / Field Job / Ticket records.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useMemo } from "react";
 import Link from "next/link";
 import { ArrowLeft, Truck, Store, CheckCircle2, XCircle, Clock, Timer } from "lucide-react";
@@ -94,7 +95,7 @@ export default function FieldReportsPage() {
           eyebrow="Field · Reports"
           title="Field Reporting"
           subtitle="Pickup & drop operations and route performance — from real linked records."
-          actions={<Link href="/field" className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-zinc-700 hover:bg-muted"><ArrowLeft className="h-3.5 w-3.5" /> Back to Field</Link>}
+          actions={<BackLink href="/field" label="Back to Field" />}
         />
 
         {/* Operational metrics */}

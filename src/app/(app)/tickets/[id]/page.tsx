@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useState, useMemo, useCallback, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { motion } from "framer-motion";
@@ -515,9 +516,7 @@ export default function TicketDetailPage() {
         </div>
         <h2 className="text-lg font-bold">Ticket Not Found</h2>
         <p className="text-sm text-muted-foreground">The ticket "{ticketId}" does not exist or has been deleted.</p>
-        <Link href="/tickets">
-          <Button variant="outline" size="md"><ArrowLeft className="h-4 w-4" /> Back to Tickets</Button>
-        </Link>
+        <BackLink href="/tickets" label="Back to Tickets" />
       </div>
     );
   }
@@ -528,11 +527,7 @@ export default function TicketDetailPage() {
       <DetailHero>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <Link href="/tickets">
-              <button className="mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Back to tickets">
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-            </Link>
+            <BackLink href="/tickets" label="Back" className="mt-1" />
             <div>
               {/* Document-type eyebrow — makes an Estimate / Warranty unmistakable. */}
               {estimate && (

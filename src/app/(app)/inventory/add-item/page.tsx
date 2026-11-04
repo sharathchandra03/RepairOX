@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
@@ -121,11 +122,7 @@ export default function AddItemPage() {
         subtitle={isEdit ? `Editing ${editItem?.name || editId}` : "Create a part/product or repair service with pricing, cost and stock controls."}
         actions={
           <>
-            <Link href="/inventory/item-master">
-              <Button variant="ghost" size="sm" className="gap-1.5 rounded-full">
-                <ArrowLeft className="h-3.5 w-3.5" /> Item Master
-              </Button>
-            </Link>
+            <BackLink href="/inventory/item-master" label="Item Master" />
             {!isEdit && (
               <Button variant="secondary" size="sm" className="gap-1.5 rounded-full" onClick={() => save(true)}>
                 <Plus className="h-3.5 w-3.5" /> Save &amp; Add New

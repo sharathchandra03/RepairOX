@@ -15,6 +15,7 @@
    lives only in the print URL.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -56,9 +57,7 @@ export default function DiagnosticReportPage() {
         </div>
         <h2 className="text-lg font-bold">Ticket Not Found</h2>
         <p className="text-sm text-muted-foreground">The ticket &ldquo;{ticketId}&rdquo; does not exist or has been deleted.</p>
-        <Link href="/tickets">
-          <Button variant="outline" size="md"><ArrowLeft className="h-4 w-4" /> Back to Tickets</Button>
-        </Link>
+        <BackLink href="/tickets" label="Back to Tickets" />
       </div>
     );
   }
@@ -72,9 +71,7 @@ export default function DiagnosticReportPage() {
         </div>
         <h2 className="text-lg font-bold">Not Allowed</h2>
         <p className="text-sm text-muted-foreground">You don&rsquo;t have permission to generate a diagnostic report.</p>
-        <Link href={`/tickets/${ticket.id}`}>
-          <Button variant="outline" size="md"><ArrowLeft className="h-4 w-4" /> Back to Ticket</Button>
-        </Link>
+        <BackLink href={`/tickets/${ticket.id}`} label="Back to Ticket" />
       </div>
     );
   }
@@ -93,11 +90,7 @@ export default function DiagnosticReportPage() {
       <DetailHero>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <Link href={`/tickets/${ticket.id}`}>
-              <button className="mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Back to ticket">
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-            </Link>
+            <BackLink href={`/tickets/${ticket.id}`} label="Back" className="mt-1" />
             <div>
               <p className="text-[11px] font-bold uppercase tracking-wider text-[#BE123C]">Diagnostic Report</p>
               <div className="flex items-center gap-2 flex-wrap">

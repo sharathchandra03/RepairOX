@@ -30,6 +30,7 @@
    same working precedent rather than forcing the Tickets-only sticky hook.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -396,9 +397,7 @@ export default function ManageCustomersPage() {
                 longer surfaced in the Shop workspace nav. Back always returns to
                 the Settings → Customers section (deterministic, unlike
                 router.back() which depends on browser history). */}
-            <Button variant="ghost" size="md" className="gap-1.5 rounded-full" onClick={() => router.push("/settings/customers/groups")}>
-              <ArrowLeft className="h-4 w-4" /> Back to Settings
-            </Button>
+            <BackPill href="/settings/customers/groups" label="Back to Settings" />
             <Can permission={CAP.customer.import}>
               <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={() => setShowImport(true)}>
                 <Upload className="h-4 w-4" /> Import

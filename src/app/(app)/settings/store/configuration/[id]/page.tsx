@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import {
@@ -214,9 +215,7 @@ function ViewStoreInner() {
   if (!detail) {
     return (
       <div className="space-y-4">
-        <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={() => router.push("/settings/store/configuration")}>
-          <ArrowLeft className="h-4 w-4" /> Back
-        </Button>
+        <BackPill href="/settings/store/configuration" />
         <div className="rounded-2xl border border-dashed border-border bg-card p-10 text-center text-muted-foreground">
           Store not found or you don&apos;t have access to it.
         </div>
@@ -257,9 +256,7 @@ function ViewStoreInner() {
         subtitle="Store administration — identity, access, credentials and data."
         actions={
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={() => router.push("/settings/store/configuration")}>
-              <ArrowLeft className="h-4 w-4" /> Back
-            </Button>
+            <BackPill href="/settings/store/configuration" />
             {canDeactivate && (
               <Button variant="outline" size="md" className="gap-1.5 rounded-full" onClick={toggleStoreActive}>
                 <Power className="h-4 w-4" /> {s.isActive ? "Deactivate" : "Activate"}

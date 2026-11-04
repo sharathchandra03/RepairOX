@@ -66,7 +66,7 @@ import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { LeadFollowUpView } from "@/components/leads/lead-followup-view";
 import { LeadFollowUpBell } from "@/components/leads/lead-followup-bell";
 import { SalesAgentsOnline } from "@/components/leads/sales-agents-online";
-import { LeadCaptureFlow } from "@/components/leads/lead-capture-flow";
+import { LeadCaptureFlow, type LeadPrefill } from "@/components/leads/lead-capture-flow";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
 import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph, qualificationTone, qualificationDot } from "@/components/leads/lead-pills";
@@ -1519,6 +1519,7 @@ export default function LeadsListPage() {
   const [showBulkStatus, setShowBulkStatus] = useState(false);
   const [showBulkDelete, setShowBulkDelete] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [newLeadPrefill, setNewLeadPrefill] = useState<LeadPrefill | null>(null);
   const [showAssign, setShowAssign] = useState(false);
   const [editLead, setEditLead] = useState<Lead | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Lead | null>(null);
@@ -1962,6 +1963,25 @@ export default function LeadsListPage() {
       toast.error("Lead unavailable", { description: "This lead doesn't exist or isn't assigned to you." });
     }
   }, [deepLinkLeadId, deepLinkAction, leads, hydrated, deepLinkChecked, openLead]);
+  /* ?action=new[&customerId=][&phone=][&email=][&name=] — "Create Lead" /
+     "Create New Lead for This Customer" from the search no-results state, the
+     Customer 360 page, or the repeat-enquiry notice. Opens the normal Add Lead
+     flow prefilled with IDENTITY ONLY — never a Sales Agent. */
+  const newLeadQS = useRef("");
+  useEffect(() => {
+    if (deepLinkAction !== "new") { newLeadQS.current = ""; return; }
+    const key = searchParams.toString();
+    if (newLeadQS.current === key) return;
+    newLeadQS.current = key;
+    setNewLeadPrefill({
+      customerId: searchParams.get("customerId") || undefined,
+      phone: searchParams.get("phone") || undefined,
+      email: searchParams.get("email") || undefined,
+      name: searchParams.get("name") || undefined,
+    });
+    setShowCreate(true);
+    router.replace("/leads/list", { scroll: false });
+  }, [deepLinkAction, searchParams, router]);
 
   const activeFilters = hasActiveLeadFilters(filters);
 
@@ -2379,19 +2399,6 @@ export default function LeadsListPage() {
         )}
       </div>
 
-      {/* Not Contacted sub-navigation (Active / History) — mirrors the
-          Follow-ups Active/History pattern. Kept outside the collapse so the
-          sub-view is always reachable. */}
-      {view === "notContacted" && (
-        <NotContactedControls
-          sub={(filters.ncSub ?? "active") as NotContactedSub}
-          onSub={(v) => setFilters((f) => ({ ...f, ncSub: v }))}
-          focus={(filters.ncFocus ?? "all") as NotContactedFocus}
-          onFocus={(v) => setFilters((f) => ({ ...f, ncFocus: v }))}
-          counts={ncCounts}
-        />
-      )}
-
       {/* ── COLLAPSIBLE CONTROL AREA ───────────────────────────────────────────
           Everything between here and the matching close tag is the
           "Lead Management control area": the date-range strip, the combined
@@ -2441,6 +2448,16 @@ export default function LeadsListPage() {
                   ? { ...f, view: "notContacted", status: "", ncSub: f.ncSub ?? "active", ncFocus: f.ncFocus ?? "all" }
                   : { ...f, view: "assigned", status: "", assignedSub: v })}
                 counts={{ all: assignedAllCount, new: assignedCount, noResponse: notContactedCount }}
+              />
+            )}
+            {/* No Response → Active / History sub-navigation. Lives on the same
+                control line (mirrors the Follow-ups Active/History pattern)
+                instead of a separate full-width row. */}
+            {view === "notContacted" && (
+              <NotContactedControls
+                sub={(filters.ncSub ?? "active") as NotContactedSub}
+                onSub={(v) => setFilters((f) => ({ ...f, ncSub: v }))}
+                counts={ncCounts}
               />
             )}
           </div>
@@ -2945,7 +2962,7 @@ export default function LeadsListPage() {
 
       {/* Create / Edit flow */}
       <AssignLeadsDialog open={showAssign} onClose={() => setShowAssign(false)} />
-      <LeadCaptureFlow open={showCreate} onClose={() => setShowCreate(false)} />
+      <LeadCaptureFlow open={showCreate} onClose={() => { setShowCreate(false); setNewLeadPrefill(null); }} prefill={newLeadPrefill} />
       <LeadCaptureFlow open={!!editLead} onClose={() => setEditLead(null)} editLead={editLead} />
 
       {/* View Lead is a dedicated FULL PAGE (app/(app)/leads/[id]/page.tsx) —

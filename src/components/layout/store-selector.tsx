@@ -14,7 +14,7 @@
    ────────────────────────────────────────────────────────────────────────── */
 
 import { useRouter, usePathname } from "next/navigation";
-import { Store, ChevronDown, Check, Building2, LayoutGrid } from "lucide-react";
+import { Store, ChevronDown, Check, Building2, LayoutGrid, Network } from "lucide-react";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { useStoreContext, ALL_SHOPS } from "@/lib/store-context";
@@ -63,10 +63,10 @@ export function StoreSelector() {
     return (
       <span
         className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-[#E5E9F8] bg-[#F5F7FF] px-3 py-1.5 text-[12px] font-semibold text-[#3A4DBB]"
-        title="Lead Management runs from this store · change it in Settings → Store Information"
+        title={`Centralized: all leads are managed from ${leadMode.defaultStore.name}, whichever shop the customer visits · change it in Settings → Store Information`}
       >
-        <Store className="h-3.5 w-3.5" />
-        <span className="max-w-[160px] truncate">{leadMode.defaultStore.name}</span>
+        <Network className="h-3.5 w-3.5" />
+        <span className="max-w-[160px] truncate">Centralized</span>
       </span>
     );
   }

@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useState, useMemo } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -94,9 +95,7 @@ export default function DailyLedgerDetailPage() {
         </nav>
         <div className="rounded-2xl border border-border bg-card p-10 text-center">
           <p className="text-muted-foreground">No session found for this date.</p>
-          <Button variant="outline" size="sm" className="mt-4" onClick={() => router.push("/accounts/ledger")}>
-            Back to Ledger
-          </Button>
+          <BackPill href="/accounts/ledger" label="Back to Ledger" className="mt-4" />
         </div>
       </div>
     );

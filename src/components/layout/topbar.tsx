@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { cn } from "@/lib/utils";
 import { UniversalSearch } from "@/components/layout/universal-search";
+import { LeadSearch } from "@/components/layout/lead-search";
 import { StoreSelector } from "@/components/layout/store-selector";
 import { AgentScopeSelector } from "@/components/layout/agent-scope-selector";
 import { useRouter } from "next/navigation";
@@ -160,7 +161,9 @@ export function Topbar({
         </div>
 
         {/* Universal Search */}
-        <UniversalSearch />
+        {/* Lead Management gets its own Lead Intelligence Search; every other
+            workspace keeps the Tickets / Invoices / Settings universal search. */}
+        {activeWorkspace === "leads" ? <LeadSearch /> : <UniversalSearch />}
 
         <div className="flex-1" />
 

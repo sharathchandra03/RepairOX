@@ -51,6 +51,10 @@ export type NotificationKind =
   | "deal_rejected"
   | "deal_resubmitted"
   | "deal_comment"
+  /* Lead handoff requests (cross-agent shared reference → take over a lead). */
+  | "lead_handoff_requested"
+  | "lead_handoff_approved"
+  | "lead_handoff_declined"
   /* Security: an employee signed in on a device (owner-facing alert). */
   | "employee_login"
   | "generic";

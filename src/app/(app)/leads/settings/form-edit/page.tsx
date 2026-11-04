@@ -11,6 +11,7 @@
    internal scroll. Add new options at the bottom.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import {
@@ -41,13 +42,7 @@ export default function FormEditPage() {
     <div className="space-y-5">
       {/* Header with back button */}
       <div className="flex items-center gap-3">
-        <Link
-          href="/leads/settings"
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border bg-card text-zinc-500 transition hover:border-[#4361EE]/40 hover:text-[#4361EE]"
-          aria-label="Back to Lead Settings"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </Link>
+        <BackLink href="/leads/settings" label="Back" />
         <div className="min-w-0">
           <p className="text-[11px] font-medium text-muted-foreground">Lead Settings</p>
           <h1 className="font-display text-lg font-bold tracking-tight text-foreground">Form Edit</h1>

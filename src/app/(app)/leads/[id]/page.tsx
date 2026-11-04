@@ -51,6 +51,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { PinnedRail } from "@/components/common/pinned-rail";
+import { BackPill } from "@/components/common/back-pill";
+import { useLeadReference } from "@/hooks/use-lead-reference";
+import { ReferenceBanner, ReferenceActivityPanel, HandoffRequestsPanel } from "@/components/leads/search/reference-mode";
 import { QuickEditDrawer, type QuickField } from "@/components/ui/quick-edit-drawer";
 import { Reveal } from "@/components/common/reveal";
 import { DetailSection, DetailField, SummaryCard, SectionEditButton, DetailHero } from "@/components/common/detail-page";
@@ -190,7 +193,7 @@ export default function ViewLeadPage() {
     ? { href: "/leads/deals", label: "Back to Deals" }
     : { href: "/leads/list", label: "Back to Leads" };
 
-  const { leads, hydrated, viewAsReadOnly, updateLead, optionsFor } = useLeads();
+  const { leads, hydrated, viewAsReadOnly: lensReadOnly, updateLead, optionsFor } = useLeads();
   const { currentDeal, commentsForDeal } = useDeals();
   const { currentQuotationForLead } = useQuotations();
   const { id: currentUserId } = useSession();
@@ -200,10 +203,23 @@ export default function ViewLeadPage() {
   const { tickets, invoices, walkIns, customers } = useStore();
   const { jobs: fieldJobs } = useField();
 
-  const lead = useMemo<Lead | undefined>(
+  const scopedLead = useMemo<Lead | undefined>(
     () => leads.find((l) => l.id === id || l.leadNo === id),
     [leads, id],
   );
+  /* Phase 5 — shared READ-ONLY reference. Only attempted when the lead is NOT
+     in the caller's normal scope (own/assigned/follow-up/see-all) — an
+     ordinary lead never pays for the extra round trip. The RPC itself still
+     enforces `leads_shared_reference` / `leads_customer_history` and never
+     reveals existence to an unauthorised caller. */
+  const needsReference = hydrated && !scopedLead;
+  const reference = useLeadReference(id, needsReference);
+  const lead = scopedLead ?? reference.lead ?? undefined;
+  const isReference = !scopedLead && !!reference.lead;
+  /* One read-only switch drives every edit affordance on the page (header Edit,
+     section Edit buttons, Quick Actions, Temperature, Follow-ups, Deal). It is
+     ON for the owner's "view as agent" lens AND for a shared reference. */
+  const viewAsReadOnly = lensReadOnly || isReference;
 
   const workflowSources = useMemo<LeadWorkflowSources>(
     () => ({ tickets, invoices, walkIns, fieldJobs }),
@@ -237,12 +253,17 @@ export default function ViewLeadPage() {
   }, [dealId, latestDealComment?.id, markSeen]);
 
   if (!lead) {
+    const loadingRef = !hydrated || reference.status === "loading" || (needsReference && reference.status === "idle");
     return (
       <div className="space-y-5">
-        <Button variant="ghost" size="sm" className="gap-1.5" onClick={() => router.push(back.href)}><ArrowLeft className="h-4 w-4" /> {back.label}</Button>
+        {from === "search" ? <BackPill fallback={back.href} /> : <BackPill href={back.href} label={back.label} />}
         <div className="rounded-2xl border border-border bg-card p-12 text-center shadow-card">
-          <p className="font-semibold">{hydrated ? "Lead not found" : "Loading lead…"}</p>
-          {hydrated && <p className="mt-1 text-sm text-muted-foreground">This lead may have been removed, or you don&rsquo;t have access to it.</p>}
+          <p className="font-semibold">{loadingRef ? "Loading lead…" : reference.status === "error" ? "Couldn’t load this lead" : "Lead not found"}</p>
+          {!loadingRef && (
+            <p className="mt-1 text-sm text-muted-foreground">
+              {reference.status === "error" ? reference.error : "This lead may have been removed, or you don’t have access to it."}
+            </p>
+          )}
         </div>
       </div>
     );
@@ -256,7 +277,7 @@ export default function ViewLeadPage() {
   const canEdit = allow(can, CAP.lead.edit) && !viewAsReadOnly;
   const canViewTicket = allow(can, CAP.ticket.view);
   const canViewInvoice = allow(can, CAP.invoice.view);
-  const canViewCustomer = allow(can, CAP.customer.view);
+  const canViewCustomer = allow(can, CAP.customer.master);
 
   /* ── Resolve the live operational graph (same resolvers the derivation uses). */
   const ticket = resolveLeadTicket(lead, tickets);
@@ -383,9 +404,12 @@ export default function ViewLeadPage() {
     <div className="space-y-5">
       {/* ─── Header + sticky context ─────────────────────────────────────── */}
       <div className="flex flex-col gap-4">
-        <Button variant="ghost" size="sm" className="w-fit gap-1.5" onClick={() => router.push(back.href)}>
-          <ArrowLeft className="h-4 w-4" /> {back.label}
-        </Button>
+        {from === "search" ? <BackPill fallback={back.href} /> : <BackPill href={back.href} label={back.label} />}
+
+        {/* Shared READ-ONLY reference notice (another agent's lead). */}
+        {isReference && reference.bundle && (
+          <ReferenceBanner lead={lead} bundle={reference.bundle} onChanged={() => void reference.reload()} />
+        )}
 
         {/* HERO — the visual anchor of the page (shared DetailHero shell) */}
         <DetailHero>
@@ -426,7 +450,7 @@ export default function ViewLeadPage() {
               {/* Header actions (permission-gated) */}
               <div className="flex flex-wrap items-center gap-2">
                 {lead.number && <a href={`tel:${lead.number}`}><Button size="sm" variant="outline" className="gap-1.5"><Phone className="h-3.5 w-3.5" /> Call</Button></a>}
-                {allow(can, CAP.quotation.view) && (
+                {allow(can, CAP.quotation.view) && !viewAsReadOnly && (
                   <Link href={`/leads/list?lead=${lead.id}&action=quotation`}>
                     <Button size="sm" variant="outline" className="gap-1.5"><FileText className="h-3.5 w-3.5" /> Quotation</Button>
                   </Link>
@@ -458,6 +482,7 @@ export default function ViewLeadPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* LEFT — detail body */}
         <div className="space-y-6 lg:col-span-2">
+          {isReference && reference.bundle && <ReferenceActivityPanel bundle={reference.bundle} />}
           {/* Document lineage (when any downstream record exists) */}
           {(lead.linkedTicketId || lead.linkedInvoiceId || lead.linkedFieldJobId || lead.linkedWalkInId || deal || quotation || lead.customerId) && (
             <DetailSection icon={GitBranch} title="Linked Records" accent="blue">
@@ -674,6 +699,10 @@ export default function ViewLeadPage() {
           {/* Colorful Quick Actions hub (Call / WhatsApp / Edit / Assign /
               Route / Push to Deal / Follow-up / Quotation / View Customer). */}
           <Reveal delay={0.04}><LeadQuickActions lead={lead} readOnly={viewAsReadOnly} /></Reveal>
+
+          {/* Pending handoff requests — shown to the owner / reassigning managers
+              only (the table's RLS returns nothing to anyone else). */}
+          {!isReference && <HandoffRequestsPanel lead={lead} />}
 
           {/* Journey — the heart of View Lead */}
           <Reveal delay={0.06}><LeadJourneyTimeline lead={lead} /></Reveal>

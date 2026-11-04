@@ -283,7 +283,7 @@ export default function PrintPreviewPage() {
                   window.close();
                 }
               }}
-              style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, border: "1px solid #e5e7eb", background: "#fff", padding: "6px 12px", fontSize: 12, fontWeight: 500, color: "#4b5563", cursor: "pointer" }}
+              style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, border: "1px solid #4361EE", background: "#4361EE", padding: "6px 14px", fontSize: 12, fontWeight: 600, color: "#fff", cursor: "pointer" }}
             >
               <ArrowLeft style={{ width: 14, height: 14 }} /> Back
             </button>

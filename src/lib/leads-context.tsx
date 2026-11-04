@@ -103,7 +103,7 @@ const CONVERSION_HISTORY_KEY = "repairox-lead-conversion-history";
 
 /* ─── Row mappers (snake_case DB ↔ camelCase app) ─────────────────────── */
 
-function rowToLead(r: any): Lead {
+export function rowToLead(r: any): Lead {
   return {
     id: r.id,
     branchId: r.branch_id ?? "",
@@ -387,7 +387,7 @@ function contactToRow(c: Partial<Contact>): Record<string, unknown> {
 
 /* ─── Follow-up + assignment-history row mappers ──────────────────────── */
 
-function rowToFollowUp(r: any): LeadFollowUp {
+export function rowToFollowUp(r: any): LeadFollowUp {
   return {
     id: r.id,
     leadId: r.lead_id,
@@ -405,7 +405,7 @@ function rowToFollowUp(r: any): LeadFollowUp {
   };
 }
 
-function rowToAssignmentEvent(r: any): LeadAssignmentEvent {
+export function rowToAssignmentEvent(r: any): LeadAssignmentEvent {
   return {
     id: r.id,
     leadId: r.lead_id,
@@ -420,7 +420,7 @@ function rowToAssignmentEvent(r: any): LeadAssignmentEvent {
   };
 }
 
-function rowToConversionEvent(r: any): LeadConversionEvent {
+export function rowToConversionEvent(r: any): LeadConversionEvent {
   return {
     id: r.id,
     leadId: r.lead_id,
@@ -543,6 +543,12 @@ interface LeadsContextValue {
   /* ── Assignment history (public.lead_assignment_history) ── */
   assignmentHistory: LeadAssignmentEvent[];
   assignmentHistoryFor: (leadId: string) => LeadAssignmentEvent[];
+  /** READ-ONLY reference overlay (Lead Intelligence Search). Registers another
+   *  agent's lead history rows so the per-lead `*For` accessors (Journey,
+   *  Follow-ups, Assignment) can render them. The rows are kept SEPARATE from
+   *  the scoped state arrays: they never affect the Lead Table, metrics, open
+   *  follow-up urgency or any write path. Pass leadId + rows to replace. */
+  registerReferenceRows: (leadId: string, rows: { followUps: LeadFollowUp[]; assignment: LeadAssignmentEvent[]; conversion: LeadConversionEvent[] }) => void;
 
   /* ── Conversion / handoff history (public.lead_conversion_history) ── */
   conversionHistory: LeadConversionEvent[];
@@ -776,6 +782,13 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   const [followUps, setFollowUps] = useState<LeadFollowUp[]>([]);
   const [assignmentHistory, setAssignmentHistory] = useState<LeadAssignmentEvent[]>([]);
   const [conversionHistory, setConversionHistory] = useState<LeadConversionEvent[]>([]);
+  // Reference overlay (see registerReferenceRows). Keyed by lead id.
+  const [referenceRows, setReferenceRows] = useState<Record<string, { followUps: LeadFollowUp[]; assignment: LeadAssignmentEvent[]; conversion: LeadConversionEvent[] }>>({});
+  const referenceRowsRef = useRef(referenceRows);
+  referenceRowsRef.current = referenceRows;
+  const registerReferenceRows = useCallback((leadId: string, rows: { followUps: LeadFollowUp[]; assignment: LeadAssignmentEvent[]; conversion: LeadConversionEvent[] }) => {
+    setReferenceRows((prev) => ({ ...prev, [leadId]: rows }));
+  }, []);
   const [hydrated, setHydrated] = useState(false);
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [filters, setFiltersState] = useState<LeadFilters>(EMPTY_LEAD_FILTERS);
@@ -1790,8 +1803,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
      module (route, walk-in, field job, ticket, invoice) records its event here
      so Sales never loses visibility after handoff. */
   const conversionHistoryFor = useCallback((leadId: string): LeadConversionEvent[] => {
-    return conversionHistory.filter((e) => e.leadId === leadId).sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
-  }, [conversionHistory]);
+    const extra = referenceRows[leadId]?.conversion ?? [];
+    return [...conversionHistory.filter((e) => e.leadId === leadId), ...extra.filter((x) => !conversionHistory.some((e) => e.id === x.id))]
+      .sort((a, b) => new Date(a.occurredAt).getTime() - new Date(b.occurredAt).getTime());
+  }, [conversionHistory, referenceRows]);
 
   const recordConversionEvent = useCallback(async (
     leadId: string,
@@ -1930,8 +1945,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
      follow-ups. Completing records the activity + outcome, and can schedule the
      NEXT follow-up in the same action — it never changes the lead's status. */
   const followUpsFor = useCallback((leadId: string): LeadFollowUp[] => {
-    return followUpsRef.current.filter((f) => f.leadId === leadId).sort((a, b) => a.seq - b.seq);
-  }, []);
+    const own = followUpsRef.current.filter((f) => f.leadId === leadId);
+    const extra = (referenceRowsRef.current[leadId]?.followUps ?? []).filter((x) => !own.some((f) => f.id === x.id));
+    return [...own, ...extra].sort((a, b) => a.seq - b.seq);
+  }, [referenceRows]);
 
   const scheduleFollowUp = useCallback(async (leadId: string, draft: LeadFollowUpDraft): Promise<LeadFollowUp | null> => {
     const lead = leadsRef.current.find((l) => l.id === leadId);
@@ -2099,8 +2116,10 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
   }, [useDb, db]);
 
   const assignmentHistoryFor = useCallback((leadId: string): LeadAssignmentEvent[] => {
-    return assignmentHistory.filter((h) => h.leadId === leadId).sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [assignmentHistory]);
+    const extra = referenceRows[leadId]?.assignment ?? [];
+    return [...assignmentHistory.filter((h) => h.leadId === leadId), ...extra.filter((x) => !assignmentHistory.some((h) => h.id === x.id))]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  }, [assignmentHistory, referenceRows]);
 
   /** Link an existing operational record to a lead (open-lead detection +
    *  unattributed safety net). Sets the lead's linked_* id, resolves the
@@ -2562,14 +2581,14 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner,
     viewAsAgentId: effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent,
     followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment,
-    assignmentHistory, assignmentHistoryFor,
+    assignmentHistory, assignmentHistoryFor, registerReferenceRows,
     conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity,
     leadMetrics,
     addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, restoreTrashedLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, registerReferenceRows, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

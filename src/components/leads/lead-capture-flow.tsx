@@ -42,6 +42,8 @@ import { isNotQualified, isQualifiedValue } from "@/lib/lead-workflow";
 import { AgentPicker, DeviceCatalogPicker, type DeviceSelection } from "@/components/leads/lead-form-fields";
 import { CustomerPicker } from "@/components/common/customer-picker";
 import { CustomerIdentityLookup } from "@/components/common/customer-identity-lookup";
+import { toast } from "@/components/ui/toaster";
+import { RepeatEnquiryNotice, type RepeatState } from "@/components/leads/search/repeat-enquiry-notice";
 import { findOrCreateCustomer } from "@/lib/customer-service";
 import type { Customer } from "@/lib/customer-data";
 import { normalizeCustomerPhone, normalizeCustomerEmail } from "@/lib/customer-data";
@@ -535,21 +537,28 @@ const STEP_TRANSITION = { duration: 0.22, ease: [0.4, 0, 0.2, 1] as const };
 
 /* ─── Main flow ───────────────────────────────────────────────────────── */
 
+/** Identity-only prefill for a NEW lead (search "Create Lead" / "New Lead for
+ *  this customer"). `customerId` links the Customer Master record; the lead's
+ *  Sales Agent / owner is NEVER taken from it (Customer Identity ≠ Sales
+ *  Attribution). */
+export interface LeadPrefill { customerId?: string; phone?: string; email?: string; name?: string }
+
 export function LeadCaptureFlow({
-  open, onClose, editLead, onSaved,
+  open, onClose, editLead, onSaved, prefill,
 }: {
   open: boolean;
   onClose: () => void;
   /** When provided, the flow edits this lead instead of creating a new one. */
   editLead?: Lead | null;
   onSaved?: (lead: Lead) => void;
+  prefill?: LeadPrefill | null;
 }) {
   if (!open) return null;
-  return <FlowInner onClose={onClose} editLead={editLead} onSaved={onSaved} />;
+  return <FlowInner onClose={onClose} editLead={editLead} onSaved={onSaved} prefill={prefill} />;
 }
 
 
-function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void }) {
+function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => void; editLead?: Lead | null; onSaved?: (lead: Lead) => void; prefill?: LeadPrefill | null }) {
   const { leads, addLead, updateLead, currentUserIsSalesAgent, isEligibleSalesAgent, salesAgentsReady, salesAgentsFor, canChangeLeadOwner, scheduleFollowUp, openFollowUpsByLead, optionsFor, fieldTitle: ft, isFieldHidden } = useLeads();
   const { id: currentUserId, name: currentUserName } = useSession();
   const { team, can, currentUser } = usePermissions();
@@ -621,6 +630,11 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
       assignedTo: selfIsAgent ? currentUserId || "" : "",
       assignedToName: selfIsAgent ? currentUserName || "" : "",
       branchId: storeId,
+      // Raw identity prefill (a customer link is applied by an effect below once
+      // the Customer Master is available). Owner is deliberately untouched.
+      ...(prefill?.name ? { name: prefill.name } : {}),
+      ...(prefill?.phone ? { number: prefill.phone } : {}),
+      ...(prefill?.email ? { email: prefill.email } : {}),
     };
   });
 
@@ -897,6 +911,26 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
     linkCustomer(c);
   };
 
+  // "Create New Lead for This Customer": adopt the Customer Master identity ONCE
+  // (the master may still be loading when the form opens). Identity only — the
+  // new lead does NOT inherit any previous lead's Sales Agent.
+  const prefillApplied = useRef(false);
+  useEffect(() => {
+    if (isEdit || prefillApplied.current || !prefill?.customerId) return;
+    const c = customers.find((x) => x.id === prefill.customerId);
+    if (!c) return;
+    prefillApplied.current = true;
+    linkCustomer(c);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isEdit, prefill?.customerId, customers]);
+
+  /* Repeat-enquiry awareness (Phase 8). `repeat.significant` = an open lead for
+     this customer looks like the same device + issue → a reason is required to
+     proceed with a separate enquiry. Awareness only; never blocks genuine
+     repeat business and never alters the existing lead. */
+  const [repeat, setRepeat] = useState<RepeatState>({ significant: false, hasOpen: false, leadNos: [] });
+  const [separateReason, setSeparateReason] = useState("");
+
   /* ── Inline "Save as Customer" from the Lead Form (spec §8/§80/§81) ──
      No second form: the lead's OWN Step-1 fields ARE the customer record. One
      pill at the top of the Customer step turns the typed identity + location
@@ -1045,6 +1079,14 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
       return;
     }
     if (!canSaveLead || saving) return;              // permission + double-submit guard
+    // Significant duplicate (same customer, same device + issue, still open):
+    // a short reason is required to create a SEPARATE enquiry. Informed choice,
+    // not a block — the existing lead is never merged or altered.
+    if (!isEdit && repeat.significant && !separateReason.trim()) {
+      toast.error("Add a reason for the separate enquiry", { description: "An open lead for this customer looks like the same device and issue." });
+      goToStage(1);
+      return;
+    }
     setSaving(true);
     try {
       // Close ONLY when the save fully landed — a rejected owner / follow-up
@@ -1060,7 +1102,13 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
         // canonical Customer Master record, which the new lead then references.
         // Identity only — the Sales Agent / attribution is never touched.
         const customerId = await ensureCustomerForLead();
-        savedLead = await addLead(customerId ? { ...draft, customerId } : draft);
+        const base = customerId ? { ...draft, customerId } : draft;
+        // Record the informed "separate enquiry" decision on the new lead's own
+        // comment — the existing lead(s) are not modified.
+        const withReason = !isEdit && repeat.hasOpen && separateReason.trim()
+          ? { ...base, comments: [base.comments, `Separate enquiry (existing open lead ${repeat.leadNos.join(", ")}): ${separateReason.trim()}`].filter(Boolean).join("\n") }
+          : base;
+        savedLead = await addLead(withReason);
         if (!savedLead) return;
       }
 
@@ -1237,6 +1285,18 @@ function FlowInner({ onClose, editLead, onSaved }: { onClose: () => void; editLe
                         <span className="text-amber-600/80"> · {activeOwnedLead.ageDays === 0 ? "today" : `${activeOwnedLead.ageDays}d ago`}</span>
                       </span>
                     </div>
+                  )}
+                  {!isEdit && (
+                    <RepeatEnquiryNotice
+                      phone={draft.number ?? ""}
+                      email={draft.email ?? ""}
+                      customerId={draft.customerId || ""}
+                      device={draft.device ?? ""}
+                      issue={draft.issue ?? ""}
+                      reason={separateReason}
+                      onReasonChange={setSeparateReason}
+                      onState={setRepeat}
+                    />
                   )}
                   <div className="grid grid-cols-2 gap-3">
                     <Field label="Email" error={touched ? validation.errors.email : undefined}>

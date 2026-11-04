@@ -373,6 +373,13 @@ export type PermissionKey =
      lead-visibility key: neither grants all-lead / cross-store scope. */
   | "leads_assign_intake"
   | "leads_pending_access"
+  /* Lead Intelligence Search + shared READ-ONLY reference (migration 0088).
+     Search, cross-agent read, customer history, edit and store scope are all
+     separate concepts. None of these grants edit, performance-all or
+     org-wide lead visibility. */
+  | "leads_search"
+  | "leads_shared_reference"
+  | "leads_customer_history"
   /* Deals & quotations */
   | "deals_view"
   | "deals_create"
@@ -893,6 +900,9 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "leads_store_mode_manage", label: "Manage Lead Store Mode (Single/Multi) & Default Lead Store" },
       { key: "leads_assign_intake", label: "Assign Leads (create an incoming lead & assign it to a Sales Agent)" },
       { key: "leads_pending_access", label: "Access Pending Leads (unassigned inbound queue)" },
+      { key: "leads_search", label: "Lead Intelligence Search (search your permitted customers & leads)" },
+      { key: "leads_shared_reference", label: "View Shared Lead Reference (read-only access to other agents' leads)" },
+      { key: "leads_customer_history", label: "View Customer Lead History (read-only, across agents)" },
       { key: "deals_view", label: "View Deals (own / submitted)" },
       { key: "deals_create", label: "Create / Submit Deal (discount approval request)" },
       { key: "deals_edit", label: "Edit / Resubmit Own Deal" },

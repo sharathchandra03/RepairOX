@@ -184,6 +184,9 @@ export const CAP = {
   },
   customer: {
     view: ["view_customers", "manage_customers"],
+    // Open the CUSTOMER MASTER pages (/customers). Sales Agents hold view_customers
+    // only so Add Lead can de-duplicate; they work Leads / Follow-ups / Contacts.
+    master: ["view_customer_history", "manage_customers"],
     create: ["create_customer", "manage_customers"],
     // Deliberately bypassing the duplicate-match warning ("Create Anyway")
     // is a more sensitive variant of create — gated on the manage tier only.
@@ -314,6 +317,19 @@ export const CAP = {
     // Pending Leads queue (unassigned inbound). Separate from assignIntake and
     // from every lead-visibility key. MUST match pending_leads RLS (0086).
     pendingAccess: ["leads_pending_access"],
+    // Lead Intelligence Search. MUST match the array gate in lead_search() /
+    // lead_repeat_check() (migration 0088): search is always limited to the
+    // leads the caller may already see, plus others' leads only with
+    // `sharedReference`.
+    search: ["leads_search", "leads_view", "manage_sales"],
+    // Open/search OTHER agents' permitted leads READ-ONLY. Granular key only —
+    // never implied by manage_sales / viewTeam. MUST match lead_search().
+    sharedReference: ["leads_shared_reference"],
+    // Read a Customer's cross-agent lead history. MUST match
+    // lead_reference_get() / lead_customer_history() (migration 0088).
+    customerHistory: ["leads_customer_history"],
+    // Read-only reference of any kind (open another agent's lead).
+    referenceRead: ["leads_shared_reference", "leads_customer_history"],
   },
   deal: {
     // See the Deal page / a lead's deal panel. Submitting a request implies

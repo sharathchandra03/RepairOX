@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
@@ -115,9 +116,7 @@ export function LeadIntelligenceView({
   return (
     <div className="space-y-5 pb-10">
       {backHref && (
-        <Link href={backHref} className="inline-flex items-center gap-1.5 text-[13px] font-medium text-[#6D28D9] hover:underline">
-          <ArrowLeft className="h-4 w-4" /> Back to Team Lead Intelligence
-        </Link>
+        <BackLink href={backHref} label="Back to Team Lead Intelligence" />
       )}
       {ownerContext && (
         <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50/70 px-3 py-2 text-[12px] text-amber-800">

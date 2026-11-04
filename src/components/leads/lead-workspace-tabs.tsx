@@ -48,7 +48,7 @@ export function LeadWorkspaceTabs({
     <div
       role="tablist"
       aria-label="Lead views"
-      className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-border bg-muted p-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+      className="inline-flex max-w-full items-center gap-1 overflow-x-auto rounded-full border border-[#4361EE]/60 bg-muted p-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
     >
       {TABS.map((t) => {
         const active = (value === "notContacted" ? "assigned" : value) === t.value;
@@ -128,7 +128,7 @@ export function AssignedSubTabs({
     <div
       role="tablist"
       aria-label="Assigned leads filter"
-      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border bg-muted p-1"
+      className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#4361EE]/60 bg-muted p-1"
     >
       {OPTIONS.map((o) => {
         const active = value === o.value;

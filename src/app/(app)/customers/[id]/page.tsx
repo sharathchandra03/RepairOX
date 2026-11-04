@@ -17,9 +17,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import {
-  ArrowLeft, Phone, Mail, MapPin, Building2, Tag, Gift, Ticket as TicketIcon,
-  Receipt, UserCheck, Truck, Target,
+  Phone, Mail, MapPin, Building2, Gift, Ticket as TicketIcon, MessageCircle, Copy,
+  Receipt, UserCheck, Truck, Target, Activity, ContactRound, Inbox,
 } from "lucide-react";
+import { BackPill } from "@/components/common/back-pill";
+import { SegmentedTabs } from "@/components/ui/tabs";
+import { DetailHero, DetailSection, DetailField, SummaryCard } from "@/components/common/detail-page";
+import { toast } from "@/components/ui/toaster";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
@@ -123,282 +127,214 @@ export default function CustomerDetailPage() {
     return () => { active = false; };
   }, [customerId, canViewLoyalty]);
 
-  const canView = allow(can, CAP.customer.view);
+  const canView = allow(can, CAP.customer.view) && allow(can, CAP.customer.master);
   const canViewHistory = can("view_customer_history") || can("manage_customers");
+  const [tab, setTab] = useState<TabId>("overview");
 
   if (!canView) {
-    return (
-      <div className="p-8 text-center text-sm text-muted-foreground">
-        You don&apos;t have permission to view customer records.
-      </div>
-    );
+    return <div className="p-8 text-center text-sm text-muted-foreground">You don&apos;t have permission to view customer records.</div>;
   }
-
   if (!customer) {
     return (
-      <div className="p-8 text-center">
-        <p className="text-sm text-muted-foreground mb-4">Customer not found.</p>
-        <Link href="/customers" className="text-sm font-medium text-[#4361EE] hover:underline">
-          &larr; Back to Customers
-        </Link>
+      <div className="space-y-5">
+        <BackPill fallback="/customers" />
+        <div className="rounded-2xl border border-border bg-card p-12 text-center text-sm text-muted-foreground shadow-card">Customer not found.</div>
       </div>
     );
   }
 
   const groups = resolveGroups(customer.groupIds, customerGroups);
+  const name = formatCustomerName(customer);
+  const wa = customer.mobile ? `https://wa.me/91${customer.mobile.replace(/\D/g, "").slice(-10)}` : "";
+  const copy = async (t: string, l: string) => { try { await navigator.clipboard.writeText(t); toast.success(`${l} copied`); } catch { toast.error("Couldn't copy"); } };
+
+  /* Recent activity across modules (newest first). */
+  type Act = { key: string; kind: string; tone: string; ref: string; sub: string; status: string; date: string; href: string };
+  const activity: Act[] = [
+    ...customerTickets.map((t) => ({ key: "t" + t.id, kind: "Ticket", tone: "bg-indigo-50 text-indigo-700", ref: t.ticketNo || t.id, sub: [t.device, t.model].filter(Boolean).join(" ") || "—", status: STATUS_LABEL[t.status] || "", date: t.createdAt || "", href: `/tickets/${t.id}` })),
+    ...customerInvoices.map((i) => ({ key: "i" + i.id, kind: "Invoice", tone: "bg-emerald-50 text-emerald-700", ref: i.reference || i.id, sub: formatINR(i.total ?? 0), status: INVOICE_STATUS_LABEL[i.status] || "", date: i.createdAt || "", href: `/invoice/${i.id}` })),
+    ...customerWalkIns.map((w) => ({ key: "w" + w.id, kind: "Walk-In", tone: "bg-sky-50 text-sky-700", ref: w.walkInNumber || w.id, sub: w.issue || "—", status: w.status, date: w.date || "", href: `/walk-in?walkIn=${w.id}` })),
+    ...customerFieldJobs.map((j: any) => ({ key: "f" + j.id, kind: "Field", tone: "bg-violet-50 text-violet-700", ref: j.jobNo || j.id, sub: (j.route || "").replace(/_/g, " ") || "—", status: (j.status || "").replace(/_/g, " "), date: j.createdAt || "", href: `/field?job=${j.id}` })),
+  ].sort((a, b) => b.date.localeCompare(a.date));
+
+  const tabs: { label: string; value: TabId }[] = [
+    { label: "Overview", value: "overview" },
+    { label: `Leads (${salesAttribution.length})`, value: "leads" },
+    { label: `Tickets (${customerTickets.length})`, value: "tickets" },
+    { label: `Invoices (${customerInvoices.length})`, value: "invoices" },
+    { label: `Walk-Ins (${customerWalkIns.length})`, value: "walkins" },
+    { label: `Field (${customerFieldJobs.length})`, value: "field" },
+    ...(canViewLoyalty ? [{ label: "Loyalty", value: "loyalty" as TabId }] : []),
+  ];
+
+  const go = (href: string) => router.push(href);
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center gap-2">
-        <button
-          onClick={() => router.push("/customers")}
-          className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted transition"
-        >
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <p className="text-sm text-muted-foreground">Customers</p>
-      </div>
+      <BackPill fallback="/customers" />
 
-      <div className="rounded-2xl border-2 border-zinc-300 bg-card p-6 shadow-card">
+      <DetailHero>
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="flex items-start gap-4">
-            <Avatar name={formatCustomerName(customer)} size={56} />
-            <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h1 className="text-lg font-bold">{formatCustomerName(customer)}</h1>
+          <div className="flex items-center gap-4">
+            <Avatar name={name} size={60} />
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h1 className="font-display text-2xl font-bold tracking-tight">{name}</h1>
                 <CustomerBadges type={customer.type} source={customer.source as CustomerSource | undefined} groups={groups} />
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-3 text-[13px] text-muted-foreground">
-                {customer.mobile && (
-                  <span className="inline-flex items-center gap-1"><Phone className="h-3.5 w-3.5" /> {formatPhone(customer.mobile)}</span>
-                )}
-                {customer.email && (
-                  <span className="inline-flex items-center gap-1"><Mail className="h-3.5 w-3.5" /> {customer.email}</span>
-                )}
-                {customer.company && (
-                  <span className="inline-flex items-center gap-1"><Building2 className="h-3.5 w-3.5" /> {customer.company}</span>
-                )}
-                {customer.city && (
-                  <span className="inline-flex items-center gap-1"><MapPin className="h-3.5 w-3.5" /> {customer.city}</span>
-                )}
-              </div>
+              <p className="mt-0.5 text-[12px] text-muted-foreground">{customer.id} · Customer since {fmtDate(customer.createdAt)}</p>
+              <p className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px] text-zinc-700">
+                {customer.mobile && <span className="inline-flex items-center gap-1.5"><Phone className="h-3.5 w-3.5 text-[#4361EE]" />{formatPhone(customer.mobile)}</span>}
+                {customer.email && <span className="inline-flex items-center gap-1.5"><Mail className="h-3.5 w-3.5 text-[#4361EE]" />{customer.email}</span>}
+                {customer.city && <span className="inline-flex items-center gap-1.5"><MapPin className="h-3.5 w-3.5 text-[#4361EE]" />{customer.city}</span>}
+              </p>
             </div>
           </div>
-          <div className="text-right">
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{customer.id}</p>
-            <p className="text-[11px] text-muted-foreground mt-0.5">Customer since {fmtDate(customer.createdAt)}</p>
+          <div className="flex flex-wrap items-center gap-2">
+            {customer.mobile && <a href={`tel:${customer.mobile}`}><Button size="sm" variant="outline" className="gap-1.5 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"><Phone className="h-3.5 w-3.5" />Call</Button></a>}
+            {wa && <a href={wa} target="_blank" rel="noreferrer"><Button size="sm" variant="outline" className="gap-1.5 bg-green-50 text-green-700 hover:bg-green-100"><MessageCircle className="h-3.5 w-3.5" />WhatsApp</Button></a>}
+            {customer.email && <a href={`mailto:${customer.email}`}><Button size="sm" variant="outline" className="gap-1.5 bg-sky-50 text-sky-700 hover:bg-sky-100"><Mail className="h-3.5 w-3.5" />Email</Button></a>}
+            {customer.mobile && <Button size="sm" variant="outline" className="gap-1.5" onClick={() => copy(customer.mobile, "Mobile")}><Copy className="h-3.5 w-3.5" />Copy</Button>}
           </div>
         </div>
-
-        {/* Quick stats */}
-        <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <StatCard label="Lifetime Value" value={formatINR(customer.lifetimeValue ?? 0)} />
-          <StatCard label="Tickets" value={String(customer.totalTickets ?? customerTickets.length)} />
-          <StatCard label="Invoices" value={String(customer.totalInvoices ?? customerInvoices.length)} />
-          <StatCard label="Loyalty Points" value={canViewLoyalty ? (loyaltyBalance != null ? String(loyaltyBalance) : "—") : "—"} icon={<Gift className="h-3.5 w-3.5" />} />
+        <div className="relative mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <SummaryCard label="Lifetime Value" value={formatINR(customer.lifetimeValue ?? 0)} />
+          <SummaryCard label="Leads" value={salesAttribution.length} />
+          <SummaryCard label="Tickets" value={customer.totalTickets ?? customerTickets.length} />
+          <SummaryCard label="Invoices" value={customer.totalInvoices ?? customerInvoices.length} />
+          <SummaryCard label="Walk-Ins" value={customerWalkIns.length} />
+          <SummaryCard label="Loyalty Points" value={canViewLoyalty && loyaltyBalance != null ? loyaltyBalance : "—"} />
         </div>
-      </div>
+      </DetailHero>
 
       {!canViewHistory ? (
-        <div className="rounded-2xl border-2 border-zinc-300 bg-card p-6 text-center text-sm text-muted-foreground">
-          You don&apos;t have permission to view this customer&apos;s activity history.
-        </div>
+        <div className="rounded-2xl border border-border bg-card p-8 text-center text-sm text-muted-foreground shadow-card">You don&apos;t have permission to view this customer&apos;s activity history.</div>
       ) : (
         <>
-          {/* Sales Attribution — derived from the customer's leads. Shows WHICH
-              Sales Agent generated each sales opportunity + its outcome and
-              finalized revenue. Identity ≠ attribution: this never comes from
-              the customer record's creator (spec §20/§52/§97). */}
-          <ActivitySection
-            title="Sales Attribution"
-            icon={<Target className="h-3.5 w-3.5" />}
-            emptyText="No sales lead has been attributed to this customer. Direct business carries no sales-agent credit."
-            headerExtra={
-              primaryAgent ? (
-                <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">
-                  <UserCheck className="h-3 w-3" /> {primaryAgent}
-                  {salesAttribution.filter((r) => r.agentName).length > 1 && (
-                    <span className="font-normal text-violet-500">+{salesAttribution.filter((r) => r.agentName).length - 1} more</span>
+          <div className="max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            <SegmentedTabs size="sm" value={tab} onChange={(v) => setTab(v as TabId)} options={tabs} />
+          </div>
+
+          {tab === "overview" && (
+            <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+              <div className="lg:col-span-2">
+                <DetailSection icon={Activity} title="Recent Activity" accent="blue">
+                  {activity.length === 0 ? (
+                    <Empty text="No tickets, invoices, walk-ins or field jobs yet." />
+                  ) : (
+                    <ul className="divide-y divide-border">
+                      {activity.slice(0, 8).map((a) => (
+                        <li key={a.key}>
+                          <button type="button" onClick={() => go(a.href)} className="flex w-full items-center gap-3 py-3 text-left transition hover:bg-muted/40">
+                            <span className={cn("w-[72px] shrink-0 rounded-md px-2 py-1 text-center text-[10.5px] font-bold uppercase", a.tone)}>{a.kind}</span>
+                            <span className="w-[110px] shrink-0 truncate text-[13px] font-semibold text-[#4361EE]">{a.ref}</span>
+                            <span className="min-w-0 flex-1 truncate text-[13px] text-foreground">{a.sub}</span>
+                            <span className="hidden shrink-0 text-[11.5px] capitalize text-muted-foreground sm:inline">{a.status}</span>
+                            <span className="w-[92px] shrink-0 text-right text-[11.5px] text-muted-foreground">{fmtDate(a.date)}</span>
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
                   )}
-                </span>
-              ) : null
-            }
-          >
-            {salesAttribution.length > 0 && (
-              <RoxTableCard>
-                <colgroup><col className="w-[16%]" /><col className="w-[24%]" /><col className="w-[18%]" /><col className="w-[18%]" /><col className="w-[24%]" /></colgroup>
-                <RoxTableHead>
-                  <RoxHeadRow><th className="px-3 py-3">Lead</th><th className="px-3 py-3">Sales Agent</th><th className="px-3 py-3">Date</th><th className="px-3 py-3">Result</th><th className="px-3 py-3">Revenue</th></RoxHeadRow>
-                </RoxTableHead>
-                <tbody>
-                  {salesAttribution.map((r) => (
-                    <RoxTableRow key={r.leadId} onClick={() => router.push(`/leads/list?lead=${r.leadId}`)} className="cursor-pointer">
-                      <RoxTableCell className="font-medium text-[#4361EE]">{r.leadNo}</RoxTableCell>
-                      <RoxTableCell className="truncate">
-                        {r.agentName ? (
-                          <span className="inline-flex items-center gap-1.5"><Avatar name={r.agentName} size={18} /> {r.agentName}</span>
-                        ) : <span className="text-muted-foreground">Unassigned</span>}
-                      </RoxTableCell>
-                      <RoxTableCell>{fmtDate(r.date)}</RoxTableCell>
-                      <RoxTableCell>
-                        <span className={cn(
-                          "inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset",
-                          r.result === "Invoice" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                            : r.result === "Ticket" ? "bg-indigo-50 text-indigo-700 ring-indigo-200"
-                            : r.result === "Lead Won" ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-                            : r.result === "Lost" ? "bg-rose-50 text-rose-600 ring-rose-200"
-                            : r.result === "In Pipeline" ? "bg-sky-50 text-sky-700 ring-sky-200"
-                            : "bg-zinc-100 text-zinc-500 ring-zinc-200",
-                        )}>{r.result}</span>
-                      </RoxTableCell>
-                      <RoxTableCell className="tabular-nums">{r.revenue > 0 ? formatINR(r.revenue) : "—"}</RoxTableCell>
-                    </RoxTableRow>
-                  ))}
-                </tbody>
-              </RoxTableCard>
-            )}
-          </ActivitySection>
+                </DetailSection>
+              </div>
+              <DetailSection icon={ContactRound} title="Contact Details" accent="green">
+                <div className="grid grid-cols-1 gap-3">
+                  <DetailField flat label="Mobile" value={customer.mobile ? formatPhone(customer.mobile) : "—"} />
+                  {customer.altMobile && <DetailField flat label="Alternate" value={formatPhone(customer.altMobile)} />}
+                  <DetailField flat label="Email" value={customer.email || "—"} />
+                  {customer.company && <DetailField flat label="Company" value={customer.company} />}
+                  {customer.gstNumber && <DetailField flat label="GST" value={customer.gstNumber} />}
+                  <DetailField flat label="Address" value={[customer.address, customer.city, customer.state, customer.postalCode].filter(Boolean).join(", ") || "—"} />
+                  {customer.notes && <DetailField flat label="Notes" value={customer.notes} />}
+                </div>
+              </DetailSection>
+            </div>
+          )}
 
-          <ActivitySection
-            title="Tickets"
-            icon={<TicketIcon className="h-3.5 w-3.5" />}
-            emptyText="No tickets for this customer yet."
-          >
-            {customerTickets.length > 0 && (
-              <RoxTableCard>
-                <colgroup><col className="w-[18%]" /><col className="w-[30%]" /><col className="w-[22%]" /><col className="w-[15%]" /><col className="w-[15%]" /></colgroup>
-                <RoxTableHead>
-                  <RoxHeadRow><th className="px-3 py-3">Ticket</th><th className="px-3 py-3">Device</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Amount</th><th className="px-3 py-3">Date</th></RoxHeadRow>
-                </RoxTableHead>
-                <tbody>
-                  {customerTickets.slice(0, RECENT_LIMIT).map((t) => (
-                    <RoxTableRow key={t.id} onClick={() => router.push(`/tickets/${t.id}`)} className="cursor-pointer">
-                      <RoxTableCell className="font-medium text-[#4361EE]">{t.ticketNo || t.id}</RoxTableCell>
-                      <RoxTableCell className="truncate">{[t.device, t.model].filter(Boolean).join(" ") || "—"}</RoxTableCell>
-                      <RoxTableCell>
-                        <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", STATUS_TONE[t.status])}>
-                          {STATUS_LABEL[t.status]}
-                        </span>
-                      </RoxTableCell>
-                      <RoxTableCell>{formatINR(t.amount ?? 0)}</RoxTableCell>
-                      <RoxTableCell>{fmtDate(t.createdAt)}</RoxTableCell>
-                    </RoxTableRow>
-                  ))}
-                </tbody>
-              </RoxTableCard>
-            )}
-          </ActivitySection>
-
-          <ActivitySection
-            title="Invoices"
-            icon={<Receipt className="h-3.5 w-3.5" />}
-            emptyText="No invoices for this customer yet."
-          >
-            {customerInvoices.length > 0 && (
-              <RoxTableCard>
-                <colgroup><col className="w-[20%]" /><col className="w-[25%]" /><col className="w-[20%]" /><col className="w-[17%]" /><col className="w-[18%]" /></colgroup>
-                <RoxTableHead>
-                  <RoxHeadRow><th className="px-3 py-3">Invoice</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Total</th><th className="px-3 py-3">Date</th></RoxHeadRow>
-                </RoxTableHead>
-                <tbody>
-                  {customerInvoices.slice(0, RECENT_LIMIT).map((inv) => (
-                    <RoxTableRow key={inv.id} onClick={() => router.push(`/invoice/${inv.id}`)} className="cursor-pointer">
-                      <RoxTableCell className="font-medium text-[#4361EE]">{inv.reference || inv.id}</RoxTableCell>
-                      <RoxTableCell className="capitalize">{inv.invoiceType}</RoxTableCell>
-                      <RoxTableCell>
-                        <span className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", INVOICE_STATUS_TONE[inv.status])}>
-                          {INVOICE_STATUS_LABEL[inv.status]}
-                        </span>
-                      </RoxTableCell>
-                      <RoxTableCell>{formatINR(inv.total ?? 0)}</RoxTableCell>
-                      <RoxTableCell>{fmtDate(inv.createdAt)}</RoxTableCell>
-                    </RoxTableRow>
-                  ))}
-                </tbody>
-              </RoxTableCard>
-            )}
-          </ActivitySection>
-
-          <ActivitySection
-            title="Walk-Ins"
-            icon={<UserCheck className="h-3.5 w-3.5" />}
-            emptyText="No walk-ins for this customer yet."
-          >
-            {customerWalkIns.length > 0 && (
-              <RoxTableCard>
-                <colgroup><col className="w-[20%]" /><col className="w-[25%]" /><col className="w-[25%]" /><col className="w-[15%]" /><col className="w-[15%]" /></colgroup>
-                <RoxTableHead>
-                  <RoxHeadRow><th className="px-3 py-3">Walk-In</th><th className="px-3 py-3">Type</th><th className="px-3 py-3">Issue</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Date</th></RoxHeadRow>
-                </RoxTableHead>
-                <tbody>
-                  {customerWalkIns.slice(0, RECENT_LIMIT).map((w) => (
-                    <RoxTableRow key={w.id} onClick={() => router.push(`/walk-in?walkIn=${w.id}`)} className="cursor-pointer">
-                      <RoxTableCell className="font-medium text-[#4361EE]">{w.walkInNumber || w.id}</RoxTableCell>
-                      <RoxTableCell className="capitalize">{w.type}</RoxTableCell>
-                      <RoxTableCell className="truncate">{w.issue || "—"}</RoxTableCell>
-                      <RoxTableCell className="capitalize">{w.status}</RoxTableCell>
-                      <RoxTableCell>{fmtDate(w.date)}</RoxTableCell>
-                    </RoxTableRow>
-                  ))}
-                </tbody>
-              </RoxTableCard>
-            )}
-          </ActivitySection>
-
-          <ActivitySection
-            title="Field Jobs"
-            icon={<Truck className="h-3.5 w-3.5" />}
-            emptyText="No field jobs for this customer yet."
-          >
-            {customerFieldJobs.length > 0 && (
-              <RoxTableCard>
-                <colgroup><col className="w-[20%]" /><col className="w-[30%]" /><col className="w-[25%]" /><col className="w-[25%]" /></colgroup>
-                <RoxTableHead>
-                  <RoxHeadRow><th className="px-3 py-3">Job</th><th className="px-3 py-3">Route</th><th className="px-3 py-3">Status</th><th className="px-3 py-3">Date</th></RoxHeadRow>
-                </RoxTableHead>
-                <tbody>
-                  {customerFieldJobs.slice(0, RECENT_LIMIT).map((j: any) => (
-                    <RoxTableRow key={j.id} onClick={() => router.push(`/field?job=${j.id}`)} className="cursor-pointer">
-                      <RoxTableCell className="font-medium text-[#4361EE]">{j.jobNo || j.id}</RoxTableCell>
-                      <RoxTableCell className="capitalize">{(j.route || "").replace(/_/g, " ") || "—"}</RoxTableCell>
-                      <RoxTableCell className="capitalize">{(j.status || "").replace(/_/g, " ")}</RoxTableCell>
-                      <RoxTableCell>{fmtDate(j.createdAt)}</RoxTableCell>
-                    </RoxTableRow>
-                  ))}
-                </tbody>
-              </RoxTableCard>
-            )}
-          </ActivitySection>
-
-          {canViewLoyalty && (
-            <ActivitySection
-              title="Loyalty Activity"
-              icon={<Gift className="h-3.5 w-3.5" />}
-              emptyText="No loyalty transactions yet."
-            >
-              {loyaltyTx.length > 0 && (
-                <RoxTableCard>
-                  <colgroup><col className="w-[20%]" /><col className="w-[35%]" /><col className="w-[15%]" /><col className="w-[15%]" /><col className="w-[15%]" /></colgroup>
-                  <RoxTableHead>
-                    <RoxHeadRow><th className="px-3 py-3">Type</th><th className="px-3 py-3">Description</th><th className="px-3 py-3">Change</th><th className="px-3 py-3">Balance</th><th className="px-3 py-3">Date</th></RoxHeadRow>
-                  </RoxTableHead>
-                  <tbody>
-                    {loyaltyTx.map((tx) => (
-                      <RoxTableRow key={tx.id}>
-                        <RoxTableCell className="capitalize">{tx.type}</RoxTableCell>
-                        <RoxTableCell className="truncate">{tx.description}</RoxTableCell>
-                        <RoxTableCell className={tx.pointsChange >= 0 ? "text-emerald-600" : "text-rose-600"}>
-                          {tx.pointsChange >= 0 ? "+" : ""}{tx.pointsChange}
-                        </RoxTableCell>
-                        <RoxTableCell>{tx.pointsBalance}</RoxTableCell>
-                        <RoxTableCell>{fmtDate(tx.createdAt)}</RoxTableCell>
-                      </RoxTableRow>
-                    ))}
-                  </tbody>
-                </RoxTableCard>
+          {tab === "leads" && (
+            <DetailSection icon={Target} title="Leads & Sales Agents" accent="violet"
+              action={primaryAgent ? <span className="inline-flex items-center gap-1.5 rounded-full bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200"><UserCheck className="h-3 w-3" />{primaryAgent}</span> : undefined}>
+              {salesAttribution.length === 0 ? <Empty text="No sales lead is linked to this customer. Direct business carries no sales-agent credit." /> : (
+                <Table heads={["Lead", "Sales Agent", "Date", "Result", "Revenue"]}
+                  rows={salesAttribution.map((r) => ({
+                    key: r.leadId, onClick: () => go(`/leads/${r.leadId}`),
+                    cells: [
+                      <span key="a" className="font-semibold text-[#4361EE]">{r.leadNo}</span>,
+                      r.agentName ? <span key="b" className="inline-flex items-center gap-1.5"><Avatar name={r.agentName} size={18} />{r.agentName}</span> : <span key="b" className="text-muted-foreground">Unassigned</span>,
+                      fmtDate(r.date),
+                      <span key="d" className="inline-flex rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-medium text-zinc-700">{r.result}</span>,
+                      r.revenue > 0 ? formatINR(r.revenue) : "—",
+                    ],
+                  }))} />
               )}
-            </ActivitySection>
+            </DetailSection>
+          )}
+
+          {tab === "tickets" && (
+            <DetailSection icon={TicketIcon} title="Tickets" accent="indigo">
+              {customerTickets.length === 0 ? <Empty text="No tickets for this customer yet." /> : (
+                <Table heads={["Ticket", "Device", "Status", "Amount", "Date"]}
+                  rows={customerTickets.map((t) => ({ key: t.id, onClick: () => go(`/tickets/${t.id}`), cells: [
+                    <span key="a" className="font-semibold text-[#4361EE]">{t.ticketNo || t.id}</span>,
+                    [t.device, t.model].filter(Boolean).join(" ") || "—",
+                    <span key="c" className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", STATUS_TONE[t.status])}>{STATUS_LABEL[t.status]}</span>,
+                    formatINR(t.amount ?? 0), fmtDate(t.createdAt),
+                  ] }))} />
+              )}
+            </DetailSection>
+          )}
+
+          {tab === "invoices" && (
+            <DetailSection icon={Receipt} title="Invoices" accent="emerald">
+              {customerInvoices.length === 0 ? <Empty text="No invoices for this customer yet." /> : (
+                <Table heads={["Invoice", "Type", "Status", "Total", "Date"]}
+                  rows={customerInvoices.map((i) => ({ key: i.id, onClick: () => go(`/invoice/${i.id}`), cells: [
+                    <span key="a" className="font-semibold text-[#4361EE]">{i.reference || i.id}</span>,
+                    <span key="b" className="capitalize">{i.invoiceType}</span>,
+                    <span key="c" className={cn("inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset", INVOICE_STATUS_TONE[i.status])}>{INVOICE_STATUS_LABEL[i.status]}</span>,
+                    formatINR(i.total ?? 0), fmtDate(i.createdAt),
+                  ] }))} />
+              )}
+            </DetailSection>
+          )}
+
+          {tab === "walkins" && (
+            <DetailSection icon={UserCheck} title="Walk-Ins" accent="sky">
+              {customerWalkIns.length === 0 ? <Empty text="No walk-ins for this customer yet." /> : (
+                <Table heads={["Walk-In", "Type", "Issue", "Status", "Date"]}
+                  rows={customerWalkIns.map((w) => ({ key: w.id, onClick: () => go(`/walk-in?walkIn=${w.id}`), cells: [
+                    <span key="a" className="font-semibold text-[#4361EE]">{w.walkInNumber || w.id}</span>,
+                    <span key="b" className="capitalize">{w.type}</span>, w.issue || "—", <span key="d" className="capitalize">{w.status}</span>, fmtDate(w.date),
+                  ] }))} />
+              )}
+            </DetailSection>
+          )}
+
+          {tab === "field" && (
+            <DetailSection icon={Truck} title="Field Jobs" accent="violet">
+              {customerFieldJobs.length === 0 ? <Empty text="No field jobs for this customer yet." /> : (
+                <Table heads={["Job", "Route", "Status", "Date"]}
+                  rows={customerFieldJobs.map((j: any) => ({ key: j.id, onClick: () => go(`/field?job=${j.id}`), cells: [
+                    <span key="a" className="font-semibold text-[#4361EE]">{j.jobNo || j.id}</span>,
+                    <span key="b" className="capitalize">{(j.route || "").replace(/_/g, " ") || "—"}</span>,
+                    <span key="c" className="capitalize">{(j.status || "").replace(/_/g, " ")}</span>, fmtDate(j.createdAt),
+                  ] }))} />
+              )}
+            </DetailSection>
+          )}
+
+          {tab === "loyalty" && canViewLoyalty && (
+            <DetailSection icon={Gift} title="Loyalty Activity" accent="amber">
+              {loyaltyTx.length === 0 ? <Empty text="No loyalty transactions yet." /> : (
+                <Table heads={["Type", "Description", "Change", "Balance", "Date"]}
+                  rows={loyaltyTx.map((tx) => ({ key: tx.id, cells: [
+                    <span key="a" className="capitalize">{tx.type}</span>, tx.description,
+                    <span key="c" className={tx.pointsChange >= 0 ? "text-emerald-600" : "text-rose-600"}>{tx.pointsChange >= 0 ? "+" : ""}{tx.pointsChange}</span>,
+                    tx.pointsBalance, fmtDate(tx.createdAt),
+                  ] }))} />
+              )}
+            </DetailSection>
           )}
         </>
       )}
@@ -406,42 +342,35 @@ export default function CustomerDetailPage() {
   );
 }
 
-function StatCard({ label, value, icon }: { label: string; value: string; icon?: React.ReactNode }) {
+type TabId = "overview" | "leads" | "tickets" | "invoices" | "walkins" | "field" | "loyalty";
+
+function Empty({ text }: { text: string }) {
   return (
-    <div className="rounded-xl border border-border bg-muted/20 p-3">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground flex items-center gap-1">{icon}{label}</p>
-      <p className="text-[15px] font-bold mt-1">{value}</p>
+    <div className="flex flex-col items-center gap-2 py-8 text-center">
+      <span className="grid h-10 w-10 place-items-center rounded-full bg-muted text-muted-foreground"><Inbox className="h-5 w-5" /></span>
+      <p className="text-[13px] text-muted-foreground">{text}</p>
     </div>
   );
 }
 
-function ActivitySection({
-  title, icon, emptyText, children, headerExtra,
-}: {
-  title: string;
-  icon: React.ReactNode;
-  emptyText: string;
-  children: React.ReactNode;
-  /** Optional node rendered on the right of the section header (e.g. a chip). */
-  headerExtra?: React.ReactNode;
-}) {
-  const hasContent = Array.isArray((children as any))
-    ? (children as any).some(Boolean)
-    : !!children;
+/** Simple in-section table (soft sub-table header per the view-page standard). */
+function Table({ heads, rows }: { heads: string[]; rows: { key: string; onClick?: () => void; cells: React.ReactNode[] }[] }) {
   return (
-    <div className="space-y-2">
-      <div className="flex items-center justify-between gap-2 px-1">
-        <div className="flex items-center gap-2">
-          <span className="grid h-6 w-6 place-items-center rounded-md bg-[#EEF1FD] text-[#4361EE]">{icon}</span>
-          <h3 className="text-[12px] font-semibold uppercase tracking-wider text-zinc-600">{title}</h3>
-        </div>
-        {headerExtra}
-      </div>
-      {hasContent ? children : (
-        <div className="rounded-2xl border-2 border-zinc-300 bg-card p-6 text-center text-[13px] text-muted-foreground">
-          {emptyText}
-        </div>
-      )}
+    <div className="overflow-hidden rounded-xl border border-border">
+      <table className="w-full text-[13px]">
+        <thead>
+          <tr className="bg-[#EEF1FD] text-left text-[10px] font-semibold uppercase tracking-wider text-[#4361EE]">
+            {heads.map((h) => <th key={h} className="px-3 py-2.5">{h}</th>)}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key} onClick={r.onClick} className={cn("border-t border-border", r.onClick && "cursor-pointer hover:bg-muted/40")}>
+              {r.cells.map((c, i) => <td key={i} className="px-3 py-3 align-middle">{c}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

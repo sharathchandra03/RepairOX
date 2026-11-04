@@ -13,6 +13,7 @@
    architecture. See spec §11–§29, §38–§40, §52–§62, §67–§69.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useState, useMemo, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -314,11 +315,7 @@ export default function WarrantySearchPage() {
     <div className="mx-auto max-w-3xl space-y-6 pb-16">
       {/* Header */}
       <div className="flex items-center gap-3">
-        <Link href="/tickets">
-          <button className="grid h-9 w-9 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Back to tickets">
-            <ArrowLeft className="h-4 w-4" />
-          </button>
-        </Link>
+        <BackLink href="/tickets" label="Back" />
         <div>
           <h1 className="font-display text-2xl font-extrabold tracking-tight">Warranty</h1>
           <p className="text-sm text-muted-foreground">Check a previous repair and raise a warranty claim.</p>

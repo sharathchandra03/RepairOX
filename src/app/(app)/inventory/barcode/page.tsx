@@ -120,7 +120,7 @@ export default function BarcodePage() {
 
       {/* Item status filter */}
       <div className="-mx-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="inline-flex items-center gap-1 rounded-full border border-border bg-muted p-1">
+        <div className="inline-flex items-center gap-1 rounded-full border border-[#4361EE]/60 bg-muted p-1">
           {STATUS_TABS.map((t) => (
             <button
               key={t.value}

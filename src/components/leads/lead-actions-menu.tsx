@@ -98,6 +98,18 @@ export function LeadActionsMenu({
       {/* Deal conversation shortcut — only when a deal conversation exists. */}
       {hasDealConversation && <DealConversationButton lead={lead} onAction={onAction} unreadCount={dealUnreadCount} />}
 
+      {/* Edit — first shortcut, gated by the same capability as the menu item */}
+      <Can permission={CAP.lead.edit}>
+        <button
+          onClick={() => onAction("edit", lead)}
+          className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-[#EEF1FD] hover:text-[#4361EE]"
+          title="Edit lead"
+          aria-label="Edit lead"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
+      </Can>
+
       {/* View */}
       <button
         onClick={() => onAction("view", lead)}

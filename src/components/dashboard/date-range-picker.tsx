@@ -1,9 +1,10 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import * as React from "react";
 import { createPortal } from "react-dom";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, CalendarDays } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, X, CalendarDays } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /* ── Types ── */
@@ -116,9 +117,9 @@ function MonthYearSelector({
       <div className="border-t border-border/60 px-4 py-3">
         <button
           onClick={onClose}
-          className="w-full rounded-lg py-2 text-[12px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition"
+          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-full bg-[#4361EE] text-[12px] font-semibold text-white transition hover:bg-[#3450D8]"
         >
-          ← Back to calendar
+          <ArrowLeft className="h-3.5 w-3.5" /> Back to calendar
         </button>
       </div>
     </div>

@@ -1595,3 +1595,7 @@ html, body {
     background-color: rgba(67, 97, 238, 0.12);
   }
 }
+
+/* Topbar content follows the sidebar edge: when the sidebar collapses the topbar
+   widens leftwards and its pills / search settle at the left; when the sidebar
+   opens it pushes them back to the right. No compensating padding. */

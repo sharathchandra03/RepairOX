@@ -10,6 +10,7 @@
    CAP.quotation.view / viewAll + store scope.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -104,7 +105,7 @@ export default function QuotationDetailPage() {
         <div className="flex flex-col items-center gap-2 rounded-2xl border border-border bg-card p-12 text-center shadow-card">
           <div className="grid h-14 w-14 place-items-center rounded-2xl bg-muted text-muted-foreground"><FileText className="h-6 w-6" /></div>
           <p className="font-semibold">Quotation not found</p>
-          <Button variant="outline" size="sm" onClick={() => router.push("/leads/quotations")}>Back to Quotations</Button>
+          <BackPill href="/leads/quotations" label="Back to Quotations" />
         </div>
       </div>
     );
@@ -147,9 +148,7 @@ export default function QuotationDetailPage() {
       <div>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="flex items-start gap-3">
-            <button onClick={() => router.push("/leads/quotations")} className="mt-1 inline-flex h-9 w-9 items-center justify-center rounded-xl border border-border bg-card text-muted-foreground shadow-card transition hover:bg-[#EEF1FD] hover:text-[#4361EE]">
-              <ArrowLeft className="h-4 w-4" />
-            </button>
+            <BackPill href="/leads/quotations" label="Back" className="mt-1" />
             <div>
               <div className="flex items-center gap-2">
                 <h1 className="font-display text-2xl font-extrabold tabular-nums">{q.quotationNo}</h1>
@@ -349,9 +348,7 @@ export default function QuotationDetailPage() {
 
 function PageBack({ router }: { router: ReturnType<typeof useRouter> }) {
   return (
-    <button onClick={() => router.push("/leads/quotations")} className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-[#4361EE]">
-      <ArrowLeft className="h-4 w-4" /> Back to Quotations
-    </button>
+    <BackPill href="/leads/quotations" label="Back to Quotations" />
   );
 }
 

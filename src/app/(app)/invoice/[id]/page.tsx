@@ -1,5 +1,6 @@
 "use client";
 
+import { BackPill, BackLink } from "@/components/common/back-pill";
 import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { motion } from "framer-motion";
@@ -344,9 +345,7 @@ export default function InvoiceDetailPage() {
         </div>
         <h2 className="text-lg font-bold">Invoice Not Found</h2>
         <p className="text-sm text-muted-foreground">The invoice "{invoiceId}" does not exist or has been deleted.</p>
-        <Link href="/invoice">
-          <Button variant="outline" size="md"><ArrowLeft className="h-4 w-4" /> Back to Invoices</Button>
-        </Link>
+        <BackLink href="/invoice" label="Back to Invoices" />
       </div>
     );
   }
@@ -359,11 +358,7 @@ export default function InvoiceDetailPage() {
       <DetailHero>
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <div className="flex items-start gap-3">
-            <Link href="/invoice">
-              <button className="mt-1 grid h-9 w-9 shrink-0 place-items-center rounded-xl border border-border bg-card text-zinc-600 shadow-card transition hover:bg-muted" aria-label="Back to invoices">
-                <ArrowLeft className="h-4 w-4" />
-              </button>
-            </Link>
+            <BackLink href="/invoice" label="Back" className="mt-1" />
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <h1 className="font-display text-[26px] font-extrabold tracking-tight">{invoice.id}</h1>
