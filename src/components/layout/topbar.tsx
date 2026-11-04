@@ -221,14 +221,14 @@ export function Topbar({
             <button
               onClick={toggle}
               className={cn(
-                "hidden md:flex items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
+                "hidden md:flex shrink-0 items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
                 isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card hover:bg-muted"
               )}
             >
               <Avatar name={displayName} src={currentUser?.avatarUrl} size={30} />
-              <div className="text-left leading-tight">
-                <p className="text-[12px] font-semibold text-zinc-800">{displayName}</p>
-                <p className="text-[10px] text-muted-foreground">{role.label}</p>
+              <div className="max-w-[110px] text-left leading-tight">
+                <p className="truncate whitespace-nowrap text-[12px] font-semibold text-zinc-800" title={displayName}>{displayName}</p>
+                <p className="truncate whitespace-nowrap text-[10px] text-muted-foreground" title={role.label}>{role.label}</p>
               </div>
               <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", open && "rotate-180")} />
             </button>
