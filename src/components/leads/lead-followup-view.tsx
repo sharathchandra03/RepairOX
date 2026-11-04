@@ -93,20 +93,24 @@ export function LeadFollowUpView({
     [followUps, leadById],
   );
 
+  const viewSwitch = (
+    <SegmentedTabs
+      accent="amber"
+      value={view}
+      onChange={(v) => setView(v as ViewMode)}
+      options={[
+        { label: <span className="inline-flex items-center gap-1.5"><TableIcon className="h-3.5 w-3.5" /> Table</span>, value: "table" },
+        { label: <span className="inline-flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5" /> Calendar</span>, value: "calendar" },
+      ]}
+      size="sm"
+    />
+  );
+
   return (
     <div className="space-y-3">
-      {/* Table / Calendar switch */}
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <SegmentedTabs
-          value={view}
-          onChange={(v) => setView(v as ViewMode)}
-          options={[
-            { label: <span className="inline-flex items-center gap-1.5"><TableIcon className="h-3.5 w-3.5" /> Table</span>, value: "table" },
-            { label: <span className="inline-flex items-center gap-1.5"><CalendarIcon className="h-3.5 w-3.5" /> Calendar</span>, value: "calendar" },
-          ]}
-          size="sm"
-        />
-      </div>
+      {/* Table / Calendar switch — amber theme. In Table mode it shares ONE row
+          with the Active / History toggle (rendered inside FollowUpTable). */}
+      {view === "calendar" && viewSwitch}
 
       {view === "table" ? (
         <FollowUpTable
@@ -115,6 +119,7 @@ export function LeadFollowUpView({
           followUps={visibleFollowUps}
           sub={sub}
           onSubChange={setSub}
+          leading={viewSwitch}
           theadTop={theadTop}
           onOpenLead={onOpenLead}
           highlightLeadId={highlightLeadId}
@@ -129,8 +134,10 @@ export function LeadFollowUpView({
 /* ── Active / History table ──────────────────────────────────────────────── */
 
 function FollowUpTable({
-  leads, leadById, followUps, sub, onSubChange, theadTop, onOpenLead, highlightLeadId,
+  leads, leadById, followUps, sub, onSubChange, leading, theadTop, onOpenLead, highlightLeadId,
 }: {
+  /** Table / Calendar switch, rendered beside the Active / History toggle. */
+  leading?: import("react").ReactNode;
   leads: Lead[];
   leadById: Map<string, Lead>;
   followUps: LeadFollowUp[];
@@ -208,9 +215,12 @@ function FollowUpTable({
   return (
     <div className="space-y-3">
       {/* Active / History sub-toggle — same pill group as Walk-In. */}
-      <div className="flex items-center gap-1 rounded-full bg-muted p-1 w-fit">
+      <div className="flex flex-wrap items-center gap-3">
+      {leading}
+      <div className="flex items-center gap-1 rounded-full border border-[#F59E0C]/70 bg-muted p-1 w-fit">
         <SubTab label="Active" count={activeRows.length} active={sub === "active"} onClick={() => onSubChange("active")} icon={CalendarClock} />
         <SubTab label="History" count={historyRows.length} active={sub === "history"} onClick={() => onSubChange("history")} icon={HistoryIcon} />
+      </div>
       </div>
 
       {/* Canonical RepairOX table shell (matches the main Lead / Walk-In table). */}
@@ -496,7 +506,7 @@ function SubTab({ label, count, active, onClick, icon: Icon }: { label: string; 
       onClick={onClick}
       className={cn(
         "inline-flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[12.5px] font-semibold transition",
-        active ? "bg-card text-[#4361EE] shadow-sm" : "text-muted-foreground hover:text-foreground",
+        active ? "bg-card text-[#F59E0C] shadow-sm" : "text-muted-foreground hover:text-foreground",
       )}
     >
       {Icon && <Icon className="h-3.5 w-3.5" />}
@@ -505,7 +515,7 @@ function SubTab({ label, count, active, onClick, icon: Icon }: { label: string; 
         <span
           className={cn(
             "inline-flex h-[18px] items-center justify-center rounded-full px-1.5 text-[10.5px] font-bold leading-none tabular-nums",
-            active ? "bg-[#4361EE] text-white" : "bg-zinc-200 text-zinc-600",
+            active ? "bg-[#F59E0C] text-white" : "bg-zinc-200 text-zinc-600",
           )}
           style={{ minWidth: 18 }}
         >
@@ -661,18 +671,18 @@ function FollowUpCommentCell({ lead }: { lead: Lead }) {
         type="button"
         onClick={(e) => { e.stopPropagation(); setOpen((o) => !o); }}
         title="View & add comments"
-        className="group/cmt flex min-h-[44px] w-full items-center gap-2 overflow-hidden rounded-lg border border-amber-200/80 bg-amber-50/70 px-2.5 py-1.5 text-left transition hover:border-amber-300"
+        className="group/cmt relative mr-2 flex min-h-[48px] w-full items-center gap-2 overflow-hidden rounded-lg border border-amber-300 bg-amber-100/90 pl-3 pr-2.5 py-1.5 text-left shadow-[0_1px_2px_rgba(146,64,14,0.12)] transition hover:border-amber-400 hover:bg-amber-100"
       >
-        <span aria-hidden className="h-full w-[3px] shrink-0 self-stretch rounded-full bg-amber-400" />
+        <span aria-hidden className="pointer-events-none absolute inset-y-0 left-0 w-[3.5px] bg-amber-500" />
         <div className="min-w-0 flex-1">
           {previewText ? (
-            <p className="line-clamp-2 break-words text-[12.5px] leading-snug text-foreground/90">{previewText}</p>
+            <p className="line-clamp-2 w-full break-words whitespace-pre-line text-[13px] font-medium leading-snug text-amber-950" title={previewText}>{previewText}</p>
           ) : (
-            <p className="text-[12px] italic text-muted-foreground">No comments yet — click to add</p>
+            <p className="text-[12px] italic text-amber-700/80">No comments yet — click to add</p>
           )}
-          {entries.length > 1 && <p className="mt-0.5 text-[10.5px] font-medium text-amber-700">{entries.length} notes · tap to view</p>}
+          {entries.length > 1 && <p className="mt-0.5 text-[10.5px] font-semibold text-amber-800">{entries.length} notes · tap to view</p>}
         </div>
-        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-amber-600 opacity-70" />
+        <MessageSquare className="h-3.5 w-3.5 shrink-0 text-amber-700" />
       </button>
 
       {typeof document !== "undefined" && createPortal(

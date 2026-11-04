@@ -2389,14 +2389,12 @@ export default function LeadsListPage() {
                 : undefined
           }
         />
-        {/* Outside All Leads there is no status strip, so the Customer filter +
-            Collapse control sit on the tabs line instead of leaving an empty row. */}
-        {view !== "all" && (
-          <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-            {controlsCollapsed && collapsedIndicators}
-            {rightControls}
-          </div>
-        )}
+        {/* Customer filter + Collapse control sit on the tabs line (above Search)
+            for EVERY view — All Leads, Assigned and Follow-ups alike. */}
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
+          {controlsCollapsed && view !== "all" && collapsedIndicators}
+          {rightControls}
+        </div>
       </div>
 
       {/* ── COLLAPSIBLE CONTROL AREA ───────────────────────────────────────────
@@ -2551,7 +2549,6 @@ export default function LeadsListPage() {
               are active without reproducing the whole control area. */}
           {controlsCollapsed && collapsedIndicators}
         </div>
-        {rightControls}
       </div>
       )}
 

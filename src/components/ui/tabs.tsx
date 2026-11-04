@@ -9,13 +9,17 @@ interface TabsProps {
   onChange: (v: string) => void;
   className?: string;
   size?: "sm" | "md";
+  /** Accent theme. "amber" is used by the Follow-ups workspace (#F59E0C). */
+  accent?: "blue" | "amber";
 }
-export function SegmentedTabs({ options, value, onChange, className, size = "md" }: TabsProps) {
+export function SegmentedTabs({ options, value, onChange, className, size = "md", accent = "blue" }: TabsProps) {
+  const amber = accent === "amber";
   return (
     <div
       role="tablist"
       className={cn(
-        "relative inline-flex items-center rounded-full border border-[#4361EE]/60 bg-muted p-1",
+        "relative inline-flex items-center rounded-full border bg-muted p-1",
+        amber ? "border-[#F59E0C]/70" : "border-[#4361EE]/60",
         size === "sm" ? "text-[11px]" : "text-sm",
         className
       )}
@@ -37,7 +41,12 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
             {active && (
               <motion.span
                 layoutId={`pill-${options.map((x) => x.value).join("-")}`}
-                className="absolute inset-0 rounded-full bg-[#4361EE] shadow-[0_6px_20px_-8px_rgba(67,97,238,0.50)]"
+                className={cn(
+                  "absolute inset-0 rounded-full",
+                  amber
+                    ? "bg-[#F59E0C] shadow-[0_6px_20px_-8px_rgba(245,158,12,0.55)]"
+                    : "bg-[#4361EE] shadow-[0_6px_20px_-8px_rgba(67,97,238,0.50)]",
+                )}
                 transition={{ type: "spring", stiffness: 380, damping: 30 }}
               />
             )}

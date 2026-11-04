@@ -25,13 +25,13 @@ interface TabDef {
   value: LeadView;
   label: string;
   icon: React.ComponentType<{ className?: string }>;
-  tone: "blue" | "teal" | "rose" | "red";
+  tone: "blue" | "teal" | "rose" | "red" | "amber";
 }
 
 const TABS: TabDef[] = [
   { value: "assigned", label: "Assigned Leads", icon: Inbox, tone: "teal" },
   { value: "all", label: "All Leads", icon: Users, tone: "blue" },
-  { value: "followUps", label: "Follow-ups", icon: CalendarClock, tone: "red" },
+  { value: "followUps", label: "Follow-ups", icon: CalendarClock, tone: "amber" },
 ];
 
 export function LeadWorkspaceTabs({
@@ -71,13 +71,15 @@ export function LeadWorkspaceTabs({
                   ? "bg-[#E11D48] text-white shadow-[0_6px_16px_-8px_rgba(225,29,72,0.6)] focus-visible:ring-[#E11D48]/40"
                   : t.tone === "teal"
                   ? "bg-[#0F766E] text-white shadow-[0_6px_16px_-8px_rgba(15,118,110,0.6)] focus-visible:ring-[#0F766E]/40"
+                  : t.tone === "amber"
+                  ? "bg-[#F59E0C] text-white shadow-[0_6px_16px_-8px_rgba(245,158,12,0.6)] focus-visible:ring-[#F59E0C]/40"
                   : "bg-[#4361EE] text-white shadow-[0_6px_16px_-8px_rgba(67,97,238,0.6)] focus-visible:ring-[#4361EE]/40"
                 : t.tone === "rose"
                   ? "text-rose-700 hover:bg-rose-200/80 focus-visible:ring-[#E11D48]/30"
                   : t.tone === "teal"
                   ? "text-[#0F766E] hover:bg-[#C4E8E2] focus-visible:ring-[#0F766E]/30"
-                  : t.tone === "red"
-                  ? "text-zinc-600 hover:bg-[#FAD1D1] hover:text-[#B91C1C] focus-visible:ring-[#DC2626]/30"
+                  : t.tone === "amber"
+                  ? "text-zinc-600 hover:bg-[#FDE8C0] hover:text-[#B45309] focus-visible:ring-[#F59E0C]/30"
                   : "text-zinc-600 hover:bg-[#D5DDFB] hover:text-[#3450D8] focus-visible:ring-[#4361EE]/30",
             )}
           >
@@ -88,10 +90,10 @@ export function LeadWorkspaceTabs({
                 className={cn(
                   "grid h-[18px] min-w-[18px] place-items-center rounded-full px-1 text-[10px] font-bold leading-none tabular-nums",
                   active
-                    ? t.tone === "rose" ? "bg-white text-[#E11D48]" : t.tone === "teal" ? "bg-white text-[#0F766E]" : "bg-white text-[#4361EE]"
+                    ? t.tone === "rose" ? "bg-white text-[#E11D48]" : t.tone === "teal" ? "bg-white text-[#0F766E]" : t.tone === "amber" ? "bg-white text-[#F59E0C]" : "bg-white text-[#4361EE]"
                     : t.tone === "rose" ? "bg-[#E11D48] text-white"
                     : t.tone === "teal" ? "bg-[#0F766E] text-white"
-                    : t.tone === "red" ? "bg-[#DC2626] text-white"
+                    : t.tone === "amber" ? "bg-[#F59E0C] text-white"
                     : "bg-[#4361EE] text-white",
                 )}
                 aria-label={`${count} ${t.label}`}
