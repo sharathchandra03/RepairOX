@@ -52,10 +52,13 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
   // "/leads/intelligence" (Lead Intelligence) is exact-match too, so it does NOT
   // light up when "/leads/intelligence/agents" (Agent Intelligence) is open — the
   // two are sibling sections, each with its own independent active pill.
-  const isModuleRoot = item.href === "/operations" || item.href === "/lead-management" || item.href === "/dashboard" || item.href === "/leads/intelligence";
-  const active = !item.newTab && !comingSoon && (isModuleRoot
+  const isModuleRoot = item.href === "/operations" || item.href === "/field" || item.href === "/lead-management" || item.href === "/dashboard" || item.href === "/leads/intelligence";
+  // "/field" is a module root (so Dashboards/Reports don't light it up) BUT its
+  // record pages (/field/<tripId>) belong to it — View Assignment keeps it active.
+  const fieldRecordPage = item.href === "/field" && pathname.startsWith("/field/") && !/^\/field\/(dashboard|reports)(\/|$)/.test(pathname);
+  const active = !item.newTab && !comingSoon && (fieldRecordPage || (isModuleRoot
     ? pathname === item.href
-    : pathname === item.href || pathname.startsWith(item.href + "/"));
+    : pathname === item.href || pathname.startsWith(item.href + "/")));
   return (
     // Enter/exit (opacity+height) is for permission-driven add/remove ONLY.
     // We deliberately do NOT use the `layout` prop here: during a collapse/expand

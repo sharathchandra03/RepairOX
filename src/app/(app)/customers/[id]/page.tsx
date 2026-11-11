@@ -154,7 +154,7 @@ export default function CustomerDetailPage() {
     ...customerTickets.map((t) => ({ key: "t" + t.id, kind: "Ticket", tone: "bg-indigo-50 text-indigo-700", ref: t.ticketNo || t.id, sub: [t.device, t.model].filter(Boolean).join(" ") || "—", status: STATUS_LABEL[t.status] || "", date: t.createdAt || "", href: `/tickets/${t.id}` })),
     ...customerInvoices.map((i) => ({ key: "i" + i.id, kind: "Invoice", tone: "bg-emerald-50 text-emerald-700", ref: i.reference || i.id, sub: formatINR(i.total ?? 0), status: INVOICE_STATUS_LABEL[i.status] || "", date: i.createdAt || "", href: `/invoice/${i.id}` })),
     ...customerWalkIns.map((w) => ({ key: "w" + w.id, kind: "Walk-In", tone: "bg-sky-50 text-sky-700", ref: w.walkInNumber || w.id, sub: w.issue || "—", status: w.status, date: w.date || "", href: `/walk-in?walkIn=${w.id}` })),
-    ...customerFieldJobs.map((j: any) => ({ key: "f" + j.id, kind: "Field", tone: "bg-violet-50 text-violet-700", ref: j.jobNo || j.id, sub: (j.route || "").replace(/_/g, " ") || "—", status: (j.status || "").replace(/_/g, " "), date: j.createdAt || "", href: `/field?job=${j.id}` })),
+    ...customerFieldJobs.map((j: any) => ({ key: "f" + j.id, kind: "Field", tone: "bg-violet-50 text-violet-700", ref: j.jobNo || j.id, sub: (j.route || "").replace(/_/g, " ") || "—", status: (j.status || "").replace(/_/g, " "), date: j.createdAt || "", href: `/field/${j.id}` })),
   ].sort((a, b) => b.date.localeCompare(a.date));
 
   const tabs: { label: string; value: TabId }[] = [
@@ -315,7 +315,7 @@ export default function CustomerDetailPage() {
             <DetailSection icon={Truck} title="Field Jobs" accent="violet">
               {customerFieldJobs.length === 0 ? <Empty text="No field jobs for this customer yet." /> : (
                 <Table heads={["Job", "Route", "Status", "Date"]}
-                  rows={customerFieldJobs.map((j: any) => ({ key: j.id, onClick: () => go(`/field?job=${j.id}`), cells: [
+                  rows={customerFieldJobs.map((j: any) => ({ key: j.id, onClick: () => go(`/field/${j.id}`), cells: [
                     <span key="a" className="font-semibold text-[#4361EE]">{j.jobNo || j.id}</span>,
                     <span key="b" className="capitalize">{(j.route || "").replace(/_/g, " ") || "—"}</span>,
                     <span key="c" className="capitalize">{(j.status || "").replace(/_/g, " ")}</span>, fmtDate(j.createdAt),

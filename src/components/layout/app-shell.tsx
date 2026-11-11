@@ -161,7 +161,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // user's prior expanded/collapsed state is restored when they leave. The user
   // can still manually re-expand while on the Lead Table — we never force it
   // back collapsed on a route update that stays within the Lead Table.
-  const isLeadTable = pathname === "/leads/list" || pathname.startsWith("/leads/list/");
+  // Pickup & Drop (/field) is a dense data grid too — same enter-collapse / leave-restore.
+  const isLeadTable = pathname === "/leads/list" || pathname.startsWith("/leads/list/") || pathname === "/field";
   const wasLeadTable = useRef(false);
   const collapsedBeforeLeadTable = useRef<boolean | null>(null);
   useEffect(() => {

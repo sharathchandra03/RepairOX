@@ -21,11 +21,13 @@
 import { useMemo } from "react";
 import {
   Sparkles, UserCheck, CalendarClock, Route as RouteIcon, Truck, Store,
-  Ticket as TicketIcon, Receipt, CheckCircle2, XCircle, BadgePercent, RefreshCw, Send, Ban, FileText,
+  Ticket as TicketIcon, Receipt, CheckCircle2, XCircle, BadgePercent, RefreshCw, Send, Ban, FileText, MessageSquareText, MapPin,
 } from "lucide-react";
 import { useLeads } from "@/lib/leads-context";
 import { useDeals } from "@/lib/lead-deals-context";
 import { useQuotations } from "@/lib/quotations-context";
+import { useField } from "@/lib/field-context";
+import { FIELD_EVENT_LABEL, describeFieldEvent } from "@/lib/field-data";
 import { formatQuotationMoney } from "@/lib/quotation-data";
 import { cn } from "@/lib/utils";
 import {
@@ -78,6 +80,7 @@ export function LeadJourneyTimeline({ lead }: { lead: Lead }) {
   const { conversionHistoryFor, assignmentHistoryFor, followUpsFor } = useLeads();
   const { dealsForLead, revisionsForDeal } = useDeals();
   const { quotationsForLead } = useQuotations();
+  const { eventsForLead } = useField();
 
   const rows = useMemo<Row[]>(() => {
     const out: Row[] = [];
@@ -173,6 +176,22 @@ export function LeadJourneyTimeline({ lead }: { lead: Lead }) {
       }
     }
 
+    // Field trip events (append-only field_job_events): the Sales Agent's
+    // customer-communication note, engineer (re)assignment, status moves and
+    // location updates. Real rows only; the trip's own "created" / "ticket
+    // linked" events are already represented by the conversion history above.
+    for (const e of eventsForLead(lead.id)) {
+      if (e.kind === "created" || e.kind === "ticket_linked" || e.kind === "drop_ninja_assigned") continue;
+      const comm = e.kind === "communication" || e.kind === "comment";
+      const detail = describeFieldEvent(e);
+      out.push({
+        key: `fje:${e.id}`, at: e.occurredAt,
+        icon: comm ? MessageSquareText : e.kind === "location_changed" ? MapPin : Truck,
+        color: comm ? "bg-sky-50 text-sky-700 ring-sky-200" : "bg-teal-50 text-teal-600 ring-teal-200",
+        title: `${e.jobNo ? e.jobNo + " · " : ""}${FIELD_EVENT_LABEL[e.kind]}`,
+        detail: [comm ? `“${detail}”` : detail, e.actorName ? `by ${e.actorName}` : undefined].filter(Boolean).join(" · ") || undefined,
+      });
+    }
     // Terminal lost/won markers come through lead_conversion_history ("won" /
     // "lost") when recorded — no separate derived row needed here.
 
@@ -180,7 +199,7 @@ export function LeadJourneyTimeline({ lead }: { lead: Lead }) {
     return out
       .filter((r) => r.at)
       .sort((a, b) => new Date(a.at).getTime() - new Date(b.at).getTime());
-  }, [lead, conversionHistoryFor, assignmentHistoryFor, followUpsFor, dealsForLead, revisionsForDeal, quotationsForLead]);
+  }, [lead, conversionHistoryFor, assignmentHistoryFor, followUpsFor, dealsForLead, revisionsForDeal, quotationsForLead, eventsForLead]);
 
   return (
     <section className="rounded-2xl border border-border bg-card p-4">

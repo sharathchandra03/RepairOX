@@ -23,6 +23,7 @@
     "leads:workspace:test": "tsx --test src/lib/lead-workspace.test.ts",
     "leads:salesbook:test": "tsx --test src/lib/lead-sales-book.test.ts",
     "perf:kpi:test": "tsx --test src/lib/agent-performance.test.ts",
+    "field:test": "tsx --test src/lib/maps-url.test.ts src/lib/field-table.test.ts src/lib/field-location.test.ts src/lib/field-dashboard.test.ts src/lib/maps-resolve.test.ts src/lib/geo/reverse-geocode.test.ts src/lib/lead-picker-search.test.ts src/lib/field-overview.test.ts src/lib/field-devices.test.ts src/lib/lead-to-trip.test.ts src/lib/field-reports.test.ts",
     "attendance:test": "tsx --test src/lib/work-session.test.ts",
     "inventory:costing:test": "tsx --test src/lib/inventory-costing.test.ts",
     "inventory:costing:verify": "node scripts/inventory-costing-verify.mjs",

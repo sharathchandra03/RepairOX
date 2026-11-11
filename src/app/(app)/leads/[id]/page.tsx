@@ -38,6 +38,7 @@
      • Result       — SYSTEM-DERIVED outcome (read-only)
    ────────────────────────────────────────────────────────────────────────── */
 
+import { mapsOpenUrl } from "@/lib/maps-url";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
@@ -45,7 +46,7 @@ import { useReducedMotion } from "framer-motion";
 import {
   ArrowLeft, Phone, Mail, User, Tag, Wrench, UserCheck, BadgePercent, Pencil,
   Lock, Truck, Store, Route as RouteIcon, Ticket as TicketIcon, Receipt,
-  ExternalLink, FileText, IndianRupee, Building2, CheckCircle2, GitBranch,
+  MapPin, ExternalLink, FileText, IndianRupee, Building2, CheckCircle2, GitBranch,
   type LucideIcon,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -492,7 +493,7 @@ export default function ViewLeadPage() {
                 )}
                 {deal && <Link href={`/leads/deals?deal=${deal.id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:border-[#4361EE]/40 hover:bg-muted"><BadgePercent className="h-3.5 w-3.5" /> {deal.dealNo}</Link>}
                 {quotation && <Link href={`/leads/quotations/${quotation.id}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:border-[#4361EE]/40 hover:bg-muted"><FileText className="h-3.5 w-3.5" /> {quotation.quotationNo}</Link>}
-                {(fieldJob || lead.linkedFieldJobId) && <Link href={`/field?job=${fieldJob?.id || lead.linkedFieldJobId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:border-[#4361EE]/40 hover:bg-muted"><Truck className="h-3.5 w-3.5" /> {fieldJob?.jobNo || "Field Job"}</Link>}
+                {(fieldJob || lead.linkedFieldJobId) && <Link href={`/field/${fieldJob?.id || lead.linkedFieldJobId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:border-[#4361EE]/40 hover:bg-muted"><Truck className="h-3.5 w-3.5" /> {fieldJob?.jobNo || "Field Job"}</Link>}
                 {(walkIn || lead.linkedWalkInId) && <Link href={`/walk-in?walkIn=${walkIn?.id || lead.linkedWalkInId}`} className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium text-[#4361EE] transition hover:border-[#4361EE]/40 hover:bg-muted"><Store className="h-3.5 w-3.5" /> {walkIn?.walkInNumber || "Walk-In"}</Link>}
                 {lead.linkedTicketId && <Link href={canViewTicket ? `/tickets/${ticket?.id || lead.linkedTicketId}` : "#"} className={cn("inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium transition", canViewTicket ? "text-[#4361EE] hover:border-[#4361EE]/40 hover:bg-muted" : "pointer-events-none text-zinc-400")}><TicketIcon className="h-3.5 w-3.5" /> {ticket?.ticketNo || lead.linkedTicketId}</Link>}
                 {finalizedInvoice && <Link href={canViewInvoice ? `/invoice/${finalizedInvoice.id}` : "#"} className={cn("inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-[12px] font-medium transition", canViewInvoice ? "text-[#4361EE] hover:border-[#4361EE]/40 hover:bg-muted" : "pointer-events-none text-zinc-400")}><Receipt className="h-3.5 w-3.5" /> {finalizedInvoice.id}</Link>}
@@ -765,7 +766,7 @@ export default function ViewLeadPage() {
           {/* The real operational records this route produced (document lineage). */}
           <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {(fieldJob || lead.linkedFieldJobId) && (
-              <RecordCard label="Field Job" value={fieldJob?.jobNo || "Field Job"} icon={Truck} tone="bg-violet-50 text-violet-600" href={`/field?job=${fieldJob?.id || lead.linkedFieldJobId}`} />
+              <RecordCard label="Field Job" value={fieldJob?.jobNo || "Field Job"} icon={Truck} tone="bg-violet-50 text-violet-600" href={`/field/${fieldJob?.id || lead.linkedFieldJobId}`} />
             )}
             {(walkIn || lead.linkedWalkInId) && (
               <RecordCard label="Walk-In" value={walkIn?.walkInNumber || "Walk-In"} icon={Store} tone="bg-amber-50 text-amber-600" href={`/walk-in?walkIn=${walkIn?.id || lead.linkedWalkInId}`} />
@@ -783,6 +784,21 @@ export default function ViewLeadPage() {
               muted={!finalizedInvoice}
             />
           </div>
+
+          {/* Service location + latest customer-communication note of the linked trip
+              (same data as Field Management — one canonical trip record). */}
+          {fieldJob && (fieldJob.pickupAddress || fieldJob.locationMapsUrl) && (
+            <div className="mt-4 rounded-xl border border-border p-3.5">
+              <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><MapPin className="h-3.5 w-3.5" /> Service location · {fieldJob.jobNo}</p>
+              <p className="text-[13px] font-medium text-foreground">{fieldJob.pickupAddress || "—"}{fieldJob.pincode ? ` – ${fieldJob.pincode}` : ""}</p>
+              {fieldJob.landmark && <p className="text-[12px] text-muted-foreground">Landmark: {fieldJob.landmark}</p>}
+              {fieldJob.locationInstructions && <p className="text-[12px] text-muted-foreground">{fieldJob.locationInstructions}</p>}
+              {(() => {
+                const href = mapsOpenUrl({ mapsUrl: fieldJob.locationMapsUrl, lat: fieldJob.locationLat, lng: fieldJob.locationLng, address: fieldJob.pickupAddress, pincode: fieldJob.pincode });
+                return href ? <a href={href} target="_blank" rel="noopener noreferrer" className="mt-1.5 inline-flex items-center gap-1 text-[12px] font-medium text-[#4361EE] hover:underline"><ExternalLink className="h-3 w-3" /> Open in Maps</a> : null;
+              })()}
+            </div>
+          )}
 
           {/* Ninja / technician */}
           {fieldJob?.ninjaName && (

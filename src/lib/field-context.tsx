@@ -30,12 +30,14 @@ import { logActivity } from "@/lib/activity-log";
 import { notify } from "@/lib/notifications";
 import {
   genFieldJobId, nextFieldJobNo, nextFieldJobNoFromDb, applyFieldFilters, EMPTY_FIELD_FILTERS,
-  FIELD_STATUS_LABEL, normaliseLeadType,
+  FIELD_STATUS_LABEL, normaliseLeadType, rowToFieldEvent, formatFieldJobNo,
   type FieldJob, type FieldJobDraft, type FieldJobStatus, type FieldJobFilters, type FieldProof,
+  type FieldJobEvent, type FieldJobEventKind,
 } from "@/lib/field-data";
 import { useStoreContext } from "@/lib/store-context";
 
 const JOBS_KEY = "repairox-field-jobs";
+const EVENTS_KEY = "repairox-field-job-events";
 
 /* ─── Row mappers (snake_case DB ↔ camelCase app) — used only in DB mode ── */
 
@@ -80,13 +82,43 @@ function rowToJob(r: any): FieldJob {
     deliveryConfirmed: !!r.delivery_confirmed,
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
+    branchId: r.branch_id ?? "",
+    leadBranchId: r.lead_branch_id ?? "",
+    altPhone: r.alt_phone ?? "",
+    imei: r.imei ?? "",
+    accessories: r.accessories ?? "",
+    deviceCondition: r.device_condition ?? "",
+    deviceCategoryId: r.device_category_id ?? "",
+    deviceBrandId: r.device_brand_id ?? "",
+    preferredWindow: r.preferred_window ?? "",
+    pincode: r.pincode ?? "",
+    landmark: r.landmark ?? "",
+    locationLat: r.location_lat ?? null,
+    locationLng: r.location_lng ?? null,
+    locationMapsUrl: r.location_maps_url ?? "",
+    locationInstructions: r.location_instructions ?? "",
+    locationSource: r.location_source ?? "",
+    dropLat: r.drop_lat ?? null,
+    dropLng: r.drop_lng ?? null,
+    dropMapsUrl: r.drop_maps_url ?? "",
+    assignedAt: r.assigned_at ?? "",
+    createdByName: r.created_by_name ?? "",
+    clientRequestId: r.client_request_id ?? "",
+    devices: Array.isArray(r.devices) && r.devices.length > 0 ? (r.devices as FieldJob["devices"]) : undefined,
   };
 }
 
 /** Columns added by later migrations (0028). If the DB hasn't been migrated
  *  yet, writes including these fail with an unknown-column error; we strip them
  *  and retry so the module keeps working against an older schema. */
-const OPTIONAL_JOB_COLUMNS = ["lead_type", "source", "linked_ticket_device_id"] as const;
+const OPTIONAL_JOB_COLUMNS = [
+  "lead_type", "source", "linked_ticket_device_id",
+  // 0091 — Pickup & Drop trip detail / location / idempotency
+  "alt_phone", "imei", "accessories", "device_condition", "device_category_id", "device_brand_id",
+  "preferred_window", "pincode", "landmark", "location_lat", "location_lng", "location_maps_url",
+  "location_instructions", "location_source", "drop_lat", "drop_lng", "drop_maps_url",
+  "lead_branch_id", "client_request_id", "devices",
+] as const;
 
 /** True when a Supabase error is about an unknown column (schema not migrated).
  *  Covers Postgres 42703 and PostgREST's PGRST204 schema-cache message. */
@@ -152,6 +184,27 @@ function jobToRow(j: Partial<FieldJob>): Record<string, unknown> {
   set("status", j.status);
   set("notes", j.notes);
   if (j.deliveryConfirmed !== undefined) row.delivery_confirmed = j.deliveryConfirmed;
+  // 0091 trip detail + canonical location (nullable; "" -> null)
+  set("alt_phone", j.altPhone);
+  set("imei", j.imei);
+  set("accessories", j.accessories);
+  set("device_condition", j.deviceCondition);
+  set("device_category_id", j.deviceCategoryId);
+  set("device_brand_id", j.deviceBrandId);
+  set("preferred_window", j.preferredWindow);
+  set("pincode", j.pincode);
+  set("landmark", j.landmark);
+  if (j.locationLat !== undefined) row.location_lat = j.locationLat;
+  if (j.locationLng !== undefined) row.location_lng = j.locationLng;
+  set("location_maps_url", j.locationMapsUrl);
+  set("location_instructions", j.locationInstructions);
+  set("location_source", j.locationSource);
+  if (j.dropLat !== undefined) row.drop_lat = j.dropLat;
+  if (j.dropLng !== undefined) row.drop_lng = j.dropLng;
+  set("drop_maps_url", j.dropMapsUrl);
+  set("lead_branch_id", j.leadBranchId);
+  set("client_request_id", j.clientRequestId);
+  if (j.devices !== undefined) row.devices = j.devices;
   return row;
 }
 
@@ -170,6 +223,17 @@ interface FieldContextValue {
   getJob: (id: string) => FieldJob | undefined;
   /** Find an active (non-terminal) field job already linked to a lead. */
   activeJobForLead: (leadId: string) => FieldJob | undefined;
+  /** All trips for a lead (a Lead may legitimately need several visits). */
+  jobsForLead: (leadId: string) => FieldJob[];
+
+  /** Append-only event trail (status / assignment / location / ticket / notes). */
+  events: FieldJobEvent[];
+  eventsForJob: (jobId: string) => FieldJobEvent[];
+  eventsForLead: (leadId: string) => FieldJobEvent[];
+  /** Record a customer-communication note or comment against a trip. Append-only;
+   *  never overwrites an earlier note. Falls back to local storage (and says so)
+   *  if the event table is unavailable — the text is never silently dropped. */
+  addJobNote: (jobId: string, note: string, kind?: Extract<FieldJobEventKind, "communication" | "comment">, source?: string) => Promise<boolean>;
 
   /** Create a field job. `overrideBranchId` forces the job's owning store
    *  (branch_id) instead of defaulting to the active store — REQUIRED when
@@ -235,6 +299,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   const activePrefixesRef = useRef(activePrefixes);
   useEffect(() => { activePrefixesRef.current = activePrefixes; }, [activePrefixes]);
   const [jobs, setJobs] = useState<FieldJob[]>([]);
+  const [events, setEvents] = useState<FieldJobEvent[]>([]);
   const [hydrated, setHydrated] = useState(false);
   const [filters, setFiltersState] = useState<FieldJobFilters>(EMPTY_FIELD_FILTERS);
   // Whether a live `field_jobs` table is usable. Starts optimistic in DB mode
@@ -265,12 +330,18 @@ export function FieldProvider({ children }: { children: ReactNode }) {
           setJobs(readLS<FieldJob[]>(JOBS_KEY, []));
         } else {
           setJobs((data ?? []).map(rowToJob));
+          // Append-only trail (0091). A missing table (unmigrated DB) just
+          // means no events yet — never an error for the module.
+          const ev = await supabase.from("field_job_events").select("*")
+            .order("occurred_at", { ascending: false }).limit(1500);
+          if (active && !ev.error) setEvents((ev.data ?? []).map(rowToFieldEvent));
         }
         setHydrated(true);
         return;
       }
       // Local mode
       setJobs(readLS<FieldJob[]>(JOBS_KEY, []));
+      setEvents(readLS<FieldJobEvent[]>(EVENTS_KEY, []));
       setHydrated(true);
     }
     // Wait for auth AND the active-store selection in DB mode so RLS reads
@@ -293,7 +364,14 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       if (!active || error) return;
       setJobs((data ?? []).map(rowToJob));
     };
+    const reloadEvents = async () => {
+      const { data, error } = await db.from("field_job_events").select("*")
+        .order("occurred_at", { ascending: false }).limit(1500);
+      if (!active || error) return;
+      setEvents((data ?? []).map(rowToFieldEvent));
+    };
     channel.on("postgres_changes", { event: "*", schema: "public", table: "field_jobs" }, reload);
+    channel.on("postgres_changes", { event: "INSERT", schema: "public", table: "field_job_events" }, reloadEvents);
     channel.subscribe();
     return () => { active = false; db.removeChannel(channel); };
   }, [useDb, authReady, db, activeStoreId]);
@@ -312,6 +390,71 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   const getJob = useCallback((id: string) => jobsRef.current.find((j) => j.id === id), []);
   const activeJobForLead = useCallback((leadId: string) =>
     jobsRef.current.find((j) => j.leadId === leadId && j.status !== "cancelled"), []);
+  const jobsForLead = useCallback((leadId: string) =>
+    jobsRef.current.filter((j) => j.leadId === leadId)
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt)), []);
+
+  /* ── Events ──
+     DB mode: structural events (status / assignment / location / ticket) are
+     written by the field_jobs trigger, so the client only inserts human notes.
+     Local/demo mode has no trigger, so the same events are synthesised here by
+     diffing the job before/after an update (see updateJob / createJob). */
+  const eventsRef = useRef<FieldJobEvent[]>([]);
+  eventsRef.current = events;
+  const pushLocalEvents = useCallback((incoming: Omit<FieldJobEvent, "id" | "occurredAt" | "actorId" | "actorName">[]) => {
+    if (incoming.length === 0) return;
+    const nowIso = new Date().toISOString();
+    setEvents((prev) => {
+      const add = incoming.map((e, i) => ({
+        ...e, id: `fje-${Date.now()}-${i}-${Math.random().toString(16).slice(2, 6)}`,
+        occurredAt: nowIso, actorId: currentUserId || "", actorName: currentUserName || "",
+      }));
+      const next = [...add, ...prev].slice(0, 1500);
+      writeLS(EVENTS_KEY, next);
+      return next;
+    });
+  }, [currentUserId, currentUserName]);
+  const eventsForJob = useCallback((jobId: string) =>
+    eventsRef.current.filter((e) => e.jobId === jobId).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)), []);
+  const eventsForLead = useCallback((leadId: string) =>
+    eventsRef.current.filter((e) => e.leadId === leadId).sort((a, b) => a.occurredAt.localeCompare(b.occurredAt)), []);
+
+  const addJobNote = useCallback(async (
+    jobId: string, note: string,
+    kind: Extract<FieldJobEventKind, "communication" | "comment"> = "communication",
+    source = "field_form",
+  ): Promise<boolean> => {
+    const text = note.trim();
+    const job = jobsRef.current.find((j) => j.id === jobId);
+    if (!text || !job) return false;
+    if (useDb) {
+      const { data, error } = await db.from("field_job_events").insert({
+        job_id: job.id, job_no: job.jobNo, lead_id: job.leadId || null,
+        branch_id: job.branchId || null, kind, note: text, source,
+        actor_staff_id: currentUserId || null, actor_name: currentUserName || null,
+      }).select("*").single();
+      if (!error && data) {
+        setEvents((prev) => [rowToFieldEvent(data), ...prev]);
+        return true;
+      }
+      // Never drop the user's text: keep it locally and tell them.
+      toast.error("Note saved on this device only", { description: "The server couldn't store it yet. It stays visible here." });
+    }
+    pushLocalEvents([{ jobId: job.id, jobNo: job.jobNo, leadId: job.leadId, kind, previous: null, next: null, note: text, source }]);
+    return true;
+  }, [useDb, db, currentUserId, currentUserName, pushLocalEvents]);
+
+  /** Allocate the next Trip ID. Supabase: server-side RPC (monotonic counter,
+   *  never reused, collision-free). Falls back to the legacy max+1 derivation
+   *  when the RPC isn't deployed yet. Local mode: in-memory max+1. */
+  const allocateJobNo = useCallback(async (ownerBranchId: string | null, prefix?: string | null): Promise<string> => {
+    if (useDb) {
+      const { data, error } = await db.rpc("next_field_job_no", { p_branch: ownerBranchId, p_prefix: prefix ?? null });
+      if (!error && typeof data === "string" && data) return data;
+      return nextFieldJobNoFromDb(ownerBranchId, prefix);
+    }
+    return nextFieldJobNo(jobsRef.current, prefix);
+  }, [useDb, db]);
 
   /* ── Create ── */
   const createJob = useCallback(async (draft: FieldJobDraft, overrideBranchId?: string | null): Promise<FieldJob | null> => {
@@ -319,9 +462,17 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     // branch so the job is visible in that store's Field workspace regardless of
     // the active store; otherwise fall back to the active store.
     const ownerBranchId = overrideBranchId || activeStoreIdRef.current;
-    // Duplicate protection: one active Field Job per lead.
+    // IDEMPOTENCY: a retried / double-clicked submit carries the same
+    // clientRequestId and resolves to the trip it already created.
+    if (draft.clientRequestId) {
+      const same = jobsRef.current.find((j) => j.clientRequestId === draft.clientRequestId);
+      if (same) return same;
+    }
+    // Duplicate protection: one OPEN (non-terminal) Field Job per lead. A Lead
+    // may legitimately need another visit once the previous trip is completed
+    // or cancelled, so terminal trips no longer block a new one.
     if (draft.leadId) {
-      const existing = jobsRef.current.find((j) => j.leadId === draft.leadId && j.status !== "cancelled");
+      const existing = jobsRef.current.find((j) => j.leadId === draft.leadId && j.status !== "cancelled" && j.status !== "completed");
       if (existing) {
         toast.info("Field Job already exists", { description: `${existing.jobNo} is already handling this lead.` });
         return existing;
@@ -334,9 +485,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     // to the in-memory max+1. Concurrency is handled by a retry loop on the
     // unique(organization_id, branch_id, job_no) index below.
     const fieldPrefix = activePrefixesRef.current.field;
-    const initialJobNo = useDb
-      ? await nextFieldJobNoFromDb(ownerBranchId, fieldPrefix)
-      : nextFieldJobNo(jobsRef.current, fieldPrefix);
+    const initialJobNo = await allocateJobNo(ownerBranchId, fieldPrefix);
     const job: FieldJob = {
       id: genFieldJobId(),
       jobNo: initialJobNo,
@@ -375,6 +524,28 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       deliveryConfirmed: false,
       createdAt: nowIso,
       updatedAt: nowIso,
+      branchId: ownerBranchId || "",
+      leadBranchId: draft.leadBranchId ?? "",
+      altPhone: draft.altPhone ?? "",
+      imei: draft.imei ?? "",
+      accessories: draft.accessories ?? "",
+      deviceCondition: draft.deviceCondition ?? "",
+      deviceCategoryId: draft.deviceCategoryId ?? "",
+      deviceBrandId: draft.deviceBrandId ?? "",
+      preferredWindow: draft.preferredWindow ?? "",
+      pincode: draft.pincode ?? "",
+      landmark: draft.landmark ?? "",
+      locationLat: draft.locationLat ?? null,
+      locationLng: draft.locationLng ?? null,
+      locationMapsUrl: draft.locationMapsUrl ?? "",
+      locationInstructions: draft.locationInstructions ?? "",
+      locationSource: draft.locationSource ?? "",
+      dropLat: draft.dropLat ?? null,
+      dropLng: draft.dropLng ?? null,
+      dropMapsUrl: draft.dropMapsUrl ?? "",
+      createdByName: currentUserName || "",
+      clientRequestId: draft.clientRequestId ?? "",
+      devices: draft.devices && draft.devices.length > 0 ? draft.devices : undefined,
     };
 
     if (useDb) {
@@ -407,7 +578,14 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       let guard = 0;
       while (error && isUniqueViolation(error) && guard < 6) {
         guard += 1;
-        const retryNo = await nextFieldJobNoFromDb(ownerBranchId, activePrefixesRef.current.field);
+        // Idempotency-key collision => the trip already exists (retry after a
+        // network failure): return it instead of creating a second one.
+        if (current.clientRequestId && /client_request/i.test(error.message ?? "")) {
+          const { data: dup } = await db.from("field_jobs").select("*")
+            .eq("client_request_id", current.clientRequestId).maybeSingle();
+          if (dup) { const existing = rowToJob(dup); setJobs((prev) => prev.some((j) => j.id === existing.id) ? prev : [existing, ...prev]); return existing; }
+        }
+        const retryNo = await allocateJobNo(ownerBranchId, activePrefixesRef.current.field);
         current = { ...current, jobNo: retryNo };
         ({ data, error } = await insertOnce(current));
       }
@@ -422,6 +600,9 @@ export function FieldProvider({ children }: { children: ReactNode }) {
     } else {
       setJobs((prev) => { const next = [job, ...prev]; persistLocal(next); return next; });
     }
+    if (!useDb) {
+      pushLocalEvents([{ jobId: job.id, jobNo: job.jobNo, leadId: job.leadId, kind: "created", previous: null, next: { status: job.status, lead_type: job.leadType }, note: "", source: "system" }]);
+    }
 
     logActivity({
       module: "Field", action: "Field Job Created", severity: "info", entity: "Field Job",
@@ -433,14 +614,34 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       kind: "field_new_job", recipientRole: "field_manager",
       title: "New Pickup & Drop lead",
       body: `${job.jobNo} · ${job.customer || "Customer"} — ${job.device || "device"}${job.branch ? ` · ${job.branch}` : ""}`,
-      href: `/field?job=${job.id}`, reference: job.jobNo,
+      href: `/field/${job.id}`, reference: job.jobNo,
     });
     return job;
-  }, [useDb, db, persistLocal]);
+  }, [useDb, db, persistLocal, allocateJobNo, pushLocalEvents, currentUserName]);
 
   /* ── Low-level update ── */
   const updateJob = useCallback(async (id: string, updates: Partial<FieldJob>) => {
     const nowIso = new Date().toISOString();
+    const before = jobsRef.current.find((j) => j.id === id);
+    if (!useDb && before) {
+      const evs: Omit<FieldJobEvent, "id" | "occurredAt" | "actorId" | "actorName">[] = [];
+      const base = { jobId: before.id, jobNo: before.jobNo, leadId: before.leadId, note: "", source: "system" };
+      if (updates.status && updates.status !== before.status)
+        evs.push({ ...base, kind: "status_changed", previous: { status: before.status }, next: { status: updates.status } });
+      if (updates.ninjaId && updates.ninjaId !== before.ninjaId)
+        evs.push({ ...base, kind: before.ninjaId ? "ninja_reassigned" : "ninja_assigned", previous: { ninja_id: before.ninjaId, ninja: before.ninjaName }, next: { ninja_id: updates.ninjaId, ninja: updates.ninjaName ?? "" } });
+      if (updates.dropNinjaId && updates.dropNinjaId !== before.dropNinjaId)
+        evs.push({ ...base, kind: "drop_ninja_assigned", previous: { ninja_id: before.dropNinjaId, ninja: before.dropNinjaName }, next: { ninja_id: updates.dropNinjaId, ninja: updates.dropNinjaName ?? "" } });
+      const locTouched = (["pickupAddress", "pincode", "locationMapsUrl", "locationLat", "locationLng"] as const)
+        .some((k) => k in updates && updates[k] !== before[k]);
+      if (locTouched)
+        evs.push({ ...base, kind: "location_changed",
+          previous: { address: before.pickupAddress, pincode: before.pincode ?? "", maps_url: before.locationMapsUrl ?? "", lat: before.locationLat ?? null, lng: before.locationLng ?? null },
+          next: { address: updates.pickupAddress ?? before.pickupAddress, pincode: updates.pincode ?? before.pincode ?? "", maps_url: updates.locationMapsUrl ?? before.locationMapsUrl ?? "", lat: updates.locationLat ?? before.locationLat ?? null, lng: updates.locationLng ?? before.locationLng ?? null } });
+      if (updates.linkedTicketId && updates.linkedTicketId !== before.linkedTicketId)
+        evs.push({ ...base, kind: "ticket_linked", previous: { ticket_id: before.linkedTicketId }, next: { ticket_id: updates.linkedTicketId } });
+      pushLocalEvents(evs);
+    }
     if (useDb) {
       let { error } = await db.from("field_jobs").update(jobToRow(updates)).eq("id", id);
       if (error && isUndefinedColumnError(error)) {
@@ -453,7 +654,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       persistLocal(next);
       return next;
     });
-  }, [useDb, db, persistLocal]);
+  }, [useDb, db, persistLocal, pushLocalEvents]);
 
   /* ── Assign Field Manager ── */
   const assignFieldManager = useCallback(async (id: string, managerId: string, managerName: string) => {
@@ -470,7 +671,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
         kind: "field_new_job", recipientId: managerId,
         title: "New Field Job assigned to you",
         body: `${job.jobNo} · ${job.customer || "Customer"} — review and assign a Ninja.`,
-        href: `/field?job=${job.id}`, reference: job.jobNo,
+        href: `/field/${job.id}`, reference: job.jobNo,
       });
     }
   }, [updateJob]);
@@ -498,7 +699,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
         kind: "field_assignment", recipientId: ninjaId,
         title: "New pickup assigned to you",
         body: `${job.jobNo} · ${job.customer || "Customer"} — ${job.device || "device"} · ${job.pickupAddress || "address on file"}${date ? ` · ${date}${time ? " " + time : ""}` : ""}`,
-        href: `/field?job=${job.id}`, reference: job.jobNo,
+        href: `/field/${job.id}`, reference: job.jobNo,
       });
     }
   }, [updateJob]);
@@ -523,7 +724,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
         kind: "drop_assignment", recipientId: ninjaId,
         title: "New drop assigned to you",
         body: `${job.jobNo} · ${job.customer || "Customer"} — deliver ${job.device || "device"} to ${job.dropAddress || "customer"}${date ? ` · ${date}${time ? " " + time : ""}` : ""}`,
-        href: `/field?job=${job.id}`, reference: job.jobNo,
+        href: `/field/${job.id}`, reference: job.jobNo,
       });
     }
   }, [updateJob]);
@@ -550,8 +751,8 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       reference: job.jobNo, description: `${job.jobNo} device picked up from ${job.customer || "customer"}.`,
     });
     // Notify Sales + Store (branch handled by role/store views).
-    if (job.salesPersonId) notify({ kind: "pickup_done", recipientId: job.salesPersonId, title: "Pickup completed", body: `${job.jobNo} · ${job.customer || "Customer"} device collected.`, href: `/field?job=${job.id}`, reference: job.jobNo });
-    notify({ kind: "device_received", recipientRole: "reception", title: "Incoming field handover", body: `${job.jobNo} · ${job.device || "device"} en route to store.`, href: `/field?job=${job.id}`, reference: job.jobNo });
+    if (job.salesPersonId) notify({ kind: "pickup_done", recipientId: job.salesPersonId, title: "Pickup completed", body: `${job.jobNo} · ${job.customer || "Customer"} device collected.`, href: `/field/${job.id}`, reference: job.jobNo });
+    notify({ kind: "device_received", recipientRole: "reception", title: "Incoming field handover", body: `${job.jobNo} · ${job.device || "device"} en route to store.`, href: `/field/${job.id}`, reference: job.jobNo });
   }, [updateJob]);
 
   /* ── Receive at store ── */
@@ -563,7 +764,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       module: "Field", action: "Device Received at Store", severity: "success", entity: "Field Job",
       reference: job.jobNo, description: `${job.jobNo} device received at ${job.branch || "store"}.`,
     });
-    if (job.salesPersonId) notify({ kind: "device_received", recipientId: job.salesPersonId, title: "Device received at store", body: `${job.jobNo} · create the repair Ticket to proceed.`, href: `/field?job=${job.id}`, reference: job.jobNo });
+    if (job.salesPersonId) notify({ kind: "device_received", recipientId: job.salesPersonId, title: "Device received at store", body: `${job.jobNo} · create the repair Ticket to proceed.`, href: `/field/${job.id}`, reference: job.jobNo });
   }, [updateJob]);
 
   /* ── Ready for drop ── */
@@ -575,9 +776,9 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       module: "Field", action: "Ready for Drop", severity: "info", entity: "Field Job",
       reference: job.jobNo, description: `${job.jobNo} repair complete — ready to return to customer.`,
     });
-    notify({ kind: "ready_for_drop", recipientRole: "field_manager", title: "Ready for drop", body: `${job.jobNo} · assign a Ninja to deliver ${job.device || "device"}.`, href: `/field?job=${job.id}`, reference: job.jobNo });
-    if (job.fieldManagerId) notify({ kind: "ready_for_drop", recipientId: job.fieldManagerId, title: "Ready for drop", body: `${job.jobNo} · assign a Ninja to deliver.`, href: `/field?job=${job.id}`, reference: job.jobNo });
-    if (job.salesPersonId) notify({ kind: "ready_for_drop", recipientId: job.salesPersonId, title: "Repair complete", body: `${job.jobNo} · device ready for delivery.`, href: `/field?job=${job.id}`, reference: job.jobNo });
+    notify({ kind: "ready_for_drop", recipientRole: "field_manager", title: "Ready for drop", body: `${job.jobNo} · assign a Ninja to deliver ${job.device || "device"}.`, href: `/field/${job.id}`, reference: job.jobNo });
+    if (job.fieldManagerId) notify({ kind: "ready_for_drop", recipientId: job.fieldManagerId, title: "Ready for drop", body: `${job.jobNo} · assign a Ninja to deliver.`, href: `/field/${job.id}`, reference: job.jobNo });
+    if (job.salesPersonId) notify({ kind: "ready_for_drop", recipientId: job.salesPersonId, title: "Repair complete", body: `${job.jobNo} · device ready for delivery.`, href: `/field/${job.id}`, reference: job.jobNo });
   }, [updateJob]);
 
   /* ── Confirm delivery ── */
@@ -589,7 +790,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       module: "Field", action: "Delivered & Completed", severity: "success", entity: "Field Job",
       reference: job.jobNo, description: `${job.jobNo} delivered to ${job.customer || "customer"} — job completed.`,
     });
-    if (job.salesPersonId) notify({ kind: "drop_done", recipientId: job.salesPersonId, title: "Job completed", body: `${job.jobNo} · ${job.customer || "Customer"} device delivered.`, href: `/field?job=${job.id}`, reference: job.jobNo });
+    if (job.salesPersonId) notify({ kind: "drop_done", recipientId: job.salesPersonId, title: "Job completed", body: `${job.jobNo} · ${job.customer || "Customer"} device delivered.`, href: `/field/${job.id}`, reference: job.jobNo });
   }, [updateJob]);
 
   /* ── Cancel ── */
@@ -601,7 +802,7 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       module: "Field", action: "Field Job Cancelled", severity: "warning", entity: "Field Job",
       reference: job.jobNo, description: `${job.jobNo} cancelled${reason ? ` — ${reason}` : ""}.`, reason,
     });
-    if (job.ninjaId) notify({ kind: "field_cancel", recipientId: job.ninjaId, title: "Job cancelled", body: `${job.jobNo} has been cancelled.`, href: `/field?job=${job.id}`, reference: job.jobNo });
+    if (job.ninjaId) notify({ kind: "field_cancel", recipientId: job.ninjaId, title: "Job cancelled", body: `${job.jobNo} has been cancelled.`, href: `/field/${job.id}`, reference: job.jobNo });
   }, [updateJob]);
 
   /* ── Link ticket ── */
@@ -623,7 +824,8 @@ export function FieldProvider({ children }: { children: ReactNode }) {
   const value: FieldContextValue = {
     jobs, filteredJobs, hydrated, mode: useDb ? "db" : "local",
     filters, setFilters, clearFilters,
-    getJob, activeJobForLead,
+    getJob, activeJobForLead, jobsForLead,
+    events, eventsForJob, eventsForLead, addJobNote,
     createJob, updateJob,
     assignFieldManager, assignNinja, assignDropNinja,
     transition, confirmPickup, receiveAtStore, markReadyForDrop, confirmDelivery, cancelJob, linkTicket,

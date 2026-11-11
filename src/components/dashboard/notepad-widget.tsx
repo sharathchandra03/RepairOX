@@ -61,9 +61,17 @@ function relativeTime(ts?: number | null): string {
   return d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" });
 }
 
-export function NotepadWidget() {
+export function NotepadWidget({ maxHeight }: { maxHeight?: number } = {}) {
   const { notes, ready, addNote, updateNote, deleteNote, togglePin } = useNotes();
   const pinnedCount = notes.filter((n) => n.pinnedAt).length;
+  // Quick capture: type a line, press Enter → a note is saved straight away.
+  const [quick, setQuick] = useState("");
+  const submitQuick = () => {
+    const text = quick.trim();
+    if (!text) return;
+    void addNote({ body: text, color: COLORS[0].token });
+    setQuick("");
+  };
 
   return (
     <div className="overflow-hidden rounded-2xl border-[2.2px] border-amber-200/80 bg-amber-50 shadow-card">
@@ -92,7 +100,20 @@ export function NotepadWidget() {
         </button>
       </div>
 
-      <div className="p-5">
+      <div className="border-b border-amber-200/60 px-5 py-3">
+        <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-white/80 px-3 py-1.5 focus-within:border-amber-400 focus-within:ring-2 focus-within:ring-amber-300/30">
+          <input
+            value={quick}
+            onChange={(e) => setQuick(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitQuick(); } }}
+            placeholder="Jot a reminder and press Enter…"
+            aria-label="Quick note"
+            className="h-7 min-w-0 flex-1 bg-transparent text-[12.5px] placeholder:text-muted-foreground/70 focus:outline-none"
+          />
+          <button type="button" onClick={submitQuick} disabled={!quick.trim()} className="rounded-lg bg-amber-400 px-2.5 py-1 text-[11px] font-semibold text-white transition enabled:hover:bg-amber-500 disabled:opacity-40">Add</button>
+        </div>
+      </div>
+      <div className="p-5" style={maxHeight ? { maxHeight, overflowY: "auto" } : undefined}>
         {ready && notes.length === 0 && (
           <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-amber-300/70 bg-amber-100/40 py-9 text-center">
             <div className="mb-2 flex h-11 w-11 items-center justify-center rounded-2xl bg-amber-100 text-amber-600">

@@ -26,6 +26,7 @@ import { useStore } from "@/lib/store";
 import { useSession } from "@/lib/use-session";
 import { resolveCustomer } from "@/lib/field-linking";
 import { fullLeadLocation, type Lead } from "@/lib/leads-data";
+import { locationFromLead, locationToJobFields } from "@/lib/field-location";
 import { leadStatusIntent, type LeadStatusIntent } from "@/lib/lead-workflow";
 import type { FieldLeadType, FulfilmentRoute } from "@/lib/field-data";
 
@@ -44,7 +45,7 @@ function intentToField(intent: LeadStatusIntent): { leadType: FieldLeadType; rou
  */
 export function useLeadStatusFieldJob() {
   const { updateLead, recordConversionEvent } = useLeads();
-  const { createJob, activeJobForLead, assignNinja } = useField();
+  const { createJob, activeJobForLead, jobsForLead } = useField();
   const { customers, addCustomer } = useStore();
   const { id: currentUserId, name: currentUserName } = useSession();
 
@@ -65,10 +66,8 @@ export function useLeadStatusFieldJob() {
             targetType: "field_job", targetId: existing.id, targetLabel: existing.jobNo,
           });
         }
-        // Carry the agent if the job has none yet.
-        if (!existing.ninjaId && lead.assignedTo && lead.assignedToName) {
-          await assignNinja(existing.id, lead.assignedTo, lead.assignedToName);
-        }
+        // The Sales Agent is NEVER turned into the Field Engineer (Sales
+        // ownership ≠ field execution) — assignment stays with Field Management.
         return;
       }
 
@@ -99,10 +98,14 @@ export function useLeadStatusFieldJob() {
           leadType: map.leadType, // "pickup" | "onsite"
           source: lead.source || "",
           branch: lead.assignedStore || "",
-          salesPersonId: currentUserId || "",
-          salesPersonName: currentUserName || "",
-          pickupAddress: fullLeadLocation(lead),
+          // Sales attribution = the LEAD owner (not whoever flipped the status).
+          salesPersonId: lead.assignedTo || currentUserId || "",
+          salesPersonName: lead.assignedToName || currentUserName || "",
+          leadBranchId: lead.branchId || "",
+          ...locationToJobFields(locationFromLead(lead)),
           status: "pending_assignment",
+          // Idempotent per lead + intent: repeat status changes / retries = one trip.
+          clientRequestId: `status:${lead.id}:${map.leadType}:${jobsForLead(lead.id).length}`,
         },
         // Own the job in the LEAD's store (not the routing user's active store)
         // so it surfaces in that store's Field "Pickup & Drop" workspace.
@@ -132,14 +135,10 @@ export function useLeadStatusFieldJob() {
         });
       }
 
-      // Carry the lead's AGENT onto the field job so the agent name shows in
-      // the Pickup & Drop section. The lead's assigned Sales Agent is the
-      // accountable owner driving the job; only assign when one exists (an
-      // unassigned lead leaves the job in Pending Assignment for a manager).
-      if (job.leadId === lead.id && lead.assignedTo && lead.assignedToName) {
-        await assignNinja(job.id, lead.assignedTo, lead.assignedToName);
-      }
+      // The trip stays in Pending Assignment for a Field Manager / authorised
+      // user to pick a Field Engineer. The Sales Agent remains the Lead owner
+      // (salesPerson*) and is never used as the engineer.
     },
-    [customers, addCustomer, createJob, activeJobForLead, assignNinja, updateLead, recordConversionEvent, currentUserId, currentUserName],
+    [customers, addCustomer, createJob, activeJobForLead, jobsForLead, updateLead, recordConversionEvent, currentUserId, currentUserName],
   );
 }

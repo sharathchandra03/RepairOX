@@ -370,10 +370,34 @@ export const CAP = {
     editTargets: ["edit_dashboard_targets", "manage_settings"],
     export: ["export_dashboard", "export_reports", "manage_reports"],
   },
+  /* Field Management — Pickup & Drop. Every array here MUST be a SUBSET of the
+     matching `auth_has_any([...])` array in migration 0091 (field_jobs_sel /
+     _ins / _upd) — UI never grants more than RLS allows. Granular key first,
+     coarse fallback after (existing roles keep working). */
   field: {
+    /** See the Pickup & Drop workspace + trips. */
+    view: ["view_field_jobs", "field_view_all", "manage_field_jobs", "update_pickup", "update_drop"],
+    /** Create a Field Assignment (direct or routed from a Lead). */
+    create: ["manage_field_jobs", "route_leads"],
+    /** Edit trip details (address / device / schedule / location). */
+    edit: ["manage_field_jobs"],
+    /** Assign / reassign the Field Engineer. */
+    assignNinja: ["assign_ninja", "manage_field_jobs"],
     assignFieldManager: ["assign_field_manager", "manage_field_jobs"],
+    /** Change status (any leg). Leg-specific keys below. */
+    updateStatus: ["manage_field_jobs", "assign_ninja", "field_pickup_status_change", "field_drop_status_change", "update_pickup", "update_drop"],
     advancePickup: ["field_pickup_status_change", "update_pickup", "manage_field_jobs"],
     advanceDrop: ["field_drop_status_change", "update_drop", "manage_field_jobs"],
+    /** Cancel a trip (non-destructive). */
+    cancel: ["manage_field_jobs"],
+    /** See / edit the trip's service location + customer contact details. */
+    viewLocation: ["view_field_jobs", "field_view_all", "manage_field_jobs", "update_pickup", "update_drop"],
+    editLocation: ["manage_field_jobs"],
+    /** Dashboards + reports. Team/store dashboards need the field-wide scope. */
+    dashboard: ["view_field_reports", "field_view_all", "manage_field_jobs"],
+    reports: ["view_field_reports", "field_view_all", "manage_field_jobs"],
+    /** Cross-engineer (team) visibility: every trip in the authorised stores. */
+    viewAll: ["field_view_all", "manage_field_jobs"],
   },
   expense: {
     view: ["view_expenses", "view_financial_reports"],

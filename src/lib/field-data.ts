@@ -301,6 +301,126 @@ export interface FieldJob {
   /* ── Audit ── */
   createdAt: string;
   updatedAt: string;
+
+  /* ── Pickup & Drop trip detail (migration 0091). All OPTIONAL so legacy rows
+        and older constructors keep compiling; the DB columns are nullable. ── */
+  /** OPERATIONAL store id (branch_id). `branch` above stays the display name. */
+  branchId?: string;
+  /** LEAD store (sales origin) — never overwritten by the operational store. */
+  leadBranchId?: string;
+  altPhone?: string;
+  imei?: string;
+  accessories?: string;
+  deviceCondition?: string;
+  deviceCategoryId?: string;
+  deviceBrandId?: string;
+  /** Customer's preferred time window text; pickupDate/Time = the scheduled slot. */
+  preferredWindow?: string;
+  /* Canonical service location (pickup-from / on-site). Coordinates nullable. */
+  pincode?: string;
+  landmark?: string;
+  locationLat?: number | null;
+  locationLng?: number | null;
+  locationMapsUrl?: string;
+  locationInstructions?: string;
+  /** "manual" | "maps_url" | "lead" | "map_pin" */
+  locationSource?: string;
+  /* Drop destination coordinates (default = operational store; optional override). */
+  dropLat?: number | null;
+  dropLng?: number | null;
+  dropMapsUrl?: string;
+  assignedAt?: string;
+  createdByName?: string;
+  /** Idempotency key — one trip per (org, key). */
+  clientRequestId?: string;
+  /** Every device on the trip (multi-device). Device #1 is ALSO mirrored into the
+   *  flat device/issue/imei/... fields above so every existing reader keeps working. */
+  devices?: FieldTripDevice[];
+}
+
+/** One device on a Pickup & Drop / On-Site trip. */
+export interface FieldTripDevice {
+  id: string;
+  /** Cached catalog label (brand + model). The ids are authoritative. */
+  label: string;
+  categoryId: string;
+  brandId: string;
+  modelId: string;
+  imei: string;
+  issue: string;
+  condition: string;
+  accessories: string;
+}
+
+/* ─── Field Job events (append-only trail, migration 0091) ─────────────── */
+
+export type FieldJobEventKind =
+  | "created" | "status_changed" | "ninja_assigned" | "ninja_reassigned"
+  | "drop_ninja_assigned" | "location_changed" | "ticket_linked"
+  | "communication" | "comment";
+
+export interface FieldJobEvent {
+  id: string;
+  jobId: string;
+  jobNo: string;
+  leadId: string;
+  kind: FieldJobEventKind;
+  previous: Record<string, unknown> | null;
+  next: Record<string, unknown> | null;
+  note: string;
+  source: string;
+  actorId: string;
+  actorName: string;
+  occurredAt: string;
+}
+
+export const FIELD_EVENT_LABEL: Record<FieldJobEventKind, string> = {
+  created: "Trip created",
+  status_changed: "Status changed",
+  ninja_assigned: "Field Engineer assigned",
+  ninja_reassigned: "Field Engineer reassigned",
+  drop_ninja_assigned: "Drop Engineer assigned",
+  location_changed: "Location updated",
+  ticket_linked: "Ticket linked",
+  communication: "Customer communication",
+  comment: "Comment",
+};
+
+export function rowToFieldEvent(r: any): FieldJobEvent {
+  return {
+    id: r.id,
+    jobId: r.job_id ?? "",
+    jobNo: r.job_no ?? "",
+    leadId: r.lead_id ?? "",
+    kind: r.kind as FieldJobEventKind,
+    previous: r.previous ?? null,
+    next: r.next ?? null,
+    note: r.note ?? "",
+    source: r.source ?? "system",
+    actorId: r.actor_staff_id ?? "",
+    actorName: r.actor_name ?? "",
+    occurredAt: r.occurred_at ?? new Date().toISOString(),
+  };
+}
+
+/** Human description of one event for timelines (never invents data). */
+export function describeFieldEvent(e: FieldJobEvent): string {
+  const s = (o: Record<string, unknown> | null, k: string) => (o && typeof o[k] === "string" ? (o[k] as string) : "");
+  switch (e.kind) {
+    case "status_changed": {
+      const from = s(e.previous, "status") as FieldJobStatus;
+      const to = s(e.next, "status") as FieldJobStatus;
+      return `${FIELD_STATUS_LABEL[from] ?? (from || "—")} → ${FIELD_STATUS_LABEL[to] ?? (to || "—")}`;
+    }
+    case "ninja_assigned": return s(e.next, "ninja");
+    case "ninja_reassigned": return `${s(e.previous, "ninja") || "—"} → ${s(e.next, "ninja") || "—"}`;
+    case "drop_ninja_assigned": return s(e.next, "ninja");
+    case "location_changed": return s(e.next, "address") || "Address updated";
+    case "ticket_linked": return s(e.next, "ticket_id");
+    case "communication":
+    case "comment": return e.note;
+    default: return "";
+  }
 }
 
 /** Fields the creator supplies; identity/timestamps are auto-filled. */
@@ -481,7 +601,11 @@ export type FieldQueue =
   | "ready_for_drop"
   | "today_drop"
   | "delayed"
-  | "completed";
+  | "completed"
+  /* Combined queues (unions of the atomic ones) — power the grouped KPI cards. */
+  | "today_visits"   // today_pickup ∪ today_drop
+  | "needs_action"   // pending_assignment ∪ delayed
+  | "in_store";      // at_store ∪ ready_for_drop
 
 export const FIELD_QUEUES: { value: FieldQueue; label: string }[] = [
   { value: "all",                label: "All Jobs" },
@@ -494,6 +618,9 @@ export const FIELD_QUEUES: { value: FieldQueue; label: string }[] = [
   { value: "today_drop",         label: "Today's Drop" },
   { value: "delayed",            label: "Delayed" },
   { value: "completed",          label: "Completed" },
+  { value: "today_visits",       label: "Today's Visits (pickups + drops)" },
+  { value: "needs_action",       label: "Needs Action (unassigned + delayed)" },
+  { value: "in_store",           label: "In Store (at store + ready for drop)" },
 ];
 
 export function jobMatchesQueue(job: FieldJob, queue: FieldQueue, now: Date = new Date()): boolean {
@@ -509,6 +636,9 @@ export function jobMatchesQueue(job: FieldJob, queue: FieldQueue, now: Date = ne
     case "today_drop": return isDropLeg(job.status) && job.dropDate === today && job.status !== "delivered";
     case "delayed": return isDelayed(job, now);
     case "completed": return job.status === "completed";
+    case "today_visits": return jobMatchesQueue(job, "today_pickup", now) || jobMatchesQueue(job, "today_drop", now);
+    case "needs_action": return jobMatchesQueue(job, "pending_assignment", now) || jobMatchesQueue(job, "delayed", now);
+    case "in_store": return jobMatchesQueue(job, "at_store", now) || jobMatchesQueue(job, "ready_for_drop", now);
     default: return true;
   }
 }

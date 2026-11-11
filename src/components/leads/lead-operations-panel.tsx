@@ -249,7 +249,7 @@ export function LeadOperationsPanel({ lead, readOnly = false }: { lead: Lead; re
                     {FIELD_STATUS_LABEL[linkedJob.status]}
                   </span>
                 </div>
-                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => router.push(`/field?job=${linkedJob.id}`)}>
+                <Button size="sm" variant="outline" className="gap-1.5" onClick={() => router.push(`/field/${linkedJob.id}`)}>
                   Open Field Job <ExternalLink className="h-3.5 w-3.5" />
                 </Button>
               </div>

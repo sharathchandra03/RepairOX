@@ -507,8 +507,13 @@ export default function LeadDashboardPage() {
 
         </div>
 
-        {/* RIGHT (1/3): follow-up command panel */}
+        {/* RIGHT (1/3): notepad (quick capture) + follow-up command panel */}
         <div className="space-y-5">
+          {/* Notepad — the same personal sticky notes as the full Notes page
+              (private to the user, per store), now at the TOP of the rail with
+              quick capture so a reminder is one line + Enter. Height-capped so
+              the Follow-up Panel stays in view. */}
+          <NotepadWidget maxHeight={280} />
           <SectionCard title="Follow-up Panel" icon={CalendarClock}>
             <div className="space-y-4">
               <FollowUpGroup
@@ -535,11 +540,6 @@ export default function LeadDashboardPage() {
             </Link>
           </SectionCard>
 
-          {/* Notepad — same personal sticky notes as the full Notes page,
-              here as a compact rail card so a Sales Agent can jot reminders
-              without leaving their daily workspace. Moved up into the space
-              freed by removing the old "Got a call?" card. */}
-          <NotepadWidget />
         </div>
       </div>
 
