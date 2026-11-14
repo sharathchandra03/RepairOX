@@ -1,0 +1,14 @@
+{
+  "appId": "app.repairox.ninja",
+  "appName": "RepairOX Ninja",
+  "webDir": "public",
+  "server": {
+    "url": "https://REPLACE-WITH-YOUR-REPAIROX-DOMAIN/ninja",
+    "cleartext": false,
+    "androidScheme": "https"
+  },
+  "android": { "allowMixedContent": false },
+  "plugins": {
+    "SplashScreen": { "launchShowDuration": 0 }
+  }
+}

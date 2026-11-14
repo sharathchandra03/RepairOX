@@ -79,7 +79,7 @@ export function Toaster() {
   const dismiss = (id: string) => setToasts((prev) => prev.filter((t) => t.id !== id));
 
   return (
-    <div className="pointer-events-none fixed bottom-6 left-1/2 z-[100] flex w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-2 sm:max-w-md">
+    <div className="rox-toaster pointer-events-none fixed bottom-6 left-1/2 z-[100] flex w-full max-w-[calc(100vw-2rem)] -translate-x-1/2 flex-col items-center gap-2 sm:max-w-md">
       <AnimatePresence initial={false}>
         {toasts.map((t) => {
           const style = VARIANT_STYLES[t.variant];

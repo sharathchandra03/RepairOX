@@ -24,6 +24,9 @@ import { BackPill } from "@/components/common/back-pill";
 import { Can } from "@/components/common/can";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { Reveal } from "@/components/common/reveal";
+import { FieldTripsPanel } from "@/components/field/field-trips-panel";
+import { useJobTrips } from "@/hooks/use-job-trips";
+import { STATUS_META as TRIP_STATUS, TYPE_LABEL as TRIP_TYPE } from "@/lib/ninja/model";
 import { DetailHero, DetailSection, DetailField, SummaryCard, SectionEditButton } from "@/components/common/detail-page";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -67,6 +70,7 @@ export default function ViewFieldAssignmentPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const id = decodeURIComponent(String(params?.id ?? ""));
+  const { executing: ninjaTrip } = useJobTrips(id);
   const { can, role } = usePermissions();
   const { id: meId, name: meName } = useSession();
   const {
@@ -168,6 +172,17 @@ export default function ViewFieldAssignmentPage() {
   function stageAction() {
     const s = j.status;
     if (closed) return null;
+    // A Ninja is executing this job in the Ninja app: the trip state machine (DB) owns
+    // pickup / drop / on-site steps, so the legacy step buttons are not offered here.
+    if (ninjaTrip && ["assigned", "pickup_scheduled", "out_for_pickup", "picked_up", "drop_scheduled", "out_for_drop", "ready_for_drop"].concat(onSite ? ["in_repair"] : []).includes(s))
+      return (
+        <div className="space-y-2 rounded-xl border border-[#4361EE]/25 bg-[#EEF1FD]/50 p-3.5 text-[12.5px]">
+          <p className="font-semibold text-[#3450D8]">{TRIP_TYPE[ninjaTrip.trip_type]} {ninjaTrip.trip_no} · {TRIP_STATUS[ninjaTrip.status].label}</p>
+          <p className="text-muted-foreground">The Ninja updates this trip from the Ninja app. Store handovers and reassignment are on the Dispatch Board.</p>
+          <Button variant="outline" className="w-full gap-1.5" onClick={() => router.push("/field/dispatch")}><Send className="h-4 w-4" /> Open Dispatch Board</Button>
+          {s === "picked_up" || ninjaTrip.status === "store_received" ? ticketBtn : null}
+        </div>
+      );
     if (s === "pending_assignment")
       return <Can permission="assign_ninja"><Button className="w-full gap-1.5" onClick={() => setDlg("assign_ninja")}><UserCheck className="h-4 w-4" /> {onSite ? "Assign Ninja for on-site visit" : "Assign Ninja for pickup"}</Button></Can>;
     if (s === "assigned" || s === "pickup_scheduled")
@@ -372,6 +387,7 @@ export default function ViewFieldAssignmentPage() {
             )}
           </DetailSection>
 
+          <FieldTripsPanel jobId={j.id} />
           {(j.pickupProof || j.dropProof) && (
             <DetailSection icon={ShieldCheck} accent="emerald" title="Handover Proof">
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

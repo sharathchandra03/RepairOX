@@ -106,6 +106,9 @@ export default function FieldPage() {
   // Dashboard drill-down filters (same predicates as lib/field-dashboard.ts).
   const [groupFilter, setGroupFilter] = useState<TripGroup | "">("");
   const [hideCancelled, setHideCancelled] = useState(false);
+  // Drill-down from dashboards: sales agent (lead owner) / lead source — distinct from the Field Engineer.
+  const [salesFilter, setSalesFilter] = useState("");
+  const [srcFilter, setSrcFilter] = useState("");
   // "Needs attention" drill-down (same predicate that produced the overview count).
   const [attn, setAttn] = useState("");
   const [formOpen, setFormOpen] = useState(false);
@@ -155,11 +158,13 @@ export default function FieldPage() {
     if (actionFilter && fieldTripAction(j).label !== actionFilter) return false;
     if (groupFilter && tripGroupOf(j) !== groupFilter) return false;
     if (hideCancelled && j.status === "cancelled") return false;
+    if (salesFilter && (j.salesPersonId || `n:${(j.salesPersonName || "").toLowerCase()}`) !== salesFilter && !(salesFilter === "none" && !j.salesPersonId && !j.salesPersonName)) return false;
+    if (srcFilter && ((j.source || "").trim().toLowerCase() || "unknown") !== srcFilter) return false;
     if (attn && !attentionMatches(attn, j)) return false;
     const refDate = j.pickupDate || j.dropDate || j.createdAt.slice(0, 10);
     if (!isWalkInInDateRange(refDate, dateRange as any, customFrom, customTo)) return false;
     return true;
-  }, [filters, dateRange, customFrom, customTo, resolveSrc, storeFilter, actionFilter, groupFilter, hideCancelled, attn, storeForJob, branchIdOf]);
+  }, [filters, dateRange, customFrom, customTo, resolveSrc, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn, storeForJob, branchIdOf]);
 
   const filteredBase = useMemo(() => scopedJobs.filter(matchesFilters), [scopedJobs, matchesFilters]);
   const filtered = useMemo(() => {
@@ -167,7 +172,7 @@ export default function FieldPage() {
     return filteredBase.filter((j) => jobMatchesQueue(j, queue, now));
   }, [filteredBase, queue]);
 
-  useEffect(() => { setPage(1); }, [queue, filters, pageSize, dateRange, customFrom, customTo, storeFilter, actionFilter, groupFilter, hideCancelled, attn]);
+  useEffect(() => { setPage(1); }, [queue, filters, pageSize, dateRange, customFrom, customTo, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
@@ -238,17 +243,25 @@ export default function FieldPage() {
     const id = searchParams.get("job");
     if (id) router.replace(`/field/${id}`);
   }, [searchParams, router]);
+  /* Header search "View all" while already on this page: apply the new query. */
+  const qParam = searchParams.get("q");
+  useEffect(() => { if (qParam) setFilters((f) => (f.query === qParam ? f : { ...f, query: qParam })); }, [qParam]);
   /* Drill-down from the Field dashboards: /field?store=&fe=&group=&range=custom&from=&to=&excl=cancelled */
   useEffect(() => {
+    const qText = searchParams.get("q");
+    const sales = searchParams.get("sales"), src = searchParams.get("src");
     const store = searchParams.get("store"), fe = searchParams.get("fe"), group = searchParams.get("group");
     const from = searchParams.get("from"), to = searchParams.get("to");
     const q = searchParams.get("queue"), a = searchParams.get("attn");
     if (searchParams.get("new") === "1") setFormOpen(true);
     if (q && STRIP.some((x) => x.value === q)) setQueue(q as FieldQueue);
     if (a && ATTENTION_DEFS.some((d) => d.key === a)) setAttn(a);
-    if (!store && !fe && !group && !from && !to && !searchParams.get("excl")) return;
+    if (!qText && !store && !fe && !sales && !src && !group && !from && !to && !searchParams.get("excl")) return;
     if (store) setStoreFilter([store]);
     if (fe) setFilters((f) => ({ ...f, ninjaId: fe }));
+    if (qText) setFilters((f) => ({ ...f, query: qText }));
+    if (sales) setSalesFilter(sales);
+    if (src) setSrcFilter(src);
     if (group === "onsite" || group === "pickup" || group === "drop") setGroupFilter(group);
     if (from || to) { setCustomFrom(from ?? ""); setCustomTo(to ?? ""); setDateRange("custom"); }
     if (searchParams.get("excl") === "cancelled") setHideCancelled(true);
@@ -281,6 +294,8 @@ export default function FieldPage() {
   if (filters.leadType) chips.push({ label: "Type", value: FIELD_LEAD_TYPES.find((t) => t.value === filters.leadType)?.label ?? filters.leadType, onClear: () => setFilters((f) => ({ ...f, leadType: "" as any })) });
   if (attn) chips.push({ label: "Needs attention", value: ATTENTION_DEFS.find((d) => d.key === attn)?.label ?? attn, onClear: () => setAttn("") });
   if (groupFilter) chips.push({ label: "Trip group", value: TRIP_GROUP_LABEL[groupFilter], onClear: () => setGroupFilter("") });
+  if (salesFilter) chips.push({ label: "Sales agent", value: jobs.find((j) => j.salesPersonId === salesFilter)?.salesPersonName || (salesFilter === "none" ? "None" : "Sales agent"), onClear: () => setSalesFilter("") });
+  if (srcFilter) chips.push({ label: "Source", value: srcFilter, onClear: () => setSrcFilter("") });
   if (hideCancelled) chips.push({ label: "Cancelled", value: "excluded", onClear: () => setHideCancelled(false) });
   if (actionFilter) chips.push({ label: "Action", value: actionFilter, onClear: () => setActionFilter("") });
   if (filters.ninjaId) chips.push({ label: "Ninja", value: engineers.find((e) => e.id === filters.ninjaId)?.name ?? "Ninja", onClear: () => setFilters((f) => ({ ...f, ninjaId: "" })) });
@@ -336,7 +351,7 @@ export default function FieldPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 rox-lock-root">
       <PageHeader
         eyebrow="Field Management · Logistics"
         title="Pickup & Drop"
@@ -498,8 +513,7 @@ export default function FieldPage() {
       )}
 
       {/* Desktop data-grid — bounded dual-axis scroll; sticky head; frozen anchors. */}
-      <div ref={grid.scrollRef} className="rox-table-card rox-grid-scroll hidden overflow-auto shadow-card md:block"
-        style={grid.gridMaxH ? { height: grid.gridMaxH } : undefined}>
+      <div ref={grid.scrollRef} className="rox-table-card rox-grid-scroll rox-lock-grow hidden overflow-auto shadow-card md:block">
         <table className="w-full table-fixed text-[14px]" style={{ minWidth: grid.tableMinWidth }}>
           <colgroup>{grid.displayColumns.map((c) => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
           <thead className="rox-table-head sticky top-0 z-[6] [&_.rox-frozen]:!bg-[#5368D4] [&_th]:!text-white"
@@ -581,7 +595,7 @@ export default function FieldPage() {
       </div>
 
       <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filtered.length} pageSize={pageSize}
-        pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="trip" className="-mt-3 !py-0" />
+        pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="trip" className="rox-lock-footer -mt-3 !py-0" />
 
             <FieldAssignmentForm open={formOpen} onClose={() => setFormOpen(false)} onCreated={(j) => router.push(`/field/${j.id}`)} />
     </div>

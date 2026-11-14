@@ -40,6 +40,11 @@ export const isWarranty = (j: Pick<FieldJob, "leadType">) => normaliseLeadType(j
 /* ─── Date range ──────────────────────────────────────────────────────── */
 
 export type DashPreset = "all" | "today" | "7days" | "month" | "lastmonth" | "year" | "custom";
+export const DASH_PRESETS: { label: string; value: DashPreset }[] = [
+  { label: "All", value: "all" }, { label: "Today", value: "today" }, { label: "7 Days", value: "7days" },
+  { label: "This Month", value: "month" }, { label: "Last Month", value: "lastmonth" }, { label: "This Year", value: "year" },
+  { label: "Custom", value: "custom" },
+];
 export interface DateBounds { from: string | null; to: string | null } // inclusive YYYY-MM-DD
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -79,11 +84,17 @@ export interface DashRow {
   onsite: Bucket;
   pickup: Bucket;
   drop: Bucket;
+  /** Lead sync: trips that came from a Lead, trips with a repair Ticket, finalized invoices. */
+  leadTrips: number;
+  ticketed: number;
+  invoiced: number;
   /** Exact trip ids behind the row (drill-down reconciles by construction). */
   jobIds: string[];
 }
 
-export type GroupBy = "store" | "engineer";
+/** store · engineer (the person doing the trip) · agent (SALES agent who owns the lead — a different person) · source. */
+export type GroupBy = "store" | "engineer" | "agent" | "source";
+export const GROUP_BY_LABEL: Record<GroupBy, string> = { store: "Store", engineer: "Field Engineer", agent: "Sales Agent", source: "Lead Source" };
 export interface AggregateCtx {
   /** Finalized invoice for a trip: stable invoice id + total, or null. */
   finalizedInvoiceOf: (j: FieldJob) => { id: string; total: number } | null;
@@ -95,8 +106,19 @@ const engineerOf = (j: FieldJob) =>
     : j.dropNinjaId ? { key: j.dropNinjaId, label: j.dropNinjaName || "Field Engineer" }
     : { key: "unassigned", label: "Unassigned" };
 
-function groupKey(j: FieldJob, by: GroupBy, ctx: AggregateCtx) {
-  return by === "store" ? ctx.storeKeyOf(j) : engineerOf(j);
+const agentOf = (j: FieldJob) =>
+  j.salesPersonId ? { key: j.salesPersonId, label: j.salesPersonName || "Sales Agent" }
+    : j.salesPersonName ? { key: `n:${j.salesPersonName.toLowerCase()}`, label: j.salesPersonName }
+    : { key: "none", label: j.leadId ? "Unassigned lead" : "Direct (no lead)" };
+const sourceOf = (j: FieldJob) => { const v = (j.source || "").trim(); return { key: v.toLowerCase() || "unknown", label: v || "Unknown" }; };
+
+export function groupKey(j: FieldJob, by: GroupBy, ctx: AggregateCtx) {
+  switch (by) {
+    case "store": return ctx.storeKeyOf(j);
+    case "agent": return agentOf(j);
+    case "source": return sourceOf(j);
+    default: return engineerOf(j);
+  }
 }
 
 function foldRows(jobs: FieldJob[], by: GroupBy, ctx: AggregateCtx): DashRow[] {
@@ -104,7 +126,7 @@ function foldRows(jobs: FieldJob[], by: GroupBy, ctx: AggregateCtx): DashRow[] {
   for (const j of jobs) {
     const { key, label } = groupKey(j, by, ctx);
     let r = map.get(key);
-    if (!r) { r = { key, label, business: null, groupBusiness: emptyMoney(), totalTrips: 0, onsite: emptyBucket(), pickup: emptyBucket(), drop: emptyBucket(), jobIds: [], _inv: new Set(), _sum: 0 }; map.set(key, r); }
+    if (!r) { r = { key, label, business: null, groupBusiness: emptyMoney(), totalTrips: 0, onsite: emptyBucket(), pickup: emptyBucket(), drop: emptyBucket(), leadTrips: 0, ticketed: 0, invoiced: 0, jobIds: [], _inv: new Set(), _sum: 0 }; map.set(key, r); }
     const grp = tripGroupOf(j);
     const b = r[grp];
     b.total += 1;
@@ -112,11 +134,13 @@ function foldRows(jobs: FieldJob[], by: GroupBy, ctx: AggregateCtx): DashRow[] {
     if (isAssigned(j)) b.assigned += 1;
     if (isCompleted(j)) b.completed += 1;
     r.totalTrips += 1;
+    if (j.leadId) r.leadTrips += 1;
+    if (j.linkedTicketId) r.ticketed += 1;
     r.jobIds.push(j.id);
     const inv = ctx.finalizedInvoiceOf(j);
     if (inv && !r._inv.has(inv.id)) { r._inv.add(inv.id); r._sum += inv.total; r.groupBusiness[grp] = (r.groupBusiness[grp] ?? 0) + inv.total; }
   }
-  return [...map.values()].map(({ _inv, _sum, ...row }) => ({ ...row, business: _inv.size > 0 ? _sum : null }))
+  return [...map.values()].map(({ _inv, _sum, ...row }) => ({ ...row, invoiced: _inv.size, business: _inv.size > 0 ? _sum : null }))
     .sort((a, b) => (b.business ?? -1) - (a.business ?? -1) || b.totalTrips - a.totalTrips || a.label.localeCompare(b.label));
 }
 
@@ -127,10 +151,10 @@ export function buildSummaryRows(jobs: FieldJob[], by: GroupBy, bounds: DateBoun
 }
 
 export function sumRows(rows: DashRow[]): Omit<DashRow, "key" | "label" | "jobIds"> & { jobIds: string[] } {
-  const t = { business: null as number | null, groupBusiness: emptyMoney(), totalTrips: 0, onsite: emptyBucket(), pickup: emptyBucket(), drop: emptyBucket(), jobIds: [] as string[] };
+  const t = { business: null as number | null, groupBusiness: emptyMoney(), totalTrips: 0, onsite: emptyBucket(), pickup: emptyBucket(), drop: emptyBucket(), leadTrips: 0, ticketed: 0, invoiced: 0, jobIds: [] as string[] };
   for (const r of rows) {
     if (r.business != null) t.business = (t.business ?? 0) + r.business;
-    t.totalTrips += r.totalTrips;
+    t.totalTrips += r.totalTrips; t.leadTrips += r.leadTrips; t.ticketed += r.ticketed; t.invoiced += r.invoiced;
     for (const g of ["onsite", "pickup", "drop"] as const) {
       t[g].assigned += r[g].assigned; t[g].completed += r[g].completed; t[g].total += r[g].total; t[g].warranty += r[g].warranty;
       if (r.groupBusiness[g] != null) t.groupBusiness[g] = (t.groupBusiness[g] ?? 0) + (r.groupBusiness[g] as number);
@@ -174,4 +198,35 @@ export function buildMasterRows(jobs: FieldJob[], by: GroupBy, year: number, ctx
     rows.push({ key, label, months, yearTrips: mine.length, yearBusiness: yr?.business ?? null, yearGroups: yr ?? null });
   }
   return rows.sort((a, b) => (b.yearBusiness ?? -1) - (a.yearBusiness ?? -1) || b.yearTrips - a.yearTrips || a.label.localeCompare(b.label));
+}
+
+/* ─── Export row-builders (Excel + CSV share these, so export == on-screen) ─── */
+
+type Cellv = string | number;
+export function summaryTable(rows: DashRow[], totals: Omit<DashRow, "key" | "label" | "jobIds">, first: string): { headers: string[]; rows: Cellv[][] } {
+  const headers = [first, "Business (₹)", "Total trips"];
+  for (const g of ["onsite", "pickup", "drop"] as const) { const L = TRIP_GROUP_LABEL[g]; headers.push(`${L} assigned`, `${L} completed`, `${L} new`, `${L} warranty`); }
+  headers.push("Lead-linked trips", "Ticket created", "Invoices finalized");
+  const line = (label: string, r: Omit<DashRow, "key" | "label" | "jobIds">): Cellv[] => {
+    const out: Cellv[] = [label, r.business ?? "", r.totalTrips];
+    for (const g of ["onsite", "pickup", "drop"] as const) out.push(r[g].assigned, r[g].completed, newCount(r[g]), r[g].warranty);
+    out.push(r.leadTrips, r.ticketed, r.invoiced);
+    return out;
+  };
+  return { headers, rows: [...rows.map((r) => line(r.label, r)), ...(rows.length ? [line("Total", totals)] : [])] };
+}
+
+export function masterTable(rows: MasterRow[], monthCount: number, year: number, first: string): { headers: string[]; rows: Cellv[][] } {
+  const headers = [first];
+  for (let m = 0; m < monthCount; m++) headers.push(`${MONTH_NAMES[m]} trips`, `${MONTH_NAMES[m]} business (₹)`);
+  headers.push(`${year} trips`, `${year} business (₹)`);
+  return {
+    headers,
+    rows: rows.map((r) => {
+      const o: Cellv[] = [r.label];
+      for (let m = 0; m < monthCount; m++) o.push(r.months[m].totalTrips, r.months[m].business ?? "");
+      o.push(r.yearTrips, r.yearBusiness ?? "");
+      return o;
+    }),
+  };
 }

@@ -18,6 +18,7 @@ import { ComingSoonPage } from "@/components/common/coming-soon";
 import { getComingSoonContentByHref, FEATURE_BY_HREF } from "@/lib/feature-visibility";
 import { resetDemoData } from "@/lib/demo-mode";
 import { useSessionTracker } from "@/lib/use-session-tracker";
+import { useFieldNotifications } from "@/lib/use-field-notifications";
 import { useLoginAlerts } from "@/lib/use-login-alerts";
 import { useSalesPresenceTracker } from "@/lib/use-sales-presence";
 import { useWorkSessionAutoStart } from "@/lib/work-session-context";
@@ -116,6 +117,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // owner's own topbar bell (durable notifications written by the sessions
   // route). Empty / no-op for every non-owner. No effect in local mode.
   useLoginAlerts();
+  // Field Operations: DB-owned trip notifications (assign / accept / handover / delivered) → bell.
+  useFieldNotifications(currentUser?.roleId !== "ninja");
 
   // Publish app-wide "online" presence for the signed-in user, with an idle
   // timeout (option C). Marks the user online whenever ANY RepairOX page is open

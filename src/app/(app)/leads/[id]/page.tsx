@@ -52,6 +52,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { PinnedRail } from "@/components/common/pinned-rail";
+import { FieldTripsPanel } from "@/components/field/field-trips-panel";
 import { BackPill } from "@/components/common/back-pill";
 import { useLeadReference } from "@/hooks/use-lead-reference";
 import { ReferenceBanner, ReferenceActivityPanel, HandoffRequestsPanel } from "@/components/leads/search/reference-mode";
@@ -808,6 +809,7 @@ export default function ViewLeadPage() {
           )}
         </DetailSection>
       )}
+      {fieldJob ? <FieldTripsPanel jobId={fieldJob.id} compact /> : null}
 
       {/* ─── Commercial Summary (full width — Estimate ≠ Quotation ≠ Revenue) */}
       {hasCommercial && (

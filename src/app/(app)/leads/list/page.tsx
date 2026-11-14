@@ -20,7 +20,7 @@ import { ActiveFilterChip } from "@/components/ui/rox-filter";
 import { DateTimeDialog } from "@/components/ui/date-time-picker";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { EmptyDash } from "@/components/common/empty-dash";
-import { LeadFilterPanel, type FacetDef } from "@/components/leads/lead-filter-panel";
+import { LeadFilterBar, type FacetDef } from "@/components/leads/lead-filter-bar";
 import { FreezeColumnsMenu } from "@/components/common/freeze-columns-menu";
 import { CustomizeColumnsMenu } from "@/components/common/customize-columns-menu";
 import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
@@ -52,7 +52,7 @@ import { DealRequestModal } from "@/components/deals/deal-request-modal";
 import { DealConversationPopover } from "@/components/deals/deal-conversation-popover";
 import { useLeadStatusFieldJob } from "@/lib/use-lead-status-field-job";
 import {
-  followUpState, followUpTone, hasActiveLeadFilters, openFollowUpRowState, followUpLifecycle, openFollowUp, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, isFollowUpStatus, type LeadFollowUp,
+  followUpState, followUpTone, hasActiveLeadFilters, fieldValuesOf, openFollowUpRowState, followUpLifecycle, openFollowUp, getLeadDevices, leadDevicesTotalEstimate, leadIsExistingCustomer, statusRequiresFollowUp, followUpNounForStatus, isFollowUpStatus, type LeadFollowUp,
   isNotContactedStatus, isNotContactedLocked, LEAD_DATE_RANGES, EMPTY_LEAD_FILTERS,
   isFreshAssignment, isNotContactedActive, isNotContactedHistory, notContactedFocusOf, contactStatusClass,
   type Lead, type LeadFieldKey, type LeadFilterField, type LeadDateRange, type LeadFilters, type LeadView,
@@ -1248,6 +1248,7 @@ const FILTER_FIELDS: { key: LeadFilterField; label: string; optionField?: LeadFi
   { key: "finalResult",    label: "Final Result",    optionField: "finalResult" },
 ];
 
+const ROUTE_LABEL: Record<string, string> = { STORE_VISIT: "Walk-in (store visit)", PICKUP_DROP: "Pickup & drop", ON_SITE: "On-site visit" };
 // Shared 8-option date-range vocabulary (matches Tickets / Dashboard).
 const DATE_RANGES = LEAD_DATE_RANGES;
 
@@ -1431,34 +1432,9 @@ export default function LeadsListPage() {
      pagination footer). Measured from the grid's live distance to the top of
      the viewport, so it stays correct regardless of how tall the filters above
      it are, and re-measures on resize. */
-  const [gridMaxH, setGridMaxH] = useState<number | null>(null);
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    // Compact: just the 32px pagination row + a few px of breathing room, so the
-    // grid claims the rest of the viewport (more lead rows visible).
-    const FOOTER_RESERVE = 50;
-    const measure = () => {
-      const top = el.getBoundingClientRect().top; // distance from viewport top
-      setGridMaxH(Math.max(240, window.innerHeight - top - FOOTER_RESERVE));
-    };
-    measure();
-    // Re-measure as the collapse/expand height animation plays so the table's
-    // bounded height tracks the control area contracting/expanding smoothly and
-    // lands correctly once the transition settles (no stale height, no jump).
-    const raf = requestAnimationFrame(measure);
-    const settle = setTimeout(measure, 280); // just past the ~0.22s animation
-    window.addEventListener("resize", measure);
-    const ro = new ResizeObserver(measure);
-    ro.observe(document.body);
-    return () => {
-      window.removeEventListener("resize", measure);
-      ro.disconnect();
-      cancelAnimationFrame(raf);
-      clearTimeout(settle);
-    };
-  }, [hydrated, controlsCollapsed]);
-
+  /* Height is pure CSS now (see .rox-lock-root in globals.css): the page is exactly
+     one viewport tall, the table region takes whatever is left, and ONLY the table
+     scrolls. Browser zoom therefore resizes the table, never the page. */
   // Width of the always-frozen selection column (sits before the Lead ID
   // anchor). The hook owns the Lead ID left anchor, so every hook-computed left
   // offset is shifted right by this width, and the select column itself is
@@ -1513,7 +1489,17 @@ export default function LeadsListPage() {
 
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(20);
-  const [showFilters, setShowFilters] = useState(false);
+  // Inline filter bar (above the table). Open by default so salespeople find it;
+  // the choice is remembered per browser.
+  const [showFilters, setShowFiltersState] = useState(true);
+  useEffect(() => { try { if (localStorage.getItem("repairox-lead-filterbar-open") === "0") setShowFiltersState(false); } catch { /* storage unavailable */ } }, []);
+  const setShowFilters = useCallback((v: boolean | ((p: boolean) => boolean)) => {
+    setShowFiltersState((p) => {
+      const n = typeof v === "function" ? v(p) : v;
+      try { localStorage.setItem("repairox-lead-filterbar-open", n ? "1" : "0"); } catch { /* storage unavailable */ }
+      return n;
+    });
+  }, []);
   // ── Multiselect (matches Tickets/Walk-In) ──
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [showBulkStatus, setShowBulkStatus] = useState(false);
@@ -1984,6 +1970,11 @@ export default function LeadsListPage() {
   }, [deepLinkAction, searchParams, router]);
 
   const activeFilters = hasActiveLeadFilters(filters);
+  // The filter bar changes the space above the table: ask the grid to re-measure.
+  useEffect(() => {
+    const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
+    return () => clearTimeout(t);
+  }, [showFilters, filters.fields, filters.followUp, filters.dateRange, filters.unassigned, filters.discounted, filters.valueMin, filters.valueMax, filters.idleDays, filters.hasEmail]);
 
   /* Applied-filter chips — each APPLIED filter is individually removable
      (Design System v2 §3g). The panel's "Clear all" is in addition, never
@@ -2016,16 +2007,28 @@ export default function LeadsListPage() {
         onClear: () => setFilters((f) => ({ ...f, customerLink: "any" })),
       });
     }
+    if (filters.unassigned) chips.push({ label: "Owner", value: "Not assigned yet", onClear: () => setFilters((f) => ({ ...f, unassigned: false })) });
+    if (filters.discounted) chips.push({ label: "Discount", value: "Asked for discount", onClear: () => setFilters((f) => ({ ...f, discounted: false })) });
+    if (filters.hasEmail && filters.hasEmail !== "any") chips.push({ label: "Email", value: filters.hasEmail === "yes" ? "Has email" : "Missing", onClear: () => setFilters((f) => ({ ...f, hasEmail: "any" })) });
+    if (filters.idleDays) chips.push({ label: "Activity", value: `Not touched in ${filters.idleDays} days`, onClear: () => setFilters((f) => ({ ...f, idleDays: 0 })) });
+    if (filters.valueMin || filters.valueMax) {
+      const r = (n: string) => `₹${Number(n).toLocaleString("en-IN")}`;
+      chips.push({ label: "Lead value", value: filters.valueMin && filters.valueMax ? `${r(filters.valueMin)} – ${r(filters.valueMax)}` : filters.valueMin ? `${r(filters.valueMin)}+` : `Up to ${r(filters.valueMax!)}`, onClear: () => setFilters((f) => ({ ...f, valueMin: "", valueMax: "" })) });
+    }
     for (const field of FILTER_FIELDS) {
       const v = filters.fields[field.key];
       if (!v) continue;
       // People filters store a user id → show the resolved name.
-      let display = v;
-      if (field.key === "assignedTo" || field.key === "followUpAgentId") {
-        display = salesAgents.find((a) => a.id === v)?.name
-          ?? leads.find((l) => String(l[field.key] || "") === v)?.[field.key === "assignedTo" ? "assignedToName" : "followUpAgent"]
-          ?? v;
-      }
+      const nameOf = (one: string) => {
+        if (field.key === "assignedTo" || field.key === "followUpAgentId") {
+          return salesAgents.find((a) => a.id === one)?.name
+            ?? leads.find((l) => String(l[field.key] || "") === one)?.[field.key === "assignedTo" ? "assignedToName" : "followUpAgent"]
+            ?? one;
+        }
+        if (field.key === "fulfilmentRoute") return ROUTE_LABEL[one.toUpperCase()] ?? one;
+        return one;
+      };
+      const display = fieldValuesOf(v).map(nameOf).join(", ");
       chips.push({
         label: field.optionField ? fieldTitle(field.optionField) : field.label,
         value: display,
@@ -2055,7 +2058,7 @@ export default function LeadsListPage() {
         key: f.key,
         label: f.optionField ? fieldTitle(f.optionField) : f.label,
         options: optionsForFilter(f).map((o) =>
-          typeof o === "string" ? { label: o, value: o } : o,
+          typeof o === "string" ? { label: f.key === "fulfilmentRoute" ? (ROUTE_LABEL[o.toUpperCase()] ?? o) : o, value: o } : o,
         ),
       })),
     // optionsForFilter closes over leads/salesAgents/optionsFor; recompute when
@@ -2335,7 +2338,7 @@ export default function LeadsListPage() {
   );
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 rox-lock-root">
       <PageHeader
         eyebrow="Sales"
         title="Leads"
@@ -2392,7 +2395,7 @@ export default function LeadsListPage() {
         {/* Customer filter + Collapse control sit on the tabs line (above Search)
             for EVERY view — All Leads, Assigned and Follow-ups alike. */}
         <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">
-          {controlsCollapsed && view !== "all" && collapsedIndicators}
+          {controlsCollapsed && collapsedIndicators}
           {rightControls}
         </div>
       </div>
@@ -2478,7 +2481,8 @@ export default function LeadsListPage() {
             variant={showFilters || activeFilters ? "soft" : "outline"}
             size="sm"
             className="shrink-0 gap-1.5 rounded-full"
-            onClick={() => setShowFilters(true)}
+            onClick={() => setShowFilters((v) => !v)}
+            aria-expanded={showFilters}
           >
             <Filter className="h-3.5 w-3.5" /> Filters
             {appliedChips.length > 0 && (
@@ -2505,6 +2509,21 @@ export default function LeadsListPage() {
         onFromChange={(v) => setFilters((f) => ({ ...f, customFrom: v, dateRange: "custom" }))}
         onToChange={(v) => setFilters((f) => ({ ...f, customTo: v, dateRange: "custom" }))}
       />
+      {showFilters && (
+        <LeadFilterBar
+          filters={filters}
+          setFilters={setFilters}
+          leads={leads}
+          openFollowUpsByLead={openFollowUpsByLead}
+          facets={filterFacets}
+          meId={meId}
+          userId={currentUser?.id}
+          shown={filteredLeads.length}
+          chips={appliedChips}
+          onClearAll={clearFiltersKeepView}
+          onClose={() => setShowFilters(false)}
+        />
+      )}
 
           </motion.div>
         )}
@@ -2520,57 +2539,28 @@ export default function LeadsListPage() {
           MODE the compact "Filters · N" + date indicators show on the left
           where the strip was. The strip stays visible for the Not-Contacted /
           Follow-Ups views too, since those segments now live inside it. */}
-      {view === "all" && (
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 flex-1">
-          <AnimatePresence initial={false}>
-            {!controlsCollapsed && view === "all" && statusStripTabs.length > 1 && (
-              <motion.div
-                key="lead-status-strip"
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: "auto", opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-                className="overflow-hidden"
-              >
-                <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                  <SegmentedTabs
-                    value={statusStripValue}
-                    onChange={onStatusStripChange}
-                    options={statusStripTabs}
-                    size="sm"
-                  />
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-          {/* Compact active-state indicators (collapsed WORK MODE only) — shown
-              where the status strip was, so the user still knows filters/date
-              are active without reproducing the whole control area. */}
-          {controlsCollapsed && collapsedIndicators}
-        </div>
-      </div>
-      )}
-
-      {/* Structured, faceted filter panel (slide-over) — grouped sections,
-          searchable facets with live counts, and a live "Show N leads"
-          preview. Replaces the flat pill wall. */}
-      <LeadFilterPanel
-        open={showFilters}
-        onClose={() => setShowFilters(false)}
-        filters={filters}
-        onApply={(next) => setFilters(() => next)}
-        onClearAll={clearFiltersKeepView}
-        leads={leads}
-        openFollowUpsByLead={openFollowUpsByLead}
-        facets={filterFacets}
-      />
+      <AnimatePresence initial={false}>
+        {view === "all" && !controlsCollapsed && statusStripTabs.length > 1 && (
+          <motion.div
+            key="lead-status-strip"
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            className="overflow-hidden"
+          >
+            <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <SegmentedTabs value={statusStripValue} onChange={onStatusStripChange} options={statusStripTabs} size="sm" />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Applied-filter chips — each individually removable (Design System §3g).
           Part of the filter display, so they collapse with the control area
           (the collapsed toolbar shows a compact "Filters · N" indicator
           instead). State is untouched — expanding brings the chips right back. */}
-      {!controlsCollapsed && appliedChips.length > 0 && (
+      {!controlsCollapsed && !showFilters && appliedChips.length > 0 && (
         <div className="flex flex-wrap items-center gap-2">
           {appliedChips.map((c, i) => (
             <ActiveFilterChip key={`${c.label}-${i}`} label={c.label} value={c.value} onClear={c.onClear} />
@@ -2650,7 +2640,7 @@ export default function LeadsListPage() {
             scroll-sync. Sharp 2px frame + brand header preserved. */}
       <div
         ref={scrollRef}
-        className="rox-table-card rox-grid-scroll shadow-card hidden md:block overflow-auto"
+        className="rox-table-card rox-grid-scroll rox-lock-grow shadow-card hidden md:block overflow-auto"
         /* FIXED height (not max-height) so the table workspace FILLS the
            available viewport even with only a few leads — the frame grows to
            the bottom and the detached footer anchors near the viewport bottom
@@ -2658,7 +2648,6 @@ export default function LeadsListPage() {
            height the body scrolls internally with the sticky header. Measured
            from the grid's live top so it tracks the collapsed/expanded control
            area and the viewport. */
-        style={gridMaxH ? { height: gridMaxH } : undefined}
       >
         {/* Explicit per-column pixel widths (deterministic with table-fixed) so
             every grouped column gets a generous width AND the frozen offsets
@@ -2952,7 +2941,7 @@ export default function LeadsListPage() {
         itemLabel="lead"
         // Pull the footer up against the table (cancels most of the page's
         // space-y gap) and drop its vertical padding.
-        className="-mt-3 !py-0"
+        className="rox-lock-footer -mt-3 !py-0"
       />
       </>
       )}

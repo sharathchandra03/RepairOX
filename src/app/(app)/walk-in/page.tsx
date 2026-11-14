@@ -627,7 +627,7 @@ export default function WalkInPage() {
   const activeFollowUpCount = useMemo(() => walkIns.filter((w) => hasActiveFollowUp(w)).length, [walkIns]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 rox-lock-root">
       <PageHeader
         eyebrow="Shop"
         title="Walk-In"
@@ -879,7 +879,7 @@ export default function WalkInPage() {
            Straight (square) card with a flat bordered header — identical edge
            treatment to the Tickets/Invoice tables. No overflow-hidden on the
            card; the inner wrapper below documents the responsive strategy. */
-        <div className="-mt-5 border-2 border-zinc-300 bg-card shadow-card">
+        <div className="rox-lock-grow -mt-5 flex flex-col border-2 border-zinc-300 bg-card shadow-card">
           {/* Same responsive architecture as the Tickets/Invoice tables:
              `table-fixed` + `w-full` makes the table lay out to EXACTLY its
              container width and honour the fixed column widths below, so as the
@@ -892,7 +892,7 @@ export default function WalkInPage() {
              guarantees the table already fits the container, clipping never
              hides the Action column. Overflow stays inside this table region,
              so the app shell (min-w-0 / overflow-y-auto) never scrolls sideways. */}
-          <div className="[overflow-x:clip]">
+          <div className="min-h-0 flex-1 overflow-auto rox-grid-scroll">
             <table className="w-full table-fixed text-[14px]">
               {/* Column widths mirror the Tickets table strategy: compact/stable
                   columns get a fixed px width so they never collapse, while the
@@ -912,7 +912,7 @@ export default function WalkInPage() {
                 <col className="w-[136px]" />{/* Final Status — N/A / Lost / Converted Ticket */}
                 <col className="w-[140px]" />{/* Action — fixed so the 3 icons never collapse/wrap */}
               </colgroup>
-              <thead style={{ top: theadTop }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
+              <thead style={{ top: 0 }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
                 <tr className="text-left text-[12px] font-bold uppercase tracking-wider text-white">
                   <th className="pl-5 pr-2 py-4">
                     <Checkbox
@@ -1205,6 +1205,7 @@ export default function WalkInPage() {
           pageSizeOptions={PAGE_SIZE_OPTIONS}
           onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
           itemLabel="walk-in"
+          className="rox-lock-footer -mt-3 !py-0"
         />
       )}
 

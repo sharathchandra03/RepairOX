@@ -4,11 +4,13 @@ import { WalkInSoundProvider } from "@/lib/walk-in-notification-sound";
 import { WalkInFollowUpWatcher } from "@/components/walk-in/walk-in-followup-watcher";
 import { LeadFollowUpWatcher } from "@/components/leads/lead-followup-watcher";
 import { CategoryPreloader } from "@/components/category-preloader";
+import { NinjaRedirect } from "@/components/ninja/ninja-redirect";
 
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   return (
     <DashboardSettingsProvider>
       <WalkInSoundProvider>
+        <NinjaRedirect />
         <CategoryPreloader />
         {/* Global follow-up watcher — fires a toast + bell notification + sound
             when any walk-in follow-up's date/time is crossed, on any page. */}

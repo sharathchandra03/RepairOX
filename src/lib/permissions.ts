@@ -473,6 +473,7 @@ export type PermissionKey =
   | "invoices_view_all"
   | "leads_view_all"
   | "field_view_all"
+  | "field_live_location_view"
   | "customers_view_all"
   /* Locked / date integrity */
   | "edit_locked_records"          // edit finalized/closed records
@@ -1034,6 +1035,7 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "invoices_view_all", label: "View All Invoices (not just own)" },
       { key: "leads_view_all", label: "View All Leads (not just own)" },
       { key: "field_view_all", label: "View All Field Jobs (not just own)" },
+      { key: "field_live_location_view", label: "View Ninja Live Location & Live Map" },
       { key: "customers_view_all", label: "View All Customers (not just own)" },
     ],
   },
@@ -1348,7 +1350,7 @@ export const ROLES: RoleDef[] = [
     permissions: [
       "view_only", "assign",
       "view_dashboard", "view_kpi_cards",
-      "view_field_jobs", "manage_field_jobs", "assign_ninja",
+      "view_field_jobs", "manage_field_jobs", "assign_ninja", "field_live_location_view",
       "update_pickup", "update_drop", "view_field_reports",
       "view_customer_details", "view_device_details",
       "view_ticket",

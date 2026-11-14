@@ -716,7 +716,26 @@ export interface LeadFilters {
   /** Exact traceability cohort from Lead Intelligence. Hidden from the normal
    * filter UI; every id still passes through RLS before it can appear. */
   evidenceIds?: string[];
+  /* ── Sales-friendly extras (all optional; absent = no constraint) ── */
+  /** Only leads nobody owns yet. */
+  unassigned?: boolean;
+  /** Only leads where the customer asked for a discount. */
+  discounted?: boolean;
+  /** Email on file: "yes" = has one, "no" = missing. */
+  hasEmail?: "any" | "yes" | "no";
+  /** Lead value range in rupees (strings so an empty box = no bound). */
+  valueMin?: string;
+  valueMax?: string;
+  /** Not touched (no update) for at least this many days. 0/undefined = off. */
+  idleDays?: number;
 }
+
+/** Multi-select: several accepted values for one field are stored in the single
+ *  string joined with this separator (control char — can't occur in real values),
+ *  so the existing `fields` shape, URLs and evidence links keep working. */
+export const FIELD_VALUE_SEP = "\u001f";
+export const fieldValuesOf = (v: string | undefined): string[] => (v ? v.split(FIELD_VALUE_SEP).filter(Boolean) : []);
+export const joinFieldValues = (vs: string[]): string => vs.join(FIELD_VALUE_SEP);
 
 export const EMPTY_LEAD_FILTERS: LeadFilters = {
   query: "",
@@ -736,6 +755,8 @@ export function hasActiveLeadFilters(f: LeadFilters): boolean {
   return (
     !!f.query.trim() || !!f.status || f.dateRange !== "all" || f.followUp !== "any" ||
     f.customerLink !== "any" || !!f.evidenceIds?.length ||
+    !!f.unassigned || !!f.discounted || (!!f.hasEmail && f.hasEmail !== "any") ||
+    !!f.valueMin || !!f.valueMax || !!f.idleDays ||
     Object.values(f.fields).some(Boolean)
   );
 }
@@ -829,7 +850,21 @@ export function applyLeadFilters(
 
     if (f.status && l.status !== f.status) return false;
     for (const [k, v] of Object.entries(f.fields)) {
-      if (v && String((l as any)[k] ?? "") !== v) return false;
+      if (v && !fieldValuesOf(v).includes(String((l as any)[k] ?? ""))) return false;
+    }
+    if (f.unassigned && (l.assignedTo || (l as any).assignedUserId)) return false;
+    if (f.discounted && !((l.discount ?? 0) > 0)) return false;
+    if (f.hasEmail === "yes" && !(l.email || "").trim()) return false;
+    if (f.hasEmail === "no" && (l.email || "").trim()) return false;
+    if (f.valueMin || f.valueMax) {
+      const v = l.estimate;
+      if (v == null) return false;
+      if (f.valueMin && v < Number(f.valueMin)) return false;
+      if (f.valueMax && v > Number(f.valueMax)) return false;
+    }
+    if (f.idleDays) {
+      const t = new Date(l.updatedAt || l.createdAt || l.date).getTime();
+      if (!Number.isFinite(t) || asOf - t < f.idleDays * 86400000) return false;
     }
     // Date basis: Assigned Leads filter by ASSIGNMENT time (org timezone);
     // every other view keeps the lead CREATION date.

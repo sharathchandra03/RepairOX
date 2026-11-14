@@ -106,3 +106,17 @@ test("warranty split (NEW = total - warranty) and business broken up by trip gro
   assert.equal(m.groupBusiness.onsite, 20000);
   assert.equal(m.pickup.warranty, 1);
 });
+test("sales agent and source are separate dimensions from the engineer; lead sync counts", () => {
+  const jobs = [
+    job({ leadId: "L1", salesPersonId: "s1", salesPersonName: "Asha", ninjaId: "e1", ninjaName: "Biju", source: "Google", linkedTicketId: "T1" }),
+    job({ leadId: "L2", salesPersonId: "s1", salesPersonName: "Asha", ninjaId: "e2", ninjaName: "Irfan", source: "google" }),
+    job({ salesPersonId: "", source: "" }),
+  ];
+  const byAgent = buildSummaryRows(jobs, "agent", { from: null, to: null }, ctx);
+  const asha = byAgent.find((r) => r.key === "s1")!;
+  assert.equal(asha.totalTrips, 2); assert.equal(asha.leadTrips, 2); assert.equal(asha.ticketed, 1);
+  assert.equal(byAgent.find((r) => r.key === "none")!.label, "Direct (no lead)");
+  assert.equal(buildSummaryRows(jobs, "engineer", { from: null, to: null }, ctx).length, 3);
+  assert.equal(buildSummaryRows(jobs, "source", { from: null, to: null }, ctx).find((r) => r.key === "google")!.totalTrips, 2);
+  assert.deepEqual(boundsForPreset("7days", "", "", new Date(2026, 4, 15)), { from: "2026-05-09", to: "2026-05-15" });
+});

@@ -224,6 +224,33 @@ body {
   min-height: 0;
 }
 
+/* LOCKED TABLE PAGE (Lead Table, desktop): the page is exactly one viewport tall
+   and never scrolls by itself. Controls keep their height, the table region
+   (.rox-lock-grow) takes the rest and scrolls internally, and the footer sits a
+   little above the bottom edge. Pure CSS, so browser zoom in/out resizes the
+   table instead of making the whole page scroll. If the controls alone are taller
+   than the screen the table keeps a 240px minimum and the page scrolls (safety). */
+@media (min-width: 768px) {
+  .rox-page-main:has(.rox-lock-root) {
+    min-height: 0;
+    flex: 1 1 0%;
+    padding-bottom: 6px;
+  }
+  .rox-lock-root {
+    flex: 1 1 0%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .rox-lock-root > * { flex-shrink: 0; }
+  /* Footer hugs the table: a few px above, a few px below. */
+  .rox-lock-root > .rox-lock-footer { margin-top: 6px !important; padding-top: 0 !important; padding-bottom: 0 !important; }
+  .rox-lock-root > .rox-lock-grow {
+    flex: 1 1 0%;
+    min-height: 240px;
+    flex-shrink: 1;
+  }
+}
 ::selection {
   background: hsl(231 80% 57% / 0.15);
   color: hsl(231 80% 42%);

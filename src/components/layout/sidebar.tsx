@@ -55,7 +55,7 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
   const isModuleRoot = item.href === "/operations" || item.href === "/field" || item.href === "/lead-management" || item.href === "/dashboard" || item.href === "/leads/intelligence";
   // "/field" is a module root (so Dashboards/Reports don't light it up) BUT its
   // record pages (/field/<tripId>) belong to it — View Assignment keeps it active.
-  const fieldRecordPage = item.href === "/field" && pathname.startsWith("/field/") && !/^\/field\/(dashboard|reports)(\/|$)/.test(pathname);
+  const fieldRecordPage = item.href === "/field" && pathname.startsWith("/field/") && !/^\/field\/(dashboard|reports|dispatch|ops-report)(\/|$)/.test(pathname);
   const active = !item.newTab && !comingSoon && (fieldRecordPage || (isModuleRoot
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(item.href + "/")));

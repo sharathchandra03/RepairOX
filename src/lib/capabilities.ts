@@ -398,6 +398,10 @@ export const CAP = {
     reports: ["view_field_reports", "field_view_all", "manage_field_jobs"],
     /** Cross-engineer (team) visibility: every trip in the authorised stores. */
     viewAll: ["field_view_all", "manage_field_jobs"],
+    /** Ninja live location + Live Operations Map. LOCKSTEP with auth_field_location_viewer() (0098). */
+    liveLocation: ["field_live_location_view", "manage_field_jobs", "assign_ninja", "field_view_all"],
+    /** Confirm store receipt / release a repaired device (store reception). */
+    storeHandoff: ["receive_store_handoff", "manage_field_jobs"],
   },
   expense: {
     view: ["view_expenses", "view_financial_reports"],

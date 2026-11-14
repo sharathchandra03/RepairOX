@@ -216,7 +216,7 @@ export const PERMISSION_MODULES: ModuleDef[] = [
       ],
       manage: [
         "manage_field_jobs", "route_leads", "assign_ninja", "assign_field_manager",
-        "field_view_all",
+        "field_view_all", "field_live_location_view",
       ],
     },
   },

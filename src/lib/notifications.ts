@@ -44,6 +44,13 @@ export type NotificationKind =
   | "drop_assignment"
   | "drop_reminder"
   | "drop_done"
+  /* Field Operations (DB-owned, written by field_trips triggers — migration 0097) */
+  | "field_trip_assigned"
+  | "field_trip_update"
+  | "field_trip_problem"
+  | "field_trip_released"
+  | "field_trip_cancelled"
+  | "field_trip_unassigned"
   /* Deal / discount-approval workflow (attached to a lead). */
   | "deal_approval_requested"
   | "deal_changes_requested"

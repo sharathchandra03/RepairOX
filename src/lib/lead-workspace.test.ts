@@ -141,3 +141,25 @@ test("org-timezone today/yesterday boundaries", () => {
   // Invalid timezone falls back instead of throwing.
   assert.doesNotThrow(() => isInListDateRangeTz(row, "today", undefined, undefined, "Not/AZone", now));
 });
+
+/* ── Sales-friendly filters: multi-select, unassigned, discount, value range, idle ── */
+import { joinFieldValues } from "./leads-data";
+test("multi-select field values match ANY chosen value", () => {
+  const ls = [lead({ id: "a", source: "Google" }), lead({ id: "b", source: "Meta" }), lead({ id: "c", source: "Walk-in" })];
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ fields: { source: joinFieldValues(["Google", "Meta"]) } }))), ["a", "b"]);
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ fields: { source: "Google" } }))), ["a"]);
+});
+test("unassigned, discount, email, value range and idle filters", () => {
+  const old = new Date(Date.now() - 5 * 86400000).toISOString();
+  const ls = [
+    lead({ id: "u", assignedTo: "", assignedToName: "", estimate: 3000, email: "a@b.c", updatedAt: old }),
+    lead({ id: "o", assignedTo: "x", estimate: 15000, discount: 500, updatedAt: new Date().toISOString() }),
+    lead({ id: "n", assignedTo: "x", estimate: null, updatedAt: new Date().toISOString() }),
+  ];
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ unassigned: true }))), ["u"]);
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ discounted: true }))), ["o"]);
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ hasEmail: "yes" }))), ["u"]);
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ valueMin: "5000" }))), ["o"]);
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ valueMin: "1000", valueMax: "5000" }))), ["u"]);
+  assert.deepEqual(ids(applyLeadFilters(ls, f({ idleDays: 3 }))), ["u"]);
+});

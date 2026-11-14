@@ -977,7 +977,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
         if (typeof window !== "undefined") localStorage.setItem("repairox-demo-needs-reload", "1");
         trackDemoVisit();
       }
-      return { ok: true, account, landingHref: computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
+      return { ok: true, account, landingHref: account.roleId === "ninja" ? "/ninja" : computeLandingHref(allowedWorkspacesForRole(account.roleId)) };
     }
 
     // Local mode
@@ -997,7 +997,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
       if (typeof window !== "undefined") localStorage.setItem("repairox-demo-needs-reload", "1");
       trackDemoVisit();
     }
-    return { ok: true, account: { ...acc, lastLogin: now }, landingHref: computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
+    return { ok: true, account: { ...acc, lastLogin: now }, landingHref: acc.roleId === "ninja" ? "/ninja" : computeLandingHref(allowedWorkspacesForRole(acc.roleId)) };
   }, [team, allowedWorkspacesForRole, refreshTeamFromDb]);
 
   const logout = useCallback(() => {
@@ -1007,7 +1007,7 @@ export function PermissionsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const landingForRole = useCallback(
-    (roleId: string) => computeLandingHref(allowedWorkspacesForRole(roleId)),
+    (roleId: string) => (roleId === "ninja" ? "/ninja" : computeLandingHref(allowedWorkspacesForRole(roleId))),
     [allowedWorkspacesForRole]
   );
 
