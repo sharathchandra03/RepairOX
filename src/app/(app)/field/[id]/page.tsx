@@ -24,13 +24,13 @@ import { BackPill } from "@/components/common/back-pill";
 import { Can } from "@/components/common/can";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { Reveal } from "@/components/common/reveal";
-import { FieldTripsPanel } from "@/components/field/field-trips-panel";
+import { FieldTripsPanel, RejectedBanner } from "@/components/field/field-trips-panel";
 import { useJobTrips } from "@/hooks/use-job-trips";
 import { STATUS_META as TRIP_STATUS, TYPE_LABEL as TRIP_TYPE } from "@/lib/ninja/model";
 import { DetailHero, DetailSection, DetailField, SummaryCard, SectionEditButton } from "@/components/common/detail-page";
 import { Avatar } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
-import { TimePicker } from "@/components/ui/time-picker";
+import { DateTimePill } from "@/components/ui/date-time-pill";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { StaffPicker } from "@/components/field/ninja-picker";
@@ -51,6 +51,7 @@ import { resolveFieldRow, formatInvoiceAmount } from "@/lib/field-resolve";
 import { fieldTripAction, tripValue, TRIP_ACTION_TONE_CLASS } from "@/lib/field-table";
 import { tripDevicesOf } from "@/lib/field-devices";
 import { mapsOpenUrl } from "@/lib/maps-url";
+import { formatDateTime, formatHHmm } from "@/lib/time-format";
 import { locationFromJob, locationToJobFields, validateLocation, hasLocationErrors, type ServiceLocation } from "@/lib/field-location";
 
 type Dlg = "none" | "assign_ninja" | "assign_drop" | "pickup_proof" | "drop_proof" | "location" | "cancel";
@@ -63,7 +64,7 @@ const fmtDay = (d?: string) => {
 const fmtStamp = (iso?: string) => {
   if (!iso) return "";
   const x = new Date(iso);
-  return Number.isNaN(x.getTime()) ? "" : x.toLocaleString("en-IN", { day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
+  return Number.isNaN(x.getTime()) ? "" : formatDateTime(x, { year: true });
 };
 
 export default function ViewFieldAssignmentPage() {
@@ -228,6 +229,7 @@ export default function ViewFieldAssignmentPage() {
       <div><BackPill href="/field" label="Back to Pickup & Drop" /></div>
 
       {/* HERO */}
+      <RejectedBanner jobId={j.id} />
       <DetailHero>
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3.5">
@@ -261,7 +263,7 @@ export default function ViewFieldAssignmentPage() {
           </div>
         </div>
         <div className="relative mt-5 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-          <SummaryCard label="Scheduled" value={j.pickupDate || j.dropDate ? `${fmtDay(j.pickupDate || j.dropDate)}${j.pickupTime || j.dropTime ? ` · ${j.pickupTime || j.dropTime}` : ""}` : "Not scheduled"} tone={delayed ? "text-rose-600" : undefined} />
+          <SummaryCard label="Scheduled" value={j.pickupDate || j.dropDate ? `${fmtDay(j.pickupDate || j.dropDate)}${j.pickupTime || j.dropTime ? ` · ${formatHHmm(j.pickupTime || j.dropTime)}` : ""}` : "Not scheduled"} tone={delayed ? "text-rose-600" : undefined} />
           <SummaryCard label="Customer window" value={j.preferredWindow || "—"} />
           <SummaryCard label="Ninja" value={j.ninjaName || "Unassigned"} />
           <SummaryCard label="Devices" value={devices.length || 1} />
@@ -361,7 +363,7 @@ export default function ViewFieldAssignmentPage() {
             <div className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-2">
               <DetailField label="Type of trip" value={FIELD_LEAD_TYPE_LABEL[lt]} />
               <DetailField label="Source" value={j.source || FIELD_SOURCE_LABEL[classifySource(j.source)]} />
-              <DetailField label="Scheduled" value={j.pickupDate ? `${fmtDay(j.pickupDate)}${j.pickupTime ? ` · ${j.pickupTime}` : ""}` : ""} />
+              <DetailField label="Scheduled" value={j.pickupDate ? `${fmtDay(j.pickupDate)}${j.pickupTime ? ` · ${formatHHmm(j.pickupTime)}` : ""}` : ""} />
               <DetailField label="Customer's preferred window" value={j.preferredWindow} />
               <DetailField label={onSite ? "Ninja (on-site)" : "Pickup Ninja"} value={j.ninjaName} />
               <DetailField label="Field Manager" value={j.fieldManagerName} />
@@ -508,12 +510,9 @@ export default function ViewFieldAssignmentPage() {
           <Button className="gap-1.5" disabled={!pickId || busy} loading={busy} onClick={() => doAssign(dlg === "assign_drop" ? "drop" : "pickup")}><Check className="h-4 w-4" /> Assign &amp; notify</Button></div>}>
         <div className="space-y-4">
           <StaffPicker roleIds={["ninja"]} valueId={pickId} showLoad onPick={(sid, name) => { setPickId(sid); setPickName(name); }} placeholder="Search ninjas…" />
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1.5">
-              <label className="flex h-5 items-center text-[12px] font-medium text-zinc-700">Date</label>
-              <input type="date" value={schedDate} onChange={(e) => setSchedDate(e.target.value)} className="h-[38px] w-full rounded-xl border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" />
-            </div>
-            <div className="space-y-1.5"><label className="flex h-5 items-center text-[12px] font-medium text-zinc-700">Time</label><TimePicker className="h-[38px]" value={schedTime} onChange={setSchedTime} /></div>
+          <div className="space-y-1.5">
+            <label className="flex h-5 items-center text-[12px] font-medium text-zinc-700">Date &amp; time</label>
+            <DateTimePill date={schedDate} time={schedTime} title="Trip date & time" onChange={(d, t) => { setSchedDate(d); setSchedTime(t); }} />
           </div>
         </div>
       </RoxCenteredForm>

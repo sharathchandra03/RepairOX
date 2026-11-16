@@ -8,11 +8,12 @@ import { useSession } from "@/lib/use-session";
 import { toast } from "@/components/ui/toaster";
 import { nativeBackgroundAvailable, watchLocation } from "./native-location";
 import {
-  type NinjaTrip, type TripStatus, TRIP_SELECT, TRACKING_STATUSES, isClosed, statusRank,
+  type NinjaTrip, type TripStatus, TRIP_SELECT, TRACKING_STATUSES, MOVING_STATUSES, isClosed, statusRank,
 } from "./model";
 import {
   type OutboxItem, enqueue, readOutbox, removeItem, subscribeOutbox, updateItem, isNetworkError, uid,
 } from "./outbox";
+import { type ActivityInput, configureActivity, flushActivity, track as trackActivity } from "./activity";
 
 export interface GeoState {
   permission: "unknown" | "granted" | "denied" | "prompt" | "unsupported";
@@ -61,6 +62,8 @@ interface Ctx {
   handover: (t: NinjaTrip, h: HandoverInput) => Promise<boolean>;
   reportProblem: (t: NinjaTrip, problemId: string, label: string, note: string, status?: TripStatus) => Promise<boolean>;
   addNote: (t: NinjaTrip, note: string) => Promise<boolean>;
+  /** Append to the Ninja activity footprint (fire-and-forget, offline-safe). */
+  track: (i: ActivityInput) => void;
 }
 
 const NinjaCtx = createContext<Ctx | null>(null);
@@ -94,8 +97,27 @@ export function NinjaProvider({ children }: { children: React.ReactNode }) {
   const tripsRef = useRef<NinjaTrip[]>([]);
   tripsRef.current = trips;
   const seenAssigned = useRef<Set<string>>(new Set());
+  const fixRef = useRef<{ lat: number; lng: number; acc?: number } | null>(null);
   const firstLoad = useRef(true);
   const syncingRef = useRef(false);
+
+  /* ── activity footprint: identity + last known fix; app open / foreground / background ── */
+  const orgId = trips[0]?.organization_id ?? null;
+  const branchId = trips[0]?.branch_id ?? null;
+  useEffect(() => {
+    if (!staffId) return;
+    configureActivity({ staffId, orgId, branchId, getLocation: () => fixRef.current });
+  }, [staffId, orgId, branchId]);
+  useEffect(() => {
+    if (!staffId) return;
+    trackActivity({ kind: "app_open", payload: { online: navigator.onLine } });
+    const vis = () => {
+      trackActivity({ kind: document.visibilityState === "visible" ? "app_foreground" : "app_background" });
+      if (document.visibilityState === "hidden") void flushActivity();
+    };
+    document.addEventListener("visibilitychange", vis);
+    return () => document.removeEventListener("visibilitychange", vis);
+  }, [staffId]);
 
   /* ── load ── */
   const refresh = useCallback(async () => {
@@ -322,6 +344,11 @@ export function NinjaProvider({ children }: { children: React.ReactNode }) {
   /* ── public actions ── */
   const transition: Ctx["transition"] = useCallback(async (t, to, opts) => {
     const ok = await submit("transition", t.id, { from: t.status, to, reason: opts?.reason }, () => optimisticStatus(t.id, to));
+    if (to === "accepted") {
+      trackActivity({ kind: "assignment_accepted", tripId: t.id, jobId: t.job_id, payload: { trip_no: t.trip_no, ok, response_seconds: t.assigned_at ? Math.round((Date.now() - new Date(t.assigned_at).getTime()) / 1000) : null, offline: !navigator.onLine } });
+    } else {
+      trackActivity({ kind: "trip_status_change", tripId: t.id, jobId: t.job_id, payload: { from: t.status, to, ok, reason: opts?.reason ?? null, offline: !navigator.onLine } });
+    }
     if (ok) { optimisticStatus(t.id, to); try { navigator.vibrate?.(25); } catch { /* ignore */ } }
     if (ok && opts?.note) await submit("event", t.id, { event_type: "comment", note: opts.note });
     await refresh();
@@ -333,6 +360,7 @@ export function NinjaProvider({ children }: { children: React.ReactNode }) {
   const reject: Ctx["reject"] = useCallback(async (t, reason) => {
     const ok = await submit("transition", t.id, { from: t.status, to: "awaiting_assignment", reason },
       () => setTrips((prev) => prev.filter((x) => x.id !== t.id)));
+    trackActivity({ kind: "assignment_rejected", tripId: t.id, jobId: t.job_id, payload: { trip_no: t.trip_no, ok, reason, response_seconds: t.assigned_at ? Math.round((Date.now() - new Date(t.assigned_at).getTime()) / 1000) : null } });
     await refresh();
     return ok;
   }, [submit, refresh]);
@@ -343,6 +371,7 @@ export function NinjaProvider({ children }: { children: React.ReactNode }) {
 
   const reportProblem: Ctx["reportProblem"] = useCallback(async (t, problemId, label, note, status) => {
     const loc = geoRef.current.lastFix;
+    trackActivity({ kind: "problem_reported", tripId: t.id, jobId: t.job_id, payload: { problem: problemId, label, status: status ?? null } });
     const ok = await submit("event", t.id, { event_type: "problem_reported", note: `${label}${note ? ` — ${note}` : ""}`, payload: { problem: problemId }, location: loc });
     if (ok && status) {
       // Move the trip only where the state machine allows it; otherwise the manager sees the event.
@@ -357,7 +386,12 @@ export function NinjaProvider({ children }: { children: React.ReactNode }) {
   /* ── GPS sharing: ONLY while a trip is in an en-route state ── */
   const geoRef = useRef(geo);
   geoRef.current = geo;
-  const trackTrip = useMemo(() => trips.find((t) => TRACKING_STATUSES.includes(t.status) && !isClosed(t)) ?? null, [trips]);
+  fixRef.current = geo.lastFix ? { ...geo.lastFix, acc: geo.accuracy ?? undefined } : null;
+  // One GPS session at a time: prefer the trip the Ninja is travelling on, else any accepted / in-progress trip.
+  const trackTrip = useMemo(() => {
+    const open = trips.filter((t) => TRACKING_STATUSES.includes(t.status) && !isClosed(t));
+    return open.find((t) => MOVING_STATUSES.includes(t.status)) ?? open[0] ?? null;
+  }, [trips]);
   const trackId = trackTrip?.id ?? null;
 
   useEffect(() => {
@@ -427,7 +461,7 @@ export function NinjaProvider({ children }: { children: React.ReactNode }) {
 
   const value = useMemo<Ctx>(() => ({
     staffId: staffId ?? null, past, notices, unread: notices.filter((n) => !n.read).length, markAllRead, trips, loading, error, online, outbox, syncing,
-    refresh, syncNow, accept, reject, transition, handover, reportProblem, addNote,
+    refresh, syncNow, accept, reject, transition, handover, reportProblem, addNote, track: trackActivity,
   }), [staffId, past, notices, markAllRead, trips, loading, error, online, outbox, syncing, refresh, syncNow, accept, reject, transition, handover, reportProblem, addNote]);
 
   return <NinjaCtx.Provider value={value}><GeoCtx.Provider value={geo}>{children}</GeoCtx.Provider></NinjaCtx.Provider>;

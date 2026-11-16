@@ -1,3 +1,4 @@
+import { formatClock, formatDateTime } from "@/lib/time-format";
 /* Ninja app — trip model, status vocabulary and the next-step engine.
    The DB (field_trip_transition_ok / field_trips_guard, migration 0092) is the
    authority; this file only decides what to OFFER the Ninja at each state. */
@@ -44,9 +45,12 @@ export interface NinjaTrip {
   trip_type: TripType;
   status: TripStatus;
   lead_id: string | null;
+  customer_id?: string | null;
   ninja_id: string | null;
   assigned_at: string | null;
   accepted_at: string | null;
+  /** Manager override of the accept deadline for THIS assignment (null = assigned_at + default window). */
+  accept_deadline_at?: string | null;
   journey_started_at: string | null;
   arrived_at: string | null;
   completed_at: string | null;
@@ -101,9 +105,14 @@ export const STATUS_META: Record<TripStatus, { label: string; tone: Tone }> = {
   cancelled: { label: "Cancelled", tone: "slate" },
 };
 
-/** Statuses during which GPS sharing is allowed (mirrors DB insert policy). */
-export const TRACKING_STATUSES: TripStatus[] = ["en_route_customer", "en_route_store", "device_received_by_ninja"];
-
+/** Statuses during which GPS sharing is allowed: from ACCEPT until the job is handed over
+ *  (mirrors field_tracking_status_ok in migration 0106 — LOCKSTEP). */
+export const TRACKING_STATUSES: TripStatus[] = [
+  "accepted", "en_route_customer", "arrived_customer", "pickup_in_progress", "device_collected", "en_route_store",
+  "arrived_store", "handover_pending", "store_dispatch_confirmed", "device_received_by_ninja", "delivery_in_progress", "service_in_progress",
+];
+/** Statuses where the Ninja is physically travelling (the only ones a customer may see). */
+export const MOVING_STATUSES: TripStatus[] = ["en_route_customer", "en_route_store", "device_received_by_ninja"];
 export const TERMINAL: TripStatus[] = ["completed", "cancelled", "rescheduled", "failed_attempt", "customer_unavailable", "return_to_store"];
 
 export function isActiveTrip(t: NinjaTrip): boolean { return inProgress(t); }
@@ -243,7 +252,7 @@ export function whenLabel(iso: string | null, window?: string | null): string {
   const d = new Date(iso), now = new Date();
   const same = d.toDateString() === now.toDateString();
   const tmr = new Date(now.getTime() + 864e5).toDateString() === d.toDateString();
-  const time = d.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" });
+  const time = formatClock(d);
   return `${same ? "Today" : tmr ? "Tomorrow" : d.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}, ${time}`;
 }
 
@@ -264,3 +273,49 @@ export function freshness(iso: string | null | undefined): { label: string; tone
   if (s <= 600) return { label: "Delayed", tone: "amber" };
   return { label: "Stale", tone: "rose" };
 }
+
+/* ---- Accept window --------------------------------------------------------
+   A Ninja is expected to accept (or reject) a new assignment within this many
+   minutes of `assigned_at` (server-stamped). Display-only: the DB does not
+   auto-expire an assignment, so an overdue trip stays acceptable and the
+   manager sees it flagged. Default only: the live value comes from Settings → Field
+   (organization_settings.field_accept_window_minutes). */
+export const ACCEPT_WINDOW_MIN = 15;
+export function assignedAtMs(t: { assigned_at: string | null; updated_at?: string; created_at?: string }): number {
+  const iso = t.assigned_at ?? t.updated_at ?? t.created_at;
+  return iso ? new Date(iso).getTime() : Date.now();
+}
+type AcceptT = { assigned_at: string | null; accept_deadline_at?: string | null; updated_at?: string; created_at?: string };
+/** The moment the accept window closes: the manager's per-assignment override, else assigned_at + default window. */
+export function acceptDeadlineMs(t: AcceptT, windowMin: number = ACCEPT_WINDOW_MIN): number {
+  return t.accept_deadline_at ? new Date(t.accept_deadline_at).getTime() : assignedAtMs(t) + windowMin * 60_000;
+}
+/** Milliseconds left to accept; negative once overdue. */
+export function acceptRemainingMs(t: AcceptT, nowMs: number, windowMin: number = ACCEPT_WINDOW_MIN): number {
+  return acceptDeadlineMs(t, windowMin) - nowMs;
+}
+export function clockLabel(ms: number): string {
+  const s = Math.floor(Math.abs(ms) / 1000);
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  const p = (n: number) => String(n).padStart(2, "0");
+  return h > 0 ? `${p(h)}:${p(m)}:${p(sec)}` : `${p(m)}:${p(sec)}`;
+}
+export function assignedStamp(iso: string | number): string {
+  return formatDateTime(iso);
+}
+
+/* ---- Arrival check ---------------------------------------------------------
+   Before a Ninja can mark "arrived" (customer / store) or submit a device to the
+   store, their last GPS fix must be near the destination. Client-side guard with a
+   friendly popup; it never blocks when it cannot verify (no fix, poor accuracy, or
+   no coordinates for the destination). */
+export const ARRIVAL_RADIUS_M = 300;
+export const ARRIVAL_MAX_ACCURACY_M = 200;
+export type ArrivalResult = { ok: true } | { ok: false; meters: number };
+export function arrivalCheck(fix: { lat: number; lng: number } | null, accuracy: number | null, dest: { lat: number | null | undefined; lng: number | null | undefined } | null): ArrivalResult {
+  if (!fix || !dest || dest.lat == null || dest.lng == null) return { ok: true };           // cannot verify → allow
+  if (accuracy != null && accuracy > ARRIVAL_MAX_ACCURACY_M) return { ok: true };           // GPS too coarse → allow
+  const meters = distanceKm(fix, { lat: dest.lat, lng: dest.lng }) * 1000;
+  return meters - (accuracy ?? 0) > ARRIVAL_RADIUS_M ? { ok: false, meters } : { ok: true };
+}
+export function distanceLabel(meters: number): string { return meters < 1000 ? `${Math.round(meters / 10) * 10} m` : `${(meters / 1000).toFixed(1)} km`; }

@@ -38,7 +38,7 @@ import {
   isFollowUpTerminated,
 } from "@/lib/mock-data";
 import { followUpPill, followUpState, ordinal } from "@/lib/walk-in-data";
-import { TimePicker } from "@/components/ui/time-picker";
+import { DateTimePill } from "@/components/ui/date-time-pill";
 import { cn } from "@/lib/utils";
 
 type Mode = "menu" | "schedule" | "reschedule" | "complete" | "schedule-next" | "history";
@@ -416,16 +416,9 @@ function ScheduleView({
   const [comment, setComment] = useState(initialComment || "");
   return (
     <div className="space-y-3 p-3.5">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <label className="text-[10.5px] font-medium text-muted-foreground">Follow-Up Date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20" />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[10.5px] font-medium text-muted-foreground">Time</label>
-          <TimePicker value={time} onChange={setTime} disabled={!date} />
-        </div>
+      <div className="space-y-1">
+        <label className="text-[10.5px] font-medium text-muted-foreground">Follow-Up Date &amp; Time</label>
+        <DateTimePill date={date} time={time} title="Follow-up" className="h-9 rounded-lg" onChange={(d, t) => { setDate(d); setTime(t); }} />
       </div>
       <div className="space-y-1">
         <label className="text-[10.5px] font-medium text-muted-foreground">Comment <span className="font-normal">(optional)</span></label>

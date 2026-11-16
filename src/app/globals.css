@@ -1626,3 +1626,21 @@ html, body {
 /* Topbar content follows the sidebar edge: when the sidebar collapses the topbar
    widens leftwards and its pills / search settle at the left; when the sidebar
    opens it pushes them back to the right. No compensating padding. */
+
+/* Field table: a Ninja rejected this assignment — row blinks for 1 minute (JS removes the class), then stays tinted. */
+@keyframes rox-reject-blink { 0%, 100% { background-color: rgb(255 228 230 / 0.95); } 50% { background-color: rgb(253 164 175 / 0.85); } }
+@media (prefers-reduced-motion: no-preference) {
+  .rox-row-blink > td { animation: rox-reject-blink 1s ease-in-out infinite; }
+}
+
+/* Slim scrollbar for compact pickers (time / date-time columns). Chrome 121+ ignores ::-webkit-scrollbar
+   whenever `scrollbar-width` is set, so the standard properties are used ONLY where webkit pseudos are unsupported (Firefox). */
+.rox-slim-scroll::-webkit-scrollbar { width: 2px; height: 2px; }
+.rox-slim-scroll::-webkit-scrollbar-track { background: transparent; }
+.rox-slim-scroll::-webkit-scrollbar-thumb { background: rgba(67, 97, 238, 0.4); border-radius: 999px; }
+.rox-slim-scroll::-webkit-scrollbar-thumb:hover { background: rgba(67, 97, 238, 0.75); }
+@supports not selector(::-webkit-scrollbar) { .rox-slim-scroll { scrollbar-width: thin; scrollbar-color: rgba(67, 97, 238, 0.4) transparent; } }
+
+/* Live rider marker glides between GPS fixes (View Assignment live map). */
+.rox-rider { transition: transform 1.1s linear; }
+@media (prefers-reduced-motion: reduce) { .rox-rider { transition: none; } }

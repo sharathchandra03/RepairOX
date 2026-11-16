@@ -137,6 +137,8 @@ export const CAP = {
      page read-only). Granular key first, coarse `manage_settings` fallback,
      `full_access`/`*` implied by can(). */
   settings: {
+    // Field settings (Ninja accept window). Writes also need an org admin (org_settings RLS).
+    field: ["manage_field_jobs", "manage_settings"],
     // Invoice-related settings pages
     invoiceGeneral: ["edit_invoice_settings", "manage_settings"],
     invoiceNumbering: ["edit_numbering", "edit_invoice_settings", "manage_settings"],

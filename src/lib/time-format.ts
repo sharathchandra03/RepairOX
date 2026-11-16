@@ -47,3 +47,20 @@ export function formatHHmm(value: string | null | undefined): string {
   const mer = h >= 12 ? "PM" : "AM";
   return `${((h + 11) % 12) + 1}:${min} ${mer}`;
 }
+
+/** Format a Date / ISO string / epoch ms as "16 Nov, 5:40 PM" (date + clock in
+ *  the org time format). Pass `year: true` to include the year. Returns "" for
+ *  an invalid input. */
+export function formatDateTime(input: Date | string | number | null | undefined, opts?: { year?: boolean; timeZone?: string }): string {
+  if (input === null || input === undefined || input === "") return "";
+  const d = input instanceof Date ? input : new Date(input);
+  if (isNaN(d.getTime())) return "";
+  const dateOpts: Intl.DateTimeFormatOptions = { day: "numeric", month: "short", ...(opts?.year ? { year: "numeric" } : {}) };
+  let date: string;
+  try {
+    date = new Intl.DateTimeFormat("en-IN", { ...dateOpts, timeZone: opts?.timeZone }).format(d);
+  } catch {
+    date = new Intl.DateTimeFormat("en-IN", dateOpts).format(d);
+  }
+  return `${date}, ${formatClock(d, { timeZone: opts?.timeZone })}`;
+}

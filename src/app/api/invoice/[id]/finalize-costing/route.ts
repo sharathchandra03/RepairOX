@@ -46,9 +46,12 @@ interface LineRow {
 }
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }) {
-  const guard = await requirePermission(req, INVOICE_EDIT_KEYS);
+  // `create_invoice` (e.g. a Ninja billing in the field) is accepted ONLY for an invoice the
+  // caller created themself (checked below); the broad keys keep org-wide behaviour.
+  const guard = await requirePermission(req, [...INVOICE_EDIT_KEYS, "create_invoice"]);
   if (!guard.ok) return NextResponse.json({ ok: false, error: guard.error }, { status: guard.status });
-  const { admin, user } = guard;
+  const { admin, user, permissions } = guard;
+  const hasBroadKey = permissions.has("*") || permissions.has("full_access") || INVOICE_EDIT_KEYS.some((k) => permissions.has(k));
 
   const { id } = await ctx.params;
   if (!id) return NextResponse.json({ ok: false, error: "Missing invoice id." }, { status: 400 });
@@ -60,7 +63,7 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   // the authoritative tenant boundary here).
   const { data: row, error } = await admin
     .from("invoices")
-    .select("id, organization_id, branch_id, ticket_id, items, devices")
+    .select("id, organization_id, branch_id, ticket_id, items, devices, created_by")
     .eq("id", id)
     .eq("organization_id", orgId)
     .is("deleted_at", null)
@@ -68,6 +71,10 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
   if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
   if (!row) return NextResponse.json({ ok: false, error: "Invoice not found." }, { status: 404 });
 
+  if (!hasBroadKey) {
+    const { data: me } = await admin.from("staff").select("id").eq("auth_user_id", user.id).maybeSingle();
+    if (!me?.id || (row as any).created_by !== me.id) return NextResponse.json({ ok: false, error: "You can only finalize invoices you created." }, { status: 403 });
+  }
   const hasTicket = !!(row as any).ticket_id;
 
   // Flatten the part/service lines from the invoice JSON (items + device parts).

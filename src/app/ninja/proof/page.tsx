@@ -6,6 +6,7 @@ import { supabase } from "@/lib/supabase";
 import { useNinja } from "@/lib/ninja/ninja-context";
 import { removeItem, updateItem } from "@/lib/ninja/outbox";
 import { Card, Empty, Pill, SectionTitle } from "@/components/ninja/ui";
+import { formatClock } from "@/lib/time-format";
 
 interface H { id: string; trip_id: string; kind: string; status: string; created_at: string }
 const LABEL: Record<string, string> = { customer_to_ninja: "Pickup receipt", ninja_to_store: "Store handover", store_to_ninja: "Store release", ninja_to_customer: "Delivery confirmation" };
@@ -34,7 +35,7 @@ export default function ProofPage() {
                   <p className="flex min-w-0 items-center gap-2 truncate text-[14px] font-extrabold"><CloudUpload className="h-4 w-4 shrink-0 text-[#4361EE]" />{o.kind === "transition" ? `Status → ${String(o.payload.to).replace(/_/g, " ")}` : o.kind === "handover" ? "Proof / handover" : "Note / report"}</p>
                   <Pill tone={o.state === "pending" ? "amber" : "rose"}>{o.state === "pending" ? "Pending sync" : o.state === "conflict" ? "Conflict" : "Failed"}</Pill>
                 </div>
-                <p className="mt-1 text-[12px] text-slate-500">{byTrip(o.tripId)?.trip_no ?? "Trip"} · saved {new Date(o.createdAt).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}</p>
+                <p className="mt-1 text-[12px] text-slate-500">{byTrip(o.tripId)?.trip_no ?? "Trip"} · saved {formatClock(o.createdAt)}</p>
                 {o.error ? <p className="mt-1 text-[12px] font-semibold text-rose-600">{o.error}</p> : null}
                 {o.state !== "pending" ? (
                   <div className="mt-2 flex gap-2">

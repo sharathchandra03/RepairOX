@@ -25,7 +25,7 @@ import { Store, Truck, ArrowRight, Check, MapPin, Building2, AlertTriangle, Chev
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Button } from "@/components/ui/button";
 import { RSelect } from "@/components/ui/rselect";
-import { TimePicker } from "@/components/ui/time-picker";
+import { DateTimePill } from "@/components/ui/date-time-pill";
 import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
@@ -287,11 +287,10 @@ function RouteInner({ lead, onClose }: { lead: Lead; onClose: () => void }) {
             addressLabel={route === "ON_SITE" ? "Service location" : "Pickup from (customer location)"} />
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="space-y-1.5">
-              <label className="flex h-5 items-center gap-1 text-[12px] font-medium text-zinc-700">Date <InfoHint>Optional — the agreed trip date. Separate from the lead follow-up date.</InfoHint></label>
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="h-[38px] w-full rounded-xl border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" />
+            <div className="space-y-1.5 sm:col-span-2">
+              <label className="flex h-5 items-center gap-1 text-[12px] font-medium text-zinc-700">Date &amp; time <InfoHint>Optional — the agreed trip date and time. Separate from the lead follow-up date.</InfoHint></label>
+              <DateTimePill date={date} time={time} title="Trip date & time" onChange={(d, t) => { setDate(d); setTime(t); }} />
             </div>
-            <div className="space-y-1.5"><label className="flex h-5 items-center gap-1 text-[12px] font-medium text-zinc-700">Time</label><TimePicker className="h-[38px]" value={time} onChange={setTime} /></div>
             <div className="space-y-1.5"><label className="flex h-5 items-center gap-1 text-[12px] font-medium text-zinc-700">Customer's window</label>
               <input value={window_} onChange={(e) => setWindow(e.target.value)} placeholder="11 AM – 1 PM" className="h-[38px] w-full rounded-xl border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" /></div>
           </div>

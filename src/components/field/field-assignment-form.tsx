@@ -25,7 +25,7 @@ import {
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Button } from "@/components/ui/button";
 import { RSelect } from "@/components/ui/rselect";
-import { TimePicker } from "@/components/ui/time-picker";
+import { DateTimePill } from "@/components/ui/date-time-pill";
 import { InfoHint } from "@/components/ui/info-hint";
 import { toast } from "@/components/ui/toaster";
 import { CustomerPicker } from "@/components/common/customer-picker";
@@ -49,6 +49,7 @@ import { getLeadDevices, type Lead } from "@/lib/leads-data";
 import { leadToTripPrefill, prefillSummary, leadGapPatch } from "@/lib/lead-to-trip";
 import { reverseGeocodeFull } from "@/lib/geo/reverse-geocode";
 import { searchLeads, pickBestLead } from "@/lib/lead-picker-search";
+import { formatHHmm } from "@/lib/time-format";
 
 const STEPS = [
   { id: 1, label: "Initial Information" },
@@ -495,14 +496,11 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
             <Field label="Assign By">
               <div className={cn(inputCls(), "flex items-center bg-muted/40 text-foreground")}>{(role as { name?: string } | null)?.name ? `${(role as { name?: string }).name} – ` : ""}{meName || currentUser?.name || "You"}</div>
             </Field>
-            <Field label="Date" required error={touched ? errors.date : undefined} hint="The scheduled trip date — separate from when the record was created.">
-              <input type="date" className={inputCls(touched && !!errors.date)} value={d.date} onChange={(e) => set({ date: e.target.value })} />
+            <Field label="Date & Time" required error={touched ? errors.date : undefined} hint="The scheduled trip date and exact slot — separate from when the record was created.">
+              <DateTimePill date={d.date} time={d.time} title="Trip date & time" invalid={touched && !!errors.date} onChange={(dt, t) => set({ date: dt, time: t })} />
             </Field>
-            <Field label="Preferred Time" hint="Exact slot, plus the customer's preferred window if different.">
-              <div className="flex gap-2">
-                <div className="w-[130px] shrink-0"><TimePicker className="h-[38px]" value={d.time} onChange={(v) => set({ time: v })} /></div>
-                <input className={inputCls()} value={d.window} onChange={(e) => set({ window: e.target.value })} placeholder="e.g. 11 AM – 1 PM" />
-              </div>
+            <Field label="Customer's Window" hint="The customer's preferred window, if different from the exact slot.">
+              <input className={inputCls()} value={d.window} onChange={(e) => set({ window: e.target.value })} placeholder="e.g. 11 AM – 1 PM" />
             </Field>
             <Field label={<>Type of Trip{tag("type")}</>} required>
               <RSelect className="h-[38px]" value={d.type} onChange={(v) => set({ type: v as FieldLeadType })} options={FIELD_LEAD_TYPES.map((t) => ({ label: t.label, value: t.value }))} />
@@ -601,7 +599,7 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
           <ReviewGroup title="Initial Information" onEdit={() => go(1)} rows={[
             ["Linked Lead", linked ? `${linked.leadNo} · ${linked.name || "Unnamed"}` : "None"],
             ["Type of Trip", FIELD_LEAD_TYPES.find((t) => t.value === d.type)?.label],
-            ["Date", d.date], ["Preferred Time", [d.time, d.window].filter(Boolean).join(" · ")],
+            ["Date", d.date], ["Preferred Time", [formatHHmm(d.time), d.window].filter(Boolean).join(" · ")],
             ["Source", d.source], ["Store", storeName],
             ["Ninja", engineerName || "Assign later"],
             ["Assign By", meName || currentUser?.name],

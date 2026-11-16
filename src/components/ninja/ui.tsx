@@ -151,3 +151,61 @@ export function SwipeConfirm({ label, onConfirm, loading, tone = "primary", disa
 export function Stagger({ children, i = 0 }: { children: ReactNode; i?: number }) {
   return <motion.div initial={{ opacity: 0, y: 14 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.28, delay: Math.min(i, 8) * 0.045, ease: [0.22, 1, 0.36, 1] }}>{children}</motion.div>;
 }
+
+/* ───────────── Shared mobile form + filter primitives ───────────── */
+export const inputCls = "min-h-[50px] w-full rounded-xl border border-slate-300 bg-white px-4 text-[16px] font-medium text-slate-900 outline-none placeholder:text-slate-400 focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20";
+
+export function FormLabel({ children, hint }: { children: ReactNode; hint?: ReactNode }) {
+  return <div className="mb-1.5 flex items-center justify-between"><p className="text-[12px] font-bold uppercase tracking-wider text-slate-500">{children}</p>{hint ? <span className="text-[11.5px] font-semibold text-slate-400">{hint}</span> : null}</div>;
+}
+
+/** Equal-width segmented control. Never scrolls sideways, so no segment is ever clipped. */
+export function Segmented<T extends string>({ value, onChange, options, label }: { value: T; onChange: (v: T) => void; label: string; options: { id: T; label: string; count?: number; alert?: boolean }[] }) {
+  return (
+    <div role="tablist" aria-label={label} className="grid gap-1 rounded-2xl bg-slate-200/70 p-1" style={{ gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))` }}>
+      {options.map((o) => {
+        const on = o.id === value;
+        return (
+          <button key={o.id} role="tab" aria-selected={on} onClick={() => onChange(o.id)}
+            className={`relative flex min-h-[54px] flex-col items-center justify-center rounded-xl px-1 transition ${on ? "bg-white text-[#3450D8] shadow-[0_2px_8px_-2px_rgba(20,30,80,0.25)]" : "text-slate-500 active:bg-white/50"}`}>
+            {o.count != null ? <span className="text-[17px] font-extrabold leading-none tabular-nums">{o.count}</span> : null}
+            <span className={o.count != null ? "mt-1 text-[11.5px] font-bold leading-none" : "text-[13.5px] font-extrabold leading-none"}>{o.label}</span>
+            {o.alert && !on ? <span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-amber-500 ring-2 ring-slate-200" /> : null}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+/** Single-choice chip group that wraps instead of scrolling. */
+export function ChipGroup<T extends string>({ value, onChange, options }: { value: T; onChange: (v: T) => void; options: { id: T; label: string }[] }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {options.map((o) => (
+        <button key={o.id} type="button" onClick={() => onChange(o.id)}
+          className={`min-h-[44px] rounded-xl px-4 text-[13.5px] font-bold ring-1 ring-inset transition ${value === o.id ? "bg-[#4361EE] text-white ring-[#4361EE]" : "bg-white text-slate-700 ring-slate-300"}`}>{o.label}</button>
+      ))}
+    </div>
+  );
+}
+
+/** Applied-filter chip with its own remove (×). */
+export function AppliedChip({ children, onRemove }: { children: ReactNode; onRemove: () => void }) {
+  return (
+    <span className="inline-flex min-h-[34px] items-center gap-1 rounded-full bg-[#EEF1FD] pl-3 pr-1 text-[12.5px] font-bold text-[#3450D8]">
+      {children}
+      <button onClick={onRemove} aria-label="Remove filter" className="grid h-7 w-7 place-items-center rounded-full active:bg-[#4361EE]/15"><X className="h-3.5 w-3.5" /></button>
+    </span>
+  );
+}
+
+export function QtyStepper({ value, onChange, min = 1 }: { value: number; onChange: (n: number) => void; min?: number }) {
+  return (
+    <div className="inline-flex items-center rounded-xl bg-slate-100 p-1">
+      <button type="button" aria-label="Decrease" onClick={() => onChange(Math.max(min, value - 1))} className="grid h-10 w-10 place-items-center rounded-lg bg-white text-[20px] font-bold text-slate-700 shadow-sm active:scale-95">−</button>
+      <span className="w-9 text-center text-[15px] font-extrabold tabular-nums">{value}</span>
+      <button type="button" aria-label="Increase" onClick={() => onChange(value + 1)} className="grid h-10 w-10 place-items-center rounded-lg bg-white text-[20px] font-bold text-slate-700 shadow-sm active:scale-95">+</button>
+    </div>
+  );
+}

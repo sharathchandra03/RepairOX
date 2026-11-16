@@ -36,7 +36,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   CalendarPlus, CalendarClock, PhoneCall, CheckCheck, History, ChevronDown, X,
 } from "lucide-react";
-import { TimePicker } from "@/components/ui/time-picker";
+import { DateTimePill } from "@/components/ui/date-time-pill";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -426,16 +426,9 @@ function ScheduleView({
   const [comment, setComment] = useState("");
   return (
     <div className="space-y-3 p-3.5">
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-1">
-          <label className="text-[10.5px] font-medium text-muted-foreground">Date</label>
-          <input type="date" value={date} onChange={(e) => setDate(e.target.value)}
-            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20" />
-        </div>
-        <div className="space-y-1">
-          <label className="text-[10.5px] font-medium text-muted-foreground">Time</label>
-          <TimePicker value={time} onChange={setTime} disabled={!date} />
-        </div>
+      <div className="space-y-1">
+        <label className="text-[10.5px] font-medium text-muted-foreground">Follow-Up Date &amp; Time</label>
+        <DateTimePill date={date} time={time} title="Follow-up" className="h-9 rounded-lg" onChange={(d, t) => { setDate(d); setTime(t); }} />
       </div>
       <div className="space-y-1">
         <label className="text-[10.5px] font-medium text-muted-foreground">Follow-Up Agent</label>
@@ -522,11 +515,7 @@ function CompleteView({
         Schedule next follow-up
       </label>
       {scheduleNext && (
-        <div className="grid grid-cols-2 gap-2">
-          <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)}
-            className="h-9 w-full rounded-lg border border-input bg-background px-2.5 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/20" />
-          <TimePicker value={nextTime} onChange={setNextTime} />
-        </div>
+        <DateTimePill date={nextDate} time={nextTime} title="Next follow-up" className="h-9 rounded-lg" onChange={(d, t) => { setNextDate(d); setNextTime(t); }} />
       )}
       <p className="text-[10px] text-muted-foreground">The outcome updates the lead status; the comment is saved to the lead&apos;s comments too.</p>
       <button

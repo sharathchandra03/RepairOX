@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { Bell, ChevronRight, LogOut, MapPin, Smartphone, UserCog } from "lucide-react";
+import { Activity, Bell, ChevronRight, FileCheck2, LogOut, MapPin, Navigation, Smartphone, UserCog } from "lucide-react";
 import Link from "next/link";
 import { usePermissions } from "@/lib/permissions-context";
 import { useNinja, useNinjaGeo } from "@/lib/ninja/ninja-context";
@@ -59,6 +59,21 @@ export default function ProfilePage() {
       </div>
       <p className="px-1 text-[12px] text-slate-500">Average time to accept a job: <b>{stats.avgAcc == null ? "—" : `${stats.avgAcc} min`}</b></p>
 
+      <SectionTitle>Shortcuts</SectionTitle>
+      <Card className="divide-y divide-slate-100">
+        {[
+          { href: "/ninja/insights", icon: Activity, tone: "bg-[#EEF1FD] text-[#4361EE]", l: "My Day", d: "Your numbers and streak" },
+          { href: "/ninja/active", icon: Navigation, tone: "bg-emerald-50 text-emerald-600", l: "Active trip", d: "Jump back into what you're doing" },
+          { href: "/ninja/proof", icon: FileCheck2, tone: "bg-violet-50 text-violet-600", l: "Proof & sync", d: "Receipts, signatures, queued actions" },
+        ].map((x) => (
+          <Link key={x.href} href={x.href} className="flex items-center gap-3 px-4 py-3.5 active:bg-slate-50">
+            <span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${x.tone}`}><x.icon className="h-5 w-5" /></span>
+            <span className="min-w-0 flex-1"><span className="block text-[14.5px] font-extrabold">{x.l}</span><span className="block text-[12px] font-medium text-slate-500">{x.d}</span></span>
+            <ChevronRight className="h-5 w-5 text-slate-300" />
+          </Link>
+        ))}
+      </Card>
+
       <SectionTitle>Permissions</SectionTitle>
       <Card className="divide-y divide-slate-100 px-4">
         <div className="flex items-center justify-between py-3.5">
@@ -70,7 +85,7 @@ export default function ProfilePage() {
           {notif === "granted" ? <Pill tone="green">Allowed</Pill> : notif === "denied" ? <Pill tone="rose">Blocked</Pill> : notif === "unsupported" ? <Pill>Not supported</Pill> : <button onClick={enableNotif} className="rounded-xl bg-[#4361EE] px-3.5 py-2 text-[12px] font-bold text-white">Allow</button>}
         </div>
       </Card>
-      <p className="px-1 text-[12px] leading-relaxed text-slate-400">Location is used only while a journey is active (on the way to the customer or the store). In this web version, sharing works while the app is open; background tracking needs the installed RepairOX Ninja mobile app.</p>
+      <p className="px-1 text-[12px] leading-relaxed text-slate-400">Location is shared with your manager only while you hold an accepted job (from Accept until handover). Customers see it only while you are on the way to them. In this web version, sharing works while the app is open; background tracking needs the installed RepairOX Ninja mobile app.</p>
 
       <SectionTitle>This device</SectionTitle>
       <Card className="divide-y divide-slate-100 px-4">

@@ -26,6 +26,8 @@ import { LiveOpsMap } from "@/components/field/live-ops-map";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { DateTimeDialog } from "@/components/ui/date-time-picker";
 import { Textarea } from "@/components/ui/input";
+import { useNinjaAvailability } from "@/hooks/use-ninja-availability";
+import { describeAvailability } from "@/lib/field-availability";
 import { useRouter } from "next/navigation";
 import { CalendarClock, RotateCcw, Ticket as TicketIcon, XCircle } from "lucide-react";
 import { Map as MapIcon, List } from "lucide-react";
@@ -67,11 +69,11 @@ function Dispatch() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const [view, setView] = useState<"list" | "map">("list");
-  const [duty, setDuty] = useState<Record<string, string>>({});
   const [reasonFor, setReasonFor] = useState<null | { kind: "cancel" | "flag"; trip: NinjaTrip }>(null);
   const [reason, setReason] = useState("");
   const [schedFor, setSchedFor] = useState<NinjaTrip | null>(null);
   const router = useRouter();
+  const { map: avail } = useNinjaAvailability(ninjas.map((x) => x.id));
   const canAssign = allow(can, CAP.field.assignNinja);
   const canStore = allow(can, CAP.field.storeHandoff);
 
@@ -88,13 +90,6 @@ function Dispatch() {
     const openDrop = new Set(((t.data ?? []) as unknown as NinjaTrip[]).filter((x) => x.trip_type === "drop" && !["completed", "cancelled"].includes(x.status)).map((x) => x.job_id));
     setReady(((r.data ?? []) as ReadyJob[]).filter((j) => !openDrop.has(j.id)));
     setLive(Object.fromEntries(((s.data ?? []) as Live[]).map((x) => [x.trip_id, x])));
-    const ids = ((n.data ?? []) as NinjaOpt[]).map((x) => x.id);
-    if (ids.length) {
-      const { data: ws } = await supabase.from("work_sessions").select("staff_id,ended_at,last_seen_at,work_session_breaks(ended_at)").in("staff_id", ids).is("ended_at", null);
-      const d: Record<string, string> = {};
-      for (const w of (ws ?? []) as { staff_id: string; work_session_breaks?: { ended_at: string | null }[] }[]) d[w.staff_id] = (w.work_session_breaks ?? []).some((b) => !b.ended_at) ? "On break" : "On duty";
-      setDuty(d);
-    }
     setLoading(false);
   }, []);
 
@@ -281,7 +276,7 @@ function Dispatch() {
                         <td className="px-4 py-4">
                           {canAssign && ["awaiting_assignment", "assigned", "accepted"].includes(t.status) ? (
                             <Select className="h-[36px]" value={t.ninja_id ?? ""} placeholder="Assign Ninja" disabled={busy === t.id}
-                              options={ninjas.filter((n) => !t.branch_id || !n.branch_id || n.branch_id === t.branch_id || n.id === t.ninja_id).map((n) => { const busyN = trips.filter((x) => x.ninja_id === n.id && !['completed','cancelled','awaiting_assignment','rescheduled','failed_attempt','customer_unavailable'].includes(x.status)).length; return { label: `${n.name} · ${duty[n.id] ?? 'Off duty'}${busyN ? ` · ${busyN} open` : ''}`, value: n.id }; })} onChange={(e) => void assign(t, e.target.value)} />
+                              options={ninjas.filter((n) => !t.branch_id || !n.branch_id || n.branch_id === t.branch_id || n.id === t.ninja_id).map((n) => { const busyN = trips.filter((x) => x.ninja_id === n.id && !['completed','cancelled','awaiting_assignment','rescheduled','failed_attempt','customer_unavailable'].includes(x.status)).length; const av = describeAvailability(avail.get(n.id)); return { label: `${n.name} · ${av?.label ?? 'Checking…'}${busyN && !av?.label.includes('booked') ? ` · ${busyN} open` : ''}`, value: n.id }; })} onChange={(e) => void assign(t, e.target.value)} />
                           ) : <span className="text-[13px] font-medium">{t.ninja_id ? (ninjas.find((n) => n.id === t.ninja_id)?.name ?? team.find((m) => m.id === t.ninja_id)?.name ?? "Assigned") : "—"}</span>}
                         </td>
                         <td className="px-4 py-4">

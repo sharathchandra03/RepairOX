@@ -123,6 +123,17 @@ export function engineerWorkload(
   return { rows, unassigned };
 }
 
+/** Open trips one engineer can comfortably hold at once (meter scale; display only). */
+export const WORKLOAD_CAPACITY = 5;
+export type LoadLevel = "free" | "light" | "busy" | "full" | "over";
+export function workloadLevel(open: number, cap = WORKLOAD_CAPACITY): { level: LoadLevel; label: string; pct: number } {
+  const pct = cap > 0 ? open / cap : 0;
+  if (open === 0) return { level: "free", label: "Free", pct };
+  if (pct <= 0.4) return { level: "light", label: "Light", pct };
+  if (pct < 1) return { level: "busy", label: "Busy", pct };
+  if (pct === 1) return { level: "full", label: "At capacity", pct };
+  return { level: "over", label: "Overloaded", pct };
+}
 /* ─── Daily series ────────────────────────────────────────────────────── */
 
 export interface DayPoint { date: string; label: string; scheduled: number; completed: number; business: number }

@@ -3,21 +3,25 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertTriangle, Check, CheckCircle2, Clock, ExternalLink, FileText, Hash, MapPin, MessageSquareText, Navigation, Phone,
-  Radio, ShieldCheck, Smartphone, Store, User, XCircle,
+  Radio, ShieldCheck, Smartphone, Store, User, XCircle, FilePlus2, Ticket,
 } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
+import { useStore } from "@/lib/store";
 import { useWorkSession } from "@/lib/work-session-context";
 import { toast } from "@/components/ui/toaster";
 import { useNinja, useNinjaGeo } from "@/lib/ninja/ninja-context";
 import {
   type NinjaTrip, TRACKING_STATUSES, TYPE_LABEL, STATUS_META, ago, distanceKm, freshness, mapsLink, navLink, nextStep, stepperFor,
-  statusRank, whenLabel,
+  statusRank, whenLabel, arrivalCheck, distanceLabel, ARRIVAL_RADIUS_M,
 } from "@/lib/ninja/model";
 import { motion } from "framer-motion";
-import { Btn, Card, Pill, Row, SectionTitle, StatusPill, SwipeConfirm, TONE } from "./ui";
+import { Btn, Card, Pill, Row, SectionTitle, Sheet, StatusPill, SwipeConfirm, TONE } from "./ui";
 import { TYPE_STYLE } from "./trip-card";
+import { AcceptTicket } from "./accept-ticket";
 import { CollectSheet, DeliverSheet, ProblemSheet, ReceiveStoreSheet, RejectSheet, ServiceSheet, SubmitStoreSheet } from "./flows";
+import { formatDateTime } from "@/lib/time-format";
 
 interface EventRow { id: string; event_type: string; previous_status: string | null; new_status: string | null; note: string | null; actor_name: string | null; occurred_at: string }
 interface HandoverRow { id: string; kind: string; status: string; created_at: string }
@@ -48,13 +52,23 @@ function Stepper({ t }: { t: NinjaTrip }) {
 }
 
 export function TripView({ t }: { t: NinjaTrip }) {
-  const { accept, transition } = useNinja();
-  const { apiFetch } = usePermissions();
+  const { accept, transition, track } = useNinja();
+  const { apiFetch, can } = usePermissions();
+  const { tickets, invoices } = useStore();
+  const canTicket = allow(can, CAP.ticket.create), canInvoice = allow(can, CAP.invoice.create);
   const { openSession, startWork } = useWorkSession();
   const [sharing, setSharing] = useState(false);
   const geo = useNinjaGeo();
   const [sheet, setSheet] = useState<null | "collect" | "submit" | "receive" | "deliver" | "service" | "problem" | "reject">(null);
   const [busy, setBusy] = useState(false);
+  const [away, setAway] = useState<null | { where: "customer" | "store"; meters: number }>(null);
+  const [storeLoc, setStoreLoc] = useState<{ lat: number | null; lng: number | null } | null>(null);
+  useEffect(() => {
+    if (!supabase || !t.branch_id) return;
+    let off = false;
+    supabase.from("branches").select("latitude,longitude").eq("id", t.branch_id).maybeSingle().then(({ data }) => { if (!off) setStoreLoc(data ? { lat: (data as any).latitude, lng: (data as any).longitude } : null); });
+    return () => { off = true; };
+  }, [t.branch_id]);
   const [events, setEvents] = useState<EventRow[]>([]);
   const [hands, setHands] = useState<HandoverRow[]>([]);
   const step = nextStep(t);
@@ -77,6 +91,14 @@ export function TripView({ t }: { t: NinjaTrip }) {
   }, [t.id, t.status]);
 
 
+  // First time the Ninja opens a brand-new assignment: how long it sat unseen is a real, reportable number.
+  useEffect(() => {
+    if (t.status !== "assigned") return;
+    const k = `ninja-seen-${t.id}-${t.assigned_at ?? ""}`;
+    try { if (sessionStorage.getItem(k)) return; sessionStorage.setItem(k, "1"); } catch { /* private mode */ }
+    track({ kind: "assignment_seen", tripId: t.id, jobId: t.job_id, screen: "trip", payload: { trip_no: t.trip_no, seconds_since_assigned: t.assigned_at ? Math.round((Date.now() - new Date(t.assigned_at).getTime()) / 1000) : null } });
+  }, [t.id, t.status, t.assigned_at, t.job_id, t.trip_no, track]);
+
   const dist = useMemo(() => (geo.lastFix && t.dest_lat != null && t.dest_lng != null ? distanceKm(geo.lastFix, { lat: t.dest_lat, lng: t.dest_lng }) : null), [geo.lastFix, t.dest_lat, t.dest_lng]);
   const fr = freshness(geo.lastSentAt);
   const phone = t.job?.phone?.replace(/\s/g, "");
@@ -92,13 +114,25 @@ export function TripView({ t }: { t: NinjaTrip }) {
     const msg = `Hi ${first || "there"}, this is your RepairOX ${t.trip_type === "drop" ? "delivery" : t.trip_type === "onsite" ? "service" : "pickup"} partner. Track your service live here: ${r.json.url}`;
     const d = (phone ?? "").replace(/\D/g, "");
     const wa = d ? `https://wa.me/${d.length === 10 ? "91" + d : d}?text=${encodeURIComponent(msg)}` : null;
+    track({ kind: "tracking_link_shared", tripId: t.id, jobId: t.job_id, payload: { channel: wa ? "whatsapp" : "other" } });
     if (wa) window.open(wa, "_blank", "noopener");
     else if (navigator.share) { try { await navigator.share({ text: msg }); } catch { /* cancelled */ } }
     else { await navigator.clipboard.writeText(msg); toast.success("Tracking message copied."); }
   }
 
+  /** Popup instead of the action when the Ninja is not yet at the destination. */
+  function notThereYet(kind: "customer" | "store"): boolean {
+    const dest = kind === "customer" ? { lat: t.dest_lat, lng: t.dest_lng } : storeLoc;
+    const r = arrivalCheck(geo.lastFix, geo.accuracy, dest);
+    if (r.ok) return false;
+    setAway({ where: kind, meters: r.meters });
+    return true;
+  }
   async function primary() {
     if (!step) return;
+    if (step.kind === "transition" && step.to === "arrived_customer" && notThereYet("customer")) return;
+    if (step.kind === "transition" && step.to === "arrived_store" && notThereYet("store")) return;
+    if (step.kind === "submit_store" && notThereYet("store")) return;
     if (step.kind === "transition" && step.to) {
       setBusy(true);
       // Starting a journey puts the Ninja on duty (idempotent shared Work Session).
@@ -142,6 +176,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
         <Card className="p-4">
           <p className="text-[15px] font-extrabold">New assignment</p>
           <p className="mt-1 text-[13px] text-slate-500">Review the details below, then accept or reject. A reason is required to reject.</p>
+          <div className="mt-3"><AcceptTicket t={t} /></div>
           <div className="mt-4 grid grid-cols-2 gap-3">
             <Btn tone="ghost" onClick={() => setSheet("reject")}><XCircle className="h-5 w-5" />Reject</Btn>
             <Btn tone="success" loading={busy} onClick={async () => { setBusy(true); await accept(t); setBusy(false); }}><CheckCircle2 className="h-5 w-5" />Accept</Btn>
@@ -177,10 +212,26 @@ export function TripView({ t }: { t: NinjaTrip }) {
       {/* Quick actions */}
       {t.status !== "awaiting_assignment" ? (
         <div className="grid grid-cols-3 gap-3">
-          <a href={navLink(t)} target="_blank" rel="noreferrer" className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]"><Navigation className="h-5 w-5" /></span>Navigate</a>
-          {phone ? <a href={`tel:${phone}`} className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><Phone className="h-5 w-5" /></span>Call</a>
+          <a href={navLink(t)} target="_blank" rel="noreferrer" onClick={() => track({ kind: "navigate_tapped", tripId: t.id, jobId: t.job_id, payload: { status: t.status } })} className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]"><Navigation className="h-5 w-5" /></span>Navigate</a>
+          {phone ? <a href={`tel:${phone}`} onClick={() => track({ kind: "call_customer", tripId: t.id, jobId: t.job_id, payload: { status: t.status } })} className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><Phone className="h-5 w-5" /></span>Call</a>
             : <span className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-slate-50 text-[12px] font-bold text-slate-300 ring-1 ring-slate-200"><Phone className="h-6 w-6" />Call</span>}
           <button disabled={!canProblem} onClick={() => setSheet("problem")} className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95 disabled:opacity-40"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-rose-50 text-rose-500"><AlertTriangle className="h-5 w-5" /></span>Problem</button>
+        </div>
+      ) : null}
+
+      {/* Paperwork: ticket + invoice raised from this job */}
+      {(canTicket || canInvoice) && !["assigned", "awaiting_assignment", "cancelled"].includes(t.status) ? (
+        <div className="grid grid-cols-2 gap-3">
+          {canTicket ? (t.ticket_id ? (
+            <div className="flex min-h-[84px] flex-col items-center justify-center gap-1 rounded-3xl bg-emerald-50 px-2 text-center ring-1 ring-emerald-200"><Ticket className="h-5 w-5 text-emerald-600" /><span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Ticket raised</span><span className="max-w-full truncate text-[13px] font-extrabold text-emerald-900">{tickets.find((x) => x.id === t.ticket_id)?.ticketNo ?? t.ticket_id}</span></div>
+          ) : (
+            <Link href={`/ninja/new/ticket?trip=${t.id}`} className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]"><Ticket className="h-5 w-5" /></span>Create ticket</Link>
+          )) : <span />}
+          {canInvoice ? (t.invoice_id ? (
+            <div className="flex min-h-[84px] flex-col items-center justify-center gap-1 rounded-3xl bg-emerald-50 px-2 text-center ring-1 ring-emerald-200"><FilePlus2 className="h-5 w-5 text-emerald-600" /><span className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Invoice raised</span><span className="max-w-full truncate text-[13px] font-extrabold text-emerald-900">{invoices.find((x) => x.id === t.invoice_id)?.id ?? t.invoice_id}</span></div>
+          ) : (
+            <Link href={`/ninja/new/invoice?trip=${t.id}`} className="flex min-h-[84px] flex-col items-center justify-center gap-2 rounded-3xl bg-white text-[12px] font-extrabold text-slate-700 shadow-[0_10px_24px_-18px_rgba(20,30,80,0.5)] ring-1 ring-slate-200/80 transition active:scale-95"><span className="grid h-10 w-10 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><FilePlus2 className="h-5 w-5" /></span>Create invoice</Link>
+          )) : <span />}
         </div>
       ) : null}
 
@@ -205,7 +256,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
             <div className="rounded-xl bg-slate-50 p-2"><p className="text-[10px] font-bold uppercase text-slate-400">To go</p><p className="mt-0.5 text-[13px] font-extrabold">{dist != null ? `${dist.toFixed(1)} km` : "—"}</p></div>
           </div>
           {geo.error ? <p className="mt-3 rounded-xl bg-rose-50 px-3 py-2 text-[12.5px] font-semibold text-rose-700">{geo.error}</p> : null}
-          <p className="mt-3 text-[12px] leading-snug text-slate-400">Your location is shared with your manager (and the customer's tracking page) only while this journey is active. {geo.background ? "Sharing continues in the background until you arrive." : "In the browser, keep this screen open while travelling. The installed Ninja app keeps sharing in the background."}</p>
+          <p className="mt-3 text-[12px] leading-snug text-slate-400">Your location is shared with your manager from the moment you accept until the job is handed over, and with the customer's tracking page only while you are travelling to them. {geo.background ? "Sharing continues in the background until the job ends." : "In the browser, keep this screen open while travelling. The installed Ninja app keeps sharing in the background."}</p>
         </Card>
       ) : null}
 
@@ -241,7 +292,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
               <Link key={h.id} href={`/ninja/receipt/${t.id}?h=${h.id}`} className="block">
                 <Card className="flex items-center gap-3 p-3.5 active:scale-[0.99]">
                   <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]"><FileText className="h-5 w-5" /></span>
-                  <div className="min-w-0 flex-1"><p className="truncate text-[14px] font-extrabold">{HAND_LABEL[h.kind] ?? h.kind}</p><p className="text-[12px] text-slate-500">{new Date(h.created_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</p></div>
+                  <div className="min-w-0 flex-1"><p className="truncate text-[14px] font-extrabold">{HAND_LABEL[h.kind] ?? h.kind}</p><p className="text-[12px] text-slate-500">{formatDateTime(h.created_at)}</p></div>
                   <Pill tone={h.status === "accepted" ? "green" : h.status === "rejected" ? "rose" : "amber"}>{h.status}</Pill>
                 </Card>
               </Link>
@@ -265,7 +316,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
                       : e.event_type === "created" ? "Trip created" : e.event_type === "problem_reported" ? "Problem reported" : "Note"}
                   </p>
                   {e.note ? <p className="text-[12.5px] text-slate-600">{e.note}</p> : null}
-                  <p className="text-[11px] text-slate-400">{e.actor_name ? `${e.actor_name} · ` : ""}{new Date(e.occurred_at).toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })}</p>
+                  <p className="text-[11px] text-slate-400">{e.actor_name ? `${e.actor_name} · ` : ""}{formatDateTime(e.occurred_at)}</p>
                 </div>
               </li>
             ))}
@@ -273,6 +324,20 @@ export function TripView({ t }: { t: NinjaTrip }) {
         )}
       </Card>
 
+      <Sheet open={!!away} onClose={() => setAway(null)} title="You haven't arrived yet"
+        footer={<Btn className="w-full" onClick={() => setAway(null)}>OK, I'll keep going</Btn>}>
+        <div className="flex flex-col items-center py-2 text-center">
+          <span className="grid h-16 w-16 place-items-center rounded-full bg-amber-100 text-amber-600"><MapPin className="h-8 w-8" /></span>
+          <p className="mt-4 text-[16px] font-extrabold text-slate-900">
+            {away?.where === "store" ? "You haven't reached the store yet" : "You haven't reached the customer's location yet"}
+          </p>
+          <p className="mt-1.5 text-[14px] leading-snug text-slate-500">
+            {away ? `You are about ${distanceLabel(away.meters)} away. ` : ""}
+            {away?.where === "store" ? "Please reach the store, then mark it again." : "Please reach the destination, then mark it again."}
+          </p>
+          <p className="mt-3 text-[11.5px] text-slate-400">Arrival is confirmed from your phone's GPS within about {ARRIVAL_RADIUS_M} m of the destination.</p>
+        </div>
+      </Sheet>
       <CollectSheet t={t} open={sheet === "collect"} onClose={() => setSheet(null)} />
       <SubmitStoreSheet t={t} open={sheet === "submit"} onClose={() => setSheet(null)} />
       <ReceiveStoreSheet t={t} open={sheet === "receive"} onClose={() => setSheet(null)} />

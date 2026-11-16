@@ -12,6 +12,8 @@ import { cn } from "@/lib/utils";
 import { usePermissions } from "@/lib/permissions-context";
 import { useField } from "@/lib/field-context";
 import { staffByRole, activeJobCountFor } from "@/lib/field-linking";
+import { useNinjaAvailability } from "@/hooks/use-ninja-availability";
+import { AVAIL_CHIP, AVAIL_DOT, describeAvailability } from "@/lib/field-availability";
 
 export function StaffPicker({
   roleIds, valueId, onPick, placeholder = "Search staff…", showLoad = false,
@@ -26,12 +28,16 @@ export function StaffPicker({
   const { jobs } = useField();
   const [q, setQ] = useState("");
 
+  const isNinja = roleIds.includes("ninja");
+  const all = useMemo(() => staffByRole(team, roleIds), [team, roleIds]);
+  const { map: avail } = useNinjaAvailability(all.map((s) => s.id), isNinja);
   const options = useMemo(() => {
-    const staff = staffByRole(team, roleIds);
     const needle = q.trim().toLowerCase();
-    return needle ? staff.filter((s) => s.name.toLowerCase().includes(needle) || (s.branch || "").toLowerCase().includes(needle)) : staff;
-  }, [team, roleIds, q]);
-
+    const list = needle ? all.filter((s) => s.name.toLowerCase().includes(needle) || (s.branch || "").toLowerCase().includes(needle)) : all;
+    if (!isNinja || avail.size === 0) return list;
+    // Best to assign first: Available → booked → on a job → in trip → on break → off duty.
+    return [...list].sort((a, b) => (describeAvailability(avail.get(a.id))?.rank ?? 9) - (describeAvailability(avail.get(b.id))?.rank ?? 9) || a.name.localeCompare(b.name));
+  }, [all, q, isNinja, avail]);
   return (
     <div>
       <div className="relative mb-2">
@@ -50,6 +56,7 @@ export function StaffPicker({
         {options.map((s) => {
           const active = s.id === valueId;
           const load = showLoad ? activeJobCountFor(s.id, jobs) : 0;
+          const av = isNinja ? describeAvailability(avail.get(s.id)) : null;
           return (
             <button
               key={s.id}
@@ -64,6 +71,11 @@ export function StaffPicker({
                 <p className="truncate text-[13px] font-medium text-zinc-900">{s.name}</p>
                 <p className="truncate text-[11px] text-zinc-500">{s.branch || "—"}{showLoad ? ` · ${load} active` : ""}</p>
               </div>
+              {av ? (
+                <span title={av.detail} className={cn("inline-flex shrink-0 items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-bold ring-1 ring-inset", AVAIL_CHIP[av.tone])}>
+                  <span className={cn("h-1.5 w-1.5 rounded-full", AVAIL_DOT[av.tone])} />{av.label}
+                </span>
+              ) : null}
               {active && <Check className="h-4 w-4 text-[#4361EE]" />}
             </button>
           );

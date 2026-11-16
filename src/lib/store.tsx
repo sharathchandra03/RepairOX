@@ -830,10 +830,23 @@ async function nextInvoiceIdFromDb(type: string, storeId?: string | null, storeP
     //      next id must SKIP over any taken key or the insert dies with a
     //      duplicate-key (23505) error in an infinite retry loop.
     const scoped = (q: any) => (storeId ? q.eq("branch_id", storeId) : q);
-    const [{ data: visibleData }, { data: allData }] = await Promise.all([
-      scoped(supabase.from("invoices").select("id").eq("invoice_type", type).is("deleted_at", null)),
-      scoped(supabase.from("invoices").select("id").eq("invoice_type", type)),
-    ]);
+    // Preferred: the SECURITY DEFINER series lookup (sees the whole series even for a user whose RLS
+    // only shows their own invoices, e.g. a Ninja). Falls back to the direct reads when the function
+    // is not installed yet.
+    let visibleData: { id: string }[] | null = null;
+    let allData: { id: string }[] | null = null;
+    const rpc = await supabase.rpc("invoice_series_ids", { p_type: type, p_branch: storeId ?? null });
+    if (!rpc.error && Array.isArray(rpc.data)) {
+      const rows = rpc.data as { id: string; deleted: boolean }[];
+      allData = rows.map((r) => ({ id: r.id }));
+      visibleData = rows.filter((r) => !r.deleted).map((r) => ({ id: r.id }));
+    } else {
+      const [v, a] = await Promise.all([
+        scoped(supabase.from("invoices").select("id").eq("invoice_type", type).is("deleted_at", null)),
+        scoped(supabase.from("invoices").select("id").eq("invoice_type", type)),
+      ]);
+      visibleData = v.data; allData = a.data;
+    }
     // Only count ids that match THIS series' canonical shape:
     //   [storePrefix]<prefix><digits>   e.g. "INV054", "KOR-INV054".
     // Off-series / malformed ids (e.g. a duplicated invoice with a random suffix

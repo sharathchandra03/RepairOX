@@ -14,13 +14,14 @@ import { useField } from "@/lib/field-context";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import type { FieldJob } from "@/lib/field-data";
+import { formatDateTime } from "@/lib/time-format";
 
 type Entry = { id: string; kind: "communication" | "comment" | "note"; text: string; who: string; at?: string };
 
 const fmtTime = (iso?: string) => {
   if (!iso) return "";
   const d = new Date(iso);
-  return isNaN(d.getTime()) ? "" : d.toLocaleString("en-IN", { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" });
+  return isNaN(d.getTime()) ? "" : formatDateTime(d);
 };
 
 export function TripCommentCell({ job }: { job: FieldJob }) {

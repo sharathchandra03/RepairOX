@@ -3,8 +3,10 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MotionConfig, motion, useMotionValue, useTransform, animate } from "framer-motion";
-import { Bell, Briefcase, CloudOff, FileCheck2, Home, Loader2, Navigation, RefreshCw, User, Wifi } from "lucide-react";
+import { Activity, Bell, Boxes, Briefcase, CloudOff, FilePlus2, Home, Loader2, Plus, RefreshCw, Ticket, User, Wifi } from "lucide-react";
 import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
+import { track } from "@/lib/ninja/activity";
 import { NinjaProvider, useNinja, useNinjaGeo } from "@/lib/ninja/ninja-context";
 import { inProgress, isNew, ago } from "@/lib/ninja/model";
 import { Sheet } from "@/components/ninja/ui";
@@ -12,10 +14,9 @@ import { useShiftHeartbeat } from "@/components/ninja/shift";
 
 const TABS = [
   { href: "/ninja", label: "Home", icon: Home },
-  { href: "/ninja/jobs", label: "My Jobs", icon: Briefcase },
-  { href: "/ninja/active", label: "Active", icon: Navigation },
-  { href: "/ninja/proof", label: "Proof", icon: FileCheck2 },
-  { href: "/ninja/profile", label: "Profile", icon: User },
+  { href: "/ninja/jobs", label: "Jobs", icon: Briefcase },
+  { href: "/ninja/stock", label: "Stock", icon: Boxes },
+  { href: "/ninja/insights", label: "My Day", icon: Activity },
 ];
 
 /** Pull-to-refresh on the single content scroller (only when already at the top). */
@@ -54,7 +55,9 @@ function Shell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
   const { trips, online, outbox, syncing, syncNow, refresh, notices, unread, markAllRead } = useNinja();
   const geo = useNinjaGeo();
-  const { currentUser } = usePermissions();
+  const { currentUser, can } = usePermissions();
+  const canTicket = allow(can, CAP.ticket.create), canInvoice = allow(can, CAP.invoice.create), canStock = allow(can, CAP.inventory.view);
+  const [create, setCreate] = useState(false);
   const scroller = useRef<HTMLElement>(null);
   const [bell, setBell] = useState(false);
   useShiftHeartbeat();
@@ -63,12 +66,25 @@ function Shell({ children }: { children: React.ReactNode }) {
   const active = trips.some((t) => inProgress(t));
   const fresh = trips.filter(isNew).length;
   const hideChrome = /^\/ninja\/receipt\//.test(path);
+  const canCreate = canTicket || canInvoice;
+  const navItems: { href: string; label: string; icon: typeof Home }[] = [
+    TABS[0], TABS[1],
+    ...(canCreate ? [{ href: "#create", label: "Create", icon: Plus }] : []),
+    ...(canStock ? [TABS[2]] : []),
+    TABS[3],
+  ];
   const initial = (currentUser?.name ?? "N").slice(0, 1).toUpperCase();
   const { y, spinning } = usePullToRefresh(scroller, async () => { await Promise.all([refresh(), syncNow()]); });
   const ind = useTransform(y, [0, 60], [0, 1]);
   const rot = useTransform(y, [0, 90], [0, 270]);
 
   useEffect(() => { scroller.current?.scrollTo({ top: 0 }); }, [path]);
+  const lastScreen = useRef<{ p: string; at: number } | null>(null);
+  useEffect(() => {
+    const now = Date.now(), prev = lastScreen.current;
+    track({ kind: "screen_view", screen: path, payload: prev ? { from: prev.p, dwell_ms: now - prev.at } : {} });
+    lastScreen.current = { p: path, at: now };
+  }, [path]);
   // Offline app shell (production only: the dev server's hot reload must not be cached).
   useEffect(() => {
     if (process.env.NODE_ENV !== "production" || !("serviceWorker" in navigator)) return;
@@ -123,16 +139,24 @@ function Shell({ children }: { children: React.ReactNode }) {
 
           {!hideChrome ? (
             <nav aria-label="Primary" className="relative z-30 shrink-0 border-t border-slate-200 bg-white pb-[env(safe-area-inset-bottom)] shadow-[0_-8px_24px_-16px_rgba(20,30,80,0.25)]">
-              <ul className="grid grid-cols-5 px-1">
-                {TABS.map((t) => {
+              <ul className="grid px-1" style={{ gridTemplateColumns: `repeat(${navItems.length}, minmax(0, 1fr))` }}>
+                {navItems.map((t) => {
+                  if (t.href === "#create") {
+                    return (
+                      <li key="create" className="grid place-items-center">
+                        <button onClick={() => { setCreate(true); track({ kind: "screen_view", screen: "create-menu" }); }} aria-label="Create ticket or invoice"
+                          className="-mt-5 grid h-[58px] w-[58px] place-items-center rounded-full bg-[#4361EE] text-white shadow-[0_12px_26px_-8px_rgba(67,97,238,0.9)] ring-4 ring-white transition active:scale-90"><Plus className="h-7 w-7" strokeWidth={2.6} /></button>
+                      </li>
+                    );
+                  }
                   const on = t.href === "/ninja" ? path === "/ninja" : path.startsWith(t.href);
                   const Icon = t.icon;
-                  const badge = t.href === "/ninja/jobs" ? fresh : t.href === "/ninja/active" && active ? -1 : 0;
+                  const badge = t.href === "/ninja/jobs" ? (fresh > 0 ? fresh : active ? -1 : 0) : 0;
                   return (
                     <li key={t.href}>
                       <Link href={t.href} prefetch aria-current={on ? "page" : undefined}
                         className={`relative flex min-h-[62px] flex-col items-center justify-center gap-0.5 text-[10.5px] font-bold transition-colors ${on ? "text-[#4361EE]" : "text-slate-400"}`}>
-                        {on ? <motion.span layoutId="ninja-nav-pill" transition={{ type: "spring", stiffness: 420, damping: 34 }} className="absolute inset-x-2 inset-y-1.5 rounded-2xl bg-[#EEF1FD]" /> : null}
+                        {on ? <motion.span layoutId="ninja-nav-pill" transition={{ type: "spring", stiffness: 420, damping: 34 }} className="absolute inset-x-1.5 inset-y-1.5 rounded-2xl bg-[#EEF1FD]" /> : null}
                         <span className="relative">
                           <Icon className="h-[22px] w-[22px]" strokeWidth={on ? 2.6 : 2} />
                           {badge > 0 ? <span className="absolute -right-2.5 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-rose-500 px-1 text-[9px] font-extrabold text-white ring-2 ring-white">{badge}</span> : null}
@@ -149,6 +173,20 @@ function Shell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
 
+      <Sheet open={create} onClose={() => setCreate(false)} title="Create">
+        <div className="space-y-2.5 pb-2">
+          {canTicket ? (
+            <button onClick={() => { setCreate(false); router.push("/ninja/new/ticket"); }} className="flex w-full items-center gap-3.5 rounded-2xl bg-white p-4 text-left ring-1 ring-slate-200 active:bg-slate-50">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-[#EEF1FD] text-[#4361EE]"><Ticket className="h-6 w-6" /></span>
+              <span><span className="block text-[16px] font-extrabold">New ticket</span><span className="block text-[12.5px] font-medium text-slate-500">Log the device you're holding, from a job</span></span>
+            </button>) : null}
+          {canInvoice ? (
+            <button onClick={() => { setCreate(false); router.push("/ninja/new/invoice"); }} className="flex w-full items-center gap-3.5 rounded-2xl bg-white p-4 text-left ring-1 ring-slate-200 active:bg-slate-50">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><FilePlus2 className="h-6 w-6" /></span>
+              <span><span className="block text-[16px] font-extrabold">New invoice</span><span className="block text-[12.5px] font-medium text-slate-500">Bill parts and service, collect payment</span></span>
+            </button>) : null}
+        </div>
+      </Sheet>
       <Sheet open={bell} onClose={() => { setBell(false); void markAllRead(); }} title="Notifications">
         {notices.length === 0 ? <p className="py-10 text-center text-[13px] text-slate-400">No notifications in the last 7 days.</p> : (
           <ul className="divide-y divide-slate-100">

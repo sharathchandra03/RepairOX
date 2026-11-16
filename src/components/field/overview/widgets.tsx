@@ -9,14 +9,16 @@ import {
   Plus, Trophy, Truck, UserCheck, Users, Activity, BarChart3, Package, ClipboardList, Recycle, Boxes, Sparkles,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useFieldLive } from "@/hooks/use-field-live";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { formatWhen } from "@/lib/activity-log";
 import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE, FIELD_LEAD_TYPE_LABEL, FIELD_LEAD_TYPE_TONE, normaliseLeadType, accentColor } from "@/lib/field-data";
 import { DASHBOARDS, useFieldDashboard } from "@/components/field/dashboard/use-field-dashboard";
 import { inr } from "@/components/field/dashboard/dashboard-table";
 import type { FieldOverview } from "@/components/field/overview/use-field-overview";
-import { dailySeries, leaderboard, completionRateOf, type AttentionTone, type LeaderPeriod, type LeaderMetric } from "@/lib/field-overview";
+import { dailySeries, leaderboard, completionRateOf, workloadLevel, WORKLOAD_CAPACITY, type LoadLevel, type AttentionTone, type LeaderPeriod, type LeaderMetric } from "@/lib/field-overview";
 import type { DashRow } from "@/lib/field-dashboard";
+import { formatHHmm } from "@/lib/time-format";
 
 /* ─── frame ─── */
 export function Panel({ title, icon: Icon, action, children, className, bodyClassName }: {
@@ -106,7 +108,7 @@ export function TodayPanel({ o, canCreate }: { o: FieldOverview; canCreate: bool
             return (
               <li key={`${e.job.id}:${e.leg}`}>
                 <button onClick={() => router.push(`/field/${e.job.id}`)} className="flex w-full items-center gap-3 px-5 py-3 text-left transition hover:bg-muted/40">
-                  <span className={cn("w-[58px] shrink-0 rounded-lg px-2 py-1 text-center text-[12px] font-bold tabular-nums", e.time ? "bg-[#EEF1FD] text-[#4361EE]" : "bg-muted text-muted-foreground")}>{e.time || "Any"}</span>
+                  <span className={cn("w-[76px] shrink-0 whitespace-nowrap rounded-lg px-2 py-1 text-center text-[12px] font-bold tabular-nums", e.time ? "bg-[#EEF1FD] text-[#4361EE]" : "bg-muted text-muted-foreground")}>{e.time ? formatHHmm(e.time) : "Any"}</span>
                   <span className="min-w-0 flex-1">
                     <span className="flex items-center gap-2">
                       <span className="truncate text-[13px] font-semibold">{e.job.customer || "Customer"}</span>
@@ -132,9 +134,47 @@ export function TodayPanel({ o, canCreate }: { o: FieldOverview; canCreate: bool
 }
 
 /* ─── Engineer workload ─── */
+const LOAD_TONE: Record<LoadLevel, { chip: string; bar: string; ring: string }> = {
+  free: { chip: "bg-emerald-50 text-emerald-700 ring-emerald-200", bar: "bg-emerald-400", ring: "text-emerald-500" },
+  light: { chip: "bg-sky-50 text-sky-700 ring-sky-200", bar: "bg-sky-500", ring: "text-sky-500" },
+  busy: { chip: "bg-[#EEF1FD] text-[#3450D8] ring-[#4361EE]/25", bar: "bg-[#4361EE]", ring: "text-[#4361EE]" },
+  full: { chip: "bg-amber-50 text-amber-800 ring-amber-200", bar: "bg-amber-500", ring: "text-amber-500" },
+  over: { chip: "bg-rose-50 text-rose-700 ring-rose-200", bar: "bg-rose-500", ring: "text-rose-500" },
+};
+function initials(n: string) { return n.replace(/^\[TEST\]\s*/, "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => w[0]?.toUpperCase()).join("") || "?"; }
+/** Circular load gauge: open trips against capacity, today's share drawn darker. */
+function LoadRing({ open, today, level }: { open: number; today: number; level: LoadLevel }) {
+  const R = 20, C = 2 * Math.PI * R;
+  const frac = Math.min(1, open / WORKLOAD_CAPACITY);
+  const todayFrac = Math.min(frac, today / WORKLOAD_CAPACITY);
+  return (
+    <span className="relative grid h-[52px] w-[52px] shrink-0 place-items-center" aria-label={`${open} open of ${WORKLOAD_CAPACITY} capacity`}>
+      <svg viewBox="0 0 48 48" className="absolute inset-0 -rotate-90">
+        <circle cx="24" cy="24" r={R} fill="none" strokeWidth="5" className="stroke-slate-100" />
+        <circle cx="24" cy="24" r={R} fill="none" strokeWidth="5" strokeLinecap="round" className={cn("stroke-current opacity-35 transition-[stroke-dasharray] duration-500", LOAD_TONE[level].ring)} strokeDasharray={`${C * frac} ${C}`} />
+        <circle cx="24" cy="24" r={R} fill="none" strokeWidth="5" strokeLinecap="round" className={cn("stroke-current transition-[stroke-dasharray] duration-500", LOAD_TONE[level].ring)} strokeDasharray={`${C * todayFrac} ${C}`} />
+      </svg>
+      <span className="relative text-[15px] font-extrabold tabular-nums leading-none">{open}<span className="text-[10px] font-bold text-muted-foreground">/{WORKLOAD_CAPACITY}</span></span>
+    </span>
+  );
+}
 export function WorkloadPanel({ o }: { o: FieldOverview }) {
   const router = useRouter();
-  const max = Math.max(1, ...o.workload.rows.map((r) => r.open));
+  const live = useFieldLive();
+  // Live Ninja state per engineer (realtime): travelling now / waiting to accept.
+  const liveBy = useMemo(() => {
+    const m = new Map<string, { moving: number; waiting: number }>();
+    for (const l of live.values()) {
+      if (!l.ninja_id) continue;
+      const e = m.get(l.ninja_id) ?? { moving: 0, waiting: 0 };
+      if (["en_route_customer", "en_route_store", "device_received_by_ninja"].includes(l.status)) e.moving += 1;
+      if (l.status === "assigned") e.waiting += 1;
+      m.set(l.ninja_id, e);
+    }
+    return m;
+  }, [live]);
+  const totalOpen = o.workload.rows.reduce((n, r) => n + r.open, 0);
+  const freeCount = o.workload.rows.filter((r) => r.free).length;
   return (
     <Panel title="Engineer workload" icon={UserCheck}
       action={o.workload.unassigned > 0 ? (
@@ -145,30 +185,53 @@ export function WorkloadPanel({ o }: { o: FieldOverview }) {
       {o.workload.rows.length === 0 ? (
         <Empty icon={Users} title="No engineers yet" text="Field Engineers appear here once they hold trips, or when they have the Ninja role." />
       ) : (
-        <ul className="space-y-3.5">
-          {o.workload.rows.slice(0, 8).map((r) => (
-            <li key={r.id}>
-              <div className="mb-1 flex items-center justify-between gap-2">
-                <button onClick={() => router.push(`/field?fe=${r.id}&excl=cancelled`)} className="flex min-w-0 items-center gap-2 text-left">
-                  <span className="h-6 w-1 shrink-0 rounded-full" style={{ backgroundColor: accentColor(r.name) }} />
-                  <span className="truncate text-[13px] font-semibold hover:text-[#4361EE]">{r.name}</span>
-                  {r.free && <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 ring-1 ring-inset ring-emerald-200">Free</span>}
-                </button>
-                <span className="shrink-0 text-[11px] tabular-nums text-muted-foreground">
-                  <strong className="text-foreground">{r.open}</strong> open · {r.today} today · {r.doneThisMonth} done this month
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted" aria-hidden>
-                <div className="h-full rounded-full bg-gradient-to-r from-[#4361EE] to-[#7C8CF5] transition-[width] duration-500" style={{ width: `${Math.round((r.open / max) * 100)}%` }} />
-              </div>
-            </li>
-          ))}
-        </ul>
+        <>
+          <div className="mb-3 grid grid-cols-3 gap-2 text-center">
+            {[{ l: "Open trips", v: totalOpen, c: "bg-[#EEF1FD] text-[#3450D8]" }, { l: "Engineers", v: o.workload.rows.length, c: "bg-slate-50 text-slate-700" }, { l: "Free now", v: freeCount, c: "bg-emerald-50 text-emerald-700" }].map((k) => (
+              <div key={k.l} className={cn("rounded-xl px-2 py-2", k.c)}><p className="text-[18px] font-extrabold tabular-nums leading-none">{k.v}</p><p className="mt-1 text-[10px] font-bold uppercase tracking-wider opacity-70">{k.l}</p></div>
+            ))}
+          </div>
+          <ul className="max-h-[420px] space-y-2 overflow-y-auto pr-0.5 rox-slim-scroll">
+            {o.workload.rows.slice(0, 10).map((r) => {
+              const lv = workloadLevel(r.open);
+              const lb = liveBy.get(r.id);
+              return (
+                <li key={r.id}>
+                  <button onClick={() => router.push(`/field?fe=${r.id}&excl=cancelled`)}
+                    className="flex w-full items-center gap-3 rounded-2xl border border-border/70 bg-card px-3 py-2.5 text-left transition hover:border-[#4361EE]/40 hover:shadow-sm">
+                    <span className="relative grid h-10 w-10 shrink-0 place-items-center rounded-full text-[12px] font-extrabold text-white" style={{ backgroundColor: accentColor(r.name) }}>
+                      {initials(r.name)}
+                      {lb?.moving ? <span className="absolute -bottom-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white bg-emerald-500"><span className="absolute inset-0 rounded-full bg-emerald-400 opacity-70 motion-safe:animate-ping" /></span> : null}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <span className="truncate text-[13.5px] font-bold">{r.name}</span>
+                        <span className={cn("rounded-full px-2 py-0.5 text-[10px] font-bold ring-1 ring-inset", LOAD_TONE[lv.level].chip)}>{lv.label}</span>
+                        {lb?.moving ? <span className="rounded-full bg-emerald-500 px-2 py-0.5 text-[10px] font-bold text-white">On the move</span> : null}
+                        {lb?.waiting ? <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800">{lb.waiting} to accept</span> : null}
+                      </span>
+                      <span className="mt-1.5 flex items-center gap-1" aria-hidden>
+                        {Array.from({ length: Math.max(WORKLOAD_CAPACITY, r.open) }).map((_, i) => (
+                          <span key={i} className={cn("h-1.5 flex-1 rounded-full", i < r.open ? LOAD_TONE[lv.level].bar : "bg-slate-100")} />
+                        ))}
+                      </span>
+                      <span className="mt-1.5 flex gap-3 text-[11px] text-muted-foreground tabular-nums">
+                        <span><strong className="text-foreground">{r.today}</strong> today</span>
+                        <span><strong className="text-foreground">{r.doneThisMonth}</strong> done this month</span>
+                      </span>
+                    </span>
+                    <LoadRing open={r.open} today={r.today} level={lv.level} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+          <p className="mt-2.5 text-[10.5px] text-muted-foreground">Scale: {WORKLOAD_CAPACITY} open trips = at capacity. The darker ring shows trips due today.</p>
+        </>
       )}
     </Panel>
   );
 }
-
 /* ─── Trend (7 / 14 / 30 days · trips or business) — SVG, no chart lib ─── */
 export function TrendPanel({ o }: { o: FieldOverview }) {
   const [days, setDays] = useState<"7" | "14" | "30">("14");

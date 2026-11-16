@@ -47,6 +47,9 @@ import { useStore } from "@/lib/store";
 import { useStoreContext, type StoreBranch } from "@/lib/store-context";
 import { useWorkspaceCollapsed } from "@/hooks/use-workspace-collapsed";
 import { useGridLayout, mergeFrozen } from "@/hooks/use-grid-layout";
+import { useFieldLive } from "@/hooks/use-field-live";
+import { effectiveAction, isRejectBlinking, EXTRA_ACTION_LABELS } from "@/lib/field-live";
+import { TripLiveOverlay } from "@/components/field/trip-live-overlay";
 import { FieldAssignmentForm } from "@/components/field/field-assignment-form";
 import { FieldGroupKpis, type GroupKpi } from "@/components/field/field-group-kpis";
 import { STRIP } from "@/components/field/field-table-parts";
@@ -80,6 +83,12 @@ export default function FieldPage() {
   const { id: currentUserId } = useSession();
   const { jobs, events, hydrated, filters, setFilters, clearFilters, getJob, transition } = useField();
   const { tickets, invoices, customers } = useStore();
+  const live = useFieldLive();
+  const [liveJobId, setLiveJobId] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const anyBlinking = useMemo(() => { for (const l of live.values()) if (isRejectBlinking(l, nowMs)) return true; return false; }, [live, nowMs]);
+  useEffect(() => { if (!anyBlinking) return; const iv = setInterval(() => setNowMs(Date.now()), 5000); return () => clearInterval(iv); }, [anyBlinking]);
+  useEffect(() => { setNowMs(Date.now()); }, [live]);
   const { isAllShops, stores } = useStoreContext();
   const multiStore = isAllShops && stores.length > 1;
 
@@ -155,7 +164,7 @@ export default function FieldPage() {
     if (filters.hasTicket === "no" && j.linkedTicketId) return false;
     if (filters.leadType && normaliseLeadType(j.leadType) !== filters.leadType) return false;
     if (filters.source && classifySource(j.source) !== filters.source) return false;
-    if (actionFilter && fieldTripAction(j).label !== actionFilter) return false;
+    if (actionFilter && effectiveAction(j, live.get(j.id)).label !== actionFilter) return false;
     if (groupFilter && tripGroupOf(j) !== groupFilter) return false;
     if (hideCancelled && j.status === "cancelled") return false;
     if (salesFilter && (j.salesPersonId || `n:${(j.salesPersonName || "").toLowerCase()}`) !== salesFilter && !(salesFilter === "none" && !j.salesPersonId && !j.salesPersonName)) return false;
@@ -164,13 +173,16 @@ export default function FieldPage() {
     const refDate = j.pickupDate || j.dropDate || j.createdAt.slice(0, 10);
     if (!isWalkInInDateRange(refDate, dateRange as any, customFrom, customTo)) return false;
     return true;
-  }, [filters, dateRange, customFrom, customTo, resolveSrc, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn, storeForJob, branchIdOf]);
+  }, [filters, dateRange, customFrom, customTo, resolveSrc, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn, storeForJob, branchIdOf, live]);
 
   const filteredBase = useMemo(() => scopedJobs.filter(matchesFilters), [scopedJobs, matchesFilters]);
   const filtered = useMemo(() => {
     const now = new Date();
-    return filteredBase.filter((j) => jobMatchesQueue(j, queue, now));
-  }, [filteredBase, queue]);
+    const base = filteredBase.filter((j) => jobMatchesQueue(j, queue, now));
+    // Rejected assignments float to the top (newest rejection first) until a Ninja is assigned again.
+    const rejAt = (j: FieldJob) => { const r = live.get(j.id)?.rejected; return r ? new Date(r.at).getTime() : 0; };
+    return base.map((j, i) => ({ j, i, r: rejAt(j) })).sort((a, b) => (b.r ? 1 : 0) - (a.r ? 1 : 0) || b.r - a.r || a.i - b.i).map((x) => x.j);
+  }, [filteredBase, queue, live]);
 
   useEffect(() => { setPage(1); }, [queue, filters, pageSize, dateRange, customFrom, customTo, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn]);
 
@@ -442,7 +454,7 @@ export default function FieldPage() {
                     </FilterField>
                     <FilterField label="Action of trip">
                       <RSelect value={actionFilter} onChange={setActionFilter} searchable menuWidth="w-60"
-                        options={[{ label: "All actions", value: "" }, ...TRIP_ACTION_LABELS.map((x) => ({ label: x, value: x }))]} />
+                        options={[{ label: "All actions", value: "" }, ...[...EXTRA_ACTION_LABELS, ...TRIP_ACTION_LABELS].map((x) => ({ label: x, value: x }))]} />
                     </FilterField>
                     <label className="flex h-9 cursor-pointer items-center gap-2 rounded-xl border border-input bg-card px-3 text-[12px] font-medium text-zinc-700">
                       <Checkbox checked={filters.delayed} onChange={(next) => setFilters((f) => ({ ...f, delayed: next }))} aria-label="Delayed only" /> Delayed only
@@ -541,12 +553,17 @@ export default function FieldPage() {
                 job: j, r, comment: latestTripComment(j, events), store: storeForJob(j), canEditStatus, canViewLocation,
                 selected: selected.has(j.id), onToggle: () => toggleOne(j.id), onOpen: () => openTrip(j),
                 onStatus: (next: FieldJobStatus) => void transition(j.id, next), onNavigate: (h: string) => router.push(h),
+                live: live.get(j.id) ?? null, onOpenLive: () => setLiveJobId(j.id),
+                rejectedByName: team.find((m) => m.id === live.get(j.id)?.rejected?.ninjaId)?.name,
               };
+              const rejected = !!ctx.live?.rejected;
+              const blink = isRejectBlinking(ctx.live, nowMs);
               return (
                 <tr key={j.id} onClick={() => openTrip(j)}
-                  style={delayed ? ({ ["--rox-row-tint" as any]: "rgb(255 241 242 / 0.7)" }) : undefined}
+                  style={rejected ? ({ ["--rox-row-tint" as any]: "rgb(255 228 230 / 0.95)" }) : delayed ? ({ ["--rox-row-tint" as any]: "rgb(255 241 242 / 0.7)" }) : undefined}
                   className={cn("rox-table-row group h-[76px] cursor-pointer align-middle transition",
-                    delayed ? "bg-rose-50/70 rox-frozen-tinted" : "hover:bg-muted/40", selected.has(j.id) && "bg-[#EEF1FD]/60")}>
+                    rejected ? "bg-rose-100/80 rox-frozen-tinted shadow-[inset_4px_0_0_#e11d48]" : delayed ? "bg-rose-50/70 rox-frozen-tinted" : "hover:bg-muted/40",
+                    blink && "rox-row-blink", selected.has(j.id) && "bg-[#EEF1FD]/60")}>
                   {grid.displayColumns.map((c) => {
                     const bodyAlign = FIELD_LEFT_COLS.has(c.key) ? "text-left" : "text-center";
                     return (
@@ -594,6 +611,16 @@ export default function FieldPage() {
         })}
       </div>
 
+      {(() => {
+        const lj = liveJobId ? getJob(liveJobId) : null;
+        const ll = liveJobId ? live.get(liveJobId) ?? null : null;
+        return (
+          <TripLiveOverlay open={!!(lj && ll)} onClose={() => setLiveJobId(null)} live={ll} jobNo={lj?.jobNo ?? ""} customer={lj?.customer ?? ""}
+            ninjaName={team.find((m) => m.id === ll?.ninja_id)?.name ?? lj?.ninjaName ?? ""}
+            rejectedByName={team.find((m) => m.id === ll?.rejected?.ninjaId)?.name}
+            onReassign={lj ? () => { setLiveJobId(null); router.push(`/field/${lj.id}`); } : undefined} />
+        );
+      })()}
       <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filtered.length} pageSize={pageSize}
         pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="trip" className="rox-lock-footer -mt-3 !py-0" />
 

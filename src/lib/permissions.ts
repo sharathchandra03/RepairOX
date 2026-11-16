@@ -1367,6 +1367,8 @@ export const ROLES: RoleDef[] = [
       "view_field_jobs", "update_pickup", "update_drop",
       "view_customer_details", "view_device_details",
       "upload_files",
+      // Field sales (migration 0106): create tickets + invoices for their own jobs, read stock.
+      "create_ticket", "view_ticket", "create_invoice", "view_invoice", "view_inventory",
     ],
   },
   {

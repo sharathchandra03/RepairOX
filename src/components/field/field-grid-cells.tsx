@@ -2,7 +2,7 @@
 /* RepairOX — Field (Pickup & Drop) data-grid: column contract + cell renderers.
    Column order, widths and anchors are defined ONCE here (canonical GridColumn[]);
    per-user order/freeze live in the shared hooks under table_key "field_table". */
-import { Eye, Lock, MapPin, Phone, Mail } from "lucide-react";
+import { Eye, ChevronRight, Lock, MapPin, Phone, Mail, AlertTriangle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { GridColumn } from "@/hooks/use-frozen-columns";
 import {
@@ -11,13 +11,15 @@ import {
   type FieldJob,
 } from "@/lib/field-data";
 import { formatInvoiceAmount, type ResolvedFieldRow } from "@/lib/field-resolve";
-import { fieldTripAction, tripValue, TRIP_ACTION_TONE_CLASS } from "@/lib/field-table";
+import { tripValue, TRIP_ACTION_TONE_CLASS } from "@/lib/field-table";
+import { effectiveAction, type JobLive } from "@/lib/field-live";
 import { mapsOpenUrl } from "@/lib/maps-url";
 import { tripDevicesOf } from "@/lib/field-devices";
 import { StoreContextCell } from "@/components/common/store-context-cell";
 import { StatusPill } from "@/components/field/field-table-parts";
 import { TripCommentCell } from "@/components/field/trip-comment-cell";
 import type { StoreBranch } from "@/lib/store-context";
+import { formatDateTime, formatHHmm } from "@/lib/time-format";
 
 /** Canonical default order (per the Pickup & Drop spec). Trip ID is the primary
  *  frozen-left anchor; the View/eye column is the frozen-right anchor. */
@@ -63,6 +65,11 @@ export interface FieldCellCtx {
   onOpen: () => void;
   onStatus: (next: FieldJob["status"]) => void;
   onNavigate: (href: string) => void;
+  /** Realtime Ninja state for this job (null when no trip exists). */
+  live?: JobLive | null;
+  rejectedByName?: string;
+  /** Opens the live trip tracker box. */
+  onOpenLive?: () => void;
 }
 
 /* Inherits the cell's alignment: left in left-aligned columns, centred in centred ones. */
@@ -89,9 +96,9 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
       const p = fmtDate(j.pickupDate || j.dropDate, j.pickupTime || j.dropTime);
       const delayed = isDelayed(j);
       return p ? (
-        <div className={cn("leading-tight", delayed && "font-semibold text-rose-600")} title={`Scheduled trip date · created ${new Date(j.createdAt).toLocaleString("en-IN")}`}>
+        <div className={cn("leading-tight", delayed && "font-semibold text-rose-600")} title={`Scheduled trip date · created ${formatDateTime(j.createdAt, { year: true })}`}>
           <p className="whitespace-nowrap text-[12.5px] font-medium">{p.day}</p>
-          {(p.time || j.preferredWindow) && <p className="text-[11px] font-normal text-zinc-500">{j.preferredWindow || p.time}</p>}
+          {(p.time || j.preferredWindow) && <p className="text-[11px] font-normal text-zinc-500">{j.preferredWindow || formatHHmm(p.time)}</p>}
         </div>
       ) : <Dash />;
     }
@@ -124,13 +131,16 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
       );
     }
     case "action": {
-      const a = fieldTripAction(j);
+      const a = effectiveAction(j, c.live);
+      const hot = !!c.live?.rejected;
       return (
-        <span className={cn("flex h-7 w-full min-w-0 cursor-default select-none items-center justify-between gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", TRIP_ACTION_TONE_CLASS[a.tone])}
-          title={`${a.label} — ${a.reason} (system-derived, read-only)`}>
-          <span className="min-w-0 flex-1 truncate">{a.label}</span>
-          <Lock className="h-3 w-3 shrink-0 opacity-50" aria-hidden />
-        </span>
+        <button type="button" onClick={(e) => { e.stopPropagation(); c.onOpenLive?.(); }}
+          className={cn("flex h-7 w-full min-w-0 items-center justify-between gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset transition hover:brightness-95 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/50", TRIP_ACTION_TONE_CLASS[a.tone], hot && "ring-rose-300")}
+          title={`${a.label} — ${a.reason} Click for live trip status.`} aria-label={`${a.label}. Open live trip status`}>
+          {hot ? <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden /> : null}
+          <span className="min-w-0 flex-1 truncate text-left">{a.label}</span>
+          <ChevronRight className="h-3 w-3 shrink-0 opacity-60" aria-hidden />
+        </button>
       );
     }
     case "contact":
@@ -180,6 +190,14 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
       ) : <Dash />;
     }
     case "fe": {
+      if (c.live?.rejected) {
+        return (
+          <div className="min-w-0 leading-tight">
+            <span className="block truncate text-[12px] font-bold text-rose-700">Needs a new Ninja</span>
+            <span className="block truncate text-[11px] text-rose-600" title={c.live.rejected.reason ?? ""}>Rejected{c.rejectedByName ? ` by ${c.rejectedByName}` : ""}</span>
+          </div>
+        );
+      }
       const n = j.ninjaName;
       return n || j.fieldManagerName ? (
         <div className="relative min-w-0 pl-2 leading-tight">
@@ -203,6 +221,13 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
         </div>
       ) : <Dash />;
     case "status":
+      if (c.live?.rejected) {
+        return (
+          <span className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full bg-rose-50 px-2.5 text-[11px] font-semibold text-rose-700 ring-1 ring-inset ring-rose-300" title="The Ninja rejected this assignment — assign another Ninja.">
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-rose-500" /><span className="truncate">Rejected · Reassign</span>
+          </span>
+        );
+      }
       return <StatusPill job={j} canEdit={c.canEditStatus} onSelect={c.onStatus} />;
     case "value": {
       const v = tripValue(r);

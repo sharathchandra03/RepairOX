@@ -34,8 +34,10 @@ function parse(value?: string): { h12: number; minute: number; ampm: "AM" | "PM"
     const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
     return { h12, minute, ampm };
   }
-  // Default: 9:00 AM (a sensible business-hours default).
-  return { h12: 9, minute: 0, ampm: "AM" };
+  // Nothing chosen yet: open ON the exact current time (never a made-up 9:00 AM).
+  const now = new Date();
+  const h24 = now.getHours();
+  return { h12: h24 % 12 === 0 ? 12 : h24 % 12, minute: now.getMinutes(), ampm: h24 >= 12 ? "PM" : "AM" };
 }
 
 function to24(h12: number, minute: number, ampm: "AM" | "PM"): string {
@@ -113,7 +115,7 @@ function Popover({
       >
         {/* Three columns: Hour | Minute | AM-PM */}
         <div className="flex gap-1 p-2">
-          <div ref={hourRef} className="max-h-[220px] flex-1 overflow-y-auto [scrollbar-width:thin]">
+          <div ref={hourRef} className="max-h-[220px] flex-1 overflow-y-auto rox-slim-scroll">
             {HOURS.map((h) => {
               const sel = h === h12;
               return (
@@ -129,7 +131,7 @@ function Popover({
               );
             })}
           </div>
-          <div ref={minRef} className="max-h-[220px] flex-1 overflow-y-auto [scrollbar-width:thin]">
+          <div ref={minRef} className="max-h-[220px] flex-1 overflow-y-auto rox-slim-scroll">
             {MINUTES.map((m) => {
               const sel = m === minute;
               return (

@@ -2,17 +2,20 @@
 import Link from "next/link";
 import { useMemo } from "react";
 import { motion } from "framer-motion";
-import { BellRing, CalendarCheck2, CheckCircle2, ChevronRight, FileCheck2, Navigation, PackageSearch, RefreshCw, Route as RouteIcon, Sparkles } from "lucide-react";
+import { Activity, BellRing, Boxes, CalendarCheck2, CheckCircle2, ChevronRight, FilePlus2, Navigation, PackageSearch, Sparkles, Ticket } from "lucide-react";
+import { usePermissions } from "@/lib/permissions-context";
+import { allow, CAP } from "@/lib/capabilities";
 import { useNinja } from "@/lib/ninja/ninja-context";
 import { useSession } from "@/lib/use-session";
 import { inProgress, isNew, isClosed, nextStep, STATUS_META, TYPE_LABEL } from "@/lib/ninja/model";
 import { Empty, SectionTitle, Skeleton, Stagger } from "@/components/ninja/ui";
 import { TripCard, TYPE_STYLE } from "@/components/ninja/trip-card";
 import { ShiftCard } from "@/components/ninja/shift";
+import { formatClock } from "@/lib/time-format";
 
 function greeting() { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; }
 const sameDay = (iso: string | null) => !!iso && new Date(iso).toDateString() === new Date().toDateString();
-const hhmm = (iso: string | null) => (iso ? new Date(iso).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" }) : "Anytime");
+const hhmm = (iso: string | null) => (iso ? formatClock(iso) : "Anytime");
 
 function Ring({ done, total }: { done: number; total: number }) {
   const r = 34, c = 2 * Math.PI * r, pct = total ? done / total : 0;
@@ -30,7 +33,8 @@ function Ring({ done, total }: { done: number; total: number }) {
 
 export default function NinjaHome() {
   const { name } = useSession();
-  const { trips, loading, error, refresh } = useNinja();
+  const { trips, loading, error } = useNinja();
+  const { can } = usePermissions();
 
   const s = useMemo(() => {
     const fresh = trips.filter(isNew);
@@ -102,15 +106,16 @@ export default function NinjaHome() {
       {/* Quick actions */}
       <div className="grid grid-cols-4 gap-2.5">
         {[
-          { l: "My jobs", icon: RouteIcon, href: "/ninja/jobs", tone: "bg-[#EEF1FD] text-[#4361EE]" },
-          { l: "Active", icon: Navigation, href: "/ninja/active", tone: "bg-emerald-50 text-emerald-600" },
-          { l: "Proof", icon: FileCheck2, href: "/ninja/proof", tone: "bg-violet-50 text-violet-600" },
-          { l: "Refresh", icon: RefreshCw, href: "", tone: "bg-amber-50 text-amber-600" },
-        ].map((a) => {
-          const inner = (<><span className={`grid h-12 w-12 place-items-center rounded-2xl ${a.tone}`}><a.icon className="h-5 w-5" /></span><span className="mt-1.5 text-[11.5px] font-bold text-slate-600">{a.l}</span></>);
-          return a.href ? <Link key={a.l} href={a.href} className="flex flex-col items-center py-1 transition active:scale-90">{inner}</Link>
-            : <button key={a.l} onClick={() => void refresh()} className="flex flex-col items-center py-1 transition active:scale-90">{inner}</button>;
-        })}
+          allow(can, CAP.ticket.create) ? { l: "New ticket", icon: Ticket, href: "/ninja/new/ticket", tone: "bg-[#EEF1FD] text-[#4361EE]" } : null,
+          allow(can, CAP.invoice.create) ? { l: "New invoice", icon: FilePlus2, href: "/ninja/new/invoice", tone: "bg-emerald-50 text-emerald-600" } : null,
+          allow(can, CAP.inventory.view) ? { l: "Stock", icon: Boxes, href: "/ninja/stock", tone: "bg-amber-50 text-amber-600" } : null,
+          { l: "My Day", icon: Activity, href: "/ninja/insights", tone: "bg-violet-50 text-violet-600" },
+        ].filter((a): a is { l: string; icon: typeof Ticket; href: string; tone: string } => !!a).map((a) => (
+          <Link key={a.l} href={a.href} className="flex flex-col items-center py-1 transition active:scale-90">
+            <span className={`grid h-14 w-14 place-items-center rounded-2xl ${a.tone}`}><a.icon className="h-6 w-6" /></span>
+            <span className="mt-1.5 text-center text-[11.5px] font-bold leading-tight text-slate-600">{a.l}</span>
+          </Link>
+        ))}
       </div>
 
       {loading ? (<div className="space-y-3"><Skeleton className="h-44" /><Skeleton className="h-44" /></div>) : (

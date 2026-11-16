@@ -54,7 +54,7 @@ function isSameDay(a: Date | null, b: Date | null) {
 /* ─── The centered dialog (calendar + time) ── */
 export function DateTimeDialog({
   initialIso,
-  defaultTime = "09:00",
+  defaultTime,
   title = "Date & Time",
   onClose,
   onSave,
@@ -73,7 +73,7 @@ export function DateTimeDialog({
   const today = React.useMemo(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }, []);
 
   const [selected, setSelected] = React.useState<Date>(() => { const d = new Date(initialDate); d.setHours(0, 0, 0, 0); return d; });
-  const [time, setTime] = React.useState<string>(() => isoToLocalTime(initialIso) || defaultTime);
+  const [time, setTime] = React.useState<string>(() => isoToLocalTime(initialIso) || defaultTime || isoToLocalTime(new Date().toISOString()));
   const [year, setYear] = React.useState(initialDate.getFullYear());
   const [month, setMonth] = React.useState(initialDate.getMonth());
   const [saving, setSaving] = React.useState(false);
@@ -217,7 +217,7 @@ export function DateTimeDialog({
                 Time
               </p>
               <div className="grid grid-cols-3 gap-2">
-                <div className="rox-rail-scroll h-[210px] overflow-y-auto rounded-lg border border-border bg-muted/20 p-1">
+                <div className="rox-slim-scroll h-[210px] overflow-y-auto rounded-lg border border-border bg-muted/20 p-1">
                   {HOURS.map((h) => (
                     <button
                       key={h}
@@ -233,7 +233,7 @@ export function DateTimeDialog({
                     </button>
                   ))}
                 </div>
-                <div className="rox-rail-scroll h-[210px] overflow-y-auto rounded-lg border border-border bg-muted/20 p-1">
+                <div className="rox-slim-scroll h-[210px] overflow-y-auto rounded-lg border border-border bg-muted/20 p-1">
                   {MINUTES.map((m) => (
                     <button
                       key={m}

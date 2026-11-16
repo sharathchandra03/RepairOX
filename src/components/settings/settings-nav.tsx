@@ -8,7 +8,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, ChevronDown, Building2, Users, CreditCard,
   Package, Ticket, FileText, UserCheck, Plug, Bell, Settings2,
-  ShieldCheck, Printer, Receipt, BarChart3, Palette, Footprints, Tags,
+  ShieldCheck, Truck, Printer, Receipt, BarChart3, Palette, Footprints, Tags,
 } from "lucide-react";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow } from "@/lib/capabilities";
@@ -76,6 +76,12 @@ const SETTINGS_NAV: NavSection[] = [
     id: "walk-in", label: "Walk-In", icon: Footprints,
     children: [
       { label: "Sources & Assignment", href: "/settings/walk-in" },
+    ],
+  },
+  {
+    id: "field", label: "Field", icon: Truck,
+    children: [
+      { label: "Assignment Rules", href: "/settings/field" },
     ],
   },
   {

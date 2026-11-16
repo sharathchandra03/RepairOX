@@ -22,7 +22,7 @@ import { CalendarClock, Check, X, Plus, UserCheck, History } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
-import { TimePicker } from "@/components/ui/time-picker";
+import { DateTimePill } from "@/components/ui/date-time-pill";
 import { Select } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
@@ -146,15 +146,9 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
       {/* Schedule form */}
       {scheduling && (
         <div className="mb-3 rounded-xl border border-[#B3BFF6] bg-[#EEF1FD]/50 p-3">
-          <div className="grid grid-cols-2 gap-2">
-            <label className="text-[11px] font-medium text-muted-foreground">
-              Date
-              <input type="date" value={date} onChange={(e) => setDate(e.target.value)} className="mt-1 h-[34px] w-full rounded-lg border border-input bg-card px-2 text-[13px]" />
-            </label>
-            <label className="text-[11px] font-medium text-muted-foreground">
-              Time
-              <div className="mt-1"><TimePicker value={time} onChange={setTime} /></div>
-            </label>
+          <div>
+            <label className="text-[11px] font-medium text-muted-foreground">Follow-Up Date &amp; Time</label>
+            <div className="mt-1"><DateTimePill date={date} time={time} title="Follow-up" className="h-[34px] rounded-lg" onChange={(d, t) => { setDate(d); setTime(t); }} /></div>
           </div>
           <div className="mt-2">
             <p className="mb-1 text-[11px] font-medium text-muted-foreground">
@@ -242,9 +236,8 @@ export function LeadFollowUpHistory({ lead, readOnly = false }: { lead: Lead; re
                       Schedule next follow-up
                     </label>
                     {scheduleNext && (
-                      <div className="mt-2 grid grid-cols-2 gap-2">
-                        <input type="date" value={nextDate} onChange={(e) => setNextDate(e.target.value)} className="h-[34px] w-full rounded-lg border border-input bg-card px-2 text-[13px]" />
-                        <TimePicker value={nextTime} onChange={setNextTime} />
+                      <div className="mt-2">
+                        <DateTimePill date={nextDate} time={nextTime} title="Next follow-up" className="h-[34px] rounded-lg" onChange={(d, t) => { setNextDate(d); setNextTime(t); }} />
                       </div>
                     )}
                     <p className="mt-2 text-[10px] text-muted-foreground">Completing records the activity only — it does not change the lead's status.</p>
