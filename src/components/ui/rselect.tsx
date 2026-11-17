@@ -27,7 +27,8 @@ export function RSelect({
 }: {
   value: string;
   onChange: (v: string) => void;
-  options: { label: string; value: string; swatch?: string }[];
+  /** `badge` = optional right-aligned status chip (e.g. Ninja availability); `badgeClass` = its colour classes. */
+  options: { label: string; value: string; swatch?: string; badge?: string; badgeClass?: string }[];
   placeholder?: string;
   /** Placeholder for the in-dropdown search box. Defaults to "Search options…"
    *  (relevant to what the box does — filters this select's options). Pass a
@@ -90,6 +91,7 @@ export function RSelect({
               />
             )}
             <span className="truncate">{selected ? selected.label : placeholder}</span>
+            {selected?.badge ? <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-bold ring-1 ring-inset", selected.badgeClass ?? "bg-muted text-muted-foreground ring-border")}>{selected.badge}</span> : null}
           </span>
           <ChevronDown className={cn("h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200", open && "rotate-180")} />
         </button>
@@ -131,7 +133,8 @@ export function RSelect({
                       style={{ backgroundColor: o.swatch }}
                     />
                   )}
-                  <span className="truncate">{o.label}</span>
+                  <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                  {o.badge ? <span className={cn("shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-bold ring-1 ring-inset", o.badgeClass ?? "bg-muted text-muted-foreground ring-border")}>{o.badge}</span> : null}
                 </button>
               );
             })}

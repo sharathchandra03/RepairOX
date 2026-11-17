@@ -43,7 +43,11 @@ try {
     const [jf] = await r(`insert into field_jobs(organization_id,branch_id,lead_type,status,customer) values ($1,$2,'pickup','pending_assignment','[VERIFY] far') returning id`, [own.organization_id, far.id]);
     const [tf] = await r(`select id from field_trips where job_id=$1`, [jf.id]);
     await as(own.auth_user_id);
-    ok("B0 ninja from another store is not eligible", /not_eligible/.test(await tryQ(`update field_trips set status='assigned', ninja_id=$2 where id=$1`, [tf.id, n1.id]) ?? ""));
+    // 0108: the manager's choice wins across stores (manager must see the trip's store).
+    ok("B0 manager can assign a Ninja from another store", !(await tryQ(`update field_trips set status='assigned', ninja_id=$2 where id=$1`, [tf.id, n1.id])));
+    await as(n1.auth_user_id);
+    ok("B0b cross-store Ninja sees the assigned job", (await r(`select count(*)::int n from field_jobs where id=$1`, [jf.id]))[0].n === 1);
+    await as(own.auth_user_id);
   }
   await c.query(`update field_trips set status='assigned', ninja_id=$2 where id=$1`, [t.id, n1.id]);
   await as(n1.auth_user_id);
@@ -82,7 +86,8 @@ try {
   await as(n2.auth_user_id);
   for (const s of ["arrived_customer", "pickup_in_progress"]) await c.query(`update field_trips set status=$2 where id=$1`, [t.id, s]);
   await svc();
-  ok("C4 tracking session auto-closed on arrival", (await r(`select ended_at is not null c from field_tracking_sessions where id=$1`, [ses.id]))[0].c);
+  // 0106: tracking continues from accept until handover, so arrival keeps the session open.
+  ok("C4 tracking session stays open while the job is in progress", (await r(`select ended_at is null c from field_tracking_sessions where id=$1`, [ses.id]))[0].c);
   await as(n2.auth_user_id);
   await c.query(`insert into field_handovers(organization_id,branch_id,trip_id,job_id,kind,status,ack_method,idempotency_key) values ($1,$2,$3,$4,'customer_to_ninja','accepted','signature','k1')`, [own.organization_id, br, t.id, job.id]);
   ok("C5 duplicate handover (offline retry) rejected", !!(await tryQ(`insert into field_handovers(organization_id,branch_id,trip_id,job_id,kind,status,idempotency_key) values ($1,$2,$3,$4,'customer_to_ninja','accepted','k1')`, [own.organization_id, br, t.id, job.id])));

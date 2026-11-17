@@ -2,7 +2,7 @@
 /* RepairOX — Field (Pickup & Drop) data-grid: column contract + cell renderers.
    Column order, widths and anchors are defined ONCE here (canonical GridColumn[]);
    per-user order/freeze live in the shared hooks under table_key "field_table". */
-import { Eye, ChevronRight, Lock, MapPin, Phone, Mail, AlertTriangle } from "lucide-react";
+import { Eye, ChevronRight, Lock, MapPin, Phone, Mail, AlertTriangle, Pencil, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { GridColumn } from "@/hooks/use-frozen-columns";
 import {
@@ -70,6 +70,8 @@ export interface FieldCellCtx {
   rejectedByName?: string;
   /** Opens the live trip tracker box. */
   onOpenLive?: () => void;
+  /** Opens the Assign Ninja dialog for this row (only when the user may assign). */
+  onAssign?: () => void;
 }
 
 /* Inherits the cell's alignment: left in left-aligned columns, centred in centred ones. */
@@ -190,24 +192,44 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
       ) : <Dash />;
     }
     case "fe": {
+      const leg = j.status === "ready_for_drop" || ["drop_scheduled", "out_for_drop", "failed_drop"].includes(j.status) ? "drop" : "pickup";
+      const closed = j.status === "completed" || j.status === "cancelled" || j.status === "delivered";
+      const canClick = !!c.onAssign && !closed;
+      const shownId = leg === "drop" ? j.dropNinjaId : j.ninjaId;
+      const shownName = leg === "drop" ? j.dropNinjaName : j.ninjaName;
+      let body: React.ReactNode;
       if (c.live?.rejected) {
-        return (
+        body = (
           <div className="min-w-0 leading-tight">
             <span className="block truncate text-[12px] font-bold text-rose-700">Needs a new Ninja</span>
             <span className="block truncate text-[11px] text-rose-600" title={c.live.rejected.reason ?? ""}>Rejected{c.rejectedByName ? ` by ${c.rejectedByName}` : ""}</span>
           </div>
         );
+      } else if (shownName || (!shownId && j.fieldManagerName && leg === "pickup")) {
+        const n = shownName || j.fieldManagerName;
+        body = (
+          <div className="relative min-w-0 pl-2 leading-tight">
+            <span className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-full" style={{ backgroundColor: accentColor(n) }} />
+            <span className="block truncate font-medium text-zinc-800" title={n}>{n}</span>
+            <span className="block truncate text-[11px] text-zinc-500">
+              {shownName ? (leg === "drop" ? "Drop Ninja" : j.dropNinjaName && j.dropNinjaName !== shownName ? `Drop: ${j.dropNinjaName}` : "Ninja") : "Field Manager"}
+            </span>
+          </div>
+        );
+      } else {
+        body = canClick
+          ? <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-[#4361EE]/50 bg-[#EEF1FD]/60 px-2.5 py-1 text-[11.5px] font-semibold text-[#4361EE]"><UserPlus className="h-3.5 w-3.5" />{leg === "drop" ? "Assign drop" : "Assign"}</span>
+          : <span className="text-[12px] italic text-zinc-500">Unassigned</span>;
       }
-      const n = j.ninjaName;
-      return n || j.fieldManagerName ? (
-        <div className="relative min-w-0 pl-2 leading-tight">
-          <span className="absolute left-0 top-1/2 h-7 w-1 -translate-y-1/2 rounded-full" style={{ backgroundColor: accentColor(n || j.fieldManagerName) }} />
-          <span className="block truncate font-medium text-zinc-800" title={n || j.fieldManagerName}>{n || j.fieldManagerName}</span>
-          <span className="block truncate text-[11px] text-zinc-500">
-            {n ? (j.dropNinjaName && j.dropNinjaName !== n ? `Drop: ${j.dropNinjaName}` : "Ninja") : "Field Manager"}
-          </span>
-        </div>
-      ) : <span className="text-[12px] italic text-zinc-500">Unassigned</span>;
+      if (!canClick) return body;
+      return (
+        <button type="button" onClick={(e) => { e.stopPropagation(); c.onAssign?.(); }}
+          title={shownId ? "Reassign or reschedule this trip" : "Assign a Ninja"} aria-label={shownId ? `Reassign Ninja for ${j.jobNo}` : `Assign Ninja for ${j.jobNo}`}
+          className="group/fe -mx-1.5 flex w-[calc(100%+0.75rem)] min-w-0 items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition hover:bg-[#EEF1FD] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
+          <span className="min-w-0 flex-1">{body}</span>
+          {shownId || c.live?.rejected ? <Pencil className="h-3.5 w-3.5 shrink-0 text-[#4361EE] opacity-0 transition group-hover/fe:opacity-100" aria-hidden /> : null}
+        </button>
+      );
     }
     case "comment":
       return <TripCommentCell job={j} />;

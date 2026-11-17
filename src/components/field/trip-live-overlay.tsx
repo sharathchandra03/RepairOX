@@ -4,7 +4,7 @@
    body is a REALTIME horizontal journey tracker fed by the Ninja app. */
 import { useEffect, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { X, UserRound, Clock, CheckCircle2, Radio, ExternalLink, AlertTriangle, Timer } from "lucide-react";
+import { X, UserPlus, UserRound, Clock, CheckCircle2, Radio, ExternalLink, AlertTriangle, Timer } from "lucide-react";
 import { ModalPortal } from "@/components/ui/modal-portal";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
@@ -84,6 +84,17 @@ export function TripLiveOverlay({ open, onClose, live, jobNo, customer, ninjaNam
                       <p className="mt-0.5 text-[12.5px] text-rose-700">{rej.reason ? `Reason: “${rej.reason}”` : "No reason given."} It needs a new Ninja.</p>
                     </div>
                     {onReassign ? <Button size="sm" onClick={onReassign}>Reassign Ninja</Button> : null}
+                  </div>
+                ) : null}
+                {!rej && (live.status === "awaiting_assignment" || live.status === "assigned" || live.status === "accepted") && onReassign ? (
+                  <div className={cn("flex flex-wrap items-center justify-between gap-3 rounded-xl border px-4 py-3",
+                    live.status === "awaiting_assignment" ? "border-[#4361EE]/30 bg-[#EEF1FD]/70" : "border-border bg-card")}>
+                    <p className="text-[13px] font-semibold text-foreground">
+                      {live.status === "awaiting_assignment" ? "No Ninja is assigned to this trip yet." : "Need a different Ninja or a new time?"}
+                    </p>
+                    <Button size="sm" variant={live.status === "awaiting_assignment" ? "primary" : "outline"} className="gap-1.5" onClick={onReassign}>
+                      <UserPlus className="h-3.5 w-3.5" />{live.status === "awaiting_assignment" ? "Assign Ninja" : "Reassign / reschedule"}
+                    </Button>
                   </div>
                 ) : null}
                 <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">

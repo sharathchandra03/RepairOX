@@ -647,7 +647,14 @@ export function FieldProvider({ children }: { children: ReactNode }) {
       if (error && isUndefinedColumnError(error)) {
         ({ error } = await db.from("field_jobs").update(stripOptionalColumns(jobToRow(updates))).eq("id", id));
       }
-      if (error) { setDbOk(false); }
+      if (error) {
+        // Never show a change the database refused (e.g. an assignment) as if it succeeded.
+        const msg = /not_eligible/.test(error.message) ? "This Ninja can't take field trips (inactive or no field role)."
+          : /invalid_transition/.test(error.message) ? "That trip can't be reassigned in its current stage."
+          : "Could not save the change. Please try again.";
+        toast.error(msg);
+        return;
+      }
     }
     setJobs((prev) => {
       const next = prev.map((j) => (j.id === id ? { ...j, ...updates, updatedAt: nowIso } : j));

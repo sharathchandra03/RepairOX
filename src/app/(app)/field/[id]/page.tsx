@@ -25,6 +25,7 @@ import { Can } from "@/components/common/can";
 import { PinnedRail } from "@/components/common/pinned-rail";
 import { Reveal } from "@/components/common/reveal";
 import { FieldTripsPanel, RejectedBanner } from "@/components/field/field-trips-panel";
+import { AssignNinjaDialog } from "@/components/field/assign-ninja-dialog";
 import { useJobTrips } from "@/hooks/use-job-trips";
 import { STATUS_META as TRIP_STATUS, TYPE_LABEL as TRIP_TYPE } from "@/lib/ninja/model";
 import { DetailHero, DetailSection, DetailField, SummaryCard, SectionEditButton } from "@/components/common/detail-page";
@@ -138,15 +139,6 @@ export default function ViewFieldAssignmentPage() {
     setEditLoc(null); setLocTouched(false); setBusy(false);
   };
   const makeProof = (): FieldProof => ({ at: new Date().toISOString(), byId: meId, byName: meName, condition, notes: proofNotes });
-  const doAssign = async (leg: "pickup" | "drop") => {
-    if (!pickId) return;
-    setBusy(true);
-    try {
-      if (leg === "pickup") await assignNinja(j.id, pickId, pickName, schedDate || undefined, schedTime || undefined);
-      else await assignDropNinja(j.id, pickId, pickName, schedDate || undefined, schedTime || undefined);
-      closeDlg();
-    } finally { setBusy(false); }
-  };
   const doProof = async () => {
     setBusy(true);
     try {
@@ -503,20 +495,7 @@ export default function ViewFieldAssignmentPage() {
       </div>
 
       {/* ── Centred dialogs (full forms are centred, never drawers) ── */}
-      <RoxCenteredForm open={dlg === "assign_ninja" || dlg === "assign_drop"} onClose={closeDlg} width="max-w-md" icon={UserCheck}
-        title={dlg === "assign_drop" ? "Assign drop Ninja" : j.ninjaId ? "Reassign / reschedule pickup" : onSite ? "Assign Ninja for on-site visit" : "Assign Ninja for pickup"}
-        subtitle={`${j.jobNo} · ${r.customerName || j.customer}`}
-        footer={<div className="flex w-full justify-end gap-2"><Button variant="outline" onClick={closeDlg}>Cancel</Button>
-          <Button className="gap-1.5" disabled={!pickId || busy} loading={busy} onClick={() => doAssign(dlg === "assign_drop" ? "drop" : "pickup")}><Check className="h-4 w-4" /> Assign &amp; notify</Button></div>}>
-        <div className="space-y-4">
-          <StaffPicker roleIds={["ninja"]} valueId={pickId} showLoad onPick={(sid, name) => { setPickId(sid); setPickName(name); }} placeholder="Search ninjas…" />
-          <div className="space-y-1.5">
-            <label className="flex h-5 items-center text-[12px] font-medium text-zinc-700">Date &amp; time</label>
-            <DateTimePill date={schedDate} time={schedTime} title="Trip date & time" onChange={(d, t) => { setSchedDate(d); setSchedTime(t); }} />
-          </div>
-        </div>
-      </RoxCenteredForm>
-
+      {(dlg === "assign_ninja" || dlg === "assign_drop") && <AssignNinjaDialog job={j} leg={dlg === "assign_drop" ? "drop" : "pickup"} onClose={closeDlg} />}
       <RoxCenteredForm open={dlg === "pickup_proof" || dlg === "drop_proof"} onClose={closeDlg} width="max-w-md" icon={PackageCheck}
         title={dlg === "pickup_proof" ? "Confirm pickup" : onSite ? "Complete on-site job" : "Confirm delivery"} subtitle={`${j.jobNo} · ${r.customerName || j.customer}`}
         footer={<div className="flex w-full justify-end gap-2"><Button variant="outline" onClick={closeDlg}>Cancel</Button>

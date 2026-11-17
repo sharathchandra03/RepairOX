@@ -96,7 +96,7 @@ function Popover({
   return (
     <>
       <div
-        className="fixed inset-0 z-[9998]"
+        className="fixed inset-0 z-[10055]"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         aria-hidden
@@ -107,7 +107,7 @@ function Popover({
         exit={{ opacity: 0, y: openUp ? 6 : -6, scale: 0.98 }}
         transition={{ duration: 0.14, ease: "easeOut" }}
         style={{ position: "fixed", top, left, width: POPOVER_W }}
-        className="z-[9999] overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
+        className="z-[10060] overflow-hidden rounded-2xl border border-border bg-card shadow-xl"
         onMouseDown={(e) => e.stopPropagation()}
         onClick={(e) => e.stopPropagation()}
         role="dialog"

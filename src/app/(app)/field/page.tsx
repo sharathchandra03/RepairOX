@@ -50,6 +50,7 @@ import { useGridLayout, mergeFrozen } from "@/hooks/use-grid-layout";
 import { useFieldLive } from "@/hooks/use-field-live";
 import { effectiveAction, isRejectBlinking, EXTRA_ACTION_LABELS } from "@/lib/field-live";
 import { TripLiveOverlay } from "@/components/field/trip-live-overlay";
+import { AssignNinjaDialog } from "@/components/field/assign-ninja-dialog";
 import { FieldAssignmentForm } from "@/components/field/field-assignment-form";
 import { FieldGroupKpis, type GroupKpi } from "@/components/field/field-group-kpis";
 import { STRIP } from "@/components/field/field-table-parts";
@@ -85,6 +86,7 @@ export default function FieldPage() {
   const { tickets, invoices, customers } = useStore();
   const live = useFieldLive();
   const [liveJobId, setLiveJobId] = useState<string | null>(null);
+  const [assignJobId, setAssignJobId] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const anyBlinking = useMemo(() => { for (const l of live.values()) if (isRejectBlinking(l, nowMs)) return true; return false; }, [live, nowMs]);
   useEffect(() => { if (!anyBlinking) return; const iv = setInterval(() => setNowMs(Date.now()), 5000); return () => clearInterval(iv); }, [anyBlinking]);
@@ -125,6 +127,7 @@ export default function FieldPage() {
 
   const isNinja = role?.id === "ninja";
   const canEditStatus = allow(can, CAP.field.updateStatus);
+  const canAssignNinja = allow(can, CAP.field.assignNinja);
   const canViewLocation = allow(can, CAP.field.viewLocation);
 
   /* ── Grid: shared layout hook (order / freeze / display / offsets / height) ── */
@@ -554,6 +557,7 @@ export default function FieldPage() {
                 selected: selected.has(j.id), onToggle: () => toggleOne(j.id), onOpen: () => openTrip(j),
                 onStatus: (next: FieldJobStatus) => void transition(j.id, next), onNavigate: (h: string) => router.push(h),
                 live: live.get(j.id) ?? null, onOpenLive: () => setLiveJobId(j.id),
+                onAssign: canAssignNinja ? () => setAssignJobId(j.id) : undefined,
                 rejectedByName: team.find((m) => m.id === live.get(j.id)?.rejected?.ninjaId)?.name,
               };
               const rejected = !!ctx.live?.rejected;
@@ -618,9 +622,10 @@ export default function FieldPage() {
           <TripLiveOverlay open={!!(lj && ll)} onClose={() => setLiveJobId(null)} live={ll} jobNo={lj?.jobNo ?? ""} customer={lj?.customer ?? ""}
             ninjaName={team.find((m) => m.id === ll?.ninja_id)?.name ?? lj?.ninjaName ?? ""}
             rejectedByName={team.find((m) => m.id === ll?.rejected?.ninjaId)?.name}
-            onReassign={lj ? () => { setLiveJobId(null); router.push(`/field/${lj.id}`); } : undefined} />
+            onReassign={lj && canAssignNinja ? () => { setLiveJobId(null); setAssignJobId(lj.id); } : undefined} />
         );
       })()}
+      <AssignNinjaDialog job={assignJobId ? getJob(assignJobId) ?? null : null} onClose={() => setAssignJobId(null)} />
       <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filtered.length} pageSize={pageSize}
         pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="trip" className="rox-lock-footer -mt-3 !py-0" />
 

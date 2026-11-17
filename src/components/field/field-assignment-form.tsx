@@ -12,24 +12,28 @@
      existing reader keeps working.
    • REVIEW pill (top of the last step) opens a read-only summary of everything
      entered; each group has an Edit link back to its step. Never a flow step.
-   • Customer Master is reused (CustomerPicker / resolveCustomer) — no duplicates.
+   • Customer Master is reused (one Lead + Customer search / resolveCustomer) — no duplicates.
    • Editing trip fields NEVER rewrites the Customer Master or the Lead.
    • Idempotent: one clientRequestId per form-open, so a double click / retry
      resolves to the same trip. Trip ID is allocated server-side by createJob.
    ────────────────────────────────────────────────────────────────────────── */
-import { Fragment, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   Truck, Check, ChevronLeft, ChevronRight, ChevronDown, Link2, X, AlertCircle, CheckCircle2, Search, Lock, Plus, ClipboardList,
 } from "lucide-react";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Button } from "@/components/ui/button";
+import { useNinjaAvailability } from "@/hooks/use-ninja-availability";
+import { AVAIL_CHIP, describeAvailability } from "@/lib/field-availability";
 import { RSelect } from "@/components/ui/rselect";
 import { DateTimePill } from "@/components/ui/date-time-pill";
+import { WindowPickerField } from "@/components/ui/window-picker";
 import { InfoHint } from "@/components/ui/info-hint";
 import { toast } from "@/components/ui/toaster";
-import { CustomerPicker } from "@/components/common/customer-picker";
 import { DeviceCatalogPicker } from "@/components/leads/lead-form-fields";
+import { IssueSelector } from "@/components/common/issue-selector";
 import { ServiceLocationFields } from "@/components/field/service-location-fields";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
@@ -52,9 +56,10 @@ import { searchLeads, pickBestLead } from "@/lib/lead-picker-search";
 import { formatHHmm } from "@/lib/time-format";
 
 const STEPS = [
-  { id: 1, label: "Initial Information" },
-  { id: 2, label: "Contact Information" },
-  { id: 3, label: "Device Information" },
+  { id: 1, label: "Customer" },
+  { id: 2, label: "Location" },
+  { id: 3, label: "Trip" },
+  { id: 4, label: "Device" },
 ];
 
 const inputCls = (invalid?: boolean) =>
@@ -150,7 +155,8 @@ function DeviceCard({
                 <Field label="Accessories handed over" hint="Charger, cable, box, SIM tray key…"><input className={inputCls()} value={device.accessories} onChange={(e) => onChange({ accessories: e.target.value })} placeholder="e.g. Charger, box" /></Field>
               </div>
               <Field label="Issue" required error={touched ? errors?.issue : undefined}>
-                <input className={inputCls(touched && !!errors?.issue)} value={device.issue} onChange={(e) => onChange({ issue: e.target.value })} placeholder="Customer-reported problem" />
+                <IssueSelector value={device.issue ?? ""} onChange={(v) => onChange({ issue: v })} placeholder="Search or add issues…" pillClassName="py-0.5"
+                  fieldClassName={touched && errors?.issue ? "border-rose-300" : undefined} />
               </Field>
               <Field label="Device condition at collection" hint="Visible damage, water marks, passcode status — keep it short.">
                 <input className={inputCls()} value={device.condition} onChange={(e) => onChange({ condition: e.target.value })} placeholder="Optional" />
@@ -210,6 +216,10 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
   const [linked, setLinked] = useState<Lead | null>(null);
   const [leadError, setLeadError] = useState("");
   const [leadOpen, setLeadOpen] = useState(false);
+  // Results float BELOW the search box, portalled to <body> so the dialog body/footer never clip them.
+  const searchBoxRef = useRef<HTMLDivElement>(null);
+  const resultsRef = useRef<HTMLUListElement>(null);
+  const [resPos, setResPos] = useState<{ left: number; top: number; width: number; maxH: number } | null>(null);
   const [prefillNote, setPrefillNote] = useState("");
 
   const defaultStore = activeStoreId || stores[0]?.id || "";
@@ -243,6 +253,26 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
 
   /* ── Lead lookup (RLS-scoped list; inaccessible leads are simply not found) ── */
   const matches = useMemo(() => searchLeads(leads, leadQuery, 8), [leads, leadQuery]);
+  // The same box also finds Customer Master records that have no matching Lead in the list.
+  const customerMatches = useMemo(() => {
+    const q = leadQuery.trim().toLowerCase();
+    if (q.length < 2) return [];
+    const digits = q.replace(/\D/g, "");
+    const leadPhones = new Set(matches.map((l) => (l.number || "").replace(/\D/g, "").slice(-10)).filter(Boolean));
+    return customers.filter((c) => {
+      const ph = (c.mobile || "").replace(/\D/g, "");
+      if (leadPhones.has(ph.slice(-10))) return false;
+      return (c.fullName || "").toLowerCase().includes(q) || (c.email || "").toLowerCase().includes(q)
+        || (c.id || "").toLowerCase().includes(q) || (digits.length >= 4 && (ph.includes(digits) || (c.altMobile || "").replace(/\D/g, "").includes(digits)));
+    }).slice(0, 5);
+  }, [customers, leadQuery, matches]);
+  const [pickedCustomer, setPickedCustomer] = useState<{ id: string; name: string } | null>(null);
+  const pickCustomer = (c: (typeof customers)[number]) => {
+    setPickedCustomer({ id: c.id, name: c.fullName }); setLeadOpen(false); setLeadQuery(""); setLeadError("");
+    setD((p) => ({ ...p, customerId: c.id, name: c.fullName, phone: c.mobile, altPhone: c.altMobile ?? "", email: c.email }));
+    if (!loc.address.trim()) setLoc((l) => ({ ...l, address: [c.address, c.city].filter(Boolean).join(", "), pincode: c.postalCode || l.pincode }));
+  };
+  const unpickCustomer = () => { setPickedCustomer(null); setD((p) => ({ ...p, customerId: "", name: "", phone: "", altPhone: "", email: "" })); };
 
   /* Linking a Lead fills EVERYTHING the trip needs from ONE field map
      (lib/lead-to-trip.ts): customer, contact, source, ALL devices, comment, trip
@@ -286,9 +316,33 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
     if (!leadQuery.trim()) return;
     const best = pickBestLead(leads, leadQuery);
     if (best) pickLead(best);
-    else if (matches.length > 0) { setLeadOpen(true); setLeadError(""); }
-    else setLeadError("No Lead matches that. Try the Lead number (e.g. 031), mobile, email, name or device — or you may not have access to it.");
+    else if (matches.length > 0 || customerMatches.length > 0) { setLeadOpen(true); setLeadError(""); }
+    else setLeadError("No Lead or customer matches that. Try the Lead number (e.g. 031), mobile, email or name — or enter the customer below.");
   };
+  const showResults = leadOpen && (matches.length > 0 || customerMatches.length > 0) && !leadError;
+  useLayoutEffect(() => {
+    if (!showResults) { setResPos(null); return; }
+    const place = () => {
+      const r = searchBoxRef.current?.getBoundingClientRect();
+      if (!r) return;
+      setResPos({ left: r.left, top: r.bottom + 6, width: r.width, maxH: Math.max(220, Math.min(420, window.innerHeight - r.bottom - 20)) });
+    };
+    place();
+    window.addEventListener("resize", place);
+    window.addEventListener("scroll", place, true);
+    return () => { window.removeEventListener("resize", place); window.removeEventListener("scroll", place, true); };
+  }, [showResults]);
+  useEffect(() => {
+    if (!showResults) return;
+    const away = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (!searchBoxRef.current?.contains(t) && !resultsRef.current?.contains(t)) setLeadOpen(false);
+    };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { e.stopPropagation(); setLeadOpen(false); } };
+    document.addEventListener("mousedown", away);
+    document.addEventListener("keydown", esc, true);
+    return () => { document.removeEventListener("mousedown", away); document.removeEventListener("keydown", esc, true); };
+  }, [showResults]);
   const unlink = () => { setLinked(null); setFromLead(new Set()); setLeadDeviceIds(new Set()); setPrefillNote(""); setLeadQuery(""); setLeadError(""); };
 
   const existingOpenTrip = linked ? jobsForLead(linked.id).find((j) => j.status !== "cancelled" && j.status !== "completed") : undefined;
@@ -301,6 +355,15 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
     return inStore.length > 0 ? inStore : all;
   }, [team, storeName]);
 
+  // Live Ninja status (duty + trips) beside each name; best to assign listed first.
+  const { map: avail } = useNinjaAvailability(engineers.map((m) => m.id));
+  const ninjaOptions = useMemo(() => engineers
+    .map((m) => ({ m, av: describeAvailability(avail.get(m.id)) }))
+    .sort((a, b) => (a.av?.rank ?? 9) - (b.av?.rank ?? 9) || a.m.name.localeCompare(b.m.name))
+    .map(({ m, av }) => ({
+      label: av ? m.name : `${m.name} · ${activeJobCountFor(m.id, jobs)} open`, value: m.id,
+      badge: av?.label, badgeClass: av ? AVAIL_CHIP[av.tone] : undefined,
+    })), [engineers, avail, jobs]);
   const sourceOptions = useMemo(() => optionsFor("source").map((o) => o.value).filter(Boolean), [optionsFor]);
 
   /* ── Validation ── */
@@ -319,20 +382,21 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
   }, [d, deviceErrors]);
   const locErrors = useMemo(() => validateLocation(loc), [loc]);
   const stepOf = (): number =>
-    errors.date || errors.storeId ? 1
-    : errors.name || errors.phone || errors.email || hasLocationErrors(locErrors) ? 2
-    : 3;
+    errors.name || errors.phone || errors.email ? 1
+    : hasLocationErrors(locErrors) ? 2
+    : errors.date || errors.storeId ? 3
+    : 4;
   const valid = Object.keys(errors).length === 0 && !hasLocationErrors(locErrors);
 
   /** Navigate to a step (leaves the review overlay). */
-  const go = (n: number) => { setReviewOpen(false); setStep(Math.max(1, Math.min(3, n))); };
+  const go = (n: number) => { setReviewOpen(false); setStep(Math.max(1, Math.min(STEPS.length, n))); };
 
   async function save() {
     setTouched(true);
     if (!valid) {
       const n = stepOf();
       go(n);
-      if (n === 3) { const firstBad = d.devices.find((x) => deviceErrors[x.id]); if (firstBad) setExpandedId(firstBad.id); }
+      if (n === 4) { const firstBad = d.devices.find((x) => deviceErrors[x.id]); if (firstBad) setExpandedId(firstBad.id); }
       return;
     }
     if (!canCreate || saving || submitting.current) return;
@@ -401,7 +465,7 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
 
   return (
     <RoxCenteredForm
-      open onClose={onClose} title="NEW FIELD ASSIGNMENT" subtitle="Pickup & Drop · On-Site — three quick steps." icon={Truck}
+      open onClose={onClose} title="NEW FIELD ASSIGNMENT" subtitle="Pickup & Drop · On-Site — four quick steps." icon={Truck}
       width="max-w-2xl" canEdit={canCreate} readOnlyNote="You don't have permission to create field assignments."
       footer={
         <div className="flex w-full items-center justify-between gap-2">
@@ -412,7 +476,7 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
           </div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Cancel</Button>
-            {!reviewOpen && step < 3
+            {!reviewOpen && step < STEPS.length
               ? <Button size="sm" className="gap-1" onClick={() => go(step + 1)}>Next <ChevronRight className="h-4 w-4" /></Button>
               : <Button size="sm" className="gap-1.5" loading={saving} disabled={saving || !canCreate} onClick={save}><Check className="h-4 w-4" /> Save Assignment</Button>}
           </div>
@@ -422,28 +486,28 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
       {/* Stepper — steps hug their content and the connectors take ALL the space
           between them, so the last step ends flush right (no gap) and the gaps
           between steps are equal. */}
-      <div className="-mt-1 mb-4 flex items-center border-b border-border pb-3">
+      <div className="-mt-1 mb-4 flex min-w-0 items-center overflow-hidden border-b border-border pb-3">
         {STEPS.map((s, i) => {
           const done = !reviewOpen && step > s.id, active = !reviewOpen && step === s.id;
           return (
             <Fragment key={s.id}>
-              <button type="button" onClick={() => go(s.id)} className="flex shrink-0 items-center gap-2 text-left" title={s.label}>
+              <button type="button" onClick={() => go(s.id)} className="flex min-w-0 shrink-0 items-center gap-1.5 text-left" title={`${s.label} information`}>
                 <span className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-full text-[11px] font-bold", done ? "bg-emerald-500 text-white" : active ? "bg-[#4361EE] text-white" : "bg-muted text-muted-foreground")}>
                   {done ? <Check className="h-3.5 w-3.5" /> : s.id}
                 </span>
-                <span className={cn("hidden whitespace-nowrap text-[12px] font-semibold md:block", active ? "text-foreground" : "text-muted-foreground")}>{s.label}</span>
+                <span className={cn("hidden whitespace-nowrap text-[12px] font-semibold sm:block", active ? "text-foreground" : "text-muted-foreground")}>{s.label}</span>
               </button>
-              {i < STEPS.length - 1 && <span aria-hidden className={cn("mx-3 h-px min-w-4 flex-1 transition-colors", done ? "bg-emerald-300" : "bg-border")} />}
+              {i < STEPS.length - 1 && <span aria-hidden className={cn("mx-2 h-px min-w-3 flex-1 transition-colors", done ? "bg-emerald-300" : "bg-border")} />}
             </Fragment>
           );
         })}
       </div>
 
-      {/* ── STEP 1 ── */}
+      {/* ── STEP 1 · customer (one search finds Leads AND Customer Master records) ── */}
       {!reviewOpen && step === 1 && (
         <div className="space-y-4">
           <div className="rounded-xl border border-border bg-muted/20 p-3.5">
-            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><Link2 className="h-3.5 w-3.5" /> Link existing Lead (optional)</p>
+            <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground"><Link2 className="h-3.5 w-3.5" /> Find Lead or customer (optional)</p>
             {linked ? (
               <div className="flex items-start justify-between gap-3 rounded-lg bg-emerald-50 p-3 ring-1 ring-inset ring-emerald-200">
                 <div className="min-w-0 text-[12.5px] text-emerald-900">
@@ -458,23 +522,31 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
                 </div>
                 <button type="button" onClick={unlink} aria-label="Unlink lead" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-emerald-800 hover:bg-emerald-100"><X className="h-4 w-4" /></button>
               </div>
+            ) : pickedCustomer ? (
+              <div className="flex items-center justify-between gap-3 rounded-lg bg-emerald-50 p-3 ring-1 ring-inset ring-emerald-200">
+                <p className="flex items-center gap-1.5 text-[12.5px] font-semibold text-emerald-900"><CheckCircle2 className="h-4 w-4" /> Existing customer: {pickedCustomer.name}<span className="font-normal text-emerald-800"> · no Lead linked</span></p>
+                <button type="button" onClick={unpickCustomer} aria-label="Remove customer" className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-emerald-800 hover:bg-emerald-100"><X className="h-4 w-4" /></button>
+              </div>
             ) : (
               <div className="relative">
                 <div className="flex items-center gap-2">
-                  <div className="relative flex-1">
+                  <div ref={searchBoxRef} className="relative flex-1">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                    <input className={cn(inputCls(!!leadError), "pl-9")} value={leadQuery} placeholder="Lead no. (031), mobile, email, name or device…"
+                    <input className={cn(inputCls(!!leadError), "pl-9")} value={leadQuery} placeholder="Lead no. (031), customer name, mobile or email…"
                       onChange={(e) => { setLeadQuery(e.target.value); setLeadError(""); setLeadOpen(true); }}
                       onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitLeadId(); } }} onFocus={() => setLeadOpen(true)} />
                   </div>
                   <Button variant="outline" size="sm" onClick={submitLeadId}>Find</Button>
                 </div>
                 {leadError && <p className="mt-1.5 flex items-center gap-1 text-[11px] font-medium text-rose-600"><AlertCircle className="h-3 w-3" /> {leadError}</p>}
-                {leadOpen && matches.length > 0 && !leadError && (
-                  <ul className="absolute z-20 mt-1 w-full overflow-hidden rounded-xl border border-border bg-card shadow-xl">
+                {showResults && resPos && typeof document !== "undefined" && createPortal(
+                  <ul ref={resultsRef} role="listbox" aria-label="Matching leads and customers"
+                    style={{ position: "fixed", left: resPos.left, top: resPos.top, width: resPos.width, maxHeight: resPos.maxH }}
+                    className="z-[10050] overflow-y-auto overscroll-contain rounded-xl border border-border bg-card py-1 shadow-[0_18px_40px_-12px_rgba(20,30,80,0.35)] rox-slim-scroll">
+                    {matches.length > 0 && <li className="sticky top-0 z-10 bg-card/95 px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground backdrop-blur">Leads · {matches.length}</li>}
                     {matches.map((l) => (
                       <li key={l.id}>
-                        <button type="button" onClick={() => pickLead(l)} className="flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-[12.5px] hover:bg-muted">
+                        <button type="button" onClick={() => pickLead(l)} className="mx-1 flex w-[calc(100%-0.5rem)] items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition hover:bg-[#EEF1FD]">
                           <span className="w-[72px] shrink-0 font-bold tnum text-[#4361EE]">{l.leadNo}</span>
                           <span className="min-w-0 flex-1">
                             <span className="block truncate font-medium text-zinc-800">{l.name || "Unnamed"}{l.number ? <span className="font-normal text-zinc-500"> · {l.number}</span> : null}</span>
@@ -483,12 +555,46 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
                         </button>
                       </li>
                     ))}
-                  </ul>
+                    {customerMatches.length > 0 && <li className="sticky top-0 z-10 mt-1 border-t border-border/70 bg-card/95 px-3 pb-1 pt-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground backdrop-blur">Customers · {customerMatches.length}</li>}
+                    {customerMatches.map((cu) => (
+                      <li key={cu.id}>
+                        <button type="button" onClick={() => pickCustomer(cu)} className="mx-1 flex w-[calc(100%-0.5rem)] items-center justify-between gap-3 rounded-lg px-2.5 py-2 text-left text-[12.5px] transition hover:bg-[#EEF1FD]">
+                          <span className="w-[72px] shrink-0 text-[11px] font-bold uppercase text-emerald-700">Customer</span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate font-medium text-zinc-800">{cu.fullName || "Unnamed"}{cu.mobile ? <span className="font-normal text-zinc-500"> · {cu.mobile}</span> : null}</span>
+                            <span className="block truncate text-[11px] text-zinc-500">{[cu.email, cu.city].filter(Boolean).join(" · ") || "No lead · Customer Master"}</span>
+                          </span>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>,
+                  document.body,
                 )}
               </div>
             )}
           </div>
 
+          <div className="grid grid-cols-2 gap-3">
+            <Field label={<>Customer Name{tag("name")}</>} required error={touched ? errors.name : undefined}><input className={inputCls(touched && !!errors.name)} value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder="Full name" /></Field>
+            <Field label={<>Mobile Number{tag("phone")}</>} required error={touched ? errors.phone : undefined}><input className={inputCls(touched && !!errors.phone)} inputMode="tel" value={d.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="98765 43210" /></Field>
+            <Field label="Alternate Number"><input className={inputCls()} inputMode="tel" value={d.altPhone} onChange={(e) => set({ altPhone: e.target.value })} /></Field>
+            <Field label={<>Email{tag("email")}</>} error={touched ? errors.email : undefined}><input className={inputCls(touched && !!errors.email)} value={d.email} onChange={(e) => set({ email: e.target.value })} placeholder="name@email.com" /></Field>
+          </div>
+          <p className="text-[11px] text-muted-foreground">Trip-only changes: the Customer Master and the Lead are not modified by edits here.</p>
+        </div>
+      )}
+
+      {/* ── STEP 2 · location ── */}
+      {!reviewOpen && step === 2 && (
+        <div className="space-y-4">
+          <ServiceLocationFields value={loc} onChange={setLoc} errors={locErrors} touched={touched}
+            addressLabel={d.type === "onsite" || d.type === "warranty_onsite" ? "Service location" : "Pickup from (customer location)"} />
+        </div>
+      )}
+
+      {/* ── STEP 3 · trip ── */}
+      {!reviewOpen && step === 3 && (
+        <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <Field label="Trip ID" hint="Generated by the server when you save. It is unique and never reused.">
               <div className={cn(inputCls(), "flex items-center gap-1.5 bg-muted/40 text-muted-foreground")}><Lock className="h-3 w-3" /> Auto-generated</div>
@@ -499,8 +605,8 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
             <Field label="Date & Time" required error={touched ? errors.date : undefined} hint="The scheduled trip date and exact slot — separate from when the record was created.">
               <DateTimePill date={d.date} time={d.time} title="Trip date & time" invalid={touched && !!errors.date} onChange={(dt, t) => set({ date: dt, time: t })} />
             </Field>
-            <Field label="Customer's Window" hint="The customer's preferred window, if different from the exact slot.">
-              <input className={inputCls()} value={d.window} onChange={(e) => set({ window: e.target.value })} placeholder="e.g. 11 AM – 1 PM" />
+            <Field label="Customer's Window" hint="The customer's preferred date and time window (from – to), if different from the exact slot.">
+              <WindowPickerField value={d.window} onChange={(v) => set({ window: v })} defaultDate={d.date} defaultTime={d.time} />
             </Field>
             <Field label={<>Type of Trip{tag("type")}</>} required>
               <RSelect className="h-[38px]" value={d.type} onChange={(v) => set({ type: v as FieldLeadType })} options={FIELD_LEAD_TYPES.map((t) => ({ label: t.label, value: t.value }))} />
@@ -514,37 +620,18 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
             <Field label="Store" required error={touched ? errors.storeId : undefined} hint="The OPERATIONAL store handling this trip. The Lead's own store is never overwritten.">
               <RSelect className="h-[38px]" value={d.storeId} onChange={(v) => set({ storeId: v, engineerId: "" })} options={stores.map((s) => ({ label: s.name, value: s.id }))} placeholder="Select store" />
             </Field>
-            <Field label="Ninja" hint="Optional now — can be assigned later. Workload = open trips.">
+            <Field label="Ninja" hint="Optional now — can be assigned later. Each Ninja shows their live status: Available, booked, on a job, in trip, on break or off duty.">
               <div className={cn(!canAssign && "pointer-events-none opacity-60")}>
                 <RSelect className="h-[38px]" value={d.engineerId} onChange={(v) => set({ engineerId: v })} searchable
-                  options={[{ label: canAssign ? "Assign later" : "No permission to assign", value: "" }, ...engineers.map((m) => ({ label: `${m.name} · ${activeJobCountFor(m.id, jobs)} open`, value: m.id }))]} />
+                  options={[{ label: canAssign ? "Assign later" : "No permission to assign", value: "" }, ...ninjaOptions]} />
               </div>
             </Field>
           </div>
         </div>
       )}
 
-      {/* ── STEP 2 ── */}
-      {!reviewOpen && step === 2 && (
-        <div className="space-y-4">
-          <Field label="Find existing customer">
-            <CustomerPicker className="[&>div:first-of-type]:min-h-[38px] [&>div:first-of-type]:rounded-xl [&>div:first-of-type]:py-1.5" customers={customers} value={d.customerId} placeholder="Search name / phone / email…"
-              onChange={() => {}} onCustomerSelected={(c) => { setD((p) => ({ ...p, customerId: c.id, name: c.fullName, phone: c.mobile, altPhone: c.altMobile ?? "", email: c.email })); if (!loc.address.trim()) setLoc((l) => ({ ...l, address: [c.address, c.city].filter(Boolean).join(", "), pincode: c.postalCode || l.pincode })); }} />
-          </Field>
-          <div className="grid grid-cols-2 gap-3">
-            <Field label={<>Customer Name{tag("name")}</>} required error={touched ? errors.name : undefined}><input className={inputCls(touched && !!errors.name)} value={d.name} onChange={(e) => set({ name: e.target.value })} placeholder="Full name" /></Field>
-            <Field label={<>Mobile Number{tag("phone")}</>} required error={touched ? errors.phone : undefined}><input className={inputCls(touched && !!errors.phone)} inputMode="tel" value={d.phone} onChange={(e) => set({ phone: e.target.value })} placeholder="98765 43210" /></Field>
-            <Field label="Alternate Number"><input className={inputCls()} inputMode="tel" value={d.altPhone} onChange={(e) => set({ altPhone: e.target.value })} /></Field>
-            <Field label={<>Email{tag("email")}</>} error={touched ? errors.email : undefined}><input className={inputCls(touched && !!errors.email)} value={d.email} onChange={(e) => set({ email: e.target.value })} placeholder="name@email.com" /></Field>
-          </div>
-          <p className="text-[11px] text-muted-foreground">Trip-only changes: the Customer Master and the Lead are not modified by edits here.</p>
-          <ServiceLocationFields value={loc} onChange={setLoc} errors={locErrors} touched={touched}
-            addressLabel={d.type === "onsite" || d.type === "warranty_onsite" ? "Service location" : "Pickup from (customer location)"} />
-        </div>
-      )}
-
-      {/* ── STEP 3 · devices (multi-device) ── */}
-      {!reviewOpen && step === 3 && (
+      {/* ── STEP 4 · devices (multi-device) ── */}
+      {!reviewOpen && step === 4 && (
         <div className="space-y-4">
           {/* Review pill — a view-only summary toggle, never a flow step. */}
           <div className="flex items-center justify-between gap-2">
@@ -596,24 +683,26 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
               </span>
             </div>
           )}
-          <ReviewGroup title="Initial Information" onEdit={() => go(1)} rows={[
+          <ReviewGroup title="Customer Information" onEdit={() => go(1)} rows={[
             ["Linked Lead", linked ? `${linked.leadNo} · ${linked.name || "Unnamed"}` : "None"],
+            ["Customer", d.name], ["Mobile", d.phone], ["Alternate Number", d.altPhone], ["Email", d.email],
+            ["Customer Master", d.customerId ? "Linked" : "New / unlinked"],
+          ]} />
+          <ReviewGroup title="Location Information" onEdit={() => go(2)} rows={[
+            ["Address", [loc.address, loc.pincode].filter(Boolean).join(" – ")], ["Landmark", loc.landmark],
+            ["Map", hasPin ? `Pinned (${loc.lat!.toFixed(5)}, ${loc.lng!.toFixed(5)})` : loc.mapsUrl ? "Link saved (no coordinates)" : ""],
+            ["Instructions", loc.instructions],
+          ]} />
+          <ReviewGroup title="Trip Information" onEdit={() => go(3)} rows={[
             ["Type of Trip", FIELD_LEAD_TYPES.find((t) => t.value === d.type)?.label],
             ["Date", d.date], ["Preferred Time", [formatHHmm(d.time), d.window].filter(Boolean).join(" · ")],
             ["Source", d.source], ["Store", storeName],
             ["Ninja", engineerName || "Assign later"],
             ["Assign By", meName || currentUser?.name],
           ]} />
-          <ReviewGroup title="Contact Information" onEdit={() => go(2)} rows={[
-            ["Customer", d.name], ["Mobile", d.phone], ["Alternate Number", d.altPhone], ["Email", d.email],
-            ["Address", [loc.address, loc.pincode].filter(Boolean).join(" – ")], ["Landmark", loc.landmark],
-            ["Map", hasPin ? `Pinned (${loc.lat!.toFixed(5)}, ${loc.lng!.toFixed(5)})` : loc.mapsUrl ? "Link saved (no coordinates)" : ""],
-            ["Instructions", loc.instructions],
-            ["Customer Master", d.customerId ? "Linked" : "New / unlinked"],
-          ]} />
           {(filledDevices.length > 0 ? filledDevices : d.devices).map((dev, i, arr) => (
             <ReviewGroup key={dev.id} title={arr.length > 1 ? `Device ${i + 1} of ${arr.length}` : "Device Information"}
-              onEdit={() => { setExpandedId(dev.id); go(3); }} rows={[
+              onEdit={() => { setExpandedId(dev.id); go(4); }} rows={[
                 ["Device", dev.label], ["Issue", dev.issue], ["IMEI / Serial", dev.imei],
                 ["Accessories", dev.accessories], ["Condition", dev.condition],
               ]} />
@@ -622,7 +711,7 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
             <div className="rounded-xl border border-border bg-card p-3.5">
               <div className="mb-1 flex items-center justify-between">
                 <h4 className="text-[11px] font-semibold uppercase tracking-wider text-zinc-500">Comment</h4>
-                <button type="button" onClick={() => go(3)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Edit</button>
+                <button type="button" onClick={() => go(4)} className="text-[11px] font-medium text-[#4361EE] hover:underline">Edit</button>
               </div>
               <p className="whitespace-pre-line text-[13px] text-foreground">{d.comment}</p>
             </div>

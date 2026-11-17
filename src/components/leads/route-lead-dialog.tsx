@@ -26,6 +26,7 @@ import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Button } from "@/components/ui/button";
 import { RSelect } from "@/components/ui/rselect";
 import { DateTimePill } from "@/components/ui/date-time-pill";
+import { WindowPickerField } from "@/components/ui/window-picker";
 import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/utils";
 import { useLeads } from "@/lib/leads-context";
@@ -292,7 +293,7 @@ function RouteInner({ lead, onClose }: { lead: Lead; onClose: () => void }) {
               <DateTimePill date={date} time={time} title="Trip date & time" onChange={(d, t) => { setDate(d); setTime(t); }} />
             </div>
             <div className="space-y-1.5"><label className="flex h-5 items-center gap-1 text-[12px] font-medium text-zinc-700">Customer's window</label>
-              <input value={window_} onChange={(e) => setWindow(e.target.value)} placeholder="11 AM – 1 PM" className="h-[38px] w-full rounded-xl border border-input bg-card px-3 text-[13px] outline-none focus:border-[#4361EE] focus:ring-2 focus:ring-[#4361EE]/15" /></div>
+              <WindowPickerField value={window_} onChange={setWindow} defaultDate={date} defaultTime={time} /></div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
