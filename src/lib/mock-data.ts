@@ -159,6 +159,8 @@ export type DeviceRecord = {
   qcTemplateId?: string;
   /** Status tracking per device */
   status: TicketStatus;
+  /** Custom status id for this device (see Ticket.statusId). */
+  statusId?: string;
 };
 
 /** Helper: create a blank DeviceRecord with defaults */
@@ -600,6 +602,8 @@ export type Ticket = {
   items?: TicketItem[];
   parts?: TicketPart[];
   status: TicketStatus;
+  /** Custom status (Settings → Tickets) shown for `status`; honoured only while its base equals `status`. */
+  statusId?: string;
   priority: TicketPriority;
   technician: string;
   createdAt: string;
@@ -765,10 +769,7 @@ export const navItems: NavItem[] = [
   { href: "/shop/payments",    label: "Payments",      icon: "Wallet", permission: "manage_payments" },
   { href: "/walk-in",          label: "Walk-In",       icon: "WalkIn", permission: "use_pos" },
   { href: "/field",            label: "Pickup & Drop", icon: "Truck", permission: "view_field_jobs" },
-  { href: "/field/dispatch",    label: "Dispatch Board", icon: "ClipboardList", permission: ["manage_field_jobs", "assign_ninja", "receive_store_handoff", "field_view_all"] },
-  { href: "/field/dashboard",   label: "Field Dashboards", icon: "BarChart3", permission: ["view_field_reports", "field_view_all", "manage_field_jobs"] },
-  { href: "/field/reports",     label: "Field Reports",    icon: "ClipboardList", permission: "view_field_reports" },
-  { href: "/field/ops-report",  label: "Ninja Operations", icon: "BarChart3", permission: ["view_field_reports", "field_view_all", "manage_field_jobs"] },
+  { href: "/field/insights",    label: "Field Insights", icon: "BarChart3", permission: ["view_field_reports", "field_view_all", "manage_field_jobs"] },
   { href: "/price-list",       label: "Price List",    icon: "ClipboardList", permission: ["manage_sales", "manage_repair_jobs"] },
   { href: "/expenses",         label: "Expenses",      icon: "IndianRupee", permission: "manage_payments" },
 
@@ -2117,7 +2118,7 @@ export const navGroups: Record<WorkspaceId, { label: string; items: string[] }[]
     { label: "GENERAL",        items: ["/activity", "/reports", "/settings"] },
   ],
   operations: [
-    { label: "MODULE",     items: ["/operations", "/field", "/field/dispatch", "/field/dashboard", "/field/reports", "/field/ops-report", "/stock"] },
+    { label: "MODULE",     items: ["/operations", "/field", "/field/insights", "/stock"] },
     { label: "PURCHASING", items: ["/operations/vendors", "/operations/purchase-orders", "/operations/transfers", "/operations/products"] },
     { label: "GENERAL",    items: ["/operations/reports", "/settings"] },
   ],

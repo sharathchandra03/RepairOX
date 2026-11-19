@@ -327,6 +327,8 @@ function rowToOption(r: any): LeadOption {
     value: r.value ?? "",
     sortOrder: Number(r.sort_order ?? 0),
     active: r.active !== false,
+    icon: r.icon || undefined,
+    color: r.color || undefined,
     createdAt: r.created_at ?? new Date().toISOString(),
     updatedAt: r.updated_at ?? new Date().toISOString(),
   };
@@ -582,6 +584,8 @@ interface LeadsContextValue {
 
   addOption: (field: LeadFieldKey, value: string) => Promise<void>;
   updateOption: (id: string, value: string) => Promise<void>;
+  /** Set an option's display icon / colour (undefined = back to automatic). */
+  updateOptionStyle: (id: string, style: { icon?: string; color?: string }) => Promise<void>;
   setOptionActive: (id: string, active: boolean) => Promise<void>;
   reorderOptions: (field: LeadFieldKey, orderedIds: string[]) => Promise<void>;
   /** Permanently remove an option. */
@@ -2348,6 +2352,15 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     setOptions((prev) => { const next = [...prev, opt]; writeLS(OPTIONS_KEY, next); return next; });
   }, [useDb, db]);
 
+  const updateOptionStyle = useCallback(async (id: string, style: { icon?: string; color?: string }) => {
+    const icon = style.icon?.trim() || undefined;
+    const color = style.color && /^#[0-9a-fA-F]{6}$/.test(style.color) ? style.color : undefined;
+    if (useDb) {
+      const { error } = await db.from("lead_options").update({ icon: icon ?? null, color: color ?? null }).eq("id", id);
+      if (error) { console.error("[leads] updateOptionStyle failed:", error.message); toast.error("Style not saved", { description: "We couldn't save this icon/colour. Please try again." }); return; }
+    }
+    setOptions((prev) => { const next = prev.map((o) => (o.id === id ? { ...o, icon, color } : o)); if (!useDb) writeLS(OPTIONS_KEY, next); return next; });
+  }, [useDb, db]);
   const updateOption = useCallback(async (id: string, value: string) => {
     const trimmed = value.trim();
     if (!trimmed) return;
@@ -2584,11 +2597,11 @@ export function LeadsProvider({ children }: { children: ReactNode }) {
     assignmentHistory, assignmentHistoryFor, registerReferenceRows,
     conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity,
     leadMetrics,
-    addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
+    addOption, updateOption, updateOptionStyle, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption,
     fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden,
     contacts, addContact, updateContact, deleteContact,
   }), [scopedLeads, filteredLeads, options, hydrated, loadErrors, useDb, filters, setFilters, clearFilters, optionsFor, addLead, updateLead, deleteLead, restoreTrashedLead, assignLead, pinLead, routeLead, changeLeadStatus,
-    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, registerReferenceRows, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
+    salesAgents, salesAgentsReady, salesAgentsFor, isEligibleSalesAgent, currentUserIsSalesAgent, refreshSalesAgents, canSeeAllLeads, canChangeLeadOwner, effectiveViewAsId, canViewAsAgent, viewAsReadOnly, setViewAsAgent, followUps, followUpsFor, openFollowUpsByLead, scheduleFollowUp, completeFollowUp, cancelFollowUp, updateFollowUpComment, assignmentHistory, assignmentHistoryFor, registerReferenceRows, conversionHistory, conversionHistoryFor, recordConversionEvent, linkOperationalRecord, autoLinkByIdentity, leadMetrics, addOption, updateOption, updateOptionStyle, setOptionActive, reorderOptions, deleteOption, countLeadsUsingOption, fieldTitle, setFieldTitle, hiddenFields, isFieldHidden, setFieldHidden, contacts, addContact, updateContact, deleteContact]);
 
   return <LeadsContext.Provider value={value}>{children}</LeadsContext.Provider>;
 }

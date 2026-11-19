@@ -215,6 +215,10 @@ export interface LeadOption {
   sortOrder: number;
   /** false = archived: hidden from NEW dropdowns, but existing leads keep it. */
   active: boolean;
+  /** Display icon chosen in Settings: "i:<icon key>" or an emoji. Unset = automatic. */
+  icon?: string;
+  /** Display colour #RRGGBB chosen in Settings. Unset = automatic. */
+  color?: string;
   createdAt: string;
   updatedAt: string;
 }

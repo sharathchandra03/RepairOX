@@ -20,7 +20,8 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { QuickEditDrawer } from "@/components/ui/quick-edit-drawer";
 import { Drawer } from "@/components/ui/drawer";
 import { ModalPortal } from "@/components/ui/modal-portal";
-import { StatusPillSelect } from "@/components/ui/status-pill-select";
+import { statusGroups, resolveStatus } from "@/lib/ticket-status-config";
+import { ResolvedStatusPill } from "@/components/tickets/resolved-status-pill";
 import { StatusPillDropdown } from "@/components/tickets/inline-status-dropdown";
 import { useStore } from "@/lib/store";
 import { usePermissions } from "@/lib/permissions-context";
@@ -385,11 +386,11 @@ export default function TicketDetailPage() {
     }
   }, [ticket, deleteTicket, router]);
 
-  const handleStatusChange = useCallback((status: TicketStatus) => {
+  const handleStatusChange = useCallback((status: TicketStatus, statusId?: string) => {
     if (ticket) {
       // Update all device statuses along with the ticket status
-      const updatedDevices = ticket.devices?.map((d) => ({ ...d, status }));
-      updateTicket(ticket.id, { status, devices: updatedDevices });
+      const updatedDevices = ticket.devices?.map((d) => ({ ...d, status, statusId }));
+      updateTicket(ticket.id, { status, statusId, devices: updatedDevices });
       // Deduct inventory when ticket is repaired
       if (status === "repaired") {
         const hasPlannedParts = ticket.devices
@@ -549,10 +550,7 @@ export default function TicketDetailPage() {
                     {ESTIMATE_STATUS_LABEL[estimateStatus]}
                   </span>
                 ) : (
-                  <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
-                    <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                    {STATUS_LABEL[ticket.status]}
-                  </span>
+                  <ResolvedStatusPill status={ticket.status} statusId={ticket.statusId} className="px-2.5 py-1" />
                 )}
                 {ticket.priority !== "normal" && (
                   <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${PRIORITY_TONE[ticket.priority]}`}>
@@ -807,7 +805,8 @@ export default function TicketDetailPage() {
                         <div className="ml-auto">
                           <StatusPillDropdown
                             status={dev.status}
-                            onSelect={(next) => updateDeviceStatus(ticket.id, dev.id, next)}
+                            statusId={dev.statusId}
+                            onSelect={(next, id) => updateDeviceStatus(ticket.id, dev.id, next, id)}
                             statusColors={settings.statusColors}
                             hasInvoice={invoices.some((inv) => inv.ticketId === ticket.id)}
                             size="sm"
@@ -873,10 +872,7 @@ export default function TicketDetailPage() {
               </div>
               <div>
                 <p className="text-[11px] font-medium text-muted-foreground mb-1">Status</p>
-                <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-medium ring-1 ring-inset ${STATUS_TONE[ticket.status]}`}>
-                  <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                  {STATUS_LABEL[ticket.status]}
-                </span>
+                <ResolvedStatusPill status={ticket.status} statusId={ticket.statusId} className="px-2.5 py-0.5" />
               </div>
               <DetailField label="Estimated Cost" value={formatINR(ticket.amount)} />
               <DetailField label="Created" value={fmtDate(ticket.createdAt)} />
@@ -1291,11 +1287,13 @@ export default function TicketDetailPage() {
                       </p>
                     )}
                   </div>
-                  <StatusPillSelect
-                    value={ticket.status}
-                    onChange={(v: TicketStatus) => handleStatusChange(v)}
-                    blockedStatuses={!linkedInvoice && ticket.status !== "repaired_collected" ? ["repaired_collected"] : undefined}
-                    blockedReason="Create an invoice before selecting Repaired & Collected"
+                  <StatusPillDropdown
+                    status={ticket.status}
+                    statusId={ticket.statusId}
+                    onSelect={(v, id) => handleStatusChange(v, id)}
+                    statusColors={settings.statusColors}
+                    hasInvoice={!!linkedInvoice}
+                    size="md"
                   />
                 </div>
               )}
@@ -1434,28 +1432,31 @@ export default function TicketDetailPage() {
             className="w-full max-w-xs rounded-2xl bg-card shadow-2xl ring-1 ring-border p-5">
             <p className="text-sm font-bold mb-1">Change Status</p>
             <p className="text-[11px] text-muted-foreground mb-4">Ticket {ticket.id}</p>
-            <div className="space-y-2">
-              {(["in_progress", "repaired", "repaired_collected", "waiting_approval", "waiting_parts", "return", "return_collected"] as TicketStatus[]).map((s) => {
-                // Keep "Repaired & Collected" visible but unavailable until an
-                // invoice exists (rule also enforced in the store).
-                const isBlocked = s === "repaired_collected" && !linkedInvoice && ticket.status !== "repaired_collected";
-                return (
-                  <button key={s} disabled={isBlocked}
-                    title={isBlocked ? "Create an invoice before selecting Repaired & Collected" : undefined}
-                    onClick={() => { if (isBlocked) return; handleStatusChange(s); }}
-                    className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", isBlocked ? "cursor-not-allowed opacity-45 border-border" : ticket.status === s ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
-                    <span className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ring-1 ring-inset ${STATUS_TONE[s]}`}>
-                      <span className="h-1.5 w-1.5 rounded-full bg-current" />
-                      {STATUS_LABEL[s]}
-                    </span>
-                    {isBlocked ? (
-                      <Ban className="ml-auto h-4 w-4 text-rose-400" aria-label="Unavailable — needs invoice" />
-                    ) : ticket.status === s ? (
-                      <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span>
-                    ) : null}
-                  </button>
-                );
-              })}
+            <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-1">
+              {statusGroups(settings.ticketStatusConfig, settings.statusColors).map((g) => (
+                <div key={g.category.id} className="space-y-1.5">
+                  <div className="flex items-center gap-2"><span className="h-px flex-1 bg-border" /><span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{g.category.name}</span><span className="h-px flex-1 bg-border" /></div>
+                  {g.options.map((o) => {
+                    const isBlocked = o.status === "repaired_collected" && !linkedInvoice && ticket.status !== "repaired_collected";
+                    const cur = resolveStatus(ticket.status, ticket.statusId, settings.ticketStatusConfig, settings.statusColors);
+                    const active = o.status === ticket.status && (o.statusId ?? undefined) === (cur.statusId ?? undefined);
+                    return (
+                      <button key={o.key} disabled={isBlocked}
+                        title={isBlocked ? `Create an invoice before selecting ${o.label}` : undefined}
+                        onClick={() => { if (isBlocked) return; handleStatusChange(o.status, o.statusId); }}
+                        className={cn("flex w-full items-center gap-3 rounded-xl border px-4 py-2.5 text-left transition", isBlocked ? "cursor-not-allowed opacity-45 border-border" : active ? "border-[#4361EE] bg-indigo-50/50" : "border-border hover:border-zinc-300")}>
+                        <span className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium"
+                          style={{ backgroundColor: `${o.color}15`, color: o.color, boxShadow: `inset 0 0 0 1px ${o.color}30` }}>
+                          <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: o.color }} />
+                          {o.label}
+                        </span>
+                        {isBlocked ? <Ban className="ml-auto h-4 w-4 text-rose-400" aria-label="Unavailable — needs invoice" />
+                          : active ? <span className="ml-auto text-[10px] font-semibold text-[#4361EE]">Current</span> : null}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
             </div>
           </motion.div>
         </div>

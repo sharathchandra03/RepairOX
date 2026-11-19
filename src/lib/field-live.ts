@@ -43,14 +43,21 @@ export function buildJobLive(trips: LiveTripRow[], rejections: LiveAssignmentRow
 export const needsReassign = (l?: JobLive | null) => !!l?.rejected;
 export const isRejectBlinking = (l: JobLive | null | undefined, nowMs: number) => !!l?.rejected && nowMs - new Date(l.rejected.at).getTime() < REJECT_BLINK_MS;
 
+/** Trip statuses that need the Field Manager to plan the trip again. */
+export const REPLAN_STATUSES: TripStatus[] = ["failed_attempt", "customer_unavailable", "rescheduled", "return_to_store"];
 /** Action of Trip with the Ninja's live state layered over the legacy status. */
 export function effectiveAction(job: Pick<FieldJob, "status" | "leadType" | "linkedTicketId">, live?: JobLive | null): TripAction {
   if (live?.rejected) return { label: "Rejected · Reassign", tone: "danger", reason: "The Ninja rejected this assignment. Assign another Ninja." };
   if (live?.status === "assigned") return { label: "Awaiting Ninja Accept", tone: "warn", reason: "Assigned; the Ninja has not accepted yet." };
+  const jobClosed = job.status === "completed" || job.status === "cancelled";
+  if (live && !jobClosed) {
+    if (live.status === "handover_pending") return { label: "Store to Confirm Receipt", tone: "warn", reason: "The Ninja has handed the device to the store. Store staff must confirm receipt." };
+    if (live.trip_type === "drop" && live.status === "arrived_store") return { label: "Release Device to Ninja", tone: "warn", reason: "The drop Ninja is at the store. Store staff must release the repaired device." };
+    if (REPLAN_STATUSES.includes(live.status)) return { label: "Needs Re-plan", tone: "danger", reason: "The trip could not be completed. Re-plan it with a new time or Ninja." };
+  }
   return fieldTripAction(job);
 }
-export const EXTRA_ACTION_LABELS = ["Rejected · Reassign", "Awaiting Ninja Accept"];
-
+export const EXTRA_ACTION_LABELS = ["Rejected · Reassign", "Awaiting Ninja Accept", "Store to Confirm Receipt", "Release Device to Ninja", "Needs Re-plan"];
 /** Journey stages for the horizontal tracker: Assigned → Accepted → … → Done. */
 export function stagesFor(type: TripType): { key: TripStatus; label: string }[] {
   const mid = stepperFor({ trip_type: type } as NinjaTrip).filter((s) => s.key !== "accepted");

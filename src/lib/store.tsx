@@ -119,7 +119,7 @@ interface StoreActions {
   updateTicket: (id: string, updates: Partial<Ticket>) => Promise<void>;
   deleteTicket: (id: string) => Promise<void>;
   bulkUpdateStatus: (ids: string[], status: TicketStatus) => Promise<void>;
-  updateDeviceStatus: (ticketId: string, deviceId: string, status: TicketStatus) => Promise<void>;
+  updateDeviceStatus: (ticketId: string, deviceId: string, status: TicketStatus, statusId?: string) => Promise<void>;
   addInvoice: (invoice: Invoice) => Promise<string>;
   updateInvoice: (id: string, updates: Partial<Invoice>) => Promise<void>;
   deleteInvoice: (id: string) => Promise<void>;
@@ -318,6 +318,7 @@ function rowToTicket(r: any): Ticket {
     sourceInvoiceId: meta.sourceInvoiceId ?? undefined,
     createdFromTicketId: meta.createdFromTicketId ?? undefined,
     createdFromReason: meta.createdFromReason ?? undefined,
+    statusId: meta.statusId ?? undefined,
     pinnedAt: r.pinned_at ?? undefined,
     ticketNo: r.ticket_no ?? undefined,
   };
@@ -358,6 +359,7 @@ function ticketDevicesEnvelope(t: Partial<Ticket>): Record<string, unknown> {
     sourceInvoiceId: t.sourceInvoiceId || null,
     createdFromTicketId: t.createdFromTicketId || null,
     createdFromReason: t.createdFromReason || null,
+    statusId: t.statusId || null,
   };
 }
 
@@ -2291,7 +2293,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         "recordType", "estimateStatus", "convertedTicketId", "convertedFromEstimateId",
         "proformaId", "invoiceId",
         "parentTicketId", "parentTicketNo", "warrantyDeviceIds", "warrantyIssue",
-        "warrantyStatus", "sourceInvoiceId", "createdFromTicketId", "createdFromReason",
+        "warrantyStatus", "sourceInvoiceId", "createdFromTicketId", "createdFromReason", "statusId",
       ] as const;
       if (envelopeKeys.some((k) => k in updates)) {
         row.devices = ticketDevicesEnvelope({ ...(prev ?? {}), ...updates });
@@ -2446,7 +2448,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
    * invoice exists for the ticket (same rule updateTicket enforces). This keeps
    * the collected/billing state honest at the device level too.
    */
-  const updateDeviceStatus = useCallback(async (ticketId: string, deviceId: string, status: TicketStatus) => {
+  const updateDeviceStatus = useCallback(async (ticketId: string, deviceId: string, status: TicketStatus, statusId?: string) => {
     const ticket = stateRef.current.tickets.find((t) => t.id === ticketId);
     if (!ticket) return;
 
@@ -2455,7 +2457,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const currentDevices = getTicketDevices(ticket);
     const target = currentDevices.find((d) => d.id === deviceId);
     if (!target) return;
-    if (target.status === status) return; // no-op
+    if (target.status === status && (target.statusId || undefined) === (statusId || undefined)) return; // no-op
 
     // ── Business rule: block a device moving to "Repaired & Collected" without
     // an invoice — mirrors the ticket-level rule so it can't be bypassed here.
@@ -2470,14 +2472,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
 
     const prevDeviceStatus = target.status;
-    const nextDevices = currentDevices.map((d) => (d.id === deviceId ? { ...d, status } : d));
+    const nextDevices = currentDevices.map((d) => (d.id === deviceId ? { ...d, status, statusId: statusId || undefined } : d));
     const nextTicketStatus = deriveTicketStatus(nextDevices);
+    // Ticket-level custom status follows the device that drives the rollup.
+    const nextTicketStatusId = nextDevices.find((d) => d.status === nextTicketStatus && d.statusId)?.statusId;
 
     if (shouldUseDb()) {
       // Persist the devices array (device-level status) AND the recomputed
       // aggregate ticket status in a single update. Reuse ticketToRow's device
       // serialization so the {records, ...meta} shape is preserved.
-      const devicesJson = ticketToRow({ ...ticket, devices: nextDevices }).devices;
+      const devicesJson = ticketToRow({ ...ticket, devices: nextDevices, statusId: nextTicketStatusId }).devices;
       let currentRow: Record<string, unknown> = { devices: devicesJson, status: nextTicketStatus };
       let { error } = await db.from("tickets").update(currentRow).eq("id", ticketId);
       // Schema-drift resilience (mirrors updateTicket).
@@ -2499,7 +2503,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
     setState((s) => ({
       ...s,
-      tickets: s.tickets.map((t) => (t.id === ticketId ? { ...t, devices: nextDevices, status: nextTicketStatus } : t)),
+      tickets: s.tickets.map((t) => (t.id === ticketId ? { ...t, devices: nextDevices, status: nextTicketStatus, statusId: nextTicketStatusId } : t)),
     }));
 
     // Mirror the recomputed aggregate onto linked invoices' repairStatus so both

@@ -303,8 +303,8 @@ export default function Dashboard() {
   // logic as the Tickets module (updateTicket + parts deduction when a ticket
   // becomes "repaired"). The store owns the Ticket↔Invoice status sync and the
   // "Repaired & Collected" guard, so no business rule is duplicated here.
-  const handleCriticalStatusChange = useCallback((ticketId: string, status: TicketStatus) => {
-    updateTicket(ticketId, { status });
+  const handleCriticalStatusChange = useCallback((ticketId: string, status: TicketStatus, statusId?: string) => {
+    updateTicket(ticketId, { status, statusId });
     if (status === "repaired") {
       const t = tickets.find((tk) => tk.id === ticketId);
       if (t?.parts?.some((p) => p.status === "planned")) {

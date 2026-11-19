@@ -30,22 +30,14 @@
  * one place.
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronDown, Ban } from "lucide-react";
-import { STATUS_LABEL, type TicketStatus, type Ticket } from "@/lib/mock-data";
+import { ChevronDown, Ban, Search, Check } from "lucide-react";
+import { type TicketStatus, type Ticket } from "@/lib/mock-data";
+import { useStoreSettings } from "@/lib/store-settings";
+import { resolveStatus, statusGroups } from "@/lib/ticket-status-config";
+import { ModalPortal, Z } from "@/components/ui/modal-portal";
 import { cn } from "@/lib/utils";
-
-/** The selectable statuses, in the same order the Tickets module presents them. */
-const STATUS_OPTIONS: { label: string; value: TicketStatus }[] = [
-  { label: "In Progress", value: "in_progress" },
-  { label: "Repaired", value: "repaired" },
-  { label: "Repaired & Collected", value: "repaired_collected" },
-  { label: "Waiting for Approval", value: "waiting_approval" },
-  { label: "Waiting for Parts", value: "waiting_parts" },
-  { label: "Returned", value: "return" },
-  { label: "Returned & Collected", value: "return_collected" },
-];
 
 /** Compact size variant used inside device cards; `md` matches the list row. */
 type PillSize = "sm" | "md";
@@ -58,36 +50,46 @@ const PILL_SIZE: Record<PillSize, string> = {
 /**
  * StatusPillDropdown — reusable, scope-agnostic status pill + menu.
  *
- * Renders `status` as a coloured pill (using `statusColors`) and, on click,
- * opens the shared portal menu of statuses. Calls `onSelect(nextStatus)` when
- * the user picks one. Used for both ticket-level and device-level status.
+ * Shows the record's status (custom status label/colour when one is set) and,
+ * on click, a searchable menu GROUPED BY CATEGORY (Settings → Tickets →
+ * Statuses & Categories): system statuses + custom statuses. Picking a custom
+ * status calls `onSelect(baseStatus, customId)` — the base keeps every
+ * business rule working; picking a system status passes `statusId` undefined.
  */
 export function StatusPillDropdown({
   status,
+  statusId,
   onSelect,
   statusColors,
   hasInvoice,
   size = "md",
   ariaLabel,
+  fill = false,
 }: {
+  /** Table mode: the pill fills its column (stable width, label truncates,
+   *  chevron pinned right) — the RepairOX table-pill standard. */
+  fill?: boolean;
   status: TicketStatus;
-  onSelect: (status: TicketStatus) => void;
+  statusId?: string;
+  onSelect: (status: TicketStatus, statusId?: string) => void;
   statusColors: Record<string, string>;
   hasInvoice: boolean;
   size?: PillSize;
   /** Optional accessible label prefix, e.g. a device name, for screen readers. */
   ariaLabel?: string;
 }) {
+  const { settings } = useStoreSettings();
+  const config = settings.ticketStatusConfig;
   const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
   const [pos, setPos] = useState<{ top: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
-  const [hoveredBlocked, setHoveredBlocked] = useState<TicketStatus | null>(null);
+  const [hoveredBlocked, setHoveredBlocked] = useState<string | null>(null);
   const btnRef = useRef<HTMLButtonElement>(null);
   const tooltipTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Themed tooltip appears quickly (0.3s) instead of the native ~1.5s browser delay.
-  const showTooltip = (s: TicketStatus) => {
+  const showTooltip = (k: string) => {
     if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
-    tooltipTimer.current = setTimeout(() => setHoveredBlocked(s), 300);
+    tooltipTimer.current = setTimeout(() => setHoveredBlocked(k), 300);
   };
   const hideTooltip = () => {
     if (tooltipTimer.current) clearTimeout(tooltipTimer.current);
@@ -99,45 +101,54 @@ export function StatusPillDropdown({
     if (!open && btnRef.current) {
       const rect = btnRef.current.getBoundingClientRect();
       const spaceBelow = window.innerHeight - rect.bottom;
-      const dropUp = spaceBelow < 300;
-      setPos({ top: dropUp ? rect.top : rect.bottom + 6, left: rect.left, dropUp });
+      const dropUp = spaceBelow < 360 && rect.top > spaceBelow;
+      setPos({ top: dropUp ? rect.top : rect.bottom + 6, left: Math.min(rect.left, window.innerWidth - 248), dropUp });
+      setQ("");
     }
     setOpen(!open);
   };
 
-  const activeColor = statusColors[status] || "#71717A";
+  const current = resolveStatus(status, statusId, config, statusColors);
+  const groups = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    return statusGroups(config, statusColors)
+      .map((g) => ({ ...g, options: needle ? g.options.filter((o) => o.label.toLowerCase().includes(needle) || g.category.name.toLowerCase().includes(needle)) : g.options }))
+      .filter((g) => g.options.length > 0);
+  }, [config, statusColors, q]);
+  const isCurrent = (o: { status: TicketStatus; statusId?: string }) => o.status === status && (o.statusId ?? undefined) === (current.statusId ?? undefined);
   const labelPrefix = ariaLabel ? `${ariaLabel} — ` : "";
 
-  // NOTE: The status is intentionally NOT locked after invoice creation. Users
-  // may still change a device/ticket status after an invoice exists (e.g. a
-  // correction, a return, or moving a collected job onward). The only remaining
-  // guard is that "Repaired & Collected" cannot be selected UNTIL an invoice
-  // exists (see isBlocked below) — which no longer applies once invoiced.
+  // NOTE: the status is intentionally NOT locked after invoice creation. The
+  // only guard: anything that behaves as "Repaired & Collected" needs an
+  // invoice first (also enforced in the store, so it can't be bypassed).
 
   return (
-    <div className="relative flex justify-start" onClick={(e) => e.stopPropagation()}>
+    <div className={cn("relative flex justify-start", fill && "w-full")} onClick={(e) => e.stopPropagation()}>
       <button
         ref={btnRef}
         onClick={handleOpen}
-        aria-label={ariaLabel ? `${labelPrefix}status: ${STATUS_LABEL[status]}` : undefined}
+        aria-label={`${labelPrefix}status: ${current.label}`}
+        title={current.categoryName ? `${current.categoryName} · ${current.label}` : current.label}
         className={cn(
-          "inline-flex items-center gap-1.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm",
+          "max-w-full items-center gap-1.5 rounded-full font-medium ring-1 ring-inset whitespace-nowrap cursor-pointer transition hover:shadow-sm",
+          fill ? "flex w-full min-w-0" : "inline-flex",
           PILL_SIZE[size]
         )}
         style={{
-          backgroundColor: `${activeColor}15`,
-          color: activeColor,
-          boxShadow: `inset 0 0 0 1px ${activeColor}30`,
+          backgroundColor: `${current.color}15`,
+          color: current.color,
+          boxShadow: `inset 0 0 0 1px ${current.color}30`,
         }}
       >
-        <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeColor }} />
-        {STATUS_LABEL[status]}
-        <ChevronDown className="h-3 w-3 opacity-60" />
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: current.color }} />
+        <span className={cn("truncate", fill && "min-w-0 flex-1 text-left")}>{current.label}</span>
+        <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
       </button>
+      <ModalPortal>
       <AnimatePresence>
         {open && (
           <>
-            <div className="fixed inset-0 z-[60]" onClick={() => setOpen(false)} />
+            <div className={`fixed inset-0 ${Z.overlay}`} onClick={() => setOpen(false)} />
             <motion.div
               initial={{ opacity: 0, y: pos.dropUp ? 4 : -4, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -149,58 +160,67 @@ export function StatusPillDropdown({
                 bottom: pos.dropUp ? (window.innerHeight - pos.top + 6) : undefined,
                 left: pos.left,
               }}
-              className="z-[70] w-[200px] rounded-xl border border-border bg-card p-1.5 shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+              className={`${Z.overlayPanel} w-[240px] overflow-hidden rounded-xl border border-border bg-card shadow-xl`}
             >
-              {STATUS_OPTIONS.map((s) => {
-                const sColor = statusColors[s.value] || "#71717A";
-                // "Repaired & Collected" stays visible but is unavailable until
-                // an invoice exists. The rule is also enforced in the store so
-                // it can't be bypassed from any other path.
-                const isBlocked = s.value === "repaired_collected" && !hasInvoice && status !== "repaired_collected";
-                return (
-                  <div
-                    key={s.value}
-                    className="relative"
-                    onMouseEnter={() => isBlocked && showTooltip(s.value)}
-                    onMouseLeave={() => isBlocked && hideTooltip()}
-                  >
-                    <button
-                      disabled={isBlocked}
-                      onClick={() => { if (isBlocked) return; onSelect(s.value); setOpen(false); }}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[11px] font-medium transition",
-                        isBlocked
-                          ? "cursor-not-allowed opacity-45"
-                          : status === s.value ? "bg-indigo-50 text-[#4361EE]" : "hover:bg-zinc-50 text-foreground"
-                      )}
-                    >
-                      <span className="h-2 w-2 rounded-full ring-1 ring-inset ring-black/10" style={{ backgroundColor: sColor }} />
-                      {s.label}
-                      {isBlocked ? (
-                        <Ban className="ml-auto h-3.5 w-3.5 text-rose-400" aria-label="Unavailable — needs invoice" />
-                      ) : status === s.value ? (
-                        <span className="ml-auto text-[9px] font-semibold text-[#4361EE]">✓</span>
-                      ) : null}
-                    </button>
-                    {isBlocked && hoveredBlocked === s.value && (
-                      <div
-                        role="tooltip"
-                        className="pointer-events-none absolute left-full top-1/2 z-[80] ml-2 w-max max-w-[210px] -translate-y-1/2 animate-in fade-in-0 zoom-in-95 duration-150"
-                      >
-                        <div className="relative flex items-center gap-2 rounded-xl border border-[#4361EE]/20 bg-card px-3 py-2 text-[11px] font-medium leading-snug text-foreground shadow-lg ring-1 ring-black/[0.02]">
-                          <Ban className="h-3.5 w-3.5 shrink-0 text-rose-500" />
-                          <span>Create an invoice before selecting Repaired &amp; Collected</span>
-                          <span className="absolute -left-1 top-1/2 h-2 w-2 -translate-y-1/2 rotate-45 border-b border-l border-[#4361EE]/20 bg-card" />
+              {/* Search */}
+              <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+                <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search statuses…"
+                  className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-muted-foreground" />
+              </div>
+              <div className="max-h-[300px] overflow-y-auto p-1.5 rox-rail-scroll">
+                {groups.length === 0 && <p className="px-3 py-4 text-center text-[11.5px] text-muted-foreground">No matching status</p>}
+                {groups.map((g) => (
+                  <div key={g.category.id}>
+                    {/* Category divider — "──── Open ────" */}
+                    <div className="flex items-center gap-2 px-2 pb-1 pt-2">
+                      <span className="h-px flex-1 bg-border" />
+                      <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{g.category.name}</span>
+                      <span className="h-px flex-1 bg-border" />
+                    </div>
+                    {g.options.map((o) => {
+                      const isBlocked = o.status === "repaired_collected" && !hasInvoice && status !== "repaired_collected";
+                      const active = isCurrent(o);
+                      return (
+                        <div key={o.key} className="relative"
+                          onMouseEnter={() => isBlocked && showTooltip(o.key)}
+                          onMouseLeave={() => isBlocked && hideTooltip()}>
+                          <button
+                            disabled={isBlocked}
+                            onClick={() => { if (isBlocked) return; onSelect(o.status, o.statusId); setOpen(false); }}
+                            className={cn(
+                              "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-[12px] font-medium transition",
+                              isBlocked ? "cursor-not-allowed opacity-45" : active ? "bg-indigo-50 text-[#4361EE]" : "text-foreground hover:bg-zinc-50",
+                            )}
+                          >
+                            {/* Ring-dot, like the reference: colour ring + filled centre */}
+                            <span className="grid h-3.5 w-3.5 shrink-0 place-items-center rounded-full" style={{ boxShadow: `inset 0 0 0 2px ${o.color}` }}>
+                              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: o.color }} />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate">{o.label}</span>
+                            {isBlocked ? <Ban className="h-3.5 w-3.5 shrink-0 text-rose-400" aria-label="Unavailable — needs invoice" />
+                              : active ? <Check className="h-3.5 w-3.5 shrink-0 text-[#4361EE]" /> : null}
+                          </button>
+                          {isBlocked && hoveredBlocked === o.key && (
+                            <div role="tooltip" className="pointer-events-none absolute right-full top-1/2 z-[80] mr-2 w-max max-w-[210px] -translate-y-1/2">
+                              <div className="flex items-center gap-2 rounded-xl border border-[#4361EE]/20 bg-card px-3 py-2 text-[11px] font-medium leading-snug text-foreground shadow-lg">
+                                <Ban className="h-3.5 w-3.5 shrink-0 text-rose-500" />
+                                <span>Create an invoice before selecting {o.label}</span>
+                              </div>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    )}
+                      );
+                    })}
                   </div>
-                );
-              })}
+                ))}
+              </div>
             </motion.div>
           </>
         )}
       </AnimatePresence>
+      </ModalPortal>
     </div>
   );
 }
@@ -215,19 +235,23 @@ export function InlineStatusDropdown({
   onStatusChange,
   statusColors,
   hasInvoice,
+  fill,
 }: {
+  fill?: boolean;
   ticket: Ticket;
-  onStatusChange: (ticketId: string, status: TicketStatus) => void;
+  onStatusChange: (ticketId: string, status: TicketStatus, statusId?: string) => void;
   statusColors: Record<string, string>;
   hasInvoice: boolean;
 }) {
   return (
     <StatusPillDropdown
       status={ticket.status}
-      onSelect={(s) => onStatusChange(ticket.id, s)}
+      statusId={ticket.statusId}
+      onSelect={(s, id) => onStatusChange(ticket.id, s, id)}
       statusColors={statusColors}
       hasInvoice={hasInvoice}
       size="md"
+      fill={fill}
     />
   );
 }

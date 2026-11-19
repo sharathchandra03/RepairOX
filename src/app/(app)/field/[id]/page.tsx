@@ -171,8 +171,7 @@ export default function ViewFieldAssignmentPage() {
       return (
         <div className="space-y-2 rounded-xl border border-[#4361EE]/25 bg-[#EEF1FD]/50 p-3.5 text-[12.5px]">
           <p className="font-semibold text-[#3450D8]">{TRIP_TYPE[ninjaTrip.trip_type]} {ninjaTrip.trip_no} · {TRIP_STATUS[ninjaTrip.status].label}</p>
-          <p className="text-muted-foreground">The Ninja updates this trip from the Ninja app. Store handovers and reassignment are on the Dispatch Board.</p>
-          <Button variant="outline" className="w-full gap-1.5" onClick={() => router.push("/field/dispatch")}><Send className="h-4 w-4" /> Open Dispatch Board</Button>
+          <p className="text-muted-foreground">The Ninja updates this trip from the Ninja app. Store handovers, re-planning and cancellation are in the Ninja Trips section below.</p>
           {s === "picked_up" || ninjaTrip.status === "store_received" ? ticketBtn : null}
         </div>
       );

@@ -4,6 +4,7 @@
    per-user order/freeze live in the shared hooks under table_key "field_table". */
 import { Eye, ChevronRight, Lock, MapPin, Phone, Mail, AlertTriangle, Pencil, UserPlus } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { DeviceCard } from "@/components/common/device-card";
 import type { GridColumn } from "@/hooks/use-frozen-columns";
 import {
   FIELD_LEAD_TYPE_LABEL, FIELD_LEAD_TYPE_TONE, FIELD_SOURCE_LABEL, FIELD_SOURCE_TONE,
@@ -161,14 +162,9 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
       const extra = devs.length - 1;
       const all = devs.map((x, i) => `${i + 1}. ${[x.label, x.issue].filter(Boolean).join(" — ") || "Device"}`).join("\n");
       return (
-        <div className="min-w-0 leading-tight" title={devs.length > 1 ? all : undefined}>
-          <span className="flex items-center gap-1.5">
-            <span className="block min-w-0 truncate font-semibold text-foreground" title={r.model}>{r.model || "N/A"}</span>
-            {extra > 0 && <span className="shrink-0 rounded-full bg-[#EEF1FD] px-1.5 py-0.5 text-[10px] font-bold text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/60">+{extra} more</span>}
-          </span>
-          {(r.modelDetail || j.issue) && <span className="block truncate text-[11px] font-medium text-zinc-500" title={j.issue}>{j.issue || r.modelDetail}</span>}
-          {j.imei && <span className="block truncate text-[11px] text-zinc-400 tnum" title="IMEI / Serial">{j.imei}</span>}
-        </div>
+        <DeviceCard label={r.model || "N/A"} hint={`${r.model} ${r.modelDetail ?? ""}`} issue={j.issue || r.modelDetail || undefined}
+          detail={j.imei ? <span className="tnum text-zinc-500" title="IMEI / Serial">{j.imei}</span> : undefined}
+          extra={extra} title={devs.length > 1 ? all : undefined} />
       );
     }
     case "location": {
@@ -178,16 +174,17 @@ export function renderFieldCell(key: string, c: FieldCellCtx): React.ReactNode {
       const hasPin = !!(j.locationMapsUrl || (j.locationLat != null && j.locationLng != null));
       return addr || j.pincode ? (
         <div className="flex min-w-0 items-start gap-1.5 leading-tight">
-          <div className="min-w-0 flex-1">
+          {/* Map pin leads the address (left), so it reads as "location →". */}
+          {url ? (
+            <a href={url} target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()} title={hasPin ? "Open saved map location" : "Search this address on the map"}
+              aria-label="Open map" className={cn("-ml-1 grid h-6 w-6 shrink-0 place-items-center rounded-md transition hover:bg-[#EEF1FD]", hasPin ? "text-[#4361EE]" : "text-zinc-400")}>
+              <MapPin className="h-3.5 w-3.5" />
+            </a>
+          ) : <span className="-ml-1 grid h-6 w-6 shrink-0 place-items-center text-zinc-300"><MapPin className="h-3.5 w-3.5" /></span>}
+          <div className="min-w-0 flex-1 pt-[3px]">
             <span className="line-clamp-2 text-[12.5px] font-medium text-zinc-800" title={addr}>{addr || "—"}</span>
             {j.pincode && <span className="block text-[11px] text-zinc-500 tnum">{j.pincode}</span>}
           </div>
-          {url && (
-            <a href={url} target="_blank" rel="noopener noreferrer" title={hasPin ? "Open saved map location" : "Search this address on the map"}
-              aria-label="Open map" className={cn("grid h-6 w-6 shrink-0 place-items-center rounded-md transition hover:bg-[#EEF1FD]", hasPin ? "text-[#4361EE]" : "text-zinc-400")}>
-              <MapPin className="h-3.5 w-3.5" />
-            </a>
-          )}
         </div>
       ) : <Dash />;
     }

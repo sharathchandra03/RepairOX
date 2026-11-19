@@ -27,6 +27,7 @@ import {
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
 import { setTimeFormat } from "@/lib/time-format";
+import { DEFAULT_TICKET_STATUS_CONFIG, normalizeStatusConfig, type TicketStatusConfig } from "@/lib/ticket-status-config";
 import { DEFAULT_ORDER as TICKET_DEFAULT_ORDER, DEFAULT_VISIBLE as TICKET_DEFAULT_VISIBLE } from "@/lib/ticket-columns";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
@@ -173,6 +174,8 @@ export type StoreSettings = {
    *    required columns (ticket, status) are always kept visible by the UI. */
   ticketColumnOrder: string[];
   ticketVisibleColumns: string[];
+  /** Ticket status categories + custom statuses (Settings → Tickets). */
+  ticketStatusConfig: TicketStatusConfig;
 
   /* ── Invoice configuration (single source of truth for Settings → Invoice) ── */
 
@@ -362,6 +365,7 @@ WARRANTY IS VOID IF:
   /* Ticket table columns — default to the full catalog order, all visible. */
   ticketColumnOrder: [...TICKET_DEFAULT_ORDER],
   ticketVisibleColumns: [...TICKET_DEFAULT_VISIBLE],
+  ticketStatusConfig: DEFAULT_TICKET_STATUS_CONFIG,
 
   /* Invoice configuration defaults — preserve the current hardcoded behaviour. */
   invoiceStatusColors: {
@@ -503,6 +507,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
     // so existing installs keep every column visible in catalog order.
     ticketColumnOrder: parseJsonColumn(row.ticket_column_order, DEFAULT_STORE_SETTINGS.ticketColumnOrder),
     ticketVisibleColumns: parseJsonColumn(row.ticket_visible_columns, DEFAULT_STORE_SETTINGS.ticketVisibleColumns),
+    ticketStatusConfig: normalizeStatusConfig(parseJsonColumn(row.ticket_status_config, DEFAULT_STORE_SETTINGS.ticketStatusConfig)),
     invoiceStatusColors: parseJsonColumn(row.invoice_status_colors, DEFAULT_STORE_SETTINGS.invoiceStatusColors),
     invoiceNumbering: parseJsonColumn(row.invoice_numbering, DEFAULT_STORE_SETTINGS.invoiceNumbering),
     invoiceDefaults: parseJsonColumn(row.invoice_defaults, DEFAULT_STORE_SETTINGS.invoiceDefaults),
@@ -613,6 +618,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     ticketDefaultResolutionMinutes: "ticket_default_resolution_minutes",
     ticketColumnOrder: "ticket_column_order",
     ticketVisibleColumns: "ticket_visible_columns",
+    ticketStatusConfig: "ticket_status_config",
     invoiceStatusColors: "invoice_status_colors",
     invoiceNumbering: "invoice_numbering",
     invoiceDefaults: "invoice_defaults",

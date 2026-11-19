@@ -19,7 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  Truck, Search, Filter, MapPin, Clock, AlertTriangle, CheckCircle2, Package, PackageCheck,
+  Search, Filter, MapPin, Map as MapIcon, List as ListIcon, Clock, PackageCheck,
   RotateCcw, Plus, TrendingUp, Download, ChevronDown, FileSpreadsheet, FileText, LayoutDashboard,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
@@ -50,9 +50,9 @@ import { useGridLayout, mergeFrozen } from "@/hooks/use-grid-layout";
 import { useFieldLive } from "@/hooks/use-field-live";
 import { effectiveAction, isRejectBlinking, EXTRA_ACTION_LABELS } from "@/lib/field-live";
 import { TripLiveOverlay } from "@/components/field/trip-live-overlay";
+import { FieldLiveMapPanel } from "@/components/field/field-live-map-panel";
 import { AssignNinjaDialog } from "@/components/field/assign-ninja-dialog";
 import { FieldAssignmentForm } from "@/components/field/field-assignment-form";
-import { FieldGroupKpis, type GroupKpi } from "@/components/field/field-group-kpis";
 import { STRIP } from "@/components/field/field-table-parts";
 import { fieldGridColumns, renderFieldCell, FIELD_LEFT_COLS, FIELD_STOP_COLS } from "@/components/field/field-grid-cells";
 import { staffByRole } from "@/lib/field-linking";
@@ -68,6 +68,7 @@ import { downloadXLSX, downloadCSV, toCSV } from "@/lib/csv-utils";
 import { tripDevicesOf } from "@/lib/field-devices";
 import { tripGroupOf, TRIP_GROUP_LABEL, type TripGroup } from "@/lib/field-dashboard";
 import { ATTENTION_DEFS, attentionMatches } from "@/lib/field-overview";
+import { WORK_VIEWS, jobMatchesWorkView, type WorkView } from "@/lib/field-work-views";
 
 const PAGE_SIZES = [10, 20, 50, 100];
 /* Extra left breathing room for specific columns (header + cells together). */
@@ -123,6 +124,8 @@ export default function FieldPage() {
   // "Needs attention" drill-down (same predicate that produced the overview count).
   const [attn, setAttn] = useState("");
   const [formOpen, setFormOpen] = useState(false);
+  const [mapView, setMapView] = useState(false);
+  const [workView, setWorkView] = useState<WorkView>("all");
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const isNinja = role?.id === "ninja";
@@ -181,71 +184,25 @@ export default function FieldPage() {
   const filteredBase = useMemo(() => scopedJobs.filter(matchesFilters), [scopedJobs, matchesFilters]);
   const filtered = useMemo(() => {
     const now = new Date();
-    const base = filteredBase.filter((j) => jobMatchesQueue(j, queue, now));
+    const base = filteredBase.filter((j) => jobMatchesQueue(j, queue, now) && jobMatchesWorkView(j, workView, live.get(j.id), now));
     // Rejected assignments float to the top (newest rejection first) until a Ninja is assigned again.
     const rejAt = (j: FieldJob) => { const r = live.get(j.id)?.rejected; return r ? new Date(r.at).getTime() : 0; };
     return base.map((j, i) => ({ j, i, r: rejAt(j) })).sort((a, b) => (b.r ? 1 : 0) - (a.r ? 1 : 0) || b.r - a.r || a.i - b.i).map((x) => x.j);
-  }, [filteredBase, queue, live]);
+  }, [filteredBase, queue, workView, live]);
 
-  useEffect(() => { setPage(1); }, [queue, filters, pageSize, dateRange, customFrom, customTo, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn]);
+  useEffect(() => { setPage(1); }, [queue, workView, filters, pageSize, dateRange, customFrom, customTo, storeFilter, actionFilter, groupFilter, hideCancelled, salesFilter, srcFilter, attn]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages);
   const paged = useMemo(() => filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize), [filtered, currentPage, pageSize]);
 
-  /* Counts come from the SAME queue matchers the table uses, so a card's number
-     always equals the rows you get when you click it. Combined cards count
-     DISTINCT trips (a trip that is both unassigned and delayed counts once). */
-  const kq = useMemo(() => {
+
+  const workCount = useMemo(() => {
     const now = new Date();
-    const n = (q: FieldQueue) => scopedJobs.filter((j) => jobMatchesQueue(j, q, now)).length;
-    const total = scopedJobs.filter((j) => j.status !== "cancelled").length;
-    return {
-      total,
-      visits: n("today_visits"), pickups: n("today_pickup"), drops: n("today_drop"),
-      needs: n("needs_action"), pending: n("pending_assignment"), delayed: n("delayed"),
-      inStore: n("in_store"), atStore: n("at_store"), ready: n("ready_for_drop"),
-      completed: n("completed"),
-    };
-  }, [scopedJobs]);
-
-  const pick = (q: FieldQueue) => () => setQueue((cur) => (cur === q ? "all" : q));
-  const groupKpis: GroupKpi[] = [
-    {
-      key: "today", label: "Today", icon: Truck, tone: "sky", primary: kq.visits, description: "Visits scheduled today",
-      progress: kq.total ? kq.visits / kq.total : 0, active: queue === "today_visits", onClick: pick("today_visits"),
-      support: [
-        { label: "Today's Pickups", value: kq.pickups, onClick: pick("today_pickup"), active: queue === "today_pickup" },
-        { label: "Today's Drops", value: kq.drops, onClick: pick("today_drop"), active: queue === "today_drop" },
-      ],
-    },
-    {
-      key: "needs", label: "Needs action", icon: AlertTriangle, tone: "rose", primary: kq.needs, description: "Unassigned or delayed trips",
-      urgent: kq.delayed > 0, progress: kq.needs ? kq.delayed / kq.needs : 0, progressAlert: kq.delayed > 0,
-      active: queue === "needs_action", onClick: pick("needs_action"),
-      support: [
-        { label: "Pending Assignment", value: kq.pending, onClick: pick("pending_assignment"), active: queue === "pending_assignment" },
-        { label: "Delayed", value: kq.delayed, onClick: pick("delayed"), active: queue === "delayed", alert: kq.delayed > 0 },
-      ],
-    },
-    {
-      key: "store", label: "In store", icon: Package, tone: "amber", primary: kq.inStore, description: "Devices at the store",
-      progress: kq.total ? kq.inStore / kq.total : 0, active: queue === "in_store", onClick: pick("in_store"),
-      support: [
-        { label: "At Store", value: kq.atStore, onClick: pick("at_store"), active: queue === "at_store" },
-        { label: "Ready for Drop", value: kq.ready, onClick: pick("ready_for_drop"), active: queue === "ready_for_drop" },
-      ],
-    },
-    {
-      key: "done", label: "Completed", icon: CheckCircle2, tone: "emerald", primary: kq.completed, description: "Trips completed",
-      progress: kq.total ? kq.completed / kq.total : 0, active: queue === "completed", onClick: pick("completed"),
-      support: [
-        { label: "All trips", value: kq.total, onClick: () => setQueue("all"), active: queue === "all" },
-        { label: "Completion rate", value: kq.total ? `${Math.round((kq.completed / kq.total) * 100)}%` : "—" },
-      ],
-    },
-  ];
-
+    const map: Record<string, number> = {};
+    for (const w of WORK_VIEWS) map[w.value] = filteredBase.filter((j) => jobMatchesQueue(j, queue, now) && jobMatchesWorkView(j, w.value, live.get(j.id), now)).length;
+    return map;
+  }, [filteredBase, queue, live]);
   const stripCount = useMemo(() => {
     const now = new Date();
     const map: Record<string, number> = {};
@@ -322,7 +279,7 @@ export default function FieldPage() {
   if (storeFilter.length > 0) chips.push({ label: "Stores", value: `${storeFilter.length} selected`, onClear: () => setStoreFilter([]) });
   if (dateRange !== "all") chips.push({ label: "Date", value: FIELD_DATE_RANGES.find((d) => d.value === dateRange)?.label ?? dateRange, onClear: () => setDateRange("all") });
 
-  const resetAll = () => { clearFilters(); setQueue("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); setStoreFilter([]); setActionFilter(""); setGroupFilter(""); setHideCancelled(false); setAttn(""); };
+  const resetAll = () => { clearFilters(); setQueue("all"); setWorkView("all"); setDateRange("all"); setCustomFrom(""); setCustomTo(""); setStoreFilter([]); setActionFilter(""); setGroupFilter(""); setHideCancelled(false); setAttn(""); };
 
   /* ── Selection (select-all spans the filtered set) ── */
   const filteredIds = useMemo(() => filtered.map((j) => j.id), [filtered]);
@@ -361,6 +318,7 @@ export default function FieldPage() {
   const collapsedIndicators = (
     <div className="flex items-center gap-2 text-[12px] text-muted-foreground">
       <span className="rounded-full border border-border bg-card px-2.5 py-1 font-semibold">Filters · {filterCount}</span>
+      {workView !== "all" && <span className="rounded-full border border-[#4361EE]/40 bg-[#EEF1FD] px-2.5 py-1 font-semibold text-[#4361EE]">{WORK_VIEWS.find((w) => w.value === workView)?.label}</span>}
       <span className="rounded-full border border-border bg-card px-2.5 py-1 font-semibold">{FIELD_DATE_RANGES.find((d) => d.value === dateRange)?.label ?? "All"}</span>
     </div>
   );
@@ -378,14 +336,14 @@ export default function FieldPage() {
               <Filter className="h-3.5 w-3.5" /> Filters
               {filterCount > 0 && <span className="grid h-4 min-w-4 place-items-center rounded-full bg-[#4361EE] px-1 text-[10px] font-bold text-white">{filterCount}</span>}
             </Button>
-            <Can permission={CAP.field.dashboard}>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => router.push("/field/dashboard")}>
-                <LayoutDashboard className="h-3.5 w-3.5" /> Dashboards
+            <Can permission={CAP.field.liveLocation}>
+              <Button variant={mapView ? "soft" : "outline"} size="sm" className="gap-1.5" aria-pressed={mapView} onClick={() => setMapView((v) => !v)}>
+                {mapView ? <ListIcon className="h-3.5 w-3.5" /> : <MapIcon className="h-3.5 w-3.5" />}{mapView ? "Trip list" : "Live map"}
               </Button>
             </Can>
             <Can permission={CAP.field.reports}>
-              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => router.push("/field/reports")}>
-                <TrendingUp className="h-3.5 w-3.5" /> Reports
+              <Button variant="outline" size="sm" className="gap-1.5" onClick={() => router.push("/field/insights")}>
+                <TrendingUp className="h-3.5 w-3.5" /> Insights
               </Button>
             </Can>
             <Dropdown width="w-52" trigger={({ toggle }) => (
@@ -415,7 +373,6 @@ export default function FieldPage() {
         {!controlsCollapsed && (
           <motion.div key="field-controls" initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }} className="space-y-4 overflow-hidden">
-            <div className="pt-0.5"><FieldGroupKpis items={groupKpis} /></div>
 
             <div className="flex flex-wrap items-center gap-x-3 gap-y-3 lg:flex-nowrap">
               <div className="max-w-full shrink-0 overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
@@ -442,15 +399,24 @@ export default function FieldPage() {
               onFromChange={(v) => { setCustomFrom(v); setDateRange("custom"); }}
               onToChange={(v) => { setCustomTo(v); setDateRange("custom"); }} />
 
+            {/* Work views: the one-click queues (what used to be the Dispatch Board tabs). */}
+            <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+              <SegmentedTabs size="sm" value={workView} onChange={(v) => setWorkView(v as WorkView)}
+                options={WORK_VIEWS.map((w) => ({
+                  value: w.value,
+                  label: (
+                    <span className="inline-flex items-center gap-1.5 whitespace-nowrap" title={w.hint}>
+                      {w.label}
+                      <span className="rounded-full bg-black/10 px-1.5 text-[10px] font-bold tabular-nums">{workCount[w.value] ?? 0}</span>
+                    </span>
+                  ),
+                }))} />
+            </div>
             {showFilters && (
               <div className="rounded-2xl border border-border bg-card p-4 shadow-card">
                 <RoxFilterPanelHeader title="Filters" onClose={() => setShowFilters(false)} onReset={resetAll} resetLabel="Reset all" showReset={chips.length > 0 || !!filters.query} />
                 <div className="grid grid-cols-1 gap-x-6 gap-y-5 md:grid-cols-3">
-                  <FilterGroup title="Progress">
-                    <FilterField label="View">
-                      <RSelect value={queue} onChange={(v) => setQueue(v as FieldQueue)} menuWidth="w-60"
-                        options={STRIP.map((s2) => ({ label: `${s2.label} (${stripCount[s2.value] ?? 0})`, value: s2.value }))} />
-                    </FilterField>
+                  <FilterGroup title="Status">
                     <FilterField label="Status">
                       <RSelect value={filters.status} onChange={(v) => setFilters((f) => ({ ...f, status: v as FieldJobStatus | "" }))} searchable menuWidth="w-56"
                         options={[{ label: "All statuses", value: "" }, ...(Object.keys(FIELD_STATUS_LABEL) as FieldJobStatus[]).map((s2) => ({ label: FIELD_STATUS_LABEL[s2], value: s2 }))]} />
@@ -528,7 +494,8 @@ export default function FieldPage() {
       )}
 
       {/* Desktop data-grid — bounded dual-axis scroll; sticky head; frozen anchors. */}
-      <div ref={grid.scrollRef} className="rox-table-card rox-grid-scroll rox-lock-grow hidden overflow-auto shadow-card md:block">
+      {mapView ? <FieldLiveMapPanel /> : null}
+      <div ref={grid.scrollRef} className={cn("rox-table-card rox-grid-scroll rox-lock-grow hidden overflow-auto shadow-card", mapView ? "!hidden" : "md:block")}>
         <table className="w-full table-fixed text-[14px]" style={{ minWidth: grid.tableMinWidth }}>
           <colgroup>{grid.displayColumns.map((c) => <col key={c.key} style={{ width: c.width }} />)}</colgroup>
           <thead className="rox-table-head sticky top-0 z-[6] [&_.rox-frozen]:!bg-[#5368D4] [&_th]:!text-white"
@@ -595,7 +562,7 @@ export default function FieldPage() {
       </div>
 
       {/* Mobile cards */}
-      <div className="grid grid-cols-1 gap-3 md:hidden">
+      <div className={cn("grid grid-cols-1 gap-3 md:hidden", mapView && "!hidden")}>
         {paged.map((j) => {
           const r = resolveFieldRow(j, resolveSrc);
           const a = fieldTripAction(j);
@@ -627,7 +594,7 @@ export default function FieldPage() {
       })()}
       <AssignNinjaDialog job={assignJobId ? getJob(assignJobId) ?? null : null} onClose={() => setAssignJobId(null)} />
       <Pagination page={currentPage} totalPages={totalPages} onPageChange={setPage} totalItems={filtered.length} pageSize={pageSize}
-        pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="trip" className="rox-lock-footer -mt-3 !py-0" />
+        pageSizeOptions={PAGE_SIZES} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }} itemLabel="trip" className={cn("rox-lock-footer -mt-3 !py-0", mapView && "!hidden")} />
 
             <FieldAssignmentForm open={formOpen} onClose={() => setFormOpen(false)} onCreated={(j) => router.push(`/field/${j.id}`)} />
     </div>

@@ -17,6 +17,7 @@ import { Avatar } from "@/components/ui/avatar";
 import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Can } from "@/components/common/can";
+import { DeviceCard } from "@/components/common/device-card";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
 import { toast } from "@/components/ui/toaster";
@@ -690,8 +691,8 @@ export default function TicketsPage() {
     updateTicket(ticketId, { warrantyStatus: status });
   }, [updateTicket]);
 
-  const handleInlineStatusChange = useCallback((ticketId: string, status: TicketStatus) => {
-    updateTicket(ticketId, { status });
+  const handleInlineStatusChange = useCallback((ticketId: string, status: TicketStatus, statusId?: string) => {
+    updateTicket(ticketId, { status, statusId });
     // Deduct parts when repaired
     if (status === "repaired") {
       const t = tickets.find((tk) => tk.id === ticketId);
@@ -1241,7 +1242,7 @@ export default function TicketsPage() {
             <thead style={{ top: "var(--rox-thead-top)" }} className="sticky z-[5] bg-[#5368D4] border-b-2 border-white/35">
               <tr className="text-left text-[11px] font-bold uppercase tracking-wider text-white">
                 {activeColumns.map((col) => (
-                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-1 pr-[30px] text-center", col.id === "device" && "pl-0", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
+                  <th key={col.id} className={cn("px-3 py-3", col.width, col.id === "status" && "pl-[32px] pr-3 text-center", col.id === "device" && "text-center pr-[26px]", col.id === "amount" && "pr-6", col.id === "actions" && "pr-[14px]", col.align === "right" && "text-right", col.align === "center" && "text-center")}>
                     {col.id === "checkbox" ? (
                       <Checkbox
                         checked={allSelected}
@@ -1293,7 +1294,7 @@ export default function TicketsPage() {
                         // Slightly more vertical breathing room; content stays
                         // vertically centered via align-middle.
                         "px-3 py-4 align-middle",
-                        col.id === "status" && "pl-1 pr-5",
+                        col.id === "status" && "pl-0 pr-3",
                         col.id === "customer" && "pl-0",
                         col.id === "device" && "pl-0",
                         col.id === "amount" && "pr-6",
@@ -1625,12 +1626,12 @@ function renderCell(
   hasMultiItems: boolean | undefined,
   toggleOne: () => void,
   handleAction: (action: TicketAction, ticket: Ticket) => void,
-  onStatusChange: (ticketId: string, status: TicketStatus) => void,
+  onStatusChange: (ticketId: string, status: TicketStatus, statusId?: string) => void,
   statusColors: Record<string, string>,
   coverage: TicketInvoiceCoverage,
   onOpenDeviceDetails: (ticket: Ticket) => void,
   navigateToSection: (ticketId: string, section: "billing") => void,
-  onDeviceStatusChange: (ticketId: string, deviceId: string, status: TicketStatus) => void,
+  onDeviceStatusChange: (ticketId: string, deviceId: string, status: TicketStatus, statusId?: string) => void,
   store?: StoreBranch | null,
   /** For a converted Estimate, the human-readable number of the Ticket it
    *  produced (resolved by the caller from the ticket list). */
@@ -1696,7 +1697,7 @@ function renderCell(
         <div className="flex items-center justify-center gap-3 min-w-0">
           <Avatar name={t.customer} size={30} ticketType={getTicketType(t) ?? "na"} />
           <div className="min-w-0 flex-1 [[data-sidebar-collapsed=true]_&]:translate-x-[10px]">
-            <p className="text-sm font-medium leading-tight truncate">{t.customer}</p>
+            <p className="text-sm font-medium leading-tight truncate" title={t.customer}>{t.customer}</p>
             <p className="text-[11px] font-medium text-[#5B6FC0] truncate">{t.phone}</p>
             {t.company && <p className="text-[11px] text-muted-foreground truncate">{t.company}</p>}
           </div>
@@ -1717,111 +1718,35 @@ function renderCell(
       //    with the SAME vertical rhythm as the Status column so each device
       //    lines up row-for-row with its own status pill. No more "1 device
       //    shown vs 2 statuses" mismatch. ──
+      // Priority (Critical red / High amber) rides on the first icon chip.
+      const prioBadge = t.priority !== "normal" ? (
+        <span className={cn("block h-2.5 w-2.5 rounded-full ring-2 ring-white", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")}
+          title={t.priority === "critical" ? "Critical" : "High Priority"} />
+      ) : undefined;
+      const open = () => onOpenDeviceDetails(t);
       if (devices.length > 1) {
+        // One compact card PER DEVICE, gap-2 + min-h-[40px] to stay aligned
+        // row-for-row with the Status column's per-device pills.
         return (
-          <div
-            className="group/device relative flex cursor-pointer items-start gap-1 py-0.5 pr-7"
-            role="button"
-            tabIndex={0}
-            aria-label="View device and service details"
-            onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
-            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onOpenDeviceDetails(t); } }}
-          >
-            {/* Priority marker — aligned with the first device name. */}
-            <div className="w-3 shrink-0 flex flex-col items-center pt-[6px]">
-              {t.priority !== "normal" ? (
-                <span className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")} title={t.priority === "critical" ? "Critical" : "High Priority"} />
-              ) : (
-                <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
-              )}
-            </div>
-            {/* Per-device blocks — gap-2 matches the Status column so the two
-                columns align device-for-device. Each block reserves a min
-                height equal to the status label + pill stack. */}
-            <div className="min-w-0 flex-1 flex flex-col gap-2">
-              {devices.map((dev, i) => {
-                const issueText = issueOf(dev);
-                return (
-                  <div key={dev.id} className={cn("min-w-0 flex min-h-[40px] flex-col justify-center", i < devices.length - 1 && "border-b border-zinc-300 pb-2")}>
-                    <p className="truncate text-[13px] font-semibold leading-snug text-foreground">{nameOf(dev)}</p>
-                    <p className="truncate text-[11px] leading-snug text-zinc-600">{issueText || "—"}</p>
-                  </div>
-                );
-              })}
-            </div>
-            <button
-              type="button"
-              aria-label="View device and service details"
-              onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
-              className="absolute right-0 top-1/2 -translate-y-1/2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-400 opacity-70 transition hover:bg-indigo-50 hover:text-[#4361EE] group-hover/device:opacity-100"
-            >
-              <ChevronDown className="h-4 w-4" />
-            </button>
+          <div className="flex min-w-0 flex-col gap-2">
+            {devices.map((dev, i) => (
+              <DeviceCard key={dev.id} label={nameOf(dev)} hint={`${dev.brand ?? ""} ${nameOf(dev)}`} issue={issueOf(dev) || "—"}
+                badge={i === 0 ? prioBadge : undefined} onOpen={open} ariaLabel="View device and service details"
+                className="-ml-2.5 w-[calc(100%+0.625rem)] min-h-[40px] py-1" />
+            ))}
           </div>
         );
       }
-
-      // ── Single device: rich 3-line layout (name / issue / IMEI-Serial). ──
+      // ── Single device: name / issue / IMEI-Serial. ──
       const deviceName = nameOf(first);
       const issueText = issueOf(first) || t.service || t.issue || "";
       const idLabel = first?.imeiType === "serial" ? "Serial" : "IMEI";
       const idValue = first?.imei || t.items?.[0]?.serial || "";
       return (
-        <div
-          className="group/device relative flex items-start gap-1 py-0.5 cursor-pointer"
-          role="button"
-          tabIndex={0}
-          aria-label="View device and service details"
-          onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); e.stopPropagation(); onOpenDeviceDetails(t); }
-          }}
-        >
-          {/* Fixed-width marker area — aligned with the first line's cap height so
-              the dot sits neatly beside the device name. Content always starts
-              after this whether or not a priority dot is present. */}
-          <div className="w-3 shrink-0 flex flex-col items-center pt-[6px]">
-            {t.priority !== "normal" ? (
-              /* Critical (red) / High (amber) indicator — replaces the first
-                 device marker dot so the Device/Service text keeps the same
-                 X-position. Same size & meaning as before. */
-              <span
-                className={cn("h-2 w-2 rounded-full shrink-0", t.priority === "critical" ? "bg-rose-500" : "bg-amber-500")}
-                title={t.priority === "critical" ? "Critical" : "High Priority"}
-              />
-            ) : (
-              <span className="h-1.5 w-1.5 rounded-full bg-zinc-400" />
-            )}
-          </div>
-          {/* Content area — stacks Device Name / Issue / IMEI-Serial with clear,
-              even vertical rhythm so the three lines don't feel clumsy. Reserve
-              right padding (pr-7) so truncated text never runs under the
-              absolutely-positioned expand chevron. Long values truncate here;
-              the full value lives in the detail overlay. */}
-          <div className="min-w-0 flex-1 pr-7 space-y-[3px]">
-            <p className="text-[14px] font-semibold leading-snug text-foreground truncate">{deviceName}</p>
-            {issueText && (
-              <p className="text-[12px] leading-snug text-zinc-600 truncate">{issueText}</p>
-            )}
-            {idValue && (
-              <p className="text-[12px] leading-snug text-zinc-700 truncate">
-                <span className="font-semibold">{idLabel}:</span>{" "}
-                <span className="font-mono tracking-tight">{idValue}</span>
-              </p>
-            )}
-          </div>
-          {/* Expand chevron — opens the device-details overlay. Absolutely
-              positioned in the cell's right gutter so it never changes the
-              row height, cell width, or pushes the existing text. */}
-          <button
-            type="button"
-            aria-label="View device and service details"
-            onClick={(e) => { e.stopPropagation(); onOpenDeviceDetails(t); }}
-            className="absolute right-0 top-1/2 -translate-y-1/2 grid h-6 w-6 shrink-0 place-items-center rounded-md text-zinc-400 opacity-70 transition hover:bg-indigo-50 hover:text-[#4361EE] group-hover/device:opacity-100"
-          >
-            <ChevronDown className="h-4 w-4" />
-          </button>
-        </div>
+        <DeviceCard label={deviceName} hint={`${first?.brand ?? ""} ${deviceName}`} issue={issueText || undefined}
+          detail={idValue ? <><span className="font-semibold">{idLabel}:</span> <span className="font-mono tracking-tight">{idValue}</span></> : undefined}
+          badge={prioBadge} onOpen={open} ariaLabel="View device and service details"
+          className="-ml-2.5 w-[calc(100%+0.625rem)]" />
       );
     }
     case "status": {
@@ -1865,7 +1790,7 @@ function renderCell(
       // the Device column's per-device blocks so name/issue and status line up.
       if (statusDevices.length <= 1) {
         return (
-          <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={coverage !== "none"} />
+          <InlineStatusDropdown ticket={t} onStatusChange={onStatusChange} statusColors={statusColors} hasInvoice={coverage !== "none"} fill />
         );
       }
       return (
@@ -1876,10 +1801,12 @@ function renderCell(
               <div key={dev.id} className={cn("flex min-h-[40px] items-center", i < statusDevices.length - 1 && "border-b border-transparent pb-2")}>
                 <StatusPillDropdown
                   status={dev.status}
-                  onSelect={(next) => onDeviceStatusChange(t.id, dev.id, next)}
+                  statusId={dev.statusId}
+                  onSelect={(next, id) => onDeviceStatusChange(t.id, dev.id, next, id)}
                   statusColors={statusColors}
                   hasInvoice={coverage !== "none"}
                   size="sm"
+                  fill
                   ariaLabel={deviceName}
                 />
               </div>

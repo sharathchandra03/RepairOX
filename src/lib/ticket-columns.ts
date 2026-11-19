@@ -34,15 +34,20 @@ export const ALL_COLUMNS: ColumnDef[] = [
   // completely unchanged. The Tickets page injects it (right after the
   // checkbox, before Ticket) ONLY when the table is operating in multi-store /
   // All-Shops mode. Compact: enough for the code avatar + store name.
-  { id: "store", label: "Store", width: "w-[132px]", locked: true },
-  { id: "ticket", label: "Ticket", width: "w-[112px]" },
-  { id: "customer", label: "Customer", width: "w-[33%]" },
-  { id: "device", label: "Device / Service", width: "w-[33%]" },
-  { id: "status", label: "Status", width: "w-[184px]", align: "left" },
-  { id: "dueDate", label: "Due Date", width: "w-[100px]" },
-  { id: "created", label: "Created", width: "w-[100px]" },
-  { id: "amount", label: "Amount", width: "w-[92px]", align: "right" },
-  { id: "actions", label: "Actions", width: "w-[108px]", align: "center", locked: true },
+  // SIDEBAR COLLAPSED (wide table): every column gets a PROPORTIONAL share
+  // (percentages, sum 100) so the extra width is spread evenly across the
+  // whole table — no single column stretches and no gap opens anywhere.
+  // SIDEBAR EXPANDED ([body:has(.rox-sidebar-expanded)_&] variant): the original widths, unchanged.
+  // When Store is hidden (single store) table-fixed scales the rest evenly.
+  { id: "store", label: "Store", width: "w-[10%] [body:has(.rox-sidebar-expanded)_&]:w-[132px]", locked: true },
+  { id: "ticket", label: "Ticket", width: "w-[8.5%] [body:has(.rox-sidebar-expanded)_&]:w-[112px]" },
+  { id: "customer", label: "Customer", width: "w-[15.5%] [body:has(.rox-sidebar-expanded)_&]:w-[33%]" },
+  { id: "device", label: "Device / Service", width: "w-[21%] [body:has(.rox-sidebar-expanded)_&]:w-[33%]" },
+  { id: "status", label: "Ticket Status", width: "w-[14%] [body:has(.rox-sidebar-expanded)_&]:w-[184px]", align: "left" },
+  { id: "dueDate", label: "Due Date", width: "w-[9%] [body:has(.rox-sidebar-expanded)_&]:w-[100px]" },
+  { id: "created", label: "Created", width: "w-[8%] [body:has(.rox-sidebar-expanded)_&]:w-[100px]" },
+  { id: "amount", label: "Amount", width: "w-[6.5%] [body:has(.rox-sidebar-expanded)_&]:w-[92px]", align: "right" },
+  { id: "actions", label: "Actions", width: "w-[7.5%] [body:has(.rox-sidebar-expanded)_&]:w-[108px]", align: "center", locked: true },
 ];
 
 /** Columns that are NOT part of the normal (single-store) table. `store` is a

@@ -13,11 +13,13 @@ import { useFieldLive } from "@/hooks/use-field-live";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { formatWhen } from "@/lib/activity-log";
 import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE, FIELD_LEAD_TYPE_LABEL, FIELD_LEAD_TYPE_TONE, normaliseLeadType, accentColor } from "@/lib/field-data";
-import { DASHBOARDS, useFieldDashboard } from "@/components/field/dashboard/use-field-dashboard";
+import { useFieldDashboard } from "@/components/field/dashboard/use-field-dashboard";
 import { inr } from "@/components/field/dashboard/dashboard-table";
 import type { FieldOverview } from "@/components/field/overview/use-field-overview";
-import { dailySeries, leaderboard, completionRateOf, workloadLevel, WORKLOAD_CAPACITY, type LoadLevel, type AttentionTone, type LeaderPeriod, type LeaderMetric } from "@/lib/field-overview";
-import type { DashRow } from "@/lib/field-dashboard";
+import { leaderboard, completionRateOf, workloadLevel, WORKLOAD_CAPACITY, type LoadLevel, type AttentionTone, type LeaderPeriod, type LeaderMetric } from "@/lib/field-overview";
+import { tripGroupOf, tripDateOf, type DashRow } from "@/lib/field-dashboard";
+import type { FieldJob } from "@/lib/field-data";
+import { DateRangePicker } from "@/components/filters/date-range-picker";
 import { formatHHmm } from "@/lib/time-format";
 
 /* ─── frame ─── */
@@ -232,60 +234,143 @@ export function WorkloadPanel({ o }: { o: FieldOverview }) {
     </Panel>
   );
 }
-/* ─── Trend (7 / 14 / 30 days · trips or business) — SVG, no chart lib ─── */
+/* ─── Trend: Pickup vs On-Site, side by side — Today (hourly) · Month (daily) · Year (monthly) · Custom (daily) ─── */
+type TrendPeriod = "today" | "month" | "year" | "custom";
+interface TrendBucket { key: string; label: string; tip: string; pickup: number; onsite: number }
+const pad2 = (n: number) => String(n).padStart(2, "0");
+const ymdOf = (d: Date) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const hourLabel = (h: number) => `${h % 12 || 12} ${h < 12 ? "AM" : "PM"}`;
+const MONTHS_SHORT = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const parseYmd = (v: string) => { const [y, m, d] = v.split("-").map(Number); return new Date(y, m - 1, d); };
+/** Hour (0–23) a trip is scheduled for on `date`, or null when it has no time. */
+function tripHourOn(j: FieldJob, date: string): number | null {
+  const t = (j.pickupDate === date ? j.pickupTime : j.dropDate === date ? j.dropTime : "") || j.pickupTime || j.dropTime;
+  const h = Number(String(t || "").slice(0, 2));
+  return t && Number.isFinite(h) && h >= 0 && h < 24 ? h : null;
+}
 export function TrendPanel({ o }: { o: FieldOverview }) {
-  const [days, setDays] = useState<"7" | "14" | "30">("14");
-  const [metric, setMetric] = useState<"trips" | "business">("trips");
-  const n = Number(days);
-  const series = useMemo(() => dailySeries(o.jobs, o.ctx, n, o.now), [o.jobs, o.ctx, o.now, n]);
-  const total = series.reduce((x, p) => x + p.scheduled, 0);
-  const done = series.reduce((x, p) => x + p.completed, 0);
-  const biz = series.reduce((x, p) => x + p.business, 0);
-  const rate = total ? Math.round((done / total) * 100) : null;
-  const val = (p: (typeof series)[number]) => (metric === "trips" ? p.scheduled : p.business);
-  const max = Math.max(1, ...series.map(val));
-  const W = 560, H = 230, padL = 4, padB = 22, bw = (W - padL) / series.length;
-  const chartH = H - padB;
-  const step = n <= 7 ? 1 : n <= 14 ? 2 : 5;
-  const empty = metric === "trips" ? total === 0 : biz === 0;
+  const [period, setPeriod] = useState<TrendPeriod>("today");
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
+  const [hover, setHover] = useState<number | null>(null);
+
+  const { buckets, title, unscheduled, needsRange } = useMemo(() => {
+    const live = o.jobs.filter((j) => j.status !== "cancelled" && (tripGroupOf(j) === "pickup" || tripGroupOf(j) === "onsite"));
+    const add = (b: TrendBucket | undefined, j: FieldJob) => { if (b) b[tripGroupOf(j) === "onsite" ? "onsite" : "pickup"] += 1; };
+    const now = o.now;
+    let out: TrendBucket[] = []; let ttl = ""; let unsched = 0; let needs = false;
+    if (period === "today") {
+      const day = ymdOf(now);
+      out = Array.from({ length: 24 }, (_, h) => ({ key: String(h), label: hourLabel(h), tip: `${hourLabel(h)} – ${hourLabel((h + 1) % 24)}`, pickup: 0, onsite: 0 }));
+      for (const j of live) {
+        if (tripDateOf(j) !== day) continue;
+        const h = tripHourOn(j, day);
+        if (h == null) { unsched += 1; continue; }
+        add(out[h], j);
+      }
+      ttl = `Today · ${now.toLocaleDateString("en-IN", { day: "numeric", month: "short" })}`;
+    } else if (period === "month") {
+      const days = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+      out = Array.from({ length: days }, (_, i) => {
+        const d = new Date(now.getFullYear(), now.getMonth(), i + 1);
+        return { key: ymdOf(d), label: String(i + 1), tip: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }), pickup: 0, onsite: 0 };
+      });
+      const idx = new Map(out.map((b, i) => [b.key, i]));
+      for (const j of live) { const i = idx.get(tripDateOf(j)); if (i != null) add(out[i], j); }
+      ttl = now.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+    } else if (period === "year") {
+      out = MONTHS_SHORT.map((m, i) => ({ key: `${now.getFullYear()}-${pad2(i + 1)}`, label: m, tip: `${m} ${now.getFullYear()}`, pickup: 0, onsite: 0 }));
+      for (const j of live) {
+        const d = tripDateOf(j);
+        if (d.startsWith(`${now.getFullYear()}-`)) add(out[Number(d.slice(5, 7)) - 1], j);
+      }
+      ttl = `${now.getFullYear()} · month by month`;
+    } else if (customFrom && customTo) {
+      const from = parseYmd(customFrom <= customTo ? customFrom : customTo), to = parseYmd(customFrom <= customTo ? customTo : customFrom);
+      const n = Math.min(120, Math.round((to.getTime() - from.getTime()) / 86400000) + 1);
+      out = Array.from({ length: n }, (_, i) => {
+        const d = new Date(from.getFullYear(), from.getMonth(), from.getDate() + i);
+        return { key: ymdOf(d), label: `${d.getDate()} ${MONTHS_SHORT[d.getMonth()]}`, tip: d.toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short", year: "numeric" }), pickup: 0, onsite: 0 };
+      });
+      const idx = new Map(out.map((b, i) => [b.key, i]));
+      for (const j of live) { const i = idx.get(tripDateOf(j)); if (i != null) add(out[i], j); }
+      ttl = `${from.toLocaleDateString("en-IN", { day: "numeric", month: "short" })} – ${to.toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" })}`;
+    } else { needs = true; ttl = "Custom range"; }
+    return { buckets: out, title: ttl, unscheduled: unsched, needsRange: needs };
+  }, [o.jobs, o.now, period, customFrom, customTo]);
+
+  const totalPickup = buckets.reduce((x, b) => x + b.pickup, 0);
+  const totalOnsite = buckets.reduce((x, b) => x + b.onsite, 0);
+  const rawMax = Math.max(1, ...buckets.map((b) => Math.max(b.pickup, b.onsite)));
+  const tickStep = rawMax <= 4 ? 1 : Math.ceil(rawMax / 4);
+  const niceMax = rawMax <= 4 ? rawMax : tickStep * 4;
+  const ticks = Array.from({ length: Math.round(niceMax / tickStep) }, (_, i) => (i + 1) * tickStep);
+
+  const W = 720, H = 260, padL = 28, padB = 24, padT = 14;
+  const chartH = H - padB - padT, bw = (W - padL) / Math.max(1, buckets.length);
+  const labelEvery = buckets.length > 60 ? 7 : buckets.length > 31 ? 3 : buckets.length > 24 ? 2 : period === "today" ? 2 : 1;
+  const showNums = buckets.length <= 31;
+  const empty = !needsRange && totalPickup + totalOnsite === 0;
+  const hb = hover != null ? buckets[hover] : null;
+  const yOf = (v: number) => padT + chartH - (v / niceMax) * chartH;
+
   return (
-    <Panel title={`Last ${n} days`} icon={BarChart3} className="h-full" bodyClassName="flex flex-col"
-      action={<LinkAction href="/field/reports">Full report</LinkAction>}>
+    <Panel title={title} icon={BarChart3} className="h-full" bodyClassName="flex flex-col"
+      action={<LinkAction href="/field/insights">Full report</LinkAction>}>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <SegmentedTabs size="sm" value={days} onChange={(v) => setDays(v as "7" | "14" | "30")} options={[{ label: "7 days", value: "7" }, { label: "14 days", value: "14" }, { label: "30 days", value: "30" }]} />
-        <SegmentedTabs size="sm" value={metric} onChange={(v) => setMetric(v as "trips" | "business")} options={[{ label: "Trips", value: "trips" }, { label: "Business", value: "business" }]} />
+        <SegmentedTabs size="sm" value={period} onChange={(v) => { setPeriod(v as TrendPeriod); setHover(null); }}
+          options={[{ label: "Today", value: "today" }, { label: "Month", value: "month" }, { label: "Year", value: "year" }, { label: "Custom", value: "custom" }]} />
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-sky-400" /> Pickup <strong className="tabular-nums">{totalPickup}</strong></span>
+          <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-violet-500" /> On-Site <strong className="tabular-nums">{totalOnsite}</strong></span>
+        </div>
       </div>
-      <div className="mb-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px]">
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-sky-300" /> Scheduled <strong className="tabular-nums">{total}</strong></span>
-        <span className="inline-flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Completed <strong className="tabular-nums">{done}</strong></span>
-        <span className="text-muted-foreground">Completion <strong className="tabular-nums text-foreground">{rate != null ? `${rate}%` : "—"}</strong></span>
-        <span className="text-muted-foreground">Business <strong className="tabular-nums text-emerald-700">{biz > 0 ? inr(biz) : "—"}</strong></span>
-      </div>
-      <div className="relative flex flex-1 items-center">
-        <svg viewBox={`0 0 ${W} ${H}`} className="h-[290px] w-full" role="img" aria-label={`${metric === "trips" ? "Trips" : "Business"} per day, last ${n} days`}>
-          {[0.25, 0.5, 0.75, 1].map((g) => <line key={g} x1={padL} x2={W} y1={chartH - chartH * g} y2={chartH - chartH * g} stroke="currentColor" className="text-border" strokeDasharray="3 4" />)}
-          <line x1={padL} x2={W} y1={chartH} y2={chartH} stroke="currentColor" className="text-border" />
-          {series.map((p, i) => {
+      <DateRangePicker open={period === "custom"} from={customFrom} to={customTo} onFromChange={setCustomFrom} onToChange={setCustomTo} />
+      <div className="relative flex flex-1 items-center" onMouseLeave={() => setHover(null)}>
+        <svg viewBox={`0 0 ${W} ${H}`} className="h-[290px] w-full" role="img" aria-label={`Pickup and on-site trips, ${title}`}>
+          {ticks.map((g) => (
+            <g key={g}>
+              <line x1={padL} x2={W} y1={yOf(g)} y2={yOf(g)} stroke="currentColor" className="text-border" strokeDasharray="3 4" />
+              <text x={padL - 6} y={yOf(g) + 3} textAnchor="end" className="fill-muted-foreground" style={{ fontSize: 9 }}>{g}</text>
+            </g>
+          ))}
+          <line x1={padL} x2={W} y1={yOf(0)} y2={yOf(0)} stroke="currentColor" className="text-border" />
+          {buckets.map((b, i) => {
             const x = padL + i * bw;
-            const hs = (val(p) / max) * chartH;
-            const hc = metric === "trips" ? (p.completed / max) * chartH : 0;
+            const w = bw * 0.36;
+            const x1 = x + bw * 0.12, x2 = x1 + w + bw * 0.04;
+            const hp = (b.pickup / niceMax) * chartH, ho = (b.onsite / niceMax) * chartH;
+            const num = (v: number, bx: number, h: number) => showNums && v > 0
+              ? <text x={bx + w / 2} y={padT + chartH - h - 3} textAnchor="middle" className="fill-foreground" style={{ fontSize: 9, fontWeight: 700 }}>{v}</text> : null;
             return (
-              <g key={p.date}>
-                <title>{`${p.label}: ${p.scheduled} scheduled · ${p.completed} completed${p.business ? ` · ${inr(p.business)}` : ""}`}</title>
-                <rect x={x + bw * 0.14} y={chartH - hs} width={bw * 0.72} height={hs} rx="3" className={metric === "trips" ? "fill-sky-300" : "fill-emerald-500"} />
-                {hc > 0 && <rect x={x + bw * 0.14} y={chartH - hc} width={bw * 0.72} height={hc} rx="3" className="fill-emerald-500" />}
-                {i % step === (series.length - 1) % step ? <text x={x + bw / 2} y={H - 6} textAnchor="middle" className="fill-muted-foreground" style={{ fontSize: 9 }}>{p.label}</text> : null}
+              <g key={b.key} onMouseEnter={() => setHover(i)}>
+                <rect x={x} y={padT} width={bw} height={chartH + padB} fill={hover === i ? "rgba(67,97,238,0.07)" : "transparent"} />
+                {b.pickup > 0 && <rect x={x1} y={padT + chartH - hp} width={w} height={hp} rx="2.5" className="fill-sky-400" />}
+                {b.onsite > 0 && <rect x={x2} y={padT + chartH - ho} width={w} height={ho} rx="2.5" className="fill-violet-500" />}
+                {num(b.pickup, x1, hp)}{num(b.onsite, x2, ho)}
+                {i % labelEvery === 0 ? <text x={x + bw / 2} y={H - 7} textAnchor="middle" className="fill-muted-foreground" style={{ fontSize: 9 }}>{b.label}</text> : null}
               </g>
             );
           })}
         </svg>
-        {empty && (
+        {hb && hover != null && (
+          <div className="pointer-events-none absolute top-2 z-10 min-w-[150px] rounded-xl border border-border bg-card px-3 py-2 text-[12px] shadow-lg"
+            style={{ left: `${Math.min(78, Math.max(2, ((padL + (hover + 0.5) * bw) / W) * 100 - 8))}%` }}>
+            <p className="mb-1 font-bold text-foreground">{hb.tip}</p>
+            <p className="flex items-center justify-between gap-4"><span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="h-2 w-2 rounded-sm bg-sky-400" />Pickup</span><strong className="tabular-nums">{hb.pickup}</strong></p>
+            <p className="flex items-center justify-between gap-4"><span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="h-2 w-2 rounded-sm bg-violet-500" />On-Site</span><strong className="tabular-nums">{hb.onsite}</strong></p>
+            <p className="mt-1 flex items-center justify-between gap-4 border-t border-border pt-1"><span className="text-muted-foreground">Total</span><strong className="tabular-nums">{hb.pickup + hb.onsite}</strong></p>
+          </div>
+        )}
+        {(empty || needsRange) && (
           <p className="pointer-events-none absolute inset-x-0 top-[38%] text-center text-[12px] text-muted-foreground">
-            {metric === "trips" ? `No trips in the last ${n} days` : `No finalized invoices in the last ${n} days`}
-            {days !== "30" && <span className="pointer-events-auto"> · <button className="font-semibold text-[#4361EE] hover:underline" onClick={() => setDays("30")}>try 30 days</button></span>}
+            {needsRange ? "Pick a date range to see the graph" : period === "today" ? "No pickup or on-site trips today" : "No pickup or on-site trips in this period"}
           </p>
         )}
       </div>
+      {period === "today" && unscheduled > 0 && (
+        <p className="mt-1 text-[11px] text-muted-foreground">{unscheduled} trip{unscheduled > 1 ? "s" : ""} today without a set time are not shown on the hourly graph.</p>
+      )}
     </Panel>
   );
 }
@@ -394,17 +479,24 @@ export function ActivityPanel({ o }: { o: FieldOverview }) {
   );
 }
 
-/* ─── Dashboards — compact, equal-height rows (replaces the uneven card grid) ─── */
-const TILE = { sky: "from-sky-400 to-blue-600", teal: "from-teal-400 to-emerald-600", violet: "from-violet-400 to-indigo-600", amber: "from-amber-400 to-orange-500", emerald: "from-emerald-400 to-green-600" } as const;
+/* ─── Field Insights shortcuts — jump straight to a section of the merged page ─── */
+const INSIGHT_LINKS = [
+  { hash: "ins-compare", name: "Compare", purpose: "Stores, engineers, agents or sources side by side", Icon: BarChart3, tone: "sky" },
+  { hash: "ins-performance", name: "Performance table", purpose: "Trips, completion, on-time and business per row", Icon: ClipboardList, tone: "teal" },
+  { hash: "ins-monthly", name: "Month by month", purpose: "The year at a glance, month columns", Icon: CalendarClock, tone: "amber" },
+  { hash: "ins-ninjas", name: "Ninja operations", purpose: "Acceptance, rejection and turnaround", Icon: Users, tone: "violet", team: true },
+  { hash: "ins-exceptions", name: "Exceptions", purpose: "Delayed, failed and cancelled trips", Icon: AlertTriangle, tone: "emerald" },
+] as const;
+const TILE = { sky: "from-sky-400 to-blue-600", teal: "from-teal-400 to-emerald-600", violet: "from-violet-400 to-indigo-600", amber: "from-amber-400 to-orange-500", emerald: "from-rose-400 to-red-600" } as const;
 export function DashboardLinksPanel() {
   const router = useRouter();
-  const { available } = useFieldDashboard();
+  const { canTeam } = useFieldDashboard();
   return (
-    <Panel title="Field dashboards" icon={BarChart3} action={<LinkAction href="/field/dashboard">All</LinkAction>} bodyClassName="p-3">
+    <Panel title="Field Insights" icon={BarChart3} action={<LinkAction href="/field/insights">Open</LinkAction>} bodyClassName="p-3">
       <ul className="space-y-1.5">
-        {available.map((d) => (
-          <li key={d.id}>
-            <button onClick={() => router.push(d.href)} className="group flex h-[54px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition hover:bg-[#EEF1FD]/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
+        {INSIGHT_LINKS.filter((d) => !("team" in d) || canTeam).map((d) => (
+          <li key={d.hash}>
+            <button onClick={() => router.push(`/field/insights#${d.hash}`)} className="group flex h-[54px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition hover:bg-[#EEF1FD]/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
               <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-sm ring-1 ring-white/40", TILE[d.tone])}><d.Icon className="h-4 w-4" /></span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold">{d.name}</span>
@@ -418,7 +510,6 @@ export function DashboardLinksPanel() {
     </Panel>
   );
 }
-
 /* ─── Stock & purchasing shortcuts (links only — no sample numbers) ─── */
 const STOCK_LINKS = [
   { href: "/stock", label: "Stock Levels", Icon: Boxes },
@@ -440,4 +531,3 @@ export function StockShortcuts() {
   );
 }
 
-export { DASHBOARDS };

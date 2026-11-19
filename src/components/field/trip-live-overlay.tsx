@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import { AcceptTicket } from "@/components/ninja/accept-ticket";
 import { TripStageStrip, useTripEvents } from "@/components/field/trip-stage-strip";
+import { TripActionBar } from "@/components/field/trip-action-bar";
 import { STATUS_META, TYPE_LABEL, ago, freshness } from "@/lib/ninja/model";
 import type { JobLive } from "@/lib/field-live";
 import { cn } from "@/lib/utils";
@@ -97,6 +98,7 @@ export function TripLiveOverlay({ open, onClose, live, jobNo, customer, ninjaNam
                     </Button>
                   </div>
                 ) : null}
+                <TripActionBar trip={live} showEmpty className="rounded-xl border border-border bg-card px-4 py-3" />
                 <div className="grid grid-cols-2 gap-2.5 lg:grid-cols-4">
                   <Box icon={UserRound} label="Ninja" value={rej ? "Unassigned" : ninjaName || "—"} tone={rej ? "border-rose-200 bg-rose-50 text-rose-800" : "border-violet-200 bg-violet-50 text-violet-800"} />
                   <Box icon={Clock} label="Assigned" value={fmt(live.assigned_at)} tone="border-amber-200 bg-amber-50 text-amber-900" />

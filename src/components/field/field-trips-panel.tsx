@@ -4,8 +4,7 @@
    proofs and assignment history. Same rows the Ninja app writes (RLS-scoped).
    Used on View Field Job and View Lead. */
 import { useCallback, useEffect, useRef, useState } from "react";
-import Link from "next/link";
-import { Copy, ExternalLink, Timer, FileText, History, Link2, Radio, Route as RouteIcon, Truck, UserCheck } from "lucide-react";
+import { Copy, ExternalLink, Timer, FileText, History, Link2, Radio, Route as RouteIcon, UserCheck } from "lucide-react";
 import { DetailSection } from "@/components/common/detail-page";
 import { Button } from "@/components/ui/button";
 import { toast } from "@/components/ui/toaster";
@@ -16,6 +15,7 @@ import { cn } from "@/lib/utils";
 import { LiveTrackMap } from "@/components/field/live-track-map";
 import { AcceptTicket } from "@/components/ninja/accept-ticket";
 import { TripStageStrip, useTripEvents } from "@/components/field/trip-stage-strip";
+import { TripActionBar } from "@/components/field/trip-action-bar";
 import { isRejectBlinking, type JobLive } from "@/lib/field-live";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Input } from "@/components/ui/input";
@@ -200,7 +200,6 @@ export function FieldTripsPanel({ jobId, compact }: { jobId: string; compact?: b
     <DetailSection icon={RouteIcon} title={`Ninja Trips · ${trips.length}`} accent="violet"
       action={<div className="flex items-center gap-2">
         {canShare ? <Button size="sm" variant="outline" className="gap-1.5" loading={linking} onClick={() => void copyLink()}><Link2 className="h-3.5 w-3.5" />Customer tracking link</Button> : null}
-        <Link href="/field/dispatch" className="inline-flex h-8 items-center gap-1 rounded-lg px-2 text-xs font-semibold text-[#4361EE] hover:bg-[#EEF1FD]"><Truck className="h-3.5 w-3.5" />Dispatch</Link>
       </div>}>
       <div className="space-y-3">
         {trips.map((t) => {
@@ -222,6 +221,7 @@ export function FieldTripsPanel({ jobId, compact }: { jobId: string; compact?: b
                 <div><p className="text-[11px] font-medium text-muted-foreground">{t.completed_at ? "Closed" : "Arrived"}</p><p className="font-semibold">{fmt(t.completed_at ?? t.arrived_at)}</p></div>
               </div>
               <StripFor trip={t} jobId={jobId} rejected={t.status === "awaiting_assignment" ? ((): JobLive["rejected"] => { const r = ta.find((a) => a.outcome === "rejected"); return r ? { at: r.responded_at ?? r.assigned_at, reason: r.reject_reason, ninjaId: r.ninja_id } : null; })() : null} />
+              {!compact ? <TripActionBar trip={{ id: t.id, trip_no: t.trip_no, trip_type: t.trip_type, status: t.status, job_id: jobId, scheduled_at: t.scheduled_at }} onChanged={() => void load()} className="mt-3" /> : null}
               {t.failure_reason ? <p className="mt-2 rounded-lg bg-rose-50 px-3 py-2 text-[12px] font-medium text-rose-700">{t.failure_reason}</p> : null}
               {t.status === "assigned" ? (
                 <div className="mt-3 space-y-1.5">

@@ -39,7 +39,7 @@ export interface FieldKpi {
   hint?: string;
 }
 
-export function FieldKpiCards({ items, total, columns = "lg:grid-cols-7" }: { items: FieldKpi[]; total: number; columns?: string }) {
+export function FieldKpiCards({ items, total, columns = "lg:grid-cols-7", large = false }: { items: FieldKpi[]; total: number; columns?: string; large?: boolean }) {
   return (
     <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-4", columns)} role="group" aria-label="Trip queues">
       {items.map((k) => {
@@ -55,7 +55,7 @@ export function FieldKpiCards({ items, total, columns = "lg:grid-cols-7" }: { it
             key={k.key}
             {...wrapperProps}
             className={cn(
-              "group relative overflow-hidden rounded-2xl border bg-gradient-to-br p-3.5 text-left shadow-sm transition duration-200",
+              "group relative overflow-hidden rounded-2xl border bg-gradient-to-br text-left", large ? "p-5" : "p-3.5", " shadow-sm transition duration-200",
               interactive && "hover:-translate-y-0.5 hover:shadow-md focus:outline-none focus-visible:ring-2",
               t.card, t.border, interactive && t.ring.replace("ring-", "focus-visible:ring-"),
               k.active && cn("-translate-y-0.5 shadow-md ring-2", t.ring),
@@ -63,14 +63,14 @@ export function FieldKpiCards({ items, total, columns = "lg:grid-cols-7" }: { it
           >
             <span aria-hidden className={cn("pointer-events-none absolute -right-6 -top-6 h-20 w-20 rounded-full blur-2xl", t.glow)} />
             <div className="relative flex items-start justify-between">
-              <span className={cn("grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br text-white shadow-[0_6px_14px_-6px_rgba(0,0,0,0.45)] ring-1 ring-white/40", t.tile)}>
-                <k.Icon className="h-[18px] w-[18px]" />
+              <span className={cn("grid place-items-center rounded-xl bg-gradient-to-br text-white", large ? "h-11 w-11" : "h-9 w-9", " shadow-[0_6px_14px_-6px_rgba(0,0,0,0.45)] ring-1 ring-white/40", t.tile)}>
+                <k.Icon className={large ? "h-5 w-5" : "h-[18px] w-[18px]"} />
               </span>
               {k.active && <span className="grid h-5 w-5 place-items-center rounded-full bg-white/90 text-[#4361EE] shadow-sm"><Check className="h-3 w-3" /></span>}
             </div>
-            <p className={cn("relative mt-3 font-display text-[28px] font-extrabold leading-none tabular-nums tracking-tight", t.num)}>{k.value}</p>
-            <p className={cn("relative mt-1.5 text-[10.5px] font-bold uppercase tracking-wider", t.label)}>{k.label}</p>
-            {k.hint && <p className={cn("relative mt-0.5 text-[11px]", t.label)}>{k.hint}</p>}
+            <p className={cn("relative font-display font-extrabold", large ? "mt-4 text-[38px]" : "mt-3 text-[28px]", " leading-none tabular-nums tracking-tight", t.num)}>{k.value}</p>
+            <p className={cn("relative mt-2 font-bold uppercase tracking-wider", large ? "text-[12px]" : "text-[10.5px]", "", t.label)}>{k.label}</p>
+            {k.hint && <p className={cn("relative mt-1 text-[12px]", t.label)}>{k.hint}</p>}
             {share !== undefined && (
               <div className={cn("relative mt-2.5 h-1 overflow-hidden rounded-full", t.track)} aria-hidden>
                 <div className={cn("h-full rounded-full bg-gradient-to-r transition-[width] duration-500", t.bar)} style={{ width: `${share}%` }} />

@@ -27,6 +27,8 @@ import { useFrozenColumns, type GridColumn } from "@/hooks/use-frozen-columns";
 import { useColumnOrder } from "@/hooks/use-column-order";
 import { useWorkspaceCollapsed } from "@/hooks/use-workspace-collapsed";
 import { WorkspaceCollapseBar } from "@/components/common/workspace-collapse-bar";
+import { ScrollHint } from "@/components/common/scroll-hint";
+import { DeviceCard } from "@/components/common/device-card";
 import { usePermissions } from "@/lib/permissions-context";
 import { useStoreContext } from "@/lib/store-context";
 import { useLeadStoreMode } from "@/lib/lead-store-mode";
@@ -69,8 +71,9 @@ import { SalesAgentsOnline } from "@/components/leads/sales-agents-online";
 import { LeadCaptureFlow, type LeadPrefill } from "@/components/leads/lead-capture-flow";
 import { LeadActionsMenu, type LeadAction } from "@/components/leads/lead-actions-menu";
 import { RouteLeadDialog } from "@/components/leads/route-lead-dialog";
-import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph, qualificationTone, qualificationDot } from "@/components/leads/lead-pills";
+import { statusTone, priorityTone, leadNatureTone, leadNatureDot, leadNatureGlyph, qualificationTone, qualificationDot , outlineTone, statusDotColor, stageIcon, leadNatureLevel } from "@/components/leads/lead-pills";
 import { AnimatedTemperatureGlyph } from "@/components/leads/animated-temperature-glyph";
+import { renderOptionIcon } from "@/components/leads/option-icon";
 import { AssignMenu, AssignBadge, useCanAssignLeads } from "@/components/leads/lead-assign";
 import { LeadDeviceDetailsOverlay } from "@/components/leads/lead-device-details-overlay";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -106,7 +109,7 @@ function leadGridColumns(multiStore: boolean): GridColumn[] {
     // from Source (acquisition) and Capture Channel.
     { key: "mode", label: "Mode of Lead", width: 172 },
     { key: "contactInfo", label: "Contact Info", width: 230 },
-    { key: "device", label: "Device & Issue", width: 210 },
+    { key: "device", label: "Device & Issue", width: 240 },
     { key: "comment", label: "Comment", width: 210 },
     { key: "value", label: "Lead Value", width: 128 },
     { key: "region", label: "Region", width: 128 },
@@ -348,17 +351,6 @@ function formatFollowUp(date: string): string {
    ───────────────────────────────────────────────────────────────────────── */
 
 /* Derives a hex dot color that matches statusTone's semantic mapping. */
-function statusDotColor(status: string): string {
-  const s = status.toLowerCase();
-  if (/new/.test(s)) return "#0284c7";           // sky-600
-  if (/won|convert|qualif/.test(s)) return "#059669";  // emerald-600
-  if (/lost|drop|not interested/.test(s)) return "#71717a"; // zinc-500
-  if (/follow/.test(s)) return "#ea580c";         // orange-600
-  if (/contact|progress|proposal/.test(s)) return "#7c3aed"; // violet-600
-  if (/interest/.test(s)) return "#4361EE";       // indigo
-  return "#71717a";                               // neutral
-}
-
 /* Column 2 — DATE: date primary line, time secondary. */
 function DateCell({ lead }: { lead: Lead }) {
   const d = lead.date ? new Date(lead.date + "T00:00:00") : null;
@@ -473,7 +465,25 @@ function LeadSelectCell({
   glyphFor,
   reasonPromptFor,
   onChangeWithReason,
+  variant = "filled",
+  dotFor,
+  meterFor,
+  centered = false,
+  ambientFor,
 }: {
+  /** Centre the glyph + label inside the pill (chevron stays at the right). */
+  centered?: boolean;
+  /** Optional looping "ambient" animation class for the pill glyph (e.g. a
+   *  flickering flame for Hot). Honours prefers-reduced-motion via motion-safe. */
+  ambientFor?: (value: string) => string | undefined;
+  /** Optional 3-step meter before the chevron (e.g. Lead Nature heat 1–3). */
+  meterFor?: (value: string) => number;
+  /** "outline" = white pill, colour only on the border + dot (calmer). Used
+   *  for every Lead Table pill except Contact Status, Lead Nature, Lead Stage.
+   *  "solid" = full colour fill + white text (Contact Status only). */
+  variant?: "filled" | "outline" | "solid" | "tag";
+  /** Per-option dot colour in the menu (else only the current value is coloured). */
+  dotFor?: (value: string) => string;
   value: string;
   options: string[];
   onChange: (v: string) => void;
@@ -499,11 +509,13 @@ function LeadSelectCell({
   // `animated` opts the PILL glyph into the one-shot change animation; option
   // rows and other callers stay static (default false).
   const leadGlyph = (v: string, dot: string, animated = false) =>
-    glyphFor
+    variant === "tag"
+      ? <span className="-ml-2.5 mr-0.5 grid h-full w-8 shrink-0 place-items-center rounded-l-full text-white" style={{ backgroundColor: dot }}>{glyphFor?.(v)}</span>
+      : glyphFor
       ? animated
-        ? <AnimatedTemperatureGlyph glyph={glyphFor(v)} changeKey={v} />
+        ? <span className={cn("inline-flex shrink-0", ambientFor?.(v))}><AnimatedTemperatureGlyph glyph={glyphFor(v)} changeKey={v} /></span>
         : <span className="shrink-0 text-[12px] leading-none">{glyphFor(v)}</span>
-      : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: dot }} />;
+      : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: variant === "solid" ? "#fff" : dot }} />;
   const [open, setOpen] = useState(false);
   const [pos, setPos] = useState<{ top?: number; bottom?: number; left: number; dropUp: boolean }>({ top: 0, left: 0, dropUp: false });
   const btnRef = useRef<HTMLButtonElement>(null);
@@ -587,10 +599,22 @@ function LeadSelectCell({
       ? <span
           title={value}
           className={cn("flex h-7 w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", toneClass)}
+          style={variant === "tag" ? { backgroundColor: "#fff", color: "#27272a", boxShadow: `inset 0 0 0 1px ${dotColor}80`, overflow: "hidden" }
+            : variant === "solid" ? { backgroundColor: dotColor, color: "#fff", boxShadow: `inset 0 0 0 1px ${dotColor}` }
+            : variant === "outline" ? { backgroundColor: "#fff", color: "#3f3f46", boxShadow: `inset 0 0 0 1px ${dotColor}99` } : undefined}
         >
-          {leadGlyph(value, dotColor, true)}
-          <span className="min-w-0 flex-1 truncate">{value}</span>
-        </span>
+          <span className={cn("flex min-w-0 flex-1 items-center gap-1.5", centered && "justify-center")}>
+            {leadGlyph(value, dotColor, true)}
+            <span className="min-w-0 truncate">{value}</span>
+          </span>
+          {value && meterFor && meterFor(value) > 0 && (
+            <span className="flex shrink-0 items-end gap-[2px]" aria-label={`Level ${meterFor(value)} of 3`}>
+              {[1, 2, 3].map((n) => (
+                <span key={n} className="w-[3px] rounded-full" style={{ height: 4 + n * 3, backgroundColor: n <= meterFor(value) ? dotColor : "#e4e4e7" }} />
+              ))}
+            </span>
+          )}
+          </span>
       : <span className="flex h-7 w-full items-center px-2.5 text-[11px] text-zinc-400">{placeholder}</span>;
   }
 
@@ -605,10 +629,32 @@ function LeadSelectCell({
           "flex h-7 w-full min-w-0 cursor-pointer items-center gap-1.5 rounded-full px-2.5 text-left text-[11px] font-medium ring-1 ring-inset transition hover:shadow-sm",
           value ? toneClass : "bg-zinc-50 text-zinc-400 ring-zinc-200",
         )}
-        style={value ? { backgroundColor: `${dotColor}15`, color: dotColor, boxShadow: `inset 0 0 0 1px ${dotColor}30` } : undefined}
+        style={value
+          ? variant === "tag"
+            ? { backgroundColor: "#fff", color: "#27272a", boxShadow: `inset 0 0 0 1px ${dotColor}80`, overflow: "hidden" }
+            : variant === "solid"
+            ? { backgroundColor: dotColor, color: "#fff", boxShadow: `inset 0 0 0 1px ${dotColor}` }
+            : variant === "outline"
+            ? { backgroundColor: "#fff", color: "#3f3f46", boxShadow: `inset 0 0 0 1px ${dotColor}99` }
+            : { backgroundColor: `${dotColor}15`, color: dotColor, boxShadow: `inset 0 0 0 1px ${dotColor}30` }
+          : undefined}
       >
+        {centered ? (
+          <span className="flex min-w-0 flex-1 items-center justify-center gap-1.5 pl-3">
+            {value ? leadGlyph(value, dotColor, true) : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#a1a1aa" }} />}
+            <span className="min-w-0 truncate">{value || placeholder}</span>
+          </span>
+        ) : (<>
         {value ? leadGlyph(value, dotColor, true) : <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: "#a1a1aa" }} />}
         <span className="min-w-0 flex-1 truncate">{value || placeholder}</span>
+        </>)}
+        {value && meterFor && meterFor(value) > 0 && (
+          <span className="flex shrink-0 items-end gap-[2px]" aria-label={`Level ${meterFor(value)} of 3`}>
+            {[1, 2, 3].map((n) => (
+              <span key={n} className="w-[3px] rounded-full" style={{ height: 4 + n * 3, backgroundColor: n <= meterFor(value) ? dotColor : "#e4e4e7" }} />
+            ))}
+          </span>
+        )}
         <ChevronDown className="h-3 w-3 shrink-0 opacity-60" />
       </button>
       {mounted && createPortal(
@@ -705,9 +751,9 @@ function LeadSelectCell({
                           )}
                         >
                           {glyphFor
-                            ? <span className="shrink-0 text-[13px] leading-none">{glyphFor(opt)}</span>
+                            ? <span className="shrink-0 text-[13px] leading-none" style={dotFor ? { color: dotFor(opt) } : undefined}>{glyphFor(opt)}</span>
                             : <span className="h-2 w-2 shrink-0 rounded-full ring-1 ring-inset ring-black/10"
-                                style={{ backgroundColor: opt === value ? dotColor : "#a1a1aa" }} />}
+                                style={{ backgroundColor: dotFor ? dotFor(opt) : opt === value ? dotColor : "#a1a1aa" }} />}
                           <span className="min-w-0 flex-1 truncate" title={opt}>{opt}</span>
                           {opt === value && <span className="ml-auto shrink-0 text-[9px] font-bold text-[#4361EE]">✓</span>}
                         </button>
@@ -743,14 +789,12 @@ function ContactStatusCell({ lead, options, onSave, locked }: {
   onSave: (v: string) => void;
   locked: boolean;
 }) {
-  const s = (lead.contactStatus || "").toLowerCase();
-  const toneClass = s.includes("not") ? "bg-zinc-100 text-zinc-600 ring-zinc-200"
-    : s.includes("rnr") || s.includes("busy") || s.includes("switched") ? "bg-amber-50 text-amber-700 ring-amber-200"
-    : lead.contactStatus ? "bg-emerald-50 text-emerald-700 ring-emerald-200"
-    : "bg-zinc-50 text-zinc-400 ring-zinc-200";
-  const dotColor = s.includes("not") ? "#71717a"
-    : s.includes("rnr") || s.includes("busy") || s.includes("switched") ? "#d97706"
-    : lead.contactStatus ? "#059669" : "#a1a1aa";
+  // Colour from the ONE contact classifier (contactStatusClass): reached =
+  // green, attempted but no two-way contact (No Response, RNR, Busy, Switched
+  // Off, Not Reachable…) = red, Not Contacted = grey. Solid pill (this column only).
+  const cls = contactStatusClass(lead.contactStatus || "");
+  const dotColor = contactStatusColor(lead.contactStatus || "");
+  const toneClass = cls === "contacted" ? "ring-emerald-600" : cls === "attempted" ? "ring-rose-600" : "ring-zinc-500";
   return (
     <LeadSelectCell
       value={lead.contactStatus || ""}
@@ -758,10 +802,18 @@ function ContactStatusCell({ lead, options, onSave, locked }: {
       onChange={onSave}
       toneClass={toneClass}
       dotColor={dotColor}
+      variant="solid"
+      dotFor={contactStatusColor}
       readOnly={locked}
       placeholder="—"
     />
   );
+}
+
+/** Contact Status colour: contacted green · attempted/no-response red · not contacted grey. */
+function contactStatusColor(v: string): string {
+  const c = contactStatusClass(v);
+  return c === "contacted" ? "#059669" : c === "attempted" ? "#E11D48" : c === "not_contacted" ? "#71717A" : "#A1A1AA";
 }
 
 /* Column 7 — CONTACT INFO (GROUPED: name + phone + email in one cell). */
@@ -810,26 +862,15 @@ function DeviceIssueCell({ lead, onOpen }: { lead: Lead; onOpen: (lead: Lead) =>
   // Summarise all devices for the hover tooltip so the row stays compact.
   const allLabels = devices.map((d) => d.label || "Device").join(", ");
   return (
-    <button
-      type="button"
-      onClick={(e) => { e.stopPropagation(); onOpen(lead); }}
-      aria-label="View device and issue details"
+    <DeviceCard
+      label={first.label || (first.issue ? "Device" : "—")}
+      hint={`${first.label} ${first.category}`}
+      issue={first.issue}
+      extra={extra}
       title={extra > 0 ? allLabels : undefined}
-      className="group/device flex w-full min-w-0 items-center gap-1.5 rounded-lg text-center transition hover:bg-indigo-50/50"
-    >
-      <div className="min-w-0 flex-1 text-center leading-snug">
-        <p className="flex min-w-0 items-center justify-center gap-1.5 font-medium text-zinc-800">
-          <span className="truncate">{first.label || (first.issue ? "Device" : "—")}</span>
-          {extra > 0 && (
-            <span className="shrink-0 rounded-full bg-indigo-100 px-1.5 py-0.5 text-[10px] font-semibold text-indigo-700">
-              +{extra} more
-            </span>
-          )}
-        </p>
-        {first.issue && <p className="mt-0.5 truncate text-[12.5px] text-zinc-500" title={first.issue}>{first.issue}</p>}
-      </div>
-      <ChevronDown className="h-4 w-4 shrink-0 -rotate-90 text-zinc-400 opacity-70 transition group-hover/device:text-[#4361EE] group-hover/device:opacity-100" />
-    </button>
+      ariaLabel="View device and issue details"
+      onOpen={() => onOpen(lead)}
+    />
   );
 }
 
@@ -1128,17 +1169,20 @@ function ActionCell({ wf }: { wf: LeadWorkflow }) {
   // Full-width read-only pill (Lead Table pill standard): leading lock (fixed) ·
   // truncating label (flex-1, full value in the title tooltip). The stable
   // Action column width comes from the <colgroup>, never the row's label length.
+  // Outline pill: colour lives on the border + dot only (calmer table).
+  const o = outlineTone(tone);
   return (
     <span
       title={`${label} · System-derived — ${wf.reason}`}
       aria-label={`Action: ${label} (system-derived, read-only)`}
       className={cn(
-        "flex h-7 w-full min-w-0 cursor-default items-center gap-1 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
-        tone,
+        "flex h-7 w-full min-w-0 cursor-default items-center gap-1.5 rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset select-none",
+        o.pill,
       )}
     >
-      <Lock className="h-2.5 w-2.5 shrink-0 opacity-60" aria-hidden />
+      <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full bg-current", o.accent)} aria-hidden />
       <span className="min-w-0 flex-1 truncate">{label}</span>
+      <Lock className="h-2.5 w-2.5 shrink-0 text-zinc-400" aria-hidden />
     </span>
   );
 }
@@ -1653,9 +1697,9 @@ export default function LeadsListPage() {
     // first two are primary workspace views, and "New Lead" is represented by
     // the Assigned Leads inbox. Their meaning in the data is unchanged — a
     // lead's status is still filterable from the Filters panel.
-    const statuses = [...configured, ...legacy].filter(
-      (s) => !isFollowUpStatus(s) && s.trim().toLowerCase() !== "new lead",
-    );
+    // Every stage configured in Settings shows here (incl. "New Lead"); only
+    // the Follow-Up stage is folded into the Follow-ups view tab.
+    const statuses = [...configured, ...legacy].filter((s) => !isFollowUpStatus(s));
     return [
       { label: "All", value: "all" },
       ...statuses.map((s) => ({ label: s, value: s })),
@@ -1729,6 +1773,25 @@ export default function LeadsListPage() {
   // (lead_options "leadNature"), live-refreshed via optionsFor. Powers the
   // inline Lead Nature dropdown in the table.
   const leadNatureOptions = useMemo(() => optionsFor("leadNature").map((o) => o.value).filter(Boolean), [optionsFor]);
+  /* Option STYLE (Settings → Lead Settings → Form Edit → icon + colour). A
+     chosen icon/colour wins; otherwise the automatic keyword style applies, so
+     a brand-new stage still looks sensible before anyone styles it. */
+  const styleMaps = useMemo(() => {
+    const m = (f: "status" | "leadNature") => new globalThis.Map(optionsFor(f).map((o) => [o.value, o] as const));
+    return { status: m("status"), leadNature: m("leadNature") };
+  }, [optionsFor]);
+  const stageDot = useCallback((v: string) => styleMaps.status.get(v)?.color ?? statusDotColor(v), [styleMaps]);
+  const stageGlyph = useCallback((v: string) => renderOptionIcon(styleMaps.status.get(v)?.icon) ?? stageIcon(v), [styleMaps]);
+  const natureDot = useCallback((v: string) => styleMaps.leadNature.get(v)?.color ?? leadNatureDot(v), [styleMaps]);
+  // Ambient glyph motion by heat: Hot = flickering flame, Warm = gently
+  // breathing sun, Cold = slow-spinning snowflake (motion-safe only).
+  const natureAmbient = useCallback((v: string) => {
+    const lvl = leadNatureLevel(v);
+    return lvl === 3 ? "motion-safe:animate-[rox-flame_1.4s_ease-in-out_infinite] origin-bottom"
+      : lvl === 2 ? "motion-safe:animate-[rox-sun_3.2s_ease-in-out_infinite]"
+      : lvl === 1 ? "motion-safe:animate-[rox-snow_6s_linear_infinite]" : undefined;
+  }, []);
+  const natureGlyph = useCallback((v: string) => renderOptionIcon(styleMaps.leadNature.get(v)?.icon, "h-3 w-3") ?? leadNatureGlyph(v), [styleMaps]);
   // LEAD CATEGORY options — the qualification values (Qualified Lead / Not
   // Qualified Lead), configured in Lead Settings under "Lead Category" (the
   // lead_options "qualification" field). Sub Category options are separate.
@@ -2190,6 +2253,7 @@ export default function LeadsListPage() {
               }
               onChangeWithReason={(v, reason) => applyLeadCategory(lead, v, reason)}
               toneClass={lead.qualification ? qualificationTone(lead.qualification) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
+              variant="outline"
               dotColor={qualificationDot(lead.qualification || "")}
               readOnly={!canEditLead}
             />
@@ -2201,6 +2265,7 @@ export default function LeadsListPage() {
               options={subCategoryOptions}
               onChange={(v) => updateLead(lead.id, { subCategory: v })}
               toneClass="bg-violet-50 text-violet-700 ring-violet-200"
+              variant="outline"
               dotColor="#8B5CF6"
               readOnly={!canEditLead}
             />
@@ -2212,8 +2277,10 @@ export default function LeadsListPage() {
               options={leadNatureOptions}
               onChange={(v) => updateLead(lead.id, { leadNature: v })}
               toneClass={lead.leadNature ? leadNatureTone(lead.leadNature) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
-              dotColor={leadNatureDot(lead.leadNature || "")}
-              glyphFor={leadNatureGlyph}
+              dotColor={natureDot(lead.leadNature || "")}
+              dotFor={natureDot}
+              glyphFor={natureGlyph}
+              ambientFor={natureAmbient}
               readOnly={!canEditLead}
             />
           );
@@ -2244,7 +2311,10 @@ export default function LeadsListPage() {
                 options={statusOptions}
                 onChange={(v) => applyLeadStatus(lead, v)}
                 toneClass={lead.status ? statusTone(lead.status) : "bg-zinc-50 text-zinc-400 ring-zinc-200"}
-                dotColor={statusDotColor(lead.status || "")}
+                dotColor={stageDot(lead.status || "")}
+                dotFor={stageDot}
+                variant="tag"
+                glyphFor={stageGlyph}
                 readOnly={!canBulkStatus}
               />
               {showDealLineage && (
@@ -2315,7 +2385,18 @@ export default function LeadsListPage() {
   );
 
   const rightControls = (
-      <div className="flex shrink-0 items-center gap-2">
+      <div className="flex min-w-0 items-center gap-2">
+          {/* Search lives on the top line so it stays reachable in work mode too. */}
+          <div className="w-56 min-w-0 xl:w-72">
+            <Input
+              value={filters.query}
+              onChange={(e: any) => setFilters((f) => ({ ...f, query: e.target.value }))}
+              placeholder="Search leads by ID, name, phone, email or device…"
+              animatedPrefix="Search by "
+              animatedWords={["lead ID", "name", "phone", "email", "device"]}
+              iconLeft={<Search className="h-4 w-4" />}
+            />
+          </div>
           <div className="hidden shrink-0 items-center gap-2 sm:flex">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Customer</span>
             <SegmentedTabs
@@ -2430,8 +2511,9 @@ export default function LeadsListPage() {
           the New/Existing customer-link filter sits next to the Collapse
           control. */}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-        <div className="min-w-0 flex-1 max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-          <div className="flex min-w-max items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 items-center gap-3">
+          <ScrollHint className="shrink-0 max-w-full">
           <SegmentedTabs
             value={filters.dateRange}
             onChange={(v) => setFilters((f) => ({ ...f, dateRange: v as LeadDateRange }))}
@@ -2442,6 +2524,15 @@ export default function LeadsListPage() {
               .map((d) => ({ label: d.label, value: d.value }))}
             size="sm"
           />
+          </ScrollHint>
+            {/* Lead Stage strip (All Leads) — sits right after the date strip on
+                the same line; options come live from Settings → Lead Stage.
+                When it doesn't fit, ScrollHint shows a pulsing arrow + fade. */}
+            {view === "all" && statusStripTabs.length > 1 && (
+              <ScrollHint framed className="min-w-0 flex-initial">
+                <SegmentedTabs value={statusStripValue} onChange={onStatusStripChange} options={statusStripTabs} size="sm" className="border-0 bg-transparent p-0" />
+              </ScrollHint>
+            )}
             {(view === "assigned" || view === "notContacted") && (
               <AssignedSubTabs
                 value={(view === "notContacted" ? "noResponse" : filters.assignedSub === "new" ? "new" : "all") as AssignedSubValue}
@@ -2467,16 +2558,6 @@ export default function LeadsListPage() {
           )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
-          <div className="w-full lg:w-72">
-            <Input
-              value={filters.query}
-              onChange={(e: any) => setFilters((f) => ({ ...f, query: e.target.value }))}
-              placeholder="Search leads by ID, name, phone, email or device…"
-              animatedPrefix="Search by "
-              animatedWords={["lead ID", "name", "phone", "email", "device"]}
-              iconLeft={<Search className="h-4 w-4" />}
-            />
-          </div>
           <Button
             variant={showFilters || activeFilters ? "soft" : "outline"}
             size="sm"
@@ -2525,33 +2606,6 @@ export default function LeadsListPage() {
         />
       )}
 
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* STRIP 3 ROW — the single primary filter strip on the LEFT (Not
-          Contacted / Follow-Ups VIEWS + lifecycle STATUS filters, one leading
-          "All"), sharing ONE line with the New/Existing customer-link filter
-          and the Collapse/Expand control on the RIGHT. The strip is part of the
-          control area, so it animates to height 0 when collapsed; the right-
-          side controls sit OUTSIDE that animation and stay visible in both
-          modes (single collapse mechanism, no duplicate). In collapsed WORK
-          MODE the compact "Filters · N" + date indicators show on the left
-          where the strip was. The strip stays visible for the Not-Contacted /
-          Follow-Ups views too, since those segments now live inside it. */}
-      <AnimatePresence initial={false}>
-        {view === "all" && !controlsCollapsed && statusStripTabs.length > 1 && (
-          <motion.div
-            key="lead-status-strip"
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
-            className="overflow-hidden"
-          >
-            <div className="max-w-full overflow-x-auto px-0.5 py-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-              <SegmentedTabs value={statusStripValue} onChange={onStatusStripChange} options={statusStripTabs} size="sm" />
-            </div>
           </motion.div>
         )}
       </AnimatePresence>
@@ -2653,7 +2707,7 @@ export default function LeadsListPage() {
             every grouped column gets a generous width AND the frozen offsets
             line up exactly. The min-width equals their sum; the container
             scrolls horizontally on narrower viewports. */}
-        <table className="w-full min-w-[2910px] table-fixed text-[14px]">
+        <table className="w-full min-w-[2940px] table-fixed text-[14px]">
           <colgroup>
             {displayColumns.map((c) => (
               <col key={c.key} style={{ width: c.width }} />

@@ -28,6 +28,7 @@ import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { toast } from "@/components/ui/toaster";
 import { usePermissions } from "@/lib/permissions-context";
 import { useLeads } from "@/lib/leads-context";
+import { OptionStylePicker, STYLED_OPTION_FIELDS } from "@/components/leads/settings/option-style-picker";
 import { LEAD_DROPDOWN_FIELDS, type LeadFieldDef, type LeadOption } from "@/lib/leads-data";
 import { cn } from "@/lib/utils";
 
@@ -63,7 +64,7 @@ export default function FormEditPage() {
       {/* Sidebar + Editor panel */}
       <div className="flex gap-5">
         {/* ── Left rail: field list ── */}
-        <div className="w-52 shrink-0">
+        <div className="w-52 shrink-0 lg:sticky lg:top-[72px] lg:max-h-[calc(100vh-96px)] lg:self-start lg:overflow-y-auto lg:rounded-2xl lg:pr-1.5 rox-rail-scroll">
           <nav className="space-y-1">
             {LEAD_DROPDOWN_FIELDS.map((f) => (
               <FieldTab
@@ -81,7 +82,7 @@ export default function FormEditPage() {
         </div>
 
         {/* ── Right panel: option editor ── */}
-        <div className="min-w-0 flex-1">
+        <div className="min-w-0 flex-1 lg:sticky lg:top-[72px] lg:self-start">
           <OptionEditor field={activeField} canManage={canManage} />
         </div>
       </div>
@@ -196,11 +197,12 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
   };
 
   return (
-    <div className="rounded-2xl border border-border bg-card shadow-card">
+    <div className="relative overflow-hidden rounded-2xl border-[1.5px] border-border bg-card shadow-[0_1px_2px_rgba(20,30,80,0.04),0_14px_36px_-20px_rgba(67,97,238,0.35)] lg:flex lg:max-h-[calc(100vh-96px)] lg:flex-col">
+      <div className="h-1 shrink-0 bg-gradient-to-r from-[#4361EE] via-[#6D83F2] to-[#A5B4FC]" />
       {/* Panel header */}
-      <div className="flex items-center gap-3 border-b border-border px-5 py-4">
-        <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]">
-          {field.usesStaff ? <Users className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />}
+      <div className="relative flex shrink-0 items-center gap-3 border-b border-border bg-gradient-to-br from-white via-[#F6F8FF] to-[#EAEFFF] px-5 py-4">
+        <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-[#4361EE] text-white shadow-[0_6px_16px_-6px_rgba(67,97,238,0.7)] ring-4 ring-[#4361EE]/10">
+          {field.usesStaff ? <Users className="h-5 w-5" /> : <ListChecks className="h-5 w-5" />}
         </span>
         <div className="min-w-0 flex-1">
           {editingTitle ? (
@@ -232,7 +234,7 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
           )}
           <p className="text-[12px] text-muted-foreground">{field.hint}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground">
+        <span className="shrink-0 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-inset ring-emerald-200">
           {rows.filter((r) => r.active).length} active
         </span>
         {canManage && (
@@ -274,7 +276,7 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
       )}
 
       {/* Scrollable option list — fixed height so the panel never stretches */}
-      <div className="max-h-[420px] overflow-y-auto px-5 py-4">
+      <div className="max-h-[420px] overflow-y-auto px-5 py-4 lg:max-h-none lg:min-h-0 lg:flex-1 rox-rail-scroll">
         {rows.length === 0 && !field.usesStaff ? (
           <p className="rounded-xl border border-dashed border-border py-8 text-center text-[13px] text-muted-foreground">
             No options yet — add one below.
@@ -291,11 +293,11 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
                           ref={provided.innerRef}
                           {...provided.draggableProps}
                           className={cn(
-                            "flex items-center gap-1.5 rounded-xl border px-2 py-2",
+                            "group flex items-center gap-2 rounded-xl border px-2.5 py-2 transition duration-150",
                             snapshot.isDragging
                               ? "border-[#4361EE]/40 bg-[#EEF1FD] shadow-lg"
                               : opt.active
-                              ? "border-border bg-background"
+                              ? "border-border bg-white shadow-sm hover:-translate-y-px hover:border-[#4361EE]/40 hover:shadow-md"
                               : "border-dashed border-zinc-200 bg-zinc-50 opacity-70",
                           )}
                         >
@@ -309,6 +311,8 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
                               <GripVertical className="h-3.5 w-3.5" />
                             </span>
                           )}
+
+                          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-md bg-[#EEF1FD] text-[10.5px] font-bold tabular-nums text-[#4361EE]">{i + 1}</span>
 
                           {editingId === opt.id ? (
                             <>
@@ -324,12 +328,13 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
                             </>
                           ) : (
                             <>
+                              {STYLED_OPTION_FIELDS.has(field.key) && <OptionStylePicker opt={opt} disabled={!canManage} />}
                               <span className={cn("min-w-0 flex-1 truncate text-[13px] font-medium", !opt.active && "text-zinc-400 line-through")}>
                                 {opt.value}
                               </span>
                               {!opt.active && <span className="shrink-0 rounded-full bg-zinc-200 px-2 py-0.5 text-[10px] font-semibold text-zinc-500">Archived</span>}
                               {canManage && (
-                                <div className="flex shrink-0 items-center gap-0.5">
+                                <div className="flex shrink-0 items-center gap-0.5 opacity-60 transition group-hover:opacity-100">
                                   <button onClick={() => { setEditingId(opt.id); setEditValue(opt.value); }} className="grid h-7 w-7 place-items-center rounded-lg text-zinc-400 hover:bg-muted hover:text-zinc-700" title="Rename"><Pencil className="h-3.5 w-3.5" /></button>
                                   <button
                                     onClick={() => setOptionActive(opt.id, !opt.active)}
@@ -356,7 +361,7 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
       </div>
 
       {/* Add new option */}
-      <div className="border-t border-border px-5 py-4">
+      <div className="shrink-0 border-t border-border bg-[#F6F8FF] px-5 py-4">
         {canManage ? (
           <div className="flex items-center gap-2">
             <Input
@@ -364,7 +369,7 @@ function OptionEditor({ field, canManage }: { field: LeadFieldDef; canManage: bo
               onChange={(e: any) => setAdding(e.target.value)}
               onKeyDown={(e: any) => e.key === "Enter" && handleAdd()}
               placeholder={`Add ${title.toLowerCase()}…`}
-              className="h-9 flex-1 text-[13px]"
+              className="h-9 flex-1 bg-white text-[13px]"
             />
             <Button size="sm" className="gap-1" onClick={handleAdd} disabled={!adding.trim()}>
               <Plus className="h-3.5 w-3.5" /> Add
