@@ -62,7 +62,7 @@ export function StoreSelector() {
   if (onLeadRoutes && leadMode.ready && leadMode.isSingle && leadMode.defaultStore) {
     return (
       <span
-        className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-[#E5E9F8] bg-[#F5F7FF] px-3 py-1.5 text-[12px] font-semibold text-[#3A4DBB]"
+        className="hidden md:inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60"
         title={`Centralized: all leads are managed from ${leadMode.defaultStore.name}, whichever shop the customer visits · change it in Settings → Store Information`}
       >
         <Network className="h-3.5 w-3.5" />
@@ -76,7 +76,7 @@ export function StoreSelector() {
     const only = activeStore ?? stores[0];
     if (!only) return null;
     return (
-      <span className="hidden md:inline-flex items-center gap-1.5 rounded-full border border-[#E5E9F8] bg-[#F5F7FF] px-3 py-1.5 text-[12px] font-semibold text-[#3A4DBB]">
+      <span className="hidden md:inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60">
         <Store className="h-3.5 w-3.5" />
         <span className="max-w-[140px] truncate">{only.name}</span>
       </span>
@@ -101,13 +101,10 @@ export function StoreSelector() {
           aria-label="Switch store"
           className={cn(
             "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
-            onOwnerDashboard || isAllShops
-              ? "bg-[#EEF1FD] text-[#3A4DBB]"
-              : "bg-[#F5F7FF] text-[#3A4DBB]",
-            open ? "border-[#B3BFF6]" : "border-[#E5E9F8] hover:border-[#B3BFF6]"
+            open ? "border-white/70 bg-white/[0.3] text-white" : "border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60"
           )}
         >
-          {isAllShops || onOwnerDashboard ? <Building2 className="h-3.5 w-3.5" /> : <Store className="h-3.5 w-3.5" />}
+          {isAllShops || onOwnerDashboard ? <Building2 className="h-3.5 w-3.5 text-[#C7D2FF]" /> : <Store className="h-3.5 w-3.5 text-[#C7D2FF]" />}
           <span className="max-w-[160px] truncate">{label}</span>
           <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
         </button>

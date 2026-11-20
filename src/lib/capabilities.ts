@@ -402,6 +402,9 @@ export const CAP = {
     viewAll: ["field_view_all", "manage_field_jobs"],
     /** Ninja live location + Live Operations Map. LOCKSTEP with auth_field_location_viewer() (0098). */
     liveLocation: ["field_live_location_view", "manage_field_jobs", "assign_ninja", "field_view_all"],
+    /** Salary + incentives of every Field Engineer. LOCKSTEP with field_pay_reader() / field_pay_manager() (0115). No coarse fallback on purpose. */
+    payView: ["field_pay_view", "field_pay_manage"],
+    payManage: ["field_pay_manage"],
     /** Confirm store receipt / release a repaired device (store reception). */
     storeHandoff: ["receive_store_handoff", "manage_field_jobs"],
   },

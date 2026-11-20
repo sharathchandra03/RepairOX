@@ -12,12 +12,14 @@ import { cn } from "@/lib/utils";
  *                    or, with `href`, a fixed destination.
  *   <BackLink/>      same look as a real <a> (Next Link) for a fixed route.
  *   backPillClass()  class string for the rare case a custom element is needed
- *                    (e.g. print pages) — still must render blue + white.
+ *                    (e.g. print pages) — still must render slate-navy + white.
  */
+/** Colour-only overrides for Back buttons built on another component (e.g. <Button>). */
+export const BACK_TONE_CLASS = "!border-[#2B3553] !bg-[#2B3553] !text-white hover:!border-[#1B2238] hover:!bg-[#1B2238] [&_svg]:!text-white";
 export function backPillClass(className?: string) {
   return cn(
-    "inline-flex h-9 w-fit shrink-0 items-center gap-1.5 rounded-full border border-[#4361EE] bg-[#4361EE] px-4 text-[13px] font-semibold text-white shadow-sm transition",
-    "hover:border-[#3450D8] hover:bg-[#3450D8] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40",
+    "inline-flex h-9 w-fit shrink-0 items-center gap-1.5 rounded-full border border-[#2B3553] bg-[#2B3553] px-4 text-[13px] font-semibold text-white shadow-sm transition",
+    "hover:border-[#1B2238] hover:bg-[#1B2238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2B3553]/40",
     "[&_svg]:text-white",
     className,
   );

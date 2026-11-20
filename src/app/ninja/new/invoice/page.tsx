@@ -92,7 +92,7 @@ function Form() {
           <p className="mt-3 text-[30px] font-extrabold tabular-nums text-slate-900">{formatINR(done.total)}</p>
           <p className={`mt-1 text-[13px] font-bold ${done.paid ? "text-emerald-600" : "text-amber-600"}`}>{done.paid ? "Paid" : "Payment pending"}</p>
         </Card>
-        <Link href={`/ninja/trip/${trip.id}`} className="block"><Btn className="w-full">Back to job</Btn></Link>
+        <Link href={`/ninja/trip/${trip.id}`} className="block"><Btn className="w-full !bg-[#2B3553] !shadow-none active:!bg-[#1B2238]">Back to job</Btn></Link>
         <Link href="/ninja" className="block"><Btn tone="ghost" className="w-full">Home</Btn></Link>
       </div>
     );

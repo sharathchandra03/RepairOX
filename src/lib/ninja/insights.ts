@@ -3,7 +3,7 @@
    field_ninja_trip_stats_v (distance, travel + service time), the invoices the Ninja raised and
    problem events. Nothing is estimated or invented: when the source is empty the metric is null and
    the UI says so. */
-import type { NinjaTrip, TripType } from "./model";
+import { kindOf, type NinjaTrip, type TripKind } from "./model";
 
 export type Period = "today" | "week" | "month";
 export const PERIOD_LABEL: Record<Period, string> = { today: "Today", week: "7 days", month: "30 days" };
@@ -51,7 +51,7 @@ export interface Insights {
   response: { medianSec: number | null; fastestSec: number | null; n: number };
   onTime: { rate: number | null; n: number };
   road: { km: number | null; travelSec: number | null; avgServiceSec: number | null; trackedTrips: number };
-  mix: Record<TripType, number>;
+  mix: Record<TripKind, number>;
   docs: { tickets: number; invoices: number; billed: number; collected: number };
   care: { rejected: number; problems: number; topReasons: { reason: string; count: number }[] };
   open: { new: number; active: number; later: number };
@@ -98,8 +98,8 @@ export function computeInsights(i: InsightInput): Insights {
   const tracked = st.filter((s) => (s.distance_m ?? 0) > 0);
   const services = st.map((s) => s.service_seconds).filter((x): x is number => x != null && x > 0);
 
-  const mix: Record<TripType, number> = { pickup: 0, drop: 0, onsite: 0, warranty_pickup: 0 };
-  for (const t of completed) mix[t.trip_type]++;
+  const mix: Record<TripKind, number> = { pickup: 0, drop: 0, onsite: 0, warranty_pickup: 0, buyback: 0 };
+  for (const t of completed) mix[kindOf(t)]++;
 
   // documents the Ninja raised in the period
   const periodTrips = i.trips.filter((t) => inRange(t.updated_at, from, to) || inRange(t.completed_at, from, to));

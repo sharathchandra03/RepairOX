@@ -17,6 +17,7 @@
    • Idempotent: one clientRequestId per form-open, so a double click / retry
      resolves to the same trip. Trip ID is allocated server-side by createJob.
    ────────────────────────────────────────────────────────────────────────── */
+import { BACK_TONE_CLASS } from "@/components/common/back-pill";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion } from "framer-motion";
@@ -471,7 +472,7 @@ function Inner({ onClose, onCreated }: { onClose: () => void; onCreated?: (job: 
         <div className="flex w-full items-center justify-between gap-2">
           <div>
             {reviewOpen
-              ? <Button variant="ghost" size="sm" className="gap-1" onClick={() => setReviewOpen(false)}><ChevronLeft className="h-4 w-4" /> Back to form</Button>
+              ? <Button variant="ghost" size="sm" className={`gap-1 ${BACK_TONE_CLASS}`} onClick={() => setReviewOpen(false)}><ChevronLeft className="h-4 w-4" /> Back to form</Button>
               : step > 1 && <Button variant="ghost" size="sm" className="gap-1" onClick={() => go(step - 1)}><ChevronLeft className="h-4 w-4" /> Previous</Button>}
           </div>
           <div className="flex items-center gap-2">

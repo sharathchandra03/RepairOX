@@ -1,12 +1,12 @@
 "use client";
 /* ──────────────────────────────────────────────────────────────────────────
    RepairOX — Field Insights.
-   ONE page that replaces Field Dashboards, Field Reports and Ninja Operations.
+   ONE page for trip analysis (the people parts live in Field Activity).
    A sticky selector deck at the top (period · stores · view by · trip type ·
    compare metrics · vs previous) drives EVERY section below, and a section
    rail jumps between them — nobody has to scroll back up to re-select.
      Overview KPIs → Compare (side-by-side + trend) → Performance table →
-     Month by month → Ninja operations → Funnel & status → Exceptions
+     Month by month → Store activity → Funnel & status → Exceptions
    Real trips only (RLS + store scoped). Business = finalized invoices only.
    Math: lib/field-insights.ts + lib/field-reports.ts + lib/field-dashboard.ts
    + lib/field-ops-report.ts (all pure). Export == on-screen (same rows).
@@ -14,11 +14,12 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  BarChart3, CheckCircle2, ChevronDown, Clock, Download, FileSpreadsheet, FileText, GitCompareArrows, IndianRupee,
-  ListChecks, Target, Timer, TriangleAlert, Truck, CalendarRange, Users, Table2, Filter,
+  BarChart3, CheckCircle2, ChevronDown, Download, FileSpreadsheet, FileText, GitCompareArrows, IndianRupee,
+  ListChecks, Target, Timer, TriangleAlert, Truck, CalendarRange, Table2, Filter,
 } from "lucide-react";
 import { BackPill } from "@/components/common/back-pill";
 import { PageHeader } from "@/components/layout/page-header";
+import { CAP } from "@/lib/capabilities";
 import { RequireCapability } from "@/components/common/require-capability";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
 import { TableSearch } from "@/components/common/table-utility-bar";
@@ -35,9 +36,6 @@ import { Frame, Head, NameCell, Dash, EmptyRows, inr } from "@/components/field/
 import { useFieldDashboard } from "@/components/field/dashboard/use-field-dashboard";
 import { InsightsDeck, ChipToggle, type DeckItem } from "@/components/field/insights/insights-deck";
 import { CompareBars, TrendLines, ENTITY_COLORS } from "@/components/field/insights/compare-charts";
-import { supabase } from "@/lib/supabase";
-import { usePermissions } from "@/lib/permissions-context";
-import { CAP } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
 import { FIELD_STATUS_LABEL, FIELD_STATUS_TONE, type FieldJob } from "@/lib/field-data";
 import {
@@ -49,7 +47,7 @@ import {
   insightRows, totalRow, previousBounds, boundsLabel, trendBuckets, trendSeries, metricDef, formatMetric, pctDelta,
   INSIGHT_BY_LABEL, METRICS, type InsightBy, type InsightRow, type MetricKey,
 } from "@/lib/field-insights";
-import { fmtDur, ninjaRows, repairTurnaround, turnaround, type RAssignment, type REvent, type RTrip } from "@/lib/field-ops-report";
+import { DailyActivity } from "@/components/field/insights/daily-activity";
 import { downloadXLSXWorkbook, downloadCSV, toCSV } from "@/lib/csv-utils";
 
 type TypeFilter = "all" | TripGroup;
@@ -174,7 +172,6 @@ function Insights() {
   };
 
   /* ─── Ninja operations (trip/assignment/event rows, Supabase mode) ─── */
-  const ops = useNinjaOps(bounds, multiStore ? storeSel : [], canTeam);
 
   /* ─── export: one workbook, every section, same rows as on screen ─── */
   const first = INSIGHT_BY_LABEL[effBy];
@@ -192,10 +189,6 @@ function Insights() {
       { name: "Exceptions", headers: ["Trip", "Customer", "Kind", "Status", "Ninja", "Store", "Date", "Reason"],
         rows: exc.map((e) => [e.job.jobNo, e.job.customer, e.kind, FIELD_STATUS_LABEL[e.job.status], e.job.ninjaName || "Unassigned", e.job.branch, tripDateOf(e.job), e.reason] as (string | number)[]) },
     ];
-    if (canTeam && ops.available) {
-      sheets.push({ name: "Ninjas", headers: ops.ninjaHead, rows: ops.ninjaBody });
-      sheets.push({ name: "Turnaround", headers: ["Stage", "Median", "Trips measured"], rows: ops.tat.map((x) => [x.label, fmtDur(x.medianMs), x.samples]) });
-    }
     void downloadXLSXWorkbook(`${fname}.xlsx`, sheets);
   };
 
@@ -204,6 +197,9 @@ function Insights() {
     if (!hydrated) return;
     const id = window.location.hash.slice(1);
     if (!id) return;
+    // the people sections moved to Field Activity — old links keep working
+    const moved: Record<string, string> = { "ins-attendance": "/field/activity/attendance", "ins-pay": "/field/activity/pay", "ins-ninjas": "/field/activity/operations" };
+    if (moved[id]) { router.replace(moved[id]); return; }
     const t = window.setTimeout(() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" }), 120);
     return () => window.clearTimeout(t);
   }, [hydrated]);
@@ -229,7 +225,7 @@ function Insights() {
     { id: "ins-compare", label: "Compare" },
     { id: "ins-performance", label: "Performance" },
     { id: "ins-monthly", label: "Month by month" },
-    ...(canTeam ? [{ id: "ins-ninjas", label: "Ninja operations" }] : []),
+    { id: "ins-daily", label: "Store activity" },
     { id: "ins-funnel", label: "Funnel & status" },
     { id: "ins-exceptions", label: `Exceptions${exc.length ? ` (${exc.length})` : ""}` },
   ];
@@ -371,47 +367,12 @@ function Insights() {
         </Frame>
       </section>
 
-      {/* ── Ninja operations ── */}
-      {canTeam && (
-        <section id="ins-ninjas" className="scroll-mt-[190px] space-y-3">
-          <SectionTitle icon={Users} title="Ninja operations" sub="Acceptance, rejection and turnaround from the Ninja app's trip records"
-            info="Counted by trip creation date in the selected period and store. The trip-type filter does not apply here; Pickup / Drop / On-site are shown as columns." />
-          {!ops.available ? (
-            <p className="rounded-2xl border border-border bg-card p-6 text-center text-[13px] text-muted-foreground">Ninja trip records are available when RepairOX is connected to the database.</p>
-          ) : ops.err ? (
-            <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">Could not load Ninja trips: {ops.err}</p>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                {ops.tat.map((x) => (
-                  <div key={x.key} className="rounded-xl border-2 border-zinc-200 bg-card p-4 shadow-card transition hover:border-[#4361EE]/30">
-                    <p className="inline-flex items-center gap-1.5 text-[12px] font-semibold text-muted-foreground"><Clock className="h-3.5 w-3.5 text-[#4361EE]" />{x.label}</p>
-                    <p className="mt-1.5 text-[22px] font-extrabold tabular-nums">{ops.loading ? "–" : fmtDur(x.medianMs)}</p>
-                    <p className="text-[11px] text-muted-foreground">{x.samples ? `median of ${x.samples} trip${x.samples > 1 ? "s" : ""}` : "Not enough data"}</p>
-                  </div>
-                ))}
-              </div>
-              <Frame>
-                <table className="w-full min-w-[1100px] table-fixed text-[14px]">
-                  <colgroup><col style={{ width: 180 }} />{ops.ninjaHead.slice(1).map((h) => <col key={h} />)}</colgroup>
-                  <Head cols={ops.ninjaHead} firstWidth={180} />
-                  <tbody>
-                    {ops.ninjaBody.map((r, i) => (
-                      <tr key={i} className="rox-table-row align-middle hover:bg-muted/40">
-                        <NameCell label={String(r[0])} />
-                        {r.slice(1).map((c, j) => <td key={j} className={cn("px-3 py-4 text-center tabular-nums", j === 2 && Number(c) > 0 && "font-semibold text-rose-700", j === 9 && "font-semibold")}>{j === 9 ? `${c}%` : c}</td>)}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {ops.ninjaBody.length === 0 && <EmptyRows text={ops.loading ? "Loading…" : "No Ninja trips in this period."} />}
-              </Frame>
-            </>
-          )}
-        </section>
-      )}
-
-      {/* ── Funnel & status ── */}
+      {/* ── Store activity (the people tables moved to Field Activity) ── */}
+      <section id="ins-daily" className="scroll-mt-[190px] space-y-3">
+        <SectionTitle icon={ListChecks} title="Store activity" sub="Trips per store for one day"
+          info="Built from the Ninja app's trip legs. Per-Ninja activity, attendance, fuel, pay and operations now live in Field Activity." />
+        <DailyActivity show="store" jobs={jobs} ctx={ctx} bounds={bounds} storeSel={storeSel} multiStore={multiStore} canTeam={canTeam} />
+      </section>
       <section id="ins-funnel" className="scroll-mt-[190px] grid grid-cols-1 items-stretch gap-5 lg:grid-cols-2">
         <Panel title="Trip funnel" icon={Filter}>
           {steps[0].count === 0 ? <p className="text-[12.5px] text-muted-foreground">No trips in this selection.</p> : (
@@ -521,51 +482,4 @@ function PerfRow({ r, prev, total, onOpen }: { r: InsightRow; prev?: InsightRow;
       <td className="px-3 py-4 text-center font-semibold tabular-nums text-emerald-700">{inr(r.business)}{d("business")}</td>
     </tr>
   );
-}
-
-/* Ninja trip rows (field_trips + assignments + status events) for the period. */
-function useNinjaOps(bounds: DateBounds, storeSel: string[], enabled: boolean) {
-  const { team } = usePermissions();
-  const [rows, setRows] = useState<{ trips: RTrip[]; asg: RAssignment[]; ev: REvent[] }>({ trips: [], asg: [], ev: [] });
-  const [loading, setLoading] = useState(true);
-  const [err, setErr] = useState<string | null>(null);
-  const available = !!supabase;
-  useEffect(() => {
-    if (!supabase || !enabled) { setLoading(false); return; }
-    let alive = true;
-    (async () => {
-      setLoading(true);
-      let qy = supabase!.from("field_trips").select("id,job_id,trip_type,status,ninja_id,branch_id,assigned_at,accepted_at,journey_started_at,arrived_at,completed_at,created_at").limit(5000);
-      if (bounds.from) qy = qy.gte("created_at", new Date(`${bounds.from}T00:00:00`).toISOString());
-      if (bounds.to) qy = qy.lt("created_at", new Date(new Date(`${bounds.to}T00:00:00`).getTime() + 864e5).toISOString());
-      const { data: t, error } = await qy;
-      if (!alive) return;
-      if (error) { setErr(error.message); setLoading(false); return; }
-      const trips = (t ?? []) as RTrip[];
-      const ids = trips.map((x) => x.id);
-      const chunks = Array.from({ length: Math.ceil(ids.length / 200) }, (_, i) => ids.slice(i * 200, i * 200 + 200));
-      const asg: RAssignment[] = [], ev: REvent[] = [];
-      for (const c of chunks) {
-        const [x, y] = await Promise.all([
-          supabase!.from("field_assignments").select("trip_id,ninja_id,outcome,assigned_at,responded_at").in("trip_id", c),
-          supabase!.from("field_trip_events").select("trip_id,new_status,occurred_at").eq("event_type", "status_changed").in("trip_id", c),
-        ]);
-        asg.push(...((x.data ?? []) as RAssignment[])); ev.push(...((y.data ?? []) as REvent[]));
-      }
-      if (!alive) return;
-      setErr(null); setRows({ trips, asg, ev }); setLoading(false);
-    })();
-    return () => { alive = false; };
-  }, [bounds.from, bounds.to, enabled]);
-  const scoped = useMemo(() => {
-    const trips = rows.trips.filter((t) => matchesStoreSelection(t.branch_id ?? undefined, storeSel));
-    const ids = new Set(trips.map((t) => t.id));
-    return { trips, asg: rows.asg.filter((a) => ids.has(a.trip_id)), ev: rows.ev.filter((e) => ids.has(e.trip_id)) };
-  }, [rows, storeSel]);
-  const name = (id: string) => team.find((m) => m.id === id)?.name ?? "Ninja";
-  const ninjas = useMemo(() => ninjaRows(scoped.trips, scoped.asg), [scoped]);
-  const tat = useMemo(() => [...turnaround(scoped.trips, scoped.ev), repairTurnaround(scoped.trips, scoped.ev)], [scoped]);
-  const ninjaHead = ["Ninja", "Assigned", "Accepted", "Rejected", "Reassigned", "Completed", "Pickups", "Drops", "On-site", "Failed", "Completion %", "Time to accept", "Trip duration"];
-  const ninjaBody = ninjas.map((r) => [name(r.ninjaId), r.assignments, r.accepted, r.rejected, r.reassigned, r.completed, r.pickups, r.drops, r.onsite, r.failed, Math.round(r.completionRate * 100), fmtDur(r.medianAcceptMs), fmtDur(r.medianTripMs)] as (string | number)[]);
-  return { available, loading, err, tat, ninjaHead, ninjaBody };
 }

@@ -390,7 +390,7 @@ function ChatView({
         <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: "radial-gradient(circle at 1px 1px, white 1px, transparent 0)", backgroundSize: "20px 20px" }} />
         <button
           onClick={onBack}
-          className="relative grid h-8 w-8 place-items-center rounded-lg bg-white/[0.1] text-white ring-1 ring-white/15 transition hover:bg-white/[0.18]"
+          className="relative grid h-8 w-8 place-items-center rounded-lg bg-[#2B3553] text-white ring-1 ring-white/15 transition hover:bg-[#1B2238]"
           aria-label="Back to workspaces"
         >
           <ArrowLeft className="h-4 w-4" />

@@ -229,7 +229,7 @@ export function RefundFlow({
       <button
         type="button"
         onClick={step === 1 ? close : () => setStep((s) => s - 1)}
-        className="rounded-xl border border-border px-4 py-2 text-[13px] font-medium text-foreground transition hover:bg-muted"
+        className={step === 1 ? "rounded-xl border border-border px-4 py-2 text-[13px] font-medium text-foreground transition hover:bg-muted" : "rounded-xl border border-[#2B3553] bg-[#2B3553] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#1B2238]"}
       >
         {step === 1 ? "Cancel" : "Back"}
       </button>

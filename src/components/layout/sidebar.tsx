@@ -32,11 +32,15 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 };
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
-function NavItem({ item, collapsed, pathname, comingSoon }: {
+/** Subtle icon motion on row hover (lift handled by the row itself). */
+const ICON_ANIM = "transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110 motion-reduce:transform-none";
+
+function NavItem({ item, collapsed, pathname, comingSoon, dark = false }: {
   item: NavItemDef;
   collapsed: boolean;
   pathname: string;
   comingSoon?: boolean;
+  dark?: boolean;
 }) {
   const Icon = ICONS[item.icon] ?? Home;
   // New-tab items (e.g. Leads → Price List) point at their canonical target
@@ -55,7 +59,7 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
   const isModuleRoot = item.href === "/operations" || item.href === "/field" || item.href === "/lead-management" || item.href === "/dashboard" || item.href === "/leads/intelligence";
   // "/field" is a module root (so Dashboards/Reports don't light it up) BUT its
   // record pages (/field/<tripId>) belong to it — View Assignment keeps it active.
-  const fieldRecordPage = item.href === "/field" && pathname.startsWith("/field/") && !/^\/field\/(insights|dashboard|reports|ops-report)(\/|$)/.test(pathname);
+  const fieldRecordPage = item.href === "/field" && pathname.startsWith("/field/") && !/^\/field\/(insights|activity|dashboard|reports|ops-report)(\/|$)/.test(pathname);
   const active = !item.newTab && !comingSoon && (fieldRecordPage || (isModuleRoot
     ? pathname === item.href
     : pathname === item.href || pathname.startsWith(item.href + "/")));
@@ -79,17 +83,18 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
         rel={item.newTab ? "noopener noreferrer" : undefined}
         className={cn(
           "group relative flex items-center rounded-xl text-sm font-medium transition-colors",
+          "transform-gpu hover:-translate-y-0.5 motion-reduce:transform-none",
           // Padding/justify change on the SAME curve as the width so the icon
           // glides to centre instead of snapping.
-          "[transition:padding_360ms_cubic-bezier(0.4,0,0.2,1),background-color_200ms_ease]",
+          "[transition:padding_360ms_cubic-bezier(0.4,0,0.2,1),background-color_200ms_ease,transform_220ms_cubic-bezier(0.22,1,0.36,1),box-shadow_220ms_ease]",
           collapsed ? "mx-auto w-10 justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5",
-          active ? "text-white" : comingSoon ? "text-slate-400 hover:bg-slate-50 hover:text-slate-600" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          active ? ("text-white") : comingSoon ? (dark ? "text-white/50 hover:bg-white/10 hover:text-white/75" : "text-slate-400 hover:bg-white/70 hover:text-slate-600") : dark ? "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white" : "text-slate-500 hover:bg-white hover:shadow-[0_6px_16px_-8px_rgba(67,97,238,0.35)] hover:text-slate-900"
         )}
       >
         {active && (
           <motion.span
             layoutId="sidebar-active"
-            className="absolute inset-0 rounded-xl bg-[#4361EE] shadow-[0_8px_24px_-8px_rgba(67,97,238,0.45)]"
+            className={cn("absolute inset-0 rounded-xl", dark ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]" : "bg-[#4361EE] shadow-[0_8px_24px_-8px_rgba(67,97,238,0.45)]")}
             transition={{ type: "spring", stiffness: 380, damping: 30 }}
           />
         )}
@@ -98,7 +103,7 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
           <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
         )}
         <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
-          <Icon className={cn("h-[18px] w-[18px]", active ? "text-white" : comingSoon ? "text-zinc-300" : "text-zinc-400 group-hover:text-zinc-700")} />
+          <Icon className={cn(ICON_ANIM, "h-[18px] w-[18px]", active ? ("text-white") : comingSoon ? "text-zinc-300" : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
         </span>
         {/* Label: fades out AND collapses its width on the same curve as the
             aside, so the icon glides to centre instead of snapping and the text
@@ -107,7 +112,8 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
         <span
           className={cn(
             "relative flex items-center gap-2 overflow-hidden whitespace-nowrap [transition:opacity_200ms_ease,max-width_360ms_cubic-bezier(0.4,0,0.2,1),margin_360ms_cubic-bezier(0.4,0,0.2,1)]",
-            collapsed ? "pointer-events-none ml-0 max-w-0 opacity-0" : "ml-0 max-w-[180px] opacity-100"
+            collapsed ? "pointer-events-none ml-0 max-w-0 opacity-0" : "ml-0 max-w-[180px] opacity-100",
+            dark && "font-semibold [text-shadow:0_1px_1px_rgba(15,23,55,0.35)]"
           )}
         >
           {item.label}
@@ -124,10 +130,11 @@ function NavItem({ item, collapsed, pathname, comingSoon }: {
 }
 
 /* Expandable nav group — collapsible section with children */
-function ExpandableNavSection({ group, collapsed, pathname }: {
+function ExpandableNavSection({ group, collapsed, pathname, dark = false }: {
   group: ExpandableNavGroup;
   collapsed: boolean;
   pathname: string;
+  dark?: boolean;
 }) {
   const Icon = ICONS[group.icon] ?? Home;
   // Auto-expand if any child is active
@@ -149,12 +156,12 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
         <button
           onClick={() => setExpanded(!expanded)}
           className={cn(
-            "group relative mx-auto flex w-10 items-center justify-center rounded-xl py-2.5 text-sm font-medium transition-colors",
-            childActive ? "text-[#4361EE]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+            "group relative mx-auto flex w-10 items-center justify-center rounded-xl py-2.5 text-sm font-medium transition-[background-color,box-shadow,transform] duration-200 transform-gpu hover:-translate-y-0.5 motion-reduce:transform-none",
+            childActive ? (dark ? "text-white" : "text-[#4361EE]") : dark ? "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white" : "text-slate-500 hover:bg-white hover:shadow-[0_6px_16px_-8px_rgba(67,97,238,0.35)] hover:text-slate-900"
           )}
         >
           <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
-            <Icon className={cn("h-[18px] w-[18px]", childActive ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-700")} />
+            <Icon className={cn(ICON_ANIM, "h-[18px] w-[18px]", childActive ? (dark ? "text-white" : "text-[#4361EE]") : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
           </span>
         </button>
         </SidebarTooltip>
@@ -167,8 +174,8 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
       <button
         onClick={() => setExpanded(!expanded)}
         className={cn(
-          "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-colors",
-          childActive ? "text-[#4361EE]" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+          "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-[background-color,box-shadow,transform] duration-200 transform-gpu hover:-translate-y-0.5 motion-reduce:transform-none",
+          childActive ? (dark ? "text-white" : "text-[#4361EE]") : dark ? "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white" : "text-slate-500 hover:bg-white hover:shadow-[0_6px_16px_-8px_rgba(67,97,238,0.35)] hover:text-slate-900"
         )}
       >
         {/* Hover underline — sweeps in from the left */}
@@ -176,15 +183,15 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
           <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
         )}
         <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
-          <Icon className={cn("h-[18px] w-[18px]", childActive ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-700")} />
+          <Icon className={cn(ICON_ANIM, "h-[18px] w-[18px]", childActive ? (dark ? "text-white" : "text-[#4361EE]") : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
         </span>
-        <span className="flex-1 whitespace-nowrap text-left">{group.label}</span>
+        <span className={cn("flex-1 whitespace-nowrap text-left", dark && "font-semibold [text-shadow:0_1px_1px_rgba(15,23,55,0.35)]")}>{group.label}</span>
         <motion.span
           animate={{ rotate: expanded ? 180 : 0 }}
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           className="inline-flex h-4 w-4 shrink-0 items-center justify-center"
         >
-          <ChevronDown className={cn("h-3.5 w-3.5", childActive ? "text-[#4361EE]" : "text-zinc-400")} />
+          <ChevronDown className={cn("h-3.5 w-3.5", childActive ? (dark ? "text-white" : "text-[#4361EE]") : dark ? "text-white" : "text-zinc-400")} />
         </motion.span>
       </button>
 
@@ -211,10 +218,10 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
                   <Link
                     href={child.href}
                     className={cn(
-                      "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors",
+                      "group relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-[background-color,box-shadow,transform] duration-200 transform-gpu hover:-translate-y-0.5 motion-reduce:transform-none",
                       active
-                        ? "bg-[#EEF1FD] text-[#4361EE]"
-                        : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                        ? (dark ? "bg-white text-[#2B3FCF] shadow-sm" : "bg-[#EEF1FD] text-[#4361EE]")
+                        : dark ? "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white" : "text-slate-500 hover:bg-white hover:shadow-[0_6px_16px_-8px_rgba(67,97,238,0.35)] hover:text-slate-900"
                     )}
                   >
                     {/* Hover underline — sweeps in from the left */}
@@ -222,9 +229,9 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
                       <span className="pointer-events-none absolute bottom-0.5 left-2.5 right-2.5 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
                     )}
                     <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
-                      <ChildIcon className={cn("h-[15px] w-[15px]", active ? "text-[#4361EE]" : "text-zinc-400 group-hover:text-zinc-600")} />
+                      <ChildIcon className={cn(ICON_ANIM, "h-[15px] w-[15px]", active ? "text-[#4361EE]" : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-600")} />
                     </span>
-                    <span className="whitespace-nowrap">{child.label}</span>
+                    <span className={cn("whitespace-nowrap", dark && "font-semibold [text-shadow:0_1px_1px_rgba(15,23,55,0.35)]")}>{child.label}</span>
                     {active && (
                       <motion.span
                         layoutId="sidebar-child-active"
@@ -244,11 +251,12 @@ function ExpandableNavSection({ group, collapsed, pathname }: {
 }
 
 /* Workspace switcher pill row — only shows workspaces the active role can access */
-function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
+function WorkspaceSwitcher({ active, collapsed, onChange, allowed, dark = false }: {
   active: WorkspaceId;
   collapsed: boolean;
   onChange: (id: WorkspaceId) => void;
   allowed: ReturnType<typeof usePermissions>["allowedWorkspaces"];
+  dark?: boolean;
 }) {
   if (allowed.length <= 1) return null; // single-workspace users never see a switcher
 
@@ -262,7 +270,7 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
       <div className="mb-3 flex flex-col items-center px-2">
         {/* Module selector — grouped into one compact capsule so it reads as a
             distinct control, separate from the section navigation below. */}
-        <div className="flex flex-col items-center gap-1 rounded-2xl border-2 border-[#4361EE]/25 bg-[#4361EE]/[0.04] p-1">
+        <div className={cn("flex flex-col items-center gap-1 rounded-2xl border-2 p-1", dark ? "border-white/25 bg-white/10" : "border-[#4361EE]/25 bg-[#4361EE]/[0.04]")}>
           {allowed.map((w) => {
             const Icon = WORKSPACE_ICONS[w.id];
             return (
@@ -272,8 +280,8 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-lg transition",
                   active === w.id
-                    ? "bg-[#4361EE] text-white"
-                    : "text-zinc-500 hover:bg-white hover:text-zinc-700"
+                    ? (dark ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white" : "bg-[#4361EE] text-white")
+                    : dark ? "text-white/90 hover:bg-white/15 hover:text-white" : "text-zinc-500 hover:bg-white hover:text-zinc-700"
                 )}
               >
                 <Icon className="h-4 w-4" />
@@ -283,12 +291,12 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
           })}
         </div>
         {/* Divider — communicates the shift from modules to navigation. */}
-        <div className="mt-3 h-0.5 w-8 rounded-full bg-slate-300" />
+        <div className={cn("mt-3 h-0.5 w-8 rounded-full", dark ? "bg-white/25" : "bg-slate-300")} />
       </div>
     );
   }
   return (
-    <div className="mx-3 mb-4 flex items-center gap-1 rounded-xl bg-muted p-1">
+    <div className={cn("mx-3 mb-4 flex items-center gap-1 rounded-xl p-1", dark ? "bg-white/10 ring-1 ring-inset ring-white/25" : "bg-muted")}>
       {allowed.map((w) => (
         <button
           key={w.id}
@@ -297,8 +305,8 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed }: {
           className={cn(
             "flex-1 truncate rounded-lg px-1.5 py-1.5 text-[11.5px] font-semibold leading-tight transition",
             active === w.id
-              ? "bg-[#4361EE] text-white shadow-sm"
-              : "text-zinc-500 hover:text-zinc-800"
+              ? (dark ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white shadow-sm" : "bg-[#4361EE] text-white shadow-sm")
+              : dark ? "text-white/90 hover:text-white" : "text-zinc-500 hover:text-zinc-800"
           )}
         >
           {w.navLabel ?? w.label}
@@ -338,7 +346,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
   return (
     <aside
       className={cn(
-        "rox-sidebar z-30 hidden h-full shrink-0 flex-col border-r border-border bg-card lg:flex",
+        "rox-sidebar z-30 hidden h-full shrink-0 flex-col border-r-2 border-[#33406B] shadow-[4px_0_14px_-8px_rgba(30,40,80,0.45)] bg-gradient-to-b from-[#4D5C8C] via-[#455383] to-[#3C4977] text-white lg:flex",
         // Smooth collapse/expand: a single, well-tuned width transition with a
         // gentle ease-in-out curve. `will-change: width` lets the browser
         // promote the animation so it stays fluid, and the inner content fades
@@ -360,7 +368,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
               </motion.div>
             ) : (
               <motion.div key="f" initial={{ opacity: 0, x: -6 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0 }}>
-                <Logo />
+                <Logo onDark className="text-white" />
               </motion.div>
             )}
           </AnimatePresence>
@@ -369,7 +377,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
           onClick={() => setCollapsed(!collapsed)}
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.95 }}
-          className="group relative grid h-[28.2px] w-[28.2px] shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white transition-transform"
+          className="group relative grid h-[28.2px] w-[28.2px] shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white transition-transform"
           aria-label="Toggle sidebar"
         >
           {/* Soft blue outer glow, matching the POS button */}
@@ -391,7 +399,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
       </div>
 
       {/* Workspace switcher */}
-      <WorkspaceSwitcher active={activeWorkspace} collapsed={collapsed} onChange={handleWorkspaceChange} allowed={allowedWorkspaces} />
+      <WorkspaceSwitcher dark active={activeWorkspace} collapsed={collapsed} onChange={handleWorkspaceChange} allowed={allowedWorkspaces} />
 
       {/* Grouped nav — scrollable middle zone, filtered live by the active role's permissions */}
       <ThinScroll className="px-3 pb-2">
@@ -412,7 +420,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
                   so the section labels don't pop when toggling. */}
               <p
                 className={cn(
-                  "px-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 select-none overflow-hidden [transition:opacity_200ms_ease,max-height_360ms_cubic-bezier(0.4,0,0.2,1),margin_360ms_cubic-bezier(0.4,0,0.2,1)]",
+                  "px-3 text-[10px] font-bold uppercase tracking-widest text-[#E3E8FF] select-none overflow-hidden [transition:opacity_200ms_ease,max-height_360ms_cubic-bezier(0.4,0,0.2,1),margin_360ms_cubic-bezier(0.4,0,0.2,1)]",
                   collapsed ? "mb-0 max-h-0 opacity-0" : "mb-1 max-h-5 opacity-100"
                 )}
                 aria-hidden={collapsed}
@@ -430,12 +438,13 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
                     }}
                     collapsed={collapsed}
                     pathname={pathname}
+                    dark
                   />
                 ))}
                 {/* Regular flat nav items */}
                 <AnimatePresence initial={false}>
                   {items.map((item) => (
-                    <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} comingSoon={isComingSoon(item.href)} />
+                    <NavItem key={item.href} item={item} collapsed={collapsed} pathname={pathname} comingSoon={isComingSoon(item.href)} dark />
                   ))}
                 </AnimatePresence>
               </ul>

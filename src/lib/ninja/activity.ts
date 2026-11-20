@@ -18,7 +18,7 @@ export type ActivityKind =
   | "assignment_seen" | "assignment_accepted" | "assignment_rejected"
   | "trip_status_change" | "trip_opened"
   | "call_customer" | "whatsapp_customer" | "navigate_tapped" | "tracking_link_shared"
-  | "problem_reported" | "note_added"
+  | "problem_reported" | "note_added" | "review_captured" | "odometer_start" | "odometer_end" | "leave_requested" | "review_link_sent"
   | "stock_search" | "stock_item_viewed"
   | "doc_ticket_created" | "doc_invoice_created" | "doc_failed"
   | "insights_viewed" | "notice_opened" | "sync_flushed";

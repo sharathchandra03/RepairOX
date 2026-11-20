@@ -100,7 +100,7 @@ export function NotificationBell() {
       trigger={({ toggle }) => (
         <button
           onClick={toggle}
-          className="relative grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition"
+          className="relative grid h-9 w-9 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white transition"
           aria-label={`Notifications${unread ? ` (${unread} unread)` : ""}`}
         >
           <motion.span
@@ -119,7 +119,7 @@ export function NotificationBell() {
             /* Compact circular red badge, lifted onto the upper-right of the bell
                with a card-coloured ring so it reads as a distinct pill (same
                visual quality as the Walk-In follow-up bell badge). */
-            <span className="absolute -right-0.5 -top-0.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
+            <span className="absolute -right-0.5 -top-0.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-[#475686]">
               {unread > 9 ? "9+" : unread}
             </span>
           )}

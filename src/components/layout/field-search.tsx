@@ -60,15 +60,15 @@ export function FieldSearch() {
 
   return (
     <div ref={box} className="relative w-[400px] max-w-[34vw] min-w-[280px] shrink-0">
-      <div className={cn("relative flex h-9 items-center rounded-full border transition-all duration-200", open ? "border-[#4361EE]/40 bg-white shadow-[0_0_0_3px_rgba(67,97,238,0.10)]" : "border-border bg-slate-100/80 hover:bg-slate-100")}>
-        <span className={cn("flex shrink-0 items-center gap-1 rounded-l-full border-r py-1.5 pl-3 pr-2 text-[11px] font-semibold", open ? "border-[#4361EE]/20 bg-[#4361EE]/5 text-[#4361EE]" : "border-border text-zinc-500")}>
+      <div className={cn("relative flex h-9 items-center rounded-full border transition-all duration-200", open ? "border-[#4361EE]/40 bg-white shadow-[0_0_0_3px_rgba(67,97,238,0.10)]" : "border-white/40 bg-white/[0.2] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60")}>
+        <span className={cn("flex shrink-0 items-center gap-1 rounded-l-full border-r py-1.5 pl-3 pr-2 text-[11px] font-semibold", open ? "border-[#4361EE]/20 bg-[#4361EE]/5 text-[#4361EE]" : "border-white/35 text-white")}>
           <Truck className="h-3 w-3" /><span className="hidden sm:inline">Trips</span>
         </span>
-        <Search className={cn("ml-2 h-3.5 w-3.5 shrink-0", open ? "text-[#4361EE]" : "text-zinc-400")} />
+        <Search className={cn("ml-2 h-3.5 w-3.5 shrink-0", open ? "text-[#4361EE]" : "text-white")} />
         <input ref={input} value={query} onChange={(e) => { setQuery(e.target.value); setOpen(true); }} onFocus={() => setOpen(true)} onKeyDown={onKey}
           placeholder={PLACEHOLDER} autoComplete="off" spellCheck={false} role="combobox" aria-expanded={show} aria-autocomplete="list"
           aria-label="Search field trips by Trip ID, customer, phone, device or Ninja"
-          className="h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:outline-none focus:ring-0" />
+          className={cn("h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] outline-none focus:outline-none focus:ring-0", open ? "text-zinc-800 placeholder:text-zinc-400" : "text-white placeholder:text-white/80")} />
         {query && <button type="button" onClick={() => { setQuery(""); input.current?.focus(); }} className="mr-2 grid h-5 w-5 place-items-center rounded-full text-zinc-400 hover:bg-zinc-200 hover:text-zinc-600" aria-label="Clear search"><X className="h-3 w-3" /></button>}
       </div>
       {show && (

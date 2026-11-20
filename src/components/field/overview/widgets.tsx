@@ -484,7 +484,7 @@ const INSIGHT_LINKS = [
   { hash: "ins-compare", name: "Compare", purpose: "Stores, engineers, agents or sources side by side", Icon: BarChart3, tone: "sky" },
   { hash: "ins-performance", name: "Performance table", purpose: "Trips, completion, on-time and business per row", Icon: ClipboardList, tone: "teal" },
   { hash: "ins-monthly", name: "Month by month", purpose: "The year at a glance, month columns", Icon: CalendarClock, tone: "amber" },
-  { hash: "ins-ninjas", name: "Ninja operations", purpose: "Acceptance, rejection and turnaround", Icon: Users, tone: "violet", team: true },
+  { hash: "ins-ninjas", href: "/field/activity", name: "Field Activity", purpose: "Team today, attendance, pay and reviews", Icon: Users, tone: "violet", team: true },
   { hash: "ins-exceptions", name: "Exceptions", purpose: "Delayed, failed and cancelled trips", Icon: AlertTriangle, tone: "emerald" },
 ] as const;
 const TILE = { sky: "from-sky-400 to-blue-600", teal: "from-teal-400 to-emerald-600", violet: "from-violet-400 to-indigo-600", amber: "from-amber-400 to-orange-500", emerald: "from-rose-400 to-red-600" } as const;
@@ -496,7 +496,7 @@ export function DashboardLinksPanel() {
       <ul className="space-y-1.5">
         {INSIGHT_LINKS.filter((d) => !("team" in d) || canTeam).map((d) => (
           <li key={d.hash}>
-            <button onClick={() => router.push(`/field/insights#${d.hash}`)} className="group flex h-[54px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition hover:bg-[#EEF1FD]/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
+            <button onClick={() => router.push("href" in d ? d.href : `/field/insights#${d.hash}`)} className="group flex h-[54px] w-full items-center gap-3 rounded-xl px-2.5 text-left transition hover:bg-[#EEF1FD]/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
               <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-gradient-to-br text-white shadow-sm ring-1 ring-white/40", TILE[d.tone])}><d.Icon className="h-4 w-4" /></span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold">{d.name}</span>

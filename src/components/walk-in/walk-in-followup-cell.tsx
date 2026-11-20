@@ -346,7 +346,7 @@ function PopoverHeader({ title, subtitle, onClose, onBack }: { title: string; su
     <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
       <div className="flex items-center gap-2 min-w-0">
         {onBack && (
-          <button onClick={onBack} className="text-muted-foreground hover:text-foreground" aria-label="Back">
+          <button onClick={onBack} className="grid h-6 w-6 place-items-center rounded-full bg-[#2B3553] text-white transition hover:bg-[#1B2238]" aria-label="Back">
             <ChevronDown className="h-4 w-4 rotate-90" />
           </button>
         )}
@@ -584,7 +584,7 @@ export function WalkInFollowUpCompleteModal({
           <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-3">
             <div className="flex items-center gap-2">
               {step === "schedule-next" && (
-                <button onClick={() => setStep("complete")} className="text-muted-foreground hover:text-foreground" aria-label="Back">
+                <button onClick={() => setStep("complete")} className="grid h-6 w-6 place-items-center rounded-full bg-[#2B3553] text-white transition hover:bg-[#1B2238]" aria-label="Back">
                   <ChevronDown className="h-4 w-4 rotate-90" />
                 </button>
               )}

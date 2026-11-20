@@ -167,7 +167,7 @@ export function StatusPillDropdown({
               <div className="flex items-center gap-2 border-b border-border px-3 py-2">
                 <Search className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                 <input autoFocus value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search statuses…"
-                  className="min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-muted-foreground" />
+                  className="rox-search-input min-w-0 flex-1 bg-transparent text-[12px] outline-none placeholder:text-muted-foreground" />
               </div>
               <div className="max-h-[300px] overflow-y-auto p-1.5 rox-rail-scroll">
                 {groups.length === 0 && <p className="px-3 py-4 text-center text-[11.5px] text-muted-foreground">No matching status</p>}

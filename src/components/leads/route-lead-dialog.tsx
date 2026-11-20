@@ -20,6 +20,7 @@
    · idempotent (clientRequestId) so retries/double-clicks make ONE trip.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BACK_TONE_CLASS } from "@/components/common/back-pill";
 import { useMemo, useRef, useState } from "react";
 import { Store, Truck, ArrowRight, Check, MapPin, Building2, AlertTriangle, ChevronLeft, Phone, Smartphone, MessageSquareText } from "lucide-react";
 import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
@@ -201,7 +202,7 @@ function RouteInner({ lead, onClose }: { lead: Lead; onClose: () => void }) {
 
   const footer = (
     <div className="flex w-full items-center justify-between gap-2">
-      <div>{stage !== "choose" && <Button variant="ghost" size="sm" className="gap-1" onClick={back} disabled={busy}><ChevronLeft className="h-4 w-4" /> Back</Button>}</div>
+      <div>{stage !== "choose" && <Button variant="ghost" size="sm" className={`gap-1 ${BACK_TONE_CLASS}`} onClick={back} disabled={busy}><ChevronLeft className="h-4 w-4" /> Back</Button>}</div>
       <div className="flex items-center gap-2">
         <Button variant="outline" onClick={close} disabled={busy}>Cancel</Button>
         {stage !== "confirm" ? (

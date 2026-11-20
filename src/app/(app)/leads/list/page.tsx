@@ -7,7 +7,7 @@ import { useSearchParams, useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
   Search, Filter, Plus, User, LayoutGrid, List, Map, Flag, X, ChevronDown, CalendarClock, Pin,
-  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal, MessageSquare, Send, UserPlus, AlertTriangle,
+  Phone, Mail, RefreshCw, Trash2, Check, SlidersHorizontal, MessageSquare, Send, UserPlus, UserCheck, AlertTriangle,
 } from "lucide-react";
 import { PageHeader } from "@/components/layout/page-header";
 import { Button } from "@/components/ui/button";
@@ -253,7 +253,7 @@ function NACell() {
  *    • BLUE   → a Ticket exists (customer's device booked), no invoice yet.
  *    • ORANGE → "Lead Won" only (routed / walk-in / field assigned), no
  *               ticket/invoice yet.
- *    • FW (amber) → an open Follow-up is being worked — ONLY when the lead has
+ *    • Calendar-clock (orange) → an open Follow-up is being worked — ONLY when the lead has
  *               no ticket / invoice / lead-won (those always win the Action).
  *    • CROSS (red) → the lead is Lost / dropped — ONLY when the lead has no
  *               ticket / invoice / lead-won.
@@ -289,24 +289,21 @@ function LeadStatusTick({ wf, lead }: { wf: LeadWorkflow; lead?: Lead }) {
         </span>
       );
     }
-    // FOLLOW-UP — amber circular "FW" badge (same shape/size as the tick).
+    // FOLLOW-UP — orange calendar-clock icon.
     // Surfaces for a due follow-up (derived Action) OR a lead whose own status
     // reads as "Follow-up" — never for a lost lead (handled above) and never
     // for a converted lead (guarded by `!tone`).
     const statusIsFollowUp = /follow/.test((lead?.status || "").toLowerCase());
     if (wf.action === "follow_up" || statusIsFollowUp) {
       return (
-        // Follow-up indicator — bold red "FW" text on a white circular
-        // background. The disc is sized so the two letters stay clearly
-        // readable (a 16px circle crammed them); it's centered on the Lead ID
-        // via the flex row, with a soft shadow + rose ring so the white disc
-        // pops against the row.
+        // Follow-up indicator — orange calendar-clock icon (replaces "FW").
         <span
-          className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-white text-[10px] font-extrabold uppercase leading-none tracking-[0.02em] text-rose-600 shadow-sm ring-1 ring-rose-200"
+          className="grid h-4 w-4 shrink-0 place-items-center text-orange-500"
           title="Follow-up in progress — the lead is being actively worked"
           aria-label="Follow-up in progress"
+          role="img"
         >
-          FW
+          <CalendarClock className="h-4 w-4" strokeWidth={2.5} />
         </span>
       );
     }
@@ -821,20 +818,17 @@ function ContactInfoCell({ lead }: { lead: Lead }) {
   const phoneDigits = (lead.number || "").replace(/\D/g, "");
   const existing = leadIsExistingCustomer(lead);
   return (
-    <div className="flex min-w-0 items-start gap-2 leading-snug" onClick={(e) => e.stopPropagation()}>
-      {/* Thin colour strip in front of the name — green = existing customer
-          (linked to Customer Master / converted), orange = new prospect.
-          Same bar pattern as the Walk-In table's type strip for uniformity. */}
-      <span
-        title={existing ? "Existing customer — linked to Customer Master" : "New prospect — not yet a customer"}
-        aria-label={existing ? "Existing customer" : "New prospect"}
-        className={cn(
-          "mt-0.5 h-8 w-1 shrink-0 rounded-full",
-          existing ? "bg-emerald-500" : "bg-amber-500",
-        )}
-      />
+    <div className="min-w-0 leading-snug" onClick={(e) => e.stopPropagation()}>
       <div className="min-w-0">
-      <p className="min-w-0 truncate font-semibold text-zinc-900">{lead.name || "—"}</p>
+      <div className="flex min-w-0 items-center gap-1.5">
+        {/* Quiet identity hint (no strip, no pill): a small icon before the
+            name — UserCheck (emerald) = existing customer, UserPlus (amber) =
+            new prospect. Full meaning in the tooltip. */}
+        {existing
+          ? <UserCheck className="h-3.5 w-3.5 shrink-0 text-emerald-600" strokeWidth={2.4} aria-label="Existing customer"><title>Existing customer — linked to Customer Master</title></UserCheck>
+          : <UserPlus className="h-3.5 w-3.5 shrink-0 text-amber-500" strokeWidth={2.4} aria-label="New prospect"><title>New prospect — not yet a customer</title></UserPlus>}
+        <p className="min-w-0 truncate font-semibold text-zinc-900" title={lead.name || undefined}>{lead.name || "—"}</p>
+      </div>
       {lead.number && (
         <a href={`tel:${phoneDigits}`} className="mt-1 flex items-center gap-1.5 text-[12.5px] text-zinc-600 hover:text-[#4361EE] tnum">
           <Phone className="h-3.5 w-3.5 shrink-0" /> <span className="truncate">{lead.number}</span>

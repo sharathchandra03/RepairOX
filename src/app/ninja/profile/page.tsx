@@ -1,6 +1,6 @@
 "use client";
 import { useRouter } from "next/navigation";
-import { Activity, Bell, ChevronRight, FileCheck2, LogOut, MapPin, Navigation, Smartphone, UserCog } from "lucide-react";
+import { Activity, BadgeIndianRupee, Bell, CalendarCheck, ChevronRight, FileCheck2, LogOut, MapPin, Navigation, Smartphone, UserCog } from "lucide-react";
 import Link from "next/link";
 import { usePermissions } from "@/lib/permissions-context";
 import { useNinja, useNinjaGeo } from "@/lib/ninja/ninja-context";
@@ -63,6 +63,8 @@ export default function ProfilePage() {
       <Card className="divide-y divide-slate-100">
         {[
           { href: "/ninja/insights", icon: Activity, tone: "bg-[#EEF1FD] text-[#4361EE]", l: "My Day", d: "Your numbers and streak" },
+          { href: "/ninja/earnings", icon: BadgeIndianRupee, tone: "bg-emerald-50 text-emerald-600", l: "My earnings", d: "Salary, incentives and what unlocks next" },
+          { href: "/ninja/attendance", icon: CalendarCheck, tone: "bg-amber-50 text-amber-600", l: "Attendance & fuel", d: "Days worked, km, fuel and leave" },
           { href: "/ninja/active", icon: Navigation, tone: "bg-emerald-50 text-emerald-600", l: "Active trip", d: "Jump back into what you're doing" },
           { href: "/ninja/proof", icon: FileCheck2, tone: "bg-violet-50 text-violet-600", l: "Proof & sync", d: "Receipts, signatures, queued actions" },
         ].map((x) => (

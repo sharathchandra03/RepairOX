@@ -7,6 +7,7 @@
    validated by the database (field_trip_transition_ok); this component only
    offers the steps the viewer is permitted to take. Assigning a Ninja stays in
    the shared AssignNinjaDialog. */
+import { BACK_TONE_CLASS } from "@/components/common/back-pill";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { CalendarClock, CheckCircle2, PackageCheck, RotateCcw, Ticket as TicketIcon, XCircle } from "lucide-react";
@@ -108,7 +109,7 @@ export function TripActionBar({ trip, onChanged, className, showEmpty }: { trip:
         title={reasonFor === "cancel" ? `Cancel ${trip.trip_no ?? "trip"}` : `Flag handover · ${trip.trip_no ?? ""}`}
         subtitle={reasonFor === "cancel" ? "The Ninja is notified. History is kept." : "Use this when the device, IMEI or accessories don't match the pickup receipt."}
         footer={<div className="flex justify-end gap-2">
-          <Button variant="outline" onClick={() => setReasonFor(null)}>Back</Button>
+          <Button variant="outline" className={BACK_TONE_CLASS} onClick={() => setReasonFor(null)}>Back</Button>
           <Button variant={reasonFor === "cancel" ? "destructive" : "primary"} disabled={reason.trim().length < 3}
             onClick={() => { const k = reasonFor; setReasonFor(null); void (k === "cancel" ? cancel(reason.trim()) : flag(reason.trim())); }}>
             {reasonFor === "cancel" ? "Cancel trip" : "Flag mismatch"}</Button></div>}>

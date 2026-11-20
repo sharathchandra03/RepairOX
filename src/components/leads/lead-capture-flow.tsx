@@ -15,6 +15,7 @@
    "Add Lead" and "Edit Lead" — one structured form, no duplicate systems.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BACK_TONE_CLASS } from "@/components/common/back-pill";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { createPortal } from "react-dom";
@@ -1684,7 +1685,7 @@ function FlowInner({ onClose, editLead, onSaved, prefill }: { onClose: () => voi
                 <Button variant="ghost" size="sm" className="gap-1" onClick={() => goToStage(stage - 1)}><ChevronLeft className="h-4 w-4" /> Previous</Button>
               )}
               {reviewOpen && (
-                <Button variant="ghost" size="sm" className="gap-1" onClick={() => setReviewOpen(false)}><ChevronLeft className="h-4 w-4" /> Back to form</Button>
+                <Button variant="ghost" size="sm" className={`gap-1 ${BACK_TONE_CLASS}`} onClick={() => setReviewOpen(false)}><ChevronLeft className="h-4 w-4" /> Back to form</Button>
               )}
             </div>
             <div className="flex items-center gap-2">

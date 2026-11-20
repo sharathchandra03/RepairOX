@@ -3,25 +3,28 @@
    meter and plain-language lines. Everything is computed from real records by lib/ninja/insights.ts. */
 import { useEffect, useMemo, useState } from "react";
 import { motion } from "framer-motion";
-import { ArrowDownRight, ArrowUpRight, Clock3, Flame, MapPinned, ReceiptText, ShieldCheck, Timer, Ticket, TriangleAlert } from "lucide-react";
+import { ArrowDownRight, ArrowUpRight, Clock3, Flame, MapPinned, IndianRupee, ReceiptText, ShieldCheck, Timer, Ticket, TriangleAlert } from "lucide-react";
 import { supabase } from "@/lib/supabase";
 import { useStore } from "@/lib/store";
-import { formatINR } from "@/lib/utils";
+import { formatINR, fitFontSize } from "@/lib/utils";
 import { useNinja } from "@/lib/ninja/ninja-context";
 import { type AssignmentRow, type Period, type TripStatRow, PERIOD_LABEL, computeInsights, durationLabel } from "@/lib/ninja/insights";
 import { TYPE_LABEL } from "@/lib/ninja/model";
-import { Card, SectionTitle, Segmented } from "@/components/ninja/ui";
+import { Card, FitNumber, SectionTitle, Segmented } from "@/components/ninja/ui";
 
-function Ring({ value, label, tone, size = 92 }: { value: number | null; label: string; tone: string; size?: number }) {
-  const r = size / 2 - 9, c = 2 * Math.PI * r, pct = value ?? 0;
+function Ring({ value, label, tone, size = 116 }: { value: number | null; label: string; tone: string; size?: number }) {
+  const r = size / 2 - 8, c = 2 * Math.PI * r, pct = value ?? 0;
   return (
     <div className="relative grid place-items-center" style={{ width: size, height: size }}>
       <svg viewBox={`0 0 ${size} ${size}`} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} stroke="#E8ECF6" strokeWidth="9" fill="none" />
-        <motion.circle cx={size / 2} cy={size / 2} r={r} stroke={tone} strokeWidth="9" strokeLinecap="round" fill="none" strokeDasharray={c}
+        <circle cx={size / 2} cy={size / 2} r={r} stroke="#E8ECF6" strokeWidth="8" fill="none" />
+        <motion.circle cx={size / 2} cy={size / 2} r={r} stroke={tone} strokeWidth="8" strokeLinecap="round" fill="none" strokeDasharray={c}
           initial={{ strokeDashoffset: c }} animate={{ strokeDashoffset: c * (1 - pct) }} transition={{ duration: 0.9, ease: [0.22, 1, 0.36, 1] }} />
       </svg>
-      <div className="absolute text-center leading-none"><p className="text-[22px] font-extrabold tabular-nums">{value == null ? "—" : Math.round(value * 100)}<span className="text-[12px] text-slate-400">{value == null ? "" : "%"}</span></p><p className="mt-1 text-[9.5px] font-bold uppercase tracking-wider text-slate-400">{label}</p></div>
+      <div className="absolute inset-0 flex flex-col items-center justify-center text-center">
+        <p className="flex items-baseline font-extrabold leading-none tabular-nums" style={{ fontSize: fitFontSize(value == null ? "—" : Math.round(value * 100), 26, { fitAt: 2 }) }}>{value == null ? "—" : Math.round(value * 100)}<span className="ml-0.5 text-[12px] font-bold text-slate-400">{value == null ? "" : "%"}</span></p>
+        <p className="mt-1.5 text-[9.5px] font-bold uppercase tracking-wider text-slate-400">{label}</p>
+      </div>
     </div>
   );
 }
@@ -39,7 +42,7 @@ function Delta({ now, prev }: { now: number; prev: number }) {
 export default function InsightsPage() {
   const { trips, staffId, track } = useNinja();
   const { invoices } = useStore();
-  const [period, setPeriod] = useState<Period>("week");
+  const [period, setPeriod] = useState<Period>("today");
   const [assignments, setAssignments] = useState<AssignmentRow[]>([]);
   const [stats, setStats] = useState<TripStatRow[] | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
@@ -69,7 +72,7 @@ export default function InsightsPage() {
   }), [trips, assignments, stats, problems, period, invoices]);
 
   const maxBar = Math.max(1, ...ins.week.map((d) => d.count));
-  const mixTotal = ins.mix.pickup + ins.mix.drop + ins.mix.onsite + ins.mix.warranty_pickup;
+  const mixTotal = ins.mix.pickup + ins.mix.drop + ins.mix.onsite + ins.mix.warranty_pickup + ins.mix.buyback;
   const respPct = ins.response.medianSec == null ? 0 : Math.max(0.06, 1 - Math.min(1, ins.response.medianSec / 900));   // 15 min = default accept window
 
   return (
@@ -88,9 +91,23 @@ export default function InsightsPage() {
             <div className="mt-2"><Delta now={ins.completed} prev={ins.prevCompleted} /></div>
           </div>
           <div className="rounded-2xl bg-white/15 px-4 py-3 text-center ring-1 ring-white/20">
-            <Flame className={`mx-auto h-6 w-6 ${ins.streakDays > 0 ? "text-amber-300" : "text-white/40"}`} />
-            <p className="mt-1 text-[22px] font-extrabold leading-none tabular-nums">{ins.streakDays}</p>
-            <p className="mt-0.5 text-[10px] font-bold uppercase tracking-wider text-white/70">day streak</p>
+            <div className="flex items-center justify-center gap-1.5">
+              <motion.p
+                key={ins.streakDays}
+                initial={{ y: 10, opacity: 0, scale: 0.7 }}
+                animate={{ y: 0, opacity: 1, scale: 1 }}
+                transition={{ type: "spring", stiffness: 300, damping: 18 }}
+                className="text-[28px] font-extrabold leading-none tabular-nums"
+              >{ins.streakDays}</motion.p>
+              <motion.span
+                className="inline-flex origin-bottom"
+                animate={ins.streakDays > 0 ? { scale: [1, 1.18, 0.95, 1.12, 1], rotate: [0, -6, 5, -3, 0] } : { scale: 1 }}
+                transition={ins.streakDays > 0 ? { duration: 1.6, repeat: Infinity, ease: "easeInOut" } : undefined}
+              >
+                <Flame className={`h-7 w-7 ${ins.streakDays > 0 ? "fill-orange-400 text-amber-300 drop-shadow-[0_0_8px_rgba(251,191,36,0.8)]" : "text-white/40"}`} />
+              </motion.span>
+            </div>
+            <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-white/70">day streak</p>
           </div>
         </div>
         <div className="relative mt-5 grid grid-cols-3 gap-2 text-center">
@@ -150,7 +167,7 @@ export default function InsightsPage() {
         ].map((x) => (
           <Card key={x.l} className="p-3 text-center">
             <span className={`mx-auto grid h-9 w-9 place-items-center rounded-xl ${x.tone}`}><x.icon className="h-5 w-5" /></span>
-            <p className="mt-2 text-[17px] font-extrabold leading-none tabular-nums">{x.v}<span className="text-[11px] text-slate-400"> {x.u}</span></p>
+            <p className="mt-2 flex items-baseline justify-center gap-1 whitespace-nowrap font-extrabold leading-none tabular-nums" style={{ fontSize: fitFontSize(`${x.v}${x.u}`, 17, { fitAt: 6, min: 11 }) }}>{x.v}{x.u ? <span className="text-[11px] text-slate-400">{x.u}</span> : null}</p>
             <p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">{x.l}</p>
           </Card>
         ))}
@@ -163,10 +180,10 @@ export default function InsightsPage() {
         {mixTotal === 0 ? <p className="mt-2 text-[13px] text-slate-400">No completed jobs in this period.</p> : (
           <>
             <div className="mt-3 flex h-3.5 overflow-hidden rounded-full bg-slate-100">
-              {([["pickup", "bg-[#4361EE]"], ["drop", "bg-emerald-500"], ["onsite", "bg-violet-500"], ["warranty_pickup", "bg-amber-500"]] as const).map(([k, c]) => ins.mix[k] ? <div key={k} className={c} style={{ width: `${(ins.mix[k] / mixTotal) * 100}%` }} /> : null)}
+              {([["pickup", "bg-[#4361EE]"], ["drop", "bg-emerald-500"], ["onsite", "bg-violet-500"], ["warranty_pickup", "bg-amber-500"], ["buyback", "bg-orange-500"]] as const).map(([k, c]) => ins.mix[k] ? <div key={k} className={c} style={{ width: `${(ins.mix[k] / mixTotal) * 100}%` }} /> : null)}
             </div>
             <div className="mt-3 flex flex-wrap gap-x-4 gap-y-1.5 text-[12.5px] font-semibold text-slate-600">
-              {(["pickup", "drop", "onsite", "warranty_pickup"] as const).filter((k) => ins.mix[k]).map((k) => <span key={k}>{TYPE_LABEL[k]} <b className="text-slate-900">{ins.mix[k]}</b></span>)}
+              {(["pickup", "drop", "onsite", "warranty_pickup", "buyback"] as const).filter((k) => ins.mix[k]).map((k) => <span key={k}>{TYPE_LABEL[k]} <b className="text-slate-900">{ins.mix[k]}</b></span>)}
             </div>
           </>
         )}
@@ -175,9 +192,9 @@ export default function InsightsPage() {
       {/* Field sales */}
       <SectionTitle>Field sales</SectionTitle>
       <div className="grid grid-cols-3 gap-2.5">
-        <Card className="p-3 text-center"><Ticket className="mx-auto h-5 w-5 text-[#4361EE]" /><p className="mt-2 text-[20px] font-extrabold leading-none tabular-nums">{ins.docs.tickets}</p><p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Tickets</p></Card>
-        <Card className="p-3 text-center"><ReceiptText className="mx-auto h-5 w-5 text-emerald-600" /><p className="mt-2 text-[20px] font-extrabold leading-none tabular-nums">{ins.docs.invoices}</p><p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Invoices</p></Card>
-        <Card className="p-3 text-center"><p className="text-[11px] font-extrabold text-slate-400">₹</p><p className="text-[17px] font-extrabold leading-none tabular-nums">{formatINR(ins.docs.collected).replace(/^₹\s?/, "")}</p><p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Collected</p></Card>
+        <Card className="p-3 text-center"><Ticket className="mx-auto h-5 w-5 text-[#4361EE]" /><p className="mt-2"><FitNumber base={20} fitAt={5} min={11} className="font-extrabold">{ins.docs.tickets}</FitNumber></p><p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Tickets</p></Card>
+        <Card className="p-3 text-center"><ReceiptText className="mx-auto h-5 w-5 text-emerald-600" /><p className="mt-2"><FitNumber base={20} fitAt={5} min={11} className="font-extrabold">{ins.docs.invoices}</FitNumber></p><p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Invoices</p></Card>
+        <Card className="p-3 text-center"><IndianRupee className="mx-auto h-5 w-5 text-amber-500" /><p className="mt-2"><FitNumber base={20} fitAt={5} min={11} className="font-extrabold">{formatINR(ins.docs.collected).replace(/^₹\s?/, "")}</FitNumber></p><p className="mt-1 text-[10.5px] font-bold uppercase tracking-wider text-slate-400">Collected</p></Card>
       </div>
 
       {/* Care */}

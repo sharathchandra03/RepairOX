@@ -81,13 +81,15 @@ export function Topbar({
   }
 
   return (
-    <header className="border-b border-border bg-card">
+    <header className="border-b-2 border-[#33406B] bg-gradient-to-r from-[#4D5C8C] via-[#475686] to-[#3F4C7B] shadow-[0_10px_24px_-16px_rgba(30,40,80,0.6)]">
       <div className="rox-topbar flex h-[60px] items-center gap-3 px-4 sm:px-6">
+        {/* LEFT — context selectors */}
+        <div className="flex shrink-0 items-center gap-3">
 
         {/* Mobile menu */}
         <button
           onClick={onMenu}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-muted-foreground hover:bg-muted lg:hidden"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-lg text-white hover:bg-white/15 lg:hidden"
           aria-label="Open menu"
         >
           <Menu className="h-4 w-4" />
@@ -103,12 +105,11 @@ export function Topbar({
                 <button
                   onClick={toggle}
                   className={cn(
-                    "relative flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95 animate-module-breathe",
-                    meta.bg, meta.color,
-                    open ? "border-[#B3BFF6]" : "border-transparent hover:border-[#E5E9F8]"
+                    "relative flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
+                    open ? "border-white/70 bg-white/[0.3] text-white" : "border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60"
                   )}
                 >
-                  <LayoutGrid className="h-3.5 w-3.5" />
+                  <LayoutGrid className="h-3.5 w-3.5 text-[#C7D2FF]" />
                   {meta.label}
                   <ChevronDown className={cn("h-3 w-3 transition-transform", open && "rotate-180")} />
                 </button>
@@ -140,7 +141,7 @@ export function Topbar({
               )}
             </Dropdown>
           ) : (
-            <span className={cn("rounded-full px-3 py-1.5 text-[12px] font-semibold animate-module-breathe", meta.bg, meta.color)}>
+            <span className="rounded-full border px-3 py-1.5 text-[12px] font-semibold border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60">
               {meta.label}
             </span>
           )}
@@ -149,7 +150,7 @@ export function Topbar({
         {/* Store context selector — shows the current store / All Shops and
             lets authorized users switch. Sits beside the module switcher so the
             two context selectors read together (see design reference). */}
-        <div className="shrink-0">
+        <div className="relative left-3 shrink-0 empty:hidden">
           <StoreSelector />
         </div>
 
@@ -157,25 +158,29 @@ export function Topbar({
             the store selector. Renders only inside the Leads workspace and only
             for owners who may view all agents' performance. Agent scope and
             Store scope are independent dimensions (see the component). */}
-        <div className="shrink-0">
+        <div className="relative left-3 shrink-0 empty:hidden">
           <AgentScopeSelector activeWorkspace={activeWorkspace} />
         </div>
 
-        {/* Universal Search */}
-        {/* Lead Management gets its own Lead Intelligence Search; every other
-            workspace keeps the Tickets / Invoices / Settings universal search. */}
-        {activeWorkspace === "leads" ? <LeadSearch /> : activeWorkspace === "operations" ? <FieldSearch /> : <UniversalSearch />}
-
-        <div className="flex-1" />
+        </div>
+        {/* CENTRE — search. Takes the free space between the two groups and
+            centres itself there, so it adapts when the sidebar opens/closes
+            and never collides with the left chips or the POS button. */}
+        <div className="flex min-w-[180px] flex-1 justify-center pl-4 pr-1 [&>div]:w-full [&>div]:max-w-[480px] [&>div]:min-w-0">
+          {activeWorkspace === "leads" ? <LeadSearch /> : activeWorkspace === "operations" ? <FieldSearch /> : <UniversalSearch />}
+  
+        </div>
+        {/* RIGHT — actions + profile */}
+        <div className="flex shrink-0 items-center justify-end gap-2">
 
         {/* POS shortcut — only for roles allowed to transact at the counter */}
         <Can permission="use_pos">
           <button
             onClick={() => router.push("/pos")}
-            className="group relative hidden md:inline-flex items-center gap-1.5 rounded-full h-9 px-4 bg-gradient-to-r from-[#4361EE] to-[#6366F1] text-white font-semibold text-[13px] transition-all duration-300 hover:scale-[1.04] active:scale-[0.97]"
+            className="group relative hidden md:inline-flex items-center gap-1.5 rounded-full h-9 px-4 bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white font-semibold text-[13px] transition-all duration-300 hover:scale-[1.04] active:scale-[0.97]"
           >
             {/* Thin glowing border light */}
-            <span className="absolute -inset-[1.5px] rounded-full bg-transparent ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
+            <span className="absolute -inset-[1.5px] rounded-full bg-transparent ring-[1.5px] ring-white/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
             <ShoppingBag className="h-3.5 w-3.5 relative z-10" />
             <span className="relative z-10">POS</span>
           </button>
@@ -190,13 +195,13 @@ export function Topbar({
           className={cn(
             "relative grid h-9 w-9 place-items-center rounded-xl transition",
             chatOpen
-              ? "bg-[#4361EE]/10 text-[#4361EE]"
-              : "text-zinc-400 hover:bg-muted hover:text-zinc-700"
+              ? "bg-white/20 text-white"
+              : "text-white/90 hover:bg-white/15 hover:text-white"
           )}
         >
           <MessageCircle className="h-[22px] w-[22px]" strokeWidth={1.75} />
           {CHAT_UNREAD_TOTAL > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-card">
+            <span className="absolute -top-1 -right-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#475686]">
               {CHAT_UNREAD_TOTAL}
             </span>
           )}
@@ -204,11 +209,11 @@ export function Topbar({
 
         {/* Icon actions */}
         <div className="flex items-center gap-0.5">
-          <button className="grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition">
+          <button className="grid h-9 w-9 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white transition">
             <MoreHorizontal className="h-4 w-4" />
           </button>
           <NotificationBell />
-          <button className="grid h-9 w-9 place-items-center rounded-xl text-zinc-400 hover:bg-muted hover:text-zinc-700 transition">
+          <button className="grid h-9 w-9 place-items-center rounded-xl text-white/90 hover:bg-white/15 hover:text-white transition">
             <HelpCircle className="h-4 w-4" />
           </button>
         </div>
@@ -223,15 +228,15 @@ export function Topbar({
               onClick={toggle}
               className={cn(
                 "hidden md:flex shrink-0 items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
-                isPreviewing ? "border-[#B3BFF6] bg-[#F5F7FF]" : "border-border bg-card hover:bg-muted"
+                isPreviewing ? "border-amber-300/60 bg-amber-300/15" : "border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60", open && "border-white/50 bg-white/20"
               )}
             >
-              <Avatar name={displayName} src={currentUser?.avatarUrl} size={30} />
-              <div className="max-w-[110px] text-left leading-tight">
-                <p className="truncate whitespace-nowrap text-[12px] font-semibold text-zinc-800" title={displayName}>{displayName}</p>
-                <p className="truncate whitespace-nowrap text-[10px] text-muted-foreground" title={role.label}>{role.label}</p>
+              <span className="rounded-full ring-2 ring-white/40"><Avatar name={displayName} src={currentUser?.avatarUrl} size={30} /></span>
+              <div className={cn("max-w-[110px] text-left leading-tight", activeWorkspace === "leads" && "hidden xl:block")}>
+                <p className="truncate whitespace-nowrap text-[12px] font-semibold text-white" title={displayName}>{displayName}</p>
+                <p className="truncate whitespace-nowrap text-[10px] text-[#C7D2FF]" title={role.label}>{role.label}</p>
               </div>
-              <ChevronDown className={cn("h-3 w-3 text-muted-foreground transition-transform", open && "rotate-180")} />
+              <ChevronDown className={cn("h-3 w-3 text-white/80 transition-transform", open && "rotate-180")} />
             </button>
           )}
         >
@@ -294,6 +299,7 @@ export function Topbar({
             </>
           )}
         </Dropdown>
+        </div>
       </div>
     </header>
   );

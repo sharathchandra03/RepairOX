@@ -135,7 +135,7 @@ function ActivityLogInner() {
           origin ? (
             <button
               onClick={handleBack}
-              className="group inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-4px_rgba(67,97,238,0.5)] ring-1 ring-inset ring-white/10 transition-all duration-200 hover:bg-[#3A56D4] hover:shadow-[0_6px_16px_-4px_rgba(67,97,238,0.6)] active:scale-[0.97]"
+              className="group inline-flex items-center gap-1.5 rounded-full bg-[#2B3553] px-4 py-2 text-[13px] font-semibold text-white shadow-[0_4px_12px_-4px_rgba(43,53,83,0.5)] ring-1 ring-inset ring-white/10 transition-all duration-200 hover:bg-[#1B2238] hover:shadow-[0_6px_16px_-4px_rgba(43,53,83,0.6)] active:scale-[0.97]"
               aria-label={`Back to ${origin.label}`}
               title={`Back to ${origin.label}`}
             >

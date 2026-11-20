@@ -474,6 +474,8 @@ export type PermissionKey =
   | "leads_view_all"
   | "field_view_all"
   | "field_live_location_view"
+  | "field_pay_view"                // see every Field Engineer's salary + incentive
+  | "field_pay_manage"              // change salary, incentive plans, device lists, monthly inputs
   | "customers_view_all"
   /* Locked / date integrity */
   | "edit_locked_records"          // edit finalized/closed records
@@ -796,6 +798,8 @@ export const PERMISSION_GROUPS: PermissionGroup[] = [
       { key: "update_pickup", label: "Update Pickup" },
       { key: "update_drop", label: "Update Drop" },
       { key: "view_field_reports", label: "View Field Reports" },
+      { key: "field_pay_view", label: "View Field Engineer Salary & Incentives" },
+      { key: "field_pay_manage", label: "Manage Field Engineer Salary & Incentive Plans" },
     ],
   },
   {
@@ -1351,7 +1355,7 @@ export const ROLES: RoleDef[] = [
       "view_only", "assign",
       "view_dashboard", "view_kpi_cards",
       "view_field_jobs", "manage_field_jobs", "assign_ninja", "field_live_location_view",
-      "update_pickup", "update_drop", "view_field_reports",
+      "update_pickup", "update_drop", "view_field_reports", "field_pay_view", "field_pay_manage",
       "view_customer_details", "view_device_details",
       "view_ticket",
       "print_documents", "upload_files", "send_communications",

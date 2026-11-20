@@ -5,17 +5,18 @@
 import Link from "next/link";
 import { memo, useState } from "react";
 import { CheckCircle2, ChevronRight, Clock, MapPin, PackageCheck, PackageOpen, Smartphone, Wrench, XCircle } from "lucide-react";
-import { type NinjaTrip, type TripType, TYPE_LABEL, STATUS_META, whenLabel, nextStep, stepperFor, statusRank } from "@/lib/ninja/model";
+import { type NinjaTrip, type TripKind, TYPE_LABEL, kindOf, STATUS_META, whenLabel, nextStep, stepperFor, statusRank } from "@/lib/ninja/model";
 import { useNinja } from "@/lib/ninja/ninja-context";
 import { AcceptTicket } from "./accept-ticket";
 import { RejectSheet } from "./flows";
 import { TONE } from "./ui";
 
-export const TYPE_STYLE: Record<TripType, { stripe: string; tile: string; chip: string; icon: typeof PackageCheck }> = {
+export const TYPE_STYLE: Record<TripKind, { stripe: string; tile: string; chip: string; icon: typeof PackageCheck }> = {
   pickup: { stripe: "from-[#4361EE] to-[#7C93FF]", tile: "bg-[#EEF1FD] text-[#4361EE]", chip: "bg-[#EEF1FD] text-[#3450D8]", icon: PackageOpen },
   drop: { stripe: "from-emerald-500 to-teal-400", tile: "bg-emerald-50 text-emerald-600", chip: "bg-emerald-50 text-emerald-700", icon: PackageCheck },
   onsite: { stripe: "from-violet-500 to-fuchsia-400", tile: "bg-violet-50 text-violet-600", chip: "bg-violet-50 text-violet-700", icon: Wrench },
   warranty_pickup: { stripe: "from-amber-500 to-orange-400", tile: "bg-amber-50 text-amber-600", chip: "bg-amber-50 text-amber-700", icon: PackageOpen },
+  buyback: { stripe: "from-orange-500 to-rose-400", tile: "bg-orange-50 text-orange-600", chip: "bg-orange-50 text-orange-700", icon: PackageCheck },
 };
 
 const DOT: Record<string, string> = { blue: "bg-[#4361EE]", amber: "bg-amber-500", green: "bg-emerald-500", rose: "bg-rose-500", slate: "bg-slate-400", violet: "bg-violet-500", sky: "bg-sky-500" };
@@ -38,7 +39,7 @@ function TripCardBase({ t, highlight }: { t: NinjaTrip; highlight?: boolean }) {
   const { accept, track } = useNinja();
   const [busy, setBusy] = useState(false);
   const [reject, setReject] = useState(false);
-  const st = TYPE_STYLE[t.trip_type];
+  const st = TYPE_STYLE[kindOf(t)];
   const Icon = st.icon;
   const meta = STATUS_META[t.status];
   const step = nextStep(t);
@@ -52,7 +53,7 @@ function TripCardBase({ t, highlight }: { t: NinjaTrip; highlight?: boolean }) {
       <Link href={`/ninja/trip/${t.id}`} prefetch onClick={() => track({ kind: "trip_opened", tripId: t.id, jobId: t.job_id, screen: "jobs", payload: { status: t.status } })}
         className="block p-4 pb-3 transition active:bg-slate-50">
         <div className="flex items-center justify-between gap-2">
-          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${st.chip}`}><Icon className="h-3.5 w-3.5" />{TYPE_LABEL[t.trip_type]}</span>
+          <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-extrabold ${st.chip}`}><Icon className="h-3.5 w-3.5" />{TYPE_LABEL[kindOf(t)]}</span>
           <span className="flex min-w-0 items-center gap-1 text-[12.5px] font-bold text-slate-700"><Clock className="h-3.5 w-3.5 shrink-0 text-slate-400" /><span className="truncate">{whenLabel(t.scheduled_at, t.scheduled_window)}</span></span>
         </div>
         <p className="mt-3 truncate text-[19px] font-extrabold leading-tight tracking-tight text-slate-900">{t.job?.customer || "Customer"}</p>

@@ -3,7 +3,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Inbox, Search, SlidersHorizontal, X } from "lucide-react";
 import { useNinja } from "@/lib/ninja/ninja-context";
-import { inProgress, isClosed, isNew, type NinjaTrip, type TripType, TYPE_LABEL } from "@/lib/ninja/model";
+import { inProgress, isClosed, isNew, type NinjaTrip, type TripKind, TYPE_LABEL, kindOf } from "@/lib/ninja/model";
 import { AppliedChip, Btn, ChipGroup, Empty, FormLabel, Segmented, Sheet, Skeleton, Stagger, inputCls } from "@/components/ninja/ui";
 import { TripCard } from "@/components/ninja/trip-card";
 
@@ -46,7 +46,7 @@ function Jobs() {
   const tab: Tab = (legacy?.tab ?? (raw === "closed" ? "rejected" : ["new", "open", "done", "rejected", "closed"].includes(raw) ? raw : "new")) as Tab;
 
   const [when, setWhen] = useState<When>(legacy?.when ?? "any");
-  const [type, setType] = useState<TripType | "all">("all");
+  const [type, setType] = useState<TripKind | "all">("all");
   const [sort, setSort] = useState<Sort>("soonest");
   const [q, setQ] = useState("");
   const [showSearch, setShowSearch] = useState(false);
@@ -73,7 +73,7 @@ function Jobs() {
     const needle = q.trim().toLowerCase();
     const rows = trips.filter(TESTS[tab])
       .filter((x) => inWhen(x.scheduled_at, when))
-      .filter((x) => type === "all" || x.trip_type === type)
+      .filter((x) => type === "all" || kindOf(x) === type)
       .filter((x) => !needle || [x.trip_no, x.job?.customer, x.job?.device, x.job?.phone, x.dest_address, x.job?.pincode].some((v) => v?.toLowerCase().includes(needle)));
     const at = (x: NinjaTrip) => (x.scheduled_at ? new Date(x.scheduled_at).getTime() : Number.MAX_SAFE_INTEGER);
     const rank = (x: NinjaTrip) => (inProgress(x) ? 0 : 1);      // in-progress work always floats up in Open
@@ -159,8 +159,8 @@ function Jobs() {
         <FormLabel>When</FormLabel>
         <ChipGroup<When> value={draft.when} onChange={(v) => setDraft((d) => ({ ...d, when: v }))} options={(Object.keys(WHEN_LABEL) as When[]).map((id) => ({ id, label: WHEN_LABEL[id] }))} />
         <div className="mt-5"><FormLabel>Job type</FormLabel></div>
-        <ChipGroup<TripType | "all"> value={draft.type} onChange={(v) => setDraft((d) => ({ ...d, type: v }))}
-          options={[{ id: "all", label: "All types" }, ...(["pickup", "drop", "onsite", "warranty_pickup"] as TripType[]).map((id) => ({ id, label: TYPE_LABEL[id] }))]} />
+        <ChipGroup<TripKind | "all"> value={draft.type} onChange={(v) => setDraft((d) => ({ ...d, type: v }))}
+          options={[{ id: "all", label: "All types" }, ...(["pickup", "buyback", "drop", "onsite", "warranty_pickup"] as TripKind[]).map((id) => ({ id, label: TYPE_LABEL[id] }))]} />
         <div className="mt-5"><FormLabel>Sort by</FormLabel></div>
         <ChipGroup<Sort> value={draft.sort} onChange={(v) => setDraft((d) => ({ ...d, sort: v }))} options={(Object.keys(SORT_LABEL) as Sort[]).map((id) => ({ id, label: SORT_LABEL[id] }))} />
         <div className="h-2" />

@@ -250,6 +250,18 @@ body {
     min-height: 240px;
     flex-shrink: 1;
   }
+  /* Same lock when the table sits a few wrappers down (Field Activity): every wrapper on the way is a
+     .rox-lock-fill flex column, and the table frame at the end is the .rox-lock-grow. */
+  .rox-lock-root > .rox-lock-fill {
+    flex: 1 1 0%;
+    min-height: 240px;
+    flex-shrink: 1;
+  }
+  .rox-lock-fill { display: flex; flex-direction: column; min-width: 0; }
+  .rox-lock-fill > * { flex-shrink: 0; }
+  .rox-lock-fill > .rox-lock-fill { flex: 1 1 0%; min-height: 0; flex-shrink: 1; }
+  .rox-lock-fill > .rox-lock-grow { flex: 1 1 0%; min-height: 220px; flex-shrink: 1; }
+  .rox-lock-fill > .rox-lock-footer { margin-top: 8px !important; padding-top: 0 !important; padding-bottom: 0 !important; }
 }
 ::selection {
   background: hsl(231 80% 57% / 0.15);
@@ -399,7 +411,11 @@ body {
    Reuse `.rox-search-input` on any such input so focus feedback stays quiet
    (RepairOX design-system: focus is a colour change, never a heavy blue box). */
 .rox-search-input:focus,
-.rox-search-input:focus-visible {
+.rox-search-input:focus-visible,
+/* Default: any bare (transparent, outline-none) input living inside a wrapper
+   — e.g. dropdown search boxes — never gets the global focus ring. */
+input.bg-transparent.outline-none:focus,
+input.bg-transparent.outline-none:focus-visible {
   outline: none !important;
   box-shadow: none !important;
 }
@@ -1659,3 +1675,39 @@ html, body {
 }
 @keyframes rox-sun { 0%, 100% { transform: scale(1) rotate(0deg); } 50% { transform: scale(1.12) rotate(8deg); } }
 @keyframes rox-snow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* Checkbox tick animation: box pops, tick draws itself, soft ring pulse */
+.rox-checkbox:active { transform: scale(0.92); }
+.rox-checkbox[data-state="checked"],
+.rox-checkbox[data-state="mixed"] {
+  animation: rox-cb-pop 260ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.rox-checkbox[data-state="checked"]::after,
+.rox-checkbox[data-state="mixed"]::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  animation: rox-cb-ring 420ms ease-out forwards;
+}
+.rox-checkbox-tick,
+.rox-checkbox-dash {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: rox-cb-draw 240ms 70ms cubic-bezier(0.65, 0, 0.35, 1) forwards;
+}
+@keyframes rox-cb-draw { to { stroke-dashoffset: 0; } }
+@keyframes rox-cb-pop {
+  0% { transform: scale(0.85); }
+  60% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+@keyframes rox-cb-ring {
+  0% { box-shadow: 0 0 0 0 rgba(67, 97, 238, 0.45); }
+  100% { box-shadow: 0 0 0 8px rgba(67, 97, 238, 0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rox-checkbox, .rox-checkbox::after, .rox-checkbox-tick, .rox-checkbox-dash { animation: none !important; }
+  .rox-checkbox-tick, .rox-checkbox-dash { stroke-dashoffset: 0; }
+}

@@ -69,7 +69,9 @@ export type FieldLeadType =
   | "onsite"
   | "drop"
   | "warranty_pickup"
-  | "warranty_onsite";
+  | "warranty_onsite"
+  /** Store buys the device from the customer: a pickup-style trip with NO drop leg. */
+  | "buyback";
 
 export const FIELD_LEAD_TYPE_LABEL: Record<FieldLeadType, string> = {
   pickup: "Pickup",
@@ -77,6 +79,7 @@ export const FIELD_LEAD_TYPE_LABEL: Record<FieldLeadType, string> = {
   drop: "Drop",
   warranty_pickup: "Warranty Pickup",
   warranty_onsite: "Warranty On-Site",
+  buyback: "Buyback",
 };
 
 /** Tailwind chip tones per lead type (kept subtle — not a status colour). */
@@ -86,6 +89,7 @@ export const FIELD_LEAD_TYPE_TONE: Record<FieldLeadType, string> = {
   drop:            "bg-teal-50 text-teal-700 ring-teal-200",
   warranty_pickup: "bg-indigo-50 text-indigo-700 ring-indigo-200",
   warranty_onsite: "bg-fuchsia-50 text-fuchsia-700 ring-fuchsia-200",
+  buyback:         "bg-orange-50 text-orange-700 ring-orange-200",
 };
 
 export const FIELD_LEAD_TYPES: { value: FieldLeadType; label: string }[] =
@@ -104,7 +108,7 @@ export function typeHasPickup(t: FieldLeadType): boolean {
 /** True when the type has a store→customer drop leg (everything except a pure pickup-only
  *  or an on-site job where the device never leaves — here On-Site keeps a return step). */
 export function typeHasDrop(t: FieldLeadType): boolean {
-  return t !== "onsite" ? true : true; // all current types end with the device back at customer
+  return t !== "buyback"; // all other types end with the device back at the customer; a buyback keeps the device
 }
 
 /** Normalise any stored/legacy value to a stable FieldLeadType. Defaults to
@@ -115,6 +119,7 @@ export function normaliseLeadType(v: string | null | undefined): FieldLeadType {
   if (s === "drop") return "drop";
   if (s === "warranty_pickup" || s === "warranty" ) return "warranty_pickup";
   if (s === "warranty_onsite" || s === "warranty_on_site") return "warranty_onsite";
+  if (s === "buyback" || s === "buy_back") return "buyback";
   return "pickup";
 }
 
@@ -576,6 +581,8 @@ export function allowedFieldTransitions(status: FieldJobStatus, leadType?: Field
   // device never travels to the store. Once the Ninja has reached the customer
   // (out_for_pickup = "on the way / on site"), the job moves straight into
   // repair, then is completed on site (no drop leg needed).
+  // Buyback: the store keeps the device, so the job closes once it reaches the store (no repair / drop).
+  if (t === "buyback" && status === "at_store") next = ["completed"];
   if ((t === "onsite" || t === "warranty_onsite")) {
     if (status === "out_for_pickup") next = ["in_repair", "failed_pickup"];
     if (status === "in_repair") next = ["completed"];

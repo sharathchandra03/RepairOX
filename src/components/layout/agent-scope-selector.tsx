@@ -76,8 +76,7 @@ export function AgentScopeSelector({ activeWorkspace }: { activeWorkspace: Works
           aria-label="Agent intelligence scope"
           className={cn(
             "hidden md:flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[12px] font-semibold transition-all active:scale-95",
-            viewAsAgentId ? "bg-[#EEF1FD] text-[#3A4DBB]" : "bg-[#F5F7FF] text-[#3A4DBB]",
-            open ? "border-[#B3BFF6]" : "border-[#E5E9F8] hover:border-[#B3BFF6]",
+            open ? "border-white/70 bg-white/[0.3] text-white" : viewAsAgentId ? "border-amber-300/60 bg-amber-300/15 text-white" : "border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60",
           )}
         >
           {/* Eye signals the read-only workspace lens; Users is the default. */}

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMemo } from "react";
 import { ChevronRight, Inbox } from "lucide-react";
 import { useNinja } from "@/lib/ninja/ninja-context";
-import { STATUS_META, TYPE_LABEL, isClosed, type NinjaTrip } from "@/lib/ninja/model";
+import { STATUS_META, TYPE_LABEL, kindOf, isClosed, type NinjaTrip } from "@/lib/ninja/model";
 import { Empty, Skeleton } from "./ui";
 import { TYPE_STYLE } from "./trip-card";
 
@@ -27,13 +27,13 @@ export function JobPicker({ base, title, extra = "" }: { base: string; title: st
       ) : (
         <div className="space-y-2.5">
           {jobs.map((t) => {
-            const st = TYPE_STYLE[t.trip_type]; const Icon = st.icon;
+            const st = TYPE_STYLE[kindOf(t)]; const Icon = st.icon;
             return (
               <Link key={t.id} href={`${base}?trip=${t.id}${extra}`} className="flex items-center gap-3 rounded-2xl bg-white p-3.5 ring-1 ring-slate-200/80 transition active:scale-[0.985]">
                 <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl ${st.tile}`}><Icon className="h-5 w-5" /></span>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[15px] font-extrabold text-slate-900">{t.job?.customer || "Customer"}</span>
-                  <span className="block truncate text-[12.5px] font-medium text-slate-500">{TYPE_LABEL[t.trip_type]} · {t.job?.device || "Device"} · {STATUS_META[t.status].label}</span>
+                  <span className="block truncate text-[12.5px] font-medium text-slate-500">{TYPE_LABEL[kindOf(t)]} · {t.job?.device || "Device"} · {STATUS_META[t.status].label}</span>
                 </span>
                 <ChevronRight className="h-5 w-5 shrink-0 text-slate-300" />
               </Link>

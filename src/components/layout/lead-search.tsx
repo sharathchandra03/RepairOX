@@ -132,21 +132,21 @@ export function LeadSearch() {
           "relative flex h-9 items-center rounded-full border transition-all duration-200",
           isOpen
             ? "border-[#4361EE]/40 bg-white shadow-[0_0_0_3px_rgba(67,97,238,0.10)]"
-            : "border-border bg-slate-100/80 hover:bg-slate-100",
+            : "border-white/40 bg-white/[0.2] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60",
         )}
       >
         {/* Static scope label — Lead Management only searches Lead Management data */}
         <span
           className={cn(
             "flex shrink-0 items-center gap-1 rounded-l-full border-r py-1.5 pl-3 pr-2 text-[11px] font-semibold",
-            isOpen ? "border-[#4361EE]/20 bg-[#4361EE]/5 text-[#4361EE]" : "border-border text-zinc-500",
+            isOpen ? "border-[#4361EE]/20 bg-[#4361EE]/5 text-[#4361EE]" : "border-white/35 text-white",
           )}
         >
           <Users className="h-3 w-3" />
           <span className="hidden sm:inline">Leads</span>
         </span>
         <div className="relative flex min-w-0 flex-1 items-center">
-          <Search className={cn("ml-2 h-3.5 w-3.5 shrink-0", isOpen ? "text-[#4361EE]" : "text-zinc-400")} />
+          <Search className={cn("ml-2 h-3.5 w-3.5 shrink-0", isOpen ? "text-[#4361EE]" : "text-white")} />
           <input
             ref={inputRef}
             type="text"
@@ -157,7 +157,7 @@ export function LeadSearch() {
             placeholder={PLACEHOLDER}
             autoComplete="off"
             spellCheck={false}
-            className="h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] text-zinc-800 outline-none placeholder:text-zinc-400 focus:outline-none focus:ring-0"
+            className={cn("h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] outline-none focus:outline-none focus:ring-0", isOpen ? "text-zinc-800 placeholder:text-zinc-400" : "text-white placeholder:text-white/80")}
             aria-label="Search customers, mobile, email, Lead ID or device"
             role="combobox"
             aria-expanded={showPanel}
@@ -177,7 +177,7 @@ export function LeadSearch() {
           )}
         </div>
         {!isOpen && (
-          <kbd className="mr-3 hidden shrink-0 items-center gap-0.5 rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-zinc-200 sm:inline-flex">
+          <kbd className="mr-3 hidden shrink-0 items-center gap-0.5 rounded-md bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-white/85 ring-1 ring-white/25 sm:inline-flex">
             {isMac ? "⌘K" : "Ctrl K"}
           </kbd>
         )}

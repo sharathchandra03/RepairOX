@@ -34,6 +34,8 @@ export interface TripJob {
   location_instructions: string | null;
   linked_invoice_id: string | null;
   linked_ticket_id: string | null;
+  /** field_jobs.lead_type — only used to tell a Buyback (a pickup-style trip) apart. */
+  lead_type?: string | null;
 }
 
 export interface NinjaTrip {
@@ -70,11 +72,15 @@ export interface NinjaTrip {
 }
 
 export const TRIP_SELECT =
-  "*, job:field_jobs(job_no,customer,phone,alt_phone,device,issue,pincode,landmark,imei,accessories,device_condition,branch,drop_address,drop_lat,drop_lng,drop_maps_url,pickup_address,location_instructions,linked_invoice_id,linked_ticket_id)";
+  "*, job:field_jobs(job_no,customer,phone,alt_phone,device,issue,pincode,landmark,imei,accessories,device_condition,branch,drop_address,drop_lat,drop_lng,drop_maps_url,pickup_address,location_instructions,linked_invoice_id,linked_ticket_id,lead_type)";
 
-export const TYPE_LABEL: Record<TripType, string> = {
-  pickup: "Pickup", drop: "Drop", onsite: "On-Site", warranty_pickup: "Warranty Pickup",
+/** What the Ninja sees as the trip kind. A Buyback runs the pickup flow, so it is the same trip_type with lead_type "buyback". */
+export type TripKind = TripType | "buyback";
+export const TYPE_LABEL: Record<TripKind, string> = {
+  pickup: "Pickup", drop: "Drop", onsite: "On-Site", warranty_pickup: "Warranty Pickup", buyback: "Buyback",
 };
+export const kindOf = (t: Pick<NinjaTrip, "trip_type" | "job">): TripKind =>
+  t.trip_type === "pickup" && t.job?.lead_type === "buyback" ? "buyback" : t.trip_type;
 
 export type Tone = "blue" | "amber" | "green" | "rose" | "slate" | "violet" | "sky";
 

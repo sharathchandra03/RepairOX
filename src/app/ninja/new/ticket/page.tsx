@@ -65,7 +65,7 @@ function Form() {
           <p className="mt-1 text-[14px] font-semibold text-slate-500">{no} · {job?.customer}</p>
         </Card>
         <Link href={`/ninja/new/invoice?trip=${trip.id}`} className="block"><Btn className="w-full"><FilePlus2 className="h-5 w-5" />Create invoice</Btn></Link>
-        <Link href={`/ninja/trip/${trip.id}`} className="block"><Btn tone="ghost" className="w-full">Back to job</Btn></Link>
+        <Link href={`/ninja/trip/${trip.id}`} className="block"><Btn className="w-full !bg-[#2B3553] !shadow-none active:!bg-[#1B2238]">Back to job</Btn></Link>
       </div>
     );
   }

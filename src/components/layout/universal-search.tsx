@@ -310,7 +310,7 @@ export function UniversalSearch() {
           "relative flex h-9 items-center rounded-full border transition-all duration-200",
           isOpen
             ? "border-[#4361EE]/40 bg-white shadow-[0_0_0_3px_rgba(67,97,238,0.10)]"
-            : "border-border bg-slate-100/80 hover:bg-slate-100"
+            : "border-white/40 bg-white/[0.2] shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60"
         )}
       >
         {/* Scope selector (inside the pill) */}
@@ -322,7 +322,7 @@ export function UniversalSearch() {
               "flex items-center gap-1 rounded-l-full pl-3 pr-2 py-1.5 text-[11px] font-semibold transition-colors border-r",
               isOpen
                 ? "border-[#4361EE]/20 text-[#4361EE] bg-[#4361EE]/5"
-                : "border-border text-zinc-500 hover:text-zinc-700"
+                : "border-white/35 text-white hover:text-white"
             )}
             aria-label="Select search scope"
           >
@@ -365,7 +365,7 @@ export function UniversalSearch() {
 
         {/* Input */}
         <div className="relative flex min-w-0 flex-1 items-center">
-          <Search className={cn("ml-2 h-3.5 w-3.5 shrink-0 transition-colors", isOpen ? "text-[#4361EE]" : "text-zinc-400")} />
+          <Search className={cn("ml-2 h-3.5 w-3.5 shrink-0 transition-colors", isOpen ? "text-[#4361EE]" : "text-white")} />
           <input
             ref={inputRef}
             type="text"
@@ -377,7 +377,7 @@ export function UniversalSearch() {
             onFocus={() => setIsOpen(true)}
             onKeyDown={handleKeyDown}
             placeholder={`Search ${scopeLabel.toLowerCase()}...`}
-            className="h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] text-zinc-800 placeholder:text-zinc-400 outline-none focus:outline-none focus:ring-0"
+            className={cn("h-full min-w-0 flex-1 border-0 bg-transparent px-2 text-[13px] outline-none focus:outline-none focus:ring-0", isOpen ? "text-zinc-800 placeholder:text-zinc-400" : "text-white placeholder:text-white/80")}
             aria-label={`Search ${scopeLabel}`}
             aria-expanded={showResults}
             aria-controls="universal-search-results"
@@ -401,7 +401,7 @@ export function UniversalSearch() {
 
         {/* Keyboard hint */}
         {!isOpen && (
-          <kbd className="mr-3 hidden shrink-0 items-center gap-0.5 rounded-md bg-white px-1.5 py-0.5 text-[10px] font-medium text-zinc-400 ring-1 ring-zinc-200 sm:inline-flex">
+          <kbd className="mr-3 hidden shrink-0 items-center gap-0.5 rounded-md bg-white/15 px-1.5 py-0.5 text-[10px] font-medium text-white/85 ring-1 ring-white/25 sm:inline-flex">
             ⌘K
           </kbd>
         )}

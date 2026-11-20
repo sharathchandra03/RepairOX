@@ -4,6 +4,7 @@ import { animate, motion, useMotionValue, useTransform } from "framer-motion";
 import { ChevronsRight } from "lucide-react";
 import { createPortal } from "react-dom";
 import { X } from "lucide-react";
+import { fitFontSize } from "@/lib/utils";
 import { STATUS_META, type Tone, type TripStatus } from "@/lib/ninja/model";
 
 export const TONE: Record<Tone, string> = {
@@ -208,4 +209,9 @@ export function QtyStepper({ value, onChange, min = 1 }: { value: number; onChan
       <button type="button" aria-label="Increase" onClick={() => onChange(value + 1)} className="grid h-10 w-10 place-items-center rounded-lg bg-white text-[20px] font-bold text-slate-700 shadow-sm active:scale-95">+</button>
     </div>
   );
+}
+
+/** A number/short value that shrinks by length so it never overflows its card (shared app-wide rule). */
+export function FitNumber({ children, base, fitAt, min, className = "" }: { children: string | number; base: number; fitAt?: number; min?: number; className?: string }) {
+  return <span className={`block whitespace-nowrap tabular-nums leading-none ${className}`} style={{ fontSize: fitFontSize(children, base, { fitAt, min }) }}>{children}</span>;
 }

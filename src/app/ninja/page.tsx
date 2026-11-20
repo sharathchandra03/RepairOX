@@ -7,10 +7,11 @@ import { usePermissions } from "@/lib/permissions-context";
 import { allow, CAP } from "@/lib/capabilities";
 import { useNinja } from "@/lib/ninja/ninja-context";
 import { useSession } from "@/lib/use-session";
-import { inProgress, isNew, isClosed, nextStep, STATUS_META, TYPE_LABEL } from "@/lib/ninja/model";
+import { inProgress, isNew, isClosed, nextStep, STATUS_META, TYPE_LABEL, kindOf } from "@/lib/ninja/model";
 import { Empty, SectionTitle, Skeleton, Stagger } from "@/components/ninja/ui";
 import { TripCard, TYPE_STYLE } from "@/components/ninja/trip-card";
 import { ShiftCard } from "@/components/ninja/shift";
+import { MonthGlance } from "@/components/ninja/month-glance";
 import { formatClock } from "@/lib/time-format";
 
 function greeting() { const h = new Date().getHours(); return h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening"; }
@@ -81,6 +82,7 @@ export default function NinjaHome() {
       </motion.section>
 
       <ShiftCard />
+      <MonthGlance />
 
       {error ? <div className="rounded-2xl bg-rose-50 p-3 text-[13px] font-semibold text-rose-700">Couldn't load jobs: {error}</div> : null}
 
@@ -93,7 +95,7 @@ export default function NinjaHome() {
               <div className="relative">
                 <p className="flex items-center gap-2 text-[11px] font-extrabold uppercase tracking-wider text-emerald-300"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />Trip in progress · {activeTrip.trip_no}</p>
                 <p className="mt-2 text-[21px] font-extrabold leading-tight">{activeTrip.job?.customer || "Customer"}</p>
-                <p className="mt-0.5 text-[13px] font-semibold text-white/60">{TYPE_LABEL[activeTrip.trip_type]} · {STATUS_META[activeTrip.status].label}</p>
+                <p className="mt-0.5 text-[13px] font-semibold text-white/60">{TYPE_LABEL[kindOf(activeTrip)]} · {STATUS_META[activeTrip.status].label}</p>
                 <div className="mt-4 flex items-center justify-between rounded-2xl bg-white px-4 py-3.5 text-[14px] font-extrabold text-slate-900">
                   {nextStep(activeTrip)?.label ?? "Open trip"}<ChevronRight className="h-5 w-5 text-[#4361EE]" />
                 </div>
@@ -132,7 +134,7 @@ export default function NinjaHome() {
               <SectionTitle>Today's route</SectionTitle>
               <ol className="space-y-4">
                 {s.todayOpen.map((t, i) => {
-                  const st = TYPE_STYLE[t.trip_type]; const Icon = st.icon;
+                  const st = TYPE_STYLE[kindOf(t)]; const Icon = st.icon;
                   return (
                     <li key={t.id}>
                       <div className="mb-2 flex items-center gap-2 px-1">

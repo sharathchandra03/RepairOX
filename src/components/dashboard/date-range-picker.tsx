@@ -117,7 +117,7 @@ function MonthYearSelector({
       <div className="border-t border-border/60 px-4 py-3">
         <button
           onClick={onClose}
-          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-full bg-[#4361EE] text-[12px] font-semibold text-white transition hover:bg-[#3450D8]"
+          className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-full bg-[#2B3553] text-[12px] font-semibold text-white transition hover:bg-[#1B2238]"
         >
           <ArrowLeft className="h-3.5 w-3.5" /> Back to calendar
         </button>

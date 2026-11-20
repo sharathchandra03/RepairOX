@@ -11,9 +11,10 @@ import { allow, CAP } from "@/lib/capabilities";
 import { useStore } from "@/lib/store";
 import { useWorkSession } from "@/lib/work-session-context";
 import { toast } from "@/components/ui/toaster";
+import { ReviewCard } from "./review-card";
 import { useNinja, useNinjaGeo } from "@/lib/ninja/ninja-context";
 import {
-  type NinjaTrip, TRACKING_STATUSES, TYPE_LABEL, STATUS_META, ago, distanceKm, freshness, mapsLink, navLink, nextStep, stepperFor,
+  type NinjaTrip, TRACKING_STATUSES, TYPE_LABEL, kindOf, STATUS_META, ago, distanceKm, freshness, mapsLink, navLink, nextStep, stepperFor,
   statusRank, whenLabel, arrivalCheck, distanceLabel, ARRIVAL_RADIUS_M,
 } from "@/lib/ninja/model";
 import { motion } from "framer-motion";
@@ -148,7 +149,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
   }
 
   const canProblem = !closed && t.status !== "assigned";
-  const TypeIcon = TYPE_STYLE[t.trip_type].icon;
+  const TypeIcon = TYPE_STYLE[kindOf(t)].icon;
 
   return (
     <div className="space-y-4">
@@ -158,7 +159,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
         <div className="pointer-events-none absolute -right-12 -top-14 h-48 w-48 rounded-full bg-white/10 blur-3xl" />
         <div className="relative">
           <div className="flex items-center justify-between gap-2">
-            <span className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/15 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider ring-1 ring-white/25"><TypeIcon className="h-3.5 w-3.5" />{TYPE_LABEL[t.trip_type]}</span>
+            <span className="flex shrink-0 items-center gap-2 whitespace-nowrap rounded-full bg-white/15 px-3 py-1 text-[11px] font-extrabold uppercase tracking-wider ring-1 ring-white/25"><TypeIcon className="h-3.5 w-3.5" />{TYPE_LABEL[kindOf(t)]}</span>
             <span className="text-[12px] font-bold tabular-nums text-white/70">{t.trip_no}</span>
           </div>
           <h1 className="mt-4 font-display text-[26px] font-extrabold leading-tight tracking-tight">{t.job?.customer || "Customer"}</h1>
@@ -209,6 +210,7 @@ export function TripView({ t }: { t: NinjaTrip }) {
         </Card>
       ) : null}
 
+      {t.status === "completed" ? <ReviewCard t={t} /> : null}
       {/* Quick actions */}
       {t.status !== "awaiting_assignment" ? (
         <div className="grid grid-cols-3 gap-3">

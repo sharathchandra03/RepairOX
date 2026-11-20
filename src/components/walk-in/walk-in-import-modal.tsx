@@ -14,6 +14,7 @@
      • Unknown sources/types/statuses are surfaced, never silently dropped.
    ────────────────────────────────────────────────────────────────────────── */
 
+import { BACK_TONE_CLASS } from "@/components/common/back-pill";
 import { useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "framer-motion";
@@ -399,7 +400,7 @@ export function WalkInImportModal({
         <div className="flex items-center justify-end gap-2 border-t border-border px-5 py-4">
           {stage === "review" && (
             <>
-              <Button variant="secondary" size="sm" onClick={reset}>Back</Button>
+              <Button variant="secondary" size="sm" className={BACK_TONE_CLASS} onClick={reset}>Back</Button>
               <Button
                 size="sm"
                 loading={importing}

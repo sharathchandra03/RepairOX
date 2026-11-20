@@ -62,3 +62,9 @@ export function openWhatsApp(phone?: string | null, message?: string) {
   const url = number ? `https://wa.me/${number}${text}` : `https://wa.me/${text}`;
   window.open(url, "_blank", "noopener,noreferrer");
 }
+
+/** Font size (px) that shrinks as the text gets longer so big numbers always fit. `fitAt` = max chars that still fit at `base`. */
+export function fitFontSize(text: string | number, base: number, opts?: { fitAt?: number; min?: number }): number {
+  const len = String(text).length, fitAt = opts?.fitAt ?? 4, min = opts?.min ?? Math.round(base * 0.55);
+  return len <= fitAt ? base : Math.max(min, Math.round(base * (fitAt / len) * 10) / 10);
+}

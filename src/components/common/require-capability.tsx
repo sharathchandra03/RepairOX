@@ -59,7 +59,7 @@ export function RequireCapability({
         <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{description}</p>
         <Link
           href="/dashboard"
-          className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-[#4361EE] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#3347D6]"
+          className="mt-5 inline-flex items-center gap-1.5 rounded-full bg-[#2B3553] px-4 py-2 text-[13px] font-semibold text-white transition hover:bg-[#1B2238]"
         >
           Back to dashboard
         </Link>

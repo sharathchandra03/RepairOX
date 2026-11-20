@@ -359,7 +359,7 @@ function Header({ title, subtitle, onClose, onBack }: { title: string; subtitle?
   return (
     <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-3.5 py-2.5">
       <div className="flex min-w-0 items-center gap-2">
-        {onBack && <button onClick={onBack} className="text-muted-foreground hover:text-foreground" aria-label="Back"><ChevronDown className="h-4 w-4 rotate-90" /></button>}
+        {onBack && <button onClick={onBack} className="grid h-6 w-6 place-items-center rounded-full bg-[#2B3553] text-white transition hover:bg-[#1B2238]" aria-label="Back"><ChevronDown className="h-4 w-4 rotate-90" /></button>}
         <div className="min-w-0">
           <p className="truncate text-[13px] font-semibold leading-none">{title}</p>
           {subtitle && <p className="mt-0.5 truncate text-[10.5px] text-muted-foreground">{subtitle}</p>}
