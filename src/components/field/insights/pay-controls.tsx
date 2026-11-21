@@ -8,6 +8,7 @@ import { RoxCenteredForm } from "@/components/ui/rox-centered-form";
 import { Button } from "@/components/ui/button";
 import { Input, Select } from "@/components/ui/input";
 import { InfoHint } from "@/components/ui/info-hint";
+import { Checkbox } from "@/components/ui/checkbox";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { DateTimeDialog } from "@/components/ui/date-time-picker";
 import { toast } from "@/components/ui/toaster";
@@ -56,11 +57,20 @@ const Num = ({ label, hint, value, onChange, suffix }: { label: string; hint?: s
   </label>
 );
 const Check = ({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (b: boolean) => void }) => (
-  <label className="flex items-start gap-2.5 rounded-xl border border-border p-2.5">
-    <input type="checkbox" className="mt-0.5 h-4 w-4" checked={value} onChange={(e) => onChange(e.target.checked)} />
-    <span className="text-[12.5px] font-semibold">{label}{hint && <span className="mt-0.5 block text-[11.5px] font-normal text-muted-foreground">{hint}</span>}</span>
-  </label>
+  <div role="button" tabIndex={-1} onClick={() => onChange(!value)} className={cn("flex cursor-pointer items-start gap-2.5 rounded-xl border p-2.5 transition", value ? "border-[#4361EE]/40 bg-[#EEF1FD]/50" : "border-border")}>
+    <span onClick={(e) => e.stopPropagation()} className="mt-0.5"><Checkbox checked={value} onChange={onChange} aria-label={label} /></span>
+    <span className="flex items-center gap-1 text-[12.5px] font-semibold">{label}{hint && <InfoHint content={hint} />}</span>
+  </div>
 );
+/** A two/three-way choice (e.g. "highest tier only" vs "tiers add up"). */
+function Choice<V extends string>({ label, hint, value, onChange, options }: { label: string; hint?: string; value: V; onChange: (v: V) => void; options: { label: string; value: V }[] }) {
+  return (
+    <div>
+      <span className="mb-1 flex items-center gap-1 text-[12px] font-semibold">{label}{hint && <InfoHint content={hint} />}</span>
+      <SegmentedTabs size="sm" value={value} onChange={(v) => onChange(v as V)} options={options} />
+    </div>
+  );
+}
 function Tiers<T extends Record<string, number>>({ rows, fields, onChange, make }: { rows: T[]; fields: { key: keyof T & string; label: string }[]; onChange: (r: T[]) => void; make: () => T }) {
   return (
     <div className="space-y-2">
@@ -173,43 +183,112 @@ export function PlanDialog({ scope, today, plans, onClose, onSaved }: {
         <Input className="mt-3" placeholder="Why this change? (optional)" value={note} onChange={(e) => setNote(e.target.value)} />
       </div>
 
+      <H>Which trips count</H>
+      <p className="mb-2 text-[11.5px] text-muted-foreground">Only completed trips count. Postponed, cancelled and failed trips never count. Every rule below uses only the trip types ticked here.</p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Check label="Pickup" value={p.countPickup} onChange={(b) => set("countPickup", b)} />
+        <Check label="Drop" value={p.countDrop} onChange={(b) => set("countDrop", b)} />
+        <Check label="On-site" value={p.countOnsite} onChange={(b) => set("countOnsite", b)} />
+        <Check label="Buyback" hint="A pickup whose lead type is Buyback." value={p.countBuyback} onChange={(b) => set("countBuyback", b)} />
+      </div>
+
       <H>Daily trips (days are counted, not trips)</H>
       <Tiers rows={p.dailyTiers} fields={[{ key: "minTrips", label: "Trips in a day, at least" }, { key: "amount", label: "Pay for that day (₹)" }]} onChange={(r) => set("dailyTiers", r)} make={() => ({ minTrips: 0, amount: 0 })} />
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <Choice label="When a day reaches more than one row" hint="Highest only: a 9+ day pays 300. Add up: a 9+ day pays 200 + 300 = 500." value={p.dailyStack ? "stack" : "top"} onChange={(v) => set("dailyStack", v === "stack")}
+          options={[{ label: "Highest row only", value: "top" }, { label: "Add up the rows", value: "stack" }]} />
+        <div className="grid gap-2">
+          <Check label="Long trips count extra for the day" hint="A 30 km trip that counts as 2 trips also counts as 2 toward 6+ / 9+." value={p.dailyUsesLongTrips} onChange={(b) => set("dailyUsesLongTrips", b)} />
+          <Check label="Pay the daily bonus only on a working day" hint="Not on a leave or week-off day the Ninja worked anyway." value={p.dailyNeedsPresent} onChange={(b) => set("dailyNeedsPresent", b)} />
+        </div>
+      </div>
+
       <H>Monthly target</H>
       <div className="grid grid-cols-2 gap-3">
-        <Num label="Minimum trips in the month" hint="Below this, no incentive is paid except petrol." value={p.monthlyMinTrips} onChange={(n) => set("monthlyMinTrips", n)} />
-        <Num label="Verified reviews needed for slab pay" hint="0 = not required. Your sheet says the slab is paid only if the review is completed successfully; set the number of verified 5★ reviews that means." value={p.slabMinReviews} onChange={(n) => set("slabMinReviews", n)} />
+        <Num label="Minimum trips in the month" hint="Below this, the money ticked below waits. It is shown to the Ninja as locked." value={p.monthlyMinTrips} onChange={(n) => set("monthlyMinTrips", n)} />
+        <Num label="Verified reviews needed for slab pay" hint="0 = not required. Your sheet says the slab is paid only if the review is completed successfully; set the number of counted reviews that means." value={p.slabMinReviews} onChange={(n) => set("slabMinReviews", n)} />
       </div>
-      <p className="mb-1 mt-3 text-[12px] font-semibold">Slabs: each trip above the number earns the rate</p>
+      <div className="mt-3"><Check label="Lower the target for leave and for joining mid-month" hint="Example: 60 trips, 31-day month, 3 days of approved leave → target 55. Days before the Ninja's first salary date are taken off the same way." value={p.gateProrate} onChange={(b) => set("gateProrate", b)} /></div>
+      <p className="mb-1.5 mt-3 flex items-center gap-1 text-[12px] font-semibold">Money that waits until the target is reached<InfoHint content="Ticked = paid only once the monthly target is reached. Not ticked = paid even below the target." /></p>
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        {([["daily", "Daily trips"], ["slab", "Slab"], ["reviews", "Reviews"], ["devices", "Devices"], ["sunday", "Sunday"], ["leads", "Organic leads"], ["petrol", "Petrol"]] as const).map(([k, l]) => (
+          <Check key={k} label={l} value={p.gateHolds[k]} onChange={(b) => set("gateHolds", { ...p.gateHolds, [k]: b })} />
+        ))}
+      </div>
+      <p className="mb-1 mt-4 text-[12px] font-semibold">Slabs: each trip above the number earns the rate</p>
       <Tiers rows={p.slabs} fields={[{ key: "above", label: "Trips above" }, { key: "rate", label: "₹ per trip" }]} onChange={(r) => set("slabs", r)} make={() => ({ above: 0, rate: 0 })} />
+      <div className="mt-3"><Choice label="How slabs are paid" hint="Each trip at its slab: 110 trips = 20×30 + 20×50 + 10×70. All at the top slab: 110 trips = 50×70." value={p.slabMode} onChange={(v) => set("slabMode", v)}
+        options={[{ label: "Each trip at its own slab", value: "marginal" }, { label: "All trips at the highest slab reached", value: "whole" }]} /></div>
+
       <H>Long distance trips count as several trips</H>
       <Check label="Count long trips as extra trips" value={p.distanceEnabled} onChange={(b) => set("distanceEnabled", b)} hint="Uses the straight-line distance between the store and the customer × the road factor, one way." />
       {p.distanceEnabled && <>
         <div className="mt-3"><Tiers rows={p.distanceTiers} fields={[{ key: "upToKm", label: "One-way km, up to" }, { key: "trips", label: "Counts as trips" }]} onChange={(r) => set("distanceTiers", r)} make={() => ({ upToKm: 0, trips: 1 })} /></div>
-        <div className="mt-3 grid grid-cols-2 gap-3"><Num label="Tolerance (± km)" value={p.distanceToleranceKm} onChange={(n) => set("distanceToleranceKm", n)} /><Num label="Road factor" hint="Road distance is usually about 1.3× the straight line." value={p.roadFactor} onChange={(n) => set("roadFactor", n)} /></div>
+        <div className="mt-3 grid grid-cols-3 gap-3">
+          <Num label="Tolerance (± km)" hint="41 km with ±1.5 still counts as the 'up to 40' row." value={p.distanceToleranceKm} onChange={(n) => set("distanceToleranceKm", n)} />
+          <Num label="Road factor" hint="Road distance is usually about 1.3× the straight line. Set 1 to use the straight line." value={p.roadFactor} onChange={(n) => set("roadFactor", n)} />
+          <Num label="Beyond the last row, +1 trip every" hint="0 = trips longer than the last row count as the last row." suffix="km" value={p.distanceExtraEveryKm} onChange={(n) => set("distanceExtraEveryKm", n)} />
+        </div>
       </>}
-      <H>Reviews (verified 5★ in the month, flat amount)</H>
+
+      <H>Reviews</H>
       <Tiers rows={p.reviewTiers} fields={[{ key: "min", label: "Reviews, at least" }, { key: "amount", label: "Bonus (₹)" }]} onChange={(r) => set("reviewTiers", r)} make={() => ({ min: 0, amount: 0 })} />
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <Num label="Lowest star rating that counts" hint="5 = only 5★ reviews count." suffix="★" value={p.reviewMinRating} onChange={(n) => set("reviewMinRating", Math.min(5, Math.max(1, n || 1)))} />
+        <Choice label="Bonus is" value={p.reviewMode} onChange={(v) => set("reviewMode", v)} options={[{ label: "One amount", value: "flat" }, { label: "Per review", value: "perReview" }]} />
+        <div className="pt-5"><Check label="Only reviews on a ticket" hint="The trip must have a ticket. Reviews always come from the customer link or a manager, never from the Ninja." value={p.reviewNeedsTicket} onChange={(b) => set("reviewNeedsTicket", b)} /></div>
+      </div>
+
       <H>Latest devices (per device repair, on the Cluster Manager's list)</H>
       <div className="grid grid-cols-3 gap-3">
         <Num label="MacBook (₹)" value={p.macbookPerRepair} onChange={(n) => set("macbookPerRepair", n)} />
         <Num label="iPhone (₹)" value={p.iphonePerRepair} onChange={(n) => set("iphonePerRepair", n)} />
         <Num label="iPhone above model" hint="Used only until a device list is entered." value={p.iphoneAboveModel} onChange={(n) => set("iphoneAboveModel", n)} />
       </div>
-      <H>Organic billed leads (per lead)</H>
+      <div className="mt-3"><Check label="Also count devices on drop trips" hint="Off: only the pickup / on-site leg counts, so one device is not paid twice." value={p.devicesOnDrop} onChange={(b) => set("devicesOnDrop", b)} /></div>
+
+      <H>Organic billed leads</H>
       <Tiers rows={p.leadTiers} fields={[{ key: "min", label: "Leads, at least" }, { key: "perLead", label: "₹ per lead" }]} onChange={(r) => set("leadTiers", r)} make={() => ({ min: 0, perLead: 0 })} />
-      <div className="mt-3 max-w-[200px]"><Num label="Gift at this many leads" value={p.leadGiftAt} onChange={(n) => set("leadGiftAt", n)} /></div>
-      <H>Petrol, Sunday and leave</H>
+      <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-[1fr_200px]">
+        <Choice label="How leads are paid" hint="All at the reached rate: 12 leads = 12 × 200. Each at its own row: 12 leads = 10 × 100 + 2 × 200." value={p.leadMode} onChange={(v) => set("leadMode", v)}
+          options={[{ label: "All at the reached rate", value: "whole" }, { label: "Each lead at its own row", value: "slab" }]} />
+        <Num label="Gift at this many leads" hint="0 = no gift." value={p.leadGiftAt} onChange={(n) => set("leadGiftAt", n)} />
+      </div>
+
+      <H>Sunday</H>
       <div className="grid grid-cols-3 gap-3">
-        <Num label="Petrol (₹ per km)" value={p.petrolPerKm} onChange={(n) => set("petrolPerKm", n)} />
         <Num label="Sunday bonus (₹)" value={p.sundayBonus} onChange={(n) => set("sundayBonus", n)} />
+        <Num label="Trips needed on the Sunday" hint="0 = being present is enough." value={p.sundayMinTrips} onChange={(n) => set("sundayMinTrips", n)} />
+        <Num label="Absences still allowed" hint="Used when 'needs no absence' is ticked. 0 = not a single absence." value={p.sundayAbsentAllowed} onChange={(n) => set("sundayAbsentAllowed", n)} />
+      </div>
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Check label="Needs no absence in the month" value={p.sundayNeedsNoAbsent} onChange={(b) => set("sundayNeedsNoAbsent", b)} />
+        <Check label="Replaces the daily bonus" hint="On a Sunday only the Sunday money is paid, not 6+ / 9+." value={p.sundayReplacesDaily} onChange={(b) => set("sundayReplacesDaily", b)} />
+        <Check label="A half day on Sunday also counts" value={p.sundayHalfDayCounts} onChange={(b) => set("sundayHalfDayCounts", b)} />
+      </div>
+
+      <H>Basic salary and leave</H>
+      <div className="grid grid-cols-3 gap-3">
+        <Num label="Divide salary by days" hint="0 = the real days in the month (28-31). 30 or 26 = a fixed number of days." value={p.salaryDays} onChange={(n) => set("salaryDays", n)} />
         <Num label="Half day pays" hint="1 = full day, 0.5 = half." value={p.halfDayFactor} onChange={(n) => set("halfDayFactor", n)} />
+        <Num label="Fine per absent day (₹)" hint="Deducted on top of losing that day's salary. 0 = none." value={p.absentFine} onChange={(n) => set("absentFine", n)} />
       </div>
-      <div className="mt-3 grid grid-cols-2 gap-3">
-        <Check label="Sunday needs no absence in the month" value={p.sundayNeedsNoAbsent} onChange={(b) => set("sundayNeedsNoAbsent", b)} />
-        <Check label="Sunday replaces the 6+/9+ daily bonus" value={p.sundayReplacesDaily} onChange={(b) => set("sundayReplacesDaily", b)} />
+      <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
+        <Check label="Week off is paid" value={p.weekOffPaid} onChange={(b) => set("weekOffPaid", b)} />
+        <Check label="Casual leave is paid" value={p.casualPaid} onChange={(b) => set("casualPaid", b)} />
+        <Check label="Festival leave is paid" value={p.festivalPaid} onChange={(b) => set("festivalPaid", b)} />
       </div>
-      <div className="mt-3 max-w-[200px]"><Num label="Casual leave notice (days)" hint="Requests sent later than this are flagged to the manager." value={p.casualNoticeDays} onChange={(n) => set("casualNoticeDays", n)} /></div>
+      <div className="mt-3 max-w-[220px]"><Num label="Casual leave notice (days)" hint="Requests sent later than this are flagged to the manager." value={p.casualNoticeDays} onChange={(n) => set("casualNoticeDays", n)} /></div>
+
+      <H>Petrol and month total</H>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <Num label="Petrol (₹ per km)" value={p.petrolPerKm} onChange={(n) => set("petrolPerKm", n)} />
+        <Num label="Most km paid a day" hint="0 = no limit." suffix="km" value={p.petrolMaxKmPerDay} onChange={(n) => set("petrolMaxKmPerDay", n)} />
+        <Num label="Incentive limit a month (₹)" hint="Basic and petrol are not included. 0 = no limit." value={p.incentiveCap} onChange={(n) => set("incentiveCap", n)} />
+        <div><span className="mb-1 block text-[12px] font-semibold">Round the total</span>
+          <Select className="h-[38px]" value={String(p.roundTotal)} onChange={(e) => set("roundTotal", Number(e.target.value))} options={[{ label: "No rounding", value: "0" }, { label: "Nearest ₹1", value: "1" }, { label: "Nearest ₹10", value: "10" }, { label: "Nearest ₹100", value: "100" }]} /></div>
+      </div>
+      <p className="mt-3 rounded-lg bg-muted/50 px-3 py-2 text-[11.5px] text-muted-foreground">Day rules (basic, daily, slab, devices, Sunday, petrol, fines) use the plan in force on each day. Month rules (target, what waits for it, leads, limit, rounding) use the plan in force on the last day of the month, so a change made mid-month decides how that month is settled.</p>
 
       <H>Impact</H>
       <ImpactPreview scope={scope} draft={p} />

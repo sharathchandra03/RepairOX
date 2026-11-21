@@ -2,6 +2,8 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import { Sidebar, MobileSidebar } from "./sidebar";
+import { InventorySidebar } from "@/components/inventory/inventory-sidebar";
+import { isInventoryPath } from "@/lib/inventory-nav";
 import { Topbar } from "./topbar";
 import { motion } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
@@ -209,12 +211,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       onScopeChange={handleReportScopeChange}
     >
     <div className="flex h-screen overflow-hidden bg-[hsl(var(--background))]" data-sidebar-collapsed={collapsed ? "true" : "false"}>
-      <Sidebar
-        collapsed={collapsed}
-        setCollapsed={setCollapsed}
-        activeWorkspace={activeWorkspace}
-        setActiveWorkspace={setActiveWorkspace}
-      />
+      {/* Inventory has its own dedicated sidebar (sectioned, collapsible); the
+          main RepairOX sidebar is swapped out on /inventory/* and returns via
+          the "RepairOX menu" pill. */}
+      {isInventoryPath(pathname) ? (
+        <InventorySidebar />
+      ) : (
+        <Sidebar
+          collapsed={collapsed}
+          setCollapsed={setCollapsed}
+          activeWorkspace={activeWorkspace}
+          setActiveWorkspace={setActiveWorkspace}
+        />
+      )}
       <MobileSidebar
         open={open}
         setOpen={setOpen}

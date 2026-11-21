@@ -3,20 +3,16 @@
    Field Activity layout kit — every page is built from the same pieces so they look and behave the same:
      KpiStrip   → the bordered summary boxes at the top
      ViewBar    → one connected view switch on the left, actions on the right
-     DataTable  → the canonical list table (solid #5368D4 header, 68px rows, frozen first column). On a
-                  locked page it fills the rest of the screen and scrolls inside; totals sit in a sticky foot.
+     Tables     → components/field/grid.tsx (FieldGrid: column reorder + freeze, zebra rows, sticky totals).
      usePaged   → page / page size state + the standard detached <Pagination> footer (10/20/50/100)
    ────────────────────────────────────────────────────────────────────────── */
 import { useEffect, useMemo, useState } from "react";
-import { Frame, Head, EmptyRows } from "@/components/field/dashboard/dashboard-table";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { Pagination } from "@/components/ui/pagination";
 import { InfoHint } from "@/components/ui/info-hint";
 import { cn } from "@/lib/utils";
 
-export const C = "px-3 py-4 text-center tabular-nums";
 export const PAGE_SIZES = [10, 20, 50, 100];
-const FZ = { ["--rox-frozen-offset" as string]: "0px" } as React.CSSProperties;
 
 export interface Kpi { label: string; value: React.ReactNode; sub?: React.ReactNode; tone?: "default" | "good" | "warn" | "bad"; icon?: React.ComponentType<{ className?: string }> }
 const TONE = { default: "", good: "text-emerald-700", warn: "text-amber-700", bad: "text-rose-700" };
@@ -25,9 +21,9 @@ export function KpiStrip({ items, loading }: { items: Kpi[]; loading?: boolean }
     <div className={cn("grid grid-cols-2 gap-4", items.length >= 4 ? "lg:grid-cols-4" : items.length === 3 ? "lg:grid-cols-3" : "")}>
       {items.map((k) => (
         <div key={k.label} className="rounded-xl border-2 border-zinc-200 bg-card px-4 py-3.5 shadow-card transition hover:border-[#4361EE]/30">
-          <p className="flex items-center gap-1.5 text-[11.5px] font-semibold text-muted-foreground">{k.icon && <k.icon className="h-3.5 w-3.5 text-[#4361EE]" />}{k.label}</p>
-          <p className={cn("mt-1 text-[22px] font-extrabold leading-tight tabular-nums", TONE[k.tone ?? "default"])}>{loading ? "–" : k.value}</p>
-          {k.sub != null && <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">{loading ? "\u00a0" : k.sub}</p>}
+          <p className="flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground">{k.icon && <k.icon className="h-3.5 w-3.5 text-[#4361EE]" />}{k.label}</p>
+          <p className={cn("mt-1 text-[24px] font-extrabold leading-tight tabular-nums", TONE[k.tone ?? "default"])}>{loading ? "–" : k.value}</p>
+          {k.sub != null && <p className="mt-0.5 truncate text-[12.5px] text-muted-foreground">{loading ? "\u00a0" : k.sub}</p>}
         </div>
       ))}
     </div>
@@ -39,37 +35,12 @@ export function ViewBar<T extends string>({ value, onChange, options, info, chil
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
-      {options && value != null && onChange && <SegmentedTabs size="sm" value={value} onChange={(v) => onChange(v as T)} options={options} />}
+      {options && value != null && onChange && <SegmentedTabs size="md" value={value} onChange={(v) => onChange(v as T)} options={options} />}
       {info && <InfoHint content={info} />}
       <div className="ml-auto flex flex-wrap items-center gap-2">{children}</div>
     </div>
   );
 }
-
-/** The canonical list table. `lock` = fill the locked page and scroll inside (both axes). */
-export function DataTable({ cols, first = 220, widths, minWidth, children, foot, empty, lock = true }: {
-  cols: string[]; first?: number; widths?: (number | undefined)[]; minWidth: number;
-  children: React.ReactNode; foot?: React.ReactNode; empty?: string | null; lock?: boolean;
-}) {
-  return (
-    <Frame lock={lock}>
-      <table className="w-full table-fixed text-[14px]" style={{ minWidth }}>
-        <colgroup><col style={{ width: first }} />{cols.slice(1).map((c, i) => <col key={c + i} style={widths?.[i] ? { width: widths[i] } : undefined} />)}</colgroup>
-        <Head cols={cols} firstWidth={first} />
-        <tbody>{children}</tbody>
-        {foot && !empty && <tfoot className="sticky bottom-0 z-[6] [&_td]:border-t-2 [&_td]:border-[#5368D4]/30 [&_td]:bg-[#EEF1FD] [&_td]:font-bold">{foot}</tfoot>}
-      </table>
-      {empty && <EmptyRows text={empty} />}
-    </Frame>
-  );
-}
-/** First cell of a totals row (frozen like the name column). */
-export const FootName = ({ label = "Total", sub }: { label?: string; sub?: string }) => (
-  <td className="rox-frozen rox-frozen-left rox-frozen-left-edge px-4 py-3 text-left" style={FZ}>
-    <p className="text-[13px] font-extrabold uppercase tracking-wide">{label}</p>{sub && <p className="text-[11px] font-medium text-muted-foreground">{sub}</p>}
-  </td>
-);
-export const Dash = () => <span className="text-zinc-300">—</span>;
 
 /** Paging for one table. Resets to page 1 whenever `resetKey` (filters / view) changes. */
 export function usePaged<T>(rows: T[], resetKey: string, initial = 20) {

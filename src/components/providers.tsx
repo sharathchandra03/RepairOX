@@ -12,6 +12,7 @@ import { DealsProvider } from "@/lib/lead-deals-context";
 import { QuotationsProvider } from "@/lib/quotations-context";
 import { FieldProvider } from "@/lib/field-context";
 import { CatalogProvider } from "@/lib/catalog-context";
+import { InventoryOpsProvider } from "@/lib/inventory-ops-context";
 import { AccountingProvider } from "@/lib/accounting-service";
 import { Toaster } from "@/components/ui/toaster";
 
@@ -38,7 +39,7 @@ export function Providers({ children }: { children: ReactNode }) {
                   <LeadsProvider>
                     <DealsProvider>
                       <QuotationsProvider>
-                        <FieldProvider>{children}</FieldProvider>
+                        <FieldProvider><InventoryOpsProvider>{children}</InventoryOpsProvider></FieldProvider>
                       </QuotationsProvider>
                     </DealsProvider>
                   </LeadsProvider>

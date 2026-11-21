@@ -1200,6 +1200,9 @@ function rowToInventoryItem(r: any): InventoryItem {
     serviceCharge: Number(r.service_charge ?? 0),
     trackStock: r.track_stock ?? (kind === "part"),
     migrationFlag: r.migration_flag ?? undefined,
+    grade: r.grade ?? undefined,
+    variantGroup: r.variant_group ?? undefined,
+    warrantyMonths: r.warranty_months != null ? Number(r.warranty_months) : undefined,
     costState: "not_configured",
   };
 }
@@ -1244,6 +1247,11 @@ function inventoryItemToRow(item: InventoryItem): Record<string, unknown> {
     vendor: item.vendor || null,
     description: item.description || null,
   };
+  // Variant columns (migration 0119) are only sent when set, so item creation
+  // keeps working on a database that hasn't applied 0119 yet.
+  if (item.grade) row.grade = item.grade;
+  if (item.variantGroup) row.variant_group = item.variantGroup;
+  if (item.warrantyMonths != null) row.warranty_months = item.warrantyMonths;
   // item_code / service_code are server-stamped and immutable — written only
   // when the caller already carries one (never fabricated here).
   if (item.itemCode) row.item_code = item.itemCode;
@@ -4106,6 +4114,9 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if ("vendor" in updates) row.vendor = updates.vendor || null;
       if ("description" in updates) row.description = updates.description || null;
       if ("migrationFlag" in updates) row.migration_flag = updates.migrationFlag ?? null;
+      if ("grade" in updates) row.grade = updates.grade || null;
+      if ("variantGroup" in updates) row.variant_group = updates.variantGroup || null;
+      if ("warrantyMonths" in updates) row.warranty_months = updates.warrantyMonths ?? null;
       if (Object.keys(row).length > 0) {
         const { error } = await db.from("inventory_items").update(row).eq("id", id);
         if (error) { console.error("[store] updateInventoryItem failed:", error.message); return; }

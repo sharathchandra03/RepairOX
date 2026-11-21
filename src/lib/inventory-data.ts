@@ -103,6 +103,9 @@ export type InventoryItem = {
   trackStock?: boolean;          // parts only; false ⇒ sellable non-stock good
   billingBasis?: string;         // service unit / billing basis (reuses uom channel)
   migrationFlag?: string;        // backfill flag: unrecognised_item_type | service_with_stock
+  grade?: string;                // part grade: OEM / Premium / OLED / Incell / Refurbished …
+  variantGroup?: string;         // groups grades of the same part (e.g. "iPhone 16 Pro Max · Display")
+  warrantyMonths?: number;       // warranty offered on this SKU
 };
 
 export const STORES = ["All Stores", "Main Store", "Service Counter", "Warehouse A", "Branch — Andheri"];

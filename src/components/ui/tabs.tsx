@@ -8,19 +8,22 @@ interface TabsProps {
   value: string;
   onChange: (v: string) => void;
   className?: string;
-  size?: "sm" | "md";
+  size?: "sm" | "md" | "lg";
+  /** Stretch to the full width and share it equally between the options (few options, lots of room). */
+  fill?: boolean;
   /** Accent theme. "amber" is used by the Follow-ups workspace (#F59E0C). */
   accent?: "blue" | "amber";
 }
-export function SegmentedTabs({ options, value, onChange, className, size = "md", accent = "blue" }: TabsProps) {
+export function SegmentedTabs({ options, value, onChange, className, size = "md", accent = "blue", fill = false }: TabsProps) {
   const amber = accent === "amber";
   return (
     <div
       role="tablist"
       className={cn(
-        "relative inline-flex items-center rounded-full border bg-muted p-1",
+        "relative items-center rounded-full border bg-muted p-1",
+        fill ? "flex w-full" : "inline-flex",
         amber ? "border-[#F59E0C]/70" : "border-[#4361EE]/60",
-        size === "sm" ? "text-[11px]" : "text-sm",
+        size === "sm" ? "text-[11px]" : size === "lg" ? "text-[15px]" : "text-sm",
         className
       )}
     >
@@ -34,7 +37,8 @@ export function SegmentedTabs({ options, value, onChange, className, size = "md"
             onClick={() => onChange(o.value)}
             className={cn(
               "relative z-10 inline-flex items-center justify-center rounded-full font-medium transition-colors whitespace-nowrap",
-              size === "sm" ? "px-2.5 py-1" : "px-4 py-1.5",
+              size === "sm" ? "px-2.5 py-1" : size === "lg" ? "px-5 py-2.5 font-semibold" : "px-4 py-1.5",
+              fill && "min-w-0 flex-1",
               active ? "text-white" : "text-muted-foreground hover:text-foreground"
             )}
           >

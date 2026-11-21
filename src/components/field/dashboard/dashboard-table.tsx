@@ -9,10 +9,10 @@ export const inr = (n: number | null | undefined) => (n == null ? "—" : `₹${
 export const GROUPS: TripGroup[] = ["onsite", "pickup", "drop"];
 
 /** Bounded scroll frame with the shared grid look (thin border, scroll-edge shadows). */
-export function Frame({ children, lock = false }: { children: React.ReactNode; /** Fill the rest of a locked page and scroll inside (both axes) instead of growing the page. */ lock?: boolean }) {
+export function Frame({ children, lock = false, className }: { children: React.ReactNode; /** Fill the rest of a locked page and scroll inside (both axes) instead of growing the page. */ lock?: boolean; className?: string }) {
   const ref = useRef<HTMLDivElement>(null);
   useScrollEdges(ref);
-  return <div ref={ref} className={cn("rox-table-card rox-grid-scroll overflow-auto shadow-card", lock && "rox-lock-grow")}>{children}</div>;
+  return <div ref={ref} className={cn("rox-table-card rox-grid-scroll overflow-auto shadow-card", lock && "rox-lock-grow", className)}>{children}</div>;
 }
 
 const FZ = { ["--rox-frozen-offset" as string]: "0px" } as React.CSSProperties;

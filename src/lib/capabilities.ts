@@ -95,6 +95,13 @@ export const CAP = {
     returnAccept: ["returns_accept", "adjust_stock", "manage_inventory"],
     // Execute the disposition-gated restock (increments saleable stock).
     returnRestock: ["returns_restock", "approve_inventory", "manage_inventory"],
+    // Inventory operations (Phases 2–3). Granular key first, coarse fallback.
+    // Purchasing docs carry unit COST — keep purchase/vendor gates tight.
+    purchase: ["manage_purchases", "manage_inventory"],
+    vendors: ["manage_vendors", "manage_purchases", "manage_inventory"],
+    transfer: ["transfer_inventory", "manage_inventory"],
+    adjust: ["adjust_stock", "manage_inventory"],
+    approve: ["approve_inventory", "manage_inventory"],
   },
   /* Money-sensitive VISIBILITY gates (gap audit v3). Owners hold these via
      full_access; grant explicitly to let a role SEE these figures. */

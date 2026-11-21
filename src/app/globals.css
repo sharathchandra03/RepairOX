@@ -1711,3 +1711,13 @@ html, body {
   .rox-checkbox, .rox-checkbox::after, .rox-checkbox-tick, .rox-checkbox-dash { animation: none !important; }
   .rox-checkbox-tick, .rox-checkbox-dash { stroke-dashoffset: 0; }
 }
+
+/* ── Field tables (Field Insights + Field Activity): zebra rows for long reading sessions ──
+   Every even row gets a soft, SOLID grey (solid so frozen columns stay opaque); hover a soft blue. */
+:root { --rox-zebra-bg: 225 30% 96.6%; --rox-zebra-hover: 228 75% 95.5%; }
+.dark { --rox-zebra-bg: 225 14% 15%; --rox-zebra-hover: 228 30% 20%; }
+.rox-zebra > tbody > tr > td { background-color: hsl(var(--card)); }
+.rox-zebra > tbody > tr:nth-child(even) > td { background-color: hsl(var(--rox-zebra-bg)); }
+.rox-zebra > tbody > tr:hover > td { background-color: hsl(var(--rox-zebra-hover)); }
+.rox-zebra > tbody > tr:hover > td.rox-frozen,
+.rox-zebra > tbody > tr > td.rox-frozen { background-image: none !important; }

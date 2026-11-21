@@ -790,7 +790,7 @@ export const navItems: NavItem[] = [
   // Operations
   { href: "/operations",             label: "Dashboard",       icon: "Home", permission: "view_dashboard" },
   { href: "/stock",                  label: "Stock Levels",    icon: "Boxes", permission: "manage_inventory" },
-  { href: "/inventory",              label: "Inventory",       icon: "Package", permission: "manage_inventory" },
+  { href: "/inventory",              label: "Inventory",       icon: "Package", permission: ["view_inventory", "manage_inventory", "create_item", "edit_item", "adjust_stock", "manage_purchases"] },
   { href: "/operations/vendors",     label: "Vendors",         icon: "Truck", permission: "manage_vendors" },
   { href: "/operations/purchase-orders", label: "Purchase Orders", icon: "ClipboardList", permission: "manage_purchases" },
   { href: "/operations/transfers",   label: "Parts Transfers", icon: "Recycle", permission: "transfer_inventory" },

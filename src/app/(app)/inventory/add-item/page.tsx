@@ -33,6 +33,9 @@ export default function AddItemPage() {
   const editId = params.get("edit");
   const editItem = editId ? inventory.find((i) => i.id === editId) : null;
   const isEdit = !!editItem;
+  // ?copy=<sku> pre-fills a NEW item from an existing one (SKU/codes/stock cleared).
+  const copyId = params.get("copy");
+  const copyItem = !editId && copyId ? inventory.find((i) => i.id === copyId) : null;
 
   const [values, setValues] = useState<InventoryFormValues>(() => emptyInventoryForm());
   const [toast, setToast] = useState<string | null>(null);
@@ -45,8 +48,11 @@ export default function AddItemPage() {
     if (editItem && !hydrated) {
       setValues(inventoryFormFromItem(editItem));
       setHydrated(true);
+    } else if (copyItem && !hydrated) {
+      setValues({ ...inventoryFormFromItem(copyItem), sku: "", itemCode: "", serviceCode: "", barcode: "", name: `${copyItem.name} (copy)`, currentStock: "", openingUnitCost: "" });
+      setHydrated(true);
     }
-  }, [editItem, hydrated]);
+  }, [editItem, copyItem, hydrated]);
 
   const set = (patch: Partial<InventoryFormValues>) => {
     setValues((v) => ({ ...v, ...patch }));

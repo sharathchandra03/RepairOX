@@ -35,7 +35,7 @@ export async function fetchPayMonth(ym: string, tz: string): Promise<PayMonthDat
   const lo = new Date(new Date(`${from}T00:00:00`).getTime() - 864e5).toISOString();
   const hi = new Date(new Date(`${to}T00:00:00`).getTime() + 2 * 864e5).toISOString();
   const [t, b, rv, inp, adj] = await Promise.all([
-    supabase.from("field_trips").select("id,ninja_id,trip_type,completed_at,branch_id,dest_lat,dest_lng,ticket_id,job:field_jobs(device,devices)")
+    supabase.from("field_trips").select("id,ninja_id,trip_type,completed_at,branch_id,dest_lat,dest_lng,ticket_id,job:field_jobs(device,devices,lead_type)")
       .eq("status", "completed").not("ninja_id", "is", null).gte("completed_at", lo).lt("completed_at", hi).limit(20000),
     supabase.from("branches").select("id,latitude,longitude"),
     supabase.from("field_trip_reviews").select("trip_id,ninja_id,rating,channel,created_at").gte("created_at", lo).lt("created_at", hi).limit(20000),
@@ -46,15 +46,15 @@ export async function fetchPayMonth(ym: string, tz: string): Promise<PayMonthDat
   const trips: PayTrip[] = (t.data ?? []).flatMap((r: any) => {
     const date = localDateKey(new Date(r.completed_at).getTime(), tz);
     if (date < from || date > to) return [];
-    const job = (Array.isArray(r.job) ? r.job[0] : r.job) as { device?: string; devices?: { label?: string }[] | null } | null;
+    const job = (Array.isArray(r.job) ? r.job[0] : r.job) as { device?: string; devices?: { label?: string }[] | null; lead_type?: string | null } | null;
     const labels = (job?.devices ?? []).map((d) => d?.label).filter((x): x is string => !!x);
     if (!labels.length && job?.device) labels.push(job.device);
     const store = r.branch_id ? coords.get(r.branch_id) : null;
     const crowKm = store && r.dest_lat != null && r.dest_lng != null ? haversineKm(store, { lat: r.dest_lat, lng: r.dest_lng }) : null;
     const type = r.trip_type === "drop" ? "drop" : r.trip_type === "onsite" ? "onsite" : "pickup";
-    return [{ id: r.id, staffId: r.ninja_id, date, type, crowKm, devices: labels } as PayTrip];
+    return [{ id: r.id, staffId: r.ninja_id, date, type, crowKm, devices: labels, buyback: job?.lead_type === "buyback" } as PayTrip];
   });
-  // verified review = 5 stars, from the customer (or a manager), on a trip that has a ticket
+  // verified review = from the customer (or a manager) on a trip that has a ticket; the plan decides the minimum stars
   const revRows = (rv.data ?? []) as { trip_id: string; ninja_id: string; rating: number; channel: string; created_at: string }[];
   const ticketOf = new Map<string, string | null>((t.data ?? []).map((r: any) => [r.id, r.ticket_id ?? null]));
   const missing = revRows.map((r) => r.trip_id).filter((id) => !ticketOf.has(id));
@@ -64,7 +64,7 @@ export async function fetchPayMonth(ym: string, tz: string): Promise<PayMonthDat
   }
   const reviews: PayReview[] = revRows.map((r) => ({
     staffId: r.ninja_id, date: localDateKey(new Date(r.created_at).getTime(), tz), rating: r.rating,
-    verified: r.rating === 5 && r.channel !== "ninja_app" && !!ticketOf.get(r.trip_id),
+    verified: r.channel !== "ninja_app" && !!ticketOf.get(r.trip_id), fromCustomer: r.channel !== "ninja_app",
   })).filter((r) => r.date >= from && r.date <= to);
   const leads = new Map<string, number>(); for (const x of (inp.data ?? []) as any[]) leads.set(x.staff_id, Number(x.value));
   const adjustments = new Map<string, (Adjustment & { id: string; createdAt: string })[]>();

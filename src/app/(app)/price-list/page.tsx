@@ -19,6 +19,8 @@ import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
 import { Drawer, DetailRow } from "@/components/ui/drawer";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { ModalPortal } from "@/components/ui/modal-portal";
+import { useStore } from "@/lib/store";
+import { overlayInventoryOnParts } from "@/lib/inventory-analytics";
 import { useCatalog, brandsForCategory, modelsForBrand, partsForModel, sortCategories } from "@/lib/catalog-context";
 import { uploadCatalogImage } from "@/components/settings/catalog/upload-image";
 import { collectMedia } from "@/components/settings/catalog/media-library";
@@ -76,7 +78,11 @@ const PART_SEARCH_HINTS = [
 
 /* ─── Main Page Component ────────────────────────────────────────── */
 export default function PriceListPage() {
-  const { categories, brands, models, parts: allParts, importRows, importSmartModels } = useCatalog();
+  const { categories, brands, models, parts: catalogParts, importRows, importSmartModels } = useCatalog();
+  // SKU link: a part whose part number equals an inventory SKU shows the live
+  // inventory selling price + availability (Inventory → Price List Link).
+  const { inventory: linkedInventory } = useStore();
+  const allParts = useMemo(() => overlayInventoryOnParts(catalogParts, linkedInventory), [catalogParts, linkedInventory]);
   const router = useRouter();
   const urlParams = useSearchParams();
 

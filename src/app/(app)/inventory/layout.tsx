@@ -1,10 +1,5 @@
-import { InventorySubNav } from "@/components/inventory/inventory-subnav";
-
+/* Inventory pages render inside the dedicated InventorySidebar (see
+   components/layout/app-shell.tsx); the old horizontal sub-nav is retired. */
 export default function InventoryLayout({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="space-y-6">
-      <InventorySubNav />
-      {children}
-    </div>
-  );
+  return <>{children}</>;
 }

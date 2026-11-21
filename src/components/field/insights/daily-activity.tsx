@@ -11,6 +11,7 @@ import { Select } from "@/components/ui/input";
 import { SegmentedTabs } from "@/components/ui/tabs";
 import { InfoHint } from "@/components/ui/info-hint";
 import { Frame, Head, NameCell, EmptyRows } from "@/components/field/dashboard/dashboard-table";
+import { FieldGrid, FootLabel, NameText, useFieldGrid } from "@/components/field/grid";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
@@ -124,6 +125,16 @@ export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayRows, periodRows, storeRows, loading]);
 
+  type SR = (typeof storeRows)[number];
+  const stTot = (k: "onsite" | "pickup" | "drop") => storeRows.reduce((t, r) => ({ assigned: t.assigned + r[k].assigned, completed: t.completed + r[k].completed }), { assigned: 0, completed: 0 });
+  const storeGrid = useFieldGrid<SR>("insights_store_activity", [
+    { key: "store", label: "Store", width: 240, anchor: true, render: (r) => <NameText label={r.label} />, foot: <FootLabel sub={`${storeRows.length} stores`} /> },
+    { key: "onsite", label: "On-site", width: 130, render: (r) => ratio(r.onsite), foot: ratio(stTot("onsite")) },
+    { key: "pickup", label: "Pickup", width: 130, render: (r) => ratio(r.pickup), foot: ratio(stTot("pickup")) },
+    { key: "drop", label: "Drop", width: 130, render: (r) => ratio(r.drop), foot: ratio(stTot("drop")) },
+    { key: "total", label: "Total", width: 120, cellClass: () => "font-bold", render: (r) => r.total, foot: storeRows.reduce((t, r) => t + r.total, 0) },
+    { key: "done", label: "Completed", width: 140, render: (r) => r.completed, foot: storeRows.reduce((t, r) => t + r.completed, 0) },
+  ]);
   if (!available) return <p className="rounded-2xl border border-border bg-card p-6 text-center text-[13px] text-muted-foreground">Daily activity is available when RepairOX is connected to the database.</p>;
   if (err) return <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">Could not load trips: {err}</p>;
 
@@ -180,23 +191,11 @@ export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam
       )}
 
       {show !== "ninja" && <div className="space-y-2">
-        <h3 className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-wider text-muted-foreground"><StoreIcon className="h-3.5 w-3.5 text-[#4361EE]" />Store activity · {dayLabel(effDay)}</h3>
-        <Frame>
-          <table className="w-full min-w-[720px] table-fixed text-[14px]">
-            <colgroup><col style={{ width: 200 }} /><col /><col /><col /><col /><col /></colgroup>
-            <Head cols={["Store", "On-site", "Pickup", "Drop", "Total", "Completed"]} firstWidth={200} />
-            <tbody>
-              {storeRows.map((r) => (
-                <tr key={r.key} className="rox-table-row align-middle hover:bg-muted/40">
-                  <NameCell label={r.label} />
-                  <td className={th}>{ratio(r.onsite)}</td><td className={th}>{ratio(r.pickup)}</td><td className={th}>{ratio(r.drop)}</td>
-                  <td className={cn(th, "font-bold")}>{r.total}</td><td className={th}>{r.completed}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {storeRows.length === 0 && <EmptyRows text={loading ? "Loading…" : "No store trips for this day."} />}
-        </Frame>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <h3 className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-wider text-muted-foreground"><StoreIcon className="h-3.5 w-3.5 text-[#4361EE]" />Store activity · {dayLabel(effDay)}</h3>
+          {storeGrid.menus}
+        </div>
+        <FieldGrid grid={storeGrid} lock={false} rows={storeRows} rowKey={(r) => r.key} foot empty={storeRows.length ? null : loading ? "Loading…" : "No store trips for this day."} />
       </div>}
     </div>
   );

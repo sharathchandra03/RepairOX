@@ -5,10 +5,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Award, CalendarCheck2, Fuel, History, IndianRupee, Route, Smartphone, Star, Sun, Target, Users } from "lucide-react";
 import { useActivity, useRegisterSheets } from "@/components/field/activity/activity-shell";
-import { C, DataTable, Dash, KpiStrip, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { KpiStrip, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { Dash, FieldGrid, NameText, Sub, useFieldGrid } from "@/components/field/grid";
 import { PlanDialog, DevicesDialog, SalaryDialog } from "@/components/field/insights/pay-controls";
 import { PolicyDialog } from "@/components/field/insights/attendance-section";
-import { NameCell } from "@/components/field/dashboard/dashboard-table";
 import { Button } from "@/components/ui/button";
 import { usePermissions } from "@/lib/permissions-context";
 import { allow, CAP } from "@/lib/capabilities";
@@ -26,8 +26,8 @@ const sortBy = <T,>(a: T[], k: (x: T) => number) => [...a].sort((x, y) => k(x) -
 function RuleCard({ icon: Icon, title, children }: { icon: React.ComponentType<{ className?: string }>; title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border-2 border-zinc-200 bg-card p-4 shadow-card">
-      <p className="flex items-center gap-2 text-[12px] font-bold uppercase tracking-wider text-muted-foreground"><span className="grid h-7 w-7 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Icon className="h-3.5 w-3.5" /></span>{title}</p>
-      <div className="mt-3 space-y-1.5 text-[13px]">{children}</div>
+      <p className="flex items-center gap-2 text-[12.5px] font-bold uppercase tracking-wider text-muted-foreground"><span className="grid h-8 w-8 place-items-center rounded-lg bg-[#EEF1FD] text-[#4361EE]"><Icon className="h-3.5 w-3.5" /></span>{title}</p>
+      <div className="mt-3 space-y-2 text-[14.5px]">{children}</div>
     </div>
   );
 }
@@ -35,20 +35,50 @@ const Line = ({ k, v }: { k: React.ReactNode; v: React.ReactNode }) => <p classN
 
 function PlanCards({ p }: { p: PayPlan }) {
   const slabs = sortBy(p.slabs, (s) => s.above);
+  const yes = (b: boolean) => (b ? "Yes" : "No");
+  const types = [p.countPickup && "Pickup", p.countDrop && "Drop", p.countOnsite && "On-site", p.countBuyback && "Buyback"].filter(Boolean).join(" · ") || "None";
+  const held = ([["daily", "Daily"], ["slab", "Slab"], ["reviews", "Reviews"], ["devices", "Devices"], ["sunday", "Sunday"], ["leads", "Leads"], ["petrol", "Petrol"]] as const).filter(([k]) => p.gateHolds[k]).map(([, l]) => l).join(" · ") || "Nothing";
   return (
     <div className="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-4">
-      <RuleCard icon={Award} title="Daily trips">{sortBy(p.dailyTiers, (t) => t.minTrips).map((t) => <Line key={t.minTrips} k={`${t.minTrips}+ trips in a day`} v={inr(t.amount)} />)}<p className="pt-1 text-[11.5px] text-muted-foreground">Per day, completed trips only.</p></RuleCard>
+      <RuleCard icon={Award} title="Daily trips">
+        {sortBy(p.dailyTiers, (t) => t.minTrips).map((t) => <Line key={t.minTrips} k={`${t.minTrips}+ trips in a day`} v={inr(t.amount)} />)}
+        <Line k="More than one row reached" v={p.dailyStack ? "Add up" : "Highest only"} />
+        <Line k="Long trips count extra" v={yes(p.dailyUsesLongTrips)} />
+        <Line k="Only on a working day" v={yes(p.dailyNeedsPresent)} />
+        <p className="pt-1 text-[12.5px] text-muted-foreground">Counts: {types}</p>
+      </RuleCard>
       <RuleCard icon={Target} title="Monthly target">
         <Line k="Unlocks incentives at" v={`${p.monthlyMinTrips} trips`} />
+        <Line k="Lowered for leave / joining" v={yes(p.gateProrate)} />
         {slabs.map((s, i) => <Line key={s.above} k={`Trips ${s.above + 1}${slabs[i + 1] ? `–${slabs[i + 1].above}` : "+"}`} v={`${inr(s.rate)} each`} />)}
-        {p.slabMinReviews > 0 && <Line k="Needs verified reviews" v={p.slabMinReviews} />}
+        <Line k="Slab paid" v={p.slabMode === "whole" ? "All at top slab" : "Each at its slab"} />
+        {p.slabMinReviews > 0 && <Line k="Needs reviews" v={p.slabMinReviews} />}
+        <p className="pt-1 text-[12.5px] text-muted-foreground">Waits for the target: {held}</p>
       </RuleCard>
-      <RuleCard icon={Route} title="Long trips">{p.distanceEnabled ? <>{sortBy(p.distanceTiers, (t) => t.upToKm).map((t) => <Line key={t.upToKm} k={`Up to ${t.upToKm} km one way`} v={`${t.trips} trip${t.trips === 1 ? "" : "s"}`} />)}<p className="pt-1 text-[11.5px] text-muted-foreground">±{p.distanceToleranceKm} km · road ≈ {p.roadFactor}× straight line</p></> : <p className="text-muted-foreground">Off — every trip counts once.</p>}</RuleCard>
-      <RuleCard icon={Star} title="Reviews (verified 5★)">{sortBy(p.reviewTiers, (t) => t.min).map((t) => <Line key={t.min} k={`${t.min}+ in the month`} v={inr(t.amount)} />)}</RuleCard>
-      <RuleCard icon={Smartphone} title="Latest devices"><Line k="MacBook, per repair" v={inr(p.macbookPerRepair)} /><Line k={`iPhone above ${p.iphoneAboveModel}`} v={inr(p.iphonePerRepair)} /></RuleCard>
-      <RuleCard icon={Users} title="Organic billed leads">{sortBy(p.leadTiers, (t) => t.min).map((t) => <Line key={t.min} k={`${t.min}+ leads`} v={`${inr(t.perLead)} each`} />)}{p.leadGiftAt > 0 && <Line k="Gift at" v={`${p.leadGiftAt} leads`} />}</RuleCard>
-      <RuleCard icon={Fuel} title="Petrol"><Line k="Per odometer km" v={inr(p.petrolPerKm)} /><p className="pt-1 text-[11.5px] text-muted-foreground">Always paid, even below the target.</p></RuleCard>
-      <RuleCard icon={Sun} title="Sunday & leave"><Line k="Per Sunday worked" v={inr(p.sundayBonus)} /><Line k="Needs no absence" v={p.sundayNeedsNoAbsent ? "Yes" : "No"} /><Line k="Half day pays" v={`${p.halfDayFactor * 100}%`} /><Line k="Casual leave notice" v={`${p.casualNoticeDays} days`} /></RuleCard>
+      <RuleCard icon={Route} title="Long trips">{p.distanceEnabled ? <>{sortBy(p.distanceTiers, (t) => t.upToKm).map((t) => <Line key={t.upToKm} k={`Up to ${t.upToKm} km one way`} v={`${t.trips} trip${t.trips === 1 ? "" : "s"}`} />)}
+        {p.distanceExtraEveryKm > 0 && <Line k="Beyond that" v={`+1 every ${p.distanceExtraEveryKm} km`} />}
+        <p className="pt-1 text-[12.5px] text-muted-foreground">±{p.distanceToleranceKm} km · road ≈ {p.roadFactor}× straight line</p></> : <p className="text-muted-foreground">Off — every trip counts once.</p>}</RuleCard>
+      <RuleCard icon={Star} title="Reviews">
+        {sortBy(p.reviewTiers, (t) => t.min).map((t) => <Line key={t.min} k={`${t.min}+ in the month`} v={`${inr(t.amount)}${p.reviewMode === "perReview" ? " each" : ""}`} />)}
+        <Line k="Counts from" v={`${p.reviewMinRating}★`} /><Line k="Must be on a ticket" v={yes(p.reviewNeedsTicket)} />
+      </RuleCard>
+      <RuleCard icon={Smartphone} title="Latest devices"><Line k="MacBook, per repair" v={inr(p.macbookPerRepair)} /><Line k={`iPhone above ${p.iphoneAboveModel}`} v={inr(p.iphonePerRepair)} /><Line k="Counted on drops too" v={yes(p.devicesOnDrop)} /></RuleCard>
+      <RuleCard icon={Users} title="Organic billed leads">{sortBy(p.leadTiers, (t) => t.min).map((t) => <Line key={t.min} k={`${t.min}+ leads`} v={`${inr(t.perLead)} each`} />)}
+        <Line k="Paid" v={p.leadMode === "slab" ? "Each at its row" : "All at reached rate"} />{p.leadGiftAt > 0 && <Line k="Gift at" v={`${p.leadGiftAt} leads`} />}</RuleCard>
+      <RuleCard icon={Fuel} title="Petrol & total"><Line k="Per odometer km" v={inr(p.petrolPerKm)} />
+        <Line k="Most km a day" v={p.petrolMaxKmPerDay > 0 ? `${p.petrolMaxKmPerDay} km` : "No limit"} />
+        <Line k="Incentive limit" v={p.incentiveCap > 0 ? inr(p.incentiveCap) : "No limit"} />
+        <Line k="Total rounded to" v={p.roundTotal > 0 ? inr(p.roundTotal) : "Not rounded"} /></RuleCard>
+      <RuleCard icon={Sun} title="Sunday, salary & leave">
+        <Line k="Per Sunday worked" v={inr(p.sundayBonus)} />
+        {p.sundayMinTrips > 0 && <Line k="Trips needed on Sunday" v={p.sundayMinTrips} />}
+        <Line k="Needs no absence" v={p.sundayNeedsNoAbsent ? (p.sundayAbsentAllowed > 0 ? `≤ ${p.sundayAbsentAllowed} allowed` : "Yes") : "No"} />
+        <Line k="Salary ÷ days" v={p.salaryDays > 0 ? p.salaryDays : "Days in month"} />
+        <Line k="Half day pays" v={`${p.halfDayFactor * 100}%`} />
+        <Line k="Paid: week off / casual / festival" v={`${yes(p.weekOffPaid)} / ${yes(p.casualPaid)} / ${yes(p.festivalPaid)}`} />
+        {p.absentFine > 0 && <Line k="Fine per absent day" v={inr(p.absentFine)} />}
+        <Line k="Casual leave notice" v={`${p.casualNoticeDays} days`} />
+      </RuleCard>
     </div>
   );
 }
@@ -87,6 +117,28 @@ export function RulesPage() {
     { name: "Eligible devices", headers: ["Type", "Model text", "Valid from", "Valid until"], rows: devices.map((d) => [d.kind, d.pattern, d.validFrom, d.validUntil]) },
   ], [loading, list, ctx, a.today, a.canPay, devices]));
 
+  type PRow = (typeof history)[number]; type DRow = (typeof devices)[number];
+  const salGrid = useFieldGrid<RosterNinja>("activity_rules_salaries", [
+    { key: "ninja", label: "Ninja", width: 240, anchor: true, render: (n) => <NameText label={n.name} href={`/field/activity/${n.id}?tab=settings`} /> },
+    { key: "now", label: "Salary today", width: 170, render: (n) => { const v = salaryFor(ctx.salaries, n.id, a.today); return v ? <b>{inr(v)}</b> : <span className="font-semibold text-amber-700">Not set</span>; } },
+    { key: "next", label: "Next change", width: 190, render: (n) => { const nx = ctx.salaries.filter((x) => x.staffId === n.id && x.effectiveFrom > a.today).sort((x, y) => x.effectiveFrom.localeCompare(y.effectiveFrom))[0];
+      return nx ? <><b>{inr(nx.monthlySalary)}</b><Sub>from {day(nx.effectiveFrom)}</Sub></> : <Dash />; } },
+    { key: "plan", label: "Plan", width: 170, render: (n) => planRowFor(ctx.plans, n.id, a.today)?.staffId === n.id ? <span className="rounded-full bg-violet-50 px-2.5 py-1 text-[12.5px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">Own plan</span> : <span className="text-muted-foreground">Company plan</span> },
+    { key: "act", label: "Change", width: 220, actions: true, render: (n) => a.canManagePay ? <div className="flex justify-center gap-2"><Button size="sm" variant="outline" onClick={() => setDlg({ k: "salary", n })}>Salary…</Button><Button size="sm" variant="outline" onClick={() => setDlg({ k: "plan", staffId: n.id, name: n.name })}>Plan…</Button></div> : <Dash /> },
+  ]);
+  const devGrid = useFieldGrid<DRow>("activity_rules_devices", [
+    { key: "model", label: "Model text", width: 280, anchor: true, render: (d) => <NameText label={d.pattern} /> },
+    { key: "kind", label: "Type", width: 130, cellClass: () => "capitalize", render: (d) => d.kind },
+    { key: "from", label: "Valid from", width: 160, render: (d) => day(d.validFrom) },
+    { key: "until", label: "Valid until", width: 160, render: (d) => day(d.validUntil) },
+    { key: "status", label: "Status", width: 130, render: (d) => <span className={cn("rounded-full px-2.5 py-1 text-[12.5px] font-bold", d.validUntil < a.today ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-800")}>{d.validUntil < a.today ? "Expired" : "Active"}</span> },
+  ]);
+  const histGrid = useFieldGrid<PRow>("activity_rules_history", [
+    { key: "start", label: "Starts", width: 200, anchor: true, render: (r) => <NameText label={day(r.effectiveFrom)} /> },
+    { key: "status", label: "Status", width: 170, render: (r) => <span className={cn("rounded-full px-2.5 py-1 text-[12.5px] font-bold", r.effectiveFrom > a.today ? "bg-amber-100 text-amber-800" : r.effectiveFrom === a.today ? "bg-emerald-100 text-emerald-800" : "bg-zinc-100 text-zinc-600")}>{r.effectiveFrom > a.today ? "Scheduled" : r.effectiveFrom === a.today ? "Starts today" : "Applied"}</span> },
+    { key: "note", label: "Note", width: 380, align: "left", cellClass: () => "truncate text-muted-foreground", render: (r) => r.note || "—" },
+  ]);
+  const cur = view === "salaries" ? salGrid : view === "devices" ? devGrid : histGrid;
   const views = [...(a.canPay ? [{ label: "Incentive plan", value: "plan" as View }, { label: `Salaries${noSalary ? ` (${noSalary} not set)` : ""}`, value: "salaries" as View }] : []),
     { label: "Attendance & fuel", value: "attendance" as View }, { label: `Eligible devices (${activeDevices})`, value: "devices" as View }];
   return (
@@ -101,6 +153,7 @@ export function RulesPage() {
         {view === "plan" && a.canManagePay && <Button size="sm" onClick={() => setDlg({ k: "plan", staffId: null })}>Change company plan…</Button>}
         {view === "attendance" && canEdit && <Button size="sm" onClick={() => setDlg({ k: "policy" })}>Edit rules…</Button>}
         {view === "devices" && a.canManagePay && <Button size="sm" onClick={() => setDlg({ k: "devices" })}>Edit list…</Button>}
+        {(view === "salaries" || view === "devices") && cur.menus}
       </ViewBar>
 
       {view === "plan" && (
@@ -108,37 +161,14 @@ export function RulesPage() {
           <PlanCards p={plan} />
           <div>
             <p className="mb-2 flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wider text-muted-foreground"><History className="h-3.5 w-3.5" />Change history</p>
-            <DataTable lock={false} cols={["Starts", "Status", "Note"]} first={200} minWidth={700} widths={[160]} empty={history.length ? null : "No saved change yet — the defaults from your sheet apply."}>
-              {pH.slice.map((r) => (
-                <tr key={r.id} className="rox-table-row align-middle">
-                  <NameCell label={day(r.effectiveFrom)} />
-                  <td className={C}><span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-bold", r.effectiveFrom > a.today ? "bg-amber-100 text-amber-800" : r.effectiveFrom === a.today ? "bg-emerald-100 text-emerald-800" : "bg-zinc-100 text-zinc-600")}>{r.effectiveFrom > a.today ? "Scheduled" : r.effectiveFrom === a.today ? "Starts today" : "Applied"}</span></td>
-                  <td className="truncate px-3 py-4 text-[13px] text-muted-foreground">{r.note || "—"}</td>
-                </tr>
-              ))}
-            </DataTable>
+            <FieldGrid grid={histGrid} lock={false} rows={pH.slice} rowKey={(r) => r.id ?? r.effectiveFrom} empty={history.length ? null : "No saved change yet — the defaults from your sheet apply."} />
             {history.length > 10 && <div className="mt-2">{pH.footer("change")}</div>}
           </div>
         </div>
       )}
 
       {view === "salaries" && a.canPay && <>
-        <DataTable cols={["Ninja", "Salary today", "Next change", "Plan", ""]} minWidth={960} widths={[undefined, undefined, undefined, 240]} empty={loading ? "Loading…" : list.length ? null : "No Ninjas found."}>
-          {pS.slice.map((n) => {
-            const now = salaryFor(ctx.salaries, n.id, a.today);
-            const next = ctx.salaries.filter((s) => s.staffId === n.id && s.effectiveFrom > a.today).sort((x, y) => x.effectiveFrom.localeCompare(y.effectiveFrom))[0];
-            const mine = planRowFor(ctx.plans, n.id, a.today)?.staffId === n.id;
-            return (
-              <tr key={n.id} className="rox-table-row align-middle hover:bg-muted/40">
-                <NameCell label={n.name} />
-                <td className={cn(C, !now && "font-semibold text-amber-700")}>{now ? <b>{inr(now)}</b> : "Not set"}</td>
-                <td className={C}>{next ? <><b>{inr(next.monthlySalary)}</b><span className="block text-[11px] text-muted-foreground">from {day(next.effectiveFrom)}</span></> : <Dash />}</td>
-                <td className={C}>{mine ? <span className="rounded-full bg-violet-50 px-2.5 py-0.5 text-[11px] font-semibold text-violet-700 ring-1 ring-inset ring-violet-200">Own plan</span> : <span className="text-[13px] text-muted-foreground">Company plan</span>}</td>
-                <td className="px-3 py-3 text-right">{a.canManagePay && <div className="flex justify-end gap-2"><Button size="sm" variant="outline" onClick={() => setDlg({ k: "salary", n })}>Salary…</Button><Button size="sm" variant="outline" onClick={() => setDlg({ k: "plan", staffId: n.id, name: n.name })}>Plan…</Button></div>}</td>
-              </tr>
-            );
-          })}
-        </DataTable>
+        <FieldGrid grid={salGrid} rows={pS.slice} rowKey={(n) => n.id} empty={loading ? "Loading…" : list.length ? null : "No Ninjas found."} />
         {pS.footer("Ninja")}
       </>}
 
@@ -153,15 +183,7 @@ export function RulesPage() {
       )}
 
       {view === "devices" && <>
-        <DataTable cols={["Model text", "Type", "Valid from", "Valid until", "Status"]} first={280} minWidth={860} empty={loading ? "Loading…" : devices.length ? null : `No list entered. Any MacBook and any iPhone above ${plan.iphoneAboveModel} counts until the Cluster Manager's list is added.`}>
-          {pD.slice.map((d, i) => (
-            <tr key={d.id ?? i} className="rox-table-row align-middle hover:bg-muted/40">
-              <NameCell label={d.pattern} />
-              <td className={cn(C, "capitalize")}>{d.kind}</td><td className={C}>{day(d.validFrom)}</td><td className={C}>{day(d.validUntil)}</td>
-              <td className={C}><span className={cn("rounded-full px-2.5 py-0.5 text-[11px] font-bold", d.validUntil < a.today ? "bg-rose-100 text-rose-700" : "bg-emerald-100 text-emerald-800")}>{d.validUntil < a.today ? "Expired" : "Active"}</span></td>
-            </tr>
-          ))}
-        </DataTable>
+        <FieldGrid grid={devGrid} rows={pD.slice} rowKey={(d, i) => d.id ?? String(i)} empty={loading ? "Loading…" : devices.length ? null : `No list entered. Any MacBook and any iPhone above ${plan.iphoneAboveModel} counts until the Cluster Manager's list is added.`} />
         {pD.footer("device")}
       </>}
 

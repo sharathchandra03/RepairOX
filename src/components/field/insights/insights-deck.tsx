@@ -65,18 +65,18 @@ export function InsightsDeck({ items, sections, right }: { items: DeckItem[]; se
                 <div className="flex min-w-0 flex-1 items-stretch overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                   {items.map((it, i) => (
                     <button key={it.key} type="button" onClick={() => openAt(it.key)}
-                      className={cn("group flex min-w-0 shrink-0 flex-col justify-center px-5 py-2.5 text-left transition hover:bg-white/70 focus:outline-none focus-visible:bg-white/80",
+                      className={cn("group flex min-w-[120px] flex-1 flex-col justify-center px-4 py-2 text-left transition hover:bg-white/70 focus:outline-none focus-visible:bg-white/80",
                         i > 0 && "border-l border-[#4361EE]/20")}>
                       <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-[#4361EE]/75 group-hover:text-[#4361EE]">{it.label}</span>
-                      <span className="max-w-[260px] truncate text-[13px] font-semibold text-foreground">{it.summary}</span>
+                      <span className="mt-0.5 truncate text-[13px] font-semibold text-foreground" title={typeof it.summary === "string" ? it.summary : undefined}>{it.summary}</span>
                     </button>
                   ))}
                 </div>
-                <div className="flex shrink-0 items-center gap-2 py-1.5 pl-2 pr-1.5">
+                <div className="flex shrink-0 items-center gap-2 py-1 pl-2 pr-1">
                   {right}
                   <button type="button" onClick={() => openAt(null)}
-                    className="inline-flex h-10 items-center gap-1.5 rounded-full bg-[#4361EE] px-4 text-[12.5px] font-semibold text-white shadow-[0_8px_20px_-10px_rgba(67,97,238,0.8)] transition hover:bg-[#3450D8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
-                    <SlidersHorizontal className="h-3.5 w-3.5" /> Adjust
+                    className="inline-flex h-9 items-center gap-1.5 rounded-full bg-[#4361EE] px-4 text-[13px] font-semibold text-white shadow-[0_8px_20px_-10px_rgba(67,97,238,0.8)] transition hover:bg-[#3450D8] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#4361EE]/40">
+                    <SlidersHorizontal className="h-4 w-4" /> Adjust
                   </button>
                 </div>
               </motion.div>
@@ -133,10 +133,10 @@ function SectionRail({ sections }: { sections: DeckSection[] }) {
   };
   return (
     <div className="relative mt-5 flex max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-      <nav aria-label="Report sections" className="inline-flex items-center gap-0.5 rounded-full border border-[#4361EE]/60 bg-muted/90 p-1 backdrop-blur">
+      <nav aria-label="Report sections" className="flex w-full min-w-[820px] items-center gap-0.5 rounded-full border border-[#4361EE]/60 bg-muted/90 p-1 backdrop-blur">
         {sections.map((s) => (
           <button key={s.id} type="button" onClick={() => go(s.id)} aria-current={active === s.id ? "true" : undefined}
-            className={cn("relative whitespace-nowrap rounded-full px-3 py-1 text-[11.5px] font-medium transition-colors", active === s.id ? "text-white" : "text-muted-foreground hover:text-foreground")}>
+            className={cn("relative flex-1 whitespace-nowrap rounded-full px-4 py-2 text-[14px] font-semibold transition-colors", active === s.id ? "text-white" : "text-muted-foreground hover:text-foreground")}>
             {active === s.id && <motion.span layoutId="insights-rail" className="absolute inset-0 rounded-full bg-[#4361EE] shadow-[0_6px_20px_-8px_rgba(67,97,238,0.5)]" transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 380, damping: 30 }} />}
             <span className="relative">{s.label}</span>
           </button>

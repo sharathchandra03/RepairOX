@@ -242,15 +242,15 @@ export function DataTable<T>({
       {/* ───── Desktop table (md+) ───── */}
       <div className="hidden overflow-x-auto md:block">
         <table className="w-full text-sm" style={{ minWidth: minTableWidth }}>
-          <thead>
-            <tr className="border-b border-border bg-muted/50 text-left text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <thead className="rox-table-head">
+            <tr className="text-left text-[12px] font-bold uppercase tracking-wider">
               {selectable && (
                 <th className="w-10 px-4 py-3">
                   <Checkbox checked={allOnPageSelected} indeterminate={!allOnPageSelected && someOnPageSelected} onChange={toggleAllOnPage} aria-label="Select all" />
                 </th>
               )}
               {visibleColumns.map((c) => (
-                <th key={c.key} className={cn("px-3 py-3 font-semibold", alignClass(c.align), c.headerClassName)} style={c.minWidth ? { minWidth: c.minWidth } : undefined}>
+                <th key={c.key} className={cn("whitespace-nowrap px-3 py-3.5 font-bold", alignClass(c.align), c.headerClassName)} style={c.minWidth ? { minWidth: c.minWidth } : undefined}>
                   {c.header}
                 </th>
               ))}

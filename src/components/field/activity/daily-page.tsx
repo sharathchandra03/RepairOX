@@ -3,10 +3,10 @@
    completed / assigned trips by type, warranty, total, XL, 6+ / 9+, latest devices, reviews, km.
    Source: real trip legs (field_trips) via lib/field-daily-activity.ts. */
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { Award, Route, Star, Truck } from "lucide-react";
 import { useActivity, useRegisterSheets } from "@/components/field/activity/activity-shell";
-import { C, DataTable, Dash, FootName, KpiStrip, LoadError, Unavailable, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { KpiStrip, LoadError, Unavailable, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { Dash, FieldGrid, FootLabel, NameText, Sub, useFieldGrid, type FCol } from "@/components/field/grid";
 import { useLegs } from "@/components/field/insights/daily-activity";
 import { useFieldDashboard } from "@/components/field/dashboard/use-field-dashboard";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
@@ -19,7 +19,6 @@ import { avgRating, ninjaDayRows, ninjaPeriodRows, pickableDays, sumDayRows, typ
 type View = "day" | "month";
 type Row = Omit<NinjaDayRow, "hit6" | "hit9"> & { hit6?: boolean; hit9?: boolean; days6?: number; days9?: number };
 const dayLabel = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }); };
-const FZ = { ["--rox-frozen-offset" as string]: "0px" } as React.CSSProperties;
 const ratio = (c: { assigned: number; completed: number }) => (c.assigned ? <><b>{c.completed}</b><span className="text-muted-foreground"> / {c.assigned}</span></> : <Dash />);
 const n0 = (n: number) => (n ? n : <Dash />);
 
@@ -44,6 +43,23 @@ export function DailyPage() {
   const nine = view === "day" ? rows.filter((r) => r.hit9).length : rows.reduce((t, r) => t + (r.days9 ?? 0), 0);
   const cols = ["Ninja", "On-site", "Pickup", "Buyback", "Drop", "Warranty O/P/D", "Total", "XL", view === "day" ? "6+" : "Days 6+", view === "day" ? "9+" : "Days 9+", "MacBook", "iPhone > 14", "Reviews", "KMs"];
 
+  const flag = (on: boolean) => <span className={cn("rounded-full px-2 py-0.5 text-[12.5px] font-semibold ring-1 ring-inset", on ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-zinc-100 text-zinc-500 ring-zinc-200")}>{on ? "Yes" : "No"}</span>;
+  const w = (o: number, p: number, d: number) => (o + p + d ? `${o} / ${p} / ${d}` : <Dash />);
+  const isDay = view === "day";
+  const gr = (key: "onsite" | "pickup" | "buyback" | "drop", label: string, width = 120): FCol<Row> => ({ key, label, width, render: (r) => ratio(r[key]), foot: ratio(tot[key]) });
+  const nn = (key: "xl" | "macbook" | "iphone", label: string, width = 110): FCol<Row> => ({ key, label, width, render: (r) => n0(r[key]), foot: tot[key] });
+  const grid = useFieldGrid<Row>("activity_daily", [
+    { key: "ninja", label: "Ninja", width: 220, anchor: true, render: (r) => <NameText label={nameOf(r.ninjaId)} href={`/field/activity/${r.ninjaId}`} />, foot: <FootLabel sub={`${rows.length} Ninjas`} /> },
+    gr("onsite", "On-site"), gr("pickup", "Pickup"), gr("buyback", "Buyback", 130), gr("drop", "Drop"),
+    { key: "warranty", label: "Warranty O/P/D", width: 150, render: (r) => w(r.warrantyOnsite, r.warrantyPickup, r.warrantyDrop), foot: w(tot.warrantyOnsite, tot.warrantyPickup, tot.warrantyDrop) },
+    { key: "total", label: "Total", width: 100, cellClass: () => "font-bold", render: (r) => r.total, foot: tot.total },
+    nn("xl", "XL", 90),
+    { key: "six", label: isDay ? "6+" : "Days 6+", width: 110, render: (r) => (isDay ? flag(!!r.hit6) : n0(r.days6 ?? 0)), foot: six },
+    { key: "nine", label: isDay ? "9+" : "Days 9+", width: 110, render: (r) => (isDay ? flag(!!r.hit9) : n0(r.days9 ?? 0)), foot: nine },
+    nn("macbook", "MacBook", 120), nn("iphone", "iPhone > 14", 130),
+    { key: "reviews", label: "Reviews", width: 120, render: (r) => (r.reviews ? <>{r.reviews}<Sub>{avgRating(r)}★</Sub></> : <Dash />), foot: tot.reviews },
+    { key: "km", label: "KMs", width: 130, render: (r) => (r.km == null ? <Dash /> : r.km === 0 ? <span className="text-muted-foreground">Not travelled</span> : `${r.km} km`), foot: tot.km != null ? `${Math.round(tot.km)} km` : "—" },
+  ]);
   useRegisterSheets(useMemo(() => loading ? null : [{ name: view === "day" ? `Ninja day ${effDay}` : `Ninja month ${a.ym}`, headers: cols.concat(["Avg stars"]),
     rows: rows.map((r) => { const c = (x: { assigned: number; completed: number }) => `${x.completed}/${x.assigned}`;
       return [nameOf(r.ninjaId), c(r.onsite), c(r.pickup), c(r.buyback), c(r.drop), `${r.warrantyOnsite}/${r.warrantyPickup}/${r.warrantyDrop}`, r.total, r.xl,
@@ -52,8 +68,6 @@ export function DailyPage() {
 
   if (!available) return <Unavailable text="Daily activity is available when RepairOX is connected to the database." />;
   if (err) return <LoadError what="trips" err={err} />;
-  const flag = (on: boolean) => <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", on ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-zinc-100 text-zinc-500 ring-zinc-200")}>{on ? "Yes" : "No"}</span>;
-  const w = (o: number, p: number, d: number) => (o + p + d ? `${o} / ${p} / ${d}` : <Dash />);
   return (
     <div className="rox-lock-fill space-y-4">
       <KpiStrip loading={loading} items={[
@@ -64,25 +78,10 @@ export function DailyPage() {
       ]} />
       <ViewBar value={view} onChange={setView} options={[{ label: "One day", value: "day" }, { label: "Whole month", value: "month" }]}
         info="Counts are completed / assigned trip legs. Total = every assigned leg (new + warranty + buyback). 6+ / 9+ = the Ninja's total that day reached 6 / 9 (for the month: the number of such days). XL = a trip over 40 km by GPS. KMs come from GPS tracking; “Not travelled” = tracked with no distance.">
-        {view === "day" && <Select className="h-[34px] w-[200px]" value={effDay} onChange={(e) => setDay(e.target.value)} options={days.map((d) => ({ label: dayLabel(d), value: d }))} />}
+        {grid.menus}
+        {view === "day" && <Select className="h-[38px] w-[210px]" value={effDay} onChange={(e) => setDay(e.target.value)} options={days.map((d) => ({ label: dayLabel(d), value: d }))} />}
       </ViewBar>
-      <DataTable cols={cols} first={200} minWidth={1450} empty={loading ? "Loading…" : rows.length ? null : view === "day" ? "No Ninja trips on this day." : "No Ninja trips this month."}
-        foot={<tr className="align-middle"><FootName sub={`${rows.length} Ninjas`} /><td className={C}>{ratio(tot.onsite)}</td><td className={C}>{ratio(tot.pickup)}</td><td className={C}>{ratio(tot.buyback)}</td><td className={C}>{ratio(tot.drop)}</td>
-          <td className={C}>{w(tot.warrantyOnsite, tot.warrantyPickup, tot.warrantyDrop)}</td><td className={C}>{tot.total}</td><td className={C}>{tot.xl}</td><td className={C}>{six}</td><td className={C}>{nine}</td>
-          <td className={C}>{tot.macbook}</td><td className={C}>{tot.iphone}</td><td className={C}>{tot.reviews}</td><td className={C}>{tot.km != null ? `${Math.round(tot.km)} km` : "—"}</td></tr>}>
-        {paged.slice.map((r) => (
-          <tr key={r.ninjaId} className="rox-table-row align-middle hover:bg-muted/40">
-            <td className="rox-frozen rox-frozen-left rox-frozen-left-edge px-4 py-3 text-left" style={FZ}><Link href={`/field/activity/${r.ninjaId}`} className="block truncate text-[13px] font-bold uppercase tracking-wide hover:text-[#4361EE]">{nameOf(r.ninjaId)}</Link></td>
-            <td className={C}>{ratio(r.onsite)}</td><td className={C}>{ratio(r.pickup)}</td><td className={C}>{ratio(r.buyback)}</td><td className={C}>{ratio(r.drop)}</td>
-            <td className={C}>{w(r.warrantyOnsite, r.warrantyPickup, r.warrantyDrop)}</td>
-            <td className={cn(C, "font-bold")}>{r.total}</td><td className={C}>{n0(r.xl)}</td>
-            <td className={C}>{view === "day" ? flag(!!r.hit6) : n0(r.days6 ?? 0)}</td><td className={C}>{view === "day" ? flag(!!r.hit9) : n0(r.days9 ?? 0)}</td>
-            <td className={C}>{n0(r.macbook)}</td><td className={C}>{n0(r.iphone)}</td>
-            <td className={C}>{r.reviews ? <>{r.reviews}<span className="block text-[10.5px] text-muted-foreground">{avgRating(r)}★</span></> : <Dash />}</td>
-            <td className={C}>{r.km == null ? <Dash /> : r.km === 0 ? <span className="text-muted-foreground">Not travelled</span> : `${r.km} km`}</td>
-          </tr>
-        ))}
-      </DataTable>
+      <FieldGrid grid={grid} rows={paged.slice} rowKey={(r) => r.ninjaId} foot empty={loading ? "Loading…" : rows.length ? null : isDay ? "No Ninja trips on this day." : "No Ninja trips this month."} />
       {paged.footer("Ninja")}
     </div>
   );

@@ -18,7 +18,6 @@ import {
   ListChecks, Target, Timer, TriangleAlert, Truck, CalendarRange, Table2, Filter,
 } from "lucide-react";
 import { BackPill } from "@/components/common/back-pill";
-import { PageHeader } from "@/components/layout/page-header";
 import { CAP } from "@/lib/capabilities";
 import { RequireCapability } from "@/components/common/require-capability";
 import { StoreMultiSelect, matchesStoreSelection } from "@/components/common/store-multi-select";
@@ -48,6 +47,7 @@ import {
   INSIGHT_BY_LABEL, METRICS, type InsightBy, type InsightRow, type MetricKey,
 } from "@/lib/field-insights";
 import { DailyActivity } from "@/components/field/insights/daily-activity";
+import { Dash as GDash, FieldGrid, FootLabel, NameText, useFieldGrid, type FCol } from "@/components/field/grid";
 import { downloadXLSXWorkbook, downloadCSV, toCSV } from "@/lib/csv-utils";
 
 type TypeFilter = "all" | TripGroup;
@@ -237,26 +237,83 @@ function Insights() {
     const d = pctDelta(cur, pv);
     return d == null ? undefined : `${d > 0 ? "▲ +" : d < 0 ? "▼ " : "• "}${d}% vs previous`;
   };
+  /* ── tables: one FieldGrid each (per-user column order + freeze, zebra rows, roomy text) ── */
+  const delta = (r: InsightRow, prev: InsightRow | null | undefined, k: MetricKey) => {
+    if (!prev) return null;
+    const cur = r[k] as number | null, pv = prev[k] as number | null;
+    const pc = metricDef(k).kind === "pct" ? (cur != null && pv != null ? cur - pv : null) : pctDelta(cur, pv);
+    if (pc == null || pc === 0) return null;
+    const good = (pc > 0) === metricDef(k).higherIsBetter;
+    return <span className={cn("block text-[12px] font-semibold", good ? "text-emerald-600" : "text-rose-600")}>{pc > 0 ? "▲" : "▼"} {Math.abs(pc)}{metricDef(k).kind === "pct" ? " pts" : "%"}</span>;
+  };
+  const pv = (r: InsightRow) => (showPrev ? prevRows.get(r.key) : undefined);
+  const pvT = showPrev ? prevTot : null;
+  const tripBtn = (v: number, onClick: () => void) => (v === 0 ? <span className="text-muted-foreground">0</span>
+    : <button onClick={(e) => { e.stopPropagation(); onClick(); }} className="rounded-md px-2 py-0.5 font-semibold hover:bg-[#EEF1FD] hover:text-[#4361EE]">{v}</button>);
+  const perfGrid = useFieldGrid<InsightRow>(`insights_performance_${effBy}`, [
+    { key: "name", label: first, width: 240, anchor: true, render: (r) => <NameText label={r.label} sub={`${r.trips} trip${r.trips === 1 ? "" : "s"} · open trips`} onClick={() => drill(r.key, bounds)} />, foot: <FootLabel sub="All rows" /> },
+    { key: "trips", label: "Trips", width: 110, render: (r) => <><b>{r.trips}</b>{delta(r, pv(r), "trips")}</>, foot: <>{tot.trips}{delta(tot, pvT, "trips")}</> },
+    { key: "pickup", label: "Pickup", width: 110, render: (r) => tripBtn(r.pickup, () => drill(r.key, bounds, "pickup")), foot: tot.pickup },
+    { key: "onsite", label: "On-Site", width: 110, render: (r) => tripBtn(r.onsite, () => drill(r.key, bounds, "onsite")), foot: tot.onsite },
+    { key: "drop", label: "Drop", width: 100, render: (r) => tripBtn(r.drop, () => drill(r.key, bounds, "drop")), foot: tot.drop },
+    { key: "done", label: "Done", width: 100, render: (r) => <>{r.completed}{delta(r, pv(r), "completed")}</>, foot: tot.completed },
+    { key: "donepct", label: "Done %", width: 110, render: (r) => <>{pctTxt(r.completionRate)}{delta(r, pv(r), "completionRate")}</>, foot: pctTxt(tot.completionRate) },
+    { key: "ontime", label: "On-time", width: 110, render: (r) => pctTxt(r.onTimeRate), foot: pctTxt(tot.onTimeRate) },
+    { key: "avgpick", label: "Avg pickup", width: 120, render: (r) => (r.avgPickupHours == null ? "—" : `${r.avgPickupHours}h`), foot: tot.avgPickupHours == null ? "—" : `${tot.avgPickupHours}h` },
+    { key: "failed", label: "Failed", width: 100, cellClass: (r) => r.failed > 0 && "font-semibold text-rose-700", render: (r) => r.failed, foot: tot.failed },
+    { key: "delayed", label: "Delayed", width: 110, cellClass: (r) => r.delayed > 0 && "font-semibold text-amber-700", render: (r) => r.delayed, foot: tot.delayed },
+    { key: "unassigned", label: "Unassigned", width: 130, render: (r) => r.unassigned, foot: tot.unassigned },
+    { key: "leads", label: "From leads", width: 120, render: (r) => r.leadTrips, foot: tot.leadTrips },
+    { key: "business", label: "Business", width: 150, cellClass: () => "font-semibold text-emerald-700", render: (r) => <>{inr(r.business)}{delta(r, pv(r), "business")}</>, foot: <>{inr(tot.business)}{delta(tot, pvT, "business")}</> },
+  ]);
+  type MRow = (typeof master)[number];
+  const doneOf = (c: { onsite: { completed: number }; pickup: { completed: number }; drop: { completed: number } }) => c.onsite.completed + c.pickup.completed + c.drop.completed;
+  const valOf = (trips: number, biz: number | null, d: number) => (monthMode === "business" ? inr(biz) : monthMode === "done" ? d : trips);
+  const monthGrid = useFieldGrid<MRow>(`insights_monthly_${masterBy}`, [
+    { key: "name", label: INSIGHT_BY_LABEL[masterBy], width: 240, anchor: true, render: (r) => <NameText label={r.label} sub={`${r.yearTrips} trips in ${year}`} /> },
+    ...MONTH_NAMES.slice(0, monthCount).map((mn, i): FCol<MRow> => ({ key: `m${i}`, label: mn.slice(0, 3), width: 104, cellClass: () => "!px-1.5",
+      render: (r) => { const c = r.months[i]; if (!c || c.totalTrips === 0) return <GDash />;
+        const peak = Math.max(1, ...r.months.slice(0, monthCount).map((x) => monthMode === "business" ? (x.business ?? 0) : monthMode === "done" ? doneOf(x) : x.totalTrips));
+        const raw = monthMode === "business" ? (c.business ?? 0) : monthMode === "done" ? doneOf(c) : c.totalTrips;
+        return <button onClick={() => drillMaster(r.key, `${year}-${pad(c.month + 1)}-01`, `${year}-${pad(c.month + 1)}-${pad(new Date(year, c.month + 1, 0).getDate())}`)}
+          title={`Pickup ${c.pickup.total} · On-Site ${c.onsite.total} · Drop ${c.drop.total}${c.business != null ? ` · ${inr(c.business)}` : ""}`}
+          className="w-full rounded-lg px-1 py-2 tabular-nums transition hover:ring-1 hover:ring-[#4361EE]/40" style={{ background: `rgba(67,97,238,${0.06 + 0.24 * (raw / peak)})` }}>
+          <span className="block text-[15px] font-bold">{valOf(c.totalTrips, c.business, doneOf(c))}</span></button>; } })),
+    { key: "year", label: "Year", width: 120, cellClass: () => "font-extrabold", render: (r) => valOf(r.yearTrips, r.yearBusiness, r.yearGroups ? doneOf(r.yearGroups) : 0) },
+  ]);
+  type ERow = (typeof excPaged)[number];
+  const excGrid = useFieldGrid<ERow>("insights_exceptions", [
+    { key: "trip", label: "Trip", width: 150, anchor: true, render: (e) => <span className="font-semibold text-[#4361EE]">{e.job.jobNo}</span> },
+    { key: "customer", label: "Customer", width: 220, cellClass: () => "truncate", render: (e) => e.job.customer || "—" },
+    { key: "kind", label: "Kind", width: 130, render: (e) => <span className={cn("rounded-full px-3 py-1 text-[12.5px] font-semibold capitalize ring-1 ring-inset", e.kind === "delayed" ? "bg-amber-50 text-amber-800 ring-amber-200" : e.kind === "failed" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-zinc-100 text-zinc-700 ring-zinc-200")}>{e.kind}</span> },
+    { key: "status", label: "Status", width: 180, render: (e) => <span className={cn("rounded-full px-3 py-1 text-[12.5px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[e.job.status])}>{FIELD_STATUS_LABEL[e.job.status]}</span> },
+    { key: "ninja", label: "Ninja", width: 170, cellClass: () => "truncate", render: (e) => e.job.ninjaName || <GDash /> },
+    { key: "date", label: "Date", width: 130, render: (e) => tripDateOf(e.job) || "—" },
+    { key: "reason", label: "Reason", width: 260, align: "left", cellClass: () => "truncate text-muted-foreground", render: (e) => <span title={e.reason}>{e.reason}</span> },
+  ]);
   const T = tot.trips;
 
   return (
     <div className="space-y-5">
-      <div><BackPill href="/field" label="Back to Pickup & Drop" /></div>
-      <PageHeader eyebrow="Field Management" title="Field Insights"
-        subtitle="Choose once at the top — every chart and table below follows. Business counts finalized invoices only."
-        actions={
-          <Dropdown width="w-52" trigger={({ toggle }) => (
-            <Button variant="outline" size="sm" className="gap-1.5" onClick={toggle}><Download className="h-3.5 w-3.5" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" /></Button>
-          )}>
-            {(close) => (<>
-              <MenuItem icon={FileSpreadsheet} onClick={() => { doExcel(); close(); }}>Excel (.xlsx)</MenuItem>
-              <MenuItem icon={FileText} onClick={() => { downloadCSV(`${fname}-performance.csv`, toCSV(perfHead, perfBody)); close(); }}>CSV (.csv)</MenuItem>
-            </>)}
-          </Dropdown>
-        } />
+      {/* back · title · subtitle on ONE line, vertically centred (same as Field Activity) */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="mr-auto flex min-w-0 items-center gap-3">
+          <BackPill href="/field" label="Back" className="h-8 shrink-0 px-3 text-[12px]" />
+          <h1 className="font-display text-[24px] font-extrabold leading-none tracking-tight">Field Insights</h1>
+          <span className="hidden truncate border-l border-border pl-3 text-[13px] leading-none text-muted-foreground xl:inline">Every chart and table follows the period you pick · Business counts finalized invoices only</span>
+        </div>
+        <Dropdown width="w-52" trigger={({ toggle }) => (
+          <Button variant="outline" size="sm" className="h-[36px] gap-1.5" onClick={toggle}><Download className="h-3.5 w-3.5" /> Export <ChevronDown className="h-3.5 w-3.5 opacity-70" /></Button>
+        )}>
+          {(close) => (<>
+            <MenuItem icon={FileSpreadsheet} onClick={() => { doExcel(); close(); }}>Excel (.xlsx)</MenuItem>
+            <MenuItem icon={FileText} onClick={() => { downloadCSV(`${fname}-performance.csv`, toCSV(perfHead, perfBody)); close(); }}>CSV (.csv)</MenuItem>
+          </>)}
+        </Dropdown>
+      </div>
 
       <InsightsDeck items={items} sections={sections}
-        right={<span className="hidden items-center gap-1 whitespace-nowrap px-2 text-[11.5px] text-muted-foreground xl:inline-flex">{hydrated ? `${T} trips` : "Loading…"}
+        right={<span className="hidden items-center gap-1 whitespace-nowrap px-2 text-[12px] font-semibold text-muted-foreground xl:inline-flex">{hydrated ? `${T} trips` : "Loading…"}
           <InfoHint content="Trips are placed in the period by their scheduled date (pickup, else drop, else created). Cancelled trips are excluded from trip totals." /></span>} />
       <DateRangePicker open={preset === "custom"} from={from} to={to} onFromChange={(v) => { setPreset("custom"); setFrom(v); }} onToChange={(v) => { setPreset("custom"); setTo(v); }} />
 
@@ -304,17 +361,8 @@ function Insights() {
       {/* ── Performance ── */}
       <section id="ins-performance" className="scroll-mt-[190px] space-y-3">
         <SectionTitle icon={Table2} title={`Performance by ${first.toLowerCase()}`} sub={`${rows.length} ${first.toLowerCase()}${rows.length === 1 ? "" : "s"} · ${boundsLabel(bounds)} · click a row to open its trips`} />
-        <Frame>
-          <table className="w-full min-w-[1240px] table-fixed text-[14px]">
-            <colgroup><col style={{ width: 200 }} />{Array.from({ length: 12 }).map((_, i) => <col key={i} />)}<col style={{ width: 130 }} /></colgroup>
-            <Head cols={[first, "Trips", "Pickup", "On-Site", "Drop", "Done", "Done %", "On-time", "Avg pickup", "Failed", "Delayed", "Unassigned", "From leads", "Business"]} firstWidth={200} />
-            <tbody>
-              {perfPaged.map((r) => <PerfRow key={r.key} r={r} prev={showPrev ? prevRows.get(r.key) : undefined} onOpen={(g) => drill(r.key, bounds, g)} />)}
-              {rows.length > 0 && <PerfRow r={tot} total prev={showPrev ? prevTot ?? undefined : undefined} onOpen={(g) => drill(null, bounds, g)} />}
-            </tbody>
-          </table>
-          {rows.length === 0 && <EmptyRows text={hydrated ? "No trips in this selection." : "Loading…"} />}
-        </Frame>
+        <div className="flex justify-end">{perfGrid.menus}</div>
+        <FieldGrid grid={perfGrid} lock={false} rows={perfPaged} rowKey={(r) => r.key} onRowClick={(r) => drill(r.key, bounds)} foot empty={rows.length ? null : hydrated ? "No trips in this selection." : "Loading…"} />
         {rows.length > 0 && <Pagination page={Math.min(perfPage, perfPages)} totalPages={perfPages} onPageChange={setPerfPage} totalItems={rows.length} pageSize={perfSize}
           onPageSizeChange={setPerfSize} itemLabel={first.toLowerCase()} />}
       </section>
@@ -326,45 +374,10 @@ function Insights() {
           <div className="flex flex-wrap items-center gap-2">
             <div className="w-28"><Select value={String(year)} onChange={(e) => setYearSel(Number(e.target.value))} className="h-[34px]" options={years.map((y) => ({ label: String(y), value: String(y) }))} /></div>
             <SegmentedTabs size="sm" value={monthMode} onChange={(v) => setMonthMode(v as typeof monthMode)} options={[{ label: "Trips", value: "trips" }, { label: "Business", value: "business" }, { label: "Completed", value: "done" }]} />
+            {monthGrid.menus}
           </div>
         </div>
-        <Frame>
-          <table className="table-fixed text-[14px]" style={{ width: 200 + (monthCount + 1) * 112, minWidth: "100%" }}>
-            <colgroup><col style={{ width: 200 }} />{Array.from({ length: monthCount + 1 }).map((_, i) => <col key={i} style={{ width: 112 }} />)}</colgroup>
-            <Head cols={[INSIGHT_BY_LABEL[masterBy], ...MONTH_NAMES.slice(0, monthCount).map((m) => m.slice(0, 3)), "Year"]} firstWidth={200} />
-            <tbody>
-              {master.map((r) => {
-                const done = (c: { onsite: { completed: number }; pickup: { completed: number }; drop: { completed: number } }) => c.onsite.completed + c.pickup.completed + c.drop.completed;
-                const val = (trips: number, biz: number | null, d: number) => monthMode === "business" ? inr(biz) : monthMode === "done" ? d : trips;
-                const peak = Math.max(1, ...r.months.slice(0, monthCount).map((c) => monthMode === "business" ? (c.business ?? 0) : monthMode === "done" ? done(c) : c.totalTrips));
-                return (
-                  <tr key={r.key} className="rox-table-row align-middle hover:bg-muted/40">
-                    <NameCell label={r.label} sub={`${r.yearTrips} trips in ${year}`} />
-                    {r.months.slice(0, monthCount).map((c) => {
-                      const raw = monthMode === "business" ? (c.business ?? 0) : monthMode === "done" ? done(c) : c.totalTrips;
-                      return (
-                        <td key={c.month} className="px-1.5 py-3 text-center align-middle">
-                          {c.totalTrips === 0 ? <Dash /> : (
-                            <button onClick={() => drillMaster(r.key, `${year}-${pad(c.month + 1)}-01`, `${year}-${pad(c.month + 1)}-${pad(new Date(year, c.month + 1, 0).getDate())}`)}
-                              title={`Pickup ${c.pickup.total} · On-Site ${c.onsite.total} · Drop ${c.drop.total}${c.business != null ? ` · ${inr(c.business)}` : ""}`}
-                              className="w-full rounded-lg px-1 py-1.5 tabular-nums transition hover:ring-1 hover:ring-[#4361EE]/40"
-                              style={{ background: `rgba(67,97,238,${0.06 + 0.24 * (raw / peak)})` }}>
-                              <span className="block text-[13px] font-bold">{val(c.totalTrips, c.business, done(c))}</span>
-                            </button>
-                          )}
-                        </td>
-                      );
-                    })}
-                    <td className="bg-[#EEF1FD]/60 px-1.5 py-3 text-center align-middle text-[13px] font-extrabold tabular-nums">
-                      {val(r.yearTrips, r.yearBusiness, r.yearGroups ? done(r.yearGroups) : 0)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-          {master.length === 0 && <EmptyRows text={`No trips in ${year}.`} />}
-        </Frame>
+        <FieldGrid grid={monthGrid} lock={false} rows={master} rowKey={(r) => r.key} empty={master.length ? null : `No trips in ${year}.`} />
       </section>
 
       {/* ── Store activity (the people tables moved to Field Activity) ── */}
@@ -409,28 +422,10 @@ function Insights() {
             <SegmentedTabs size="sm" value={kind} onChange={(v) => setKind(v as typeof kind)}
               options={[{ label: "All", value: "all" }, { label: "Delayed", value: "delayed" }, { label: "Failed", value: "failed" }, { label: "Cancelled", value: "cancelled" }]} />
             <TableSearch value={q} onChange={setQ} placeholder="Search exceptions by trip no, customer, phone or Ninja…" />
+            {excGrid.menus}
           </div>
         </div>
-        <Frame>
-          <table className="w-full min-w-[960px] table-fixed text-[14px]">
-            <colgroup><col style={{ width: "13%" }} /><col style={{ width: "21%" }} /><col style={{ width: "11%" }} /><col style={{ width: "17%" }} /><col style={{ width: "15%" }} /><col style={{ width: "10%" }} /><col style={{ width: "13%" }} /></colgroup>
-            <Head cols={["Trip", "Customer", "Kind", "Status", "Ninja", "Date", "Reason"]} />
-            <tbody>
-              {excPaged.map((e) => (
-                <tr key={e.job.id} onClick={() => router.push(`/field/${e.job.id}`)} className="h-[68px] cursor-pointer border-t border-zinc-500 align-middle hover:bg-muted/40">
-                  <td className="px-3 py-4 font-semibold text-[#4361EE]">{e.job.jobNo}</td>
-                  <td className="truncate px-3 py-4 text-center">{e.job.customer || "—"}</td>
-                  <td className="px-3 py-4 text-center"><span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold capitalize ring-1 ring-inset", e.kind === "delayed" ? "bg-amber-50 text-amber-800 ring-amber-200" : e.kind === "failed" ? "bg-rose-50 text-rose-700 ring-rose-200" : "bg-zinc-100 text-zinc-700 ring-zinc-200")}>{e.kind}</span></td>
-                  <td className="px-3 py-4 text-center"><span className={cn("rounded-full px-2.5 py-1 text-[11px] font-semibold ring-1 ring-inset", FIELD_STATUS_TONE[e.job.status])}>{FIELD_STATUS_LABEL[e.job.status]}</span></td>
-                  <td className="truncate px-3 py-4 text-center">{e.job.ninjaName || <span className="text-zinc-400">—</span>}</td>
-                  <td className="px-3 py-4 text-center tabular-nums">{tripDateOf(e.job) || "—"}</td>
-                  <td className="truncate px-3 py-4 text-center text-[12px] text-muted-foreground" title={e.reason}>{e.reason}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {excPaged.length === 0 && <div className="px-4 py-10 text-center text-[13px] text-muted-foreground"><CheckCircle2 className="mx-auto mb-1 h-5 w-5 text-emerald-500" />No exceptions in this selection.</div>}
-        </Frame>
+        <FieldGrid grid={excGrid} lock={false} rows={excPaged} rowKey={(e) => e.job.id} onRowClick={(e) => router.push(`/field/${e.job.id}`)} empty={excPaged.length ? null : "No exceptions in this selection."} />
         <Pagination page={Math.min(excPage, excPages)} totalPages={excPages} onPageChange={setExcPage} totalItems={excFiltered.length} pageSize={excSize}
           onPageSizeChange={setExcSize} itemLabel="exception" />
       </section>
@@ -443,43 +438,10 @@ function SectionTitle({ icon: Icon, title, sub, info }: { icon: React.ComponentT
     <div className="flex items-center gap-2.5">
       <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE]"><Icon className="h-4 w-4" /></span>
       <div>
-        <h2 className="inline-flex items-center gap-1 text-[13px] font-bold uppercase tracking-wider text-foreground">{title}{info && <InfoHint content={info} />}</h2>
-        {sub && <p className="text-[11.5px] text-muted-foreground">{sub}</p>}
+        <h2 className="inline-flex items-center gap-1 text-[14.5px] font-bold uppercase tracking-wider text-foreground">{title}{info && <InfoHint content={info} />}</h2>
+        {sub && <p className="text-[13px] text-muted-foreground">{sub}</p>}
       </div>
     </div>
   );
 }
 
-function PerfRow({ r, prev, total, onOpen }: { r: InsightRow; prev?: InsightRow; total?: boolean; onOpen: (g?: TripGroup) => void }) {
-  const num = (v: number, g?: TripGroup, tone?: string) => (
-    <td className="px-2 py-4 text-center tabular-nums">
-      {v === 0 ? <span className="text-muted-foreground">0</span> : g || !tone
-        ? <button onClick={() => onOpen(g)} className={cn("rounded-md px-1.5 py-0.5 font-semibold hover:bg-[#EEF1FD] hover:text-[#4361EE]", tone)}>{v}</button>
-        : <span className={cn("font-semibold", tone)}>{v}</span>}
-    </td>
-  );
-  const d = (k: MetricKey) => {
-    if (!prev) return null;
-    const cur = r[k] as number | null, pv = prev[k] as number | null;
-    const pc = metricDef(k).kind === "pct" ? (cur != null && pv != null ? cur - pv : null) : pctDelta(cur, pv);
-    if (pc == null || pc === 0) return null;
-    const good = (pc > 0) === metricDef(k).higherIsBetter;
-    return <span className={cn("block text-[10px] font-semibold", good ? "text-emerald-600" : "text-rose-600")}>{pc > 0 ? "▲" : "▼"} {Math.abs(pc)}{metricDef(k).kind === "pct" ? " pts" : "%"}</span>;
-  };
-  return (
-    <tr className={cn("rox-table-row align-middle", total ? "border-t-2 border-zinc-400 bg-[#EEF1FD]/70 font-semibold" : "hover:bg-muted/40")}>
-      <NameCell label={r.label} sub={total ? "All rows" : `${r.trips} trip${r.trips === 1 ? "" : "s"}`} onReport={() => onOpen()} reportLabel={total ? "All trips" : "Trips"} />
-      <td className="px-2 py-4 text-center tabular-nums"><span className="font-bold">{r.trips}</span>{d("trips")}</td>
-      {num(r.pickup, "pickup")}{num(r.onsite, "onsite")}{num(r.drop, "drop")}
-      <td className="px-2 py-4 text-center tabular-nums">{r.completed}{d("completed")}</td>
-      <td className="px-2 py-4 text-center tabular-nums">{pctTxt(r.completionRate)}{d("completionRate")}</td>
-      <td className="px-2 py-4 text-center tabular-nums">{pctTxt(r.onTimeRate)}</td>
-      <td className="px-2 py-4 text-center tabular-nums">{r.avgPickupHours == null ? "—" : `${r.avgPickupHours}h`}</td>
-      <td className={cn("px-2 py-4 text-center tabular-nums", r.failed > 0 && "font-semibold text-rose-700")}>{r.failed}</td>
-      <td className={cn("px-2 py-4 text-center tabular-nums", r.delayed > 0 && "font-semibold text-amber-700")}>{r.delayed}</td>
-      <td className="px-2 py-4 text-center tabular-nums">{r.unassigned}</td>
-      <td className="px-2 py-4 text-center tabular-nums">{r.leadTrips}</td>
-      <td className="px-3 py-4 text-center font-semibold tabular-nums text-emerald-700">{inr(r.business)}{d("business")}</td>
-    </tr>
-  );
-}

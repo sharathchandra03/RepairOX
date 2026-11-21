@@ -86,9 +86,9 @@ export default function EarningsPage() {
           <SectionTitle>Where it comes from</SectionTitle>
           <Card className="divide-y divide-slate-100">
             {[
-              { icon: <Trophy className="h-5 w-5" />, tone: "bg-amber-50 text-amber-600", l: "Daily trips", d: `${s.dailyDays6} days with 6+ · ${s.dailyDays9} with 9+`, v: s.daily },
-              { icon: <Target className="h-5 w-5" />, tone: "bg-[#EEF1FD] text-[#4361EE]", l: "Monthly slab", d: s.slabHeld > 0 ? `${rupees(s.slabHeld)} waits for ${plan.slabMinReviews} verified reviews` : `${Math.max(0, s.trips - plan.monthlyMinTrips)} trips above ${plan.monthlyMinTrips}`, v: s.slab },
-              { icon: <Star className="h-5 w-5" />, tone: "bg-violet-50 text-violet-600", l: "Reviews", d: `${s.verifiedReviews} verified 5★${revNext ? ` · ${revNext.min - s.verifiedReviews} more for ${rupees(revNext.amount)}` : ""}`, v: s.reviews },
+              { icon: <Trophy className="h-5 w-5" />, tone: "bg-amber-50 text-amber-600", l: "Daily trips", d: s.dailyTierDays.map((t) => `${t.days} days with ${t.minTrips}+`).join(" · "), v: s.daily },
+              { icon: <Target className="h-5 w-5" />, tone: "bg-[#EEF1FD] text-[#4361EE]", l: "Monthly slab", d: s.slabHeld > 0 ? `${rupees(s.slabHeld)} waits for ${plan.slabMinReviews} verified reviews` : `${Math.max(0, s.trips - s.gateTrips)} trips above ${s.gateTrips}`, v: s.slab },
+              { icon: <Star className="h-5 w-5" />, tone: "bg-violet-50 text-violet-600", l: "Reviews", d: `${s.verifiedReviews} counted (${plan.reviewMinRating}★+)${revNext ? ` · ${revNext.min - s.verifiedReviews} more for ${rupees(revNext.amount)}` : ""}`, v: s.reviews },
               { icon: <Smartphone className="h-5 w-5" />, tone: "bg-sky-50 text-sky-600", l: "Latest devices", d: `${s.macbookRepairs} MacBook · ${s.iphoneRepairs} iPhone`, v: s.devices },
               { icon: <CalendarCheck className="h-5 w-5" />, tone: "bg-emerald-50 text-emerald-600", l: "Sundays", d: `${s.sundaysWorked} worked`, v: s.sunday },
               { icon: <Fuel className="h-5 w-5" />, tone: "bg-orange-50 text-orange-600", l: "Petrol", d: `${s.km} km × ₹${plan.petrolPerKm}`, v: s.petrol },

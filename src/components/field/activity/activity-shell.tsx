@@ -99,10 +99,11 @@ function Inner({ children }: { children: React.ReactNode }) {
       <div className={cn("mx-auto w-full min-w-0 max-w-[1500px]", locked ? "rox-lock-root space-y-4" : "space-y-5")}>
         {/* one compact header row: back · title · month · store · search · export */}
         <div className="flex flex-wrap items-center gap-3">
-          <BackPill href="/field" label="Back to Pickup & Drop" />
-          <div className="mr-auto min-w-0">
-            <h1 className="font-display text-[22px] font-extrabold leading-tight tracking-tight">Field Activity</h1>
-            <p className="text-[12px] text-muted-foreground">Who is working, what they did, what they earn</p>
+          {/* back · title · subtitle on ONE line, vertically centred */}
+          <div className="mr-auto flex min-w-0 items-center gap-3">
+            <BackPill href="/field" label="Back" className="h-8 shrink-0 px-3 text-[12px]" />
+            <h1 className="font-display text-[24px] font-extrabold leading-none tracking-tight">Field Activity</h1>
+            <span className="hidden truncate border-l border-border pl-3 text-[13px] leading-none text-muted-foreground xl:inline">Who is working, what they did, what they earn</span>
           </div>
           <Select className="h-[36px] w-[150px]" value={ym} onChange={(e) => setYm(e.target.value)} options={monthOpts} />
           {multiStore && <StoreMultiSelect value={storeSel} onChange={setStoreSel} />}
@@ -113,8 +114,9 @@ function Inner({ children }: { children: React.ReactNode }) {
             {(close) => <MenuItem icon={FileSpreadsheet} onClick={() => { void downloadXLSXWorkbook(`field-activity-${active.label.toLowerCase().replace(/[^a-z]+/g, "-")}-${ym}.xlsx`, sheets.current); close(); }}>Excel (.xlsx) · this page</MenuItem>}
           </Dropdown>
         </div>
-        <ScrollHint framed className="min-w-0 flex-initial">
-          <SegmentedTabs size="md" value={active.href} onChange={(v) => router.push(v)} options={tabs.map((t) => ({ label: t.label, value: t.href }))} className="border-0 bg-transparent p-0" />
+        {/* Few tabs → they share the whole width with roomy, larger text. ScrollHint keeps it usable if more are added or the screen is narrow. */}
+        <ScrollHint framed className="w-full min-w-0">
+          <SegmentedTabs size="lg" fill value={active.href} onChange={(v) => router.push(v)} options={tabs.map((t) => ({ label: t.label, value: t.href }))} className="min-w-[920px] border-0 bg-transparent p-0" />
         </ScrollHint>
         {locked ? <div className="rox-lock-fill">{children}</div> : children}
       </div>

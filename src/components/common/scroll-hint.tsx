@@ -65,8 +65,8 @@ export function ScrollHint({ children, className, framed = false, step = 220 }: 
 
   return (
     <div className={cn("relative min-w-0", framed && "flex max-w-full overflow-hidden rounded-full border border-[#4361EE]/60 bg-muted p-1", className)}>
-      <div ref={ref} onClickCapture={onClickCapture} className={cn("max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden", framed ? "min-w-0 rounded-full" : "px-0.5 py-1")}>
-        <div className="w-max">{children}</div>
+      <div ref={ref} onClickCapture={onClickCapture} className={cn("max-w-full overflow-x-auto [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden", framed ? "min-w-0 flex-1 rounded-full" : "px-0.5 py-1")}>
+        <div className="w-max min-w-full">{children}</div>
       </div>
       {edges.left && <Edge side="left" framed={framed} onClick={() => go(-1)} />}
       {edges.right && <Edge side="right" framed={framed} onClick={() => go(1)} />}

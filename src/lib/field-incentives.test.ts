@@ -151,3 +151,90 @@ test("organic leads, adjustments and the grand total", () => {
   assert.equal(computeNinjaPay(base({ trips: spread(60, 4), organicLeads: 20 })).leadGift, true);
   assert.equal(p.total, p.basic + p.incentives + p.petrol + 400);
 });
+
+/* ─── Adjustable rules (every switch is dated like the rest of the plan) ─── */
+const plan = (config: Partial<PayPlan>, from = "2026-01-01"): PlanRow[] => [{ staffId: null, effectiveFrom: from, config }];
+const dayOf = (p: ReturnType<typeof computeNinjaPay>, d: string) => p.days.find((x) => x.date === d)!;
+
+test("daily tiers can add up instead of paying the highest only", () => {
+  const trips = [...tripsOn("2026-01-06", 9), ...filler(60)];
+  assert.equal(dayOf(computeNinjaPay(base({ trips })), "2026-01-06").daily, 300);
+  assert.equal(dayOf(computeNinjaPay(base({ trips, plans: plan({ dailyStack: true }) })), "2026-01-06").daily, 500);
+});
+
+test("trip types can be switched off and long trips can be kept out of the daily count", () => {
+  const trips = [...tripsOn("2026-01-05", 6, { type: "drop" }), ...filler(60)];
+  assert.equal(dayOf(computeNinjaPay(base({ trips, plans: plan({ countDrop: false }) })), "2026-01-05").trips, 0);
+  const bb = [...tripsOn("2026-01-05", 6, { buyback: true }), ...filler(60)];
+  assert.equal(dayOf(computeNinjaPay(base({ trips: bb, plans: plan({ countBuyback: false }) })), "2026-01-05").daily, 0);
+  const long = [trip("2026-01-05", { crowKm: 20 }), ...tripsOn("2026-01-05", 4), ...filler(60)];
+  assert.equal(dayOf(computeNinjaPay(base({ trips: long, plans: plan({ dailyUsesLongTrips: false }) })), "2026-01-05").daily, 0);
+});
+
+test("what waits for the monthly target is configurable", () => {
+  const trips = [...tripsOn("2026-01-05", 9), ...spread(20, 3)];
+  const held = computeNinjaPay(base({ trips }));
+  assert.equal(held.daily, 0);
+  const free = computeNinjaPay(base({ trips, plans: plan({ gateHolds: { ...DEFAULT_PLAN.gateHolds, daily: false } }) }));
+  assert.equal(free.daily, 300); assert.equal(free.gatePassed, false);
+});
+
+test("the target can be lowered for leave days", () => {
+  const m = month({ "2026-01-06": { status: "casual_leave" }, "2026-01-07": { status: "casual_leave" }, "2026-01-08": { status: "festival_leave" } });
+  const p = computeNinjaPay(base({ month: m, plans: plan({ gateProrate: true }) }));
+  assert.equal(p.gateBase, 60); assert.equal(p.gateTrips, Math.ceil(60 * 28 / 31));
+});
+
+test("slabs can pay every trip at the highest slab reached", () => {
+  const p = computeNinjaPay(base({ trips: spread(110, 4), plans: plan({ slabMode: "whole" }) }));
+  assert.equal(p.slab, 50 * 70);
+});
+
+test("reviews: minimum stars, ticket rule and per-review money", () => {
+  const rv = (n: number, rating: number, verified = true) => Array.from({ length: n }, () => ({ staffId: "n1", date: "2026-01-10", rating, verified }));
+  const trips = spread(60, 4);
+  assert.equal(computeNinjaPay(base({ trips, reviews: rv(15, 4) })).reviews, 0);
+  assert.equal(computeNinjaPay(base({ trips, reviews: rv(15, 4), plans: plan({ reviewMinRating: 4 }) })).reviews, 500);
+  assert.equal(computeNinjaPay(base({ trips, reviews: rv(15, 5, false), plans: plan({ reviewNeedsTicket: false }) })).reviews, 500);
+  assert.equal(computeNinjaPay(base({ trips, reviews: rv(15, 5), plans: plan({ reviewTiers: [{ min: 15, amount: 40 }], reviewMode: "perReview" }) })).reviews, 600);
+});
+
+test("organic leads can be paid each at its own row", () => {
+  assert.equal(computeNinjaPay(base({ trips: spread(60, 4), organicLeads: 12, plans: plan({ leadMode: "slab" }) })).leads, 10 * 100 + 2 * 200);
+});
+
+test("long trips beyond the last row can keep adding trips", () => {
+  const p = { ...DEFAULT_PLAN, distanceExtraEveryKm: 10 };
+  assert.equal(tripWeight(p, 51.5), 4); assert.equal(tripWeight(p, 60), 5); assert.equal(tripWeight(p, 62), 6);
+});
+
+test("Sunday: trips needed, half day, absences allowed", () => {
+  const trips = [...tripsOn("2026-01-04", 2), ...spread(60, 4)];
+  const need3 = computeNinjaPay(base({ trips, plans: plan({ sundayMinTrips: 3 }) }));
+  assert.equal(dayOf(need3, "2026-01-04").sunday, 0);
+  const one = month({ "2026-01-02": { status: "absent" } });
+  assert.ok(computeNinjaPay(base({ trips, month: one, plans: plan({ sundayAbsentAllowed: 1 }) })).sunday > 0);
+  const half = month({ "2026-01-04": { status: "half_day" } });
+  assert.equal(dayOf(computeNinjaPay(base({ trips, month: half })), "2026-01-04").sunday, 0);
+  assert.equal(dayOf(computeNinjaPay(base({ trips, month: half, plans: plan({ sundayHalfDayCounts: true }) })), "2026-01-04").sunday, 300);
+});
+
+test("salary divisor, unpaid leave types and absent fine", () => {
+  const salaries: SalaryRow[] = [{ staffId: "n1", effectiveFrom: "2026-01-01", monthlySalary: 30000 }];
+  const m = month({ "2026-01-02": { status: "absent" }, "2026-01-03": { status: "casual_leave" } });
+  const p = computeNinjaPay(base({ month: m, salaries, plans: plan({ salaryDays: 30, casualPaid: false, absentFine: 200 }) }));
+  assert.equal(p.basic, 29 * 1000); assert.equal(p.fines, 200);
+  assert.equal(p.total, p.basic + p.incentives + p.petrol + p.adjustments - 200);
+});
+
+test("petrol km limit, incentive cap and rounding", () => {
+  const m = month({ "2026-01-05": { km: 150 } });
+  const p = computeNinjaPay(base({ month: m, trips: spread(110, 4), plans: plan({ petrolMaxKmPerDay: 100, incentiveCap: 1000, roundTotal: 100 }) }));
+  assert.equal(p.petrol, 350); assert.equal(p.incentives, 1000); assert.ok(p.capped > 0);
+  assert.equal(p.total % 100, 0);
+});
+
+test("older saved plans without the new switches behave as before", () => {
+  const p = planFor([{ staffId: null, effectiveFrom: "2026-01-01", config: { petrolPerKm: 4, gateHolds: { petrol: true } as PayPlan["gateHolds"] } }], "n1", "2026-01-05");
+  assert.equal(p.dailyStack, false); assert.equal(p.gateHolds.daily, true); assert.equal(p.gateHolds.petrol, true);
+});

@@ -1,374 +1,266 @@
 "use client";
 
+/* Inventory → Item Master: the catalogue of every part and service.
+   Columns fit their content; price tiers that rarely matter (wholesale, dealer,
+   distributor) stay in the item form instead of widening this table. Cost and
+   margin only render for users with CAP.sensitive.viewCost. */
+
 import { Suspense, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import {
-  Plus, ChevronDown, RefreshCw, LayoutDashboard, Search, Package, Settings2,
-  Upload, Download, Printer, Tags, Pencil, Copy, Eye, Trash2, X,
-} from "lucide-react";
-import { PageHeader } from "@/components/layout/page-header";
+import { AlertTriangle, Boxes, Copy, IndianRupee, MoreHorizontal, Pencil, Plus, Tag, Trash2, Upload, Wrench, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Dropdown, MenuItem, MenuLabel } from "@/components/ui/dropdown";
-import { DataTable, type Column } from "@/components/inventory/data-table";
-import { ItemHealthBadge } from "@/components/inventory/widgets";
-import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import { Can } from "@/components/common/can";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
+import { Dropdown, MenuItem } from "@/components/ui/dropdown";
+import { Select } from "@/components/ui/input";
+import { TableSearch } from "@/components/common/table-utility-bar";
+import { InvTable, type InvColumn } from "@/components/inventory/inv-table";
+import { ExportMenu } from "@/components/inventory/export-menu";
+import { InvKpi, InvPageHeader, StatusTabs, StockStatusPill, useInventoryScope } from "@/components/inventory/inv-ui";
+import { toast } from "@/components/ui/toaster";
+import { useStore } from "@/lib/store";
 import { usePermissions } from "@/lib/permissions-context";
 import { CAP, allow } from "@/lib/capabilities";
-import { useStore } from "@/lib/store";
+import { effectiveSellingPrice, stockStatus, stockTotals } from "@/lib/inventory-analytics";
+import { compactINR, exportStock } from "@/lib/inventory-export";
 import { cn, formatINR } from "@/lib/utils";
-import {
-  itemHealth, STORES, type InventoryItem,
-} from "@/lib/inventory-data";
+import type { InventoryItem } from "@/lib/inventory-data";
 
-type StatusFilter = "all" | "low" | "excess" | "negative" | "inactive" | "needs_review";
-const STATUS_TABS: { value: StatusFilter; label: string }[] = [
-  { value: "all", label: "All" },
-  { value: "low", label: "Low Stock" },
-  { value: "excess", label: "Excess Stock" },
-  { value: "negative", label: "Negative Stock" },
-  { value: "inactive", label: "Inactive Items" },
-];
+type Tab = "all" | "part" | "service" | "attention" | "inactive" | "needs_review";
 
-/* Human labels for the backfill `migration_flag` machine reasons (inv-design
-   §1.2). Rendered on the "Needs review" pill + its tooltip — the ONLY thing
-   surfaced here is the reason string; NEVER a CP / labour / unit_cost value
-   (NIT-5 hard no-cost guarantee). */
 const MIGRATION_FLAG_LABEL: Record<string, string> = {
   unrecognised_item_type: "Unrecognised legacy item type",
   service_with_stock: "Service carrying stray stock values",
 };
-function migrationFlagLabel(flag: string): string {
-  return MIGRATION_FLAG_LABEL[flag] ?? "Needs review";
-}
-
-function matchesStatus(it: InventoryItem, status: StatusFilter) {
-  if (status === "all") return true;
-  if (status === "inactive") return !it.active;
-  if (status === "needs_review") return !!it.migrationFlag;
-  const h = itemHealth(it);
-  if (status === "low") return h === "low" || h === "reorder";
-  if (status === "excess") return h === "excess" || h === "high";
-  if (status === "negative") return h === "negative";
-  return true;
-}
-
-const money = (n: number) => formatINR(n);
+const kindOf = (i: InventoryItem) => i.kind ?? (i.type === "Service" ? "service" : "part");
+const isTracked = (i: InventoryItem) => kindOf(i) === "part" && i.trackStock !== false;
+const needsAttention = (i: InventoryItem) => i.active && isTracked(i) && stockStatus(i) !== "in";
 
 function ItemMasterInner() {
   const router = useRouter();
   const params = useSearchParams();
   const { can } = usePermissions();
-  const { inventory: inventoryItems, deleteInventoryItem, reconcileMigrationFlag } = useStore();
-  // SYS-6 — the pending "Needs review" item awaiting a deliberate, confirmed
-  // reconciliation (clearing the legacy migration_flag). An ordinary edit never
-  // clears the flag; this dedicated action does.
+  const { deleteInventoryItem, reconcileMigrationFlag } = useStore();
+  const { inventory, canViewCost, canEdit } = useInventoryScope();
+  const canDelete = allow(can, CAP.inventory.delete);
+
+  const [tab, setTab] = useState<Tab>("all");
+  const [category, setCategory] = useState("all");
+  const [location, setLocation] = useState("all");
+  const [query, setQuery] = useState(params.get("q") ?? "");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [reviewItem, setReviewItem] = useState<InventoryItem | null>(null);
-  // Legacy "Needs review" (migration_flag) is an inventory-manage concern — the
-  // opt-in filter chip + the row pill only show to inventory editors.
-  const canEditInventory = allow(can, CAP.inventory.edit);
-  const [mode, setMode] = useState<"all" | "Product" | "Service">("all");
-  const [store, setStore] = useState(STORES[0]);
-  const [status, setStatus] = useState<StatusFilter>("all");
-  const [query, setQuery] = useState("");
-  const [refreshing, setRefreshing] = useState(false);
+  const [deleteIds, setDeleteIds] = useState<string[] | null>(null);
 
-  // The opt-in "Needs review" chip (migration_flag != null) appears only for
-  // inventory editors (inv-design §1.2) and only when at least one flagged item
-  // exists — never a dead/empty chip.
-  const hasFlaggedItems = useMemo(() => inventoryItems.some((it) => !!it.migrationFlag), [inventoryItems]);
-  const visibleTabs = useMemo(() => {
-    const tabs = [...STATUS_TABS];
-    if (canEditInventory && hasFlaggedItems) tabs.push({ value: "needs_review", label: "Needs review" });
-    return tabs;
-  }, [canEditInventory, hasFlaggedItems]);
-
-  // drill-down from dashboard: /inventory/item-master?status=low
+  const hasFlagged = useMemo(() => inventory.some((i) => !!i.migrationFlag), [inventory]);
   useEffect(() => {
-    const s = params.get("status") as StatusFilter | null;
-    if (s && visibleTabs.some((t) => t.value === s)) setStatus(s);
-  }, [params, visibleTabs]);
+    const s = params.get("status");
+    if (s === "low" || s === "out") setTab("attention");
+    else if (s === "inactive") setTab("inactive");
+  }, [params]);
+
+  const categories = useMemo(() => [...new Set(inventory.map((i) => i.category).filter(Boolean))].sort(), [inventory]);
+  const locations = useMemo(() => [...new Set(inventory.map((i) => i.store).filter(Boolean))].sort(), [inventory]);
+
+  const counts = useMemo(() => ({
+    all: inventory.length,
+    part: inventory.filter((i) => kindOf(i) === "part").length,
+    service: inventory.filter((i) => kindOf(i) === "service").length,
+    attention: inventory.filter(needsAttention).length,
+    inactive: inventory.filter((i) => !i.active).length,
+    needs_review: inventory.filter((i) => !!i.migrationFlag).length,
+  }), [inventory]);
 
   const rows = useMemo(() => {
-    return inventoryItems.filter((it) => {
-      if (mode !== "all" && it.type !== mode) return false;
-      if (store !== STORES[0] && it.store !== store) return false;
-      if (!matchesStatus(it, status)) return false;
-      if (query.trim()) {
-        const q = query.toLowerCase();
-        if (!`${it.name} ${it.id} ${it.category} ${it.hsnCode}`.toLowerCase().includes(q)) return false;
-      }
+    const q = query.trim().toLowerCase();
+    return inventory.filter((i) => {
+      if (tab === "part" && kindOf(i) !== "part") return false;
+      if (tab === "service" && kindOf(i) !== "service") return false;
+      if (tab === "attention" && !needsAttention(i)) return false;
+      if (tab === "inactive" && i.active) return false;
+      if (tab === "needs_review" && !i.migrationFlag) return false;
+      if (category !== "all" && i.category !== category) return false;
+      if (location !== "all" && i.store !== location) return false;
+      if (q && !`${i.name} ${i.id} ${i.itemCode ?? ""} ${i.serviceCode ?? ""} ${i.barcode ?? ""} ${i.brandModel ?? ""} ${i.category} ${i.hsnCode} ${i.vendor ?? ""}`.toLowerCase().includes(q)) return false;
       return true;
     });
-  }, [mode, store, status, query]);
+  }, [inventory, tab, category, location, query]);
 
-  function refresh() {
-    setRefreshing(true);
-    setTimeout(() => setRefreshing(false), 800);
+  const totals = useMemo(() => stockTotals(inventory.filter((i) => i.active && isTracked(i))), [inventory]);
+  const useCost = canViewCost && totals.costValue !== undefined;
+  const missingPrice = inventory.filter((i) => i.active && effectiveSellingPrice(i) <= 0 && kindOf(i) === "part").length;
+  const selectedItems = useMemo(() => inventory.filter((i) => selected.has(i.id)), [inventory, selected]);
+
+  async function confirmDelete() {
+    if (!deleteIds || !canDelete) return;
+    for (const id of deleteIds) await deleteInventoryItem(id);
+    toast.success(`${deleteIds.length} item${deleteIds.length === 1 ? "" : "s"} deleted`);
+    setSelected((p) => { const n = new Set(p); deleteIds.forEach((id) => n.delete(id)); return n; });
+    setDeleteIds(null);
   }
 
-  const columns: Column<InventoryItem>[] = [
+  const marginPct = (i: InventoryItem) => {
+    const sp = effectiveSellingPrice(i);
+    const cp = kindOf(i) === "service" ? i.standardLabourCost : i.costPrice;
+    return cp === undefined || i.costState !== "configured" || sp <= 0 ? null : Math.round(((sp - cp) / sp) * 100);
+  };
+
+  const columns: InvColumn<InventoryItem>[] = [
     {
-      key: "name",
-      header: "Item",
-      primary: true,
-      accessor: (r) => `${r.name} ${r.id}`,
-      hideable: false,
-      minWidth: 240,
+      key: "item", header: "Item", grow: true, min: 260,
       render: (r) => (
-        <div className="flex items-center gap-2.5">
-          <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#EEF1FD] text-[#4361EE] ring-1 ring-inset ring-[#B3BFF6]/50">
-            <Package className="h-4 w-4" />
+        <div className="flex min-w-0 items-center gap-3">
+          <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-lg", kindOf(r) === "service" ? "bg-violet-50 text-violet-600" : "bg-[#EEF1FD] text-[#4361EE]")}>
+            {kindOf(r) === "service" ? <Wrench className="h-4 w-4" /> : <Tag className="h-4 w-4" />}
           </span>
           <div className="min-w-0">
-            <div className="flex items-center gap-1.5">
-              <p className="truncate font-semibold leading-tight">{r.name}</p>
-              {canEditInventory && r.migrationFlag && (
-                <>
-                  <span
-                    title={migrationFlagLabel(r.migrationFlag)}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200"
-                  >
-                    Needs review
-                  </span>
-                  <button
-                    type="button"
-                    onClick={(e) => { e.stopPropagation(); setReviewItem(r); }}
-                    className="shrink-0 text-[10px] font-medium text-[#4361EE] hover:underline"
-                  >
-                    Mark reviewed
-                  </button>
-                </>
+            <div className="flex items-center gap-2">
+              <p className="truncate text-[13.5px] font-semibold" title={r.name}>{r.name}</p>
+              {!r.active && <span className="shrink-0 rounded-full bg-zinc-100 px-2 py-px text-[10px] font-semibold text-zinc-600 ring-1 ring-inset ring-zinc-200">Inactive</span>}
+              {canEdit && r.migrationFlag && (
+                <button type="button" title={MIGRATION_FLAG_LABEL[r.migrationFlag] ?? "Needs review"} onClick={(e) => { e.stopPropagation(); setReviewItem(r); }} className="shrink-0 rounded-full bg-amber-50 px-2 py-px text-[10px] font-semibold text-amber-700 ring-1 ring-inset ring-amber-200 hover:bg-amber-100">
+                  Needs review
+                </button>
               )}
             </div>
-            <p className="font-mono text-[11px] text-muted-foreground">{r.id}</p>
+            <p className="truncate text-[11.5px] text-muted-foreground">{[r.itemCode || r.serviceCode || r.id, r.brandModel].filter(Boolean).join(" · ")}</p>
           </div>
         </div>
       ),
     },
-    { key: "category", header: "Item Category", accessor: (r) => r.category, render: (r) => <span className="text-[13px]">{r.category}</span>, minWidth: 150 },
+    { key: "type", header: "Type", min: 84, render: (r) => <span className={cn("flex h-7 w-full items-center justify-center rounded-full px-2.5 text-[11px] font-semibold ring-1 ring-inset", kindOf(r) === "service" ? "bg-violet-50 text-violet-700 ring-violet-200" : "bg-sky-50 text-sky-700 ring-sky-200")}>{kindOf(r) === "service" ? "Service" : "Part"}</span> },
+    { key: "category", header: "Category", max: 150, render: (r) => <span title={r.category}>{r.category || "—"}</span> },
+    { key: "loc", header: "Location", max: 120, render: (r) => <span className="text-muted-foreground" title={r.store}>{r.store || "—"}</span> },
     {
-      key: "stock",
-      header: "Current Stock",
-      accessor: (r) => r.currentStock,
-      align: "left",
-      minWidth: 150,
+      key: "stock", header: "Stock", align: "right",
+      render: (r) => isTracked(r)
+        ? <div className="flex items-center justify-end gap-2"><span className={cn("font-semibold tabular-nums", r.currentStock < 0 && "text-rose-600")}>{r.currentStock}</span><span className="w-[104px]"><StockStatusPill status={stockStatus(r)} /></span></div>
+        : <span className="text-muted-foreground">—</span>,
+    },
+    { key: "sell", header: "Selling Price", align: "right", render: (r) => { const p = kindOf(r) === "service" ? r.serviceCharge || effectiveSellingPrice(r) : effectiveSellingPrice(r); return <span className={cn("font-semibold tabular-nums", p <= 0 && "text-amber-600")}>{p > 0 ? formatINR(p) : "Not set"}</span>; } },
+    { key: "mrp", header: "MRP", align: "right", render: (r) => <span className="tabular-nums text-muted-foreground">{r.mrp ? formatINR(r.mrp) : "—"}</span> },
+    { key: "cost", header: "Cost", align: "right", hidden: !canViewCost, render: (r) => { const c = kindOf(r) === "service" ? r.standardLabourCost : r.costPrice; return <span className="tabular-nums text-muted-foreground">{c !== undefined && r.costState === "configured" ? formatINR(c) : "—"}</span>; } },
+    { key: "margin", header: "Margin", align: "right", hidden: !canViewCost, render: (r) => { const m = marginPct(r); return m === null ? <span className="text-muted-foreground">—</span> : <span className={cn("font-semibold tabular-nums", m < 15 ? "text-amber-600" : "text-emerald-600")}>{m}%</span>; } },
+    { key: "tax", header: "GST · HSN", render: (r) => <div className="leading-tight"><span className="font-semibold tabular-nums">{r.tax}%</span><span className="block font-mono text-[11px] text-muted-foreground">{r.hsnCode && r.hsnCode !== "—" ? r.hsnCode : "no HSN"}</span></div> },
+    { key: "vendor", header: "Vendor", max: 140, render: (r) => <span className="text-muted-foreground" title={r.vendor}>{r.vendor || "—"}</span> },
+    {
+      key: "actions", header: "", align: "right", min: 52,
       render: (r) => (
-        <div className="flex items-center gap-2">
-          <span className={cn("tnum font-semibold", r.currentStock < 0 && "text-rose-600")}>{r.currentStock}</span>
-          {r.type === "Product" && <ItemHealthBadge item={r} />}
+        <div onClick={(e) => e.stopPropagation()}>
+          <Dropdown
+            width="w-44"
+            trigger={({ toggle }) => <button onClick={toggle} aria-label="Row actions" className="grid h-8 w-8 place-items-center rounded-lg text-muted-foreground hover:bg-muted hover:text-foreground"><MoreHorizontal className="h-4 w-4" /></button>}
+          >
+            {(close) => (
+              <>
+                {canEdit && <MenuItem icon={Pencil} onClick={() => { close(); router.push(`/inventory/add-item?edit=${encodeURIComponent(r.id)}`); }}>Edit item</MenuItem>}
+                {allow(can, CAP.inventory.create) && <MenuItem icon={Copy} onClick={() => { close(); router.push(`/inventory/add-item?copy=${encodeURIComponent(r.id)}`); }}>Duplicate</MenuItem>}
+                {canDelete && <MenuItem icon={Trash2} danger onClick={() => { close(); setDeleteIds([r.id]); }}>Delete</MenuItem>}
+              </>
+            )}
+          </Dropdown>
         </div>
       ),
     },
-    { key: "defaultPrice", header: "Default Price", accessor: (r) => r.defaultPrice, align: "right", render: (r) => <span className="tnum">{money(r.defaultPrice)}</span> },
-    { key: "regBuy", header: "Regular Buying", accessor: (r) => r.regularBuyingPrice, align: "right", render: (r) => <span className="tnum text-muted-foreground">{money(r.regularBuyingPrice)}</span> },
-    { key: "wholeBuy", header: "Wholesale Buying", accessor: (r) => r.wholesaleBuyingPrice, align: "right", defaultHidden: true, render: (r) => <span className="tnum text-muted-foreground">{money(r.wholesaleBuyingPrice)}</span> },
-    { key: "regSell", header: "Regular Selling", accessor: (r) => r.regularSellingPrice, align: "right", render: (r) => <span className="tnum">{money(r.regularSellingPrice)}</span> },
-    { key: "mrp", header: "MRP", accessor: (r) => r.mrp, align: "right", render: (r) => <span className="tnum">{money(r.mrp)}</span> },
-    { key: "dealer", header: "Dealer Price", accessor: (r) => r.dealerPrice, align: "right", defaultHidden: true, render: (r) => <span className="tnum text-muted-foreground">{money(r.dealerPrice)}</span> },
-    { key: "distributor", header: "Distributor Price", accessor: (r) => r.distributorPrice, align: "right", defaultHidden: true, render: (r) => <span className="tnum text-muted-foreground">{money(r.distributorPrice)}</span> },
-    {
-      key: "type", header: "Type", accessor: (r) => r.type, render: (r) => (
-        <Badge tone={r.type === "Service" ? "violet" : "info"}>{r.type}</Badge>
-      ),
-    },
-    { key: "hsn", header: "HSN Code", accessor: (r) => r.hsnCode, render: (r) => <span className="font-mono text-[12px] text-muted-foreground">{r.hsnCode}</span> },
-    { key: "tax", header: "Tax", accessor: (r) => r.tax, align: "right", render: (r) => <span className="tnum">{r.tax}%</span> },
-    { key: "min", header: "Min Stock", accessor: (r) => r.minStock, align: "right", defaultHidden: true, render: (r) => <span className="tnum text-muted-foreground">{r.minStock}</span> },
-    { key: "max", header: "Max Stock", accessor: (r) => r.maxStock, align: "right", defaultHidden: true, render: (r) => <span className="tnum text-muted-foreground">{r.maxStock}</span> },
-  ];
-
-  // Row/bulk actions are plain data (consumed by DataTable's menu renderer, not JSX),
-  // so each entry is filtered out here based on the active role's permissions.
-  const rowActions = (r: InventoryItem) => [
-    { label: "View details", icon: Eye, onClick: () => {} },
-    ...(can("edit") ? [{ label: "Edit item", icon: Pencil, onClick: () => router.push(`/inventory/add-item?edit=${r.id}`) }] : []),
-    ...(can("create") ? [{ label: "Duplicate", icon: Copy, onClick: () => {} }] : []),
-    ...(can("delete") ? [{ label: "Delete", icon: Trash2, danger: true, onClick: () => deleteInventoryItem(r.id) }] : []),
-  ];
-
-  const bulkActions = [
-    ...(can("print_documents") ? [{ label: "Print labels", icon: Tags, onClick: () => {} }] : []),
-    ...(can("export_reports") ? [{ label: "Export", icon: Download, onClick: () => {} }] : []),
-    ...(can("delete") ? [{ label: "Delete", icon: Trash2, danger: true, onClick: () => {} }] : []),
   ];
 
   return (
-    <div className="space-y-5">
-      <PageHeader
-        eyebrow="Inventory Management"
+    <div className="rox-lock-root space-y-4">
+      <InvPageHeader
+        icon={Boxes}
         title="Item Master"
-        subtitle="Central catalogue of every item, price tier and stock level."
+        subtitle="Every part and service you stock or bill, with prices and stock health"
         actions={
           <>
-            <Button variant="outline" size="sm" className="gap-1.5 rounded-full" onClick={refresh} disabled={refreshing}>
-              <RefreshCw className={cn("h-3.5 w-3.5", refreshing && "animate-spin")} /> Refresh Analytics
-            </Button>
-            <Link href="/inventory">
-              <Button variant="ghost" size="sm" className="gap-1.5 rounded-full">
-                <LayoutDashboard className="h-3.5 w-3.5" /> Dashboard
-              </Button>
-            </Link>
-            <Can permission={["import_data", "export_reports", "print_documents", "edit"]}>
-              <Dropdown
-                width="w-52"
-                trigger={({ toggle, open }) => (
-                  <Button variant="secondary" size="sm" className="gap-1.5 rounded-full" onClick={toggle}>
-                    <Settings2 className="h-3.5 w-3.5" /> Actions <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", open && "rotate-180")} />
-                  </Button>
-                )}
-              >
-                {(close) => (
-                  <>
-                    <MenuLabel>Bulk operations</MenuLabel>
-                    <Can permission="import_data">
-                      <MenuItem icon={Upload} onClick={close}>Import items</MenuItem>
-                    </Can>
-                    <Can permission="export_reports">
-                      <MenuItem icon={Download} onClick={close}>Export catalogue</MenuItem>
-                    </Can>
-                    <Can permission="print_documents">
-                      <MenuItem icon={Printer} onClick={close}>Print barcodes</MenuItem>
-                    </Can>
-                    <Can permission="edit">
-                      <MenuItem icon={Tags} onClick={close}>Bulk price update</MenuItem>
-                    </Can>
-                  </>
-                )}
-              </Dropdown>
-            </Can>
-            <Can permission="create">
-              <Link href="/inventory/add-item">
-                <Button size="sm" className="gap-1.5 rounded-full">
-                  <Plus className="h-3.5 w-3.5" /> Add Single Item
-                </Button>
-              </Link>
+            <ExportMenu onExport={(f) => exportStock(rows.filter((i) => kindOf(i) === "part"), canViewCost, f, "repairox-item-master")} />
+            <Can permission={CAP.inventory.create}>
+              <Link href="/inventory/import-export"><Button variant="outline" className="gap-2"><Upload className="h-4 w-4" />Import</Button></Link>
+              <Link href="/inventory/add-item"><Button className="gap-2"><Plus className="h-4 w-4" />Add Item</Button></Link>
             </Can>
           </>
         }
       />
 
-      {/* Status segmented tabs */}
-      <div className="-mx-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <div className="inline-flex items-center gap-1 rounded-full border border-[#4361EE]/60 bg-muted p-1">
-          {visibleTabs.map((t) => (
-            <button
-              key={t.value}
-              onClick={() => setStatus(t.value)}
-              className={cn(
-                "relative shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors",
-                status === t.value ? "bg-[#4361EE] text-white shadow-sm" : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <InvKpi label="Total items" value={counts.all} hint={`${counts.part} parts · ${counts.service} services`} icon={Boxes} />
+        <InvKpi label={useCost ? "Stock value (cost)" : "Stock value"} value={compactINR(useCost ? (totals.costValue as number) : totals.sellValue)} hint={useCost ? `${compactINR(totals.sellValue)} at selling price` : "At selling price"} icon={IndianRupee} tone="emerald" />
+        <InvKpi label="Needs attention" value={counts.attention} hint={counts.attention ? "Low or out of stock" : "All healthy"} hintTone={counts.attention ? "danger" : "success"} icon={AlertTriangle} tone="amber" />
+        <InvKpi label="No selling price" value={missingPrice} hint={missingPrice ? "Set a price before billing" : "All parts priced"} hintTone={missingPrice ? "danger" : "success"} icon={Tag} tone="rose" />
       </div>
 
-      {/* Filter bar */}
-      <div className="flex flex-col gap-3 rounded-2xl border border-border bg-card p-3 shadow-card sm:flex-row sm:items-center sm:p-3.5">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-          <input
+      <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
+        <StatusTabs
+          value={tab}
+          onChange={setTab}
+          options={[
+            { value: "all", label: `All (${counts.all})` },
+            { value: "part", label: `Parts (${counts.part})` },
+            { value: "service", label: `Services (${counts.service})` },
+            { value: "attention", label: `Needs attention (${counts.attention})` },
+            { value: "inactive", label: `Inactive (${counts.inactive})` },
+            ...(canEdit && hasFlagged ? [{ value: "needs_review" as Tab, label: `Needs review (${counts.needs_review})` }] : []),
+          ]}
+        />
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <Select className="h-[34px] min-w-[150px]" value={category} onChange={(e) => setCategory(e.target.value)} options={[{ label: "All categories", value: "all" }, ...categories.map((c) => ({ label: c, value: c }))]} />
+          <Select className="h-[34px] min-w-[150px]" value={location} onChange={(e) => setLocation(e.target.value)} options={[{ label: "All locations", value: "all" }, ...locations.map((c) => ({ label: c, value: c }))]} />
+          <TableSearch
             value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search by name, SKU, category or HSN…"
-            className="h-10 w-full rounded-xl border border-border bg-card pl-10 pr-9 text-sm placeholder:text-muted-foreground focus:border-brand-400 focus:outline-none focus:ring-2 focus:ring-brand-200/50"
-          />
-          {query && (
-            <button onClick={() => setQuery("")} className="absolute right-2.5 top-1/2 grid h-6 w-6 -translate-y-1/2 place-items-center rounded-md text-muted-foreground hover:bg-muted">
-              <X className="h-3.5 w-3.5" />
-            </button>
-          )}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <FilterSelect
-            label="Type"
-            value={mode}
-            onChange={(v) => setMode(v as typeof mode)}
-            options={[{ value: "all", label: "Product / Service" }, { value: "Product", label: "Products" }, { value: "Service", label: "Services" }]}
-          />
-          <FilterSelect
-            label="Store"
-            value={store}
-            onChange={setStore}
-            options={STORES.map((s) => ({ value: s, label: s }))}
+            onChange={setQuery}
+            placeholder="Search items by name, SKU, code, barcode, model, HSN or vendor…"
+            animatedPrefix="Search by "
+            animatedWords={["item name", "SKU", "item code", "barcode", "brand / model", "HSN", "vendor"]}
+            className="w-full sm:w-64"
           />
         </div>
       </div>
 
-      <DataTable
+      {selectedItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[#4361EE]/30 bg-[#EEF1FD] px-4 py-2.5">
+          <span className="rounded-full bg-[#4361EE] px-3 py-1 text-[12px] font-semibold text-white">{selectedItems.length} selected</span>
+          <ExportMenu label="Export selected" onExport={(f) => exportStock(selectedItems.filter((i) => kindOf(i) === "part"), canViewCost, f, "repairox-selected-items")} />
+          {canDelete && <Button variant="destructive" className="gap-2" onClick={() => setDeleteIds(selectedItems.map((i) => i.id))}><Trash2 className="h-4 w-4" />Delete</Button>}
+          <button onClick={() => setSelected(new Set())} className="ml-auto inline-flex items-center gap-1 text-[12.5px] font-semibold text-[#4361EE] hover:underline"><X className="h-3.5 w-3.5" />Clear</button>
+        </div>
+      )}
+
+      <InvTable
         columns={columns}
         rows={rows}
         rowKey={(r) => r.id}
         selectable
-        pageSize={8}
-        loading={refreshing}
-        rowActions={rowActions}
-        bulkActions={bulkActions}
-        minTableWidth={1100}
+        selected={selected}
+        onSelectedChange={setSelected}
+        selectLabel="Select all items"
+        onRowClick={canEdit ? (r) => router.push(`/inventory/add-item?edit=${encodeURIComponent(r.id)}`) : undefined}
+        resetKey={`${tab}|${category}|${location}|${query}`}
         emptyTitle="No items found"
-        emptyDescription="Try adjusting filters or search, or add a new item to the catalogue."
+        emptyHint="Adjust the filters or search, or add a new item."
+        itemLabel="item"
       />
 
-      {/* SYS-6 — deliberate, confirmed reconciliation of a legacy review flag.
-          For a service_with_stock row this also clears the stray stock that
-          caused the flag, so the marker is never cleared while the
-          contradiction stands. */}
+      <ConfirmDialog
+        open={!!deleteIds}
+        onClose={() => setDeleteIds(null)}
+        onConfirm={confirmDelete}
+        title={`Delete ${deleteIds?.length ?? 0} item${deleteIds?.length === 1 ? "" : "s"}?`}
+        description="Deleted items disappear from the catalogue and from new invoices. Existing documents keep their history."
+        confirmLabel="Delete"
+      />
+      {/* Deliberate, confirmed reconciliation of a legacy review flag. */}
       <ConfirmDialog
         open={!!reviewItem}
         onClose={() => setReviewItem(null)}
         onConfirm={() => { if (reviewItem) reconcileMigrationFlag(reviewItem.id); setReviewItem(null); }}
         danger={false}
         title="Mark this item reviewed?"
-        description={
-          reviewItem?.migrationFlag === "service_with_stock"
-            ? "This clears the review flag and resets the stray stock (quantity, min, max) that a service should not carry. This cannot be undone."
-            : "This clears the legacy review flag now that the item type is valid."
-        }
+        description={reviewItem?.migrationFlag === "service_with_stock"
+          ? "This clears the review flag and resets the stray stock (quantity, min, max) that a service should not carry. This cannot be undone."
+          : "This clears the legacy review flag now that the item type is valid."}
         confirmLabel="Mark reviewed"
       />
     </div>
-  );
-}
-
-function FilterSelect({ label, value, onChange, options }: {
-  label: string; value: string; onChange: (v: string) => void; options: { value: string; label: string }[];
-}) {
-  return (
-    <Dropdown
-      width="w-52"
-      trigger={({ toggle, open }) => (
-        <button
-          onClick={toggle}
-          className={cn(
-            "inline-flex h-10 items-center gap-2 rounded-xl border bg-card px-3 text-[13px] font-medium transition",
-            open ? "border-[#4361EE]" : "border-border hover:bg-muted"
-          )}
-        >
-          <span className="text-muted-foreground">{label}:</span>
-          <span className="max-w-[140px] truncate">{options.find((o) => o.value === value)?.label}</span>
-          <ChevronDown className={cn("h-3.5 w-3.5 text-muted-foreground transition-transform", open && "rotate-180")} />
-        </button>
-      )}
-    >
-      {(close) => (
-        <>
-          {options.map((o) => (
-            <MenuItem
-              key={o.value}
-              onClick={() => { onChange(o.value); close(); }}
-              className={cn(value === o.value && "bg-muted font-semibold")}
-            >
-              {o.label}
-            </MenuItem>
-          ))}
-        </>
-      )}
-    </Dropdown>
   );
 }
 

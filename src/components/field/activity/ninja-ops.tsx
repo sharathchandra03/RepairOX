@@ -2,14 +2,13 @@
 /* Field Activity → Operations: how each Ninja handles assignments (accept / reject / reassign) and how long
    each stage takes. Moved out of Field Insights; same engine (lib/field-ops-report.ts). */
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { Clock } from "lucide-react";
 import { useRegisterSheets } from "@/components/field/activity/activity-shell";
-import { C, DataTable, Dash, FootName, KpiStrip, LoadError, Unavailable, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { KpiStrip, LoadError, Unavailable, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { Dash, FieldGrid, FootLabel, NameText, useFieldGrid, type FCol } from "@/components/field/grid";
 import { matchesStoreSelection } from "@/components/common/store-multi-select";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
-import { cn } from "@/lib/utils";
 import type { DateBounds } from "@/lib/field-dashboard";
 import { fmtDur, ninjaRows, repairTurnaround, turnaround, type RAssignment, type REvent, type RTrip } from "@/lib/field-ops-report";
 
@@ -60,42 +59,38 @@ function useNinjaOps(bounds: DateBounds, storeSel: string[]) {
 }
 
 const HEAD = ["Ninja", "Assigned", "Accepted", "Rejected", "Reassigned", "Completed", "Pickups", "Drops", "On-site", "Failed", "Completion", "Time to accept", "Trip duration"];
-const FZ = { ["--rox-frozen-offset" as string]: "0px" } as React.CSSProperties;
+type OpsRow = ReturnType<typeof useNinjaOps>["ninjas"][number];
 
 export function NinjaOps({ bounds, storeSel, q }: { bounds: DateBounds; storeSel: string[]; q?: string }) {
   const ops = useNinjaOps(bounds, storeSel);
   const rows = useMemo(() => ops.ninjas.filter((r) => !q || r.name.toLowerCase().includes(q.toLowerCase())), [ops.ninjas, q]);
   const paged = usePaged(rows, `${bounds.from}|${q}|${storeSel.join(",")}`);
   const t = (k: "assignments" | "accepted" | "rejected" | "reassigned" | "completed" | "pickups" | "drops" | "onsite" | "failed") => rows.reduce((s, r) => s + r[k], 0);
+  const n = (k: "assignments" | "accepted" | "rejected" | "reassigned" | "completed" | "pickups" | "drops" | "onsite" | "failed", label: string, width = 120, cls?: (r: OpsRow) => string | false): FCol<OpsRow> =>
+    ({ key: k, label, width, render: (r) => r[k] || <Dash />, foot: t(k), cellClass: cls });
+  const grid = useFieldGrid<OpsRow>("activity_operations", [
+    { key: "ninja", label: "Ninja", width: 220, anchor: true, render: (r) => <NameText label={r.name} href={`/field/activity/${r.ninjaId}?tab=trips`} />, foot: <FootLabel sub={`${rows.length} Ninjas`} /> },
+    n("assignments", "Assigned"), n("accepted", "Accepted"), n("rejected", "Rejected", 120, (r) => r.rejected > 0 && "font-semibold text-rose-700"),
+    n("reassigned", "Reassigned", 130), n("completed", "Completed", 130, () => "font-semibold"),
+    n("pickups", "Pickups", 110), n("drops", "Drops", 100), n("onsite", "On-site", 110), n("failed", "Failed", 100, (r) => r.failed > 0 && "text-amber-700"),
+    { key: "rate", label: "Completion", width: 130, render: (r) => <b>{Math.round(r.completionRate * 100)}%</b>, foot: t("accepted") ? `${Math.round((t("completed") / Math.max(1, t("accepted"))) * 100)}%` : "—" },
+    { key: "accept", label: "Time to accept", width: 150, render: (r) => fmtDur(r.medianAcceptMs) },
+    { key: "trip", label: "Trip duration", width: 150, render: (r) => fmtDur(r.medianTripMs) },
+  ]);
   useRegisterSheets(useMemo(() => ops.loading ? null : [
     { name: "Ninja operations", headers: HEAD, rows: rows.map((r) => [r.name, r.assignments, r.accepted, r.rejected, r.reassigned, r.completed, r.pickups, r.drops, r.onsite, r.failed, `${Math.round(r.completionRate * 100)}%`, fmtDur(r.medianAcceptMs), fmtDur(r.medianTripMs)]) },
     { name: "Turnaround", headers: ["Stage", "Median", "Trips measured"], rows: ops.tat.map((x) => [x.label, fmtDur(x.medianMs), x.samples]) },
   ], [ops.loading, rows, ops.tat]));
   if (!ops.available) return <Unavailable text="Ninja trip records are available when RepairOX is connected to the database." />;
   if (ops.err) return <LoadError what="Ninja trips" err={ops.err} />;
-  const assigned = t("assignments"), rejected = t("rejected");
   return (
     <div className="rox-lock-fill space-y-4">
       <KpiStrip loading={ops.loading} items={ops.tat.slice(0, 4).map((x) => ({ label: x.label, value: fmtDur(x.medianMs), sub: x.samples ? `median of ${x.samples} trip${x.samples > 1 ? "s" : ""}` : "not enough data yet", icon: Clock }))} />
       <ViewBar info="How each Ninja handles assignments in the month: accepted, rejected or reassigned, how fast they accept and how long a trip takes. Counted by the day the trip was created.">
-        <span className="text-[12.5px] text-muted-foreground">{assigned} assignments · <b className={rejected ? "text-rose-700" : ""}>{rejected} rejected</b> · {t("completed")} completed</span>
+        <span className="mr-2 text-[14px] text-muted-foreground"><b className="text-foreground">{t("assignments")}</b> assignments · <b className={t("rejected") ? "text-rose-700" : "text-foreground"}>{t("rejected")}</b> rejected · <b className="text-foreground">{t("completed")}</b> completed</span>
+        {grid.menus}
       </ViewBar>
-      <DataTable cols={HEAD} first={210} minWidth={1300} empty={ops.loading ? "Loading…" : rows.length ? null : "No Ninja trips this month."}
-        foot={<tr className="align-middle"><FootName sub={`${rows.length} Ninjas`} />{(["assignments", "accepted", "rejected", "reassigned", "completed", "pickups", "drops", "onsite", "failed"] as const).map((k) => <td key={k} className={C}>{t(k)}</td>)}
-          <td className={C}>{assigned ? `${Math.round((t("completed") / Math.max(1, t("accepted"))) * 100)}%` : "—"}</td><td className={C} /><td className={C} /></tr>}>
-        {paged.slice.map((r) => (
-          <tr key={r.ninjaId} className="rox-table-row align-middle hover:bg-muted/40">
-            <td className="rox-frozen rox-frozen-left rox-frozen-left-edge px-4 py-3 text-left" style={FZ}><Link href={`/field/activity/${r.ninjaId}?tab=trips`} className="block truncate text-[13px] font-bold uppercase tracking-wide hover:text-[#4361EE]">{r.name}</Link></td>
-            <td className={C}>{r.assignments}</td><td className={C}>{r.accepted}</td>
-            <td className={cn(C, r.rejected > 0 && "font-semibold text-rose-700")}>{r.rejected || <Dash />}</td>
-            <td className={C}>{r.reassigned || <Dash />}</td><td className={cn(C, "font-semibold")}>{r.completed}</td>
-            <td className={C}>{r.pickups || <Dash />}</td><td className={C}>{r.drops || <Dash />}</td><td className={C}>{r.onsite || <Dash />}</td>
-            <td className={cn(C, r.failed > 0 && "text-amber-700")}>{r.failed || <Dash />}</td>
-            <td className={cn(C, "font-semibold")}>{Math.round(r.completionRate * 100)}%</td>
-            <td className={C}>{fmtDur(r.medianAcceptMs)}</td><td className={C}>{fmtDur(r.medianTripMs)}</td>
-          </tr>
-        ))}
-      </DataTable>
+      <FieldGrid grid={grid} rows={paged.slice} rowKey={(r) => r.ninjaId} foot empty={ops.loading ? "Loading…" : rows.length ? null : "No Ninja trips this month."} />
       {paged.footer("Ninja")}
     </div>
   );

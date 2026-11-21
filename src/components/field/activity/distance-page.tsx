@@ -2,13 +2,12 @@
 /* Field Activity → Distance & fuel. Summary per Ninja · Days to review (missing readings / photos, GPS
    mismatches, very long days — click to fix) · Km by month for the year. Fuel = km x the rate in the rules. */
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { AlertTriangle, Camera, Fuel, Gauge, Route } from "lucide-react";
 import { useActivity, useRegisterSheets } from "@/components/field/activity/activity-shell";
 import { useAttendance } from "@/components/field/activity/use-attendance";
-import { C, DataTable, Dash, FootName, KpiStrip, LoadError, Unavailable, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { KpiStrip, LoadError, Unavailable, ViewBar, usePaged } from "@/components/field/activity/kit";
+import { Dash, FieldGrid, FootLabel, NameText, useFieldGrid, type FCol } from "@/components/field/grid";
 import { DayDialog } from "@/components/field/insights/attendance-section";
-import { NameCell } from "@/components/field/dashboard/dashboard-table";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
@@ -21,7 +20,6 @@ type View = "summary" | "review" | "months";
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 const inr = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 const dayLabel = (s: string) => { const [y, m, d] = s.split("-").map(Number); return new Date(y, m - 1, d).toLocaleDateString("en-IN", { weekday: "short", day: "numeric", month: "short" }); };
-const FZ = { ["--rox-frozen-offset" as string]: "0px" } as React.CSSProperties;
 const reasons = (d: DayCell) => [d.missingReading && "No odometer reading", d.kmCheck && KM_CHECK_LABEL[d.kmCheck], d.kmFlag && "More than 300 km in a day", d.missingPhoto && "Odometer photo missing"].filter(Boolean) as string[];
 
 export function DistancePage() {
@@ -46,6 +44,33 @@ export function DistancePage() {
     { name: `Km by month ${year}`, headers: ["Ninja", ...MONTHS, "Total"], rows: kmYear.map(({ n, k }) => [n.name, ...k, k.reduce((t, x) => t + x, 0)]) },
   ], [loading, months, review, kmYear, year]));
 
+  type MR = (typeof months)[number]; type RR = (typeof review)[number]; type YR = (typeof kmYear)[number];
+  const wk = (m: MR["m"]) => m.summary.present + m.summary.halfDay;
+  const flagCol = (k: "missingReadings" | "kmChecks" | "missingPhotos", label: string, tone: string): FCol<MR> =>
+    ({ key: k, label, width: 140, render: ({ m }) => m.summary[k] || <Dash />, cellClass: ({ m }) => m.summary[k] > 0 && `font-semibold ${tone}`, foot: s(k) });
+  const sumGrid = useFieldGrid<MR>("activity_distance_summary", [
+    { key: "ninja", label: "Ninja", width: 240, anchor: true, render: ({ n }) => <NameText label={n.name} href={`/field/activity/${n.id}?tab=attendance`} />, foot: <FootLabel sub={`${months.length} Ninjas`} /> },
+    { key: "worked", label: "Days worked", width: 140, render: ({ m }) => wk(m), foot: worked },
+    { key: "km", label: "Distance", width: 150, cellClass: () => "font-semibold", render: ({ m }) => `${m.summary.totalKm.toLocaleString("en-IN")} km`, foot: `${s("totalKm").toLocaleString("en-IN")} km` },
+    { key: "fuel", label: "Fuel", width: 140, render: ({ m }) => inr(m.summary.fuel), foot: inr(s("fuel")) },
+    { key: "perday", label: "Km per day", width: 140, render: ({ m }) => (wk(m) ? Math.round(m.summary.totalKm / wk(m)) : <Dash />), foot: worked ? Math.round(s("totalKm") / worked) : 0 },
+    flagCol("missingReadings", "No reading", "text-amber-700"), flagCol("kmChecks", "GPS checks", "text-rose-700"), flagCol("missingPhotos", "No photo", "text-amber-700"),
+  ]);
+  const revGrid = useFieldGrid<RR>("activity_distance_review", [
+    { key: "ninja", label: "Ninja", width: 230, anchor: true, render: ({ n }) => <NameText label={n.name} href={`/field/activity/${n.id}?tab=attendance`} /> },
+    { key: "day", label: "Day", width: 150, render: ({ d }) => dayLabel(d.date) },
+    { key: "odo", label: "Odometer", width: 130, render: ({ d }) => (d.km != null ? `${d.km} km` : <Dash />) },
+    { key: "gps", label: "GPS", width: 120, render: ({ d }) => (d.gpsKm != null ? `${d.gpsKm} km` : <Dash />) },
+    { key: "why", label: "What to check", width: 380, align: "left", render: ({ d }) => <span className="flex items-start gap-2">{d.kmCheck ? <AlertTriangle className="mt-1 h-4 w-4 shrink-0 text-rose-600" /> : <Gauge className="mt-1 h-4 w-4 shrink-0 text-amber-600" />}{reasons(d).join(" · ")}</span> },
+    { key: "act", label: "Action", width: 120, actions: true, render: ({ n, d }) => <Button size="sm" variant="outline" onClick={() => setOpen({ ninja: n, cell: d })}>{canManage ? "Fix" : "Open"}</Button> },
+  ]);
+  const yearGrid = useFieldGrid<YR>("activity_distance_months", [
+    { key: "ninja", label: "Ninja", width: 220, anchor: true, render: ({ n }) => <NameText label={n.name} href={`/field/activity/${n.id}`} />, foot: <FootLabel /> },
+    ...MONTHS.map((mo, i): FCol<YR> => ({ key: `m${i}`, label: mo, width: 92, render: ({ k }) => k[i] || <Dash />,
+      cellClass: () => `${year}-${String(i + 1).padStart(2, "0")}` === a.ym && "!bg-[#EEF1FD] font-semibold", foot: kmYear.reduce((t, x) => t + x.k[i], 0) || "—" })),
+    { key: "total", label: "Total", width: 120, cellClass: () => "font-bold", render: ({ k }) => k.reduce((t, x) => t + x, 0).toLocaleString("en-IN"), foot: kmYear.reduce((t, x) => t + x.k.reduce((p, q) => p + q, 0), 0).toLocaleString("en-IN") },
+  ]);
+  const cur = view === "summary" ? sumGrid : view === "review" ? revGrid : yearGrid;
   if (!supabase) return <Unavailable text="Distance & fuel is available when RepairOX is connected to the database." />;
   if (err) return <LoadError what="distance" err={err} />;
   const empty = loading ? "Loading…" : months.length === 0 ? "No Ninjas found for the stores and search you chose." : null;
@@ -59,55 +84,13 @@ export function DistancePage() {
       ]} />
       <ViewBar value={view} onChange={setView}
         options={[{ label: "Summary", value: "summary" }, { label: `Days to review${review.length ? ` (${review.length})` : ""}`, value: "review" }, { label: `Km by month · ${year}`, value: "months" }]}
-        info={`Km = end − start odometer reading from the Ninja app. Fuel = km × ₹${policy.fuelRatePerKm}. GPS only covers the time between accepting a job and handover, so it is normally lower than the odometer; a big gap is flagged for review.`} />
+        info={`Km = end − start odometer reading from the Ninja app. Fuel = km × ₹${policy.fuelRatePerKm}. GPS only covers the time between accepting a job and handover, so it is normally lower than the odometer; a big gap is flagged for review.`}>
+        {cur.menus}
+      </ViewBar>
 
-      {view === "summary" && <>
-        <DataTable cols={["Ninja", "Days worked", "Distance", "Fuel", "Km per day", "No reading", "GPS checks", "No photo"]} minWidth={1000} empty={empty}
-          foot={<tr className="align-middle"><FootName sub={`${months.length} Ninjas`} /><td className={C}>{worked}</td><td className={C}>{s("totalKm").toLocaleString("en-IN")} km</td><td className={C}>{inr(s("fuel"))}</td><td className={C}>{worked ? Math.round(s("totalKm") / worked) : 0}</td><td className={C}>{s("missingReadings")}</td><td className={C}>{s("kmChecks")}</td><td className={C}>{s("missingPhotos")}</td></tr>}>
-          {pagedN.slice.map(({ n, m }) => { const w = m.summary.present + m.summary.halfDay; return (
-            <tr key={n.id} className="rox-table-row align-middle hover:bg-muted/40">
-              <td className="rox-frozen rox-frozen-left rox-frozen-left-edge px-4 py-3 text-left" style={FZ}><Link href={`/field/activity/${n.id}?tab=attendance`} className="block truncate text-[13px] font-bold uppercase tracking-wide hover:text-[#4361EE]">{n.name}</Link></td>
-              <td className={C}>{w}</td>
-              <td className={cn(C, "font-semibold")}>{m.summary.totalKm.toLocaleString("en-IN")} km</td>
-              <td className={C}>{inr(m.summary.fuel)}</td>
-              <td className={C}>{w ? Math.round(m.summary.totalKm / w) : <Dash />}</td>
-              <td className={cn(C, m.summary.missingReadings > 0 && "font-semibold text-amber-700")}>{m.summary.missingReadings || <Dash />}</td>
-              <td className={cn(C, m.summary.kmChecks > 0 && "font-semibold text-rose-700")}>{m.summary.kmChecks || <Dash />}</td>
-              <td className={cn(C, m.summary.missingPhotos > 0 && "font-semibold text-amber-700")}>{m.summary.missingPhotos || <Dash />}</td>
-            </tr>); })}
-        </DataTable>
-        {pagedN.footer("Ninja")}
-      </>}
-
-      {view === "review" && <>
-        <DataTable cols={["Ninja", "Day", "Odometer", "GPS", "What to check", ""]} minWidth={980} widths={[150, 120, 110, undefined, 110]} empty={loading ? "Loading…" : review.length ? null : "Nothing to review this month."}>
-          {pagedR.slice.map(({ n, d }) => (
-            <tr key={`${n.id}-${d.date}`} className="rox-table-row align-middle hover:bg-muted/40">
-              <NameCell label={n.name} />
-              <td className={C}>{dayLabel(d.date)}</td>
-              <td className={C}>{d.km != null ? `${d.km} km` : <Dash />}</td>
-              <td className={C}>{d.gpsKm != null ? `${d.gpsKm} km` : <Dash />}</td>
-              <td className="px-3 py-4 text-[13px]"><span className="flex items-start gap-1.5">{d.kmCheck ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-600" /> : <Gauge className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />}{reasons(d).join(" · ")}</span></td>
-              <td className="px-3 py-3 text-right"><Button size="sm" variant="outline" onClick={() => setOpen({ ninja: n, cell: d })}>{canManage ? "Fix" : "Open"}</Button></td>
-            </tr>
-          ))}
-        </DataTable>
-        {pagedR.footer("day")}
-      </>}
-
-      {view === "months" && <>
-        <DataTable cols={["Ninja", ...MONTHS, "Total"]} first={190} minWidth={1180} empty={loading ? "Loading…" : kmYear.length ? null : "No data."}
-          foot={<tr className="align-middle"><FootName />{MONTHS.map((_, i) => <td key={i} className={C}>{kmYear.reduce((t, x) => t + x.k[i], 0) || "—"}</td>)}<td className={C}>{kmYear.reduce((t, x) => t + x.k.reduce((p, q) => p + q, 0), 0).toLocaleString("en-IN")}</td></tr>}>
-          {pagedY.slice.map(({ n, k }) => (
-            <tr key={n.id} className="rox-table-row align-middle hover:bg-muted/40">
-              <NameCell label={n.name} />
-              {k.map((v, i) => <td key={i} className={cn(C, `${year}-${String(i + 1).padStart(2, "0")}` === a.ym && "bg-[#EEF1FD]/60 font-semibold")}>{v || <Dash />}</td>)}
-              <td className={cn(C, "font-bold")}>{k.reduce((t, x) => t + x, 0).toLocaleString("en-IN")}</td>
-            </tr>
-          ))}
-        </DataTable>
-        {pagedY.footer("Ninja")}
-      </>}
+      {view === "summary" && <><FieldGrid grid={sumGrid} rows={pagedN.slice} rowKey={(r) => r.n.id} foot empty={empty} />{pagedN.footer("Ninja")}</>}
+      {view === "review" && <><FieldGrid grid={revGrid} rows={pagedR.slice} rowKey={(r) => `${r.n.id}-${r.d.date}`} empty={loading ? "Loading…" : review.length ? null : "Nothing to review this month."} />{pagedR.footer("day")}</>}
+      {view === "months" && <><FieldGrid grid={yearGrid} rows={pagedY.slice} rowKey={(r) => r.n.id} foot empty={loading ? "Loading…" : kmYear.length ? null : "No data."} />{pagedY.footer("Ninja")}</>}
 
       {open && <DayDialog ninja={open.ninja} cell={open.cell} tz={a.tz} policy={policy} canManage={canManage}
         mark={yearMarks.find((m) => m.staffId === open.ninja.id && m.day === open.cell.date)} onClose={() => setOpen(null)}

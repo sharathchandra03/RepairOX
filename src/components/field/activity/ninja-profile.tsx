@@ -80,7 +80,7 @@ export function NinjaProfile({ id }: { id: string }) {
   if (err) return <p className="rounded-xl bg-rose-50 px-4 py-3 text-sm text-rose-700">Could not load this Ninja: {err}</p>;
   if (loading && !row) return <div className="space-y-4"><div className="h-40 animate-pulse rounded-2xl bg-muted" /><div className="h-72 animate-pulse rounded-2xl bg-muted" /></div>;
   if (!row || !roster || !pay) return (
-    <div className="space-y-5"><BackPill href="/field/activity" label="Back to Field Activity" />
+    <div className="space-y-5"><BackPill href="/field/activity" label="Back" className="h-8 shrink-0 px-3 text-[12px]" />
       <p className="rounded-2xl border border-dashed border-border bg-card p-12 text-center text-[14px] text-muted-foreground">This Field Engineer was not found in the stores you can see.</p></div>
   );
   const { n, s, live, month, frozen } = row;
@@ -120,7 +120,7 @@ export function NinjaProfile({ id }: { id: string }) {
   return (
     <div className="space-y-6 pb-10">
       <div className="flex flex-wrap items-center gap-3">
-        <BackPill href="/field/activity" label="Back to Field Activity" />
+        <BackPill href="/field/activity" label="Back" className="h-8 shrink-0 px-3 text-[12px]" />
         <div className="ml-auto w-[170px]"><Select className="h-[36px]" value={a.ym} onChange={(e) => a.setYm(e.target.value)} options={monthOpts} /></div>
       </div>
 
@@ -178,12 +178,12 @@ export function NinjaProfile({ id }: { id: string }) {
           {tab === "attendance" && (
             <DetailSection icon={CalendarCheck2} title="Day by day" accent="blue">
               <div className="overflow-hidden rounded-xl border border-border">
-                <table className="w-full text-[13px]">
+                <table className="rox-zebra w-full text-[14.5px]">
                   <thead className="bg-[#EEF1FD] text-[10.5px] font-bold uppercase tracking-wider text-[#4361EE]"><tr>{["Day", "Status", "Punch in – out", "Worked", "Odometer", "Km", "GPS", ""].map((h) => <th key={h} className="px-3 py-2.5 text-left">{h}</th>)}</tr></thead>
                   <tbody>
                     {[...month.days].filter((d) => d.status !== "future" || d.markKind).reverse().map((d) => (
                       <tr key={d.date} className="border-t border-border hover:bg-muted/30">
-                        <td className="px-3 py-3 font-semibold">{dayLabel(d.date)}</td>
+                        <td className="px-3 py-3.5 font-semibold">{dayLabel(d.date)}</td>
                         <td className="px-3 py-3"><span className={cn("rounded px-1.5 py-0.5 text-[11px] font-bold ring-1 ring-inset", CHIP[d.status])}>{STATUS_LABEL[d.status]}</span></td>
                         <td className="px-3 py-3 text-muted-foreground">{d.punchIn ? `${formatClock(d.punchIn, { timeZone: a.tz })} – ${d.punchOut ? formatClock(d.punchOut, { timeZone: a.tz }) : "on duty"}` : "—"}</td>
                         <td className="px-3 py-3 tabular-nums">{d.netMs ? formatHm(d.netMs) : "—"}</td>
@@ -279,7 +279,7 @@ function TripsTable({ trips, loading, compact }: { trips: TripRow[]; loading: bo
   if (trips.length === 0) return <p className="text-[13px] text-muted-foreground">No trips this month.</p>;
   return (
     <div className="overflow-hidden rounded-xl border border-border">
-      <table className="w-full text-[13px]">
+      <table className="rox-zebra w-full text-[14.5px]">
         <thead className="bg-[#EEF1FD] text-[10.5px] font-bold uppercase tracking-wider text-[#4361EE]"><tr>{["Trip", "Type", "Customer", "Device", "Status", "Review"].map((h) => <th key={h} className="px-3 py-2.5 text-left">{h}</th>)}</tr></thead>
         <tbody>
           {trips.map((t) => (

@@ -151,16 +151,18 @@ export function PayBreakdown({ ninja, ym, tz, today, nowMs, roster, pay, ctx, ca
       {frozen && <p className="mb-3 rounded-xl bg-emerald-50 px-3.5 py-2.5 text-[12.5px] font-semibold text-emerald-900">Frozen payslip. {Math.abs(live.total - s.total) >= 1 ? `Live data now gives ${inr2(live.total)}; add an adjustment if the difference should be paid.` : "It matches the live data."}</p>}
       <div className="divide-y divide-border rounded-xl border border-border px-4">
         {line("Basic salary", `${inr(salaryFor(ctx.salaries, ninja.id, today))} / month, paid per day worked or on paid leave`, s.basic)}
-        {line("Daily trips", `${s.dailyDays6} days with 6+ trips, ${s.dailyDays9} with 9+`, s.daily)}
+        {line("Daily trips", s.dailyTierDays.map((t) => `${t.days} day${t.days === 1 ? "" : "s"} with ${t.minTrips}+`).join(" · ") || "No daily tiers", s.daily)}
         {line("Monthly slab", `${s.trips} trips counted${s.extraFromDistance ? ` (${s.extraFromDistance} from long distance)` : ""}${s.slabHeld ? ` · ${inr(s.slabHeld)} held for reviews` : ""}`, s.slab)}
-        {line("Reviews", `${s.verifiedReviews} verified 5★ reviews`, s.reviews)}
+        {line("Reviews", `${s.verifiedReviews} counted (${plan.reviewMinRating}★ and above${plan.reviewNeedsTicket ? ", on a ticket" : ""})`, s.reviews)}
         {line("Devices", `${s.macbookRepairs} MacBook · ${s.iphoneRepairs} iPhone`, s.devices)}
         {line("Organic leads", `${s.organicLeads} billed${s.leadGift ? " · gift unlocked 🎁" : ""}`, s.leads)}
         {line("Sunday", `${s.sundaysWorked} Sunday${s.sundaysWorked === 1 ? "" : "s"} worked${s.absences ? ` · ${s.absences} absence(s) this month` : ""}`, s.sunday)}
-        {line("Petrol", `${s.km} km × ${inr2(plan.petrolPerKm)}`, s.petrol)}
+        {line("Petrol", `${s.km} km × ${inr2(plan.petrolPerKm)}${plan.petrolMaxKmPerDay > 0 ? ` · max ${plan.petrolMaxKmPerDay} km a day` : ""}`, s.petrol)}
+        {s.fines > 0 && line("Absent fines", `${s.absences} absent day${s.absences === 1 ? "" : "s"} × ${inr2(plan.absentFine)}`, -s.fines)}
+        {s.capped > 0 && line("Monthly limit", `Incentives are capped at ${inr2(plan.incentiveCap)}`, -s.capped)}
         {line("Adjustments", `${adj.length} entr${adj.length === 1 ? "y" : "ies"}${post ? ` · ${inr2(post)} after close` : ""}`, frozen ? (frozen.summary.adjustments ?? 0) + post : s.adjustments)}
         <div className="flex items-baseline gap-3 py-3 text-[15px]"><span className="w-[170px] shrink-0 font-extrabold">Total payable</span>
-          <span className="min-w-0 flex-1 text-[12px] font-normal text-muted-foreground">{s.locked > 0 ? `${inr2(s.locked)} more is earned but locked (target not met)` : ""}</span>
+          <span className="min-w-0 flex-1 text-[12px] font-normal text-muted-foreground">{s.locked > 0 ? `${inr2(s.locked)} more is earned but locked (target ${s.gateTrips} trips not met)` : ""}{s.rounding ? ` · rounded ${s.rounding > 0 ? "+" : "−"}${inr2(Math.abs(s.rounding))}` : ""}</span>
           <span className="text-[18px] font-extrabold tabular-nums">{inr2(s.total)}</span></div>
       </div>
 
@@ -179,7 +181,7 @@ export function PayBreakdown({ ninja, ym, tz, today, nowMs, roster, pay, ctx, ca
 
       <p className="mb-2 mt-8 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">Day by day{frozen ? " (live data)" : ""}</p>
       <div className="max-h-[360px] overflow-auto rounded-xl border border-border">
-        <table className="w-full text-[12.5px]">
+        <table className="rox-zebra w-full text-[14px]">
           <thead className="sticky top-0 bg-[#EEF1FD] text-[10.5px] font-bold uppercase tracking-wider text-[#4361EE]"><tr>{["Day", "Status", "Trips", "Basic", "Daily", "Slab", "Review", "Devices", "Sunday", "Petrol"].map((h) => <th key={h} className="px-2.5 py-2 text-left">{h}</th>)}</tr></thead>
           <tbody>
             {live.days.map((d) => (
