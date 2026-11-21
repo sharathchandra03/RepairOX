@@ -119,7 +119,7 @@ export function NotificationBell() {
             /* Compact circular red badge, lifted onto the upper-right of the bell
                with a card-coloured ring so it reads as a distinct pill (same
                visual quality as the Walk-In follow-up bell badge). */
-            <span className="absolute -right-0.5 -top-0.5 grid h-[17px] min-w-[17px] place-items-center rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-[#475686]">
+            <span className="absolute -right-0.5 -top-0.5 grid h-[17px] min-w-[17px] place-items-center rox-chrome-keep rounded-full bg-rose-500 px-1 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-[#475686]">
               {unread > 9 ? "9+" : unread}
             </span>
           )}

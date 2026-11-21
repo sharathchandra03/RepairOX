@@ -139,7 +139,7 @@ function ActivityLogInner() {
               aria-label={`Back to ${origin.label}`}
               title={`Back to ${origin.label}`}
             >
-              <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+              <ArrowLeft className="rox-back-arrow h-4 w-4" />
               Back to {origin.label}
             </button>
           ) : undefined

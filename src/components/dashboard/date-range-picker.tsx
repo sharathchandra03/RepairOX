@@ -119,7 +119,7 @@ function MonthYearSelector({
           onClick={onClose}
           className="inline-flex h-8 w-full items-center justify-center gap-1.5 rounded-full bg-[#2B3553] text-[12px] font-semibold text-white transition hover:bg-[#1B2238]"
         >
-          <ArrowLeft className="h-3.5 w-3.5" /> Back to calendar
+          <ArrowLeft className="rox-back-arrow h-3.5 w-3.5" /> Back to calendar
         </button>
       </div>
     </div>

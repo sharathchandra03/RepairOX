@@ -140,6 +140,19 @@ export function storeDayRows(legs: Leg[], date: string): StoreDayRow[] {
   return sortRows([...by.values()], (r) => r.label);
 }
 
+/** One row per store over a whole period (inclusive YYYY-MM-DD bounds; null = unbounded). */
+export function storePeriodRows(legs: Leg[], from: string | null, to: string | null): StoreDayRow[] {
+  const by = new Map<string, StoreDayRow>();
+  for (const l of legs) {
+    if (!isAssignedLeg(l) || (from && l.date < from) || (to && l.date > to)) continue;
+    const r = by.get(l.storeKey) ?? { key: l.storeKey, label: l.storeLabel, onsite: cell(), pickup: cell(), drop: cell(), total: 0, completed: 0 };
+    const c = r[l.type]; c.assigned++; r.total++;
+    if (isDoneLeg(l)) { c.completed++; r.completed++; }
+    by.set(l.storeKey, r);
+  }
+  return sortRows([...by.values()], (r) => r.label);
+}
+
 /** Average stars, one decimal; null when there are no reviews. */
 export const avgRating = (r: { reviews: number; ratingSum: number }): number | null =>
   r.reviews ? Math.round((r.ratingSum / r.reviews) * 10) / 10 : null;

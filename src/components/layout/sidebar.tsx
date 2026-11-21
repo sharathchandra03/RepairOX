@@ -33,7 +33,7 @@ const ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
 
 /* Nav item — icon always centred in collapsed mode, no overflow */
 /** Subtle icon motion on row hover (lift handled by the row itself). */
-const ICON_ANIM = "transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110 motion-reduce:transform-none";
+export const ICON_ANIM = "transition-transform duration-300 ease-out group-hover:-rotate-6 group-hover:scale-110 motion-reduce:transform-none";
 
 function NavItem({ item, collapsed, pathname, comingSoon, dark = false }: {
   item: NavItemDef;
@@ -88,19 +88,19 @@ function NavItem({ item, collapsed, pathname, comingSoon, dark = false }: {
           // glides to centre instead of snapping.
           "[transition:padding_360ms_cubic-bezier(0.4,0,0.2,1),background-color_200ms_ease,transform_220ms_cubic-bezier(0.22,1,0.36,1),box-shadow_220ms_ease]",
           collapsed ? "mx-auto w-10 justify-center px-0 py-2.5" : "gap-3 px-3 py-2.5",
-          active ? ("text-white") : comingSoon ? (dark ? "text-white/50 hover:bg-white/10 hover:text-white/75" : "text-slate-400 hover:bg-white/70 hover:text-slate-600") : dark ? "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white" : "text-slate-500 hover:bg-white hover:shadow-[0_6px_16px_-8px_rgba(67,97,238,0.35)] hover:text-slate-900"
+          active ? ("rox-nav-active text-white") : comingSoon ? (dark ? "text-white/50 hover:bg-white/10 hover:text-white/75" : "text-slate-400 hover:bg-white/70 hover:text-slate-600") : dark ? "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white" : "text-slate-500 hover:bg-white hover:shadow-[0_6px_16px_-8px_rgba(67,97,238,0.35)] hover:text-slate-900"
         )}
       >
         {active && (
           <motion.span
             layoutId="sidebar-active"
-            className={cn("absolute inset-0 rounded-xl", dark ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]" : "bg-[#4361EE] shadow-[0_8px_24px_-8px_rgba(67,97,238,0.45)]")}
+            className={cn("absolute inset-0 rounded-xl", dark ? "bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]" : "bg-[#4361EE] shadow-[0_8px_24px_-8px_rgba(67,97,238,0.45)]")}
             transition={{ type: "spring", stiffness: 380, damping: 30 }}
           />
         )}
         {/* Hover underline — sweeps in from the left and stays while hovered */}
         {!active && !collapsed && (
-          <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
+          <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[color:var(--chrome-line)] transition-transform duration-300 ease-out group-hover:scale-x-100" />
         )}
         <span className="relative inline-flex h-5 w-5 shrink-0 items-center justify-center">
           <Icon className={cn(ICON_ANIM, "h-[18px] w-[18px]", active ? ("text-white") : comingSoon ? "text-zinc-300" : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
@@ -180,7 +180,7 @@ function ExpandableNavSection({ group, collapsed, pathname, dark = false }: {
       >
         {/* Hover underline — sweeps in from the left */}
         {!childActive && (
-          <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
+          <span className="pointer-events-none absolute bottom-1 left-3 right-3 h-0.5 origin-left scale-x-0 rounded-full bg-[color:var(--chrome-line)] transition-transform duration-300 ease-out group-hover:scale-x-100" />
         )}
         <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center">
           <Icon className={cn(ICON_ANIM, "h-[18px] w-[18px]", childActive ? (dark ? "text-white" : "text-[#4361EE]") : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-700")} />
@@ -226,7 +226,7 @@ function ExpandableNavSection({ group, collapsed, pathname, dark = false }: {
                   >
                     {/* Hover underline — sweeps in from the left */}
                     {!active && (
-                      <span className="pointer-events-none absolute bottom-0.5 left-2.5 right-2.5 h-0.5 origin-left scale-x-0 rounded-full bg-[#4361EE] transition-transform duration-300 ease-out group-hover:scale-x-100" />
+                      <span className="pointer-events-none absolute bottom-0.5 left-2.5 right-2.5 h-0.5 origin-left scale-x-0 rounded-full bg-[color:var(--chrome-line)] transition-transform duration-300 ease-out group-hover:scale-x-100" />
                     )}
                     <span className="inline-flex h-4 w-4 shrink-0 items-center justify-center">
                       <ChildIcon className={cn(ICON_ANIM, "h-[15px] w-[15px]", active ? "text-[#4361EE]" : dark ? "text-white group-hover:text-white" : "text-zinc-400 group-hover:text-zinc-600")} />
@@ -280,7 +280,7 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed, dark = false 
                 className={cn(
                   "flex h-8 w-8 items-center justify-center rounded-lg transition",
                   active === w.id
-                    ? (dark ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white" : "bg-[#4361EE] text-white")
+                    ? (dark ? "rox-nav-active bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] text-white" : "bg-[#4361EE] text-white")
                     : dark ? "text-white/90 hover:bg-white/15 hover:text-white" : "text-zinc-500 hover:bg-white hover:text-zinc-700"
                 )}
               >
@@ -305,7 +305,7 @@ function WorkspaceSwitcher({ active, collapsed, onChange, allowed, dark = false 
           className={cn(
             "flex-1 truncate rounded-lg px-1.5 py-1.5 text-[11.5px] font-semibold leading-tight transition",
             active === w.id
-              ? (dark ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white shadow-sm" : "bg-[#4361EE] text-white shadow-sm")
+              ? (dark ? "rox-nav-active bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] text-white shadow-sm" : "bg-[#4361EE] text-white shadow-sm")
               : dark ? "text-white/90 hover:text-white" : "text-zinc-500 hover:text-zinc-800"
           )}
         >
@@ -346,7 +346,7 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
   return (
     <aside
       className={cn(
-        "rox-sidebar z-30 hidden h-full shrink-0 flex-col border-r-2 border-[#33406B] shadow-[4px_0_14px_-8px_rgba(30,40,80,0.45)] bg-gradient-to-b from-[#4D5C8C] via-[#455383] to-[#3C4977] text-white lg:flex",
+        "rox-sidebar z-30 hidden h-full shrink-0 flex-col border-r-2 border-[color:var(--chrome-side-border)] shadow-[4px_0_14px_-8px_rgba(30,40,80,0.45)] bg-gradient-to-b from-[color:var(--chrome-side-from)] via-[color:var(--chrome-side-via)] to-[color:var(--chrome-side-to)] text-white lg:flex",
         // Smooth collapse/expand: a single, well-tuned width transition with a
         // gentle ease-in-out curve. `will-change: width` lets the browser
         // promote the animation so it stays fluid, and the inner content fades
@@ -377,11 +377,11 @@ export function Sidebar({ collapsed, setCollapsed, activeWorkspace, setActiveWor
           onClick={() => setCollapsed(!collapsed)}
           whileHover={{ scale: 1.08 }}
           whileTap={{ scale: 0.95 }}
-          className="group relative grid h-[28.2px] w-[28.2px] shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white transition-transform"
+          className="rox-chrome-keep group relative grid h-[28.2px] w-[28.2px] shrink-0 place-items-center rounded-full bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] text-[color:var(--chrome-pill-text)] transition-transform"
           aria-label="Toggle sidebar"
         >
           {/* Soft blue outer glow, matching the POS button */}
-          <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[#4361EE]/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
+          <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[color:var(--chrome-pill-to)] opacity-60 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
           {/* Double chevron — a second arrow sits just inside the first and
               shares the same nudge animation for a cohesive "collapse" cue. */}
           {collapsed ? (

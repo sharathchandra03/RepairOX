@@ -81,7 +81,7 @@ export function Topbar({
   }
 
   return (
-    <header className="border-b-2 border-[#33406B] bg-gradient-to-r from-[#4D5C8C] via-[#475686] to-[#3F4C7B] shadow-[0_10px_24px_-16px_rgba(30,40,80,0.6)]">
+    <header className="rox-chrome-head border-b-2 border-[color:var(--chrome-head-border)] bg-gradient-to-r from-[color:var(--chrome-head-from)] via-[color:var(--chrome-head-via)] to-[color:var(--chrome-head-to)] shadow-[0_10px_24px_-16px_rgba(30,40,80,0.6)]">
       <div className="rox-topbar flex h-[60px] items-center gap-3 px-4 sm:px-6">
         {/* LEFT — context selectors */}
         <div className="flex shrink-0 items-center gap-3">
@@ -177,7 +177,7 @@ export function Topbar({
         <Can permission="use_pos">
           <button
             onClick={() => router.push("/pos")}
-            className="group relative hidden md:inline-flex items-center gap-1.5 rounded-full h-9 px-4 bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white font-semibold text-[13px] transition-all duration-300 hover:scale-[1.04] active:scale-[0.97]"
+            className="group relative hidden md:inline-flex items-center gap-1.5 rox-chrome-keep rounded-full h-9 px-4 bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white font-semibold text-[13px] transition-all duration-300 hover:scale-[1.04] active:scale-[0.97]"
           >
             {/* Thin glowing border light */}
             <span className="absolute -inset-[1.5px] rounded-full bg-transparent ring-[1.5px] ring-white/40 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
@@ -201,7 +201,7 @@ export function Topbar({
         >
           <MessageCircle className="h-[22px] w-[22px]" strokeWidth={1.75} />
           {CHAT_UNREAD_TOTAL > 0 && (
-            <span className="absolute -top-1 -right-1 flex h-[15px] min-w-[15px] items-center justify-center rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#475686]">
+            <span className="absolute -top-1 -right-1 flex h-[15px] min-w-[15px] items-center justify-center rox-chrome-keep rounded-full bg-rose-500 px-1 text-[9px] font-bold leading-none text-white ring-2 ring-[#475686]">
               {CHAT_UNREAD_TOTAL}
             </span>
           )}
@@ -228,13 +228,13 @@ export function Topbar({
               onClick={toggle}
               className={cn(
                 "hidden md:flex shrink-0 items-center gap-2.5 rounded-full border pl-1 pr-3 py-1 transition",
-                isPreviewing ? "border-amber-300/60 bg-amber-300/15" : "border-white/40 bg-white/[0.2] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-white/[0.28] hover:border-white/60", open && "border-white/50 bg-white/20"
+                isPreviewing ? "rox-chrome-keep border-amber-300 bg-amber-500 text-white" : "rox-chrome-keep border-[#6F87FF] bg-[#4361EE] text-white shadow-[inset_0_1px_0_rgba(255,255,255,0.25),0_4px_12px_-6px_rgba(15,23,55,0.5)] hover:bg-[#3A52D8]", open && "bg-[#3A52D8]"
               )}
             >
               <span className="rounded-full ring-2 ring-white/40"><Avatar name={displayName} src={currentUser?.avatarUrl} size={30} /></span>
               <div className={cn("max-w-[110px] text-left leading-tight", activeWorkspace === "leads" && "hidden xl:block")}>
                 <p className="truncate whitespace-nowrap text-[12px] font-semibold text-white" title={displayName}>{displayName}</p>
-                <p className="truncate whitespace-nowrap text-[10px] text-[#C7D2FF]" title={role.label}>{role.label}</p>
+                <p className="truncate whitespace-nowrap text-[10px] text-white/80" title={role.label}>{role.label}</p>
               </div>
               <ChevronDown className={cn("h-3 w-3 text-white/80 transition-transform", open && "rotate-180")} />
             </button>

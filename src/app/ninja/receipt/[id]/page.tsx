@@ -69,7 +69,7 @@ function Receipt() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between gap-2 print:hidden">
-        <button onClick={() => router.back()} className="inline-flex h-10 items-center gap-2 rounded-full bg-[#2B3553] px-4 text-[13px] font-semibold text-white"><ArrowLeft className="h-4 w-4" />Back</button>
+        <button onClick={() => router.back()} className="inline-flex h-10 items-center gap-2 rounded-full bg-[#2B3553] px-4 text-[13px] font-semibold text-white"><ArrowLeft className="rox-back-arrow h-4 w-4" />Back</button>
         <div className="flex gap-2">
           <Btn tone="ghost" className="!min-h-[40px] !px-3 text-[13px]" onClick={() => void share()}><Share2 className="h-4 w-4" />Share</Btn>
           <Btn className="!min-h-[40px] !px-3 text-[13px]" onClick={() => window.print()}><Printer className="h-4 w-4" />Print / PDF</Btn>

@@ -27,6 +27,7 @@ import {
 import { supabase, isSupabaseConfigured } from "@/lib/supabase";
 import { usePermissions } from "@/lib/permissions-context";
 import { setTimeFormat } from "@/lib/time-format";
+import { normalizeChoice, type ChromeChoice } from "@/lib/chrome-themes";
 import { DEFAULT_TICKET_STATUS_CONFIG, normalizeStatusConfig, type TicketStatusConfig } from "@/lib/ticket-status-config";
 import { DEFAULT_ORDER as TICKET_DEFAULT_ORDER, DEFAULT_VISIBLE as TICKET_DEFAULT_VISIBLE } from "@/lib/ticket-columns";
 
@@ -208,6 +209,8 @@ export type StoreSettings = {
    * `defaultLeadStoreId`; 'multi' = authorized users pick an authorized store.
    * Changing the mode / default NEVER rewrites historical leads. */
   leadStoreMode: "single" | "multi";
+  /** Sidebar / header colour theme (Settings → System → Preferences). null = built-in default. */
+  chromeTheme: ChromeChoice | null;
   /** The store every NEW lead is assigned to in Single-Store mode ("" = none
    *  configured yet — a configuration error that blocks lead creation). */
   defaultLeadStoreId: string;
@@ -413,6 +416,7 @@ CLAIM PROCEDURE:
   // Lead Management defaults to Single-Store (the simplest experience). A fresh
   // org must still pick a Default Lead Store before leads can be created.
   leadStoreMode: "single",
+  chromeTheme: null,
   defaultLeadStoreId: "",
   leadFirstResponseSlaMinutes: null,
   fieldAcceptWindowMinutes: null,
@@ -525,6 +529,7 @@ function dbRowToSettings(row: Record<string, unknown>): StoreSettings {
       const m = typeof row.lead_store_mode === "string" ? row.lead_store_mode.toLowerCase() : "";
       return m === "multi" ? "multi" : "single";
     })(),
+    chromeTheme: normalizeChoice(typeof row.chrome_theme === "string" ? (() => { try { return JSON.parse(row.chrome_theme as string); } catch { return null; } })() : row.chrome_theme),
     defaultLeadStoreId: (row.default_lead_store_id as string) ?? DEFAULT_STORE_SETTINGS.defaultLeadStoreId,
     leadFirstResponseSlaMinutes: typeof row.lead_first_response_sla_minutes === "number" && row.lead_first_response_sla_minutes > 0
       ? (row.lead_first_response_sla_minutes as number)
@@ -629,6 +634,7 @@ function settingsToDbPayload(updates: Partial<StoreSettings>): Record<string, un
     invoiceSlogan: "invoice_slogan",
     invoiceWarrantyText: "invoice_warranty_text",
     leadStoreMode: "lead_store_mode",
+    chromeTheme: "chrome_theme",
     defaultLeadStoreId: "default_lead_store_id",
     leadFirstResponseSlaMinutes: "lead_first_response_sla_minutes",
     fieldAcceptWindowMinutes: "field_accept_window_minutes",

@@ -78,7 +78,7 @@ export default function MyAccountPage() {
           aria-label="Go back"
           title="Go back"
         >
-          <ArrowLeft className="h-4 w-4 transition-transform duration-200 group-hover:-translate-x-0.5" />
+          <ArrowLeft className="rox-back-arrow h-4 w-4" />
           Back
         </button>
         <nav className="text-[11px] font-medium text-[#4361EE]/70" aria-label="Breadcrumb">

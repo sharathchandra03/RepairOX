@@ -4,6 +4,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import { Sidebar, MobileSidebar } from "./sidebar";
 import { InventorySidebar } from "@/components/inventory/inventory-sidebar";
 import { isInventoryPath } from "@/lib/inventory-nav";
+import { ChromeThemeApplier } from "@/components/layout/chrome-theme-applier";
 import { Topbar } from "./topbar";
 import { motion } from "framer-motion";
 import { usePathname, useRouter } from "next/navigation";
@@ -254,6 +255,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </FeatureGate>
         </motion.main>
       </div>
+      <ChromeThemeApplier />
       <InternalChat open={chatOpen} onOpenChange={setChatOpen} />
     </div>
     </ReportContextProvider>

@@ -3,6 +3,7 @@
 import { Monitor, Moon, Sun, Palette } from "lucide-react";
 import { SettingsPage, SettingsSection } from "@/components/settings/settings-page";
 import { useTheme, type Theme } from "@/lib/theme-context";
+import { ChromeThemeSettings } from "@/components/settings/chrome-theme-settings";
 import { cn } from "@/lib/utils";
 
 /* ─── Appearance / theme choice card ─────────────────────────────────── */
@@ -72,7 +73,7 @@ export default function PreferencesPage() {
         { label: "Preferences" },
       ]}
       title="Preferences"
-      description="Personalise how RepairOX looks for your account. These preferences are saved to your profile and follow you across devices."
+      description="Personalise how RepairOX looks. Light / Dark is saved to your own profile; sidebar and header colours are a company-wide setting."
     >
       <SettingsSection
         title="Appearance"
@@ -166,6 +167,13 @@ export default function PreferencesPage() {
             Your theme preference is stored on your account and applied automatically on every sign-in.
           </p>
         </fieldset>
+      </SettingsSection>
+      <SettingsSection
+        title="Sidebar & header colours"
+        description="The colour of the sidebar, the top bar and the active menu item. Saved once for the whole company, so every employee sees the same look."
+        icon={Palette}
+      >
+        <ChromeThemeSettings />
       </SettingsSection>
     </SettingsPage>
   );

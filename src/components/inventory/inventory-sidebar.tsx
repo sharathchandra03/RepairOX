@@ -3,7 +3,7 @@
 /* ──────────────────────────────────────────────────────────────────────────
    InventorySidebar — the dedicated sidebar shown on every /inventory page.
    The main RepairOX sidebar is swapped out (see app-shell.tsx); the user gets
-   back to it with the "RepairOX menu" pill at the top.
+   back to it with the "Main menu" pill at the top.
 
    • Sections are collapsible (accordion — only the active section is open) so a
      long module stays short.
@@ -22,7 +22,16 @@ import { Logo } from "@/components/ui/logo";
 import { ThinScroll } from "@/components/layout/thin-scroll";
 import { SidebarTooltip } from "@/components/layout/sidebar-tooltip";
 import { usePermissions } from "@/lib/permissions-context";
+import { ICON_ANIM } from "@/components/layout/sidebar";
 import { INVENTORY_NAV, sectionForPath, type InvNavItem } from "@/lib/inventory-nav";
+
+/* Hover treatment is IDENTICAL to the main sidebar (lift, frosted ring, soft shadow, sliding line,
+   tilting icon) and every colour comes from the same --chrome-* variables, so whatever is saved in
+   Settings → System → Preferences applies here too. */
+const ROW_BASE = "group relative transition-[background-color,box-shadow,transform] duration-200 transform-gpu hover:-translate-y-0.5 motion-reduce:transform-none";
+const ROW_HOVER = "text-white hover:bg-white/15 hover:ring-1 hover:ring-inset hover:ring-white/25 hover:shadow-[0_8px_18px_-10px_rgba(10,20,50,0.55)] hover:text-white";
+const LABEL = "font-semibold [text-shadow:0_1px_1px_rgba(15,23,55,0.35)]";
+const HOVER_LINE = "pointer-events-none absolute origin-left scale-x-0 rounded-full bg-[color:var(--chrome-line)] transition-transform duration-300 ease-out group-hover:scale-x-100";
 
 const COLLAPSE_KEY = "repairox-inventory-sidebar-collapsed";
 
@@ -69,7 +78,7 @@ export function InventorySidebar() {
   return (
     <aside
       className={cn(
-        "rox-sidebar z-30 hidden h-full shrink-0 flex-col overflow-hidden border-r-2 border-[#33406B] bg-gradient-to-b from-[#4D5C8C] via-[#455383] to-[#3C4977] text-white shadow-[4px_0_14px_-8px_rgba(30,40,80,0.45)] lg:flex",
+        "rox-sidebar z-30 hidden h-full shrink-0 flex-col overflow-hidden border-r-2 border-[color:var(--chrome-side-border)] bg-gradient-to-b from-[color:var(--chrome-side-from)] via-[color:var(--chrome-side-via)] to-[color:var(--chrome-side-to)] text-white shadow-[4px_0_14px_-8px_rgba(30,40,80,0.45)] lg:flex",
         "[transition:width_300ms_cubic-bezier(0.4,0,0.2,1)] [will-change:width]",
         collapsed ? "w-[72px]" : "rox-sidebar-expanded w-[256px]"
       )}
@@ -80,27 +89,41 @@ export function InventorySidebar() {
         <Link href="/inventory" className="shrink-0 overflow-hidden">
           {collapsed ? <Logo mark /> : <Logo onDark className="text-white" />}
         </Link>
-        <button
+        <motion.button
           onClick={() => toggleCollapsed(!collapsed)}
+          whileHover={{ scale: 1.08 }}
+          whileTap={{ scale: 0.95 }}
           aria-label={collapsed ? "Expand inventory menu" : "Collapse inventory menu"}
-          className="grid h-7 w-7 shrink-0 place-items-center rounded-full bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] text-white transition-transform hover:scale-105 active:scale-95"
+          className="rox-chrome-keep group relative grid h-[28.2px] w-[28.2px] shrink-0 place-items-center rounded-full bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] text-[color:var(--chrome-pill-text)] transition-transform"
         >
-          {collapsed ? <ChevronRight className="h-3.5 w-3.5" /> : <ChevronLeft className="h-3.5 w-3.5" />}
-        </button>
+          {/* Soft blue outer glow, same as the main sidebar toggle */}
+          <span className="pointer-events-none absolute -inset-[1.5px] rounded-full ring-[1.5px] ring-[color:var(--chrome-pill-to)] opacity-60 animate-[glow-pulse_2.5s_ease-in-out_infinite]" />
+          {collapsed ? (
+            <span className="relative z-10 flex items-center -space-x-2 arrow-nudge-right">
+              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="h-3.5 w-3.5" />
+            </span>
+          ) : (
+            <span className="relative z-10 flex items-center -space-x-2 arrow-nudge-left">
+              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </span>
+          )}
+        </motion.button>
       </div>
 
       {/* Back to the main RepairOX menu */}
       <div className={cn("shrink-0 pb-3", collapsed ? "px-3" : "px-4")}>
-        <SidebarTooltip label="Back to RepairOX menu" enabled={collapsed}>
+        <SidebarTooltip label="Back to main menu" enabled={collapsed}>
           <button
             onClick={() => router.push("/dashboard")}
             className={cn(
-              "flex h-9 items-center justify-center gap-2 rounded-full border border-white/30 bg-[#2B3553] text-[13px] font-semibold text-white transition hover:bg-[#1B2238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
+              "group flex h-9 items-center justify-center gap-2 rounded-full border border-white/30 bg-[#2B3553] text-[13px] font-semibold text-white transition hover:bg-[#1B2238] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/40",
               collapsed ? "mx-auto w-10 px-0" : "w-full px-4"
             )}
           >
-            <ArrowLeft className="h-4 w-4 shrink-0" />
-            {!collapsed && <span>RepairOX menu</span>}
+            <ArrowLeft className="rox-back-arrow h-4 w-4 shrink-0" />
+            {!collapsed && <span>Main menu</span>}
           </button>
         </SidebarTooltip>
       </div>
@@ -144,12 +167,12 @@ export function InventorySidebar() {
                     <button
                       onClick={() => { toggleCollapsed(false); setOpenId(s.id); }}
                       className={cn(
-                        "mx-auto grid h-10 w-10 place-items-center rounded-xl transition",
-                        hasActive ? "bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]" : "hover:bg-white/15"
+                        ROW_BASE, "mx-auto grid h-10 w-10 place-items-center rounded-xl",
+                        hasActive ? "rox-nav-active bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] text-white shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]" : ROW_HOVER
                       )}
                       aria-label={s.label}
                     >
-                      <SecIcon className="h-[18px] w-[18px]" />
+                      <SecIcon className={cn(ICON_ANIM, "h-[18px] w-[18px]")} />
                     </button>
                   </SidebarTooltip>
                 </li>
@@ -161,14 +184,12 @@ export function InventorySidebar() {
                 <button
                   onClick={() => setOpenId(open && !q ? null : s.id)}
                   aria-expanded={open}
-                  className={cn(
-                    "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-semibold transition-colors hover:bg-white/15",
-                    hasActive && !open && "bg-white/10"
-                  )}
+                  className={cn(ROW_BASE, "flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium", ROW_HOVER)}
                 >
-                  <SecIcon className="h-[18px] w-[18px] shrink-0" />
-                  <span className="flex-1 truncate">{s.label}</span>
-                  <ChevronDown className={cn("h-4 w-4 shrink-0 text-white/70 transition-transform", open && "rotate-180")} />
+                  <span className={cn(HOVER_LINE, "bottom-1 left-3 right-3 h-0.5")} />
+                  <span className="inline-flex h-5 w-5 shrink-0 items-center justify-center"><SecIcon className={cn(ICON_ANIM, "h-[18px] w-[18px]")} /></span>
+                  <span className={cn("flex-1 truncate", LABEL)}>{s.label}{hasActive && !open && <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-[color:var(--chrome-line)] align-middle" />}</span>
+                  <ChevronDown className={cn("h-3.5 w-3.5 shrink-0 transition-transform", open && "rotate-180")} />
                 </button>
                 <AnimatePresence initial={false}>
                   {open && (
@@ -186,20 +207,18 @@ export function InventorySidebar() {
                           <li key={it.href} className="py-0.5">
                             <Link
                               href={it.href}
-                              className={cn(
-                                "relative flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium transition-colors",
-                                active ? "text-white" : "text-white/85 hover:bg-white/12 hover:text-white"
-                              )}
+                              className={cn(ROW_BASE, "flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-[13px] font-medium", active ? "rox-nav-active text-white" : ROW_HOVER)}
                             >
                               {active && (
                                 <motion.span
                                   layoutId="inventory-sidebar-active"
-                                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-[#6F87FF] to-[#4F6BF5] shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]"
+                                  className="absolute inset-0 rounded-lg bg-gradient-to-r from-[color:var(--chrome-pill-from)] to-[color:var(--chrome-pill-to)] shadow-[0_8px_20px_-8px_rgba(67,97,238,0.7)]"
                                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                                 />
                               )}
-                              <Icon className="relative h-4 w-4 shrink-0" />
-                              <span className="relative flex-1 truncate">{it.label}</span>
+                              {!active && <span className={cn(HOVER_LINE, "bottom-0.5 left-2.5 right-2.5 h-0.5")} />}
+                              <span className="relative inline-flex h-4 w-4 shrink-0 items-center justify-center"><Icon className={cn(ICON_ANIM, "h-[15px] w-[15px]")} /></span>
+                              <span className={cn("relative flex-1 truncate", LABEL)}>{it.label}</span>
                             </Link>
                           </li>
                         );

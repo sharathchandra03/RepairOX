@@ -58,7 +58,7 @@ export function WizardShell({
           className="grid h-10 w-10 place-items-center rounded-2xl border border-[#2B3553] bg-[#2B3553] text-white shadow-card transition hover:bg-[#1B2238] hover:border-[#1B2238]"
           aria-label="Back"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="rox-back-arrow h-4 w-4" />
         </motion.button>
 
         {/* Step pill + progress */}

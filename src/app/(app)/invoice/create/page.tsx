@@ -959,7 +959,7 @@ function InvoiceWizard() {
         {/* Back + Breadcrumb — centered group. Matches the Ticket flow's blue
             hover treatment (indigo tint + brand-blue border on hover). */}
         <button onClick={goBack} disabled={step === 1} className="grid h-10 w-10 place-items-center rounded-xl border border-[#4361EE] bg-[#4361EE] text-white shadow-card transition hover:bg-[#3B54E8] hover:border-[#3B54E8] disabled:opacity-40 disabled:cursor-not-allowed" aria-label="Previous step">
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="rox-back-arrow h-5 w-5" />
         </button>
 
         {/* Breadcrumb */}

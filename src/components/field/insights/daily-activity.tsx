@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils";
 import type { FieldJob } from "@/lib/field-data";
 import type { AggregateCtx, DateBounds } from "@/lib/field-dashboard";
 import {
-  ninjaDayRows, ninjaPeriodRows, storeDayRows, sumDayRows, pickableDays, avgRating, type Leg, type LegType, type NinjaDayRow,
+  ninjaDayRows, ninjaPeriodRows, storeDayRows, storePeriodRows, sumDayRows, pickableDays, avgRating, type Leg, type LegType, type NinjaDayRow,
 } from "@/lib/field-daily-activity";
 
 const pad = (n: number) => String(n).padStart(2, "0");
@@ -85,10 +85,14 @@ const num = (n: number) => (n ? n : <span className="text-zinc-300">—</span>);
 const kmCell = (km: number | null) => (km == null ? <span className="text-zinc-300">—</span> : km === 0 ? <span className="text-muted-foreground">Not travelled</span> : `${km} km`);
 const flag = (on: boolean) => <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", on ? "bg-emerald-50 text-emerald-700 ring-emerald-200" : "bg-zinc-100 text-zinc-500 ring-zinc-200")}>{on ? "Yes" : "No"}</span>;
 
-export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam, onRows, show = "both", q = "" }: {
+export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam, onRows, show = "both", q = "", legType = "all", header }: {
   jobs: FieldJob[]; ctx: AggregateCtx; bounds: DateBounds; storeSel: string[]; multiStore: boolean; canTeam: boolean;
   /** "store" = only the store table (Field Insights), "ninja" = only the Ninja tables (Field Activity). */
   show?: "both" | "ninja" | "store"; q?: string;
+  /** Store view only: restrict to one trip type (the page's Trip type filter). */
+  legType?: LegType | "all";
+  /** Store view only: section title rendered on the same row as the grid menus (no empty gap). */
+  header?: React.ReactNode;
   /** Hands the on-screen rows to the page export so Excel == screen. */
   onRows?: (sheets: { name: string; headers: string[]; rows: (string | number)[][] }[]) => void;
 }) {
@@ -106,7 +110,10 @@ export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam
   const hit = (id: string) => !q || nameOf(id).toLowerCase().includes(q.toLowerCase());
   const dayRows = useMemo(() => ninjaDayRows(legs, effDay, nameOf).filter((r) => hit(r.ninjaId)), [legs, effDay, team, q]); // eslint-disable-line react-hooks/exhaustive-deps
   const periodRows = useMemo(() => ninjaPeriodRows(legs, bounds.from ?? days[days.length - 1] ?? null, bounds.to ?? days[0] ?? null, nameOf).filter((r) => hit(r.ninjaId)), [legs, bounds, days, team, q]); // eslint-disable-line react-hooks/exhaustive-deps
-  const storeRows = useMemo(() => storeDayRows(legs, effDay), [legs, effDay]);
+  // Field Insights (show="store") follows the page's period + trip type; Field Activity keeps its one-day view.
+  const storeRows = useMemo(() => show === "store"
+    ? storePeriodRows(legType === "all" ? legs : legs.filter((l) => l.type === legType), bounds.from, bounds.to)
+    : storeDayRows(legs, effDay), [legs, effDay, show, legType, bounds.from, bounds.to]);
   const dayTotal = useMemo(() => sumDayRows(dayRows), [dayRows]);
   const periodTotal = useMemo(() => sumDayRows(periodRows as unknown as NinjaDayRow[]), [periodRows]);
 
@@ -164,14 +171,14 @@ export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam
   );
 
   return (
-    <div className={cn("space-y-5", show === "ninja" && "rox-lock-fill !space-y-4")}>
-      <div className="flex flex-wrap items-center gap-3">
-        {show !== "store" && <SegmentedTabs size="sm" value={view} onChange={(v) => setView(v as "day" | "period")} options={[{ label: "One day", value: "day" }, { label: "Whole month", value: "period" }]} />}
-        {(view === "day" || show === "store") && (
+    <div className={cn("space-y-5", show === "ninja" && "rox-lock-fill !space-y-4", show === "store" && "!space-y-3")}>
+      {show !== "store" && <div className="flex flex-wrap items-center gap-3">
+        <SegmentedTabs size="sm" value={view} onChange={(v) => setView(v as "day" | "period")} options={[{ label: "One day", value: "day" }, { label: "Whole month", value: "period" }]} />
+        {view === "day" && (
           <Select className="h-[34px] w-[190px]" value={effDay} onChange={(e) => setDay(e.target.value)} options={days.map((d) => ({ label: dayLabel(d), value: d }))} />
         )}
         <InfoHint content="Counts are completed / assigned trip legs. Total = every assigned leg (new + warranty). 6+ / 9+ = the Ninja's total for the day reached 6 / 9 (for a period: number of such days). XL = a trip over 40 km (GPS). Reviews = customer ratings recorded in the Ninja app (count · average stars). KMs come from GPS tracking; “Not travelled” means a tracked trip with no distance, — means not tracked." />
-      </div>
+      </div>}
 
       {canTeam && show !== "store" && (
         <div className={cn("space-y-2", show === "ninja" && "rox-lock-fill")}>
@@ -190,12 +197,16 @@ export function DailyActivity({ jobs, ctx, bounds, storeSel, multiStore, canTeam
         </div>
       )}
 
-      {show !== "ninja" && <div className="space-y-2">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <h3 className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-wider text-muted-foreground"><StoreIcon className="h-3.5 w-3.5 text-[#4361EE]" />Store activity · {dayLabel(effDay)}</h3>
-          {storeGrid.menus}
-        </div>
-        <FieldGrid grid={storeGrid} lock={false} rows={storeRows} rowKey={(r) => r.key} foot empty={storeRows.length ? null : loading ? "Loading…" : "No store trips for this day."} />
+      {show !== "ninja" && <div className="space-y-3">
+        {show === "store" ? (
+          <div className="flex flex-wrap items-center justify-between gap-3">{header ?? <span />}{storeGrid.menus}</div>
+        ) : (
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="inline-flex items-center gap-2 text-[12px] font-bold uppercase tracking-wider text-muted-foreground"><StoreIcon className="h-3.5 w-3.5 text-[#4361EE]" />Store activity · {dayLabel(effDay)}</h3>
+            {storeGrid.menus}
+          </div>
+        )}
+        <FieldGrid grid={storeGrid} lock={false} rows={storeRows} rowKey={(r) => r.key} foot empty={storeRows.length ? null : loading ? "Loading…" : show === "store" ? "No store trips in this selection." : "No store trips for this day."} />
       </div>}
     </div>
   );

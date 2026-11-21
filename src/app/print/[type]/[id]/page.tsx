@@ -263,7 +263,7 @@ export default function PrintPreviewPage() {
           onClick={() => router.back()}
           style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, background: "#2B3553", padding: "8px 16px", fontSize: 14, fontWeight: 500, color: "#fff", border: "none", cursor: "pointer" }}
         >
-          <ArrowLeft style={{ width: 16, height: 16 }} /> Go Back
+          <ArrowLeft className="rox-back-arrow" style={{ width: 16, height: 16 }} /> Go Back
         </button>
       </div>
     );
@@ -285,7 +285,7 @@ export default function PrintPreviewPage() {
               }}
               style={{ display: "inline-flex", alignItems: "center", gap: 6, borderRadius: 8, border: "1px solid #2B3553", background: "#2B3553", padding: "6px 14px", fontSize: 12, fontWeight: 600, color: "#fff", cursor: "pointer" }}
             >
-              <ArrowLeft style={{ width: 14, height: 14 }} /> Back
+              <ArrowLeft className="rox-back-arrow" style={{ width: 14, height: 14 }} /> Back
             </button>
             <div>
               <p style={{ fontSize: 14, fontWeight: 600, color: "#1f2937" }}>

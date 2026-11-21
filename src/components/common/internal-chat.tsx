@@ -393,7 +393,7 @@ function ChatView({
           className="relative grid h-8 w-8 place-items-center rounded-lg bg-[#2B3553] text-white ring-1 ring-white/15 transition hover:bg-[#1B2238]"
           aria-label="Back to workspaces"
         >
-          <ArrowLeft className="h-4 w-4" />
+          <ArrowLeft className="rox-back-arrow h-4 w-4" />
         </button>
         <div className="relative flex-1 min-w-0">
           <p className="text-[14px] font-semibold tracking-[-0.01em] text-white truncate">

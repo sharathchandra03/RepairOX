@@ -1096,6 +1096,19 @@ input.bg-transparent.outline-none:focus-visible {
   animation: arrow-nudge-right 1.8s ease-in-out infinite;
   will-change: transform;
 }
+/* BACK ARROW (mandatory on every back control — see back-button-standard):
+   on hover / keyboard focus the arrow slides out to the left, fades, and re-enters from the right, looping.
+   Put `rox-back-arrow` on the <ArrowLeft/> that is a DIRECT child of the back <button>/<a>. */
+@keyframes rox-back-arrow {
+  0%   { transform: translateX(0);    opacity: 1; }
+  50%  { transform: translateX(-9px); opacity: 0; }
+  51%  { transform: translateX(9px);  opacity: 0; }
+  100% { transform: translateX(0);    opacity: 1; }
+}
+:is(button, a):is(:hover, :focus-visible) > .rox-back-arrow { animation: rox-back-arrow 1.3s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  :is(button, a):is(:hover, :focus-visible) > .rox-back-arrow { animation: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   .arrow-nudge-left,
   .arrow-nudge-right {
@@ -1721,3 +1734,44 @@ html, body {
 .rox-zebra > tbody > tr:hover > td { background-color: hsl(var(--rox-zebra-hover)); }
 .rox-zebra > tbody > tr:hover > td.rox-frozen,
 .rox-zebra > tbody > tr > td.rox-frozen { background-image: none !important; }
+
+/* ──────────────────────────────────────────────────────────────────────────
+   App chrome (sidebar + header) colours. Every value is a CSS variable so the
+   Settings → System → Preferences (lib/chrome-themes.ts) can try palettes
+   live. Defaults = the currently approved soft-navy frame.
+   data-chrome-side / data-chrome-head = "dark" (white text) | "light" (dark text).
+   ────────────────────────────────────────────────────────────────────────── */
+:root {
+  --chrome-side-from: #4D5C8C; --chrome-side-via: #455383; --chrome-side-to: #3C4977;
+  --chrome-head-from: #4D5C8C; --chrome-head-via: #475686; --chrome-head-to: #3F4C7B;
+  --chrome-side-border: #33406B; --chrome-head-border: #33406B;
+  --chrome-pill-from: #6F87FF; --chrome-pill-to: #4F6BF5; --chrome-line: #4361EE;
+  --chrome-side-text: #FFFFFF; --chrome-head-text: #FFFFFF; --chrome-pill-text: #FFFFFF;
+  --chrome-ctl-bg: rgba(67,97,238,0.07); --chrome-ctl-border: rgba(67,97,238,0.28);
+}
+/* LIGHT sidebar: dark text, soft-blue hover, tinted glass. */
+html[data-chrome-side="light"] .rox-sidebar { color: var(--chrome-side-text); }
+html[data-chrome-side="light"] .rox-sidebar [class*="text-white"]:not(.rox-chrome-keep):not(.rox-chrome-keep *),
+html[data-chrome-side="light"] .rox-sidebar [class*="text-[#E3E8FF]"],
+html[data-chrome-side="light"] .rox-sidebar [class*="text-[#AFC0FF]"],
+html[data-chrome-side="light"] .rox-sidebar [class*="text-[#C7D2FF]"] { color: var(--chrome-side-text) !important; text-shadow: none !important; }
+html[data-chrome-side="light"] .rox-sidebar [class*="hover:bg-white"]:hover { background-color: rgba(67,97,238,0.09) !important; box-shadow: none !important; --tw-ring-color: transparent !important; }
+html[data-chrome-side="light"] .rox-sidebar [class*="bg-white/"]:not(:hover) { background-color: var(--chrome-ctl-bg) !important; }
+html[data-chrome-side="light"] .rox-sidebar [class*="border-white/"] { border-color: var(--chrome-ctl-border) !important; }
+html[data-chrome-side="light"] .rox-sidebar input { color: var(--chrome-side-text) !important; background: var(--chrome-ctl-bg) !important; border-color: var(--chrome-ctl-border) !important; }
+html[data-chrome-side="light"] .rox-sidebar input::placeholder { color: rgba(30,42,90,0.5) !important; }
+/* LIGHT header */
+html[data-chrome-head="light"] .rox-chrome-head { color: var(--chrome-head-text); }
+html[data-chrome-head="light"] .rox-chrome-head [class*="text-white"]:not(.rox-chrome-keep):not(.rox-chrome-keep *):not(input),
+html[data-chrome-head="light"] .rox-chrome-head [class*="text-[#E3E8FF]"],
+html[data-chrome-head="light"] .rox-chrome-head [class*="text-[#C7D2FF]"] { color: var(--chrome-head-text) !important; text-shadow: none !important; }
+html[data-chrome-head="light"] .rox-chrome-head [class*="hover:bg-white"]:hover { background-color: rgba(67,97,238,0.10) !important; }
+html[data-chrome-head="light"] .rox-chrome-head [class*="bg-white/"]:not(:hover):not(.rox-chrome-keep) { background-color: var(--chrome-ctl-bg) !important; }
+html[data-chrome-head="light"] .rox-chrome-head [class*="border-white/"]:not(.rox-chrome-keep) { border-color: var(--chrome-ctl-border) !important; }
+html[data-chrome-head="light"] .rox-chrome-head [class*="placeholder:text-white"]::placeholder { color: rgba(30,42,90,0.5) !important; }
+html[data-chrome-head="light"] .rox-chrome-head input { color: var(--chrome-head-text); }
+
+/* Active nav pill text colour (its own variable so a pale or white pill can carry dark text
+   whatever the sidebar tone is). Must out-rank the light-sidebar text override above. */
+:is(html, html[data-chrome-side]) .rox-sidebar .rox-nav-active.rox-nav-active.rox-nav-active,
+:is(html, html[data-chrome-side]) .rox-sidebar .rox-nav-active.rox-nav-active.rox-nav-active * { color: var(--chrome-pill-text) !important; text-shadow: none !important; }
